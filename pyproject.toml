@@ -1,6 +1,6 @@
 [project]
 name = "z-vision-generator"
-version = "0.6.1"
+dynamic = ["version"]
 description = "Z-Vision Generator — cross-platform AI image and video generator"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -37,11 +37,12 @@ dependencies = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [tool.ruff]
 line-length = 200
+exclude = ["zvisiongenerator/_version.py"]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
@@ -73,6 +74,13 @@ ziv = "zvisiongenerator.image_cli:main"
 ziv-image = "zvisiongenerator.image_cli:main"
 ziv-video = "zvisiongenerator.video_cli:main"
 ziv-convert = "zvisiongenerator.converters.convert_checkpoint:main"
+
+[tool.hatch.version]
+source = "vcs"
+raw-options = { version_scheme = "no-guess-dev" }
+
+[tool.hatch.build.hooks.vcs]
+version-file = "zvisiongenerator/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["zvisiongenerator"]
