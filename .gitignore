@@ -1,0 +1,40 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.ruff_cache/
+.pytest_cache/
+
+# MacOS files
+.DS_Store
+
+# Virtual environments
+.venv
+
+# Model weights
+models/
+loras/
+
+# Output files
+output/
+
+# Agent work files
+.agent-work/
+
+# Secrets
+.env
+.env.*
+
+# IDE
+.idea/
+.vscode/
+
+# Large model files
+*.safetensors
+*.gguf
+
+# MkDocs build output
+site/

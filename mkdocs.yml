@@ -1,0 +1,39 @@
+site_name: Z-Vision Generator
+site_url: https://knuthelge.github.io/ZVisionGenerator/
+repo_url: https://github.com/knuthelge/ZVisionGenerator
+repo_name: knuthelge/ZVisionGenerator
+
+theme:
+  name: material
+  icon:
+    logo: material/eye
+  palette:
+    - scheme: default
+      primary: teal
+      accent: pink
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: teal
+      accent: pink
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - content.code.copy
+    - navigation.top
+
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Guides:
+    - Image Generation: guides/image.md
+    - Video Generation: guides/video.md
+    - Prompts: guides/prompts.md
+    - Model & LoRA Management: guides/converter.md
+  - Reference:
+    - CLI Reference: reference/cli.md
+  - Development: development.md

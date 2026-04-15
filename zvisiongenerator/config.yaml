@@ -1,0 +1,148 @@
+# ZVisionGenerator configuration — all defaults and model presets in one file.
+# Shipped inside the wheel via importlib.resources.
+# User can override with ~/.ziv/config.yaml (deep-merged).
+
+sizes:
+  "1:1":
+    xs: { width: 512,  height: 512  }
+    s:  { width: 704,  height: 704  }
+    m:  { width: 1024, height: 1024 }
+    l:  { width: 1440, height: 1440 }
+    xl: { width: 1600, height: 1600 }
+  "16:9":
+    xs: { width: 672,  height: 384  }
+    s:  { width: 944,  height: 528  }
+    m:  { width: 1344, height: 768  }
+    l:  { width: 1888, height: 1056 }
+    xl: { width: 2112, height: 1184 }
+  "9:16":
+    xs: { width: 384,  height: 672  }
+    s:  { width: 528,  height: 944  }
+    m:  { width: 768,  height: 1344 }
+    l:  { width: 1056, height: 1888 }
+    xl: { width: 1184, height: 2112 }
+  "3:2":
+    xs: { width: 608,  height: 400  }
+    s:  { width: 864,  height: 576  }
+    m:  { width: 1216, height: 832  }
+    l:  { width: 1728, height: 1152 }
+    xl: { width: 1936, height: 1296 }
+  "2:3":
+    xs: { width: 400,  height: 608  }
+    s:  { width: 576,  height: 864  }
+    m:  { width: 832,  height: 1216 }
+    l:  { width: 1152, height: 1728 }
+    xl: { width: 1296, height: 1936 }
+
+generation:
+  default_ratio: "2:3"
+  default_size: m
+  default_steps: 10
+  default_guidance: 3.5
+  seed_min: 4            # 2**2
+  seed_max: 4294967295   # 2**32 - 1
+
+sharpening:
+  normal: 0.8
+  upscaled: 1.2
+  pre_upscale: 0.4
+
+upscale:
+  default_denoise_2x: 0.3
+  default_denoise_4x: 0.4
+
+contrast:
+  default_amount: 1.0
+
+saturation:
+  default_amount: 1.0
+
+schedulers:
+  beta:
+    mflux_class: "zvisiongenerator.schedulers.beta_scheduler.BetaScheduler"
+    # diffusers uses built-in: FlowMatchEulerDiscreteScheduler(use_beta_sigmas=True)
+
+model_aliases:
+  ltx-8: "dgrauet/ltx-2.3-mlx-q8"
+  ltx-4: "dgrauet/ltx-2.3-mlx-q4"
+  zit: "Tongyi-MAI/Z-Image-Turbo"
+  klein9b: "black-forest-labs/FLUX.2-klein-9B"
+  klein4b: "black-forest-labs/FLUX.2-klein-4B"
+
+model_presets:
+  zimage:
+    supports_negative_prompt: true
+    default_steps: 10
+    default_guidance: 0.5
+    default_scheduler:
+      mflux: beta
+      diffusers: null
+
+  flux2_klein:
+    supports_negative_prompt: false
+    default_scheduler:
+      mflux: null
+      diffusers: null
+    variants:
+      distilled:
+        default_steps: 4
+        default_guidance: 1.0
+      base:
+        default_steps: 50
+        default_guidance: 1.5
+
+  flux2:
+    supports_negative_prompt: false
+    default_steps: 20
+    default_guidance: 3.5
+    default_scheduler:
+      mflux: null
+      diffusers: null
+
+  flux1:
+    supports_negative_prompt: false
+    default_steps: 20
+    default_guidance: 3.5
+    default_scheduler:
+      mflux: null
+      diffusers: null
+
+  unknown:
+    supports_negative_prompt: false
+    default_steps: 10
+    default_guidance: 3.5
+    default_scheduler:
+      mflux: null
+      diffusers: null
+
+# --- Video generation ---
+
+video_sizes:
+  ltx:
+    # All dimensions are 64-aligned for lossless half→double roundtrip with --upscale.
+    # Frames follow 8k+1 pattern.
+    "16:9":
+      s:  { width: 512,  height: 256,  frames: 49 }
+      m:  { width: 704,  height: 448,  frames: 49 }
+      l:  { width: 960,  height: 512,  frames: 33 }
+      xl: { width: 1408, height: 896,  frames: 25 }
+    "9:16":
+      s:  { width: 256,  height: 512,  frames: 49 }
+      m:  { width: 448,  height: 704,  frames: 49 }
+      l:  { width: 512,  height: 960,  frames: 33 }
+      xl: { width: 896,  height: 1408, frames: 25 }
+    "1:1":
+      s:  { width: 384,  height: 384,  frames: 49 }
+      m:  { width: 512,  height: 512,  frames: 33 }
+      l:  { width: 768,  height: 768,  frames: 33 }
+      xl: { width: 1024, height: 1024, frames: 25 }
+
+video_generation:
+  default_ratio: "16:9"
+  default_size: m
+
+video_model_presets:
+  ltx:
+    default_steps: 8
+    upscale:
+      default_upscale_steps: 8
