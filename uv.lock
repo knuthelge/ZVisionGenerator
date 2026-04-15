@@ -1705,7 +1705,6 @@ wheels = [
 
 [[package]]
 name = "z-vision-generator"
-version = "0.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "accelerate" },

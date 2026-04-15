@@ -2,4 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.6.1"
+try:
+    from zvisiongenerator._version import __version__
+except ImportError:
+    __version__ = "0.0.0+unknown"

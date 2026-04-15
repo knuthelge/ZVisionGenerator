@@ -5,6 +5,9 @@ build/
 dist/
 wheels/
 *.egg-info
+
+# Auto-generated version file (hatch-vcs)
+zvisiongenerator/_version.py
 .ruff_cache/
 .pytest_cache/
 
