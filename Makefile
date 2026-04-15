@@ -40,6 +40,24 @@ test: ## Run tests with pytest
 
 check: lint format-check test ## Run lint + format-check + test (full CI gate)
 
+# ——— Vendored Dependencies ————————————————————————————————
+
+LTX_REPO   ?= https://github.com/dgrauet/ltx-2-mlx.git
+LTX_COMMIT ?= de4a12d3cd14f345b2ec680eb63f4114b927b435
+
+.PHONY: update-ltx
+
+update-ltx: ## Update vendored ltx-core-mlx and ltx-pipelines-mlx
+	$(eval TMP := $(shell mktemp -d))
+	git clone --quiet $(LTX_REPO) $(TMP)
+	cd $(TMP) && git checkout --quiet $(LTX_COMMIT)
+	rm -rf packages/ltx_core_mlx packages/ltx_pipelines_mlx
+	cp -r $(TMP)/packages/ltx-core-mlx/src/ltx_core_mlx packages/ltx_core_mlx
+	cp -r $(TMP)/packages/ltx-pipelines-mlx/src/ltx_pipelines_mlx packages/ltx_pipelines_mlx
+	rm -f packages/ltx_pipelines_mlx/cli.py packages/ltx_pipelines_mlx/__main__.py
+	rm -rf $(TMP)
+	@echo "✓ Vendored ltx packages updated to $(LTX_COMMIT)"
+
 # ——— Build ————————————————————————————————————————————————
 
 .PHONY: build clean
