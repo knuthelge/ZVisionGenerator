@@ -33,7 +33,10 @@ dependencies = [
     "scipy>=1.17.0",
     "torch>=2.11.0",
     "transformers>=5.0.0",
-    "ltx-pipelines-mlx; sys_platform == 'darwin'",
+    "mlx>=0.31.0; sys_platform == 'darwin'",
+    "mlx-lm>=0.31.0; sys_platform == 'darwin'",
+    "safetensors>=0.4.0",
+    "tqdm>=4.66.0",
 ]
 
 [build-system]
@@ -42,7 +45,7 @@ build-backend = "hatchling.build"
 
 [tool.ruff]
 line-length = 200
-exclude = ["zvisiongenerator/_version.py"]
+exclude = ["zvisiongenerator/_version.py", "packages"]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
@@ -53,7 +56,6 @@ explicit = true
 torch = [
     { index = "pytorch-cu126", marker = "sys_platform != 'darwin'" },
 ]
-ltx-pipelines-mlx = { git = "https://github.com/dgrauet/ltx-2-mlx.git", rev = "de4a12d3cd14f345b2ec680eb63f4114b927b435", subdirectory = "packages/ltx-pipelines-mlx" }
 
 [dependency-groups]
 dev = [
@@ -83,7 +85,7 @@ raw-options = { version_scheme = "no-guess-dev" }
 version-file = "zvisiongenerator/_version.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["zvisiongenerator"]
+packages = ["zvisiongenerator", "packages/ltx_core_mlx", "packages/ltx_pipelines_mlx"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "zvisiongenerator/config.yaml" = "zvisiongenerator/config.yaml"

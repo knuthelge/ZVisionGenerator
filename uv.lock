@@ -552,28 +552,6 @@ wheels = [
 ]
 
 [[package]]
-name = "ltx-core-mlx"
-version = "0.1.0"
-source = { git = "https://github.com/dgrauet/ltx-2-mlx.git?subdirectory=packages%2Fltx-core-mlx&rev=de4a12d3cd14f345b2ec680eb63f4114b927b435#de4a12d3cd14f345b2ec680eb63f4114b927b435" }
-dependencies = [
-    { name = "huggingface-hub", marker = "sys_platform == 'darwin'" },
-    { name = "mlx", marker = "sys_platform == 'darwin'" },
-    { name = "mlx-lm", marker = "sys_platform == 'darwin'" },
-    { name = "numpy", marker = "sys_platform == 'darwin'" },
-    { name = "safetensors", marker = "sys_platform == 'darwin'" },
-]
-
-[[package]]
-name = "ltx-pipelines-mlx"
-version = "0.1.0"
-source = { git = "https://github.com/dgrauet/ltx-2-mlx.git?subdirectory=packages%2Fltx-pipelines-mlx&rev=de4a12d3cd14f345b2ec680eb63f4114b927b435#de4a12d3cd14f345b2ec680eb63f4114b927b435" }
-dependencies = [
-    { name = "ltx-core-mlx", marker = "sys_platform == 'darwin'" },
-    { name = "pillow", marker = "sys_platform == 'darwin'" },
-    { name = "tqdm", marker = "sys_platform == 'darwin'" },
-]
-
-[[package]]
 name = "markdown"
 version = "3.10.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1712,14 +1690,17 @@ dependencies = [
     { name = "diffusers" },
     { name = "hf-transfer" },
     { name = "huggingface-hub" },
-    { name = "ltx-pipelines-mlx", marker = "sys_platform == 'darwin'" },
     { name = "mflux", marker = "sys_platform == 'darwin'" },
+    { name = "mlx", marker = "sys_platform == 'darwin'" },
+    { name = "mlx-lm", marker = "sys_platform == 'darwin'" },
     { name = "numpy" },
     { name = "pillow" },
     { name = "pyyaml" },
+    { name = "safetensors" },
     { name = "scipy" },
     { name = "torch", version = "2.11.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.11.0+cu126", source = { registry = "https://download.pytorch.org/whl/cu126" }, marker = "sys_platform != 'darwin'" },
+    { name = "tqdm" },
     { name = "transformers" },
 ]
 
@@ -1737,14 +1718,17 @@ requires-dist = [
     { name = "diffusers", specifier = ">=0.37.1" },
     { name = "hf-transfer", specifier = ">=0.1.9" },
     { name = "huggingface-hub", specifier = ">=0.30.0" },
-    { name = "ltx-pipelines-mlx", marker = "sys_platform == 'darwin'", git = "https://github.com/dgrauet/ltx-2-mlx.git?subdirectory=packages%2Fltx-pipelines-mlx&rev=de4a12d3cd14f345b2ec680eb63f4114b927b435" },
     { name = "mflux", marker = "sys_platform == 'darwin'", specifier = ">=0.17.4" },
+    { name = "mlx", marker = "sys_platform == 'darwin'", specifier = ">=0.31.0" },
+    { name = "mlx-lm", marker = "sys_platform == 'darwin'", specifier = ">=0.31.0" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "pillow", specifier = ">=12.0.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "safetensors", specifier = ">=0.4.0" },
     { name = "scipy", specifier = ">=1.17.0" },
     { name = "torch", marker = "sys_platform != 'darwin'", specifier = ">=2.11.0", index = "https://download.pytorch.org/whl/cu126" },
     { name = "torch", marker = "sys_platform == 'darwin'", specifier = ">=2.11.0" },
+    { name = "tqdm", specifier = ">=4.66.0" },
     { name = "transformers", specifier = ">=5.0.0" },
 ]
 
