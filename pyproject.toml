@@ -1,0 +1,83 @@
+[project]
+name = "z-vision-generator"
+version = "0.6.0"
+description = "Z-Vision Generator — cross-platform AI image and video generator"
+readme = "README.md"
+requires-python = ">=3.14"
+license = "AGPL-3.0-or-later"
+authors = [{ name = "Knut Risheim" }]
+keywords = ["ai", "image-generation", "video-generation", "z-image", "flux", "mlx", "diffusers", "stable-diffusion"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "accelerate>=1.13.0",
+    "bitsandbytes>=0.49.0; sys_platform != 'darwin'",
+    "diffusers>=0.37.1",
+    "hf-transfer>=0.1.9",
+    "huggingface-hub>=0.30.0",
+    "mflux>=0.17.4; sys_platform == 'darwin'",
+    "numpy>=2.0.0",
+    "Pillow>=12.0.0",
+    "pyyaml>=6.0.3",
+    "scipy>=1.17.0",
+    "torch>=2.11.0",
+    "transformers>=5.0.0",
+    "ltx-pipelines-mlx @ git+https://github.com/dgrauet/ltx-2-mlx.git@de4a12d3cd14f345b2ec680eb63f4114b927b435#subdirectory=packages/ltx-pipelines-mlx ; sys_platform == 'darwin'",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 200
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu126", marker = "sys_platform != 'darwin'" },
+]
+
+[dependency-groups]
+dev = [
+    "mkdocs-material>=9.6",
+    "pytest>=9.0.2",
+    "ruff>=0.11.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/knuthelge/ZVisionGenerator"
+Repository = "https://github.com/knuthelge/ZVisionGenerator"
+Documentation = "https://knuthelge.github.io/ZVisionGenerator/"
+Changelog = "https://github.com/knuthelge/ZVisionGenerator/blob/main/CHANGELOG.md"
+"Bug Tracker" = "https://github.com/knuthelge/ZVisionGenerator/issues"
+
+[project.scripts]
+ziv = "zvisiongenerator.image_cli:main"
+ziv-image = "zvisiongenerator.image_cli:main"
+ziv-video = "zvisiongenerator.video_cli:main"
+ziv-convert = "zvisiongenerator.converters.convert_checkpoint:main"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["zvisiongenerator"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"zvisiongenerator/config.yaml" = "zvisiongenerator/config.yaml"
