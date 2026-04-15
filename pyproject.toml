@@ -1,6 +1,6 @@
 [project]
 name = "z-vision-generator"
-version = "0.6.0"
+version = "0.6.1"
 description = "Z-Vision Generator — cross-platform AI image and video generator"
 readme = "README.md"
 requires-python = ">=3.14"
