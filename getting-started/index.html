@@ -1017,7 +1017,7 @@
 <h2 id="prerequisites">Prerequisites</h2>
 <ul>
 <li>Python 3.14+</li>
-<li><a href="https://docs.astral.sh/uv/">uv</a> package manager</li>
+<li><a href="https://docs.astral.sh/uv/">uv</a> package manager (<strong>required</strong> — pip is not supported)</li>
 <li><strong>macOS:</strong> Apple Silicon (M1+) — mflux requires MLX</li>
 <li><strong>Windows:</strong> NVIDIA GPU with CUDA support</li>
 <li><strong>Video:</strong> ffmpeg (auto-offered on first run via Homebrew)</li>
@@ -1034,6 +1034,7 @@ git clone https://github.com/knuthelge/ZVisionGenerator &amp;&amp; cd ZVisionGen
 uv sync
 </code></pre>
 <blockquote>
+<p><strong>uv is required.</strong> This package cannot be installed with pip — some dependencies require uv-specific resolution that pip does not support.</p>
 <p><strong>Note:</strong> Video generation requires ffmpeg. If missing, <code>ziv-video</code> will offer to install it via Homebrew on first run.</p>
 </blockquote>
 <h2 id="quick-start">Quick Start</h2>
