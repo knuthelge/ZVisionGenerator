@@ -37,6 +37,8 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 
 Requires Python 3.14+ and [uv](https://docs.astral.sh/uv/).
 
+> **uv is required.** This package cannot be installed with pip — some dependencies require uv-specific resolution that pip does not support. All commands below use uv.
+
 ```bash
 # Install globally from PyPI
 uv tool install z-vision-generator

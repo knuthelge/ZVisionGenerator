@@ -33,7 +33,7 @@ dependencies = [
     "scipy>=1.17.0",
     "torch>=2.11.0",
     "transformers>=5.0.0",
-    "ltx-pipelines-mlx @ git+https://github.com/dgrauet/ltx-2-mlx.git@de4a12d3cd14f345b2ec680eb63f4114b927b435#subdirectory=packages/ltx-pipelines-mlx ; sys_platform == 'darwin'",
+    "ltx-pipelines-mlx; sys_platform == 'darwin'",
 ]
 
 [build-system]
@@ -52,6 +52,7 @@ explicit = true
 torch = [
     { index = "pytorch-cu126", marker = "sys_platform != 'darwin'" },
 ]
+ltx-pipelines-mlx = { git = "https://github.com/dgrauet/ltx-2-mlx.git", rev = "de4a12d3cd14f345b2ec680eb63f4114b927b435", subdirectory = "packages/ltx-pipelines-mlx" }
 
 [dependency-groups]
 dev = [
@@ -72,9 +73,6 @@ ziv = "zvisiongenerator.image_cli:main"
 ziv-image = "zvisiongenerator.image_cli:main"
 ziv-video = "zvisiongenerator.video_cli:main"
 ziv-convert = "zvisiongenerator.converters.convert_checkpoint:main"
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["zvisiongenerator"]
