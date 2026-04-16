@@ -1,13 +1,15 @@
+&nbsp;
+<p align="center">
+    <img src="https://raw.githubusercontent.com/knuthelge/ZVisionGenerator/main/docs/assets/zvision-duo.png" alt="Z-Vision Generator Logo" width="300"/>
+</p>
+&nbsp;
+
 # Z-Vision Generator
 
 [![CI](https://github.com/knuthelge/ZVisionGenerator/actions/workflows/ci.yml/badge.svg)](https://github.com/knuthelge/ZVisionGenerator/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/z-vision-generator)](https://pypi.org/project/z-vision-generator/)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue)](https://www.python.org/downloads/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
-
-<p align="center">
-    <img src="https://raw.githubusercontent.com/knuthelge/ZVisionGenerator/main/docs/assets/zvision-duo.png" alt="Z-Vision Generator Logo" width="500"/>
-</p>
 
 Local AI image and video generation — hassle-free and fun. No tangled node graphs, no cloud dependencies, just prompts and results. Runs on macOS (Apple Silicon / MLX) and Windows (NVIDIA / CUDA), tuned for an M-series Mac with 32 GB unified memory and an NVIDIA RTX 3080.
 
