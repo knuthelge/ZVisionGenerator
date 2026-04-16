@@ -21,8 +21,8 @@ uv sync
 | `make check` | Full CI gate: lint + format-check + test |
 | `make build` | Build wheel and sdist |
 | `make clean` | Remove build artifacts, caches, venv |
-| `make run` | Run `ziv` CLI (use `ARGS="..."`) |
-| `make convert` | Run `ziv-convert` CLI (use `ARGS="..."`) |
+| `make run` | Run `ziv-image` CLI (use `ARGS="..."`) |
+| `make model` | Run `ziv-model` CLI (use `ARGS="..."`) |
 
 ## Testing Conventions
 
@@ -49,8 +49,9 @@ uv sync
 ```
 zvisiongenerator/
 ├── __init__.py
-├── image_cli.py                   Image CLI entry point (ziv / ziv-image)
+├── image_cli.py                   Image CLI entry point (ziv-image)
 ├── video_cli.py                   Video CLI entry point (ziv-video)
+├── cli.py                         Unified CLI entry point (ziv)
 ├── image_runner.py                Image generation run orchestration
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
@@ -59,9 +60,9 @@ zvisiongenerator/
 │   ├── image_win.py               Windows image backend (diffusers/CUDA)
 │   └── video_mac.py               macOS video backend (LTX via MLX)
 ├── converters/
-│   ├── convert_checkpoint.py      Safetensors checkpoint → diffusers converter (ziv-convert model)
-│   ├── list_assets.py             List installed models, video models, and LoRAs (ziv-convert list)
-│   └── lora_import.py             LoRA import — local copy and HF download (ziv-convert lora)
+│   ├── convert_checkpoint.py      Safetensors checkpoint → diffusers converter (ziv-model model)
+│   ├── list_assets.py             List installed models, video models, and LoRAs (ziv-model list)
+│   └── lora_import.py             LoRA import — local copy and HF download (ziv-model lora)
 ├── core/
 │   ├── types.py                   Shared types (StageOutcome)
 │   ├── image_types.py             Image request and artifacts

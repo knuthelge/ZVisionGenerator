@@ -1,4 +1,4 @@
-"""Image CLI — entry point for the ziv command."""
+"""Image CLI — entry point for the ziv-image command."""
 
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ from zvisiongenerator.utils.paths import resolve_model_path, resolve_lora_path
 from zvisiongenerator.utils.prompts import load_prompts_file
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="ziv",
+        prog=prog,
         description="Batch image generator with configurable settings.",
-        epilog="Example usage: ziv -m models/my-model -p prompts.yaml -r 3 --ratio 16:9 --size l --steps 20",
+        epilog=f"Example usage: {prog} -m models/my-model -p prompts.yaml -r 3 --ratio 16:9 --size l --steps 20",
     )
     parser.add_argument("-m", "--model", type=str, default=None, help="Path to the base model (Hugging Face format).")
     parser.add_argument("-q", "--quantize", type=int, default=None, help="Quantization level (4 or 8) for faster generation at the cost of quality.")
@@ -53,8 +53,8 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
-    parser = _build_parser()
+def main(*, prog: str = "ziv-image") -> None:
+    parser = _build_parser(prog=prog)
     args = parser.parse_args()
 
     if args.runs is not None and args.runs < 1:

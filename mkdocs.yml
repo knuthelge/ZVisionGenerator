@@ -33,7 +33,7 @@ nav:
     - Image Generation: guides/image.md
     - Video Generation: guides/video.md
     - Prompts: guides/prompts.md
-    - Model & LoRA Management: guides/converter.md
+    - Model & LoRA Management: guides/model.md
   - Reference:
     - CLI Reference: reference/cli.md
   - Development: development.md

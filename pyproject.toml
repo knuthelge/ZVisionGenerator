@@ -72,10 +72,10 @@ Changelog = "https://github.com/knuthelge/ZVisionGenerator/blob/main/CHANGELOG.m
 "Bug Tracker" = "https://github.com/knuthelge/ZVisionGenerator/issues"
 
 [project.scripts]
-ziv = "zvisiongenerator.image_cli:main"
+ziv = "zvisiongenerator.cli:main"
 ziv-image = "zvisiongenerator.image_cli:main"
 ziv-video = "zvisiongenerator.video_cli:main"
-ziv-convert = "zvisiongenerator.converters.convert_checkpoint:main"
+ziv-model = "zvisiongenerator.converters.convert_checkpoint:main"
 
 [tool.hatch.version]
 source = "vcs"

@@ -1,6 +1,6 @@
 # Image Generation Guide
 
-Generate images from text prompts using `ziv` (or `ziv-image`). Supports Z-Image / FLUX models on macOS (Apple Silicon via mflux/MLX) and Windows (NVIDIA GPU via diffusers/CUDA).
+Generate images from text prompts using `ziv-image`. Supports Z-Image / FLUX models on macOS (Apple Silicon via mflux/MLX) and Windows (NVIDIA GPU via diffusers/CUDA).
 
 ## Model Aliases
 
@@ -15,8 +15,8 @@ Built-in shorthands for common image models.
 For video aliases, see [Video Guide → Model Aliases](video.md#model-aliases).
 
 ```bash
-ziv -m zit --prompt "a beautiful sunset"
-ziv -m klein4b --prompt "a portrait"
+ziv-image -m zit --prompt "a beautiful sunset"
+ziv-image -m klein4b --prompt "a portrait"
 ```
 
 ### Custom Aliases
@@ -33,7 +33,7 @@ model_aliases:
 View all aliases with:
 
 ```bash
-ziv-convert list
+ziv-model list
 ```
 
 ## Image Sizes
@@ -51,7 +51,7 @@ Default ratio is `2:3`. Dimensions vary by `--ratio`.
 Use `-W` / `-H` to override with exact pixel dimensions:
 
 ```bash
-ziv -m my-model --prompt "a portrait" -W 1024 -H 1024
+ziv-image -m my-model --prompt "a portrait" -W 1024 -H 1024
 ```
 
 ## Reference Image Steering
@@ -59,8 +59,8 @@ ziv -m my-model --prompt "a portrait" -W 1024 -H 1024
 Use any image as a starting point — the model denoises it guided by your prompt.
 
 ```bash
-ziv -m my-model --prompt "A woman in a red dress" --image photo.jpg --image-strength 0.4
-ziv -m my-model --prompt "Cyberpunk cityscape" --image sketch.png --image-strength 0.8
+ziv-image -m my-model --prompt "A woman in a red dress" --image photo.jpg --image-strength 0.4
+ziv-image -m my-model --prompt "Cyberpunk cityscape" --image sketch.png --image-strength 0.8
 ```
 
 The reference image is automatically resized to match target dimensions. Works on both macOS and Windows.
@@ -71,13 +71,13 @@ Both platforms support LoRA weights. Place `.safetensors` files in `~/.ziv/loras
 
 ```bash
 # Single LoRA at default weight (1.0)
-ziv -m my-model --lora myStyle
+ziv-image -m my-model --lora myStyle
 
 # Single LoRA with explicit weight
-ziv -m my-model --lora myStyle:0.8
+ziv-image -m my-model --lora myStyle:0.8
 
 # Two LoRAs stacked
-ziv -m my-model --lora style1:0.8,detail:0.5
+ziv-image -m my-model --lora style1:0.8,detail:0.5
 ```
 
 Bare names are resolved from `~/.ziv/loras/`. Full paths also work.
@@ -91,14 +91,14 @@ The built-in upscale pipeline generates at a reduced size, then refines to targe
 3. CAS pre-sharpening → img2img refinement → CAS post-sharpening
 
 ```bash
-ziv -m my-model --prompt "a landscape" --upscale 2
-ziv -m my-model --prompt "a landscape" --upscale 4 --upscale-denoise 0.3 --upscale-steps 8
+ziv-image -m my-model --prompt "a landscape" --upscale 2
+ziv-image -m my-model --prompt "a landscape" --upscale 4 --upscale-denoise 0.3 --upscale-steps 8
 
 # Use a different guidance for the upscale refine pass
-ziv -m my-model --prompt "a landscape" --upscale 2 --upscale-guidance 0.8
+ziv-image -m my-model --prompt "a landscape" --upscale 2 --upscale-guidance 0.8
 
 # Skip the pre-sharpening CAS step before upscale refinement
-ziv -m my-model --prompt "a landscape" --upscale 2 --no-upscale-sharpen
+ziv-image -m my-model --prompt "a landscape" --upscale 2 --no-upscale-sharpen
 ```
 
 ### Upscale Flags
@@ -122,8 +122,8 @@ Reduces memory usage and speeds up generation at the cost of some quality.
 | Windows | 4-bit (NF4), 8-bit (INT8) | bitsandbytes |
 
 ```bash
-ziv -m my-model -q 4    # 4-bit quantization
-ziv -m my-model -q 8    # 8-bit quantization
+ziv-image -m my-model -q 4    # 4-bit quantization
+ziv-image -m my-model -q 8    # 8-bit quantization
 ```
 
 ## Post-Processing
@@ -131,23 +131,23 @@ ziv -m my-model -q 8    # 8-bit quantization
 ### Contrast
 
 ```bash
-ziv -m my-model --prompt "a sunset" --contrast 1.2        # boost contrast (1.0 = no change)
-ziv -m my-model --prompt "a sunset" --no-contrast         # disable entirely
+ziv-image -m my-model --prompt "a sunset" --contrast 1.2        # boost contrast (1.0 = no change)
+ziv-image -m my-model --prompt "a sunset" --no-contrast         # disable entirely
 ```
 
 ### Saturation
 
 ```bash
-ziv -m my-model --prompt "a sunset" --saturation 1.3       # boost saturation (1.0 = no change)
-ziv -m my-model --prompt "a sunset" --no-saturation        # disable entirely
+ziv-image -m my-model --prompt "a sunset" --saturation 1.3       # boost saturation (1.0 = no change)
+ziv-image -m my-model --prompt "a sunset" --no-saturation        # disable entirely
 ```
 
 ### Sharpening
 
 ```bash
-ziv -m my-model --prompt "a sunset" --sharpen              # enabled by default
-ziv -m my-model --prompt "a sunset" --sharpen 0.6          # custom amount (0.0–1.0)
-ziv -m my-model --prompt "a sunset" --no-sharpen           # disable
+ziv-image -m my-model --prompt "a sunset" --sharpen              # enabled by default
+ziv-image -m my-model --prompt "a sunset" --sharpen 0.6          # custom amount (0.0–1.0)
+ziv-image -m my-model --prompt "a sunset" --no-sharpen           # disable
 ```
 
 ## Keyboard Shortcuts

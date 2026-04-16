@@ -23,9 +23,6 @@ import shutil
 import sys
 from pathlib import Path
 
-from huggingface_hub import hf_hub_download, snapshot_download
-from safetensors.torch import load_file, save_file
-
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 
 
@@ -133,6 +130,7 @@ def convert_transformer_keys(state_dict: dict) -> dict:
 
 def download_base_components(base_model: str, output_dir: Path, use_symlinks: bool):
     """Download text_encoder, vae, tokenizer, scheduler, and config files from the base HF repo."""
+    from huggingface_hub import hf_hub_download, snapshot_download
 
     # Download non-transformer components via snapshot_download
     print(f"Downloading base model components from {base_model}...")
@@ -370,6 +368,8 @@ def convert_flux2_transformer_keys(state_dict: dict) -> dict:
 
 def convert_flux2_klein(input_path: Path, output_dir: Path, model_type: str, use_symlinks: bool):
     """Convert a safetensors FLUX.2 Klein checkpoint to HF diffusers format (manual key remapping)."""
+    from safetensors.torch import load_file, save_file
+
     repo_id = FLUX2_KLEIN_REPOS[model_type]
 
     # Step 1: Load checkpoint
@@ -406,6 +406,8 @@ def convert_flux2_klein(input_path: Path, output_dir: Path, model_type: str, use
 
 def _cmd_model(args):
     """Handle the 'model' subcommand — convert a checkpoint to diffusers format."""
+    from safetensors.torch import load_file, save_file
+
     input_path = Path(args.input).expanduser().resolve()
 
     # Validate input
@@ -531,9 +533,10 @@ def _cmd_list(args):
     print(format_asset_table(models=models, video_models=video_models, loras=loras, aliases=aliases or None))
 
 
-def main():
+def _build_model_parser(*, prog: str = "ziv-model") -> argparse.ArgumentParser:
+    """Build the argument parser for the model/LoRA management CLI."""
     parser = argparse.ArgumentParser(
-        prog="ziv-convert",
+        prog=prog,
         description="Import and manage models and LoRAs for Z-Vision Generator",
     )
     subparsers = parser.add_subparsers(dest="command")
@@ -568,6 +571,12 @@ def main():
     list_parser.add_argument("--models", action="store_true", help="Show only models")
     list_parser.add_argument("--loras", action="store_true", help="Show only LoRAs")
 
+    return parser
+
+
+def main(*, prog: str = "ziv-model") -> None:
+    """Entry point for the model/LoRA management CLI."""
+    parser = _build_model_parser(prog=prog)
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()

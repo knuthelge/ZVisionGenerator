@@ -1,13 +1,13 @@
 # Prompts Guide
 
-Z-Vision Generator supports inline prompts, YAML prompt files with batch generation, prompt variables, structured prompts, and reusable snippets. This guide covers the full prompts system used by both `ziv` and `ziv-video`.
+Z-Vision Generator supports inline prompts, YAML prompt files with batch generation, prompt variables, structured prompts, and reusable snippets. This guide covers the full prompts system used by both `ziv-image` and `ziv-video`.
 
 ## Inline Prompts
 
 Use `--prompt` for quick, one-off generation:
 
 ```bash
-ziv -m my-model --prompt "a beautiful sunset over the ocean"
+ziv-image -m my-model --prompt "a beautiful sunset over the ocean"
 ziv-video -m ltx-4 --prompt "A cat walking through a garden"
 ```
 
@@ -18,8 +18,8 @@ When `--prompt` is provided, it overrides `--prompts-file`.
 Use `--prompts-file` (or `-p`) to load prompts from a YAML file. The default file is `prompts.yaml`.
 
 ```bash
-ziv -m my-model -p prompts.yaml -r 3
-ziv -m my-model -p my-prompts.yaml
+ziv-image -m my-model -p prompts.yaml -r 3
+ziv-image -m my-model -p my-prompts.yaml
 ```
 
 Each entry has a set name and a list of prompt objects:

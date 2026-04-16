@@ -11,7 +11,7 @@
 ## Installation
 
 ```bash
-# Install globally as `ziv` command from PyPI
+# Install globally — provides `ziv` (unified), `ziv-image`, `ziv-video`, and `ziv-model` commands
 uv tool install z-vision-generator
 
 # Install globally from repository
@@ -32,13 +32,13 @@ uv sync
 
 ```bash
 # Local model (bare name resolved from ~/.ziv/models/)
-ziv -m my-model --prompt "a beautiful sunset"
+ziv-image -m my-model --prompt "a beautiful sunset"
 
 # HuggingFace model (downloaded automatically)
-ziv -m Tongyi-MAI/Z-Image-Turbo --prompt "a cat"
+ziv-image -m Tongyi-MAI/Z-Image-Turbo --prompt "a cat"
 
 # From a prompts file with multiple runs
-ziv -m my-model -p prompts.yaml -r 3
+ziv-image -m my-model -p prompts.yaml -r 3
 ```
 
 ### Video Generation
@@ -58,13 +58,13 @@ ziv-video -m dgrauet/ltx-2.3-mlx-q4 -p prompts.yaml -r 3
 
 ```bash
 # Convert a Z-Image checkpoint
-ziv-convert model -i checkpoint.safetensors --name my-model
+ziv-model model -i checkpoint.safetensors --name my-model
 
 # Import a local LoRA
-ziv-convert lora -i /path/to/style.safetensors --name my-style
+ziv-model lora -i /path/to/style.safetensors --name my-style
 
 # List installed assets
-ziv-convert list
+ziv-model list
 ```
 
 ## Model Store (`~/.ziv/`)
@@ -86,12 +86,12 @@ cp -r /path/to/my-model ~/.ziv/models/my-model
 Then reference it by bare name:
 
 ```bash
-ziv -m my-model --prompt "hello world"
+ziv-image -m my-model --prompt "hello world"
 ```
 
 ### Resolution Order
 
-When you pass `-m <name>` (both `ziv` and `ziv-video`):
+When you pass `-m <name>` (both `ziv-image` and `ziv-video`):
 
 1. **Path with `/` or `\`** → used as-is (local path)
 2. **Bare name** → checks `~/.ziv/models/<name>/` → uses it if found
@@ -106,5 +106,5 @@ Set the `ZIV_DATA_DIR` environment variable to use a custom location instead of 
 
 ```bash
 export ZIV_DATA_DIR=/mnt/fast-ssd/ziv
-ziv -m my-model --prompt "a landscape"
+ziv-image -m my-model --prompt "a landscape"
 ```
