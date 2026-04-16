@@ -1,3 +1,8 @@
+<p align="center">
+    <img src="https://raw.githubusercontent.com/knuthelge/ZVisionGenerator/main/docs/assets/zvision-duo.png" alt="Z-Vision Generator Logo" width="300"/>
+</p>
+&nbsp;
+
 # Z-Vision Generator
 
 Local AI image and video generation — hassle-free and fun. No tangled node graphs, no cloud dependencies, just prompts and results. Runs on macOS (Apple Silicon / MLX) and Windows (NVIDIA / CUDA), tuned for an M-series Mac with 32 GB unified memory and an NVIDIA RTX 3080.
