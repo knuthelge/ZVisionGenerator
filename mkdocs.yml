@@ -6,6 +6,7 @@ repo_name: knuthelge/ZVisionGenerator
 theme:
   name: material
   logo: assets/zvision-white.png
+  favicon: assets/zvision-white.png
   icon:
     repo: fontawesome/brands/github
   palette:
