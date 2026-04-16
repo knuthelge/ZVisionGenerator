@@ -14,7 +14,7 @@
         <link rel="prev" href="../video/">
       
       
-        <link rel="next" href="../converter/">
+        <link rel="next" href="../model/">
       
       
         
@@ -730,7 +730,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../converter/" class="md-nav__link">
+      <a href="../model/" class="md-nav__link">
         
   
   
@@ -1041,17 +1041,17 @@
 
 
 <h1 id="prompts-guide">Prompts Guide</h1>
-<p>Z-Vision Generator supports inline prompts, YAML prompt files with batch generation, prompt variables, structured prompts, and reusable snippets. This guide covers the full prompts system used by both <code>ziv</code> and <code>ziv-video</code>.</p>
+<p>Z-Vision Generator supports inline prompts, YAML prompt files with batch generation, prompt variables, structured prompts, and reusable snippets. This guide covers the full prompts system used by both <code>ziv-image</code> and <code>ziv-video</code>.</p>
 <h2 id="inline-prompts">Inline Prompts</h2>
 <p>Use <code>--prompt</code> for quick, one-off generation:</p>
-<pre><code class="language-bash">ziv -m my-model --prompt &quot;a beautiful sunset over the ocean&quot;
+<pre><code class="language-bash">ziv-image -m my-model --prompt &quot;a beautiful sunset over the ocean&quot;
 ziv-video -m ltx-4 --prompt &quot;A cat walking through a garden&quot;
 </code></pre>
 <p>When <code>--prompt</code> is provided, it overrides <code>--prompts-file</code>.</p>
 <h2 id="prompt-files">Prompt Files</h2>
 <p>Use <code>--prompts-file</code> (or <code>-p</code>) to load prompts from a YAML file. The default file is <code>prompts.yaml</code>.</p>
-<pre><code class="language-bash">ziv -m my-model -p prompts.yaml -r 3
-ziv -m my-model -p my-prompts.yaml
+<pre><code class="language-bash">ziv-image -m my-model -p prompts.yaml -r 3
+ziv-image -m my-model -p my-prompts.yaml
 </code></pre>
 <p>Each entry has a set name and a list of prompt objects:</p>
 <pre><code class="language-yaml">gorilla:

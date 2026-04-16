@@ -11,7 +11,7 @@
         <link rel="canonical" href="https://knuthelge.github.io/ZVisionGenerator/reference/cli/">
       
       
-        <link rel="prev" href="../../guides/converter/">
+        <link rel="prev" href="../../guides/model/">
       
       
         <link rel="next" href="../../development/">
@@ -556,7 +556,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../guides/converter/" class="md-nav__link">
+      <a href="../../guides/model/" class="md-nav__link">
         
   
   
@@ -719,10 +719,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ziv-ziv-image-image-generation" class="md-nav__link">
+  <a href="#ziv-unified-command" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ziv / ziv-image — Image Generation
+        ziv — Unified Command
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ziv-image-image-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ziv-image — Image Generation
       
     </span>
   </a>
@@ -741,10 +752,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ziv-convert-model-checkpoint-conversion" class="md-nav__link">
+  <a href="#ziv-model-model-checkpoint-conversion" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ziv-convert model — Checkpoint Conversion
+        ziv-model model — Checkpoint Conversion
       
     </span>
   </a>
@@ -752,10 +763,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ziv-convert-lora-lora-import" class="md-nav__link">
+  <a href="#ziv-model-lora-lora-import" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ziv-convert lora — LoRA Import
+        ziv-model lora — LoRA Import
       
     </span>
   </a>
@@ -763,10 +774,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ziv-convert-list-asset-listing" class="md-nav__link">
+  <a href="#ziv-model-list-asset-listing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ziv-convert list — Asset Listing
+        ziv-model list — Asset Listing
       
     </span>
   </a>
@@ -876,10 +887,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ziv-ziv-image-image-generation" class="md-nav__link">
+  <a href="#ziv-unified-command" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ziv / ziv-image — Image Generation
+        ziv — Unified Command
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ziv-image-image-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ziv-image — Image Generation
       
     </span>
   </a>
@@ -898,10 +920,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ziv-convert-model-checkpoint-conversion" class="md-nav__link">
+  <a href="#ziv-model-model-checkpoint-conversion" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ziv-convert model — Checkpoint Conversion
+        ziv-model model — Checkpoint Conversion
       
     </span>
   </a>
@@ -909,10 +931,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ziv-convert-lora-lora-import" class="md-nav__link">
+  <a href="#ziv-model-lora-lora-import" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ziv-convert lora — LoRA Import
+        ziv-model lora — LoRA Import
       
     </span>
   </a>
@@ -920,10 +942,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#ziv-convert-list-asset-listing" class="md-nav__link">
+  <a href="#ziv-model-list-asset-listing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ziv-convert list — Asset Listing
+        ziv-model list — Asset Listing
       
     </span>
   </a>
@@ -984,23 +1006,30 @@
 <tbody>
 <tr>
 <td><code>ziv</code></td>
-<td>Image generation (original)</td>
+<td>Unified parent command with subcommands: <code>image</code>, <code>video</code>, <code>model</code></td>
 </tr>
 <tr>
 <td><code>ziv-image</code></td>
-<td>Image generation (alias for <code>ziv</code>)</td>
+<td>Image generation (standalone entry point)</td>
 </tr>
 <tr>
 <td><code>ziv-video</code></td>
-<td>Video generation</td>
+<td>Video generation (standalone entry point)</td>
 </tr>
 <tr>
-<td><code>ziv-convert</code></td>
-<td>Model/LoRA management</td>
+<td><code>ziv-model</code></td>
+<td>Model/LoRA management (standalone entry point)</td>
 </tr>
 </tbody>
 </table>
-<h2 id="ziv-ziv-image-image-generation"><code>ziv</code> / <code>ziv-image</code> — Image Generation</h2>
+<h2 id="ziv-unified-command"><code>ziv</code> — Unified Command</h2>
+<p><code>ziv</code> is the parent command that dispatches to subcommands:</p>
+<pre><code class="language-bash">ziv image [options]    # Same as ziv-image
+ziv video [options]    # Same as ziv-video
+ziv model [options]    # Same as ziv-model
+</code></pre>
+<p>Run <code>ziv --help</code> for available subcommands, or <code>ziv &lt;command&gt; --help</code> for command-specific options.</p>
+<h2 id="ziv-image-image-generation"><code>ziv-image</code> — Image Generation</h2>
 <table>
 <thead>
 <tr>
@@ -1142,7 +1171,7 @@
 </tr>
 </tbody>
 </table>
-<p>Run <code>ziv --help</code> for the full list.</p>
+<p>Run <code>ziv-image --help</code> for the full list.</p>
 <h2 id="ziv-video-video-generation"><code>ziv-video</code> — Video Generation</h2>
 <table>
 <thead>
@@ -1245,7 +1274,7 @@
 </tr>
 </tbody>
 </table>
-<h2 id="ziv-convert-model-checkpoint-conversion"><code>ziv-convert model</code> — Checkpoint Conversion</h2>
+<h2 id="ziv-model-model-checkpoint-conversion"><code>ziv-model model</code> — Checkpoint Conversion</h2>
 <table>
 <thead>
 <tr>
@@ -1282,7 +1311,7 @@
 </tr>
 </tbody>
 </table>
-<h2 id="ziv-convert-lora-lora-import"><code>ziv-convert lora</code> — LoRA Import</h2>
+<h2 id="ziv-model-lora-lora-import"><code>ziv-model lora</code> — LoRA Import</h2>
 <table>
 <thead>
 <tr>
@@ -1314,7 +1343,7 @@
 </tr>
 </tbody>
 </table>
-<h2 id="ziv-convert-list-asset-listing"><code>ziv-convert list</code> — Asset Listing</h2>
+<h2 id="ziv-model-list-asset-listing"><code>ziv-model list</code> — Asset Listing</h2>
 <table>
 <thead>
 <tr>

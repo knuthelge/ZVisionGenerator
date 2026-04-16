@@ -8,7 +8,7 @@
       
       
       
-        <link rel="canonical" href="https://knuthelge.github.io/ZVisionGenerator/guides/converter/">
+        <link rel="canonical" href="https://knuthelge.github.io/ZVisionGenerator/guides/model/">
       
       
         <link rel="prev" href="../prompts/">
@@ -987,9 +987,9 @@
 
 
 <h1 id="model-lora-management">Model &amp; LoRA Management</h1>
-<p>The <code>ziv-convert</code> command converts checkpoints, imports LoRAs, and lists installed assets.</p>
+<p>The <code>ziv-model</code> command converts checkpoints, imports LoRAs, and lists installed assets.</p>
 <h2 id="overview">Overview</h2>
-<p><code>ziv-convert</code> has three subcommands:</p>
+<p><code>ziv-model</code> has three subcommands:</p>
 <ul>
 <li><strong><code>model</code></strong> — convert safetensors checkpoints to diffusers format</li>
 <li><strong><code>lora</code></strong> — import LoRA files from local paths or HuggingFace</li>
@@ -998,13 +998,13 @@
 <h2 id="converting-models-model-subcommand">Converting Models (<code>model</code> subcommand)</h2>
 <p>Convert safetensors checkpoints to diffusers format, stored in <code>~/.ziv/models/</code>.</p>
 <pre><code class="language-bash"># Convert a Z-Image checkpoint (output: ~/.ziv/models/&lt;name&gt;/)
-ziv-convert model -i checkpoint.safetensors --name my-model
+ziv-model model -i checkpoint.safetensors --name my-model
 
 # Convert a FLUX.2 Klein 4B checkpoint
-ziv-convert model -i klein4b.safetensors --name klein4b --model-type flux2-klein-4b
+ziv-model model -i klein4b.safetensors --name klein4b --model-type flux2-klein-4b
 
 # Copy base model files instead of symlinking
-ziv-convert model -i checkpoint.safetensors --name my-model --copy
+ziv-model model -i checkpoint.safetensors --name my-model --copy
 </code></pre>
 <h3 id="model-flags"><code>model</code> Flags</h3>
 <table>
@@ -1046,13 +1046,13 @@ ziv-convert model -i checkpoint.safetensors --name my-model --copy
 <h2 id="importing-loras-lora-subcommand">Importing LoRAs (<code>lora</code> subcommand)</h2>
 <p>Import LoRA <code>.safetensors</code> files into <code>~/.ziv/loras/</code> from local paths or HuggingFace.</p>
 <pre><code class="language-bash"># Import a local LoRA file
-ziv-convert lora -i /path/to/style.safetensors --name my-style
+ziv-model lora -i /path/to/style.safetensors --name my-style
 
 # Download a LoRA from HuggingFace
-ziv-convert lora --hf user/lora-repo --name my-lora
+ziv-model lora --hf user/lora-repo --name my-lora
 
 # Download a specific file from a multi-file HF repo
-ziv-convert lora --hf user/lora-repo --file model.safetensors
+ziv-model lora --hf user/lora-repo --file model.safetensors
 </code></pre>
 <h3 id="lora-flags"><code>lora</code> Flags</h3>
 <table>
@@ -1089,13 +1089,13 @@ ziv-convert lora --hf user/lora-repo --file model.safetensors
 <h2 id="listing-assets-list-subcommand">Listing Assets (<code>list</code> subcommand)</h2>
 <p>Show installed models, video models, LoRAs, and model aliases.</p>
 <pre><code class="language-bash"># List everything
-ziv-convert list
+ziv-model list
 
 # Show only models
-ziv-convert list --models
+ziv-model list --models
 
 # Show only LoRAs
-ziv-convert list --loras
+ziv-model list --loras
 </code></pre>
 <h3 id="list-flags"><code>list</code> Flags</h3>
 <table>

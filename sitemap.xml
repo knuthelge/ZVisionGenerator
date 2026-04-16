@@ -2,34 +2,34 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://knuthelge.github.io/ZVisionGenerator/</loc>
-         <lastmod>2026-04-15</lastmod>
+         <lastmod>2026-04-16</lastmod>
     </url>
     <url>
          <loc>https://knuthelge.github.io/ZVisionGenerator/development/</loc>
-         <lastmod>2026-04-15</lastmod>
+         <lastmod>2026-04-16</lastmod>
     </url>
     <url>
          <loc>https://knuthelge.github.io/ZVisionGenerator/getting-started/</loc>
-         <lastmod>2026-04-15</lastmod>
-    </url>
-    <url>
-         <loc>https://knuthelge.github.io/ZVisionGenerator/guides/converter/</loc>
-         <lastmod>2026-04-15</lastmod>
+         <lastmod>2026-04-16</lastmod>
     </url>
     <url>
          <loc>https://knuthelge.github.io/ZVisionGenerator/guides/image/</loc>
-         <lastmod>2026-04-15</lastmod>
+         <lastmod>2026-04-16</lastmod>
+    </url>
+    <url>
+         <loc>https://knuthelge.github.io/ZVisionGenerator/guides/model/</loc>
+         <lastmod>2026-04-16</lastmod>
     </url>
     <url>
          <loc>https://knuthelge.github.io/ZVisionGenerator/guides/prompts/</loc>
-         <lastmod>2026-04-15</lastmod>
+         <lastmod>2026-04-16</lastmod>
     </url>
     <url>
          <loc>https://knuthelge.github.io/ZVisionGenerator/guides/video/</loc>
-         <lastmod>2026-04-15</lastmod>
+         <lastmod>2026-04-16</lastmod>
     </url>
     <url>
          <loc>https://knuthelge.github.io/ZVisionGenerator/reference/cli/</loc>
-         <lastmod>2026-04-15</lastmod>
+         <lastmod>2026-04-16</lastmod>
     </url>
 </urlset>

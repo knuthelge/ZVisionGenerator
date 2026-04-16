@@ -554,7 +554,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guides/converter/" class="md-nav__link">
+      <a href="../guides/model/" class="md-nav__link">
         
   
   
@@ -1099,11 +1099,11 @@ uv sync
 </tr>
 <tr>
 <td><code>make run</code></td>
-<td>Run <code>ziv</code> CLI (use <code>ARGS="..."</code>)</td>
+<td>Run <code>ziv-image</code> CLI (use <code>ARGS="..."</code>)</td>
 </tr>
 <tr>
-<td><code>make convert</code></td>
-<td>Run <code>ziv-convert</code> CLI (use <code>ARGS="..."</code>)</td>
+<td><code>make model</code></td>
+<td>Run <code>ziv-model</code> CLI (use <code>ARGS="..."</code>)</td>
 </tr>
 </tbody>
 </table>
@@ -1130,8 +1130,9 @@ uv sync
 <h2 id="project-structure">Project Structure</h2>
 <pre><code>zvisiongenerator/
 ├── __init__.py
-├── image_cli.py                   Image CLI entry point (ziv / ziv-image)
+├── image_cli.py                   Image CLI entry point (ziv-image)
 ├── video_cli.py                   Video CLI entry point (ziv-video)
+├── cli.py                         Unified CLI entry point (ziv)
 ├── image_runner.py                Image generation run orchestration
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
@@ -1140,9 +1141,9 @@ uv sync
 │   ├── image_win.py               Windows image backend (diffusers/CUDA)
 │   └── video_mac.py               macOS video backend (LTX via MLX)
 ├── converters/
-│   ├── convert_checkpoint.py      Safetensors checkpoint → diffusers converter (ziv-convert model)
-│   ├── list_assets.py             List installed models, video models, and LoRAs (ziv-convert list)
-│   └── lora_import.py             LoRA import — local copy and HF download (ziv-convert lora)
+│   ├── convert_checkpoint.py      Safetensors checkpoint → diffusers converter (ziv-model model)
+│   ├── list_assets.py             List installed models, video models, and LoRAs (ziv-model list)
+│   └── lora_import.py             LoRA import — local copy and HF download (ziv-model lora)
 ├── core/
 │   ├── types.py                   Shared types (StageOutcome)
 │   ├── image_types.py             Image request and artifacts

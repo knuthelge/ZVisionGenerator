@@ -714,7 +714,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../guides/converter/" class="md-nav__link">
+      <a href="../guides/model/" class="md-nav__link">
         
   
   
@@ -1023,7 +1023,7 @@
 <li><strong>Video:</strong> ffmpeg (auto-offered on first run via Homebrew)</li>
 </ul>
 <h2 id="installation">Installation</h2>
-<pre><code class="language-bash"># Install globally as `ziv` command from PyPI
+<pre><code class="language-bash"># Install globally — provides `ziv` (unified), `ziv-image`, `ziv-video`, and `ziv-model` commands
 uv tool install z-vision-generator
 
 # Install globally from repository
@@ -1040,13 +1040,13 @@ uv sync
 <h2 id="quick-start">Quick Start</h2>
 <h3 id="image-generation">Image Generation</h3>
 <pre><code class="language-bash"># Local model (bare name resolved from ~/.ziv/models/)
-ziv -m my-model --prompt &quot;a beautiful sunset&quot;
+ziv-image -m my-model --prompt &quot;a beautiful sunset&quot;
 
 # HuggingFace model (downloaded automatically)
-ziv -m Tongyi-MAI/Z-Image-Turbo --prompt &quot;a cat&quot;
+ziv-image -m Tongyi-MAI/Z-Image-Turbo --prompt &quot;a cat&quot;
 
 # From a prompts file with multiple runs
-ziv -m my-model -p prompts.yaml -r 3
+ziv-image -m my-model -p prompts.yaml -r 3
 </code></pre>
 <h3 id="video-generation">Video Generation</h3>
 <pre><code class="language-bash"># Text-to-video with LTX
@@ -1060,13 +1060,13 @@ ziv-video -m dgrauet/ltx-2.3-mlx-q4 -p prompts.yaml -r 3
 </code></pre>
 <h3 id="model-lora-management">Model &amp; LoRA Management</h3>
 <pre><code class="language-bash"># Convert a Z-Image checkpoint
-ziv-convert model -i checkpoint.safetensors --name my-model
+ziv-model model -i checkpoint.safetensors --name my-model
 
 # Import a local LoRA
-ziv-convert lora -i /path/to/style.safetensors --name my-style
+ziv-model lora -i /path/to/style.safetensors --name my-style
 
 # List installed assets
-ziv-convert list
+ziv-model list
 </code></pre>
 <h2 id="model-store-ziv">Model Store (<code>~/.ziv/</code>)</h2>
 <p>Z-Vision Generator uses a central data directory for models and LoRAs:</p>
@@ -1078,10 +1078,10 @@ ziv-convert list
 <pre><code class="language-bash">cp -r /path/to/my-model ~/.ziv/models/my-model
 </code></pre>
 <p>Then reference it by bare name:</p>
-<pre><code class="language-bash">ziv -m my-model --prompt &quot;hello world&quot;
+<pre><code class="language-bash">ziv-image -m my-model --prompt &quot;hello world&quot;
 </code></pre>
 <h3 id="resolution-order">Resolution Order</h3>
-<p>When you pass <code>-m &lt;name&gt;</code> (both <code>ziv</code> and <code>ziv-video</code>):</p>
+<p>When you pass <code>-m &lt;name&gt;</code> (both <code>ziv-image</code> and <code>ziv-video</code>):</p>
 <ol>
 <li><strong>Path with <code>/</code> or <code>\</code></strong> → used as-is (local path)</li>
 <li><strong>Bare name</strong> → checks <code>~/.ziv/models/&lt;name&gt;/</code> → uses it if found</li>
@@ -1094,7 +1094,7 @@ ziv-convert list
 <h3 id="ziv_data_dir-override"><code>ZIV_DATA_DIR</code> Override</h3>
 <p>Set the <code>ZIV_DATA_DIR</code> environment variable to use a custom location instead of <code>~/.ziv/</code>:</p>
 <pre><code class="language-bash">export ZIV_DATA_DIR=/mnt/fast-ssd/ziv
-ziv -m my-model --prompt &quot;a landscape&quot;
+ziv-image -m my-model --prompt &quot;a landscape&quot;
 </code></pre>
 
 
