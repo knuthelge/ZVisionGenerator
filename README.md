@@ -6,7 +6,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
 <p align="center">
-    <img src="https://raw.githubusercontent.com/knuthelge/ZVisionGenerator/main/zvision.png" alt="Z-Vision Generator Logo" width="500"/>
+    <img src="https://raw.githubusercontent.com/knuthelge/ZVisionGenerator/main/docs/assets/zvision-duo.png" alt="Z-Vision Generator Logo" width="500"/>
 </p>
 
 Local AI image and video generation — hassle-free and fun. No tangled node graphs, no cloud dependencies, just prompts and results. Runs on macOS (Apple Silicon / MLX) and Windows (NVIDIA / CUDA), tuned for an M-series Mac with 32 GB unified memory and an NVIDIA RTX 3080.
