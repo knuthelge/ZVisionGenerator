@@ -85,7 +85,7 @@ class TestCLIValidation:
 
     def _run_main(self, argv: list[str]):
         """Call main() with mocked argv and dependencies."""
-        with patch("sys.argv", ["ziv"] + argv):
+        with patch("sys.argv", ["ziv-image"] + argv):
             with patch.multiple("zvisiongenerator.image_cli", **{k.split(".")[-1]: v for k, v in self._MAIN_MOCKS.items()}):
                 main()
 
@@ -169,7 +169,7 @@ class TestCLIValidation:
 
     def test_get_backend_runtime_error_exits(self):
         with pytest.raises(SystemExit, match="2"):
-            with patch("sys.argv", ["ziv", "-m", "fake"]):
+            with patch("sys.argv", ["ziv-image", "-m", "fake"]):
                 with patch.multiple("zvisiongenerator.image_cli", **{k.split(".")[-1]: v for k, v in self._MAIN_MOCKS.items() if k.split(".")[-1] != "get_backend"}):
                     with patch("zvisiongenerator.image_cli.get_backend", side_effect=RuntimeError("unsupported")):
                         main()
@@ -182,7 +182,7 @@ class TestCLIValidation:
         mock_backend.name = "mflux"
         mock_backend.load_model = _bad_load
         with pytest.raises(SystemExit, match="2"):
-            with patch("sys.argv", ["ziv", "-m", "fake"]):
+            with patch("sys.argv", ["ziv-image", "-m", "fake"]):
                 with patch.multiple("zvisiongenerator.image_cli", **{k.split(".")[-1]: v for k, v in self._MAIN_MOCKS.items() if k.split(".")[-1] != "get_backend"}):
                     with patch("zvisiongenerator.image_cli.get_backend", return_value=mock_backend):
                         main()
@@ -219,7 +219,7 @@ class TestCLIValidation:
             "generation": {"default_size": "s", "default_ratio": "2:3"},
         }
 
-        with patch("sys.argv", ["ziv", "-m", "fake"]):
+        with patch("sys.argv", ["ziv-image", "-m", "fake"]):
             with patch.multiple("zvisiongenerator.image_cli", **mocks):
                 main()
         assert recorded["size"] == "s"
@@ -312,18 +312,18 @@ class TestPostProcessingFlags:
 
     def test_negative_sharpen_rejected(self):
         with pytest.raises(SystemExit):
-            with patch("sys.argv", ["ziv", "-m", "fake", "--sharpen", "-1"]):
+            with patch("sys.argv", ["ziv-image", "-m", "fake", "--sharpen", "-1"]):
                 with patch.multiple("zvisiongenerator.image_cli", **{k.split(".")[-1]: v for k, v in TestCLIValidation._MAIN_MOCKS.items()}):
                     main()
 
     def test_negative_contrast_rejected(self):
         with pytest.raises(SystemExit):
-            with patch("sys.argv", ["ziv", "-m", "fake", "--contrast", "-0.5"]):
+            with patch("sys.argv", ["ziv-image", "-m", "fake", "--contrast", "-0.5"]):
                 with patch.multiple("zvisiongenerator.image_cli", **{k.split(".")[-1]: v for k, v in TestCLIValidation._MAIN_MOCKS.items()}):
                     main()
 
     def test_negative_saturation_rejected(self):
         with pytest.raises(SystemExit):
-            with patch("sys.argv", ["ziv", "-m", "fake", "--saturation", "-2"]):
+            with patch("sys.argv", ["ziv-image", "-m", "fake", "--saturation", "-2"]):
                 with patch.multiple("zvisiongenerator.image_cli", **{k.split(".")[-1]: v for k, v in TestCLIValidation._MAIN_MOCKS.items()}):
                     main()

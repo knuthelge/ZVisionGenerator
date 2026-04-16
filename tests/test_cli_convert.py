@@ -1,4 +1,4 @@
-"""Tests for ziv-convert CLI subcommand parsing."""
+"""Tests for ziv-model CLI subcommand parsing."""
 
 from __future__ import annotations
 
@@ -6,51 +6,15 @@ from types import SimpleNamespace
 
 import pytest
 
+from zvisiongenerator.converters.convert_checkpoint import _build_model_parser
+
 
 # ── Helper: build the parser without importing torch/safetensors ─────────────
 
 
 def _build_parser():
-    """Build the argparse parser from main() without executing anything.
-
-    We re-create the parser here because main() both creates and immediately
-    acts on the parsed args. This mirrors the parser defined in
-    convert_checkpoint.main().
-    """
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        prog="ziv-convert",
-        description="Import and manage models and LoRAs for Z-Vision Generator",
-    )
-    subparsers = parser.add_subparsers(dest="command")
-
-    # model subcommand
-    model_parser = subparsers.add_parser("model", help="Convert a checkpoint to diffusers format")
-    model_parser.add_argument("-i", "--input", required=True, help="Path to .safetensors checkpoint file")
-    model_parser.add_argument("--name", default=None, help="Custom model folder name")
-    model_parser.add_argument(
-        "--model-type",
-        choices=["zimage", "flux2-klein-4b", "flux2-klein-9b"],
-        default="zimage",
-    )
-    model_parser.add_argument("--base-model", default="Tongyi-MAI/Z-Image-Turbo")
-    model_parser.add_argument("--copy", action="store_true")
-
-    # lora subcommand
-    lora_parser = subparsers.add_parser("lora", help="Import a LoRA file")
-    lora_source = lora_parser.add_mutually_exclusive_group(required=True)
-    lora_source.add_argument("-i", "--input", help="Path to local .safetensors file")
-    lora_source.add_argument("--hf", help="HuggingFace repo ID")
-    lora_parser.add_argument("--file", default=None)
-    lora_parser.add_argument("--name", default=None)
-
-    # list subcommand
-    list_parser = subparsers.add_parser("list", help="List installed models and LoRAs")
-    list_parser.add_argument("--models", action="store_true")
-    list_parser.add_argument("--loras", action="store_true")
-
-    return parser
+    """Build the argparse parser via the extracted _build_model_parser function."""
+    return _build_model_parser()
 
 
 # ── Top-level ────────────────────────────────────────────────────────────────
@@ -58,7 +22,7 @@ def _build_parser():
 
 class TestCliNoArgs:
     def test_no_args_exits_zero(self):
-        """ziv-convert with no args prints help and exits 0."""
+        """ziv-model with no args prints help and exits 0."""
         parser = _build_parser()
         args = parser.parse_args([])
         assert args.command is None

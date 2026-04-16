@@ -19,12 +19,12 @@ from zvisiongenerator.video_runner import run_video_batch
 from zvisiongenerator.workflows import build_video_workflow
 
 
-def _build_video_parser() -> argparse.ArgumentParser:
+def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
     """Build the argument parser for ziv-video."""
     parser = argparse.ArgumentParser(
-        prog="ziv-video",
+        prog=prog,
         description="Z-Vision Video Generator — text-to-video and image-to-video.",
-        epilog="Example usage: ziv-video -m models/ltx-mlx --ratio 16:9 --size m --prompt 'a sunset'",
+        epilog=f"Example usage: {prog} -m models/ltx-mlx --ratio 16:9 --size m --prompt 'a sunset'",
     )
     parser.add_argument("-m", "--model", type=str, default=None, help="Model path or HF repo ID.")
     parser.add_argument("-p", "--prompts-file", type=str, default="prompts.yaml", help="Path to YAML prompts file.")
@@ -72,9 +72,9 @@ def _align_ltx_frames(frames: int, alignment: int = 8) -> int:
     return aligned
 
 
-def main() -> None:
+def main(*, prog: str = "ziv-video") -> None:
     """Entry point for ziv-video CLI."""
-    parser = _build_video_parser()
+    parser = _build_video_parser(prog=prog)
     args = parser.parse_args()
 
     # Validation (matching image CLI pattern)

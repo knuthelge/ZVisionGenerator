@@ -32,6 +32,6 @@ Z-Vision Generator gives you a unified CLI for both image and video generation, 
 - [Image Generation Guide](guides/image.md) — model aliases, sizes, LoRA, upscaling, post-processing
 - [Video Generation Guide](guides/video.md) — text-to-video, image-to-video, upscale, audio
 - [Prompts Guide](guides/prompts.md) — prompt files, variables, structured prompts, snippets
-- [Model & LoRA Management](guides/converter.md) — converting checkpoints, importing LoRAs
+- [Model & LoRA Management](guides/model.md) — converting checkpoints, importing LoRAs
 - [CLI Reference](reference/cli.md) — full argument tables for all commands
 - [Development](development.md) — setup, testing, architecture

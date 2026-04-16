@@ -57,13 +57,13 @@ uv sync
 
 ```bash
 # Generate an image (bare name from ~/.ziv/models/)
-ziv -m my-model --prompt "a beautiful sunset"
+ziv-image -m my-model --prompt "a beautiful sunset"
 
 # Generate from a HuggingFace model
-ziv -m Tongyi-MAI/Z-Image-Turbo --prompt "a cat in a garden"
+ziv-image -m Tongyi-MAI/Z-Image-Turbo --prompt "a cat in a garden"
 
 # Batch run from a prompts file
-ziv -m my-model -p prompts.yaml -r 3
+ziv-image -m my-model -p prompts.yaml -r 3
 
 # Generate a video
 ziv-video -m dgrauet/ltx-2.3-mlx-q4 --prompt "A cat walking through a garden"
@@ -71,6 +71,8 @@ ziv-video -m dgrauet/ltx-2.3-mlx-q4 --prompt "A cat walking through a garden"
 # Image-to-video
 ziv-video -m dgrauet/ltx-2.3-mlx-q4 --image photo.jpg --prompt "Camera zooms in slowly"
 ```
+
+> **Tip:** `ziv image`, `ziv video`, and `ziv model` are also available as subcommands of the unified `ziv` parent command.
 
 ## Documentation
 
@@ -80,7 +82,7 @@ Full documentation is available at **[knuthelge.github.io/ZVisionGenerator](http
 - [Image Guide](https://knuthelge.github.io/ZVisionGenerator/guides/image/) — aliases, sizes, reference images, LoRA, upscaling, quantization
 - [Video Guide](https://knuthelge.github.io/ZVisionGenerator/guides/video/) — T2V, I2V, upscale, audio, LoRA, constraints
 - [Prompts Guide](https://knuthelge.github.io/ZVisionGenerator/guides/prompts/) — prompt files, variables, structured prompts, snippets
-- [Converter Guide](https://knuthelge.github.io/ZVisionGenerator/guides/converter/) — checkpoint conversion, LoRA import, asset listing
+- [Model & LoRA Guide](https://knuthelge.github.io/ZVisionGenerator/guides/model/) — checkpoint conversion, LoRA import, asset listing
 - [CLI Reference](https://knuthelge.github.io/ZVisionGenerator/reference/cli/) — full argument tables for all commands
 - [Development](https://knuthelge.github.io/ZVisionGenerator/development/) — setup, testing, architecture
 

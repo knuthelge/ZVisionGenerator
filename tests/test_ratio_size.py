@@ -226,7 +226,7 @@ class TestDefaultResolution:
             },
         }
 
-        with patch("sys.argv", ["ziv"] + argv):
+        with patch("sys.argv", ["ziv-image"] + argv):
             with patch.multiple("zvisiongenerator.image_cli", **mocks):
                 main()
         return recorded

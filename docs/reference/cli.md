@@ -4,12 +4,24 @@
 
 | Command | Description |
 |---|---|
-| `ziv` | Image generation (original) |
-| `ziv-image` | Image generation (alias for `ziv`) |
-| `ziv-video` | Video generation |
-| `ziv-convert` | Model/LoRA management |
+| `ziv` | Unified parent command with subcommands: `image`, `video`, `model` |
+| `ziv-image` | Image generation (standalone entry point) |
+| `ziv-video` | Video generation (standalone entry point) |
+| `ziv-model` | Model/LoRA management (standalone entry point) |
 
-## `ziv` / `ziv-image` — Image Generation
+## `ziv` — Unified Command
+
+`ziv` is the parent command that dispatches to subcommands:
+
+```bash
+ziv image [options]    # Same as ziv-image
+ziv video [options]    # Same as ziv-video
+ziv model [options]    # Same as ziv-model
+```
+
+Run `ziv --help` for available subcommands, or `ziv <command> --help` for command-specific options.
+
+## `ziv-image` — Image Generation
 
 | Argument | Default | Description |
 |---|---|---|
@@ -40,7 +52,7 @@
 | `--image-strength` | `0.5` | Denoising strength for reference (0.0–1.0) |
 | `-o`, `--output` | `.` | Output directory for generated images |
 
-Run `ziv --help` for the full list.
+Run `ziv-image --help` for the full list.
 
 ## `ziv-video` — Video Generation
 
@@ -65,7 +77,7 @@ Run `ziv --help` for the full list.
 | `-o`, `--output` | `.` | Output directory |
 | `--format` | `mp4` | Output format |
 
-## `ziv-convert model` — Checkpoint Conversion
+## `ziv-model model` — Checkpoint Conversion
 
 | Flag | Default | Description |
 |---|---|---|
@@ -75,7 +87,7 @@ Run `ziv --help` for the full list.
 | `--base-model` | `Tongyi-MAI/Z-Image-Turbo` | Base HF repo (only for zimage type) |
 | `--copy` | off | Copy files instead of symlinking |
 
-## `ziv-convert lora` — LoRA Import
+## `ziv-model lora` — LoRA Import
 
 | Flag | Default | Description |
 |---|---|---|
@@ -84,7 +96,7 @@ Run `ziv --help` for the full list.
 | `--file` | auto-detect | Specific `.safetensors` file in the HF repo |
 | `--name` | filename stem | Custom LoRA name |
 
-## `ziv-convert list` — Asset Listing
+## `ziv-model list` — Asset Listing
 
 | Flag | Default | Description |
 |---|---|---|

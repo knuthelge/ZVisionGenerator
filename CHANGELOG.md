@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- `ziv` is now a unified parent command with subcommands: `ziv image`, `ziv video`, `ziv model`
+- `ziv-image` is now the primary standalone image generation command (previously `ziv`)
+- `ziv-convert` renamed to `ziv-model`
+
+### Removed
+- `ziv` no longer acts as the image generation command directly — use `ziv-image` or `ziv image`
+- `ziv-convert` entry point removed — use `ziv-model` or `ziv model`
+
 ## [0.6.0] - 2026-04
 
 ### Added
