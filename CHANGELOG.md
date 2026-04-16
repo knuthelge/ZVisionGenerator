@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.6.4] - 2026-04
+
+### Added
+- Bundled `ltx_core_mlx` and `ltx_pipelines_mlx` directly into the repository so the package installs correctly from PyPI without relying on an external distribution of `ltx-2-mlx`
+- Dynamic versioning via `hatch-vcs`: package version is now derived automatically from git tags
+
 ### Changed
 - `ziv` is now a unified parent command with subcommands: `ziv image`, `ziv video`, `ziv model`
 - `ziv-image` is now the primary standalone image generation command (previously `ziv`)
