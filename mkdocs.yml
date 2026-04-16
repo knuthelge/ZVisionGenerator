@@ -5,8 +5,7 @@ repo_name: knuthelge/ZVisionGenerator
 
 theme:
   name: material
-  icon:
-    logo: material/eye
+  logo: assets/zvision-white.png
   palette:
     - scheme: default
       primary: teal
