@@ -15,8 +15,9 @@ class TestDetectVideoModel:
         [
             ("dgrauet/ltx-2.3-mlx-q4", "ltx", "ltx", True, 24, 8, 32),
             ("dgrauet/ltx-2-mlx-q8", "ltx", "ltx", True, 24, 8, 32),
+            ("Lightricks/LTX-2.3", "ltx", "ltx", True, 24, 8, 32),
         ],
-        ids=["ltx-q4", "ltx-q8"],
+        ids=["ltx-q4", "ltx-q8", "ltx-lightricks"],
     )
     def test_known_models(self, model_path, expected_family, expected_backend, expected_i2v, expected_fps, expected_frame_align, expected_res_align):
         info = detect_video_model(model_path)

@@ -8,7 +8,7 @@ Use `--prompt` for quick, one-off generation:
 
 ```bash
 ziv-image -m my-model --prompt "a beautiful sunset over the ocean"
-ziv-video -m ltx-4 --prompt "A cat walking through a garden"
+ziv-video -m ltx-8 --prompt "A cat walking through a garden"
 ```
 
 When `--prompt` is provided, it overrides `--prompts-file`.

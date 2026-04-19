@@ -24,6 +24,10 @@ Open a [feature request](https://github.com/knuthelge/ZVisionGenerator/issues/ne
 
 See the [Development Guide](docs/development.md) for setup, testing, and code style details.
 
+## Testing
+
+Tests live in `tests/` and run via `make test` (pytest). See the [Development Guide](docs/development.md) for full details.
+
 ## Code Style
 
 - Enforced by [ruff](https://docs.astral.sh/ruff/) (line-length 200)

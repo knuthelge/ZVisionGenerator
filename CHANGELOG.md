@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Windows/CUDA video generation support
+- `--quantize fp8` flag for video generation (cross-platform, no-op on macOS)
+- `Lightricks/LTX` model prefix support in video model detection
+
 ## [0.6.4] - 2026-04
 
 ### Added

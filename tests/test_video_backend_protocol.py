@@ -28,6 +28,12 @@ class TestVideoBackendProtocol:
 
         assert isinstance(LtxVideoBackend(), VideoBackend)
 
+    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only backends")
+    def test_ltx_cuda_backend_satisfies_protocol(self):
+        from zvisiongenerator.backends.video_win import LtxCudaVideoBackend
+
+        assert isinstance(LtxCudaVideoBackend(), VideoBackend)
+
     def test_protocol_requires_name(self):
         """An object missing 'name' does not satisfy the protocol."""
 

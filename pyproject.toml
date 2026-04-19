@@ -37,6 +37,8 @@ dependencies = [
     "mlx-lm>=0.31.0; sys_platform == 'darwin'",
     "safetensors>=0.4.0",
     "tqdm>=4.66.0",
+    "einops>=0.8.0; sys_platform != 'darwin'",
+    "av>=14.0.0; sys_platform != 'darwin'",
 ]
 
 [build-system]
@@ -85,7 +87,7 @@ raw-options = { version_scheme = "no-guess-dev" }
 version-file = "zvisiongenerator/_version.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["zvisiongenerator", "packages/ltx_core_mlx", "packages/ltx_pipelines_mlx"]
+packages = ["zvisiongenerator", "packages/ltx_core_mlx", "packages/ltx_pipelines_mlx", "packages/ltx_core", "packages/ltx_pipelines"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "zvisiongenerator/config.yaml" = "zvisiongenerator/config.yaml"

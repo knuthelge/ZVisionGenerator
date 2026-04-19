@@ -47,13 +47,17 @@ VIDEO_BACKENDS: dict[str, "VideoBackend"] = {}
 
 
 def _register_video_backends() -> None:
-    """Register available video backends. macOS only for now."""
+    """Register available video backends."""
     if sys.platform == "darwin":
         from zvisiongenerator.backends.video_mac import LtxVideoBackend
 
         VIDEO_BACKENDS["ltx"] = LtxVideoBackend()
+    elif sys.platform == "win32":
+        from zvisiongenerator.backends.video_win import LtxCudaVideoBackend
+
+        VIDEO_BACKENDS["ltx"] = LtxCudaVideoBackend()
     else:
-        raise RuntimeError(f"Video generation is currently macOS-only. Current platform: {sys.platform}")
+        raise RuntimeError(f"Unsupported platform: {sys.platform}. ZVisionGenerator supports macOS and Windows.")
 
 
 def get_video_backend(family: str) -> "VideoBackend":

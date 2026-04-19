@@ -390,3 +390,29 @@ class TestFormatAssetTableAliases:
         for alias, target in aliases.items():
             assert alias in output
             assert target in output
+
+    def test_dict_alias_shows_both_platforms(self):
+        """Platform-aware dict alias displays both platform values."""
+        aliases = {"ltx-8": {"darwin": "dgrauet/ltx-2.3-mlx-q8", "win32": "Lightricks/LTX-2.3-fp8"}}
+        output = format_asset_table(aliases=aliases)
+        assert "ltx-8" in output
+        assert "dgrauet/ltx-2.3-mlx-q8" in output
+        assert "Lightricks/LTX-2.3-fp8" in output
+        assert "macOS" in output
+        assert "Windows" in output
+
+    def test_mixed_string_and_dict_aliases(self):
+        """Mix of string and dict aliases renders correctly."""
+        aliases = {
+            "ltx-4": {"darwin": "dgrauet/ltx-2.3-mlx-q4"},
+            "zit": "Tongyi-MAI/Z-Image-Turbo",
+        }
+        output = format_asset_table(aliases=aliases)
+        assert "ltx-4" in output
+        assert "macOS" in output
+        assert "zit" in output
+        assert "Tongyi-MAI/Z-Image-Turbo" in output
+        # String alias should NOT have platform labels
+        zit_line = [line for line in output.split("\n") if "zit" in line][0]
+        assert "macOS" not in zit_line
+        assert "Windows" not in zit_line

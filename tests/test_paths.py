@@ -134,19 +134,56 @@ class TestResolveModelAlias:
         ],
     )
     def test_all_config_aliases_resolve(self, monkeypatch, tmp_path, alias, target):
-        """All 5 configured aliases resolve to their expected targets."""
+        """All 5 configured aliases resolve to their expected targets on darwin."""
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr("zvisiongenerator.utils.paths.sys", type("_sys", (), {"platform": "darwin"})())
         (tmp_path / "models").mkdir(parents=True, exist_ok=True)
-        # Use the actual config aliases dict
+        # Use the actual config aliases dict (platform-aware for ltx-*)
         aliases = {
-            "ltx-8": "dgrauet/ltx-2.3-mlx-q8",
-            "ltx-4": "dgrauet/ltx-2.3-mlx-q4",
+            "ltx-8": {"darwin": "dgrauet/ltx-2.3-mlx-q8", "win32": "Lightricks/LTX-2.3-fp8"},
+            "ltx-4": {"darwin": "dgrauet/ltx-2.3-mlx-q4"},
             "zit": "Tongyi-MAI/Z-Image-Turbo",
             "klein9b": "black-forest-labs/FLUX.2-klein-9B",
             "klein4b": "black-forest-labs/FLUX.2-klein-4B",
         }
         result = resolve_model_path(alias, aliases=aliases)
         assert result == target
+
+
+class TestResolvePlatformAwareAlias:
+    """Tests for platform-aware dict aliases in resolve_model_path()."""
+
+    def test_dict_alias_darwin(self, monkeypatch, tmp_path):
+        """Dict alias returns darwin value when platform is darwin."""
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr("zvisiongenerator.utils.paths.sys", type("_sys", (), {"platform": "darwin"})())
+        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+        aliases = {"ltx-8": {"darwin": "dgrauet/ltx-2.3-mlx-q8", "win32": "Lightricks/LTX-2.3-fp8"}}
+        assert resolve_model_path("ltx-8", aliases=aliases) == "dgrauet/ltx-2.3-mlx-q8"
+
+    def test_dict_alias_win32(self, monkeypatch, tmp_path):
+        """Dict alias returns win32 value when platform is win32."""
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr("zvisiongenerator.utils.paths.sys", type("_sys", (), {"platform": "win32"})())
+        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+        aliases = {"ltx-8": {"darwin": "dgrauet/ltx-2.3-mlx-q8", "win32": "Lightricks/LTX-2.3-fp8"}}
+        assert resolve_model_path("ltx-8", aliases=aliases) == "Lightricks/LTX-2.3-fp8"
+
+    def test_dict_alias_unknown_platform_raises(self, monkeypatch, tmp_path):
+        """Dict alias with no matching platform key raises ValueError."""
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr("zvisiongenerator.utils.paths.sys", type("_sys", (), {"platform": "linux"})())
+        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+        aliases = {"ltx-8": {"darwin": "dgrauet/ltx-2.3-mlx-q8", "win32": "Lightricks/LTX-2.3-fp8"}}
+        with pytest.raises(ValueError, match="not available on linux"):
+            resolve_model_path("ltx-8", aliases=aliases)
+
+    def test_string_alias_still_works(self, monkeypatch, tmp_path):
+        """String alias values are unaffected by platform-aware logic."""
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+        aliases = {"zit": "Tongyi-MAI/Z-Image-Turbo"}
+        assert resolve_model_path("zit", aliases=aliases) == "Tongyi-MAI/Z-Image-Turbo"
 
 
 class TestResolveLoraPath:

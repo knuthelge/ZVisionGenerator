@@ -6,7 +6,7 @@
 - [uv](https://docs.astral.sh/uv/) package manager (**required** — pip is not supported)
 - **macOS:** Apple Silicon (M1+) — mflux requires MLX
 - **Windows:** NVIDIA GPU with CUDA support
-- **Video:** ffmpeg (auto-offered on first run via Homebrew)
+- **Video:** [ffmpeg](https://ffmpeg.org/) — install via Homebrew on macOS, winget (`winget install Gyan.FFmpeg`), Chocolatey, or Scoop on Windows
 
 ## Installation
 
@@ -24,7 +24,7 @@ uv sync
 
 > **uv is required.** This package cannot be installed with pip — some dependencies require uv-specific resolution that pip does not support.
 
-> **Note:** Video generation requires ffmpeg. If missing, `ziv-video` will offer to install it via Homebrew on first run.
+> **Note:** Video generation requires ffmpeg. On macOS, `ziv-video` will offer to install it via Homebrew on first run. On Windows, install ffmpeg manually (e.g. via [winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) (`winget install Gyan.FFmpeg`), [Chocolatey](https://chocolatey.org/), or [Scoop](https://scoop.sh/)) and ensure it is on your `PATH`.
 
 ## Quick Start
 
@@ -43,15 +43,17 @@ ziv-image -m my-model -p prompts.yaml -r 3
 
 ### Video Generation
 
-```bash
-# Text-to-video with LTX
-ziv-video -m dgrauet/ltx-2.3-mlx-q4 --prompt "A cat walking through a garden"
+Video generation works on both macOS (MLX) and Windows (CUDA). The `ltx-8` alias automatically resolves to the correct model for your platform. The `ltx-4` alias is currently macOS-only (4-bit will come to Windows when Lightricks releases the distilled checkpoint).
 
-# Image-to-video with LTX
-ziv-video -m dgrauet/ltx-2.3-mlx-q4 --image photo.jpg --prompt "Camera slowly zooms in"
+```bash
+# Text-to-video
+ziv-video -m ltx-8 --prompt "A cat walking through a garden"
+
+# Image-to-video
+ziv-video -m ltx-8 --image photo.jpg --prompt "Camera slowly zooms in"
 
 # Batch from prompts file
-ziv-video -m dgrauet/ltx-2.3-mlx-q4 -p prompts.yaml -r 3
+ziv-video -m ltx-8 -p prompts.yaml -r 3
 ```
 
 ### Model & LoRA Management

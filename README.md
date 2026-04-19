@@ -16,7 +16,7 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 ## Features
 
 - **Image generation** — text-to-image with Z-Image and FLUX.2 Klein (4B/9B) model families
-- **Video generation** — text-to-video and image-to-video with LTX-2.3 (macOS)
+- **Video generation** — text-to-video and image-to-video with LTX-2.3 (macOS and Windows)
 - **Cross-platform** — automatic backend selection: MLX on macOS, CUDA on Windows
 - **Prompt system** — YAML prompt files with variables, structured prompts, snippets, and batch runs
 - **Model store** — central `~/.ziv/` directory with bare-name resolution and HuggingFace fallback
@@ -33,7 +33,7 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 | Platform | Image Generation | Video Generation |
 |----------|------------------|------------------|
 | macOS (Apple Silicon) | ✅ Z-Image / FLUX via mflux/MLX | ✅ LTX-2.3 via MLX |
-| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX via diffusers/CUDA | ❌ Not supported |
+| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX via diffusers/CUDA | ✅ LTX-2.3 via CUDA |
 
 ## Installation
 
@@ -53,7 +53,7 @@ git clone https://github.com/knuthelge/ZVisionGenerator && cd ZVisionGenerator
 uv sync
 ```
 
-> Video generation requires [ffmpeg](https://ffmpeg.org/). On macOS, `ziv-video` offers to install it via Homebrew on first run.
+> Video generation requires [ffmpeg](https://ffmpeg.org/). On macOS, `ziv-video` offers to install it via Homebrew on first run. On Windows, install via [winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/) (`winget install Gyan.FFmpeg`), Chocolatey, or Scoop.
 
 ## Quick Start
 
@@ -68,10 +68,10 @@ ziv-image -m Tongyi-MAI/Z-Image-Turbo --prompt "a cat in a garden"
 ziv-image -m my-model -p prompts.yaml -r 3
 
 # Generate a video
-ziv-video -m dgrauet/ltx-2.3-mlx-q4 --prompt "A cat walking through a garden"
+ziv-video -m ltx-8 --prompt "A cat walking through a garden"
 
 # Image-to-video
-ziv-video -m dgrauet/ltx-2.3-mlx-q4 --image photo.jpg --prompt "Camera zooms in slowly"
+ziv-video -m ltx-8 --image photo.jpg --prompt "Camera zooms in slowly"
 ```
 
 > **Tip:** `ziv image`, `ziv video`, and `ziv model` are also available as subcommands of the unified `ziv` parent command.

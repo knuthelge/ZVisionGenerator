@@ -99,7 +99,7 @@ def format_asset_table(
     models: list[ModelEntry] | None = None,
     video_models: list[VideoModelEntry] | None = None,
     loras: list[LoraEntry] | None = None,
-    aliases: dict[str, str] | None = None,
+    aliases: dict[str, str | dict[str, str]] | None = None,
 ) -> str:
     """Format models, video models, LoRAs, and/or aliases as a human-readable table string."""
     sections: list[str] = []
@@ -182,13 +182,25 @@ def _format_loras(loras: list[LoraEntry]) -> str:
     return "\n".join(lines)
 
 
-def _format_aliases(aliases: dict[str, str]) -> str:
+def _format_aliases(aliases: dict[str, str | dict[str, str]]) -> str:
     header = "Model Aliases:"
     if not aliases:
         return f"{header}\n  (none)"
 
+    _platform_labels = {"darwin": "macOS", "win32": "Windows"}
+    _all_platforms = {"darwin", "win32"}
+
     w_name = max(len(a) for a in aliases)
     lines = [header]
     for alias, target in sorted(aliases.items()):
-        lines.append(f"  {alias:<{w_name}}  → {target}")
+        if isinstance(target, dict):
+            parts = [f"{v} ({_platform_labels.get(k, k)})" for k, v in sorted(target.items())]
+            display = " / ".join(parts)
+            missing = _all_platforms - set(target)
+            if missing:
+                missing_labels = ", ".join(_platform_labels.get(p, p) for p in sorted(missing))
+                display += f"  ({missing_labels} coming soon)"
+        else:
+            display = target
+        lines.append(f"  {alias:<{w_name}}  → {display}")
     return "\n".join(lines)

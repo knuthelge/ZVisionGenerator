@@ -29,7 +29,7 @@ Z-Vision Generator gives you a unified CLI for both image and video generation, 
 | Platform | Image Generation | Video Generation |
 |----------|------------------|------------------|
 | macOS (Apple Silicon) | ✅ Z-Image / FLUX models via mflux/MLX | ✅ LTX-2.3 via MLX |
-| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX models via diffusers/CUDA | ❌ Not supported |
+| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX models via diffusers/CUDA | ✅ LTX-2.3 via CUDA |
 
 ## Quick Links
 

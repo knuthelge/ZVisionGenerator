@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 _ziv_dirs_created: set[str] = set()
@@ -26,13 +27,15 @@ def get_ziv_data_dir() -> Path:
     return data_dir
 
 
-def resolve_model_path(name_or_path: str, *, aliases: dict[str, str] | None = None) -> str:
+def resolve_model_path(name_or_path: str, *, aliases: dict[str, str | dict[str, str]] | None = None) -> str:
     """Resolve a model name/path to a filesystem path.
 
     Resolution order:
     1. If name_or_path is absolute or contains '/' or '\\' → return as-is
     2. If bare name → check ~/.ziv/models/<name>/ → return if exists
     3. If aliases provided and name matches → return alias target
+       - String alias: return directly
+       - Dict alias: pick value for current platform (sys.platform)
     4. Otherwise → return as-is (assumed HuggingFace repo ID)
     """
     if os.path.isabs(name_or_path) or "/" in name_or_path or "\\" in name_or_path:
@@ -43,7 +46,17 @@ def resolve_model_path(name_or_path: str, *, aliases: dict[str, str] | None = No
         return str(candidate)
 
     if aliases and name_or_path in aliases:
-        return aliases[name_or_path]
+        target = aliases[name_or_path]
+        if isinstance(target, dict):
+            platform_target = target.get(sys.platform)
+            if platform_target is None:
+                _platforms = {"darwin": "macOS", "win32": "Windows"}
+                available = ", ".join(_platforms.get(k, k) for k in sorted(target))
+                current = _platforms.get(sys.platform, sys.platform)
+                msg = f"'{name_or_path}' is not available on {current}. Available on: {available}. Use 'ltx-8' instead."
+                raise ValueError(msg)
+            return platform_target
+        return target
 
     return name_or_path
 

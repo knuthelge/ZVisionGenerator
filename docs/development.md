@@ -58,7 +58,8 @@ zvisiongenerator/
 ├── backends/
 │   ├── image_mac.py               macOS image backend (mflux/MLX)
 │   ├── image_win.py               Windows image backend (diffusers/CUDA)
-│   └── video_mac.py               macOS video backend (LTX via MLX)
+│   ├── video_mac.py               macOS video backend (LTX via MLX)
+│   └── video_win.py               Windows video backend (LTX via CUDA)
 ├── converters/
 │   ├── convert_checkpoint.py      Safetensors checkpoint → diffusers converter (ziv-model model)
 │   ├── list_assets.py             List installed models, video models, and LoRAs (ziv-model list)
@@ -100,7 +101,7 @@ prompts.yaml                       Default prompt definitions
 
 ### Backend Protocol
 
-Platform backends live in `backends/image_mac.py` (mflux/MLX) and `backends/image_win.py` (diffusers/CUDA). Image backends implement the `ImageBackend` Protocol from `core/image_backend.py`; video backends implement the `VideoBackend` Protocol from `core/video_backend.py`. Platform selection uses `sys.platform` in `backends/__init__.py` — never check platform elsewhere.
+Platform backends live in `backends/image_mac.py` (mflux/MLX) and `backends/image_win.py` (diffusers/CUDA). Video backends live in `backends/video_mac.py` (LTX via MLX) and `backends/video_win.py` (LTX via CUDA). Image backends implement the `ImageBackend` Protocol from `core/image_backend.py`; video backends implement the `VideoBackend` Protocol from `core/video_backend.py`. Platform selection uses `sys.platform` in `backends/__init__.py` — never check platform elsewhere.
 
 ### Workflow Stages
 

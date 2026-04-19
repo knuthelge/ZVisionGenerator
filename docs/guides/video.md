@@ -1,20 +1,23 @@
 # Video Generation Guide
 
-Generate videos from text prompts or images using `ziv-video`. macOS (Apple Silicon) only.
+Generate videos from text prompts or images using `ziv-video`. Works on macOS (Apple Silicon / MLX) and Windows (NVIDIA GPU / CUDA).
 
 ## Supported Models
 
-| Model | Backend | Path / HF Repo ID | Quantization | I2V |
+| Model | Platform | Path / HF Repo ID | Quantization | I2V |
 |---|---|---|---|---|
-| LTX-2.3 | ltx-pipelines-mlx | `dgrauet/ltx-2.3-mlx-q4` | Pre-quantized Q4 | ✅ |
-| LTX-2.3 | ltx-pipelines-mlx | `dgrauet/ltx-2.3-mlx-q8` | Pre-quantized Q8 | ✅ |
+| LTX-2.3 | macOS | `dgrauet/ltx-2.3-mlx-q4` | Pre-quantized Q4 | ✅ |
+| LTX-2.3 | macOS | `dgrauet/ltx-2.3-mlx-q8` | Pre-quantized Q8 | ✅ |
+| LTX-2.3 | Windows | `Lightricks/LTX-2.3-fp8` | Pre-quantized FP8 | ✅ |
 
 ## Model Aliases
 
-| Alias | Expands To |
-|-------|------------|
-| `ltx-4` | `dgrauet/ltx-2.3-mlx-q4` |
-| `ltx-8` | `dgrauet/ltx-2.3-mlx-q8` |
+Aliases are platform-aware — they resolve to the correct model for your platform automatically.
+
+| Alias | macOS | Windows |
+|-------|-------|----------|
+| `ltx-4` | `dgrauet/ltx-2.3-mlx-q4` | — (macOS-only; coming to Windows when Lightricks releases the distilled checkpoint) |
+| `ltx-8` | `dgrauet/ltx-2.3-mlx-q8` | `Lightricks/LTX-2.3-fp8` |
 
 See [Image Guide → Model Aliases](image.md#model-aliases) for the full alias list.
 
@@ -22,16 +25,16 @@ See [Image Guide → Model Aliases](image.md#model-aliases) for the full alias l
 
 ```bash
 # Text-to-video with LTX
-ziv-video -m ltx-4 --prompt "A cat walking through a garden"
+ziv-video -m ltx-8 --prompt "A cat walking through a garden"
 
 # Image-to-video with LTX
-ziv-video -m ltx-4 --image photo.jpg --prompt "Camera slowly zooms in"
+ziv-video -m ltx-8 --image photo.jpg --prompt "Camera slowly zooms in"
 
 # Batch from prompts file
-ziv-video -m ltx-4 -p prompts.yaml -r 3
+ziv-video -m ltx-8 -p prompts.yaml -r 3
 
 # Square aspect, small size
-ziv-video -m ltx-4 --ratio 1:1 --size s --prompt "Abstract art"
+ziv-video -m ltx-8 --ratio 1:1 --size s --prompt "Abstract art"
 ```
 
 ## Video Upscale & Audio
@@ -53,21 +56,21 @@ ziv-video -m MODEL --no-audio --prompt "..."
 ziv-video -m MODEL --upscale 2 --no-audio --prompt "..."
 ```
 
-Both Q4 and full models include all required weights for upscaling — no extra downloads needed. The upscaler uses a distilled-only two-stage pipeline (8 denoising steps at half resolution, then 3 refinement steps at full resolution).
+Both Q4 and full models include all required weights for upscaling — no extra downloads needed. The `--upscale 2` flag produces 2× resolution output with automatic refinement for sharper detail.
 
-> **Memory:** 32 GB unified memory is sufficient for upscaled generation with Q4 model (~13 GB peak).
+> **Memory:** 32 GB unified memory is sufficient for upscaled generation on macOS (~13 GB peak). On Windows, `ltx-8` uses a pre-quantized FP8 checkpoint for reduced VRAM usage.
 
 ## Video LoRA
 
 ```bash
 # Single LoRA
-ziv-video -m ltx-4 --prompt "A sunset" --lora /path/to/style.safetensors
+ziv-video -m ltx-8 --prompt "A sunset" --lora /path/to/style.safetensors
 
 # LoRA with custom weight
-ziv-video -m ltx-4 --prompt "A sunset" --lora /path/to/style.safetensors:0.8
+ziv-video -m ltx-8 --prompt "A sunset" --lora /path/to/style.safetensors:0.8
 
 # Multiple LoRAs
-ziv-video -m ltx-4 --prompt "A dance" --lora style.safetensors:0.5,motion.safetensors:0.8
+ziv-video -m ltx-8 --prompt "A dance" --lora style.safetensors:0.5,motion.safetensors:0.8
 ```
 
 ## Video Sizes
@@ -95,7 +98,7 @@ LTX-2.3 has specific alignment requirements that are auto-corrected with a warni
 
 `ziv-video` auto-detects the model family from the path:
 
-- **HF repo IDs** — prefix matching: `dgrauet/ltx*` → LTX
+- **HF repo IDs** — prefix matching: `dgrauet/ltx*` or `Lightricks/LTX*` → LTX
 - **Local paths** — substring matching: paths containing "ltx" → LTX
 
 ## Related Guides
