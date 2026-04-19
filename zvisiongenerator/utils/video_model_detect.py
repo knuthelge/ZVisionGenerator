@@ -19,12 +19,15 @@ class VideoModelInfo:
     default_fps: int
     frame_alignment: int  # LTX: 8 (frames = 8k+1)
     resolution_alignment: int  # LTX: 32
+    default_text_encoder: str | None = None
 
 
-# Prefix → (family, backend, supports_i2v, default_fps, frame_alignment, resolution_alignment)
-_VIDEO_MODEL_MAP: dict[str, tuple[str, str, bool, int, int, int]] = {
-    "dgrauet/ltx": ("ltx", "ltx", True, 24, 8, 32),
-    "Lightricks/LTX": ("ltx", "ltx", True, 24, 8, 32),
+# Prefix → (family, backend, supports_i2v, default_fps, frame_alignment, resolution_alignment, default_text_encoder)
+_LTX_DEFAULT_TEXT_ENCODER = "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized"
+
+_VIDEO_MODEL_MAP: dict[str, tuple[str, str, bool, int, int, int, str | None]] = {
+    "dgrauet/ltx": ("ltx", "ltx", True, 24, 8, 32, _LTX_DEFAULT_TEXT_ENCODER),
+    "Lightricks/LTX": ("ltx", "ltx", True, 24, 8, 32, _LTX_DEFAULT_TEXT_ENCODER),
 }
 
 
@@ -40,7 +43,7 @@ def detect_video_model(model_path: str) -> VideoModelInfo:
     Returns:
         VideoModelInfo with detected properties.
     """
-    for prefix, (family, backend, supports_i2v, fps, frame_align, res_align) in _VIDEO_MODEL_MAP.items():
+    for prefix, (family, backend, supports_i2v, fps, frame_align, res_align, default_text_encoder) in _VIDEO_MODEL_MAP.items():
         if model_path.startswith(prefix):
             return VideoModelInfo(
                 family=family,
@@ -49,12 +52,21 @@ def detect_video_model(model_path: str) -> VideoModelInfo:
                 default_fps=fps,
                 frame_alignment=frame_align,
                 resolution_alignment=res_align,
+                default_text_encoder=default_text_encoder,
             )
 
     # Fallback: detect from substrings in the path / basename (local paths)
     path_lower = model_path.lower()
     if "ltx" in path_lower:
-        return VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
+        return VideoModelInfo(
+            family="ltx",
+            backend="ltx",
+            supports_i2v=True,
+            default_fps=24,
+            frame_alignment=8,
+            resolution_alignment=32,
+            default_text_encoder=_LTX_DEFAULT_TEXT_ENCODER,
+        )
 
     return VideoModelInfo(
         family="unknown",
@@ -63,4 +75,5 @@ def detect_video_model(model_path: str) -> VideoModelInfo:
         default_fps=24,
         frame_alignment=1,
         resolution_alignment=1,
+        default_text_encoder=None,
     )

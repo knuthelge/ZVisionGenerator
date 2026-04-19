@@ -20,7 +20,10 @@ torch.backends.cudnn.benchmark = True
 torch.set_float32_matmul_precision("high")
 
 
-def _resolve_model_paths(model_dir: str, *, require_upsampler: bool = True) -> tuple[str, str, str | None]:
+_TEXT_ENCODER_ALLOW_PATTERNS = ["*.safetensors", "*.json", "tokenizer*"]
+
+
+def _resolve_model_paths(model_dir: str, *, require_upsampler: bool = True) -> tuple[str, str | None, str | None]:
     """Auto-discover checkpoint, gemma directory, and spatial upsampler from a model directory.
 
     Args:
@@ -46,7 +49,9 @@ def _resolve_model_paths(model_dir: str, *, require_upsampler: bool = True) -> t
         raise FileNotFoundError(f"No .safetensors checkpoint found in {model_dir}. Expected a distilled checkpoint file (e.g. ltx-video-2b-v0.9.7-distilled.safetensors).")
     checkpoint_path = str(checkpoint_candidates[0])
 
-    # 2. Text encoder — prefer gemma*/, but fall back to text_encoder/
+    # 2. Text encoder — prefer gemma*/, but fall back to text_encoder/.
+    # Flat repositories such as LTX-2.3-fp8 ship only the video checkpoint,
+    # so absence here is handled later via model metadata.
     gemma_dirs = list(root.glob("gemma*/"))
     text_encoder_dir = root / "text_encoder"
     if gemma_dirs:
@@ -54,7 +59,7 @@ def _resolve_model_paths(model_dir: str, *, require_upsampler: bool = True) -> t
     elif text_encoder_dir.is_dir():
         gemma_root = str(text_encoder_dir)
     else:
-        raise FileNotFoundError(f"No gemma*/ or text_encoder/ subdirectory found in {model_dir}. Expected a text encoder directory.")
+        gemma_root = None
 
     # 3. Spatial upsampler — a file matching *spatial_upscal*.safetensors
     upsampler_files = list(root.glob("*spatial_upscal*.safetensors"))
@@ -67,11 +72,12 @@ def _resolve_model_paths(model_dir: str, *, require_upsampler: bool = True) -> t
     return checkpoint_path, gemma_root, spatial_upsampler_path
 
 
-def _maybe_download(model_path: str) -> str:
+def _maybe_download(model_path: str, *, allow_patterns: list[str] | None = None) -> str:
     """If model_path looks like a HuggingFace repo ID, download it. Otherwise return as-is.
 
     Args:
         model_path: Local path or HuggingFace repo ID (org/name).
+        allow_patterns: Optional Hugging Face snapshot filters.
 
     Returns:
         Local directory path.
@@ -79,7 +85,7 @@ def _maybe_download(model_path: str) -> str:
     if "/" in model_path and not Path(model_path).exists():
         from huggingface_hub import snapshot_download
 
-        return snapshot_download(model_path)
+        return snapshot_download(model_path, allow_patterns=allow_patterns)
     return model_path
 
 
@@ -115,6 +121,7 @@ class LtxCudaVideoBackend:
         from ltx_core.loader import LoraPathStrengthAndSDOps
         from ltx_core.loader.sd_ops import SDOps
 
+        model_info = detect_video_model(model_path)
         local_dir = _maybe_download(model_path)
         upscale: bool = bool(kwargs.get("upscale"))
 
@@ -122,13 +129,21 @@ class LtxCudaVideoBackend:
         raw_loras: list[tuple[str, float]] = kwargs.get("loras") or []
         loras = [LoraPathStrengthAndSDOps(path=p, strength=s, sd_ops=SDOps(name="identity")) for p, s in raw_loras]
 
+        checkpoint, gemma_root, upsampler = _resolve_model_paths(local_dir, require_upsampler=upscale)
+        if gemma_root is None:
+            if model_info.default_text_encoder is None:
+                raise FileNotFoundError(f"No gemma*/ or text_encoder/ subdirectory found in {local_dir}, and no default text encoder is configured for {model_path}.")
+            gemma_root = _maybe_download(
+                model_info.default_text_encoder,
+                allow_patterns=_TEXT_ENCODER_ALLOW_PATTERNS,
+            )
+
         if upscale:
             from ltx_pipelines.distilled import DistilledPipeline
 
-            checkpoint, gemma, upsampler = _resolve_model_paths(local_dir, require_upsampler=True)
             pipeline = DistilledPipeline(
                 distilled_checkpoint_path=checkpoint,
-                gemma_root=gemma,
+                gemma_root=gemma_root,
                 spatial_upsampler_path=upsampler,
                 loras=loras,
                 device=torch.device("cuda"),
@@ -136,15 +151,13 @@ class LtxCudaVideoBackend:
         else:
             from ltx_pipelines.distilled_single_stage import DistilledSingleStagePipeline
 
-            checkpoint, gemma, _ = _resolve_model_paths(local_dir, require_upsampler=False)
             pipeline = DistilledSingleStagePipeline(
                 distilled_checkpoint_path=checkpoint,
-                gemma_root=gemma,
+                gemma_root=gemma_root,
                 loras=loras,
                 device=torch.device("cuda"),
             )
 
-        model_info = detect_video_model(model_path)
         self._model_info = model_info
         return pipeline, model_info
 

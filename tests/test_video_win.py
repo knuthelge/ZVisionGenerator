@@ -95,6 +95,7 @@ _DUMMY_MODEL_INFO = VideoModelInfo(
     default_fps=24,
     frame_alignment=8,
     resolution_alignment=32,
+    default_text_encoder="Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
 )
 
 
@@ -190,8 +191,11 @@ class TestResolveModelPaths:
         (tmp_path / "model.safetensors").touch()
         (tmp_path / "spatial_upscaler.safetensors").touch()
 
-        with pytest.raises(FileNotFoundError, match="gemma"):
-            mod._resolve_model_paths(str(tmp_path))
+        checkpoint, gemma, upsampler = mod._resolve_model_paths(str(tmp_path))
+
+        assert Path(checkpoint).name == "model.safetensors"
+        assert gemma is None
+        assert Path(upsampler).name == "spatial_upscaler.safetensors"
 
     def test_resolve_model_paths_missing_upsampler_required(self, tmp_path, win_video):
         mod, _, _fakes = win_video
@@ -225,6 +229,25 @@ class TestResolveModelPaths:
         ckpt, _, upsampler = mod._resolve_model_paths(str(tmp_path))
         assert Path(ckpt).name == "model.safetensors"
         assert "spatial_upscal" in Path(upsampler).name
+
+
+class TestMaybeDownload:
+    """Verify _maybe_download() delegates snapshot filtering when downloading."""
+
+    def test_maybe_download_passes_allow_patterns_to_snapshot_download(self, win_video):
+        mod, _, fakes = win_video
+        fakes["huggingface_hub"].snapshot_download.return_value = "/tmp/downloaded-model"
+
+        result = mod._maybe_download(
+            "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
+            allow_patterns=mod._TEXT_ENCODER_ALLOW_PATTERNS,
+        )
+
+        assert result == "/tmp/downloaded-model"
+        fakes["huggingface_hub"].snapshot_download.assert_called_once_with(
+            "Lightricks/gemma-3-12b-it-qat-q4_0-unquantized",
+            allow_patterns=mod._TEXT_ENCODER_ALLOW_PATTERNS,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +311,93 @@ class TestLoadModel:
         assert Path(call_kwargs["gemma_root"]).name == "text_encoder"
         assert pipeline is fake_pipeline
         assert info == _DUMMY_MODEL_INFO
+
+    def test_load_model_downloads_default_text_encoder_for_flat_repo(self, tmp_path, win_video):
+        mod, _, fakes = win_video
+        (tmp_path / "ltx-distilled.safetensors").touch()
+
+        fake_pipeline = MagicMock()
+        mock_cls = MagicMock(return_value=fake_pipeline)
+        fakes["ltx_pipelines.distilled_single_stage"].DistilledSingleStagePipeline = mock_cls
+        downloaded_text_encoder = str(tmp_path / "downloaded-text-encoder")
+
+        with (
+            patch.object(mod, "detect_video_model", return_value=_DUMMY_MODEL_INFO),
+            patch.object(mod, "_maybe_download", side_effect=[str(tmp_path), downloaded_text_encoder]) as mock_download,
+        ):
+            backend = mod.LtxCudaVideoBackend()
+            pipeline, info = backend.load_model(str(tmp_path))
+
+        assert mock_download.call_args_list == [
+            ((str(tmp_path),), {}),
+            (
+                (_DUMMY_MODEL_INFO.default_text_encoder,),
+                {"allow_patterns": mod._TEXT_ENCODER_ALLOW_PATTERNS},
+            ),
+        ]
+        mock_cls.assert_called_once()
+        call_kwargs = mock_cls.call_args[1]
+        assert call_kwargs["gemma_root"] == downloaded_text_encoder
+        assert pipeline is fake_pipeline
+        assert info == _DUMMY_MODEL_INFO
+
+    def test_load_model_resolves_flat_hf_repo_without_path_error(self, tmp_path, win_video):
+        mod, _, fakes = win_video
+        (tmp_path / "ltx-2.3-distilled.safetensors").touch()
+
+        fake_pipeline = MagicMock()
+        mock_cls = MagicMock(return_value=fake_pipeline)
+        fakes["ltx_pipelines.distilled_single_stage"].DistilledSingleStagePipeline = mock_cls
+        downloaded_text_encoder = str(tmp_path / "downloaded-text-encoder")
+
+        with patch.object(
+            mod,
+            "_maybe_download",
+            side_effect=[str(tmp_path), downloaded_text_encoder],
+        ) as mock_download:
+            backend = mod.LtxCudaVideoBackend()
+            pipeline, info = backend.load_model("Lightricks/LTX-2.3-fp8")
+
+        assert mock_download.call_args_list == [
+            (("Lightricks/LTX-2.3-fp8",), {}),
+            ((info.default_text_encoder,), {"allow_patterns": mod._TEXT_ENCODER_ALLOW_PATTERNS}),
+        ]
+        assert info.default_text_encoder == _DUMMY_MODEL_INFO.default_text_encoder
+        assert pipeline is fake_pipeline
+        assert mock_cls.call_args[1]["gemma_root"] == downloaded_text_encoder
+
+    def test_load_model_uses_model_info_text_encoder_repo_without_hardcoding(self, tmp_path, win_video):
+        mod, _, fakes = win_video
+        (tmp_path / "ltx-distilled.safetensors").touch()
+
+        fake_pipeline = MagicMock()
+        mock_cls = MagicMock(return_value=fake_pipeline)
+        fakes["ltx_pipelines.distilled_single_stage"].DistilledSingleStagePipeline = mock_cls
+        custom_model_info = VideoModelInfo(
+            family="ltx",
+            backend="ltx",
+            supports_i2v=True,
+            default_fps=24,
+            frame_alignment=8,
+            resolution_alignment=32,
+            default_text_encoder="Example/custom-text-encoder",
+        )
+        downloaded_text_encoder = str(tmp_path / "custom-text-encoder")
+
+        with (
+            patch.object(mod, "detect_video_model", return_value=custom_model_info),
+            patch.object(mod, "_maybe_download", side_effect=[str(tmp_path), downloaded_text_encoder]) as mock_download,
+        ):
+            backend = mod.LtxCudaVideoBackend()
+            pipeline, info = backend.load_model(str(tmp_path))
+
+        assert mock_download.call_args_list == [
+            ((str(tmp_path),), {}),
+            (("Example/custom-text-encoder",), {"allow_patterns": mod._TEXT_ENCODER_ALLOW_PATTERNS}),
+        ]
+        assert info == custom_model_info
+        assert pipeline is fake_pipeline
+        assert mock_cls.call_args[1]["gemma_root"] == downloaded_text_encoder
 
     def test_load_model_upscale_calls_distilled_pipeline(self, tmp_path, win_video):
         mod, _, fakes = win_video
