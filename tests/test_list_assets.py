@@ -394,7 +394,7 @@ class TestFormatAssetTableAliases:
     def test_dict_alias_shows_both_platforms(self):
         """Platform-aware dict alias displays both platform values."""
         aliases = {"ltx-8": {"darwin": "dgrauet/ltx-2.3-mlx-q8", "win32": "Lightricks/LTX-2.3-fp8"}}
-        output = format_asset_table(aliases=aliases)
+        output = format_asset_table(aliases=aliases, platform_labels={"darwin": "macOS", "win32": "Windows"})
         assert "ltx-8" in output
         assert "dgrauet/ltx-2.3-mlx-q8" in output
         assert "Lightricks/LTX-2.3-fp8" in output
@@ -407,12 +407,28 @@ class TestFormatAssetTableAliases:
             "ltx-4": {"darwin": "dgrauet/ltx-2.3-mlx-q4"},
             "zit": "Tongyi-MAI/Z-Image-Turbo",
         }
-        output = format_asset_table(aliases=aliases)
+        output = format_asset_table(aliases=aliases, platform_labels={"darwin": "macOS", "win32": "Windows"})
         assert "ltx-4" in output
         assert "macOS" in output
+        assert "Windows coming soon" in output
         assert "zit" in output
         assert "Tongyi-MAI/Z-Image-Turbo" in output
         # String alias should NOT have platform labels
         zit_line = [line for line in output.split("\n") if "zit" in line][0]
         assert "macOS" not in zit_line
         assert "Windows" not in zit_line
+
+    def test_dict_alias_unsupported_platform_value_only_shows_supported_entry(self):
+        """Unsupported dict values render as coming soon rather than a bogus path entry."""
+        aliases = {
+            "ltx-4": {
+                "darwin": "dgrauet/ltx-2.3-mlx-q4",
+                "win32": {"message": "Use 'ltx-8' instead."},
+            }
+        }
+
+        output = format_asset_table(aliases=aliases, platform_labels={"darwin": "macOS", "win32": "Windows"})
+
+        assert "dgrauet/ltx-2.3-mlx-q4 (macOS)" in output
+        assert "Windows coming soon" in output
+        assert "Use 'ltx-8' instead." not in output

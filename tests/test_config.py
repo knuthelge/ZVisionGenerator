@@ -114,6 +114,29 @@ class TestNestedConfigValidation:
             with pytest.raises(ValueError, match=r"sizes\.1:1.*mapping.*size"):
                 load_config()
 
+    def test_platforms_not_dict_raises(self, tmp_path):
+        """A scalar platforms section should be rejected."""
+        from unittest.mock import patch
+        import yaml
+
+        bad_yaml = {
+            "platforms": "string",
+            "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
+            "generation": {"default_steps": 10, "default_guidance": 3.5},
+            "sharpening": {},
+            "upscale": {},
+            "schedulers": {},
+            "model_presets": {},
+        }
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(yaml.dump(bad_yaml))
+
+        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
+            mock_dir.return_value = tmp_path / "nope"
+            mock_files.return_value.joinpath.return_value = config_file
+            with pytest.raises(ValueError, match="platforms"):
+                load_config()
+
     def test_unknown_default_ratio_raises(self, tmp_path):
         """default_ratio referencing a ratio not in sizes should be rejected."""
         from unittest.mock import patch

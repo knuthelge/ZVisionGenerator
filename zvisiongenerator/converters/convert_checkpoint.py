@@ -512,6 +512,7 @@ def _cmd_list(args):
     """Handle the 'list' subcommand — list installed models, video models, LoRAs, and aliases."""
     from zvisiongenerator.converters.list_assets import format_asset_table, list_loras, list_models, list_video_models
     from zvisiongenerator.utils.config import load_config
+    from zvisiongenerator.utils.platform import get_all_platform_labels
 
     data_dir = get_ziv_data_dir()
 
@@ -529,8 +530,9 @@ def _cmd_list(args):
     except ValueError:
         config = {}
     aliases = config.get("model_aliases", {})
+    platform_labels = get_all_platform_labels(config) if config else None
 
-    print(format_asset_table(models=models, video_models=video_models, loras=loras, aliases=aliases or None))
+    print(format_asset_table(models=models, video_models=video_models, loras=loras, aliases=aliases or None, platform_labels=platform_labels))
 
 
 def _build_model_parser(*, prog: str = "ziv-model") -> argparse.ArgumentParser:

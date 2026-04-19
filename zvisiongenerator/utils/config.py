@@ -48,6 +48,7 @@ def load_config() -> dict[str, Any]:
 
     # Validate that known sections have the right types after merge
     _EXPECTED_DICTS = (
+        "platforms",
         "sizes",
         "generation",
         "sharpening",

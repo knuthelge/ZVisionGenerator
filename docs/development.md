@@ -115,6 +115,16 @@ Use `@dataclass(frozen=True)` for immutable value objects (inputs, detection res
 
 CLI flags > model preset variant > model preset family > global defaults. Config is a plain `dict` loaded from YAML, not a dataclass.
 
+### Platform Support
+
+- Platform definitions live in `config.yaml` under the `platforms` section, mapping `sys.platform` keys to human-readable labels.
+- `PlatformInfo` from `zvisiongenerator.utils.platform` is the typed interface for resolved platform metadata.
+- To add a new platform:
+    - Add an entry to the `platforms` section in `config.yaml`.
+    - Create the backend module(s) in `backends/`.
+    - Register the platform in `backends/__init__.py` by updating `_PLATFORM_BACKEND_KEY` and adding the import in the relevant registration function.
+- `model_aliases` use value types to signal availability: a string means supported (model path), a dict with `message` means unsupported with guidance, and a missing platform key means unsupported without guidance.
+
 ### Error Conventions
 
 Raise `ValueError`, `FileNotFoundError`, `RuntimeError` directly with descriptive f-string messages. Use `warnings.warn()` with `stacklevel=2` for non-fatal conditions. No custom exception classes except private sentinels.

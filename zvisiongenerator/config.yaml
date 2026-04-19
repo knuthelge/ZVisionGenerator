@@ -2,6 +2,12 @@
 # Shipped inside the wheel via importlib.resources.
 # User can override with ~/.ziv/config.yaml (deep-merged).
 
+platforms:
+  darwin:
+    label: "macOS"
+  win32:
+    label: "Windows"
+
 sizes:
   "1:1":
     xs: { width: 512,  height: 512  }
@@ -68,7 +74,8 @@ model_aliases:
     win32: "Lightricks/LTX-2.3-fp8"
   ltx-4:
     darwin: "dgrauet/ltx-2.3-mlx-q4"
-    # No win32 key — distilled-nvfp4 not yet released by Lightricks
+    win32:
+      message: "Not supported. Waiting for Lightricks to release the distilled checkpoint. Use 'ltx-8' instead."
   zit: "Tongyi-MAI/Z-Image-Turbo"
   klein9b: "black-forest-labs/FLUX.2-klein-9B"
   klein4b: "black-forest-labs/FLUX.2-klein-4B"

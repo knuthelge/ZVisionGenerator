@@ -8,6 +8,9 @@ from pathlib import Path
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 
+_AliasPlatformValue = str | dict[str, str]
+_AliasMap = dict[str, str | dict[str, _AliasPlatformValue]]
+
 
 @dataclass
 class ModelEntry:
@@ -99,7 +102,8 @@ def format_asset_table(
     models: list[ModelEntry] | None = None,
     video_models: list[VideoModelEntry] | None = None,
     loras: list[LoraEntry] | None = None,
-    aliases: dict[str, str | dict[str, str]] | None = None,
+    aliases: _AliasMap | None = None,
+    platform_labels: dict[str, str] | None = None,
 ) -> str:
     """Format models, video models, LoRAs, and/or aliases as a human-readable table string."""
     sections: list[str] = []
@@ -111,7 +115,7 @@ def format_asset_table(
     if loras is not None:
         sections.append(_format_loras(loras))
     if aliases is not None:
-        sections.append(_format_aliases(aliases))
+        sections.append(_format_aliases(aliases, platform_labels=platform_labels))
 
     return "\n\n".join(sections)
 
@@ -182,23 +186,27 @@ def _format_loras(loras: list[LoraEntry]) -> str:
     return "\n".join(lines)
 
 
-def _format_aliases(aliases: dict[str, str | dict[str, str]]) -> str:
+def _format_aliases(aliases: _AliasMap, platform_labels: dict[str, str] | None = None) -> str:
     header = "Model Aliases:"
     if not aliases:
         return f"{header}\n  (none)"
 
-    _platform_labels = {"darwin": "macOS", "win32": "Windows"}
-    _all_platforms = {"darwin", "win32"}
+    if platform_labels is None:
+        from zvisiongenerator.utils.config import load_config
+        from zvisiongenerator.utils.platform import get_all_platform_labels
+
+        platform_labels = get_all_platform_labels(load_config())
 
     w_name = max(len(a) for a in aliases)
     lines = [header]
     for alias, target in sorted(aliases.items()):
         if isinstance(target, dict):
-            parts = [f"{v} ({_platform_labels.get(k, k)})" for k, v in sorted(target.items())]
+            supported = {k: v for k, v in target.items() if isinstance(v, str)}
+            parts = [f"{v} ({platform_labels.get(k, k)})" for k, v in sorted(supported.items())]
             display = " / ".join(parts)
-            missing = _all_platforms - set(target)
+            missing = set(platform_labels.keys()) - set(supported.keys())
             if missing:
-                missing_labels = ", ".join(_platform_labels.get(p, p) for p in sorted(missing))
+                missing_labels = ", ".join(platform_labels.get(p, p) for p in sorted(missing))
                 display += f"  ({missing_labels} coming soon)"
         else:
             display = target

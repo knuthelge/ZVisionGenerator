@@ -12,6 +12,22 @@ __all__ = ["get_backend", "get_video_backend"]
 
 BACKENDS: dict[str, "ImageBackend"] = {}
 
+_PLATFORM_BACKEND_KEY: dict[str, str] = {
+    "darwin": "mflux",
+    "win32": "diffusers",
+}
+
+
+def _unsupported_platform_error(capability: str) -> RuntimeError:
+    """Build RuntimeError with config-sourced platform labels."""
+    from zvisiongenerator.utils.config import load_config
+    from zvisiongenerator.utils.platform import get_platform_info, get_platform_label
+
+    config = load_config()
+    info = get_platform_info(config)
+    supported_labels = [get_platform_label(config, k) for k in _PLATFORM_BACKEND_KEY]
+    return RuntimeError(f"{capability.title()} generation is not supported on {info.label}. Supported: {', '.join(supported_labels)}.")
+
 
 def _register_platform_backend() -> None:
     if sys.platform == "darwin":
@@ -23,19 +39,17 @@ def _register_platform_backend() -> None:
 
         BACKENDS["diffusers"] = DiffusersBackend()
     else:
-        raise RuntimeError(f"Unsupported platform: {sys.platform}. ZVisionGenerator supports macOS and Windows.")
+        raise _unsupported_platform_error("image")
 
 
 def get_backend() -> "ImageBackend":
     """Get the platform-appropriate backend."""
     if not BACKENDS:
         _register_platform_backend()
-    if sys.platform == "darwin":
-        return BACKENDS["mflux"]
-    elif sys.platform == "win32":
-        return BACKENDS["diffusers"]
-    else:
-        raise RuntimeError(f"Unsupported platform: {sys.platform}. ZVisionGenerator supports macOS and Windows.")
+    key = _PLATFORM_BACKEND_KEY.get(sys.platform)
+    if key is None:
+        raise _unsupported_platform_error("image")
+    return BACKENDS[key]
 
 
 # --- Video backends ---
@@ -57,7 +71,7 @@ def _register_video_backends() -> None:
 
         VIDEO_BACKENDS["ltx"] = LtxCudaVideoBackend()
     else:
-        raise RuntimeError(f"Unsupported platform: {sys.platform}. ZVisionGenerator supports macOS and Windows.")
+        raise _unsupported_platform_error("video")
 
 
 def get_video_backend(family: str) -> "VideoBackend":

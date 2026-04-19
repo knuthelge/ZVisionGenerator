@@ -176,7 +176,37 @@ class TestResolvePlatformAwareAlias:
         (tmp_path / "models").mkdir(parents=True, exist_ok=True)
         aliases = {"ltx-8": {"darwin": "dgrauet/ltx-2.3-mlx-q8", "win32": "Lightricks/LTX-2.3-fp8"}}
         with pytest.raises(ValueError, match="not available on linux"):
-            resolve_model_path("ltx-8", aliases=aliases)
+            resolve_model_path("ltx-8", aliases=aliases, platform_labels={"darwin": "macOS", "win32": "Windows"})
+
+    def test_dict_alias_unsupported_platform_includes_alias_message(self, monkeypatch, tmp_path):
+        """Unsupported platform dict values surface their configured guidance message."""
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr("zvisiongenerator.utils.paths.sys", type("_sys", (), {"platform": "win32"})())
+        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+        aliases = {
+            "ltx-4": {
+                "darwin": "dgrauet/ltx-2.3-mlx-q4",
+                "win32": {"message": "Use 'ltx-8' instead."},
+            }
+        }
+
+        with pytest.raises(ValueError, match="Use 'ltx-8' instead."):
+            resolve_model_path("ltx-4", aliases=aliases, platform_labels={"darwin": "macOS", "win32": "Windows"})
+
+    def test_dict_alias_missing_platform_has_no_hardcoded_recommendation(self, monkeypatch, tmp_path):
+        """Missing platform entries do not inject any hardcoded recommendation text."""
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        monkeypatch.setattr("zvisiongenerator.utils.paths.sys", type("_sys", (), {"platform": "win32"})())
+        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+        aliases = {"ltx-4": {"darwin": "dgrauet/ltx-2.3-mlx-q4"}}
+
+        with pytest.raises(ValueError) as exc_info:
+            resolve_model_path("ltx-4", aliases=aliases, platform_labels={"darwin": "macOS", "win32": "Windows"})
+
+        message = str(exc_info.value)
+        assert "not available on Windows" in message
+        assert "Available on: macOS." in message
+        assert "Use 'ltx-8' instead." not in message
 
     def test_string_alias_still_works(self, monkeypatch, tmp_path):
         """String alias values are unaffected by platform-aware logic."""

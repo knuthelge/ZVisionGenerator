@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 
 _ziv_dirs_created: set[str] = set()
+_AliasPlatformValue = str | dict[str, str]
+_AliasMap = dict[str, str | dict[str, _AliasPlatformValue]]
 
 
 def get_ziv_data_dir() -> Path:
@@ -27,15 +29,15 @@ def get_ziv_data_dir() -> Path:
     return data_dir
 
 
-def resolve_model_path(name_or_path: str, *, aliases: dict[str, str | dict[str, str]] | None = None) -> str:
+def resolve_model_path(name_or_path: str, *, aliases: _AliasMap | None = None, platform_labels: dict[str, str] | None = None) -> str:
     """Resolve a model name/path to a filesystem path.
 
     Resolution order:
     1. If name_or_path is absolute or contains '/' or '\\' → return as-is
     2. If bare name → check ~/.ziv/models/<name>/ → return if exists
-    3. If aliases provided and name matches → return alias target
-       - String alias: return directly
-       - Dict alias: pick value for current platform (sys.platform)
+     3. If aliases provided and name matches → return alias target
+         - String alias: return directly
+         - Dict alias: pick value for current platform (sys.platform)
     4. Otherwise → return as-is (assumed HuggingFace repo ID)
     """
     if os.path.isabs(name_or_path) or "/" in name_or_path or "\\" in name_or_path:
@@ -48,14 +50,22 @@ def resolve_model_path(name_or_path: str, *, aliases: dict[str, str | dict[str, 
     if aliases and name_or_path in aliases:
         target = aliases[name_or_path]
         if isinstance(target, dict):
-            platform_target = target.get(sys.platform)
-            if platform_target is None:
-                _platforms = {"darwin": "macOS", "win32": "Windows"}
-                available = ", ".join(_platforms.get(k, k) for k in sorted(target))
-                current = _platforms.get(sys.platform, sys.platform)
-                msg = f"'{name_or_path}' is not available on {current}. Available on: {available}. Use 'ltx-8' instead."
-                raise ValueError(msg)
-            return platform_target
+            value = target.get(sys.platform)
+            if isinstance(value, str):
+                return value
+            if platform_labels is None:
+                from zvisiongenerator.utils.config import load_config
+                from zvisiongenerator.utils.platform import get_all_platform_labels
+
+                platform_labels = get_all_platform_labels(load_config())
+            available_platforms = [k for k, v in target.items() if isinstance(v, str)]
+            available = ", ".join(platform_labels.get(k, k) for k in sorted(available_platforms))
+            current = platform_labels.get(sys.platform, sys.platform)
+            alias_message = value.get("message", "") if isinstance(value, dict) else ""
+            parts = [f"'{name_or_path}' is not available on {current}.", f"Available on: {available}."]
+            if alias_message:
+                parts.append(alias_message)
+            raise ValueError(" ".join(parts))
         return target
 
     return name_or_path
