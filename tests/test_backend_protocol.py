@@ -31,6 +31,34 @@ def test_backend_name_is_correct_for_platform():
     assert backend.name == expected
 
 
+class TestBackendRegistryLookup:
+    def test_get_backend_uses_dict_lookup_for_darwin(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        backend = MagicMock(spec=ImageBackend)
+        monkeypatch.setattr(backends, "BACKENDS", {})
+        monkeypatch.setattr(backends.sys, "platform", "darwin")
+        monkeypatch.setattr(backends, "_IMAGE_BACKENDS_MAP", {"darwin": ("mflux", lambda: backend)})
+
+        result = backends.get_backend()
+
+        assert result is backend
+        assert backends.BACKENDS["mflux"] is backend
+
+    def test_get_backend_uses_dict_lookup_for_win32(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        backend = MagicMock(spec=ImageBackend)
+        monkeypatch.setattr(backends, "BACKENDS", {})
+        monkeypatch.setattr(backends.sys, "platform", "win32")
+        monkeypatch.setattr(backends, "_IMAGE_BACKENDS_MAP", {"win32": ("diffusers", lambda: backend)})
+
+        result = backends.get_backend()
+
+        assert result is backend
+        assert backends.BACKENDS["diffusers"] is backend
+
+
 # ---------------------------------------------------------------------------
 # Guard: generation without load_model() must raise RuntimeError
 # ---------------------------------------------------------------------------

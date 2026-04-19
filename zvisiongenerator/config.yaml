@@ -62,9 +62,19 @@ schedulers:
     mflux_class: "zvisiongenerator.schedulers.beta_scheduler.BetaScheduler"
     # diffusers uses built-in: FlowMatchEulerDiscreteScheduler(use_beta_sigmas=True)
 
+platforms:
+  darwin: macOS
+  win32: Windows
+
 model_aliases:
-  ltx-8: "dgrauet/ltx-2.3-mlx-q8"
-  ltx-4: "dgrauet/ltx-2.3-mlx-q4"
+  ltx-8:
+    darwin: "dgrauet/ltx-2.3-mlx-q8"
+    win32:
+      message: "LTX is currently not available on Windows, awaiting diffusers support for LTX."
+  ltx-4:
+    darwin: "dgrauet/ltx-2.3-mlx-q4"
+    win32:
+      message: "LTX is currently not available on Windows, awaiting diffusers support for LTX."
   zit: "Tongyi-MAI/Z-Image-Turbo"
   klein9b: "black-forest-labs/FLUX.2-klein-9B"
   klein4b: "black-forest-labs/FLUX.2-klein-4B"
