@@ -46,11 +46,15 @@ def _resolve_model_paths(model_dir: str, *, require_upsampler: bool = True) -> t
         raise FileNotFoundError(f"No .safetensors checkpoint found in {model_dir}. Expected a distilled checkpoint file (e.g. ltx-video-2b-v0.9.7-distilled.safetensors).")
     checkpoint_path = str(checkpoint_candidates[0])
 
-    # 2. Gemma text encoder — a gemma*/ subdirectory
+    # 2. Text encoder — prefer gemma*/, but fall back to text_encoder/
     gemma_dirs = list(root.glob("gemma*/"))
-    if not gemma_dirs:
-        raise FileNotFoundError(f"No gemma*/ subdirectory found in {model_dir}. Expected a Gemma text encoder directory (e.g. gemma-2-2b-it/).")
-    gemma_root = str(gemma_dirs[0])
+    text_encoder_dir = root / "text_encoder"
+    if gemma_dirs:
+        gemma_root = str(gemma_dirs[0])
+    elif text_encoder_dir.is_dir():
+        gemma_root = str(text_encoder_dir)
+    else:
+        raise FileNotFoundError(f"No gemma*/ or text_encoder/ subdirectory found in {model_dir}. Expected a text encoder directory.")
 
     # 3. Spatial upsampler — a file matching *spatial_upscal*.safetensors
     upsampler_files = list(root.glob("*spatial_upscal*.safetensors"))

@@ -158,6 +158,25 @@ class TestResolveModelPaths:
         ckpt, _, _ = mod._resolve_model_paths(str(tmp_path))
         assert "distilled" in Path(ckpt).name.lower()
 
+    def test_resolve_model_paths_falls_back_to_text_encoder_directory(self, tmp_path, win_video):
+        mod, _, _fakes = win_video
+        (tmp_path / "model.safetensors").touch()
+        (tmp_path / "text_encoder").mkdir()
+        (tmp_path / "spatial_upscaler.safetensors").touch()
+
+        _, gemma, _ = mod._resolve_model_paths(str(tmp_path))
+        assert Path(gemma).name == "text_encoder"
+
+    def test_resolve_model_paths_prefers_gemma_over_text_encoder_directory(self, tmp_path, win_video):
+        mod, _, _fakes = win_video
+        (tmp_path / "model.safetensors").touch()
+        (tmp_path / "gemma-2-2b-it").mkdir()
+        (tmp_path / "text_encoder").mkdir()
+        (tmp_path / "spatial_upscaler.safetensors").touch()
+
+        _, gemma, _ = mod._resolve_model_paths(str(tmp_path))
+        assert Path(gemma).name == "gemma-2-2b-it"
+
     def test_resolve_model_paths_missing_checkpoint(self, tmp_path, win_video):
         mod, _, _fakes = win_video
         (tmp_path / "gemma-2-2b-it").mkdir()
@@ -248,6 +267,25 @@ class TestLoadModel:
         call_kwargs = mock_cls.call_args[1]
         assert "distilled" in call_kwargs["distilled_checkpoint_path"]
         assert "spatial_upsampler_path" not in call_kwargs
+        assert pipeline is fake_pipeline
+        assert info == _DUMMY_MODEL_INFO
+
+    def test_load_model_accepts_text_encoder_directory_layout(self, tmp_path, win_video):
+        mod, _, fakes = win_video
+        (tmp_path / "ltx-distilled.safetensors").touch()
+        (tmp_path / "text_encoder").mkdir()
+
+        fake_pipeline = MagicMock()
+        mock_cls = MagicMock(return_value=fake_pipeline)
+        fakes["ltx_pipelines.distilled_single_stage"].DistilledSingleStagePipeline = mock_cls
+
+        with patch.object(mod, "detect_video_model", return_value=_DUMMY_MODEL_INFO):
+            backend = mod.LtxCudaVideoBackend()
+            pipeline, info = backend.load_model(str(tmp_path))
+
+        mock_cls.assert_called_once()
+        call_kwargs = mock_cls.call_args[1]
+        assert Path(call_kwargs["gemma_root"]).name == "text_encoder"
         assert pipeline is fake_pipeline
         assert info == _DUMMY_MODEL_INFO
 
