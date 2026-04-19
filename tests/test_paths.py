@@ -149,6 +149,60 @@ class TestResolveModelAlias:
         assert result == target
 
 
+class TestResolveModelAliasPlatformAware:
+    def test_per_platform_alias_resolves_for_requested_platform(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+
+        aliases = {
+            "ltx-8": {
+                "darwin": "dgrauet/ltx-2.3-mlx-q8",
+                "win32": "Lightricks/LTX-2.3-fp8",
+            }
+        }
+
+        result = resolve_model_path("ltx-8", aliases=aliases, platform_key="win32")
+
+        assert result == "Lightricks/LTX-2.3-fp8"
+
+    def test_per_platform_message_raises_value_error(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+
+        aliases = {
+            "ltx-4": {
+                "darwin": "dgrauet/ltx-2.3-mlx-q4",
+                "win32": {"message": "LTX 4-bit is not available on Windows. Use 'ltx-8' instead."},
+            }
+        }
+
+        with pytest.raises(ValueError, match="LTX 4-bit is not available on Windows"):
+            resolve_model_path("ltx-4", aliases=aliases, platform_key="win32")
+
+    def test_platform_key_none_keeps_dict_alias_unresolved(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+
+        aliases = {
+            "ltx-8": {
+                "darwin": "dgrauet/ltx-2.3-mlx-q8",
+                "win32": "Lightricks/LTX-2.3-fp8",
+            }
+        }
+
+        result = resolve_model_path("ltx-8", aliases=aliases, platform_key=None)
+
+        assert result == "ltx-8"
+
+    def test_flat_alias_still_resolves_when_platform_key_is_present(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+
+        result = resolve_model_path("zit", aliases={"zit": "Tongyi-MAI/Z-Image-Turbo"}, platform_key="darwin")
+
+        assert result == "Tongyi-MAI/Z-Image-Turbo"
+
+
 class TestResolveLoraPath:
     def test_absolute_path_passes_through(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))

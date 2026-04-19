@@ -14,6 +14,14 @@ from zvisiongenerator.utils.config import (
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 
 
+def _write_packaged_config(tmp_path, data):
+    import yaml
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.dump(data), encoding="utf-8")
+    return config_file
+
+
 # ---------------------------------------------------------------------------
 # load_config
 # ---------------------------------------------------------------------------
@@ -428,6 +436,111 @@ class TestConfigSchemaValidation:
         monkeypatch.setattr(config_mod, "get_ziv_data_dir", lambda: tmp_path)
         cfg = load_config()
         assert cfg["generation"]["default_steps"] == 99
+
+
+class TestPlatformConfigValidation:
+    def test_platforms_section_must_be_mapping(self, tmp_path):
+        from unittest.mock import patch
+
+        packaged = _write_packaged_config(
+            tmp_path,
+            {
+                "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
+                "generation": {"default_steps": 10, "default_guidance": 3.5},
+                "sharpening": {},
+                "upscale": {},
+                "contrast": {},
+                "saturation": {},
+                "schedulers": {},
+                "platforms": ["darwin"],
+                "model_aliases": {},
+                "model_presets": {},
+                "video_sizes": {},
+                "video_generation": {},
+                "video_model_presets": {},
+            },
+        )
+
+        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
+            mock_dir.return_value = tmp_path / "no-user-config"
+            mock_files.return_value.joinpath.return_value = packaged
+            with pytest.raises(ValueError, match="Config section 'platforms' must be a mapping"):
+                load_config()
+
+    @pytest.mark.parametrize(
+        "alias_value",
+        [
+            "Tongyi-MAI/Z-Image-Turbo",
+            {"darwin": "dgrauet/ltx-2.3-mlx-q8", "win32": "Lightricks/LTX-2.3-fp8"},
+            {"darwin": "dgrauet/ltx-2.3-mlx-q4", "win32": {"message": "Use ltx-8 instead."}},
+        ],
+    )
+    def test_polymorphic_alias_values_accept_supported_shapes(self, tmp_path, alias_value):
+        from unittest.mock import patch
+
+        packaged = _write_packaged_config(
+            tmp_path,
+            {
+                "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
+                "generation": {"default_steps": 10, "default_guidance": 3.5},
+                "sharpening": {},
+                "upscale": {},
+                "contrast": {},
+                "saturation": {},
+                "schedulers": {},
+                "platforms": {"darwin": "macOS", "win32": "Windows"},
+                "model_aliases": {"ltx": alias_value},
+                "model_presets": {},
+                "video_sizes": {},
+                "video_generation": {},
+                "video_model_presets": {},
+            },
+        )
+
+        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
+            mock_dir.return_value = tmp_path / "no-user-config"
+            mock_files.return_value.joinpath.return_value = packaged
+
+            cfg = load_config()
+
+        assert cfg["model_aliases"]["ltx"] == alias_value
+
+    @pytest.mark.parametrize(
+        ("alias_value", "match"),
+        [
+            (42, r"config 'model_aliases\.ltx' must be a string or mapping"),
+            ({1: "repo/model"}, r"platform keys must be strings"),
+            ({"win32": 42}, r"config 'model_aliases\.ltx\.win32' must be a string or mapping with a message"),
+            ({"win32": {}}, r"config 'model_aliases\.ltx\.win32\.message' must be a non-empty string"),
+        ],
+    )
+    def test_polymorphic_alias_values_reject_invalid_shapes(self, tmp_path, alias_value, match):
+        from unittest.mock import patch
+
+        packaged = _write_packaged_config(
+            tmp_path,
+            {
+                "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
+                "generation": {"default_steps": 10, "default_guidance": 3.5},
+                "sharpening": {},
+                "upscale": {},
+                "contrast": {},
+                "saturation": {},
+                "schedulers": {},
+                "platforms": {"darwin": "macOS", "win32": "Windows"},
+                "model_aliases": {"ltx": alias_value},
+                "model_presets": {},
+                "video_sizes": {},
+                "video_generation": {},
+                "video_model_presets": {},
+            },
+        )
+
+        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
+            mock_dir.return_value = tmp_path / "no-user-config"
+            mock_files.return_value.joinpath.return_value = packaged
+            with pytest.raises(ValueError, match=match):
+                load_config()
 
 
 # ---------------------------------------------------------------------------

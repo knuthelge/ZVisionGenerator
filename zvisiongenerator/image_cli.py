@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 from zvisiongenerator.backends import get_backend
@@ -134,7 +135,7 @@ def main(*, prog: str = "ziv-image") -> None:
 
     if args.model is None:
         parser.error("--model is required. Provide a model name, path, or HuggingFace repo ID.")
-    args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}))
+    args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
 
     lora_paths, lora_weights = None, None
     if args.lora is not None:
