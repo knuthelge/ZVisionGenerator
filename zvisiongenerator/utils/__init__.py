@@ -11,12 +11,16 @@ from .image_model_detect import ImageModelInfo, detect_image_model
 from .interactive import SkipSignal
 from .lora import parse_lora_arg
 from .paths import resolve_model_path, resolve_lora_path, get_ziv_data_dir
+from .platform import AliasMap, AliasValue, PlatformInfo, get_platform_info, resolve_alias
 from .prompt_compose import expand_random_choices
 from .prompts import load_prompts_file
 from .video_model_detect import VideoModelInfo, detect_video_model
 
 __all__ = [
     "ImageModelInfo",
+    "AliasMap",
+    "AliasValue",
+    "PlatformInfo",
     "SkipSignal",
     "VideoModelInfo",
     "detect_image_model",
@@ -25,10 +29,12 @@ __all__ = [
     "expand_random_choices",
     "format_generation_info",
     "generate_filename",
+    "get_platform_info",
     "get_ziv_data_dir",
     "load_config",
     "load_prompts_file",
     "parse_lora_arg",
+    "resolve_alias",
     "resolve_defaults",
     "resolve_lora_path",
     "resolve_model_path",

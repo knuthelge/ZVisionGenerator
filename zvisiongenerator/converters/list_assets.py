@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
+from zvisiongenerator.utils.platform import AliasMap, AliasValue
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 
 
@@ -99,7 +100,8 @@ def format_asset_table(
     models: list[ModelEntry] | None = None,
     video_models: list[VideoModelEntry] | None = None,
     loras: list[LoraEntry] | None = None,
-    aliases: dict[str, str] | None = None,
+    aliases: AliasMap | None = None,
+    platforms: dict[str, str] | None = None,
 ) -> str:
     """Format models, video models, LoRAs, and/or aliases as a human-readable table string."""
     sections: list[str] = []
@@ -111,7 +113,7 @@ def format_asset_table(
     if loras is not None:
         sections.append(_format_loras(loras))
     if aliases is not None:
-        sections.append(_format_aliases(aliases))
+        sections.append(_format_aliases(aliases, platforms=platforms))
 
     return "\n\n".join(sections)
 
@@ -182,7 +184,7 @@ def _format_loras(loras: list[LoraEntry]) -> str:
     return "\n".join(lines)
 
 
-def _format_aliases(aliases: dict[str, str]) -> str:
+def _format_aliases(aliases: AliasMap, *, platforms: dict[str, str] | None = None) -> str:
     header = "Model Aliases:"
     if not aliases:
         return f"{header}\n  (none)"
@@ -190,5 +192,23 @@ def _format_aliases(aliases: dict[str, str]) -> str:
     w_name = max(len(a) for a in aliases)
     lines = [header]
     for alias, target in sorted(aliases.items()):
-        lines.append(f"  {alias:<{w_name}}  → {target}")
+        lines.append(f"  {alias:<{w_name}}  → {_format_alias_target(target, platforms=platforms)}")
     return "\n".join(lines)
+
+
+def _format_alias_target(target: AliasValue, *, platforms: dict[str, str] | None = None) -> str:
+    if isinstance(target, str):
+        return target
+
+    parts: list[str] = []
+    for platform_key, platform_value in sorted(target.items()):
+        platform_label = platforms.get(platform_key, platform_key) if platforms else platform_key
+        if isinstance(platform_value, str):
+            parts.append(f"{platform_value} ({platform_label})")
+            continue
+        message = platform_value.get("message")
+        if message:
+            parts.append(f"{platform_label}: unavailable ({message})")
+        else:
+            parts.append(f"{platform_label}: unavailable")
+    return " / ".join(parts)

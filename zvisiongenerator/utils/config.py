@@ -55,6 +55,7 @@ def load_config() -> dict[str, Any]:
         "contrast",
         "saturation",
         "schedulers",
+        "platforms",
         "model_aliases",
         "model_presets",
         "video_sizes",
@@ -64,6 +65,28 @@ def load_config() -> dict[str, Any]:
     for section in _EXPECTED_DICTS:
         if section in config and not isinstance(config[section], dict):
             raise ValueError(f"Config section '{section}' must be a mapping, got {type(config[section]).__name__}. Check your user config (~/.ziv/config.yaml) for overrides.")
+
+    platforms = config.get("platforms", {})
+    for key, value in platforms.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise ValueError("config 'platforms' must map platform keys to human-readable labels.")
+
+    aliases = config.get("model_aliases", {})
+    for alias_name, alias_value in aliases.items():
+        if isinstance(alias_value, str):
+            continue
+        if not isinstance(alias_value, dict):
+            raise ValueError(f"config 'model_aliases.{alias_name}' must be a string or mapping.")
+        for platform_key, platform_value in alias_value.items():
+            if not isinstance(platform_key, str):
+                raise ValueError(f"config 'model_aliases.{alias_name}' platform keys must be strings.")
+            if isinstance(platform_value, str):
+                continue
+            if not isinstance(platform_value, dict):
+                raise ValueError(f"config 'model_aliases.{alias_name}.{platform_key}' must be a string or mapping with a message.")
+            message = platform_value.get("message")
+            if not isinstance(message, str) or not message.strip():
+                raise ValueError(f"config 'model_aliases.{alias_name}.{platform_key}.message' must be a non-empty string.")
 
     # Validate nested config values that runner.py indexes directly
     gen = config.get("generation", {})

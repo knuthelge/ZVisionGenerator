@@ -530,7 +530,7 @@ def _cmd_list(args):
         config = {}
     aliases = config.get("model_aliases", {})
 
-    print(format_asset_table(models=models, video_models=video_models, loras=loras, aliases=aliases or None))
+    print(format_asset_table(models=models, video_models=video_models, loras=loras, aliases=aliases or None, platforms=config.get("platforms")))
 
 
 def _build_model_parser(*, prog: str = "ziv-model") -> argparse.ArgumentParser:

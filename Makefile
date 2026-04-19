@@ -3,7 +3,7 @@
 ARGS ?=
 ZIMAGE_MODEL ?= zit
 KLEIN_MODEL  ?= klein9b
-LTX_MODEL    ?= ltx-4
+LTX_MODEL    ?= ltx-8
 
 # ——— Setup ———————————————————————————————————————————————
 
