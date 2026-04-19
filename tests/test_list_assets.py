@@ -390,3 +390,41 @@ class TestFormatAssetTableAliases:
         for alias, target in aliases.items():
             assert alias in output
             assert target in output
+
+    def test_flat_aliases_render_unchanged(self):
+        aliases = {"zit": "Tongyi-MAI/Z-Image-Turbo"}
+
+        output = format_asset_table(aliases=aliases)
+
+        assert "zit" in output
+        assert "Tongyi-MAI/Z-Image-Turbo" in output
+        assert "macOS" not in output
+        assert "Windows" not in output
+
+    def test_per_platform_aliases_render_platform_labels_and_targets(self):
+        aliases = {
+            "ltx-8": {
+                "darwin": "dgrauet/ltx-2.3-mlx-q8",
+                "win32": "Lightricks/LTX-2.3-fp8",
+            }
+        }
+
+        output = format_asset_table(aliases=aliases, platforms={"darwin": "macOS", "win32": "Windows"})
+
+        assert "ltx-8" in output
+        assert "dgrauet/ltx-2.3-mlx-q8 (macOS)" in output
+        assert "Lightricks/LTX-2.3-fp8 (Windows)" in output
+
+    def test_message_aliases_render_unavailable_with_message(self):
+        aliases = {
+            "ltx-4": {
+                "darwin": "dgrauet/ltx-2.3-mlx-q4",
+                "win32": {"message": "LTX 4-bit is not available on Windows. Use 'ltx-8' instead."},
+            }
+        }
+
+        output = format_asset_table(aliases=aliases, platforms={"darwin": "macOS", "win32": "Windows"})
+
+        assert "dgrauet/ltx-2.3-mlx-q4 (macOS)" in output
+        assert "Windows: unavailable" in output
+        assert "LTX 4-bit is not available on Windows. Use 'ltx-8' instead." in output

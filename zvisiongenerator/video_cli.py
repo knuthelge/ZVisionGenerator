@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import warnings
 from pathlib import Path
 from typing import Any
@@ -101,7 +102,7 @@ def main(*, prog: str = "ziv-video") -> None:
         parser.error(str(e))
 
     # Resolve friendly model names (e.g. "ltx-2-mlx" → ~/.ziv/models/...)
-    args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}))
+    args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
 
     # Validate prompt source BEFORE heavy operations (model loading, ffmpeg check)
     if args.prompt is not None and not args.prompt.strip():
