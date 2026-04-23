@@ -32,6 +32,7 @@ class VideoGenerationRequest:
     num_frames: int = 49
     seed: int = 0
     steps: int = 8
+    step_callback: Callable[[dict[str, Any]], None] | None = None
 
     # I2V params
     image_path: str | None = None

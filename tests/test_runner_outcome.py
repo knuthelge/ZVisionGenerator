@@ -399,3 +399,42 @@ class TestAmountPropagation:
         req = self._capture_request({"saturation": 0.0})
         assert req.saturation is True
         assert req.saturation_amount == 0.0
+
+
+class TestProgressCallbacks:
+    """Verify run_batch forwards low-level generation progress through the structured callback API."""
+
+    def test_step_progress_includes_image_generation_context(self):
+        events: list[dict[str, object]] = []
+
+        def _emit_step_then_succeed(request, artifacts):
+            assert request.step_callback is not None
+            request.step_callback({"current_step": 2, "total_steps": request.steps})
+            return StageOutcome.success
+
+        workflow = GenerationWorkflow(name="test", stages=[_emit_step_then_succeed])
+
+        with patch("zvisiongenerator.image_runner.build_workflow", return_value=workflow):
+            run_batch(
+                MagicMock(),
+                MagicMock(spec=[]),
+                _prompts(1),
+                _CONFIG,
+                _make_args(steps=4),
+                model_info=_MODEL_INFO,
+                progress_callback=events.append,
+            )
+
+        step_events = [event for event in events if event["type"] == "step_progress"]
+
+        assert len(step_events) == 1
+        assert step_events[0]["mode"] == "image"
+        assert step_events[0]["current_step"] == 2
+        assert step_events[0]["total_steps"] == 4
+        assert step_events[0]["run_index"] == 0
+        assert step_events[0]["total_runs"] == 1
+        assert step_events[0]["ran_iterations"] == 1
+        assert step_events[0]["total_iterations"] == 1
+        assert step_events[0]["set_name"] == "set1"
+        assert step_events[0]["prompt_index"] == 0
+        assert step_events[0]["total_prompts"] == 1

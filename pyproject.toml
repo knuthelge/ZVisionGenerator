@@ -24,15 +24,18 @@ dependencies = [
     "accelerate>=1.13.0",
     "bitsandbytes>=0.49.0; sys_platform != 'darwin'",
     "diffusers>=0.37.1",
+    "fastapi>=0.116.0",
     "hf-transfer>=0.1.9",
     "huggingface-hub>=0.30.0",
     "mflux>=0.17.4; sys_platform == 'darwin'",
     "numpy>=2.0.0",
     "Pillow>=12.0.0",
+    "python-multipart>=0.0.20",
     "pyyaml>=6.0.3",
     "scipy>=1.17.0",
     "torch>=2.11.0",
     "transformers>=5.0.0",
+    "uvicorn>=0.35.0",
     "mlx>=0.31.0; sys_platform == 'darwin'",
     "mlx-lm>=0.31.0; sys_platform == 'darwin'",
     "safetensors>=0.4.0",
@@ -73,6 +76,7 @@ Changelog = "https://github.com/knuthelge/ZVisionGenerator/blob/main/CHANGELOG.m
 
 [project.scripts]
 ziv = "zvisiongenerator.cli:main"
+ziv-ui = "zvisiongenerator.web:main"
 ziv-image = "zvisiongenerator.image_cli:main"
 ziv-video = "zvisiongenerator.video_cli:main"
 ziv-model = "zvisiongenerator.converters.convert_checkpoint:main"

@@ -1,0 +1,139 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Custom zinc step between zinc-800 and zinc-900 */
+  --color-zinc-850: #202024;
+
+  /* Semantic color tokens */
+  --color-bg-base: #09090b;
+  --color-bg-surface: #18181b;
+  --color-bg-surface-hover: #27272a;
+  --color-border-subtle: #27272a;
+  --color-border-strong: #3f3f46;
+  --color-text-primary: #fafafa;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #71717a;
+  --color-primary-main: #2dd4bf;
+  --color-primary-hover: #14b8a6;
+  --color-primary-subtle: #115e59;
+  --color-success: #34d399;
+  --color-error: #f87171;
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+
+  /* Spacing */
+  --spacing-header-h: 3rem;
+}
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #3f3f46 transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: #3f3f46;
+    border-radius: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .focus-ring {
+    outline: 2px solid transparent !important;
+    box-shadow: 0 0 0 2px var(--color-bg-base), 0 0 0 4px var(--color-primary-main) !important;
+    border-color: var(--color-primary-main) !important;
+  }
+
+  .surface-input {
+    @apply bg-zinc-900 text-zinc-100 border border-zinc-700 px-3 py-2 text-sm rounded-md;
+  }
+
+  .surface-input:focus {
+    outline: 2px solid transparent !important;
+    box-shadow: 0 0 0 2px var(--color-bg-base), 0 0 0 4px var(--color-primary-main) !important;
+    border-color: var(--color-primary-main) !important;
+  }
+
+  .surface-select {
+    @apply bg-zinc-900 text-zinc-100 border border-zinc-700 px-3 py-2 text-sm rounded-md;
+  }
+
+  .surface-select:focus {
+    outline: 2px solid transparent !important;
+    box-shadow: 0 0 0 2px var(--color-bg-base), 0 0 0 4px var(--color-primary-main) !important;
+    border-color: var(--color-primary-main) !important;
+  }
+
+  .surface-textarea {
+    @apply bg-zinc-900 text-zinc-100 border border-zinc-700 px-3 py-2 text-sm rounded-md resize-none;
+  }
+
+  .surface-textarea:focus {
+    outline: 2px solid transparent !important;
+    box-shadow: 0 0 0 2px var(--color-bg-base), 0 0 0 4px var(--color-primary-main) !important;
+    border-color: var(--color-primary-main) !important;
+  }
+
+  .surface-button {
+    @apply font-medium px-4 py-2 text-sm rounded-md transition-colors;
+  }
+
+  .surface-button:focus-visible {
+    outline: 2px solid transparent !important;
+    box-shadow: 0 0 0 2px var(--color-bg-base), 0 0 0 4px var(--color-primary-main) !important;
+    border-color: var(--color-primary-main) !important;
+  }
+
+  .btn-primary {
+    @apply font-medium px-4 py-2 text-sm rounded-md transition-colors bg-teal-400 text-zinc-950 hover:bg-teal-500;
+  }
+
+  .btn-secondary {
+    @apply font-medium px-4 py-2 text-sm rounded-md transition-colors bg-zinc-800 text-zinc-100 hover:bg-zinc-700;
+  }
+
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #3f3f46 transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #3f3f46;
+    border-radius: 3px;
+  }
+
+  .job-state-completed .progress-fill {
+    background-color: var(--color-success);
+  }
+
+  .job-state-failed .progress-fill {
+    background-color: var(--color-error);
+  }
+}

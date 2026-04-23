@@ -79,3 +79,38 @@ class TestRunVideoBatch:
         run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args)
         captured = capsys.readouterr()
         assert "0/1 videos generated" in captured.out
+
+    def test_step_progress_includes_video_generation_context(self):
+        backend = _make_mock_video_backend()
+        model = MagicMock()
+        events: list[dict[str, object]] = []
+
+        def _emit_step_then_succeed(request, artifacts):
+            assert request.step_callback is not None
+            request.step_callback({"current_step": 3, "total_steps": request.steps, "phase": "video_generate"})
+            artifacts.generation_time = 0.25
+            artifacts.filename = "clip.mp4"
+            return StageOutcome.success
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _emit_step_then_succeed
+        args = _make_video_args(runs=1, steps=8)
+        prompts = {"default": [("a sunset", None)]}
+        config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
+
+        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, progress_callback=events.append)
+
+        step_events = [event for event in events if event["type"] == "step_progress"]
+
+        assert len(step_events) == 1
+        assert step_events[0]["mode"] == "video"
+        assert step_events[0]["phase"] == "video_generate"
+        assert step_events[0]["current_step"] == 3
+        assert step_events[0]["total_steps"] == 8
+        assert step_events[0]["run_index"] == 0
+        assert step_events[0]["total_runs"] == 1
+        assert step_events[0]["ran_iterations"] == 1
+        assert step_events[0]["total_iterations"] == 1
+        assert step_events[0]["set_name"] == "default"
+        assert step_events[0]["prompt_index"] == 0
+        assert step_events[0]["total_prompts"] == 1

@@ -31,6 +31,14 @@ See the [Development Guide](docs/development.md) for setup, testing, and code st
 - `from __future__ import annotations` in every `.py` file
 - Python 3.14+ type syntax (`str | None`, `list[str]`)
 
+### Frontend Development
+
+- Node.js ≥ 22.0.0 and npm ≥ 10.0.0 are required to build and test the web frontend.
+- Install frontend dependencies: `make frontend-install`
+- Build frontend assets: `make frontend-build`
+- Run frontend tests: `make frontend-test`
+- Start Vite dev server: `make frontend-dev`
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the [AGPL-3.0-or-later](LICENSE).

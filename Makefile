@@ -58,11 +58,28 @@ update-ltx: ## Update vendored ltx-core-mlx and ltx-pipelines-mlx
 	rm -rf $(TMP)
 	@echo "✓ Vendored ltx packages updated to $(LTX_COMMIT)"
 
+# ——— Frontend ————————————————————————————————————————————
+
+.PHONY: frontend-install frontend-build frontend-test frontend-dev
+
+frontend-install: ## Install frontend npm dependencies
+	npm install --prefix frontend
+
+frontend-build: ## Build the Svelte frontend into the static dir
+	npm run --prefix frontend build
+
+frontend-test: ## TypeScript check + vitest tests
+	npm run --prefix frontend check
+	npm run --prefix frontend test
+
+frontend-dev: ## Start Vite dev server (for development)
+	npm run --prefix frontend dev
+
 # ——— Build ————————————————————————————————————————————————
 
 .PHONY: build clean
 
-build: ## Build wheel and sdist
+build: frontend-build ## Build wheel and sdist
 	uv build
 
 clean: ## Remove build artifacts, caches, and venv

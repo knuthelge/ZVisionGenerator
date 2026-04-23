@@ -2,60 +2,67 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
 
 
-def _print_help() -> None:
-    """Print usage information for the unified ziv command."""
-    print(
-        "usage: ziv <command> [options]\n"
-        "\n"
-        "Z-Vision Generator — AI image and video generation.\n"
-        "\n"
-        "commands:\n"
-        "  image   Generate images (also available as ziv-image)\n"
-        "  video   Generate videos (also available as ziv-video)\n"
-        "  model   Manage models and LoRAs (also available as ziv-model)\n"
-        "\n"
-        "Run 'ziv <command> --help' for command-specific options."
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the top-level argparse parser for the unified CLI."""
+    return argparse.ArgumentParser(
+        prog="ziv",
+        description="Z-Vision Generator — AI image and video generation.",
+        epilog="Run 'ziv <command> --help' for command-specific options.",
     )
 
 
 def main() -> None:
     """Entry point for the unified ``ziv`` command.
 
-    Dispatches to image, video, or model subcommands.
-    With no subcommand or with --help/-h, prints usage and exits.
+    Dispatches to image, video, model, or Web UI entrypoints.
+    With no subcommand, launches the Web UI.
+    With --help/-h, prints usage and exits.
     With --version, prints version and exits.
     """
-    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
-        _print_help()
+    parser = _build_parser()
+    argv = sys.argv[1:]
+
+    if not argv:
+        from zvisiongenerator.web import run_server
+
+        run_server()
         return
 
-    if sys.argv[1] == "--version":
+    if argv[0] in ("-h", "--help"):
+        parser.parse_args(argv)
+        return
+
+    if argv[0] == "--version":
         from zvisiongenerator import __version__
 
         print(f"ziv {__version__}")
         return
 
-    command = sys.argv[1]
-    # Remove the subcommand from argv so the delegated main() sees correct args
-    sys.argv = sys.argv[1:]
+    command = argv[0]
+    remaining_args = argv[1:]
 
     if command == "image":
         from zvisiongenerator.image_cli import main as image_main
 
+        sys.argv = ["ziv image", *remaining_args]
         image_main(prog="ziv image")
     elif command == "video":
         from zvisiongenerator.video_cli import main as video_main
 
+        sys.argv = ["ziv video", *remaining_args]
         video_main(prog="ziv video")
     elif command == "model":
         from zvisiongenerator.converters.convert_checkpoint import main as model_main
 
+        sys.argv = ["ziv model", *remaining_args]
         model_main(prog="ziv model")
+    elif command == "ui":
+        from zvisiongenerator.web import main as web_main
+
+        web_main(remaining_args, prog="ziv ui")
     else:
-        print(f"ziv: unknown command '{command}'")
-        print()
-        _print_help()
-        sys.exit(2)
+        parser.error(f"unknown command '{command}'")

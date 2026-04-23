@@ -72,9 +72,17 @@ ziv-video -m dgrauet/ltx-2.3-mlx-q4 --prompt "A cat walking through a garden"
 
 # Image-to-video
 ziv-video -m dgrauet/ltx-2.3-mlx-q4 --image photo.jpg --prompt "Camera zooms in slowly"
+
+# Launch the Web UI
+ziv ui
+
+# Running `ziv` with no arguments opens the same Web UI
+ziv
 ```
 
-> **Tip:** `ziv image`, `ziv video`, and `ziv model` are also available as subcommands of the unified `ziv` parent command.
+The Web UI is a local Svelte app served at `/app` by the bundled FastAPI server. The root URL (`/`) redirects there automatically, while generation, history, gallery, config, and model-management actions all run through the same JSON and SSE backend used by the app.
+
+> **Tip:** `ziv image`, `ziv video`, and `ziv model` are also available as subcommands of the unified `ziv` parent command. Use `ziv -h` or `ziv --help` to print terminal help without starting the browser UI.
 
 ## Documentation
 
@@ -85,6 +93,7 @@ Full documentation is available at **[knuthelge.github.io/ZVisionGenerator](http
 - [Video Guide](https://knuthelge.github.io/ZVisionGenerator/guides/video/) — T2V, I2V, upscale, audio, LoRA, constraints
 - [Prompts Guide](https://knuthelge.github.io/ZVisionGenerator/guides/prompts/) — prompt files, variables, structured prompts, snippets
 - [Model & LoRA Guide](https://knuthelge.github.io/ZVisionGenerator/guides/model/) — checkpoint conversion, LoRA import, asset listing
+- [Web UI Config Guide](https://knuthelge.github.io/ZVisionGenerator/guides/ui-config/) — configure layout blocks, defaults, startup view, and output paths
 - [CLI Reference](https://knuthelge.github.io/ZVisionGenerator/reference/cli/) — full argument tables for all commands
 - [Development](https://knuthelge.github.io/ZVisionGenerator/development/) — setup, testing, architecture
 

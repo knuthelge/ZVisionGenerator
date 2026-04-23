@@ -100,6 +100,7 @@ class LtxVideoBackend:
         seed: int,
         steps: int,
         output_path: str,
+        step_callback: Any | None = None,
         **kwargs: Any,
     ) -> Path | None:
         """Generate video from text prompt.
@@ -120,7 +121,7 @@ class LtxVideoBackend:
         """
         stage1_steps = kwargs.get("stage1_steps")
         if stage1_steps is not None:
-            return self._generate_upscaled(model, prompt, width, height, num_frames, seed, stage1_steps, output_path)
+            return self._generate_upscaled(model, prompt, width, height, num_frames, seed, stage1_steps, output_path, step_callback=step_callback)
         model.generate_and_save(
             prompt=prompt,
             output_path=output_path,
@@ -129,6 +130,7 @@ class LtxVideoBackend:
             num_frames=num_frames,
             seed=seed,
             num_steps=steps,
+            progress_callback=step_callback,
         )
         return Path(output_path)
 
@@ -143,6 +145,7 @@ class LtxVideoBackend:
         seed: int,
         steps: int,
         output_path: str,
+        step_callback: Any | None = None,
         **kwargs: Any,
     ) -> Path | None:
         """Generate video from image and text prompt.
@@ -164,7 +167,7 @@ class LtxVideoBackend:
         """
         stage1_steps = kwargs.get("stage1_steps")
         if stage1_steps is not None:
-            return self._generate_upscaled(model, prompt, width, height, num_frames, seed, stage1_steps, output_path, image_path=image_path)
+            return self._generate_upscaled(model, prompt, width, height, num_frames, seed, stage1_steps, output_path, image_path=image_path, step_callback=step_callback)
         model.generate_and_save(
             prompt=prompt,
             image=image_path,
@@ -174,6 +177,7 @@ class LtxVideoBackend:
             num_frames=num_frames,
             seed=seed,
             num_steps=steps,
+            progress_callback=step_callback,
         )
         return Path(output_path)
 
@@ -189,6 +193,7 @@ class LtxVideoBackend:
         output_path: str,
         *,
         image_path: str | None = None,
+        step_callback: Any | None = None,
     ) -> Path:
         """Generate video with distilled-only two-stage upscaling.
 
@@ -287,6 +292,7 @@ class LtxVideoBackend:
         sigmas_1 = DISTILLED_SIGMAS[: stage1_steps + 1]
         x0_model = X0Model(pipeline.dit)
 
+        stage1_total_steps = len(sigmas_1) - 1
         output_1 = denoise_loop(
             model=x0_model,
             video_state=video_state,
@@ -294,6 +300,17 @@ class LtxVideoBackend:
             video_text_embeds=video_embeds,
             audio_text_embeds=audio_embeds,
             sigmas=sigmas_1,
+            step_callback=(
+                None
+                if step_callback is None
+                else lambda event: step_callback(
+                    {
+                        "phase": "video_upscale_stage_1",
+                        "current_step": event["current_step"],
+                        "total_steps": stage1_total_steps + len(STAGE_2_SIGMAS) - 1,
+                    }
+                )
+            ),
         )
 
         # --- 6. Upscale: denormalize → spatial 2x → renormalize ---
@@ -347,6 +364,7 @@ class LtxVideoBackend:
         )
         audio_state_2 = noise_latent_state(audio_state_2, sigma=start_sigma, seed=seed + 2)
 
+        stage2_total_steps = len(sigmas_2) - 1
         output_2 = denoise_loop(
             model=x0_model,
             video_state=video_state_2,
@@ -354,6 +372,17 @@ class LtxVideoBackend:
             video_text_embeds=video_embeds,
             audio_text_embeds=audio_embeds,
             sigmas=sigmas_2,
+            step_callback=(
+                None
+                if step_callback is None
+                else lambda event: step_callback(
+                    {
+                        "phase": "video_upscale_stage_2",
+                        "current_step": stage1_total_steps + event["current_step"],
+                        "total_steps": stage1_total_steps + stage2_total_steps,
+                    }
+                )
+            ),
         )
 
         video_latent = pipeline.video_patchifier.unpatchify(output_2.video_latent, (F, H_full, W_full))

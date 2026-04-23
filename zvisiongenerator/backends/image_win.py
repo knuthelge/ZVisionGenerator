@@ -90,15 +90,28 @@ def _load_quantized(model_path: str, quantize: int, torch_dtype: torch.dtype):
     return pipeline
 
 
-def _make_skip_callback(skip_signal):
-    """Create a callback_on_step_end that interrupts on skip."""
+def _make_step_callback(skip_signal, *, total_steps: int, step_callback=None):
+    """Create a callback_on_step_end that reports progress and interrupts on skip."""
 
     def _on_step_end(pipe, step, timestep, callback_kwargs):
-        if skip_signal.check():
+        del timestep
+        if step_callback is not None:
+            step_callback(
+                {
+                    "current_step": min(step + 1, max(total_steps, 1)),
+                    "total_steps": max(total_steps, 1),
+                }
+            )
+        if skip_signal is not None and skip_signal.check():
             pipe._interrupt = True
         return callback_kwargs
 
     return _on_step_end
+
+
+def _make_skip_callback(skip_signal):
+    """Create a callback_on_step_end that interrupts on skip."""
+    return _make_step_callback(skip_signal, total_steps=1)
 
 
 class DiffusersBackend:
@@ -200,6 +213,7 @@ class DiffusersBackend:
         scheduler: str | None = None,
         negative_prompt: str | None = None,
         skip_signal: Any | None = None,
+        step_callback: Any | None = None,
     ) -> Image.Image | None:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
@@ -232,7 +246,9 @@ class DiffusersBackend:
             if not _is_flux and negative_prompt is not None:
                 pipe_kwargs["negative_prompt"] = negative_prompt
             if skip_signal is not None:
-                pipe_kwargs["callback_on_step_end"] = _make_skip_callback(skip_signal)
+                pipe_kwargs["callback_on_step_end"] = _make_step_callback(skip_signal, total_steps=steps, step_callback=step_callback)
+            elif step_callback is not None:
+                pipe_kwargs["callback_on_step_end"] = _make_step_callback(None, total_steps=steps, step_callback=step_callback)
 
             result = self._img2img_pipe(**pipe_kwargs)
 
@@ -259,6 +275,7 @@ class DiffusersBackend:
         scheduler: str | None = None,
         negative_prompt: str | None = None,
         skip_signal: Any | None = None,
+        step_callback: Any | None = None,
     ) -> Image.Image | None:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
@@ -285,7 +302,9 @@ class DiffusersBackend:
             if not _is_flux and negative_prompt is not None:
                 kwargs["negative_prompt"] = negative_prompt
             if skip_signal is not None:
-                kwargs["callback_on_step_end"] = _make_skip_callback(skip_signal)
+                kwargs["callback_on_step_end"] = _make_step_callback(skip_signal, total_steps=steps, step_callback=step_callback)
+            elif step_callback is not None:
+                kwargs["callback_on_step_end"] = _make_step_callback(None, total_steps=steps, step_callback=step_callback)
 
             result = model(**kwargs)
 

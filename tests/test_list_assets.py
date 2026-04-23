@@ -67,10 +67,27 @@ class TestListModels:
 
         result = list_models(tmp_path)
 
-        assert [e.name for e in result] == ["alpha", "zebra"]
+        assert result == []
 
     @patch("zvisiongenerator.converters.list_assets.detect_image_model")
-    def test_detection_error_marks_unknown(self, mock_detect, tmp_path: Path):
+    def test_skips_unknown_directories_so_video_only_models_do_not_appear_as_image_models(self, mock_detect, tmp_path: Path):
+        models_dir = tmp_path / "models"
+        models_dir.mkdir()
+        (models_dir / "ltx-local").mkdir()
+        (models_dir / "zit-local").mkdir()
+
+        info_map = {
+            "ltx-local": ImageModelInfo(family="unknown", is_distilled=False, size=None),
+            "zit-local": ImageModelInfo(family="zimage", is_distilled=False, size=None),
+        }
+        mock_detect.side_effect = lambda path: info_map[Path(path).name]
+
+        result = list_models(tmp_path)
+
+        assert [entry.name for entry in result] == ["zit-local"]
+
+    @patch("zvisiongenerator.converters.list_assets.detect_image_model")
+    def test_detection_error_skips_unknown_inventory_entry(self, mock_detect, tmp_path: Path):
         models_dir = tmp_path / "models"
         models_dir.mkdir()
         (models_dir / "broken").mkdir()
@@ -79,9 +96,7 @@ class TestListModels:
 
         result = list_models(tmp_path)
 
-        assert len(result) == 1
-        assert result[0].family == "unknown"
-        assert result[0].size is None
+        assert result == []
 
     def test_ignores_files_in_models_dir(self, tmp_path: Path):
         models_dir = tmp_path / "models"

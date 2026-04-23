@@ -69,6 +69,7 @@ def text_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorking
         seed=request.seed,
         steps=request.steps,
         output_path=output_path,
+        step_callback=request.step_callback,
         **kwargs,
     )
     artifacts.generation_time = time.monotonic() - t0
@@ -104,6 +105,7 @@ def image_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
         seed=request.seed,
         steps=request.steps,
         output_path=output_path,
+        step_callback=request.step_callback,
         **kwargs,
     )
     artifacts.generation_time = time.monotonic() - t0

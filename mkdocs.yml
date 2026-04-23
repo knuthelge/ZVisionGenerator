@@ -36,6 +36,9 @@ nav:
     - Video Generation: guides/video.md
     - Prompts: guides/prompts.md
     - Model & LoRA Management: guides/model.md
+    - Web UI Configuration: guides/ui-config.md
+  - Architecture:
+    - Web UI: architecture/web-ui.md
   - Reference:
     - CLI Reference: reference/cli.md
   - Development: development.md

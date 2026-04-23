@@ -156,3 +156,18 @@ video_model_presets:
     default_steps: 8
     upscale:
       default_upscale_steps: 8
+
+ui:
+  port: 8080
+  theme: dark
+  startup_view: workspace
+  gallery_page_size: 12
+  output_dir: ~/.ziv/outputs
+  visible_sections:
+    - image_generation
+    - video_generation
+    - lora_management
+    - gallery_summary
+  default_models:
+    image: zit
+    video: ltx-8

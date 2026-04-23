@@ -7,19 +7,19 @@ import sys
 
 
 def test_ziv_help_exits_zero():
-    """``ziv`` (no args) prints help and exits 0."""
+    """``ziv`` (no args) reaches the Web UI launcher path and exits 0."""
     result = subprocess.run(
         [
             sys.executable,
             "-c",
-            "import sys; sys.argv = ['ziv']; from zvisiongenerator.cli import main; main()",
+            "import sys\nfrom unittest.mock import patch\nsys.argv = ['ziv']\nwith patch('zvisiongenerator.web.run_server') as run_server:\n    from zvisiongenerator.cli import main\n    main()\n    print(run_server.call_count)\n",
         ],
         capture_output=True,
         text=True,
         timeout=30,
     )
     assert result.returncode == 0
-    assert "usage:" in result.stdout.lower() or "ziv" in result.stdout.lower()
+    assert result.stdout.strip() == "1"
 
 
 def test_ziv_image_help_exits_zero():

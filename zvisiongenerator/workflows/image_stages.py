@@ -26,6 +26,28 @@ from zvisiongenerator.utils.prompt_compose import expand_random_choices
 _EXIF_IMAGE_DESCRIPTION = 0x010E
 
 
+def _emit_step_progress(
+    step_callback,
+    *,
+    phase: str,
+    total_steps: int,
+):
+    """Wrap backend step callbacks with a stable phase label."""
+    if step_callback is None:
+        return None
+
+    def _callback(event: dict[str, int]) -> None:
+        step_callback(
+            {
+                "phase": phase,
+                "current_step": min(event.get("current_step", 0), max(total_steps, 1)),
+                "total_steps": max(total_steps, 1),
+            }
+        )
+
+    return _callback
+
+
 def resolve_prompt_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
     """Replace {a|b|c} random choice blocks in prompt, supporting nesting."""
     artifacts.resolved_prompt = expand_random_choices(request.prompt)
@@ -97,6 +119,7 @@ def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorking
             scheduler=request.scheduler,
             negative_prompt=neg,
             skip_signal=request.skip_signal,
+            step_callback=_emit_step_progress(request.step_callback, phase="image_refine", total_steps=effective_steps),
         )
     else:
         image = request.backend.text_to_image(
@@ -110,6 +133,7 @@ def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorking
             scheduler=request.scheduler,
             negative_prompt=neg,
             skip_signal=request.skip_signal,
+            step_callback=_emit_step_progress(request.step_callback, phase="image_generate", total_steps=request.steps),
         )
     elapsed = time.perf_counter() - start
     artifacts.generation_time += elapsed
@@ -198,6 +222,7 @@ def upscale_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifa
         scheduler=request.scheduler,
         negative_prompt=neg,
         skip_signal=request.skip_signal,
+        step_callback=_emit_step_progress(request.step_callback, phase="image_upscale", total_steps=effective_steps),
     )
     elapsed = time.perf_counter() - start
     artifacts.generation_time += elapsed

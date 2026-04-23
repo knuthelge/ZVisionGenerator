@@ -8,9 +8,11 @@ _QuitBatch exception for clean multi-level loop exit.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import random
 import time
 import warnings
+from collections.abc import Callable
 from typing import Any
 
 from zvisiongenerator.core.image_backend import ImageBackend
@@ -42,6 +44,193 @@ class _QuitBatch(Exception):
     """
 
 
+type ProgressCallback = Callable[[dict[str, Any]], None]
+
+
+def _emit_progress(progress_callback: ProgressCallback | None, event_type: str, **payload: Any) -> None:
+    """Send a structured progress event when a callback is configured."""
+    if progress_callback is None:
+        return
+    progress_callback({"type": event_type, **payload})
+
+
+def _make_step_progress_callback(
+    progress_callback: ProgressCallback | None,
+    *,
+    mode: str,
+    run_index: int,
+    total_runs: int,
+    ran_iterations: int,
+    total_iterations: int,
+    set_name: str,
+    prompt_index: int,
+    total_prompts: int,
+) -> ProgressCallback | None:
+    """Bind generation context to low-level denoising step events."""
+    if progress_callback is None:
+        return None
+
+    def _callback(payload: dict[str, Any]) -> None:
+        _emit_progress(
+            progress_callback,
+            "step_progress",
+            mode=mode,
+            run_index=run_index,
+            total_runs=total_runs,
+            ran_iterations=ran_iterations,
+            total_iterations=total_iterations,
+            set_name=set_name,
+            prompt_index=prompt_index,
+            total_prompts=total_prompts,
+            **payload,
+        )
+
+    return _callback
+
+
+def _stage_label(stage: Callable[..., StageOutcome]) -> str:
+    """Convert a stage callable name into a stable progress label."""
+    stage_name = getattr(stage, "__name__", None) or getattr(stage, "_mock_name", None) or stage.__class__.__name__
+    return stage_name.removesuffix("_stage")
+
+
+def _wrap_stage_step_callback(
+    step_callback: ProgressCallback | None,
+    *,
+    stage_index: int,
+    total_stages: int,
+    stage_name: str,
+) -> ProgressCallback | None:
+    """Attach workflow-stage metadata to low-level denoiser step events."""
+    if step_callback is None:
+        return None
+
+    def _callback(payload: dict[str, Any]) -> None:
+        step_callback(
+            {
+                "workflow_stage_index": stage_index,
+                "workflow_total_stages": total_stages,
+                "workflow_stage_name": stage_name,
+                **payload,
+            }
+        )
+
+    return _callback
+
+
+def _run_workflow_with_progress(
+    workflow,
+    request: ImageGenerationRequest,
+    artifacts: ImageWorkingArtifacts,
+    *,
+    progress_callback: ProgressCallback | None,
+    event_context: dict[str, Any],
+) -> StageOutcome:
+    """Run an image workflow while emitting structured stage progress events."""
+    stages = workflow.stages if isinstance(getattr(workflow, "stages", None), list | tuple) else None
+    if stages is None:
+        stage_name = getattr(workflow, "name", "workflow")
+        _emit_progress(
+            progress_callback,
+            "workflow_started",
+            total_stages=1,
+            stage_name=stage_name,
+            **event_context,
+        )
+        _emit_progress(
+            progress_callback,
+            "workflow_stage_started",
+            stage_index=1,
+            total_stages=1,
+            stage_name=stage_name,
+            **event_context,
+        )
+        outcome = workflow.run(request, artifacts)
+        _emit_progress(
+            progress_callback,
+            "workflow_stage_completed",
+            stage_index=1,
+            total_stages=1,
+            stage_name=stage_name,
+            outcome=outcome.name.lower(),
+            **event_context,
+        )
+        _emit_progress(
+            progress_callback,
+            "workflow_finished",
+            total_stages=1,
+            completed_stages=1,
+            stage_name=stage_name,
+            status=outcome.name.lower(),
+            **event_context,
+        )
+        return outcome
+
+    total_stages = len(stages)
+    if total_stages == 0:
+        return StageOutcome.success
+
+    _emit_progress(
+        progress_callback,
+        "workflow_started",
+        total_stages=total_stages,
+        stage_name=_stage_label(stages[0]),
+        **event_context,
+    )
+
+    for stage_index, stage in enumerate(stages, start=1):
+        stage_name = _stage_label(stage)
+        stage_request = replace(
+            request,
+            step_callback=_wrap_stage_step_callback(
+                request.step_callback,
+                stage_index=stage_index,
+                total_stages=total_stages,
+                stage_name=stage_name,
+            ),
+        )
+        _emit_progress(
+            progress_callback,
+            "workflow_stage_started",
+            stage_index=stage_index,
+            total_stages=total_stages,
+            stage_name=stage_name,
+            **event_context,
+        )
+        outcome = stage(stage_request, artifacts)
+        _emit_progress(
+            progress_callback,
+            "workflow_stage_completed",
+            stage_index=stage_index,
+            total_stages=total_stages,
+            stage_name=stage_name,
+            outcome=outcome.name.lower(),
+            **event_context,
+        )
+        if outcome is not StageOutcome.success:
+            _emit_progress(
+                progress_callback,
+                "workflow_finished",
+                total_stages=total_stages,
+                completed_stages=stage_index,
+                stage_name=stage_name,
+                status=outcome.name.lower(),
+                **event_context,
+            )
+            return outcome
+
+    _emit_progress(
+        progress_callback,
+        "workflow_finished",
+        total_stages=total_stages,
+        completed_stages=total_stages,
+        stage_name=_stage_label(stages[-1]),
+        status="success",
+        **event_context,
+    )
+    return StageOutcome.success
+
+
 def run_batch(
     backend: ImageBackend,
     model: Any,
@@ -49,6 +238,9 @@ def run_batch(
     config: dict[str, Any],
     args: argparse.Namespace,
     model_info: ImageModelInfo,
+    progress_callback: ProgressCallback | None = None,
+    enable_interactive_controls: bool = True,
+    skip_signal: SkipSignal | None = None,
 ) -> None:
     """Run the batch generation loop.
 
@@ -114,11 +306,13 @@ def run_batch(
     total_iterations = args.runs * sum(len(prompts) for prompts in prompts_data.values())
     if total_iterations == 0:
         print("No active prompt sets found. Exiting.")
+        _emit_progress(progress_callback, "batch_completed", mode="image", total_iterations=0, completed_iterations=0)
         return
     ran_iterations = 0
     print(f"Total iterations to run: {total_iterations}\n")
+    _emit_progress(progress_callback, "batch_started", mode="image", total_iterations=total_iterations, total_runs=args.runs)
 
-    skip = SkipSignal()
+    skip = skip_signal or SkipSignal()
     batch_start_time = time.time()
     image_times: list[float] = []
 
@@ -142,7 +336,8 @@ def run_batch(
     workflow = build_workflow(args)
 
     try:
-        skip.start()
+        if enable_interactive_controls:
+            skip.start()
         for run_idx in range(args.runs):
             for set_name, prompts in prompts_data.items():
                 for prompt_idx, (prompt, negative_prompt) in enumerate(prompts):
@@ -162,6 +357,23 @@ def run_batch(
 
                     # Generate seed before display so the header shows the real value
                     seed = args.seed if args.seed is not None else random.randint(seed_min, seed_max)
+                    _emit_progress(
+                        progress_callback,
+                        "prompt_started",
+                        mode="image",
+                        run_index=run_idx,
+                        total_runs=args.runs,
+                        ran_iterations=ran_iterations,
+                        total_iterations=total_iterations,
+                        set_name=set_name,
+                        prompt_index=prompt_idx,
+                        total_prompts=len(prompts),
+                        prompt=prompt,
+                        seed=seed,
+                        elapsed_secs=_elapsed,
+                        avg_secs=_avg,
+                        eta_secs=_eta,
+                    )
 
                     # Build a lightweight request just for display info
                     # (the real request is built below with seed etc.)
@@ -222,6 +434,25 @@ def run_batch(
                         )
                         skip.reset()
                         _img_start = time.time()
+                        _emit_progress(
+                            progress_callback,
+                            "generation_started",
+                            mode="image",
+                            run_index=run_idx,
+                            total_runs=args.runs,
+                            ran_iterations=ran_iterations,
+                            total_iterations=total_iterations,
+                            set_name=set_name,
+                            prompt_index=prompt_idx,
+                            total_prompts=len(prompts),
+                            prompt=prompt,
+                            seed=seed,
+                            filename=gen_filename,
+                            retry=retries,
+                            elapsed_secs=_elapsed,
+                            avg_secs=_avg,
+                            eta_secs=_eta,
+                        )
 
                         # Resolve upscale_denoise from config if not explicitly set
                         if args.upscale and args.upscale_denoise is None:
@@ -252,6 +483,17 @@ def run_batch(
                             guidance=args.guidance,
                             scheduler=_resolve_scheduler_class(args.scheduler, config, backend.name),
                             skip_signal=skip,
+                            step_callback=_make_step_progress_callback(
+                                progress_callback,
+                                mode="image",
+                                run_index=run_idx,
+                                total_runs=args.runs,
+                                ran_iterations=ran_iterations,
+                                total_iterations=total_iterations,
+                                set_name=set_name,
+                                prompt_index=prompt_idx,
+                                total_prompts=len(prompts),
+                            ),
                             upscale_factor=args.upscale,
                             upscale_denoise=resolved_denoise,
                             upscale_steps=(args.upscale_steps if args.upscale else None),
@@ -274,14 +516,65 @@ def run_batch(
                         )
                         artifacts = ImageWorkingArtifacts(filename=gen_filename)
 
-                        outcome = workflow.run(request, artifacts)
+                        event_context = {
+                            "mode": "image",
+                            "run_index": run_idx,
+                            "total_runs": args.runs,
+                            "ran_iterations": ran_iterations,
+                            "total_iterations": total_iterations,
+                            "set_name": set_name,
+                            "prompt_index": prompt_idx,
+                            "total_prompts": len(prompts),
+                            "prompt": prompt,
+                            "seed": seed,
+                            "filename": gen_filename,
+                        }
+                        outcome = _run_workflow_with_progress(
+                            workflow,
+                            request,
+                            artifacts,
+                            progress_callback=progress_callback,
+                            event_context=event_context,
+                        )
                         if outcome is StageOutcome.skipped:
+                            _emit_progress(
+                                progress_callback,
+                                "generation_finished",
+                                mode="image",
+                                status="skipped",
+                                run_index=run_idx,
+                                total_runs=args.runs,
+                                ran_iterations=ran_iterations,
+                                total_iterations=total_iterations,
+                                set_name=set_name,
+                                prompt_index=prompt_idx,
+                                total_prompts=len(prompts),
+                                filename=artifacts.filename,
+                                generation_time=time.time() - _img_start,
+                                output_path=artifacts.filepath,
+                            )
                             warnings.warn("Generation skipped by workflow stage.")
                             image_times.append(time.time() - _img_start)
                             if skip.consume() == "quit":
                                 raise _QuitBatch()
                             break
                         elif outcome is StageOutcome.failed:
+                            _emit_progress(
+                                progress_callback,
+                                "generation_finished",
+                                mode="image",
+                                status="failed",
+                                run_index=run_idx,
+                                total_runs=args.runs,
+                                ran_iterations=ran_iterations,
+                                total_iterations=total_iterations,
+                                set_name=set_name,
+                                prompt_index=prompt_idx,
+                                total_prompts=len(prompts),
+                                filename=artifacts.filename,
+                                generation_time=time.time() - _img_start,
+                                output_path=artifacts.filepath,
+                            )
                             warnings.warn("Generation failed in workflow stage.")
                             image_times.append(time.time() - _img_start)
                             if skip.consume() == "quit":
@@ -289,6 +582,20 @@ def run_batch(
                             break
                         elif outcome is StageOutcome.retry:
                             retries += 1
+                            _emit_progress(
+                                progress_callback,
+                                "generation_retry",
+                                mode="image",
+                                run_index=run_idx,
+                                total_runs=args.runs,
+                                ran_iterations=ran_iterations,
+                                total_iterations=total_iterations,
+                                set_name=set_name,
+                                prompt_index=prompt_idx,
+                                total_prompts=len(prompts),
+                                retry=retries,
+                                max_retries=max_retries,
+                            )
                             if retries > max_retries:
                                 warnings.warn(f"Generation failed after {max_retries} retries; skipping.")
                                 image_times.append(time.time() - _img_start)
@@ -297,19 +604,40 @@ def run_batch(
                             continue
 
                         retries = 0
+                        generation_time = time.time() - _img_start
+                        _emit_progress(
+                            progress_callback,
+                            "generation_finished",
+                            mode="image",
+                            status="success",
+                            run_index=run_idx,
+                            total_runs=args.runs,
+                            ran_iterations=ran_iterations,
+                            total_iterations=total_iterations,
+                            set_name=set_name,
+                            prompt_index=prompt_idx,
+                            total_prompts=len(prompts),
+                            filename=artifacts.filename,
+                            generation_time=generation_time,
+                            output_path=artifacts.filepath,
+                        )
                         action = skip.consume()
                         if action == "quit":
                             print("\n⏹ Quitting batch...")
+                            _emit_progress(progress_callback, "batch_cancelled", mode="image", completed_iterations=len(image_times) + 1, total_iterations=total_iterations)
                             raise _QuitBatch()
                         elif action == "pause":
                             image_times.append(time.time() - _img_start)
+                            _emit_progress(progress_callback, "job_paused", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
                             print("\n⏸ Paused. Press any key to continue...")
                             skip.wait_for_key()
+                            _emit_progress(progress_callback, "job_resumed", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
                             print("▶ Resumed.\n")
                             break
                         elif action == "repeat":
                             image_times.append(time.time() - _img_start)
                             seed = args.seed if args.seed is not None else random.randint(seed_min, seed_max)
+                            _emit_progress(progress_callback, "generation_repeat", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
                             print("\n🔁 Repeating prompt with new seed...\n")
                             continue
                         elif action == "skip":
@@ -320,7 +648,9 @@ def run_batch(
                             break
             print(f"\nCompleted run {run_idx + 1}/{args.runs}\n{'#' * 30}\n")
         print("\nAll runs completed!\n")
+        _emit_progress(progress_callback, "batch_completed", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
     except _QuitBatch:
         pass
     finally:
-        skip.stop()
+        if enable_interactive_controls:
+            skip.stop()
