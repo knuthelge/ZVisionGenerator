@@ -80,7 +80,7 @@ ziv ui
 ziv
 ```
 
-The Web UI is a local Svelte app served at `/app` by the bundled FastAPI server. The root URL (`/`) redirects there automatically, while generation, history, gallery, config, and model-management actions all run through the same JSON and SSE backend used by the app.
+The Web UI starts a local server on `http://127.0.0.1:8080/` by default and opens your browser automatically. Open the printed address, or go directly to `/app`; the root URL redirects there automatically. Inside the app, use the top navigation to switch between Workspace, Models, Gallery, and Configuration.
 
 > **Tip:** `ziv image`, `ziv video`, and `ziv model` are also available as subcommands of the unified `ziv` parent command. Use `ziv -h` or `ziv --help` to print terminal help without starting the browser UI.
 
@@ -93,7 +93,7 @@ Full documentation is available at **[knuthelge.github.io/ZVisionGenerator](http
 - [Video Guide](https://knuthelge.github.io/ZVisionGenerator/guides/video/) — T2V, I2V, upscale, audio, LoRA, constraints
 - [Prompts Guide](https://knuthelge.github.io/ZVisionGenerator/guides/prompts/) — prompt files, variables, structured prompts, snippets
 - [Model & LoRA Guide](https://knuthelge.github.io/ZVisionGenerator/guides/model/) — checkpoint conversion, LoRA import, asset listing
-- [Web UI Config Guide](https://knuthelge.github.io/ZVisionGenerator/guides/ui-config/) — configure layout blocks, defaults, startup view, and output paths
+- [Web UI Guide](https://knuthelge.github.io/ZVisionGenerator/guides/web-ui/) — start the local app, open the supported pages, and run the main workflows
 - [CLI Reference](https://knuthelge.github.io/ZVisionGenerator/reference/cli/) — full argument tables for all commands
 - [Development](https://knuthelge.github.io/ZVisionGenerator/development/) — setup, testing, architecture
 

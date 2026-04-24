@@ -4,6 +4,7 @@
   import { addToast } from '$lib/state/toasts.svelte';
   import { getGallery, deleteAsset } from '$lib/api/gallery';
   import type { GalleryAsset } from '$lib/types';
+  import ImageCard from '$lib/components/molecules/ImageCard.svelte';
 
   let assets = $state<GalleryAsset[]>([]);
   let page = $state(1);
@@ -19,61 +20,64 @@
   let selectedAsset = $state<GalleryAsset | null>(null);
   let lightboxOpen = $state(false);
 
-  // Filtered + sorted assets (client-side since API may not support it yet)
-  const filteredAssets = $derived(
-    assets
-      .filter((a) => mediaFilter === 'all' || a.media_type === mediaFilter)
-      .sort((a, b) =>
-        sortOrder === 'newest'
-          ? new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-          : new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      )
-  );
-
   const selectedCount = $derived(selected.size);
   const hasMore = $derived(page < totalPages);
 
+  // Pending URL-based selection to restore after the first page load.
+  let _pendingSelected: string | null = null;
+
   // Sentinel element for infinite scroll
   let sentinelEl = $state<HTMLDivElement | undefined>(undefined);
-  let observer: IntersectionObserver | null = null;
 
   onMount(() => {
-    // Check URL for selected asset
+    // Record any URL-based selected asset so loadPage can restore it.
     const params = router.params;
     if (params.selected) {
-      // Will be populated once assets load
+      _pendingSelected = params.selected;
     }
 
-    loadPage(1);
-
-    return () => {
-      observer?.disconnect();
-    };
+    loadPage(1, mediaFilter, sortOrder);
   });
 
   $effect(() => {
-    if (sentinelEl) {
-      observer?.disconnect();
-      observer = new IntersectionObserver(
-        (entries) => {
-          if (entries[0]?.isIntersecting && hasMore && !loadingMore) {
-            loadMorePages();
-          }
-        },
-        { threshold: 0.2 }
-      );
-      observer.observe(sentinelEl);
+    if (!lightboxOpen) return;
+    function handleEsc(e: KeyboardEvent): void {
+      if (e.key === 'Escape') { e.preventDefault(); closeLightbox(); }
     }
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
   });
 
-  async function loadPage(p: number): Promise<void> {
+  $effect(() => {
+    if (!sentinelEl) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && hasMore && !loadingMore) {
+          loadMorePages();
+        }
+      },
+      { threshold: 0.2 }
+    );
+    io.observe(sentinelEl);
+    return () => io.disconnect();
+  });
+
+  async function loadPage(p: number, filter: string = mediaFilter, sort: string = sortOrder): Promise<void> {
     loading = true;
     error = null;
     try {
-      const result = await getGallery(p);
+      const result = await getGallery(p, filter, sort);
       assets = result.assets;
       page = result.page;
       totalPages = result.total_pages;
+      // Restore selection from a URL ?selected= param after the initial page load.
+      if (_pendingSelected && p === 1) {
+        const found = assets.find((a) => a.path === _pendingSelected) ?? null;
+        if (found) {
+          selectedAsset = found;
+        }
+        _pendingSelected = null;
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load gallery';
     } finally {
@@ -85,7 +89,7 @@
     if (loadingMore || !hasMore) return;
     loadingMore = true;
     try {
-      const result = await getGallery(page + 1);
+      const result = await getGallery(page + 1, mediaFilter, sortOrder);
       assets = [...assets, ...result.assets];
       page = result.page;
       totalPages = result.total_pages;
@@ -94,6 +98,20 @@
     } finally {
       loadingMore = false;
     }
+  }
+
+  function onFilterChange(value: 'all' | 'image' | 'video'): void {
+    mediaFilter = value;
+    selected = new Set();
+    selectedAsset = null;
+    _pendingSelected = null;
+    loadPage(1, value, sortOrder);
+  }
+
+  function onSortChange(value: 'newest' | 'oldest'): void {
+    sortOrder = value;
+    selected = new Set();
+    loadPage(1, mediaFilter, value);
   }
 
   function toggleSelect(asset: GalleryAsset, isSelected: boolean): void {
@@ -143,9 +161,17 @@
   }
 
   function reuseInWorkspace(asset: GalleryAsset): void {
-    // Navigate to workspace with prefill from reuse URL
+    // Extract query params from the reuse URL and navigate via the router so
+    // the WorkspacePage receives them on mount. Setting window.location.hash
+    // directly bypasses the router and drops the params when the workspace tab
+    // is subsequently activated.
     if (asset.reuse_workspace_url) {
-      window.location.hash = asset.reuse_workspace_url.replace(/^#/, '');
+      const queryStr = asset.reuse_workspace_url.replace(/^#\/[^?]*\??/, '');
+      const params: Record<string, string> = {};
+      if (queryStr) {
+        new URLSearchParams(queryStr).forEach((v, k) => { params[k] = v; });
+      }
+      router.navigate('workspace', params);
     } else {
       router.navigate('workspace');
     }
@@ -155,41 +181,43 @@
 <div id="gallery-view" class="flex-1 flex overflow-hidden">
 
   <!-- Left: scrollable grid -->
-  <section id="gallery-scroll-region" class="flex-1 bg-zinc-900 overflow-y-auto p-6 custom-scrollbar">
+  <section id="gallery-scroll-region" class="panel-scroll-surface custom-scrollbar flex-1 overflow-y-auto p-6">
     <div class="max-w-7xl mx-auto">
       <!-- Header -->
       <div class="flex flex-wrap items-start justify-between mb-6 gap-4">
         <div>
           <h2 class="text-xl font-semibold text-zinc-100">Gallery History</h2>
           <p class="text-sm text-zinc-500">
-            Browsing {filteredAssets.length} loaded asset{filteredAssets.length !== 1 ? 's' : ''}, {sortOrder === 'newest' ? 'newest' : 'oldest'} first.
+            Browsing {assets.length} loaded asset{assets.length !== 1 ? 's' : ''}, {sortOrder === 'newest' ? 'newest' : 'oldest'} first.
           </p>
         </div>
         <div class="flex flex-wrap items-center justify-end gap-2">
           <!-- Filter -->
           <select
-            class="bg-zinc-950 border border-zinc-800 rounded px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition"
+            class="surface-select"
             aria-label="Filter gallery media"
-            onchange={(e) => { mediaFilter = (e.currentTarget as HTMLSelectElement).value as typeof mediaFilter; }}
+            bind:value={mediaFilter}
+            onchange={() => onFilterChange(mediaFilter)}
           >
-            <option value="all" selected={mediaFilter === 'all'}>All Media</option>
-            <option value="image" selected={mediaFilter === 'image'}>Images Only</option>
-            <option value="video" selected={mediaFilter === 'video'}>Videos Only</option>
+            <option value="all">All Media</option>
+            <option value="image">Images Only</option>
+            <option value="video">Videos Only</option>
           </select>
 
           <!-- Sort -->
           <select
-            class="bg-zinc-950 border border-zinc-800 rounded px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition"
+            class="surface-select"
             aria-label="Sort gallery assets"
-            onchange={(e) => { sortOrder = (e.currentTarget as HTMLSelectElement).value as typeof sortOrder; }}
+            bind:value={sortOrder}
+            onchange={() => onSortChange(sortOrder)}
           >
-            <option value="newest" selected={sortOrder === 'newest'}>Newest First</option>
-            <option value="oldest" selected={sortOrder === 'oldest'}>Oldest First</option>
+            <option value="newest">Newest First</option>
+            <option value="oldest">Oldest First</option>
           </select>
 
           <button
             type="button"
-            class="rounded-md border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-300 transition hover:border-red-500/40 hover:text-red-300 disabled:opacity-50"
+            class="surface-button-danger rounded-md px-3 py-1.5 text-sm disabled:opacity-50"
             disabled={selectedCount === 0}
             onclick={deleteSelected}
           >Delete Selected</button>
@@ -208,85 +236,27 @@
       {:else}
         <!-- Grid -->
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-          {#each filteredAssets as asset (asset.path)}
+          {#each assets as asset (asset.path)}
             {@const isSelected = selected.has(asset.path)}
             {@const isActive = selectedAsset?.path === asset.path}
-            <article
-              class="relative group overflow-hidden rounded-lg border transition-all cursor-pointer
-                {isActive || isSelected
-                  ? 'border-teal-500/60 ring-2 ring-teal-500/50 bg-teal-500/5'
-                  : 'border-zinc-800 hover:border-zinc-700 bg-zinc-950'}"
-              onclick={() => selectAsset(asset)}
-              role="button"
-              tabindex="0"
-              onkeydown={(e) => e.key === 'Enter' && selectAsset(asset)}
-              aria-label="Asset: {asset.filename}"
-            >
-              <!-- Checkbox -->
-              <!-- svelte-ignore a11y_click_events_have_key_events -->
-              <div
-                class="absolute top-2 left-2 z-10"
-                onclick={(e) => { e.stopPropagation(); toggleSelect(asset, !isSelected); }}
-              >
-                <input
-                  type="checkbox"
-                  checked={isSelected}
-                  class="rounded border-zinc-700 bg-zinc-900 text-teal-500 focus:ring-teal-500"
-                  aria-label="Select {asset.filename}"
-                >
-              </div>
-
-              <!-- Thumbnail -->
-              <div class="aspect-square bg-zinc-900 overflow-hidden">
-                {#if asset.media_type === 'video'}
-                  <video
-                    src={asset.thumbnail_url || asset.url}
-                    class="w-full h-full object-cover"
-                    muted
-                    preload="none"
-                  ></video>
-                {:else}
-                  <img
-                    src={asset.thumbnail_url || asset.url}
-                    alt={asset.prompt || asset.filename}
-                    class="w-full h-full object-cover"
-                    loading="lazy"
-                  >
-                {/if}
-              </div>
-
-              <!-- Footer -->
-              <div class="p-2 bg-zinc-850">
-                <p class="text-xs font-medium text-zinc-200 truncate">{asset.filename}</p>
-                <p class="text-[10px] text-zinc-500 mt-0.5">{asset.created_at}</p>
-              </div>
-
-              <!-- Hover actions -->
-              <div class="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 pt-8">
-                <button
-                  type="button"
-                  class="rounded-md border border-zinc-600 bg-zinc-900/80 px-2 py-1 text-xs text-zinc-200 hover:text-white transition"
-                  onclick={(e) => { e.stopPropagation(); reuseInWorkspace(asset); }}
-                  aria-label="Reuse settings"
-                >Reuse</button>
-                <a
-                  href={asset.url}
-                  download={asset.filename}
-                  class="rounded-md border border-zinc-600 bg-zinc-900/80 px-2 py-1 text-xs text-zinc-200 hover:text-white transition"
-                  onclick={(e) => e.stopPropagation()}
-                  aria-label="Download"
-                >↓</a>
-              </div>
-            </article>
+            <ImageCard
+              {asset}
+              selected={isSelected}
+              active={isActive}
+              onselect={toggleSelect}
+              onview={selectAsset}
+              onreuse={reuseInWorkspace}
+              ondelete={deleteSingle}
+            />
           {/each}
         </div>
 
         <!-- Infinite scroll sentinel + pagination -->
         <div id="gallery-pagination" class="py-12 flex justify-center items-center">
           {#if hasMore}
-            <div bind:this={sentinelEl} class="flex items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-950 px-4 py-3 text-sm text-zinc-400">
+            <div bind:this={sentinelEl} class="surface-card-muted flex items-center gap-3 px-4 py-3 text-sm text-zinc-400">
               {#if loadingMore}
-                <svg class="h-4 w-4 animate-spin text-teal-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <svg class="text-primary-main h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                   <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
@@ -295,7 +265,7 @@
                 <span>Scroll for more</span>
               {/if}
             </div>
-          {:else if filteredAssets.length > 0}
+          {:else if assets.length > 0}
             <div class="flex items-center gap-2 text-zinc-500 text-sm">
               <span>All assets loaded</span>
             </div>
@@ -306,14 +276,14 @@
   </section>
 
   <!-- Right: detail panel -->
-  <section id="gallery-details" class="w-80 bg-zinc-950 border-l border-zinc-900 flex flex-col relative h-full overflow-y-auto custom-scrollbar">
-    <div class="p-4 border-b border-zinc-900 sticky top-0 bg-zinc-950/95 backdrop-blur z-10 flex items-center justify-between">
+  <section id="gallery-details" class="panel-shell panel-shell-right custom-scrollbar relative flex h-full w-80 flex-col overflow-y-auto">
+    <div class="panel-header sticky top-0 z-10 flex items-center justify-between p-4 backdrop-blur">
       <h3 class="text-sm font-semibold text-zinc-100">Asset Details</h3>
       {#if selectedAsset}
         <a
           href={selectedAsset.url}
           download={selectedAsset.filename}
-          class="text-zinc-500 hover:text-zinc-300"
+          class="surface-link-muted"
           aria-label="Download selected asset"
         >
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -326,7 +296,7 @@
     <div class="p-4 space-y-6">
       {#if selectedAsset}
         <!-- Preview -->
-        <div class="aspect-square bg-zinc-900 rounded-md border border-zinc-800 flex items-center justify-center overflow-hidden">
+        <div class="surface-card aspect-square flex items-center justify-center overflow-hidden">
           {#if selectedAsset.media_type === 'video'}
             <video
               src={selectedAsset.url}
@@ -346,32 +316,32 @@
 
         <button
           type="button"
-          class="w-full rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 transition hover:border-teal-500 hover:text-white"
+          class="surface-button-secondary w-full rounded-md px-3 py-2 text-sm"
           onclick={openLightbox}
         >Open Fullscreen Viewer</button>
 
         <!-- Prompt -->
         <div>
-          <label class="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Prompt</label>
-          <div class="bg-zinc-900 border border-zinc-800 rounded p-3 text-sm text-zinc-300 leading-relaxed font-mono">
+          <h4 class="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Prompt</h4>
+          <div class="surface-card p-3 text-sm text-zinc-300 leading-relaxed font-mono">
             {selectedAsset.prompt || '—'}
           </div>
         </div>
 
         <!-- Info grid -->
         <div>
-          <label class="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Generation Info</label>
+          <h4 class="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Generation Info</h4>
           <div class="grid grid-cols-2 gap-3 text-sm">
-            <div class="bg-zinc-900 border border-zinc-800 rounded px-3 py-2">
+            <div class="surface-card px-3 py-2">
               <p class="text-[10px] text-zinc-500 uppercase font-semibold mb-1">Model</p>
               <p class="text-zinc-200 truncate">{selectedAsset.model || '—'}</p>
             </div>
-            <div class="bg-zinc-900 border border-zinc-800 rounded px-3 py-2">
+            <div class="surface-card px-3 py-2">
               <p class="text-[10px] text-zinc-500 uppercase font-semibold mb-1">Type</p>
               <p class="text-zinc-200 font-mono">{selectedAsset.media_type}</p>
             </div>
             {#if selectedAsset.width}
-              <div class="bg-zinc-900 border border-zinc-800 rounded px-3 py-2">
+              <div class="surface-card px-3 py-2">
                 <p class="text-[10px] text-zinc-500 uppercase font-semibold mb-1">Dimensions</p>
                 <p class="text-zinc-200 font-mono">{selectedAsset.width}×{selectedAsset.height}</p>
               </div>
@@ -380,10 +350,30 @@
         </div>
 
         <!-- Actions -->
-        <div class="pt-4 border-t border-zinc-900 space-y-2 pb-4">
+        <div class="space-y-2 border-t border-border-subtle pb-4 pt-4">
+          <!-- Reuse fallback warning: shown when the backend indicates a model or
+               workflow had to be substituted during history/gallery reuse. -->
+          {#if selectedAsset.reuse_state?.fallback_reasons && selectedAsset.reuse_state.fallback_reasons.length > 0}
+            <div
+              class="surface-warning rounded-md border px-3 py-2 text-sm mb-3"
+              role="alert"
+            >
+              <p class="font-semibold text-zinc-100 flex items-center gap-2 mb-1">
+                <svg class="surface-warning-icon w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
+                </svg>
+                Reuse notice
+              </p>
+              <ul class="text-xs text-zinc-300 space-y-0.5 list-disc list-inside">
+                {#each selectedAsset.reuse_state.fallback_reasons as reason}
+                  <li>{reason}</li>
+                {/each}
+              </ul>
+            </div>
+          {/if}
           <button
             type="button"
-            class="w-full bg-teal-600 hover:bg-teal-500 text-white font-medium py-2 rounded shadow-sm transition flex items-center justify-center gap-2"
+            class="surface-button-primary w-full rounded-md py-2 font-medium shadow-sm transition flex items-center justify-center gap-2"
             onclick={() => reuseInWorkspace(selectedAsset!)}
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -394,7 +384,7 @@
           <a
             href={selectedAsset.url}
             download={selectedAsset.filename}
-            class="w-full bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 font-medium py-2 rounded shadow-sm transition flex items-center justify-center gap-2"
+            class="surface-button-secondary flex w-full items-center justify-center gap-2 rounded-md py-2 font-medium shadow-sm"
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
@@ -403,7 +393,7 @@
           </a>
           <button
             type="button"
-            class="w-full bg-zinc-900 hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/30 border border-zinc-800 text-zinc-400 font-medium py-2 rounded transition flex items-center justify-center gap-2"
+            class="surface-button-danger flex w-full items-center justify-center gap-2 rounded-md py-2 font-medium"
             onclick={() => deleteSingle(selectedAsset!)}
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -413,7 +403,7 @@
           </button>
         </div>
       {:else}
-        <div class="aspect-square bg-zinc-900 rounded-md border border-dashed border-zinc-800 flex items-center justify-center text-zinc-700 text-sm">
+        <div class="surface-empty-state aspect-square flex items-center justify-center text-sm">
           No asset selected
         </div>
       {/if}
@@ -423,28 +413,40 @@
 
 <!-- Lightbox -->
 {#if lightboxOpen && selectedAsset}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div
-    class="fixed inset-0 z-50 bg-black/90 p-6"
-    onclick={(e) => { if (e.target === e.currentTarget) closeLightbox(); }}
-  >
+  <div class="fixed inset-0 z-50">
+    <!-- Backdrop: native button so no a11y suppression needed -->
     <button
       type="button"
-      class="absolute right-6 top-6 rounded-md border border-zinc-700 bg-zinc-950/80 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-800 transition"
+      class="absolute inset-0 bg-black/90"
       onclick={closeLightbox}
-    >Close</button>
-    <div class="flex h-full w-full items-center justify-center">
+      aria-label="Close fullscreen viewer"
+      tabindex="-1"
+    ></button>
+    <!-- Dialog container: pointer-events-none so backdrop button receives clicks on empty areas -->
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Fullscreen viewer"
+      class="relative flex h-full w-full items-center justify-center p-6 pointer-events-none"
+    >
+      <button
+        type="button"
+        class="surface-overlay-action pointer-events-auto absolute right-6 top-6 z-10 rounded-md px-3 py-2 text-sm"
+        onclick={closeLightbox}
+      >Close</button>
       {#if selectedAsset.media_type === 'video'}
         <video
           src={selectedAsset.url}
           controls
-          class="max-h-full max-w-full object-contain"
-        ></video>
+          class="pointer-events-auto relative z-10 max-h-full max-w-full object-contain"
+        >
+          <track kind="captions" src="/app-static/empty.vtt" default srclang="en" label="No captions available">
+        </video>
       {:else}
         <img
           src={selectedAsset.url}
           alt={selectedAsset.filename}
-          class="max-h-full max-w-full object-contain"
+          class="pointer-events-auto relative z-10 max-h-full max-w-full object-contain"
         >
       {/if}
     </div>

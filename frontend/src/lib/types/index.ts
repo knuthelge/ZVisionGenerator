@@ -4,6 +4,16 @@ export type Workflow = 'txt2img' | 'img2img' | 'txt2vid' | 'img2vid';
 
 export type WorkflowMode = 'image' | 'video';
 
+export interface ReuseState {
+  requested_workflow: Workflow;
+  resolved_workflow: Workflow;
+  workflow_available: boolean;
+  requested_model: string | null;
+  resolved_model: string | null;
+  model_available: boolean;
+  fallback_reasons: string[];
+}
+
 export interface GalleryAsset {
   path: string;
   url: string;
@@ -15,8 +25,13 @@ export interface GalleryAsset {
   model: string;
   width?: number;
   height?: number;
+  ratio?: string | null;
+  size?: string | null;
+  frame_count?: number | null;
+  image_path?: string | null;
   duration?: number;
   reuse_workspace_url: string; // hash URL: '#/workspace?workflow=...&prompt=...'
+  reuse_state?: ReuseState;
   media_type: 'image' | 'video';
 }
 
@@ -36,38 +51,91 @@ export interface WorkspaceContext {
   video_models: ModelOption[];
   loras: LoraInfo[];
   history_assets: GalleryAsset[];
-  defaults: ModelDefaults;
+  defaults: ImageModelDefaults;
   video_defaults: VideoModelDefaults;
-  image_model_defaults: Record<string, ModelDefaults>;
-  video_model_defaults: Record<string, ModelDefaults>;
-  current_image_model: string;
-  current_video_model: string;
+  image_model_defaults: Record<string, ImageModelDefaults>;
+  video_model_defaults: Record<string, VideoModelDefaults>;
+  current_image_model: string | null;
+  current_video_model: string | null;
   config: WebUiConfig;
-  output_dir?: string;
-  quantize_options?: number[];
-  image_ratios?: string[];
-  video_ratios?: string[];
-  image_size_options?: Record<string, string[]>;
-  video_size_options?: Record<string, string[]>;
+  output_dir: string;
+  quantize_options: number[];
+  image_ratios: string[];
+  video_ratios: string[];
+  image_size_options: Record<string, string[]>;
+  video_size_options: Record<string, string[]>;
+  scheduler_options: string[];
+  workflow_contract: WorkflowContract;
 }
 
-export interface ModelDefaults {
+export interface UpscaleDefaults {
+  enabled: boolean;
+  factor: number | null;
+  steps: number | null;
+}
+
+export interface ImageUpscaleDefaults extends UpscaleDefaults {
+  denoise: number | null;
+  guidance: number | null;
+  sharpen: boolean;
+  save_pre: boolean;
+}
+
+export interface ImagePostprocessDefaults {
+  sharpen: number | boolean;
+  contrast: number | boolean;
+  saturation: number | boolean;
+}
+
+export interface ImageModelDefaults {
+  ratio: string;
+  size: string;
   steps: number;
   guidance: number;
   width: number;
   height: number;
-  quantize?: boolean;
+  scheduler: string | null;
+  supports_negative_prompt: boolean;
+  supports_quantize: boolean;
+  quantize: number | null;
+  image_strength: number;
+  postprocess: ImagePostprocessDefaults;
+  upscale: ImageUpscaleDefaults;
 }
 
 export interface VideoModelDefaults {
+  ratio: string;
+  size: string;
   steps: number;
-  guidance: number;
   width: number;
   height: number;
   frame_count: number;
+  audio: boolean;
+  low_memory: boolean;
+  supports_i2v: boolean;
+  supports_quantize: boolean;
+  quantize: number | null;
+  max_steps: number | null;
   fps: number;
-  motion_strength?: number;
-  quantize?: boolean;
+  upscale: UpscaleDefaults;
+}
+
+export interface WorkflowContractEntry {
+  mode: WorkflowMode;
+  model_kind: WorkflowMode;
+  supports_reference_image: boolean;
+  requires_reference_image: boolean;
+  clear_fields: string[];
+}
+
+export interface WorkflowContract {
+  values: Workflow[];
+  legacy_aliases: Record<string, Workflow>;
+  definitions: Record<Workflow, WorkflowContractEntry>;
+  field_precedence: {
+    defaults: string[];
+    dimensions: string;
+  };
 }
 
 export interface WebUiConfig {
@@ -96,6 +164,8 @@ export interface DraftState {
   prompt: string;
   negativePrompt: string;
   model: string;
+  ratio: string;
+  size: string;
   steps: number;
   guidance: number;
   width: number;
@@ -107,8 +177,11 @@ export interface DraftState {
   referenceImageStrength: number;
   frameCount: number;
   fps: number;
-  motionStrength: number;
-  quantize: boolean;
+  audio: boolean;
+  lowMemory: boolean;
+  upscaleEnabled: boolean;
+  upscaleFactor: number;
+  quantize: number | null;
   historyCollapsed: boolean;
   lastGeneratedAt: string | null;
   version: number;

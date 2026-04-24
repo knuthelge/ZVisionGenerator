@@ -32,13 +32,13 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Guides:
+    - Web UI: guides/web-ui.md
     - Image Generation: guides/image.md
     - Video Generation: guides/video.md
     - Prompts: guides/prompts.md
     - Model & LoRA Management: guides/model.md
-    - Web UI Configuration: guides/ui-config.md
-  - Architecture:
-    - Web UI: architecture/web-ui.md
   - Reference:
     - CLI Reference: reference/cli.md
+  - Architecture:
+    - Web UI Contract: architecture/web-ui.md
   - Development: development.md

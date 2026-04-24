@@ -67,6 +67,32 @@ ziv-model lora -i /path/to/style.safetensors --name my-style
 ziv-model list
 ```
 
+### Web UI
+
+```bash
+# Start the Web UI
+ziv ui
+
+# Shortcut: running `ziv` with no subcommand opens the same Web UI
+ziv
+
+# From a repository checkout
+uv run ziv ui --no-browser
+```
+
+By default, the Web UI listens on `http://127.0.0.1:8080/` and opens your browser automatically. If port `8080` is busy, Z-Vision Generator chooses the next available local port and prints the final address in the terminal.
+
+Open the printed address, or go directly to `http://127.0.0.1:8080/app` if you kept the default port. The root URL (`/`) redirects to the app automatically.
+
+Once it opens, the top navigation gives you these main pages:
+
+- **Workspace** — run image or video jobs, adjust per-run settings, and watch the current session history.
+- **Models** — review installed models and LoRAs, convert checkpoints, and import LoRAs.
+- **Gallery** — browse saved outputs, preview them, reuse them in the workspace, and delete items you no longer want.
+- **Configuration** — choose default models, set the output directory, and review runtime paths.
+
+See the [Web UI Guide](guides/web-ui.md) for a practical walkthrough.
+
 ## Model Store (`~/.ziv/`)
 
 Z-Vision Generator uses a central data directory for models and LoRAs:

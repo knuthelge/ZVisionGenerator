@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -87,25 +88,35 @@ def _make_web_config(output_dir: Path) -> WebUiConfig:
     )
 
 
-def _write_asset(asset_path: Path, *, prompt: str, model: str, seed: int, steps: int, guidance: float, modified_at: int) -> None:
+def _write_asset(
+    asset_path: Path,
+    *,
+    prompt: str,
+    model: str,
+    seed: int,
+    steps: int,
+    guidance: float,
+    modified_at: int,
+    metadata_overrides: dict[str, object] | None = None,
+) -> None:
     asset_path.parent.mkdir(parents=True, exist_ok=True)
     if asset_path.suffix.lower() == ".mp4":
         asset_path.write_bytes(b"mp4")
     else:
         Image.new("RGB", (8, 8), color="white").save(asset_path)
+    metadata = {
+        "prompt": prompt,
+        "model": model,
+        "seed": seed,
+        "steps": steps,
+        "guidance": guidance,
+        "width": 832,
+        "height": 1216,
+    }
+    if metadata_overrides:
+        metadata.update(metadata_overrides)
     asset_path.with_suffix(".json").write_text(
-        yaml.safe_dump(
-            {
-                "prompt": prompt,
-                "model": model,
-                "seed": seed,
-                "steps": steps,
-                "guidance": guidance,
-                "width": 832,
-                "height": 1216,
-            },
-            sort_keys=False,
-        ),
+        json.dumps(metadata),
         encoding="utf-8",
     )
     os.utime(asset_path, (modified_at, modified_at))
@@ -128,6 +139,79 @@ class TestWebServerSurface:
         assert app_response.headers["content-type"].startswith("text/html")
         assert asset_response.status_code == 200
         assert asset_response.headers["content-type"].startswith("image/png")
+
+    def test_app_route_serves_packaged_gallery_bundle_with_semantic_viewer_and_caption_track(self):
+        with TestClient(web_server.app) as client:
+            app_response = client.get("/app")
+            captions_response = client.get("/app-static/empty.vtt")
+
+            assert app_response.status_code == 200
+            assert captions_response.status_code == 200
+            assert "WEBVTT" in captions_response.text
+
+            script_prefix = '<script type="module" crossorigin src="'
+            script_start = app_response.text.find(script_prefix)
+            assert script_start != -1
+            bundle_path = app_response.text[script_start + len(script_prefix) :].split('"', 1)[0]
+
+            bundle_response = client.get(bundle_path)
+
+        assert bundle_response.status_code == 200
+        bundle_text = bundle_response.text
+        assert 'role="button"' in bundle_text
+        assert "Asset:" in bundle_text
+        assert 'aria-label="Fullscreen viewer"' in bundle_text
+        assert 'aria-label="Close fullscreen viewer"' in bundle_text
+        # Overlay pointer-events split: the hover overlay container must be pointer-events-none
+        # and every action button/link inside it must opt back in with pointer-events-auto.
+        # These combined class assertions fail if the split is missing or reverted.
+        assert "pointer-events-none" in bundle_text
+        assert "surface-overlay-action pointer-events-auto" in bundle_text
+        assert "surface-overlay-action-primary pointer-events-auto" in bundle_text
+        assert "surface-overlay-action-danger pointer-events-auto" in bundle_text
+        assert bundle_text.count("surface-select") >= 2
+        assert "panel-shell-right" in bundle_text
+        # Active-vs-selected card state split: all three class strings must be present so
+        # the bundle encodes the three distinct visual states (unselected, active-unselected,
+        # selected).  A stale bundle missing the active ring or the ternary would fail here.
+        assert "surface-gallery-card" in bundle_text
+        assert "surface-gallery-card-selected" in bundle_text
+        assert "ring-2 ring-white/30" in bundle_text
+        assert "/app-static/empty.vtt" in bundle_text
+
+    def test_app_route_serves_workspace_toolbar_bundle_with_rounded_md_radius(self):
+        with TestClient(web_server.app) as client:
+            app_response = client.get("/app")
+
+            assert app_response.status_code == 200
+
+            script_prefix = '<script type="module" crossorigin src="'
+            script_start = app_response.text.find(script_prefix)
+            assert script_start != -1
+            bundle_path = app_response.text[script_start + len(script_prefix) :].split('"', 1)[0]
+
+            bundle_response = client.get(bundle_path)
+
+        assert bundle_response.status_code == 200
+        bundle_text = bundle_response.text
+        assert 'testId:"model-shell"' in bundle_text
+        assert 'testId:"quantize-shell"' in bundle_text
+        assert "data-hovered" in bundle_text
+        assert "data-focused" in bundle_text
+        assert "appearance-none opacity-0 cursor-pointer focus:outline-none" in bundle_text
+        assert "transition-colors text-text-primary" in bundle_text
+        assert "panel-toolbar" in bundle_text
+        assert "surface-dropzone" in bundle_text
+        assert "surface-button-primary" in bundle_text
+        assert "bg-bg-surface-hover border-border-subtle" in bundle_text
+        assert "bg-bg-surface border-primary-main ring-4 ring-primary-main" in bundle_text
+        assert '"mouseenter"' in bundle_text
+        assert '"focus"' in bundle_text
+        assert "bg-zinc-950 border border-zinc-700 hover:border-zinc-600 text-sm rounded-md px-3 py-1.5 flex items-center justify-between transition text-zinc-200" not in bundle_text
+        assert "bg-zinc-950 border border-zinc-700 hover:border-zinc-600 text-sm rounded-md px-3 py-1.5 flex items-center justify-between transition text-zinc-200 font-mono" not in bundle_text
+        assert "bg-bg-surface border border-border-subtle hover:border-zinc-600 text-sm rounded px-3 py-1.5 flex items-center justify-between transition text-zinc-200" not in bundle_text
+        assert "group-hover:bg-bg-surface-hover" not in bundle_text
+        assert "group-focus-within:ring-4" not in bundle_text
 
     def test_media_route_serves_output_files_and_rejects_escape_attempts(self, monkeypatch, tmp_path):
         output_dir = tmp_path / "outputs"
@@ -193,12 +277,110 @@ class TestWebServerSurface:
             assert key in payload
         assert payload["image_models"] == [{"id": "zit", "label": "zit", "type": "image"}]
         assert payload["video_models"] == [{"id": "ltx-8", "label": "ltx-8", "type": "video"}]
-        assert payload["defaults"] == {"steps": 27, "guidance": 6.2, "width": 832, "height": 1216}
-        assert payload["video_defaults"] == {"steps": 7, "width": 704, "height": 448, "frame_count": 33, "fps": 24}
-        assert payload["image_model_defaults"] == {"zit": {"steps": 27, "guidance": 6.2, "width": 832, "height": 1216}}
-        assert payload["video_model_defaults"] == {"ltx-8": {"steps": 7, "guidance": 0, "width": 704, "height": 448}}
+        assert payload["defaults"] == {
+            "ratio": "2:3",
+            "size": "m",
+            "width": 832,
+            "height": 1216,
+            "steps": 27,
+            "guidance": 6.2,
+            "scheduler": "beta",
+            "supports_negative_prompt": True,
+            "supports_quantize": True,
+            "quantize": None,
+            "image_strength": 0.5,
+            "postprocess": {"sharpen": 0.8, "contrast": False, "saturation": False},
+            "upscale": {"enabled": False, "factor": None, "denoise": None, "steps": None, "guidance": None, "sharpen": True, "save_pre": False},
+        }
+        assert payload["video_defaults"] == {
+            "ratio": "16:9",
+            "size": "m",
+            "width": 704,
+            "height": 448,
+            "frame_count": 33,
+            "steps": 7,
+            "audio": True,
+            "low_memory": True,
+            "supports_i2v": True,
+            "supports_quantize": False,
+            "quantize": None,
+            "max_steps": 8,
+            "fps": 24,
+            "upscale": {"enabled": False, "factor": 2, "steps": None},
+        }
+        assert payload["image_model_defaults"] == {
+            "zit": {
+                "ratio": "2:3",
+                "size": "m",
+                "width": 832,
+                "height": 1216,
+                "steps": 27,
+                "guidance": 6.2,
+                "scheduler": "beta",
+                "supports_negative_prompt": True,
+                "supports_quantize": True,
+                "quantize": None,
+                "image_strength": 0.5,
+                "postprocess": {"sharpen": 0.8, "contrast": False, "saturation": False},
+                "upscale": {"enabled": False, "factor": None, "denoise": None, "steps": None, "guidance": None, "sharpen": True, "save_pre": False},
+            }
+        }
+        assert payload["video_model_defaults"] == {
+            "ltx-8": {
+                "ratio": "16:9",
+                "size": "m",
+                "width": 704,
+                "height": 448,
+                "frame_count": 33,
+                "steps": 7,
+                "audio": True,
+                "low_memory": True,
+                "supports_i2v": True,
+                "supports_quantize": False,
+                "quantize": None,
+                "max_steps": 8,
+                "fps": 24,
+                "upscale": {"enabled": False, "factor": 2, "steps": None},
+            }
+        }
         assert payload["history_assets"][0]["filename"] == "latest.png"
+        assert payload["history_assets"][0]["workflow"] == "txt2img"
+        assert payload["output_dir"] == str(output_dir)
+        assert payload["image_ratios"] == ["2:3"]
+        assert payload["video_ratios"] == ["16:9"]
+        assert payload["quantize_options"] == [4, 8]
+        assert payload["workflow_contract"]["values"] == ["txt2img", "img2img", "txt2vid", "img2vid"]
         assert payload["config"]["startup_view"] == "workspace"
+
+    def test_api_workspace_uses_config_backed_video_bootstrap_fallbacks_when_detection_fails(self, monkeypatch, tmp_path):
+        output_dir = tmp_path / "outputs"
+        monkeypatch.setattr(web_server, "load_web_config", lambda: _make_web_config(output_dir))
+        monkeypatch.setattr(web_server, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(web_server, "resolve_model_path", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("missing model")))
+        monkeypatch.setattr(web_server, "resolve_defaults", lambda *args, **kwargs: {"steps": 27, "guidance": 6.2, "scheduler": "beta", "supports_negative_prompt": True})
+
+        with TestClient(web_server.app) as client:
+            response = client.get("/api/workspace")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["video_defaults"] == {
+            "ratio": "16:9",
+            "size": "m",
+            "width": 704,
+            "height": 448,
+            "frame_count": 49,
+            "steps": 8,
+            "audio": True,
+            "low_memory": True,
+            "supports_i2v": False,
+            "supports_quantize": False,
+            "quantize": None,
+            "max_steps": 8,
+            "fps": 24,
+            "upscale": {"enabled": False, "factor": 2, "steps": None},
+        }
+        assert payload["video_model_defaults"]["ltx-8"] == payload["video_defaults"]
 
     def test_api_history_and_gallery_return_paginated_json(self, monkeypatch, tmp_path):
         output_dir = tmp_path / "outputs"
@@ -221,6 +403,61 @@ class TestWebServerSurface:
         gallery_payload = gallery_response.json()
         assert gallery_payload["total_count"] == 1
         assert [asset["filename"] for asset in gallery_payload["assets"]] == ["middle.mp4"]
+
+    def test_workspace_history_and_gallery_normalize_reuse_fallbacks_consistently(self, monkeypatch, tmp_path):
+        output_dir = tmp_path / "outputs"
+        _write_asset(
+            output_dir / "reuse-source.mp4",
+            prompt="Reuse this clip",
+            model="missing-video-model",
+            seed=21,
+            steps=9,
+            guidance=0.0,
+            modified_at=4_000,
+            metadata_overrides={
+                "workflow": "i2v",
+                "ratio": "16:9",
+                "size": "m",
+                "frame_count": 49,
+                "lora": [{"name": "detail", "weight": 0.8}],
+            },
+        )
+        monkeypatch.setattr(web_server, "load_web_config", lambda: _make_web_config(output_dir))
+        monkeypatch.setattr(web_server, "get_ziv_data_dir", lambda: tmp_path)
+
+        with TestClient(web_server.app) as client:
+            workspace_response = client.get("/api/workspace")
+            history_response = client.get("/api/history", params={"page": 1, "media_filter": "all", "sort_order": "newest"})
+            gallery_response = client.get("/api/gallery", params={"page": 1, "filter": "video", "sort_order": "newest"})
+
+        assert workspace_response.status_code == 200
+        assert history_response.status_code == 200
+        assert gallery_response.status_code == 200
+
+        workspace_asset = workspace_response.json()["history_assets"][0]
+        history_asset = history_response.json()["assets"][0]
+        gallery_asset = gallery_response.json()["assets"][0]
+
+        expected_reuse_state = {
+            "requested_workflow": "img2vid",
+            "resolved_workflow": "txt2vid",
+            "workflow_available": False,
+            "requested_model": "missing-video-model",
+            "resolved_model": "ltx-8",
+            "model_available": False,
+            "fallback_reasons": ["missing_reference_image", "model_not_configured"],
+        }
+        expected_reuse_url = "#/workspace?workflow=txt2vid&prompt=Reuse+this+clip&model=ltx-8&lora=detail%3A0.8&steps=9&seed=21&ratio=16%3A9&size=m&width=832&height=1216&frames=49"
+
+        for asset in (workspace_asset, history_asset, gallery_asset):
+            assert asset["workflow"] == "img2vid"
+            assert asset["media_type"] == "video"
+            assert asset["ratio"] == "16:9"
+            assert asset["size"] == "m"
+            assert asset["frame_count"] == 49
+            assert asset["image_path"] is None
+            assert asset["reuse_state"] == expected_reuse_state
+            assert asset["reuse_workspace_url"] == expected_reuse_url
 
     def test_api_config_get_returns_nested_web_ui_payload(self, monkeypatch, tmp_path):
         monkeypatch.setattr(web_server, "load_web_config", lambda: _make_web_config(tmp_path / "outputs"))
@@ -302,7 +539,7 @@ class TestWebServerSurface:
         assert response.headers["content-type"].startswith("application/json")
         payload = response.json()
         assert payload["job_id"] == "job-json"
-        assert payload["workflow"] == "Image"
+        assert payload["workflow"] == "txt2img"
         assert payload["prompt"] == "Northern lights"
         assert payload["model"] == "zit"
         assert payload["runs"] == 1
@@ -363,7 +600,228 @@ class TestWebServerSurface:
         request = submitted["request"]
         assert getattr(request, "image_path") is not None
         assert Path(getattr(request, "image_path")).is_file()
-        assert response.json()["workflow"] == "Image to Image"
+        assert response.json()["workflow"] == "img2img"
+
+    def test_api_generate_applies_cli_resolved_image_defaults_when_fields_are_omitted(self, monkeypatch, tmp_path):
+        output_dir = tmp_path / "outputs"
+        output_dir.mkdir()
+        submitted: dict[str, object] = {}
+
+        def _store_request(**kwargs: object) -> str:
+            submitted.update(kwargs)
+            return "job-image"
+
+        monkeypatch.setattr(web_server, "load_web_config", lambda: _make_web_config(output_dir))
+        monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(web_server, "detect_image_model", lambda _model: MagicMock(family="flux"))
+        monkeypatch.setattr(
+            web_server,
+            "resolve_defaults",
+            lambda *args, **kwargs: {"steps": 13, "guidance": 4.4, "scheduler": "beta", "supports_negative_prompt": True},
+        )
+        monkeypatch.setattr(web_server, "validate_scheduler", lambda *args, **kwargs: None)
+        monkeypatch.setattr(web_server.web_runner, "submit_image_request_job", _store_request)
+
+        with TestClient(web_server.app) as client:
+            response = client.post(
+                "/api/generate",
+                data={
+                    "mode": "image",
+                    "workflow": "txt2img",
+                    "prompt": "Aurora over mountains",
+                    "model": "zit",
+                    "ratio": "2:3",
+                    "size": "m",
+                },
+            )
+
+        assert response.status_code == 200
+        request = submitted["request"]
+        args = submitted["args"]
+        assert getattr(request, "steps") == 13
+        assert getattr(request, "guidance") == 4.4
+        assert getattr(request, "scheduler") == "beta"
+        assert getattr(args, "steps") == 13
+        assert getattr(args, "guidance") == 4.4
+        assert getattr(args, "scheduler") == "beta"
+        assert response.json()["workflow"] == "txt2img"
+
+    def test_api_generate_preserves_explicit_zero_image_strength(self, monkeypatch, tmp_path):
+        output_dir = tmp_path / "outputs"
+        output_dir.mkdir()
+        reference_path = tmp_path / "reference.png"
+        Image.new("RGB", (8, 8), color="white").save(reference_path)
+        submitted: dict[str, object] = {}
+
+        def _store_request(**kwargs: object) -> str:
+            submitted.update(kwargs)
+            return "job-image"
+
+        monkeypatch.setattr(web_server, "load_web_config", lambda: _make_web_config(output_dir))
+        monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(web_server, "detect_image_model", lambda _model: MagicMock(family="flux"))
+        monkeypatch.setattr(
+            web_server,
+            "resolve_defaults",
+            lambda *args, **kwargs: {"steps": 13, "guidance": 4.4, "scheduler": "beta", "supports_negative_prompt": True},
+        )
+        monkeypatch.setattr(web_server, "validate_scheduler", lambda *args, **kwargs: None)
+        monkeypatch.setattr(web_server.web_runner, "submit_image_request_job", _store_request)
+
+        with TestClient(web_server.app) as client:
+            response = client.post(
+                "/api/generate",
+                data={
+                    "mode": "image",
+                    "workflow": "img2img",
+                    "prompt": "Lock the composition",
+                    "model": "zit",
+                    "ratio": "2:3",
+                    "size": "m",
+                    "image_path": str(reference_path),
+                    "image_strength": "0.0",
+                },
+            )
+
+        assert response.status_code == 200
+        request = submitted["request"]
+        args = submitted["args"]
+        assert getattr(request, "image_strength") == 0.0
+        assert getattr(args, "image_strength") == 0.0
+
+    def test_api_generate_rejects_unknown_image_scheduler(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(web_server, "load_web_config", lambda: _make_web_config(tmp_path / "outputs"))
+        monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(web_server, "detect_image_model", lambda _model: MagicMock(family="flux"))
+
+        def _resolve_defaults(_model_info, _config, cli_overrides, _backend_name):
+            return {
+                "steps": 10,
+                "guidance": 3.5,
+                "scheduler": cli_overrides.get("scheduler"),
+                "supports_negative_prompt": True,
+            }
+
+        monkeypatch.setattr(web_server, "resolve_defaults", _resolve_defaults)
+
+        with TestClient(web_server.app) as client:
+            response = client.post(
+                "/api/generate",
+                data={
+                    "mode": "image",
+                    "workflow": "txt2img",
+                    "prompt": "Aurora over mountains",
+                    "model": "zit",
+                    "ratio": "2:3",
+                    "size": "m",
+                    "scheduler": "unknown-scheduler",
+                },
+            )
+
+        assert response.status_code == 422
+        assert response.json()["detail"] == "Unknown scheduler 'unknown-scheduler'. Valid options: ['beta']"
+
+    def test_api_generate_rejects_image_upscale_dimension_drift(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(web_server, "load_web_config", lambda: _make_web_config(tmp_path / "outputs"))
+        monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(web_server, "detect_image_model", lambda _model: MagicMock(family="flux"))
+
+        with TestClient(web_server.app) as client:
+            response = client.post(
+                "/api/generate",
+                data={
+                    "mode": "image",
+                    "workflow": "txt2img",
+                    "prompt": "Northern lights",
+                    "model": "zit",
+                    "ratio": "2:3",
+                    "size": "m",
+                    "width": "800",
+                    "upscale": "4",
+                },
+            )
+
+        assert response.status_code == 422
+        assert "Width 800 is not compatible with upscale 4" in response.json()["detail"]
+
+    def test_api_generate_rejects_canonical_img2vid_without_reference_image(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(web_server, "load_web_config", lambda: _make_web_config(tmp_path / "outputs"))
+
+        with TestClient(web_server.app) as client:
+            response = client.post(
+                "/api/generate",
+                data={
+                    "mode": "video",
+                    "workflow": "img2vid",
+                    "prompt": "Animate this",
+                    "model": "ltx-8",
+                    "ratio": "16:9",
+                    "size": "m",
+                },
+            )
+
+        assert response.status_code == 422
+        assert response.json() == {"detail": "Image-to-video requires a reference image."}
+
+    def test_api_generate_normalizes_video_submission_like_cli(self, monkeypatch, tmp_path):
+        output_dir = tmp_path / "outputs"
+        output_dir.mkdir()
+        web_config = _make_web_config(output_dir)
+        web_config.app_config["video_model_presets"]["ltx"]["upscale"] = {"default_upscale_steps": 12}
+        submitted: dict[str, object] = {}
+
+        def _store_request(**kwargs: object) -> str:
+            submitted.update(kwargs)
+            return "job-video"
+
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(
+            web_server,
+            "detect_video_model",
+            lambda _model: SimpleNamespace(
+                family="ltx",
+                backend="ltx",
+                supports_i2v=True,
+                default_fps=24,
+                frame_alignment=8,
+                resolution_alignment=32,
+            ),
+        )
+        monkeypatch.setattr(web_server.web_runner, "submit_video_request_job", _store_request)
+
+        with TestClient(web_server.app) as client:
+            response = client.post(
+                "/api/generate",
+                data={
+                    "mode": "video",
+                    "workflow": "txt2vid",
+                    "prompt": "Orbiting satellite",
+                    "model": "ltx-8",
+                    "ratio": "16:9",
+                    "size": "m",
+                    "width": "705",
+                    "height": "447",
+                    "frames": "50",
+                    "upscale": "2",
+                    "audio": "false",
+                    "low_memory": "false",
+                },
+            )
+
+        assert response.status_code == 200
+        request = submitted["request"]
+        args = submitted["args"]
+        assert getattr(request, "width") == 704
+        assert getattr(request, "height") == 448
+        assert getattr(request, "num_frames") == 49
+        assert getattr(request, "steps") == 8
+        assert getattr(request, "upscale_steps") == 8
+        assert getattr(request, "no_audio") is True
+        assert getattr(args, "low_memory") is False
+        assert getattr(args, "audio") is False
+        assert getattr(args, "upscale_steps") == 8
+        assert response.json()["workflow"] == "txt2vid"
 
     def test_job_snapshot_events_and_controls_routes_still_work(self, monkeypatch):
         snapshot = {

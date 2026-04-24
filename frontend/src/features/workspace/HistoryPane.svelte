@@ -23,19 +23,19 @@
 
 <section
   id="ws-history-shell"
-  class="shrink-0 relative z-30 bg-zinc-950 border-l border-zinc-900 flex transition-[width] duration-200 ease-out overflow-hidden"
+  class="panel-shell panel-shell-right relative z-30 flex shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
   style="width: {collapsed ? '3rem' : '20rem'}"
 >
   {#if !collapsed}
     <div class="min-w-0 flex-1 overflow-y-auto flex flex-col custom-scrollbar transition-opacity duration-150 ease-out">
-      <div class="px-4 py-3 border-b border-zinc-900 sticky top-0 bg-zinc-950/90 backdrop-blur z-30 flex justify-between items-center">
+      <div class="panel-header sticky top-0 z-30 flex items-center justify-between px-4 py-3 backdrop-blur">
         <div>
-          <h2 class="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider">Session History</h2>
+          <h2 class="field-label">Session History</h2>
         </div>
         <div class="flex items-center gap-2">
           <button
             type="button"
-            class="text-xs text-zinc-500 hover:text-zinc-300"
+            class="surface-link-muted text-xs"
             onclick={openGallery}
           >
             Open Gallery
@@ -55,9 +55,9 @@
       {:else}
         <div class="divide-y divide-zinc-900">
           {#each assets as asset (asset.path)}
-            <div class="p-3 hover:bg-zinc-900/40 transition cursor-pointer group">
+            <div class="cursor-pointer p-3 transition group hover:bg-zinc-900/40">
               <div class="flex gap-3">
-                <div class="w-14 h-14 shrink-0 rounded-md bg-zinc-900 border border-zinc-800 overflow-hidden">
+                <div class="surface-card h-14 w-14 shrink-0 overflow-hidden">
                   {#if asset.media_type === 'video'}
                     <video
                       src={asset.url}
@@ -88,11 +88,11 @@
   {/if}
 
   <!-- Toggle handle -->
-  <div class="w-12 shrink-0 border-l border-zinc-900 bg-zinc-950/95 backdrop-blur">
+  <div class="panel-handle w-12 shrink-0 backdrop-blur">
     <button
       type="button"
       id="ws-history-toggle"
-      class="flex h-full w-full flex-col items-center justify-start gap-4 px-2 py-4 text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900/80 transition"
+      class="panel-handle-button flex h-full w-full flex-col items-center justify-start gap-4 px-2 py-4"
       aria-label="{collapsed ? 'Expand' : 'Collapse'} history pane"
       aria-expanded={!collapsed}
       onclick={toggle}

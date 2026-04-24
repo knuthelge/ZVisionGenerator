@@ -26,10 +26,6 @@
     onclose?.();
   }
 
-  function handleBackdropClick(e: MouseEvent): void {
-    if (e.target === e.currentTarget) close();
-  }
-
   function handleKeydown(e: KeyboardEvent): void {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -53,21 +49,27 @@
 </script>
 
 {#if open}
-  <!-- Backdrop -->
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div
-    class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-    onclick={handleBackdropClick}
-  >
-    <!-- Dialog -->
-    <div
-      bind:this={dialogEl}
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
+  <!-- Outer container: stacking context -->
+  <div class="fixed inset-0 z-50">
+    <!-- Backdrop (native button so click-to-dismiss requires no role suppression) -->
+    <button
+      type="button"
+      class="absolute inset-0 bg-black/70 backdrop-blur-sm"
+      onclick={close}
+      aria-label="Close dialog"
       tabindex="-1"
-      class="relative w-full max-w-lg rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl focus:outline-none"
-    >
+    ></button>
+    <!-- Flex centering layer -->
+    <div class="flex items-center justify-center h-full p-4 pointer-events-none">
+      <!-- Dialog -->
+      <div
+        bind:this={dialogEl}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabindex="-1"
+        class="relative w-full max-w-lg rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl focus:outline-none pointer-events-auto"
+      >
       {#if title}
         <div class="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
           <h2 class="text-base font-semibold text-zinc-100">{title}</h2>
@@ -91,6 +93,7 @@
           {@render footer()}
         </div>
       {/if}
+      </div>
     </div>
   </div>
 {/if}

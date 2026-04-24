@@ -22,6 +22,20 @@ describe('Svelte 5 fix-cycle regressions', () => {
     expect(source).toContain('const file = e.dataTransfer?.files[0] ?? null;');
   });
 
+  it('uses shared token-backed workspace shell classes instead of repeating raw sidebar and toolbar chrome', () => {
+    const controlsSource = readSource('../features/workspace/ControlsSidebar.svelte');
+    const workspaceSource = readSource('../features/workspace/WorkspacePage.svelte');
+    const historySource = readSource('../features/workspace/HistoryPane.svelte');
+
+    expect(controlsSource).toContain('panel-shell panel-shell-left');
+    expect(controlsSource).toContain('surface-dropzone');
+    expect(controlsSource).toContain('surface-button-primary');
+    expect(workspaceSource).toContain('panel-toolbar');
+    expect(workspaceSource).toContain('surface-panel-frame');
+    expect(historySource).toContain('panel-shell panel-shell-right');
+    expect(historySource).toContain('panel-handle-button');
+  });
+
   it('subscribes to pause and resume SSE events and flips paused state', () => {
     const sseSource = readSource('../lib/api/sse.ts');
 
@@ -55,10 +69,18 @@ describe('Svelte 5 fix-cycle regressions', () => {
     const workspaceSource = readSource('../features/workspace/WorkspacePage.svelte');
     const serverTestSource = readSource('../../../tests/test_web_server.py');
 
-    expect(typesSource).toContain('image_model_defaults: Record<string, ModelDefaults>;');
-    expect(typesSource).toContain('video_model_defaults: Record<string, ModelDefaults>;');
-    expect(workspaceSource).toContain('const defaultsMap = isImageMode ? context.image_model_defaults : context.video_model_defaults;');
-    expect(workspaceSource).toContain('const modelDefaults = defaultsMap?.[newModel];');
+    expect(typesSource).toContain('image_model_defaults: Record<string, ImageModelDefaults>;');
+    expect(typesSource).toContain('video_model_defaults: Record<string, VideoModelDefaults>;');
+    expect(typesSource).toContain('workflow_contract: WorkflowContract;');
+    expect(workspaceSource).toContain('draft.hydrateFromContext(context, newModel)');
+    expect(workspaceSource).toContain('image_model_defaults');
     expect(serverTestSource).toContain('"image_model_defaults",');
+  });
+
+  it('does not append a stale reference image file after switching to a non-reference workflow', () => {
+    const workspaceSource = readSource('../features/workspace/WorkspacePage.svelte');
+
+    expect(workspaceSource).not.toContain("if (imageFile) {");
+    expect(workspaceSource).toMatch(/imageFile\s*&&\s*\(draft\.state\.workflow === 'img2img'\s*\|\|\s*draft\.state\.workflow === 'img2vid'\)/);
   });
 });

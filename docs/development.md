@@ -117,3 +117,7 @@ CLI flags > model preset variant > model preset family > global defaults. Config
 ### Error Conventions
 
 Raise `ValueError`, `FileNotFoundError`, `RuntimeError` directly with descriptive f-string messages. Use `warnings.warn()` with `stacklevel=2` for non-fatal conditions. No custom exception classes except private sentinels.
+
+### Web UI Contract
+
+See the [Web UI contract note](architecture/web-ui.md) for the maintained SPA/API surface, canonical workflow vocabulary, and the rule that CLI helpers remain the only source of defaults and validation for web-exposed controls.

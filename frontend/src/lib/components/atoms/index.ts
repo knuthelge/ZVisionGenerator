@@ -8,3 +8,4 @@ export { default as Badge } from './Badge.svelte';
 export { default as Spinner } from './Spinner.svelte';
 export { default as Separator } from './Separator.svelte';
 export { default as Label } from './Label.svelte';
+export { default as ToolbarSelectShell } from './ToolbarSelectShell.svelte';

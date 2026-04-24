@@ -19,6 +19,7 @@ _DEFAULT_VISIBLE_SECTIONS = (
     "lora_management",
     "gallery_summary",
 )
+_DEFAULT_QUANTIZE_OPTIONS = (4, 8)
 _KNOWN_THEMES = frozenset({"dark", "light"})
 _KNOWN_STARTUP_VIEWS = frozenset({"workspace", "gallery", "config"})
 
@@ -51,7 +52,7 @@ class WebUiConfig:
     video_ratios: tuple[str, ...]
     video_size_options: dict[str, tuple[str, ...]]
     scheduler_options: tuple[str, ...]
-    quantize_options: tuple[int, ...] = (4, 8)
+    quantize_options: tuple[int, ...] = _DEFAULT_QUANTIZE_OPTIONS
 
 
 def load_web_config() -> WebUiConfig:
@@ -91,6 +92,7 @@ def load_web_config() -> WebUiConfig:
         video_ratios=tuple(video_sizes.keys()),
         video_size_options={ratio: tuple(size_map.keys()) for ratio, size_map in video_sizes.items()},
         scheduler_options=tuple(app_config.get("schedulers", {}).keys()),
+        quantize_options=_resolve_quantize_options(ui_config),
     )
 
 
@@ -111,6 +113,16 @@ def _resolve_visible_sections(value: Any) -> tuple[str, ...]:
         raise ValueError("config 'ui.visible_sections' must be a list of strings.")
     resolved = tuple(dict.fromkeys(item.strip() for item in value if item.strip()))
     return resolved or _DEFAULT_VISIBLE_SECTIONS
+
+
+def _resolve_quantize_options(ui_config: dict[str, Any]) -> tuple[int, ...]:
+    value = ui_config.get("quantize_options")
+    if value is None:
+        return _DEFAULT_QUANTIZE_OPTIONS
+    if not isinstance(value, list) or not all(isinstance(item, int) for item in value):
+        raise ValueError("config 'ui.quantize_options' must be a list of integers.")
+    resolved = tuple(dict.fromkeys(item for item in value if item > 0))
+    return resolved or _DEFAULT_QUANTIZE_OPTIONS
 
 
 def _resolve_default_models(value: Any, app_config: dict[str, Any]) -> WebUiDefaultModels:

@@ -34,6 +34,7 @@ Z-Vision Generator gives you a unified CLI for both image and video generation, 
 ## Quick Links
 
 - [Getting Started](getting-started.md) — installation, prerequisites, and first steps
+- [Web UI Guide](guides/web-ui.md) — launch the local app and use Workspace, Models, Gallery, and Configuration
 - [Image Generation Guide](guides/image.md) — model aliases, sizes, LoRA, upscaling, post-processing
 - [Video Generation Guide](guides/video.md) — text-to-video, image-to-video, upscale, audio
 - [Prompts Guide](guides/prompts.md) — prompt files, variables, structured prompts, snippets

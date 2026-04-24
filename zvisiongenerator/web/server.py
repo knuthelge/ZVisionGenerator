@@ -32,6 +32,7 @@ from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import parse_lora_arg
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_lora_path, resolve_model_path
 from zvisiongenerator.utils.video_model_detect import detect_video_model
+from zvisiongenerator.video_cli import _align_ltx_frames, _align_resolution
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner
 
@@ -39,7 +40,107 @@ from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobCont
 _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 _VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".mkv"})
 
+_CANONICAL_WORKFLOW_VALUES = ("txt2img", "img2img", "txt2vid", "img2vid")
+_WORKFLOW_ALIASES = {
+    "txt2img": "txt2img",
+    "texttoimage": "txt2img",
+    "image": "txt2img",
+    "img2img": "img2img",
+    "i2i": "img2img",
+    "imagetoimage": "img2img",
+    "txt2vid": "txt2vid",
+    "texttovideo": "txt2vid",
+    "video": "txt2vid",
+    "img2vid": "img2vid",
+    "i2v": "img2vid",
+    "imagetovideo": "img2vid",
+}
+_WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "txt2img": {
+        "mode": "image",
+        "model_kind": "image",
+        "supports_reference_image": False,
+        "requires_reference_image": False,
+        "clear_fields": ["image_path", "image_strength", "frames", "audio", "low_memory"],
+    },
+    "img2img": {
+        "mode": "image",
+        "model_kind": "image",
+        "supports_reference_image": True,
+        "requires_reference_image": True,
+        "clear_fields": ["frames", "audio", "low_memory"],
+    },
+    "txt2vid": {
+        "mode": "video",
+        "model_kind": "video",
+        "supports_reference_image": False,
+        "requires_reference_image": False,
+        "clear_fields": [
+            "negative_prompt",
+            "guidance",
+            "image_path",
+            "image_strength",
+            "quantize",
+            "sharpen_enabled",
+            "sharpen_amount",
+            "contrast_enabled",
+            "contrast_amount",
+            "saturation_enabled",
+            "saturation_amount",
+            "upscale",
+            "upscale_denoise",
+            "upscale_guidance",
+            "upscale_sharpen",
+            "upscale_save_pre",
+        ],
+    },
+    "img2vid": {
+        "mode": "video",
+        "model_kind": "video",
+        "supports_reference_image": True,
+        "requires_reference_image": True,
+        "clear_fields": [
+            "negative_prompt",
+            "guidance",
+            "quantize",
+            "sharpen_enabled",
+            "sharpen_amount",
+            "contrast_enabled",
+            "contrast_amount",
+            "saturation_enabled",
+            "saturation_amount",
+            "upscale",
+            "upscale_denoise",
+            "upscale_guidance",
+            "upscale_sharpen",
+            "upscale_save_pre",
+        ],
+    },
+}
+
 web_runner = WebRunner()
+
+
+_IMAGE_BOOTSTRAP_STRENGTH = 0.5
+_IMAGE_BOOTSTRAP_POSTPROCESS = {
+    "sharpen": 0.8,
+    "contrast": False,
+    "saturation": False,
+}
+_IMAGE_BOOTSTRAP_UPSCALE = {
+    "enabled": False,
+    "factor": None,
+    "denoise": None,
+    "steps": None,
+    "guidance": None,
+    "sharpen": True,
+    "save_pre": False,
+}
+_VIDEO_BOOTSTRAP_UPSCALE = {
+    "enabled": False,
+    "factor": 2,
+    "steps": None,
+}
 
 
 @dataclass(frozen=True)
@@ -68,6 +169,12 @@ class GalleryAsset:
     seed_label: str
     steps_label: str
     guidance_label: str
+    workflow: str | None
+    ratio: str | None
+    size: str | None
+    frame_count: int | None
+    reference_image_path: str | None
+    lora: str | None
 
 
 @asynccontextmanager
@@ -142,10 +249,13 @@ async def generate(request: Request) -> JSONResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    requested_workflow = _canonicalize_workflow(_optional_text(form, "workflow"), fallback=_default_workflow_for_mode(mode))
+    workflow = _canonicalize_workflow(job_context.get("job_type"), fallback=requested_workflow)
+
     return JSONResponse(
         {
             "job_id": job_context["job_id"],
-            "workflow": job_context.get("job_type", ""),
+            "workflow": workflow,
             "prompt": job_context.get("prompt", ""),
             "model": job_context.get("title", ""),
             "runs": 1,
@@ -214,12 +324,12 @@ async def stream_job_events(job_id: str) -> StreamingResponse:
     )
 
 
-def _build_workspace_form_view(web_config: WebUiConfig) -> dict[str, Any]:
-    """Resolve per-model workspace defaults using the same config layering as the CLI."""
+def _build_workspace_bootstrap_view(web_config: WebUiConfig) -> dict[str, Any]:
+    """Resolve per-model bootstrap defaults using the same config layering as the CLI."""
     image_default_model = _preferred_option(web_config.default_models.image, web_config.image_model_options)
     video_default_model = _preferred_option(web_config.default_models.video, web_config.video_model_options)
-    image_defaults = {model_name: _resolve_image_form_defaults(model_name, web_config) for model_name in web_config.image_model_options}
-    video_defaults = {model_name: _resolve_video_form_defaults(model_name, web_config) for model_name in web_config.video_model_options}
+    image_defaults = {model_name: _build_image_bootstrap_defaults(model_name, web_config) for model_name in web_config.image_model_options}
+    video_defaults = {model_name: _build_video_bootstrap_defaults(model_name, web_config) for model_name in web_config.video_model_options}
     return {
         "image_default_model": image_default_model,
         "video_default_model": video_default_model,
@@ -235,69 +345,187 @@ def _preferred_option(preferred: str | None, options: tuple[str, ...]) -> str | 
     return options[0] if options else None
 
 
-def _resolve_image_form_defaults(model_name: str, web_config: WebUiConfig) -> dict[str, Any]:
-    """Resolve image workflow defaults for a single model option."""
+def _resolve_ratio_and_size(
+    preferred_ratio: str | None,
+    ratios: tuple[str, ...],
+    size_options_map: dict[str, tuple[str, ...]],
+    preferred_size: str | None,
+    *,
+    fallback_ratio: str,
+    fallback_size: str,
+) -> tuple[str, str]:
+    """Resolve the nearest valid ratio and size from config-backed options."""
+    ratio = _preferred_option(preferred_ratio, ratios) or fallback_ratio
+    size_options = size_options_map.get(ratio, ())
+    size = _preferred_option(preferred_size, size_options) or fallback_size
+    return ratio, size
+
+
+def _resolve_image_bootstrap_ratio_size(web_config: WebUiConfig) -> tuple[str, str]:
+    """Resolve image bootstrap ratio and size from layered config defaults."""
     app_config = web_config.app_config
-    ratio = app_config.get("generation", {}).get("default_ratio", web_config.image_ratios[0] if web_config.image_ratios else "2:3")
-    size = app_config.get("generation", {}).get("default_size", web_config.image_size_options.get(ratio, ("m",))[0])
+    return _resolve_ratio_and_size(
+        app_config.get("generation", {}).get("default_ratio"),
+        web_config.image_ratios,
+        web_config.image_size_options,
+        app_config.get("generation", {}).get("default_size"),
+        fallback_ratio="2:3",
+        fallback_size="m",
+    )
+
+
+def _resolve_video_bootstrap_ratio_size(web_config: WebUiConfig) -> tuple[str, str]:
+    """Resolve video bootstrap ratio and size from layered config defaults."""
+    app_config = web_config.app_config
+    return _resolve_ratio_and_size(
+        app_config.get("video_generation", {}).get("default_ratio"),
+        web_config.video_ratios,
+        web_config.video_size_options,
+        app_config.get("video_generation", {}).get("default_size"),
+        fallback_ratio="16:9",
+        fallback_size="m",
+    )
+
+
+def _resolve_image_bootstrap_dimensions(app_config: dict[str, Any], ratio: str, size: str) -> dict[str, int]:
+    """Resolve image dimensions from config for the selected ratio and size."""
+    dims = app_config.get("sizes", {}).get(ratio, {}).get(size, {})
+    return {
+        "width": dims.get("width", 1024),
+        "height": dims.get("height", 1024),
+    }
+
+
+def _resolve_video_bootstrap_family(app_config: dict[str, Any], family: str | None) -> str:
+    """Choose a config-backed video family for bootstrap fallback resolution."""
+    if family and family != "unknown":
+        return family
+    video_sizes = app_config.get("video_sizes", {})
+    if "ltx" in video_sizes:
+        return "ltx"
+    return next(iter(video_sizes), "ltx")
+
+
+def _default_video_max_steps(app_config: dict[str, Any], family: str) -> int | None:
+    """Expose an optional UI steps cap from the same preset family used by the CLI."""
+    value = app_config.get("video_model_presets", {}).get(family, {}).get("default_steps")
+    return value if isinstance(value, int) else None
+
+
+def _image_bootstrap_postprocess() -> dict[str, Any]:
+    """Return the default image postprocess bootstrap payload."""
+    return dict(_IMAGE_BOOTSTRAP_POSTPROCESS)
+
+
+def _image_bootstrap_upscale() -> dict[str, Any]:
+    """Return the default image upscale bootstrap payload."""
+    return dict(_IMAGE_BOOTSTRAP_UPSCALE)
+
+
+def _video_bootstrap_upscale() -> dict[str, Any]:
+    """Return the default video upscale bootstrap payload."""
+    return dict(_VIDEO_BOOTSTRAP_UPSCALE)
+
+
+def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) -> dict[str, Any]:
+    """Resolve image workflow bootstrap defaults for a single model option."""
+    app_config = web_config.app_config
+    ratio, size = _resolve_image_bootstrap_ratio_size(web_config)
     try:
         resolved_model = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
         model_info = detect_image_model(resolved_model)
         backend_name = "mflux" if sys.platform == "darwin" else "diffusers"
         defaults = resolve_defaults(model_info, app_config, {}, backend_name)
-        supports_negative_prompt = defaults.get("supports_negative_prompt", False)
     except Exception:
         defaults = {
             "steps": app_config.get("generation", {}).get("default_steps", 10),
             "guidance": app_config.get("generation", {}).get("default_guidance", 3.5),
             "scheduler": None,
+            "supports_negative_prompt": False,
         }
-        supports_negative_prompt = False
+    dims = _resolve_image_bootstrap_dimensions(app_config, ratio, size)
     return {
         "ratio": ratio,
         "size": size,
+        "width": dims["width"],
+        "height": dims["height"],
         "steps": defaults["steps"],
         "guidance": defaults["guidance"],
         "scheduler": defaults.get("scheduler"),
-        "supports_negative_prompt": supports_negative_prompt,
+        "supports_negative_prompt": bool(defaults.get("supports_negative_prompt", False)),
+        "supports_quantize": bool(web_config.quantize_options),
+        "quantize": None,
+        "image_strength": _IMAGE_BOOTSTRAP_STRENGTH,
+        "postprocess": _image_bootstrap_postprocess(),
+        "upscale": _image_bootstrap_upscale(),
     }
 
 
-def _resolve_video_form_defaults(model_name: str, web_config: WebUiConfig) -> dict[str, Any]:
-    """Resolve video workflow defaults for a single model option."""
+def _build_video_bootstrap_defaults(model_name: str, web_config: WebUiConfig) -> dict[str, Any]:
+    """Resolve video workflow bootstrap defaults for a single model option."""
     app_config = web_config.app_config
-    ratio = app_config.get("video_generation", {}).get("default_ratio", web_config.video_ratios[0] if web_config.video_ratios else "16:9")
-    size = app_config.get("video_generation", {}).get("default_size", web_config.video_size_options.get(ratio, ("m",))[0])
+    ratio, size = _resolve_video_bootstrap_ratio_size(web_config)
     supports_i2v = False
-    max_steps = None
+    fps = 24
     try:
         resolved_model = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
         model_info = detect_video_model(resolved_model)
-        defaults = resolve_video_defaults(model_info.family, app_config, {"ratio": ratio, "size": size})
+        family = _resolve_video_bootstrap_family(app_config, model_info.family)
         supports_i2v = model_info.supports_i2v
-        max_steps = 8 if model_info.family == "ltx" else None
+        fps_value = getattr(model_info, "default_fps", 24)
+        fps = fps_value if isinstance(fps_value, int) else 24
     except Exception:
-        defaults = {
-            "steps": app_config.get("video_model_presets", {}).get("ltx", {}).get("default_steps", 8),
-            "width": app_config.get("video_sizes", {}).get("ltx", {}).get(ratio, {}).get(size, {}).get("width", 704),
-            "height": app_config.get("video_sizes", {}).get("ltx", {}).get(ratio, {}).get(size, {}).get("height", 448),
-            "num_frames": app_config.get("video_sizes", {}).get("ltx", {}).get(ratio, {}).get(size, {}).get("frames", 49),
-        }
+        family = _resolve_video_bootstrap_family(app_config, None)
+    defaults = resolve_video_defaults(family, app_config, {"ratio": ratio, "size": size})
     return {
-        "ratio": ratio,
-        "size": size,
+        "ratio": defaults.get("ratio", ratio),
+        "size": defaults.get("size", size),
         "steps": defaults["steps"],
         "width": defaults["width"],
         "height": defaults["height"],
-        "num_frames": defaults["num_frames"],
+        "frame_count": defaults["num_frames"],
+        "audio": True,
+        "low_memory": True,
         "supports_i2v": supports_i2v,
-        "max_steps": max_steps,
+        "supports_quantize": False,
+        "quantize": None,
+        "max_steps": _default_video_max_steps(app_config, family),
+        "fps": fps,
+        "upscale": _video_bootstrap_upscale(),
+    }
+
+
+def _canonicalize_workflow(value: Any, *, fallback: str | None = None) -> str | None:
+    """Map backend and legacy workflow labels to the SPA-facing canonical vocabulary."""
+    if value is None:
+        return fallback
+    normalized = re.sub(r"[^a-z0-9]+", "", str(value).strip().lower())
+    return _WORKFLOW_ALIASES.get(normalized, fallback)
+
+
+def _default_workflow_for_mode(mode: str) -> str:
+    return "txt2vid" if mode == "video" else "txt2img"
+
+
+def _workflow_mode(workflow: str) -> str:
+    return "video" if workflow in {"txt2vid", "img2vid"} else "image"
+
+
+def _build_workflow_contract() -> dict[str, Any]:
+    return {
+        "values": list(_CANONICAL_WORKFLOW_VALUES),
+        "legacy_aliases": dict(_WORKFLOW_ALIASES),
+        "definitions": {name: dict(value) for name, value in _WORKFLOW_DEFINITIONS.items()},
+        "field_precedence": {
+            "defaults": ["cli", "model_variant", "model_family", "global"],
+            "dimensions": "explicit_width_height_overrides_ratio_size",
+        },
     }
 
 
 def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     app_config = web_config.app_config
-    workflow = _optional_text(form, "workflow") or "image"
+    workflow = _canonicalize_workflow(_optional_text(form, "workflow"), fallback="txt2img") or "txt2img"
     prompt = _required_text(form, "prompt")
     negative_prompt = _optional_text(form, "negative_prompt")
     model_name = _text_or_default(form, "model", web_config.default_models.image)
@@ -310,7 +538,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         size=None,
         width=_optional_int(form, "width"),
         height=_optional_int(form, "height"),
-        runs=max(_optional_int(form, "runs") or 1, 1),
+        runs=_optional_int(form, "runs") or 1,
         seed=_optional_int(form, "seed"),
         steps=_optional_int(form, "steps"),
         guidance=_optional_float(form, "guidance"),
@@ -322,7 +550,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         upscale_sharpen=_checkbox(form, "upscale_sharpen", default=True),
         upscale_save_pre=_checkbox(form, "upscale_save_pre"),
         image_path=_resolve_reference_image(form, output_dir),
-        image_strength=_optional_float(form, "image_strength") or 0.5,
+        image_strength=_optional_float(form, "image_strength"),
         output=output_dir,
         model=model_name,
         quantize=_optional_int(form, "quantize"),
@@ -333,9 +561,11 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         lora_weights=None,
     )
     args.size = _resolve_image_size(form, web_config, args.ratio)
-    if workflow == "i2i" and args.image_path is None:
+    if args.image_strength is None:
+        args.image_strength = 0.5
+    if _WORKFLOW_DEFINITIONS[workflow]["requires_reference_image"] and args.image_path is None:
         raise ValueError("Image-to-image requires a reference image.")
-    _validate_image_args(args)
+    _validate_image_args(args, quantize_options=web_config.quantize_options)
 
     resolved_model = resolve_model_path(args.model, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
     model_info = detect_image_model(resolved_model)
@@ -413,7 +643,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
 
 def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     app_config = web_config.app_config
-    workflow = _optional_text(form, "workflow") or "video"
+    workflow = _canonicalize_workflow(_optional_text(form, "workflow"), fallback="txt2vid") or "txt2vid"
     prompt = _required_text(form, "prompt")
     model_name = _text_or_default(form, "model", web_config.default_models.video)
     if not model_name:
@@ -437,7 +667,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         num_frames=None,
         steps=_optional_int(form, "steps"),
         seed=_optional_int(form, "seed"),
-        runs=max(_optional_int(form, "runs") or 1, 1),
+        runs=_optional_int(form, "runs") or 1,
         low_memory=_checkbox(form, "low_memory", default=True),
         output=output_dir,
         format="mp4",
@@ -449,10 +679,9 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         no_audio=not audio_enabled,
         audio=audio_enabled,
     )
-    if args.upscale is not None and args.upscale != 2:
-        raise ValueError("Video upscale only supports factor 2.")
-    if workflow == "i2v" and image_path is None:
+    if _WORKFLOW_DEFINITIONS[workflow]["requires_reference_image"] and image_path is None:
         raise ValueError("Image-to-video requires a reference image.")
+    _validate_video_args(args)
 
     resolved_model = resolve_model_path(args.model, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
     model_info = detect_video_model(resolved_model)
@@ -460,6 +689,13 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         raise ValueError(f"Could not detect a supported video model for '{model_name}'.")
     if image_path and not model_info.supports_i2v:
         raise ValueError(f"Model '{model_name}' does not support image-to-video.")
+
+    family_sizes = app_config.get("video_sizes", {}).get(model_info.family, {})
+    if family_sizes:
+        if args.ratio not in family_sizes:
+            raise ValueError(f"Unknown ratio '{args.ratio}' for {model_info.family}. Valid: {list(family_sizes.keys())}")
+        if args.size not in family_sizes.get(args.ratio, {}):
+            raise ValueError(f"Unknown size '{args.size}' for ratio '{args.ratio}'. Valid: {list(family_sizes.get(args.ratio, {}).keys())}")
 
     args.lora_paths, args.lora_weights = _resolve_loras(form)
     cli_overrides = {
@@ -479,10 +715,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     args.width = defaults["width"]
     args.height = defaults["height"]
     args.num_frames = defaults["num_frames"]
-    if args.steps < 1:
-        raise ValueError("Steps must be at least 1.")
-    if args.upscale:
-        args.upscale_steps = args.steps
+    _normalize_video_args(args, app_config, model_info)
 
     prompts_data = {"web": [(prompt, None)]}
     request = VideoGenerationRequest(
@@ -567,8 +800,9 @@ def _optional_float(form: Any, key: str) -> float | None:
 def _checkbox(form: Any, key: str, *, default: bool = False) -> bool:
     if key not in form:
         return default
-    value = str(form.get(key, "")).strip().lower()
-    return value not in {"0", "false", "off", "no"}
+    values = getattr(form, "getlist", lambda _key: [form.get(_key, "")])(key)
+    normalized = [str(value).strip().lower() for value in values]
+    return any(value not in {"", "0", "false", "off", "no"} for value in normalized)
 
 
 def _choice_or_default(form: Any, key: str, choices: tuple[str, ...], default: str) -> str:
@@ -675,9 +909,11 @@ def _resolve_loras(form: Any) -> tuple[list[str] | None, list[float] | None]:
     )
 
 
-def _validate_image_args(args: argparse.Namespace) -> None:
-    if args.quantize is not None and args.quantize not in (4, 8):
-        raise ValueError("Quantize must be 4 or 8.")
+def _validate_image_args(args: argparse.Namespace, *, quantize_options: tuple[int, ...] = (4, 8)) -> None:
+    if args.runs < 1:
+        raise ValueError("Runs must be at least 1.")
+    if args.quantize is not None and args.quantize not in quantize_options:
+        raise ValueError(f"Quantize must be one of {list(quantize_options)}.")
     if args.width is not None and args.width <= 0:
         raise ValueError("Width must be positive.")
     if args.height is not None and args.height <= 0:
@@ -692,10 +928,66 @@ def _validate_image_args(args: argparse.Namespace) -> None:
         raise ValueError("Upscale denoise must be between 0.0 and 1.0.")
     if args.steps is not None and args.steps < 1:
         raise ValueError("Steps must be at least 1.")
+    if args.upscale_steps is not None and args.upscale_steps < 1:
+        raise ValueError("Upscale steps must be at least 1.")
     if args.guidance is not None and args.guidance < 0:
         raise ValueError("Guidance must be non-negative.")
+    if args.upscale_guidance is not None and args.upscale_guidance < 0:
+        raise ValueError("Upscale guidance must be non-negative.")
+    if isinstance(args.sharpen, float) and args.sharpen < 0:
+        raise ValueError("Sharpen amount must be non-negative.")
+    if isinstance(args.contrast, float) and args.contrast < 0:
+        raise ValueError("Contrast amount must be non-negative.")
+    if isinstance(args.saturation, float) and args.saturation < 0:
+        raise ValueError("Saturation amount must be non-negative.")
+    if args.upscale is not None:
+
+        def _round16(value: int) -> int:
+            return ((value + 15) // 16) * 16
+
+        for dim_name, dim_val in (("Width", args.width), ("Height", args.height)):
+            if dim_val is None:
+                continue
+            base = dim_val // args.upscale
+            final = _round16(base) * args.upscale
+            if final != dim_val:
+                raise ValueError(f"{dim_name} {dim_val} is not compatible with upscale {args.upscale}: base size {base} rounds to {_round16(base)}, giving final size {final} instead of {dim_val}.")
     if not (0.0 <= args.image_strength <= 1.0):
         raise ValueError("Image strength must be between 0.0 and 1.0.")
+
+
+def _validate_video_args(args: argparse.Namespace) -> None:
+    if args.runs < 1:
+        raise ValueError("Runs must be at least 1.")
+    if args.steps is not None and args.steps < 1:
+        raise ValueError("Steps must be at least 1.")
+    if args.upscale is not None and args.upscale != 2:
+        raise ValueError("Upscale only supports factor 2 (LTX spatial upscaler).")
+
+
+def _normalize_video_args(args: argparse.Namespace, config: dict[str, Any], model_info: Any) -> None:
+    steps_explicitly_set = args.steps is not None
+    if args.upscale:
+        upscale_cfg = config.get("video_model_presets", {}).get("ltx", {}).get("upscale", {})
+        if not steps_explicitly_set:
+            args.steps = upscale_cfg.get("default_upscale_steps", 8)
+        args.upscale_steps = args.steps
+    else:
+        args.upscale_steps = None
+
+    if args.steps < 1:
+        raise ValueError("Steps must be at least 1.")
+
+    if model_info.family == "ltx" and args.steps > 8:
+        args.steps = 8
+        if args.upscale_steps is not None:
+            args.upscale_steps = args.steps
+
+    alignment = 64 if args.upscale else model_info.resolution_alignment
+    args.width, args.height = _align_resolution(args.width, args.height, alignment, model_info.family.upper())
+    args.num_frames = _align_ltx_frames(args.num_frames, model_info.frame_alignment)
+    if args.width < 64 or args.height < 64:
+        raise ValueError(f"Resolved dimensions {args.width}x{args.height} are too small (minimum 64x64)")
 
 
 def _list_gallery_assets(output_dir: str) -> list[GalleryAsset]:
@@ -744,6 +1036,12 @@ def _build_gallery_asset(root: Path, candidate: Path) -> GalleryAsset | None:
         seed_label=metadata["seed_label"],
         steps_label=metadata["steps_label"],
         guidance_label=metadata["guidance_label"],
+        workflow=metadata["workflow"],
+        ratio=metadata["ratio"],
+        size=metadata["size"],
+        frame_count=metadata["frame_count"],
+        reference_image_path=metadata["reference_image_path"],
+        lora=metadata["lora"],
     )
 
 
@@ -763,6 +1061,12 @@ def _read_asset_metadata(asset_path: Path, kind: str) -> dict[str, Any]:
     seed = _coerce_int(_metadata_value(sidecar_metadata, "seed") or filename_metadata.get("seed"))
     steps = _coerce_int(_metadata_value(sidecar_metadata, "steps", "num_inference_steps", "inference_steps") or filename_metadata.get("steps"))
     guidance = _coerce_float(_metadata_value(sidecar_metadata, "guidance", "guidance_scale", "cfg", "cfg_scale") or filename_metadata.get("guidance"))
+    workflow = _coerce_optional_text(_metadata_value(sidecar_metadata, "workflow", "workflow_name", "job_type", "mode"))
+    ratio = _coerce_optional_text(_metadata_value(sidecar_metadata, "ratio", "aspect_ratio"))
+    size = _coerce_optional_text(_metadata_value(sidecar_metadata, "size", "resolution_size"))
+    frame_count = _coerce_int(_metadata_value(sidecar_metadata, "frame_count", "frames", "num_frames"))
+    reference_image_path = _coerce_optional_text(_metadata_value(sidecar_metadata, "image_path", "reference_image", "reference_image_path", "input_image", "source_image"))
+    lora = _coerce_lora_string(_metadata_value(sidecar_metadata, "lora", "loras"))
 
     return {
         "prompt": prompt,
@@ -776,6 +1080,12 @@ def _read_asset_metadata(asset_path: Path, kind: str) -> dict[str, Any]:
         "seed_label": str(seed) if seed is not None else "Unavailable",
         "steps_label": str(steps) if steps is not None else "Unavailable",
         "guidance_label": _format_guidance(guidance),
+        "workflow": workflow,
+        "ratio": ratio,
+        "size": size,
+        "frame_count": frame_count,
+        "reference_image_path": reference_image_path,
+        "lora": lora,
     }
 
 
@@ -854,6 +1164,13 @@ def _coerce_text(value: Any) -> str:
     return text or "Unavailable"
 
 
+def _coerce_optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _coerce_int(value: Any) -> int | None:
     """Convert a metadata value to an integer when possible."""
     if value in (None, ""):
@@ -872,6 +1189,35 @@ def _coerce_float(value: Any) -> float | None:
         return float(value)
     except TypeError, ValueError:
         return None
+
+
+def _coerce_lora_string(value: Any) -> str | None:
+    if value in (None, "", [], {}):
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return text or None
+    if isinstance(value, list):
+        entries: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                text = item.strip()
+                if text:
+                    entries.append(text)
+                continue
+            if isinstance(item, dict) and isinstance(item.get("name"), str):
+                weight = item.get("weight")
+                if weight in (None, ""):
+                    entries.append(item["name"].strip())
+                else:
+                    entries.append(f"{item['name'].strip()}:{weight}")
+        return ",".join(entry for entry in entries if entry) or None
+    if isinstance(value, dict) and isinstance(value.get("name"), str):
+        weight = value.get("weight")
+        if weight in (None, ""):
+            return value["name"].strip() or None
+        return f"{value['name'].strip()}:{weight}"
+    return None
 
 
 def _format_guidance(value: float | None) -> str:
@@ -1183,47 +1529,97 @@ def _format_age(timestamp: float) -> str:
 # ─── JSON API endpoints (Svelte SPA) ─────────────────────────────────────────
 
 
-def _gallery_asset_to_json(asset: GalleryAsset) -> dict[str, Any]:
+def _gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[str, Any]:
     """Convert a GalleryAsset to the JSON shape expected by the Svelte SPA."""
     created_at = datetime.fromtimestamp(asset.modified_at, tz=timezone.utc).isoformat()
+    default_workflow = _default_workflow_for_mode(asset.kind)
+    requested_workflow = _canonicalize_workflow(asset.workflow, fallback=default_workflow)
+    fallback_reasons: list[str] = []
+    workflow_available = True
+    if _workflow_mode(requested_workflow) != asset.kind:
+        requested_workflow = default_workflow
+        workflow_available = False
+        fallback_reasons.append("workflow_media_mismatch")
+
+    resolved_workflow = requested_workflow
+    if _WORKFLOW_DEFINITIONS[resolved_workflow]["requires_reference_image"] and asset.reference_image_path is None:
+        resolved_workflow = default_workflow
+        workflow_available = False
+        fallback_reasons.append("missing_reference_image")
+
+    model_options = web_config.image_model_options if _workflow_mode(resolved_workflow) == "image" else web_config.video_model_options
+    default_model = _preferred_option(
+        web_config.default_models.image if _workflow_mode(resolved_workflow) == "image" else web_config.default_models.video,
+        model_options,
+    )
+    requested_model = None if asset.model_label == "Unavailable" else asset.model_label
+    model_available = requested_model is None or requested_model in model_options
+    resolved_model = requested_model if requested_model in model_options else default_model
+    if requested_model is not None and not model_available:
+        fallback_reasons.append("model_not_configured")
+
     reuse_params: dict[str, str] = {
-        "workflow": "video" if asset.kind == "video" else "image",
+        "workflow": resolved_workflow,
         "prompt": asset.prompt,
-        "model": asset.model_label,
     }
+    if resolved_model:
+        reuse_params["model"] = resolved_model
+    if asset.lora:
+        reuse_params["lora"] = asset.lora
     if asset.steps is not None:
         reuse_params["steps"] = str(asset.steps)
-    if asset.guidance is not None and asset.kind == "image":
+    if asset.guidance is not None and _workflow_mode(resolved_workflow) == "image":
         reuse_params["guidance"] = f"{asset.guidance:g}"
     if asset.seed is not None:
         reuse_params["seed"] = str(asset.seed)
+    if asset.ratio is not None:
+        reuse_params["ratio"] = asset.ratio
+    if asset.size is not None:
+        reuse_params["size"] = asset.size
     if asset.width is not None:
         reuse_params["width"] = str(asset.width)
     if asset.height is not None:
         reuse_params["height"] = str(asset.height)
+    if asset.frame_count is not None and _workflow_mode(resolved_workflow) == "video":
+        reuse_params["frames"] = str(asset.frame_count)
+    if _WORKFLOW_DEFINITIONS[resolved_workflow]["requires_reference_image"] and asset.reference_image_path is not None:
+        reuse_params["image_path"] = asset.reference_image_path
     return {
         "path": asset.filesystem_path,
         "url": asset.media_url,
         "thumbnail_url": asset.media_url,
         "filename": asset.name,
         "created_at": created_at,
-        "workflow": asset.kind,
+        "workflow": requested_workflow,
         "prompt": asset.prompt,
         "model": asset.model_label,
         "width": asset.width,
         "height": asset.height,
+        "ratio": asset.ratio,
+        "size": asset.size,
+        "frame_count": asset.frame_count,
+        "image_path": asset.reference_image_path,
         "media_type": asset.kind,
+        "reuse_state": {
+            "requested_workflow": requested_workflow,
+            "resolved_workflow": resolved_workflow,
+            "workflow_available": workflow_available,
+            "requested_model": requested_model,
+            "resolved_model": resolved_model,
+            "model_available": model_available,
+            "fallback_reasons": fallback_reasons,
+        },
         "reuse_workspace_url": f"#/workspace?{urlencode(reuse_params)}",
     }
 
 
-def _build_gallery_page_json(assets: list[GalleryAsset], *, page: int, page_size: int) -> dict[str, Any]:
+def _build_gallery_page_json(assets: list[GalleryAsset], web_config: WebUiConfig, *, page: int, page_size: int) -> dict[str, Any]:
     """Build a paginated GalleryPage response dict."""
     total_count = len(assets)
     total_pages = max(1, (total_count + page_size - 1) // page_size)
     page_assets, _ = _paginate_assets(assets, page=page, page_size=page_size)
     return {
-        "assets": [_gallery_asset_to_json(a) for a in page_assets],
+        "assets": [_gallery_asset_to_json(a, web_config) for a in page_assets],
         "page": page,
         "total_pages": total_pages,
         "total_count": total_count,
@@ -1266,63 +1662,20 @@ async def api_workspace() -> dict[str, Any]:
     data_dir = get_ziv_data_dir()
 
     all_assets = _list_gallery_assets(web_config.output_dir)
-    history_assets = [_gallery_asset_to_json(a) for a in all_assets[:20]]
+    history_assets = [_gallery_asset_to_json(a, web_config) for a in all_assets[:20]]
 
     image_models = [{"id": name, "label": name, "type": "image"} for name in web_config.image_model_options]
     video_models = [{"id": name, "label": name, "type": "video"} for name in web_config.video_model_options]
     loras_dir = data_dir / "loras"
     loras = [{"name": name, "path": str(loras_dir / f"{name}.safetensors")} for name in web_config.lora_options]
 
-    form_view = _build_workspace_form_view(web_config)
+    form_view = _build_workspace_bootstrap_view(web_config)
     image_default_model = form_view["image_default_model"]
     video_default_model = form_view["video_default_model"]
-    app_config = web_config.app_config
-
-    image_defaults: dict[str, Any] = {"steps": 20, "guidance": 7.5, "width": 1024, "height": 1024}
-    if image_default_model and image_default_model in form_view["image_model_defaults"]:
-        model_defs = form_view["image_model_defaults"][image_default_model]
-        ratio = model_defs.get("ratio", "2:3")
-        size = model_defs.get("size", "m")
-        dims = app_config.get("sizes", {}).get(ratio, {}).get(size, {})
-        image_defaults = {
-            "steps": model_defs.get("steps", 20),
-            "guidance": model_defs.get("guidance", 7.5),
-            "width": dims.get("width", 1024),
-            "height": dims.get("height", 1024),
-        }
-
-    video_defaults: dict[str, Any] = {"steps": 20, "width": 848, "height": 480, "frame_count": 97, "fps": 24}
-    if video_default_model and video_default_model in form_view["video_model_defaults"]:
-        model_defs = form_view["video_model_defaults"][video_default_model]
-        video_defaults = {
-            "steps": model_defs.get("steps", 20),
-            "width": model_defs.get("width", 848),
-            "height": model_defs.get("height", 480),
-            "frame_count": model_defs.get("num_frames", 97),
-            "fps": 24,
-        }
-
-    # Per-model defaults maps (all configured models, for use on model switch)
-    image_model_defaults_map: dict[str, Any] = {}
-    for alias, model_defs in form_view["image_model_defaults"].items():
-        ratio = model_defs.get("ratio", "2:3")
-        size = model_defs.get("size", "m")
-        dims = app_config.get("sizes", {}).get(ratio, {}).get(size, {})
-        image_model_defaults_map[alias] = {
-            "steps": model_defs.get("steps", 20),
-            "guidance": model_defs.get("guidance", 7.5),
-            "width": dims.get("width", 1024),
-            "height": dims.get("height", 1024),
-        }
-
-    video_model_defaults_map: dict[str, Any] = {}
-    for alias, model_defs in form_view["video_model_defaults"].items():
-        video_model_defaults_map[alias] = {
-            "steps": model_defs.get("steps", 20),
-            "guidance": 0,
-            "width": model_defs.get("width", 848),
-            "height": model_defs.get("height", 480),
-        }
+    image_model_defaults_map = form_view["image_model_defaults"]
+    video_model_defaults_map = form_view["video_model_defaults"]
+    image_defaults = image_model_defaults_map.get(image_default_model) or _build_image_bootstrap_defaults(image_default_model or "", web_config)
+    video_defaults = video_model_defaults_map.get(video_default_model) or _build_video_bootstrap_defaults(video_default_model or "", web_config)
 
     return {
         "image_models": image_models,
@@ -1335,11 +1688,24 @@ async def api_workspace() -> dict[str, Any]:
         "video_model_defaults": video_model_defaults_map,
         "current_image_model": image_default_model,
         "current_video_model": video_default_model,
+        "output_dir": web_config.output_dir,
+        "quantize_options": list(web_config.quantize_options),
+        "image_ratios": list(web_config.image_ratios),
+        "video_ratios": list(web_config.video_ratios),
+        "image_size_options": {ratio: list(options) for ratio, options in web_config.image_size_options.items()},
+        "video_size_options": {ratio: list(options) for ratio, options in web_config.video_size_options.items()},
+        "scheduler_options": list(web_config.scheduler_options),
+        "workflow_contract": _build_workflow_contract(),
         "config": {
             "visible_sections": list(web_config.visible_sections),
             "theme": web_config.theme,
             "gallery_page_size": web_config.gallery_page_size,
             "startup_view": web_config.startup_view,
+            "output_dir": web_config.output_dir,
+            "default_models": {
+                "image": web_config.default_models.image,
+                "video": web_config.default_models.video,
+            },
         },
     }
 
@@ -1357,7 +1723,7 @@ async def api_history(
         media_filter=media_filter,
         sort_order=sort_order,
     )
-    return _build_gallery_page_json(all_assets, page=page, page_size=web_config.gallery_page_size)
+    return _build_gallery_page_json(all_assets, web_config, page=page, page_size=web_config.gallery_page_size)
 
 
 @app.get("/api/gallery")
@@ -1373,7 +1739,7 @@ async def api_gallery_json(
         media_filter=filter,
         sort_order=sort_order,
     )
-    return _build_gallery_page_json(all_assets, page=page, page_size=web_config.gallery_page_size)
+    return _build_gallery_page_json(all_assets, web_config, page=page, page_size=web_config.gallery_page_size)
 
 
 @app.get("/api/config")

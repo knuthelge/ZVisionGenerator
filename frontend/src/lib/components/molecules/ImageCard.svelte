@@ -4,6 +4,7 @@
   interface Props {
     asset: GalleryAsset;
     selected?: boolean;
+    active?: boolean;
     onselect?: (asset: GalleryAsset, selected: boolean) => void;
     onview?: (asset: GalleryAsset) => void;
     ondownload?: (asset: GalleryAsset) => void;
@@ -14,6 +15,7 @@
   let {
     asset,
     selected = false,
+    active = false,
     onselect,
     onview,
     ondownload,
@@ -23,20 +25,16 @@
 
   let hovered = $state(false);
 
-  function toggleSelect(e: MouseEvent): void {
-    e.stopPropagation();
-    onselect?.(asset, !selected);
-  }
-
   const cardCls = $derived(
     selected
-      ? 'border-teal-500/60 ring-2 ring-teal-500/50 bg-teal-500/5'
-      : 'border-zinc-800 hover:border-zinc-700 bg-zinc-950'
+      ? 'surface-gallery-card-selected'
+      : 'surface-gallery-card'
   );
+  const activeCls = $derived(active && !selected ? 'ring-2 ring-white/30' : '');
 </script>
 
-<article
-  class="relative group overflow-hidden rounded-lg border transition-all cursor-pointer {cardCls}"
+<div
+  class="relative group overflow-hidden rounded-lg transition-all cursor-pointer {cardCls} {activeCls}"
   onmouseenter={() => hovered = true}
   onmouseleave={() => hovered = false}
   onclick={() => onview?.(asset)}
@@ -46,7 +44,7 @@
   aria-label="Asset: {asset.filename}"
 >
   <!-- Thumbnail -->
-  <div class="aspect-square bg-zinc-900 overflow-hidden">
+  <div class="surface-media-frame aspect-square overflow-hidden">
     {#if asset.media_type === 'video'}
       <video
         src={asset.thumbnail_url || asset.url}
@@ -66,27 +64,24 @@
 
   <!-- Selection checkbox (top-left) -->
   <div class="absolute top-2 left-2 z-10">
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div onclick={toggleSelect}>
-      <input
-        type="checkbox"
-        checked={selected}
-        class="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-teal-500 accent-teal-500 cursor-pointer focus-visible:focus-ring"
-        aria-label="Select {asset.filename}"
-        onclick={(e) => e.stopPropagation()}
-        onchange={(e) => onselect?.(asset, (e.currentTarget as HTMLInputElement).checked)}
-      />
-    </div>
+    <input
+      type="checkbox"
+      checked={selected}
+      class="surface-checkbox h-4 w-4 cursor-pointer rounded focus-visible:focus-ring"
+      aria-label="Select {asset.filename}"
+      onclick={(e) => e.stopPropagation()}
+      onchange={(e) => onselect?.(asset, (e.currentTarget as HTMLInputElement).checked)}
+    />
   </div>
 
   <!-- Hover overlay with action buttons -->
   {#if hovered}
-    <div class="absolute inset-0 bg-black/60 flex items-center justify-center gap-2 z-10">
+    <div class="absolute inset-0 bg-black/60 flex items-center justify-center gap-2 z-10 pointer-events-none">
       <!-- View / Fullscreen -->
       <button
         type="button"
         onclick={(e) => { e.stopPropagation(); onview?.(asset); }}
-        class="rounded-md bg-zinc-900/90 p-2 text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors focus-visible:focus-ring"
+        class="surface-overlay-action pointer-events-auto rounded-md p-2 focus-visible:focus-ring"
         title="View fullscreen"
         aria-label="View fullscreen"
       >
@@ -99,7 +94,7 @@
         href={asset.url}
         download={asset.filename}
         onclick={(e) => { e.stopPropagation(); ondownload?.(asset); }}
-        class="rounded-md bg-zinc-900/90 p-2 text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors focus-visible:focus-ring"
+        class="surface-overlay-action pointer-events-auto rounded-md p-2 focus-visible:focus-ring"
         title="Download"
         aria-label="Download {asset.filename}"
       >
@@ -111,7 +106,7 @@
       <a
         href={asset.reuse_workspace_url}
         onclick={(e) => { e.stopPropagation(); onreuse?.(asset); }}
-        class="rounded-md bg-teal-600/90 p-2 text-white hover:bg-teal-500 transition-colors focus-visible:focus-ring"
+        class="surface-overlay-action-primary pointer-events-auto rounded-md p-2 focus-visible:focus-ring"
         title="Reuse in workspace"
         aria-label="Reuse settings in workspace"
       >
@@ -123,7 +118,7 @@
       <button
         type="button"
         onclick={(e) => { e.stopPropagation(); ondelete?.(asset); }}
-        class="rounded-md bg-zinc-900/90 p-2 text-red-400 hover:bg-red-900/40 hover:text-red-300 transition-colors focus-visible:focus-ring"
+        class="surface-overlay-action-danger pointer-events-auto rounded-md p-2 focus-visible:focus-ring"
         title="Delete"
         aria-label="Delete {asset.filename}"
       >
@@ -135,10 +130,10 @@
   {/if}
 
   <!-- Footer -->
-  <div class="bg-[#202024] px-3 py-2">
+  <div class="surface-footer-strip px-3 py-2">
     <p class="text-xs text-zinc-300 truncate font-medium">{asset.filename}</p>
     <p class="text-xs text-zinc-500 truncate mt-0.5">
       {asset.workflow} &middot; {new Date(asset.created_at).toLocaleDateString()}
     </p>
   </div>
-</article>
+</div>
