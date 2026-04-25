@@ -349,7 +349,125 @@ class TestWebServerSurface:
         assert payload["image_ratios"] == ["2:3"]
         assert payload["video_ratios"] == ["16:9"]
         assert payload["quantize_options"] == [4, 8]
+        assert payload["prompt_sources"] == ["inline", "file"]
+        assert payload["default_prompt_source"] == "inline"
+        assert payload["prompt_file"] == {
+            "accepted_extensions": [".yaml", ".yml"],
+            "browse_kind": "existing_file",
+            "selection_required": True,
+        }
         assert payload["workflow_contract"]["values"] == ["txt2img", "img2img", "txt2vid", "img2vid"]
+        assert payload["workflow_contract"]["definitions"]["txt2img"]["visible_controls"] == [
+            "workflow",
+            "model",
+            "quantize",
+            "loras",
+            "prompt_source",
+            "prompt_inline",
+            "negative_prompt",
+            "prompt_file_path",
+            "prompt_file_option",
+            "prompt_file_preview",
+            "prompt_file_edit",
+            "ratio",
+            "size",
+            "custom_dimensions",
+            "runs",
+            "steps",
+            "guidance",
+            "seed",
+            "scheduler",
+            "postprocess_sharpen",
+            "postprocess_contrast",
+            "postprocess_saturation",
+            "image_upscale_enabled",
+            "image_upscale_factor",
+            "image_upscale_denoise",
+            "image_upscale_steps",
+            "image_upscale_guidance",
+            "image_upscale_sharpen",
+        ]
+        assert payload["workflow_contract"]["definitions"]["img2img"]["visible_controls"] == [
+            "workflow",
+            "model",
+            "quantize",
+            "loras",
+            "prompt_source",
+            "prompt_inline",
+            "negative_prompt",
+            "prompt_file_path",
+            "prompt_file_option",
+            "prompt_file_preview",
+            "prompt_file_edit",
+            "reference_image",
+            "reference_image_path",
+            "reference_image_clear",
+            "ratio",
+            "size",
+            "custom_dimensions",
+            "runs",
+            "steps",
+            "guidance",
+            "image_strength",
+            "seed",
+            "scheduler",
+            "postprocess_sharpen",
+            "postprocess_contrast",
+            "postprocess_saturation",
+            "image_upscale_enabled",
+            "image_upscale_factor",
+            "image_upscale_denoise",
+            "image_upscale_steps",
+            "image_upscale_guidance",
+            "image_upscale_sharpen",
+        ]
+        assert payload["workflow_contract"]["definitions"]["txt2vid"]["visible_controls"] == [
+            "workflow",
+            "model",
+            "loras",
+            "prompt_source",
+            "prompt_inline",
+            "prompt_file_path",
+            "prompt_file_option",
+            "prompt_file_preview",
+            "prompt_file_edit",
+            "ratio",
+            "size",
+            "custom_dimensions",
+            "runs",
+            "frame_count",
+            "steps",
+            "seed",
+            "audio",
+            "low_memory",
+            "video_upscale_enabled",
+            "video_upscale_factor",
+        ]
+        assert payload["workflow_contract"]["definitions"]["img2vid"]["visible_controls"] == [
+            "workflow",
+            "model",
+            "loras",
+            "prompt_source",
+            "prompt_inline",
+            "prompt_file_path",
+            "prompt_file_option",
+            "prompt_file_preview",
+            "prompt_file_edit",
+            "reference_image",
+            "reference_image_path",
+            "reference_image_clear",
+            "ratio",
+            "size",
+            "custom_dimensions",
+            "runs",
+            "frame_count",
+            "steps",
+            "seed",
+            "audio",
+            "low_memory",
+            "video_upscale_enabled",
+            "video_upscale_factor",
+        ]
         assert payload["config"]["startup_view"] == "workspace"
 
     def test_api_workspace_uses_config_backed_video_bootstrap_fallbacks_when_detection_fails(self, monkeypatch, tmp_path):
@@ -565,6 +683,90 @@ class TestWebServerSurface:
         assert validation_response.status_code == 422
         assert validation_response.json() == {"detail": "Field 'prompt' is required."}
 
+    def test_api_generate_file_mode_resolves_selected_prompt_option(self, monkeypatch, tmp_path):
+        output_dir = tmp_path / "outputs"
+        output_dir.mkdir()
+        prompt_file = tmp_path / "prompts.yaml"
+        prompt_file.write_text(
+            """
+portrait:
+  - prompt: "hero portrait"
+    negative: "blurry"
+""".strip(),
+            encoding="utf-8",
+        )
+        submitted: dict[str, object] = {}
+
+        def _store_request(**kwargs: object) -> str:
+            submitted.update(kwargs)
+            return "job-image"
+
+        monkeypatch.setattr(web_server, "load_web_config", lambda: _make_web_config(output_dir))
+        monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(web_server, "detect_image_model", lambda _model: MagicMock(family="flux"))
+        monkeypatch.setattr(
+            web_server,
+            "resolve_defaults",
+            lambda *args, **kwargs: {"steps": 13, "guidance": 4.4, "scheduler": "beta", "supports_negative_prompt": True},
+        )
+        monkeypatch.setattr(web_server, "validate_scheduler", lambda *args, **kwargs: None)
+        monkeypatch.setattr(web_server.web_runner, "submit_image_request_job", _store_request)
+
+        with TestClient(web_server.app) as client:
+            response = client.post(
+                "/api/generate",
+                data={
+                    "mode": "image",
+                    "workflow": "txt2img",
+                    "prompt_source": "file",
+                    "prompts_file": str(prompt_file),
+                    "prompt_option_id": "portrait:0",
+                    "model": "zit",
+                    "ratio": "2:3",
+                    "size": "m",
+                },
+            )
+
+        assert response.status_code == 200
+        request = submitted["request"]
+        assert getattr(request, "prompt") == "hero portrait"
+        assert getattr(request, "negative_prompt") == "blurry"
+        assert submitted["prompts_data"] == {"portrait": [("hero portrait", "blurry")]}
+        assert response.json()["prompt"] == "hero portrait"
+
+    def test_api_generate_file_mode_rejects_stale_prompt_option(self, monkeypatch, tmp_path):
+        output_dir = tmp_path / "outputs"
+        output_dir.mkdir()
+        prompt_file = tmp_path / "prompts.yaml"
+        prompt_file.write_text("portrait:\n  - prompt: hero\n", encoding="utf-8")
+        monkeypatch.setattr(web_server, "load_web_config", lambda: _make_web_config(output_dir))
+        monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(web_server, "detect_image_model", lambda _model: MagicMock(family="flux"))
+        monkeypatch.setattr(
+            web_server,
+            "resolve_defaults",
+            lambda *args, **kwargs: {"steps": 13, "guidance": 4.4, "scheduler": "beta", "supports_negative_prompt": True},
+        )
+        monkeypatch.setattr(web_server, "validate_scheduler", lambda *args, **kwargs: None)
+
+        with TestClient(web_server.app) as client:
+            response = client.post(
+                "/api/generate",
+                data={
+                    "mode": "image",
+                    "workflow": "txt2img",
+                    "prompt_source": "file",
+                    "prompts_file": str(prompt_file),
+                    "prompt_option_id": "portrait:99",
+                    "model": "zit",
+                    "ratio": "2:3",
+                    "size": "m",
+                },
+            )
+
+        assert response.status_code == 422
+        assert response.json() == {"detail": "Prompt option 'portrait:99' is missing or inactive."}
+
     def test_api_generate_accepts_uploaded_reference_images(self, monkeypatch, tmp_path):
         output_dir = tmp_path / "outputs"
         output_dir.mkdir()
@@ -688,6 +890,19 @@ class TestWebServerSurface:
         args = submitted["args"]
         assert getattr(request, "image_strength") == 0.0
         assert getattr(args, "image_strength") == 0.0
+
+    def test_resolve_numeric_toggle_parses_enabled_amount_and_disabled_state(self):
+        form = {
+            "sharpen_enabled": "true",
+            "sharpen_amount": "0.75",
+            "contrast_enabled": "false",
+            "saturation_enabled": "true",
+            "saturation_amount": "1.2",
+        }
+
+        assert web_server._resolve_numeric_toggle(form, "sharpen_enabled", "sharpen_amount", default_enabled=True) == 0.75
+        assert web_server._resolve_numeric_toggle(form, "contrast_enabled", "contrast_amount", default_enabled=False) is False
+        assert web_server._resolve_numeric_toggle(form, "saturation_enabled", "saturation_amount", default_enabled=False) == 1.2
 
     def test_api_generate_rejects_unknown_image_scheduler(self, monkeypatch, tmp_path):
         monkeypatch.setattr(web_server, "load_web_config", lambda: _make_web_config(tmp_path / "outputs"))
@@ -876,10 +1091,15 @@ class TestWebServerSurface:
             hf_response = client.post("/api/models/import-lora/hf", json={"repo_id": "org/lora"})
 
         assert models_response.status_code == 200
-        assert models_response.json()["image_models"] == [{"name": "flux-dev", "family": "flux", "size": "23 GB"}]
-        assert models_response.json()["video_models"] == [{"name": "ltx-8", "family": "ltx-video", "supports_i2v": True}]
-        assert models_response.json()["loras"] == [{"name": "portrait-cinematic", "file_size_mb": 123, "size_label": "123 MB"}]
-        assert models_response.json()["huggingface_token_env_var"] == "HF_TOKEN"
+        assert models_response.json() == {
+            "models_dir": str(tmp_path / "models"),
+            "loras_dir": str(tmp_path / "loras"),
+            "image_models": [{"name": "flux-dev", "family": "flux", "size": "23 GB"}],
+            "video_models": [{"name": "ltx-8", "family": "ltx-video", "supports_i2v": True}],
+            "loras": [{"name": "portrait-cinematic", "file_size_mb": 123, "size_label": "123 MB"}],
+            "huggingface_configured": True,
+            "huggingface_token_env_var": "HF_TOKEN",
+        }
         assert convert_response.json() == {"status": "ok", "tone": "success", "message": "Converted."}
         assert local_response.json() == {"status": "ok", "tone": "success", "message": "Imported local."}
         assert hf_response.json() == {"status": "ok", "tone": "success", "message": "Imported hf."}
@@ -892,6 +1112,121 @@ class TestWebServerSurface:
 
         assert response.status_code == 200
         assert response.json() == {"path": "/tmp/picked"}
+
+    def test_api_picker_returns_status_payload_for_existing_file(self, monkeypatch):
+        monkeypatch.setattr(
+            web_server,
+            "pick_path",
+            lambda *_args, **_kwargs: SimpleNamespace(to_payload=lambda: {"status": "selected", "path": "/tmp/prompts.yaml", "message": None}),
+        )
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/picker", json={"kind": "existing_file", "purpose": "prompt_file"})
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "selected", "path": "/tmp/prompts.yaml", "message": None}
+
+    def test_api_prompt_files_inspect_normalizes_path_and_returns_active_options(self, monkeypatch, tmp_path):
+        home_dir = tmp_path / "home"
+        home_dir.mkdir()
+        prompt_file = home_dir / "prompts.yaml"
+        prompt_file.write_text(
+            """
+snippets:
+  mood: cinematic lighting
+portrait:
+  - prompt: ["hero", $mood]
+  - prompt: "inactive"
+    active: false
+  - prompt: "second active"
+    negative: "blurry"
+""".strip(),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("HOME", str(home_dir))
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt-files/inspect", json={"path": "~/prompts.yaml"})
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "path": str(prompt_file.resolve()),
+            "options": [
+                {
+                    "id": "portrait:0",
+                    "set_name": "portrait",
+                    "source_index": 0,
+                    "label": "portrait #1 · hero. cinematic lighting",
+                    "prompt_preview": "hero. cinematic lighting",
+                    "negative_preview": None,
+                },
+                {
+                    "id": "portrait:2",
+                    "set_name": "portrait",
+                    "source_index": 2,
+                    "label": "portrait #3 · second active",
+                    "prompt_preview": "second active",
+                    "negative_preview": "blurry",
+                },
+            ],
+        }
+
+    def test_api_prompt_files_read_normalizes_path_and_returns_raw_text_and_active_options(self, monkeypatch, tmp_path):
+        home_dir = tmp_path / "home"
+        home_dir.mkdir()
+        prompt_file = home_dir / "prompts.yaml"
+        raw_text = """
+portrait:
+  - prompt: first active
+  - prompt: inactive
+    active: false
+  - prompt: second active
+    negative: noisy
+""".strip()
+        prompt_file.write_text(raw_text, encoding="utf-8")
+        monkeypatch.setenv("HOME", str(home_dir))
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt-files/read", json={"path": "~/prompts.yaml"})
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "path": str(prompt_file.resolve()),
+            "raw_text": raw_text,
+            "options": [
+                {
+                    "id": "portrait:0",
+                    "set_name": "portrait",
+                    "source_index": 0,
+                    "label": "portrait #1 · first active",
+                    "prompt_preview": "first active",
+                    "negative_preview": None,
+                },
+                {
+                    "id": "portrait:2",
+                    "set_name": "portrait",
+                    "source_index": 2,
+                    "label": "portrait #3 · second active",
+                    "prompt_preview": "second active",
+                    "negative_preview": "noisy",
+                },
+            ],
+        }
+
+    def test_api_prompt_files_write_rejects_invalid_yaml_without_mutating_file(self, tmp_path):
+        prompt_file = tmp_path / "prompts.yaml"
+        original_text = "portrait:\n  - prompt: hello\n"
+        prompt_file.write_text(original_text, encoding="utf-8")
+
+        with TestClient(web_server.app) as client:
+            response = client.put(
+                "/api/prompt-files/write",
+                json={"path": str(prompt_file), "raw_text": "portrait:\n  - prompt: [unterminated"},
+            )
+
+        assert response.status_code == 422
+        assert "Failed to parse prompts file" in response.json()["detail"]
+        assert prompt_file.read_text(encoding="utf-8") == original_text
 
     def test_api_delete_gallery_asset_removes_asset_and_sidecar(self, monkeypatch, tmp_path):
         output_dir = tmp_path / "outputs"

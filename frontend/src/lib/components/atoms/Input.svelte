@@ -16,6 +16,7 @@
     oninput?: (event: Event) => void;
     onchange?: (event: Event) => void;
     onblur?: (event: FocusEvent) => void;
+    onkeydown?: (event: KeyboardEvent) => void;
   }
 
   let {
@@ -34,7 +35,8 @@
     autocomplete,
     oninput,
     onchange,
-    onblur
+    onblur,
+    onkeydown
   }: Props = $props();
 
   const baseCls = 'surface-input w-full transition-colors';
@@ -60,6 +62,7 @@
   {oninput}
   {onchange}
   {onblur}
+  {onkeydown}
 />
 {#if error}
   <p id="{id}-error" class="mt-1 text-xs text-red-400">{error}</p>

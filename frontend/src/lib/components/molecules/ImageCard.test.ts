@@ -55,11 +55,11 @@ describe('ImageCard', () => {
 
   it('opens the asset from pointer and keyboard activation', async () => {
     const asset = makeAsset();
-    const onview = vi.fn();
+    const onactivate = vi.fn();
 
     app = flushSync(() => mount(ImageCard, {
       target,
-      props: { asset, onview },
+      props: { asset, onactivate },
     }));
     await settle();
 
@@ -69,19 +69,19 @@ describe('ImageCard', () => {
     card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     card!.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' }));
 
-    expect(onview).toHaveBeenCalledTimes(2);
-    expect(onview).toHaveBeenNthCalledWith(1, asset);
-    expect(onview).toHaveBeenNthCalledWith(2, asset);
+    expect(onactivate).toHaveBeenCalledTimes(2);
+    expect(onactivate).toHaveBeenNthCalledWith(1, asset);
+    expect(onactivate).toHaveBeenNthCalledWith(2, asset);
   });
 
   it('toggles selection without bubbling into the card view action', async () => {
     const asset = makeAsset();
-    const onview = vi.fn();
+    const onactivate = vi.fn();
     const onselect = vi.fn();
 
     app = flushSync(() => mount(ImageCard, {
       target,
-      props: { asset, onview, onselect, selected: false },
+      props: { asset, onactivate, onselect, selected: false },
     }));
     await settle();
 
@@ -91,7 +91,7 @@ describe('ImageCard', () => {
     checkbox!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    expect(onview).not.toHaveBeenCalled();
+    expect(onactivate).not.toHaveBeenCalled();
 
     expect(onselect).toHaveBeenCalledTimes(1);
     expect(onselect).toHaveBeenCalledWith(asset, true);

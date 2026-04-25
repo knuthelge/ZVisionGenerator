@@ -53,8 +53,10 @@ def test_web_ui_docs_cover_launch_access_pages_and_workflows() -> None:
         assert workflow_name in web_guide
 
     assert "On Windows, the Web UI is currently image-only" in web_guide
-    assert "CLI-only" in web_guide
-    assert "sharpen, contrast, and saturation remain CLI-only" in web_guide
+    assert "CLI-Only" in web_guide
+    assert "upscale_save_pre" in web_guide
+    assert "scheduler" in web_guide
+    assert "upscale" in web_guide
     assert "Running `ziv` with no subcommand starts the Web UI." in cli_reference
     assert "`ziv ui` / `ziv-ui`" in cli_reference
 

@@ -124,11 +124,6 @@
     selected = next;
   }
 
-  function selectAsset(asset: GalleryAsset): void {
-    selectedAsset = asset;
-    router.replace('gallery', { selected: asset.path });
-  }
-
   async function deleteSelected(): Promise<void> {
     if (!confirm(`Delete ${selectedCount} selected asset${selectedCount !== 1 ? 's' : ''}?`)) return;
     const paths = Array.from(selected);
@@ -152,12 +147,22 @@
     }
   }
 
+  function selectAsset(asset: GalleryAsset): void {
+    selectedAsset = asset;
+    router.replace('gallery', { selected: asset.path });
+  }
+
   function openLightbox(): void {
     lightboxOpen = true;
   }
 
   function closeLightbox(): void {
     lightboxOpen = false;
+  }
+
+  function handleOpenLightbox(asset: GalleryAsset): void {
+    selectAsset(asset);
+    openLightbox();
   }
 
   function reuseInWorkspace(asset: GalleryAsset): void {
@@ -244,7 +249,8 @@
               selected={isSelected}
               active={isActive}
               onselect={toggleSelect}
-              onview={selectAsset}
+              onactivate={selectAsset}
+              onopenlightbox={handleOpenLightbox}
               onreuse={reuseInWorkspace}
               ondelete={deleteSingle}
             />

@@ -6,7 +6,8 @@
     selected?: boolean;
     active?: boolean;
     onselect?: (asset: GalleryAsset, selected: boolean) => void;
-    onview?: (asset: GalleryAsset) => void;
+    onactivate?: (asset: GalleryAsset) => void;
+    onopenlightbox?: (asset: GalleryAsset) => void;
     ondownload?: (asset: GalleryAsset) => void;
     onreuse?: (asset: GalleryAsset) => void;
     ondelete?: (asset: GalleryAsset) => void;
@@ -17,7 +18,8 @@
     selected = false,
     active = false,
     onselect,
-    onview,
+    onactivate,
+    onopenlightbox,
     ondownload,
     onreuse,
     ondelete
@@ -37,10 +39,10 @@
   class="relative group overflow-hidden rounded-lg transition-all cursor-pointer {cardCls} {activeCls}"
   onmouseenter={() => hovered = true}
   onmouseleave={() => hovered = false}
-  onclick={() => onview?.(asset)}
+  onclick={() => onactivate?.(asset)}
   role="button"
   tabindex="0"
-  onkeydown={(e) => e.key === 'Enter' && onview?.(asset)}
+  onkeydown={(e) => e.key === 'Enter' && onactivate?.(asset)}
   aria-label="Asset: {asset.filename}"
 >
   <!-- Thumbnail -->
@@ -80,7 +82,7 @@
       <!-- View / Fullscreen -->
       <button
         type="button"
-        onclick={(e) => { e.stopPropagation(); onview?.(asset); }}
+        onclick={(e) => { e.stopPropagation(); onopenlightbox?.(asset); }}
         class="surface-overlay-action pointer-events-auto rounded-md p-2 focus-visible:focus-ring"
         title="View fullscreen"
         aria-label="View fullscreen"

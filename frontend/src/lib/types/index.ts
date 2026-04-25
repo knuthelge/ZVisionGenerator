@@ -4,6 +4,8 @@ export type Workflow = 'txt2img' | 'img2img' | 'txt2vid' | 'img2vid';
 
 export type WorkflowMode = 'image' | 'video';
 
+export type PromptSource = 'inline' | 'file';
+
 export interface ReuseState {
   requested_workflow: Workflow;
   resolved_workflow: Workflow;
@@ -65,7 +67,42 @@ export interface WorkspaceContext {
   image_size_options: Record<string, string[]>;
   video_size_options: Record<string, string[]>;
   scheduler_options: string[];
+  prompt_sources: PromptSource[];
+  default_prompt_source: PromptSource;
+  prompt_file: PromptFileContract;
   workflow_contract: WorkflowContract;
+}
+
+export interface PromptFileContract {
+  accepted_extensions: string[];
+  browse_kind: 'existing_file';
+  selection_required: boolean;
+}
+
+export interface PromptFileOption {
+  id: string;
+  set_name: string;
+  source_index: number;
+  label: string;
+  prompt_preview: string;
+  negative_preview: string | null;
+}
+
+export interface PromptFileInspection {
+  path: string;
+  options: PromptFileOption[];
+}
+
+export interface PromptFileDocument extends PromptFileInspection {
+  raw_text: string;
+}
+
+export type PathPickerStatus = 'selected' | 'cancelled' | 'unsupported' | 'error';
+
+export interface PathPickerResult {
+  status: PathPickerStatus;
+  path: string | null;
+  message: string | null;
 }
 
 export interface UpscaleDefaults {
@@ -123,6 +160,7 @@ export interface VideoModelDefaults {
 export interface WorkflowContractEntry {
   mode: WorkflowMode;
   model_kind: WorkflowMode;
+  visible_controls: string[];
   supports_reference_image: boolean;
   requires_reference_image: boolean;
   clear_fields: string[];
@@ -161,8 +199,11 @@ export interface WebUiConfig {
 
 export interface DraftState {
   workflow: Workflow;
+  promptSource: PromptSource;
   prompt: string;
   negativePrompt: string;
+  promptFilePath: string | null;
+  promptFileOptionId: string | null;
   model: string;
   ratio: string;
   size: string;
@@ -185,6 +226,19 @@ export interface DraftState {
   historyCollapsed: boolean;
   lastGeneratedAt: string | null;
   version: number;
+  scheduler: string | null;
+  postprocessSharpenEnabled: boolean;
+  postprocessSharpenAmount: number;
+  postprocessContrastEnabled: boolean;
+  postprocessContrastAmount: number;
+  postprocessSaturationEnabled: boolean;
+  postprocessSaturationAmount: number;
+  upscaleDenoise: number | null;
+  upscaleSteps: number | null;
+  upscaleGuidance: number | null;
+  upscaleSharpen: boolean;
+  videoUpscaleEnabled: boolean;
+  videoUpscaleFactor: number;
 }
 
 export type WorkspacePrefill = Partial<Omit<DraftState, 'historyCollapsed' | 'lastGeneratedAt' | 'version'>>;
@@ -354,7 +408,6 @@ export interface ModelInventory {
   image_models: ModelEntry[];
   video_models: VideoModelEntry[];
   loras: LoraEntry[];
-  available_surfaces: string[];
   huggingface_configured: boolean;
   huggingface_token_env_var: string | null;
 }

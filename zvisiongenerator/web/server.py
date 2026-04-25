@@ -34,6 +34,8 @@ from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_lora_path, re
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.video_cli import _align_ltx_frames, _align_resolution
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
+from zvisiongenerator.web.path_picker import pick_path
+from zvisiongenerator.web.prompt_files import inspect_prompt_file, read_prompt_file, resolve_prompt_file_option, write_prompt_file
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner
 
 
@@ -59,6 +61,36 @@ _WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
     "txt2img": {
         "mode": "image",
         "model_kind": "image",
+        "visible_controls": [
+            "workflow",
+            "model",
+            "quantize",
+            "loras",
+            "prompt_source",
+            "prompt_inline",
+            "negative_prompt",
+            "prompt_file_path",
+            "prompt_file_option",
+            "prompt_file_preview",
+            "prompt_file_edit",
+            "ratio",
+            "size",
+            "custom_dimensions",
+            "runs",
+            "steps",
+            "guidance",
+            "seed",
+            "scheduler",
+            "postprocess_sharpen",
+            "postprocess_contrast",
+            "postprocess_saturation",
+            "image_upscale_enabled",
+            "image_upscale_factor",
+            "image_upscale_denoise",
+            "image_upscale_steps",
+            "image_upscale_guidance",
+            "image_upscale_sharpen",
+        ],
         "supports_reference_image": False,
         "requires_reference_image": False,
         "clear_fields": ["image_path", "image_strength", "frames", "audio", "low_memory"],
@@ -66,6 +98,40 @@ _WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
     "img2img": {
         "mode": "image",
         "model_kind": "image",
+        "visible_controls": [
+            "workflow",
+            "model",
+            "quantize",
+            "loras",
+            "prompt_source",
+            "prompt_inline",
+            "negative_prompt",
+            "prompt_file_path",
+            "prompt_file_option",
+            "prompt_file_preview",
+            "prompt_file_edit",
+            "reference_image",
+            "reference_image_path",
+            "reference_image_clear",
+            "ratio",
+            "size",
+            "custom_dimensions",
+            "runs",
+            "steps",
+            "guidance",
+            "image_strength",
+            "seed",
+            "scheduler",
+            "postprocess_sharpen",
+            "postprocess_contrast",
+            "postprocess_saturation",
+            "image_upscale_enabled",
+            "image_upscale_factor",
+            "image_upscale_denoise",
+            "image_upscale_steps",
+            "image_upscale_guidance",
+            "image_upscale_sharpen",
+        ],
         "supports_reference_image": True,
         "requires_reference_image": True,
         "clear_fields": ["frames", "audio", "low_memory"],
@@ -73,6 +139,28 @@ _WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
     "txt2vid": {
         "mode": "video",
         "model_kind": "video",
+        "visible_controls": [
+            "workflow",
+            "model",
+            "loras",
+            "prompt_source",
+            "prompt_inline",
+            "prompt_file_path",
+            "prompt_file_option",
+            "prompt_file_preview",
+            "prompt_file_edit",
+            "ratio",
+            "size",
+            "custom_dimensions",
+            "runs",
+            "frame_count",
+            "steps",
+            "seed",
+            "audio",
+            "low_memory",
+            "video_upscale_enabled",
+            "video_upscale_factor",
+        ],
         "supports_reference_image": False,
         "requires_reference_image": False,
         "clear_fields": [
@@ -89,6 +177,7 @@ _WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "saturation_amount",
             "upscale",
             "upscale_denoise",
+            "upscale_steps",
             "upscale_guidance",
             "upscale_sharpen",
             "upscale_save_pre",
@@ -97,6 +186,31 @@ _WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
     "img2vid": {
         "mode": "video",
         "model_kind": "video",
+        "visible_controls": [
+            "workflow",
+            "model",
+            "loras",
+            "prompt_source",
+            "prompt_inline",
+            "prompt_file_path",
+            "prompt_file_option",
+            "prompt_file_preview",
+            "prompt_file_edit",
+            "reference_image",
+            "reference_image_path",
+            "reference_image_clear",
+            "ratio",
+            "size",
+            "custom_dimensions",
+            "runs",
+            "frame_count",
+            "steps",
+            "seed",
+            "audio",
+            "low_memory",
+            "video_upscale_enabled",
+            "video_upscale_factor",
+        ],
         "supports_reference_image": True,
         "requires_reference_image": True,
         "clear_fields": [
@@ -111,12 +225,22 @@ _WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "saturation_amount",
             "upscale",
             "upscale_denoise",
+            "upscale_steps",
             "upscale_guidance",
             "upscale_sharpen",
             "upscale_save_pre",
         ],
     },
 }
+
+_PROMPT_SOURCE_VALUES = ("inline", "file")
+_DEFAULT_PROMPT_SOURCE = "inline"
+_PROMPT_FILE_CONTRACT = {
+    "accepted_extensions": [".yaml", ".yml"],
+    "browse_kind": "existing_file",
+    "selection_required": True,
+}
+_PROMPT_FILE_EXTENSIONS = tuple(_PROMPT_FILE_CONTRACT["accepted_extensions"])
 
 web_runner = WebRunner()
 
@@ -230,6 +354,52 @@ async def pick_directory(request: Request) -> dict[str, str | None]:
     payload = await request.json()
     selected_path = _pick_directory(_coerce_optional_string(payload.get("initial_dir")))
     return {"path": selected_path}
+
+
+@app.post("/api/picker")
+async def open_picker(request: Request) -> dict[str, str | None]:
+    """Open a shared native picker on the local machine running the Web UI host."""
+    payload = await request.json()
+    kind = _required_json_string(payload, "kind")
+    initial_path = _coerce_optional_string(payload.get("initial_path"))
+    return pick_path(kind, initial_path=initial_path).to_payload()
+
+
+@app.post("/api/prompt-files/inspect")
+async def api_prompt_file_inspect(request: Request) -> dict[str, Any]:
+    """Inspect a host-local prompt file and return active option metadata."""
+    payload = await request.json()
+    try:
+        document = inspect_prompt_file(_required_json_string(payload, "path"), accepted_extensions=_PROMPT_FILE_EXTENSIONS)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"path": document.path, "options": document.options}
+
+
+@app.post("/api/prompt-files/read")
+async def api_prompt_file_read(request: Request) -> dict[str, Any]:
+    """Read raw prompt-file YAML plus active option metadata."""
+    payload = await request.json()
+    try:
+        document = read_prompt_file(_required_json_string(payload, "path"), accepted_extensions=_PROMPT_FILE_EXTENSIONS)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"path": document.path, "raw_text": document.raw_text, "options": document.options}
+
+
+@app.put("/api/prompt-files/write")
+async def api_prompt_file_write(request: Request) -> dict[str, Any]:
+    """Validate and atomically replace a host-local prompt file."""
+    payload = await request.json()
+    try:
+        document = write_prompt_file(
+            _required_json_string(payload, "path"),
+            _required_json_string(payload, "raw_text"),
+            accepted_extensions=_PROMPT_FILE_EXTENSIONS,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"path": document.path, "options": document.options}
 
 
 @app.post("/api/generate")
@@ -526,8 +696,6 @@ def _build_workflow_contract() -> dict[str, Any]:
 def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     app_config = web_config.app_config
     workflow = _canonicalize_workflow(_optional_text(form, "workflow"), fallback="txt2img") or "txt2img"
-    prompt = _required_text(form, "prompt")
-    negative_prompt = _optional_text(form, "negative_prompt")
     model_name = _text_or_default(form, "model", web_config.default_models.image)
     if not model_name:
         raise ValueError("An image model is required.")
@@ -576,6 +744,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         {key: value for key, value in {"steps": args.steps, "guidance": args.guidance, "scheduler": args.scheduler}.items() if value is not None},
         backend_name,
     )
+    _prompt_source, prompt, negative_prompt, prompts_data = _resolve_prompt_submission(form)
     args.steps = defaults["steps"]
     args.guidance = defaults["guidance"]
     args.scheduler = defaults["scheduler"]
@@ -583,8 +752,11 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     if args.upscale and args.upscale_steps is None:
         args.upscale_steps = max(1, args.steps // 2)
 
+    if not defaults.get("supports_negative_prompt", False):
+        negative_prompt = None
+        prompts_data = _replace_prompt_negatives(prompts_data, negative_prompt=None)
+
     args.lora_paths, args.lora_weights = _resolve_loras(form)
-    prompts_data = {"web": [(prompt, negative_prompt)]}
     dims = app_config["sizes"][args.ratio][args.size]
 
     request = ImageGenerationRequest(
@@ -644,7 +816,6 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
 def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     app_config = web_config.app_config
     workflow = _canonicalize_workflow(_optional_text(form, "workflow"), fallback="txt2vid") or "txt2vid"
-    prompt = _required_text(form, "prompt")
     model_name = _text_or_default(form, "model", web_config.default_models.video)
     if not model_name:
         raise ValueError("A video model is required.")
@@ -654,6 +825,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     output_dir = _resolve_output_dir(_text_or_default(form, "output", web_config.output_dir))
     image_path = _resolve_reference_image(form, output_dir)
     audio_enabled = _checkbox(form, "audio", default=True)
+    _prompt_source, prompt, _negative_prompt, prompts_data = _resolve_prompt_submission(form)
     args = argparse.Namespace(
         model=model_name,
         prompt=prompt,
@@ -717,7 +889,6 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     args.num_frames = defaults["num_frames"]
     _normalize_video_args(args, app_config, model_info)
 
-    prompts_data = {"web": [(prompt, None)]}
     request = VideoGenerationRequest(
         backend=None,
         model=None,
@@ -756,6 +927,33 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         "supported_controls": (),
         "meta": f"{args.width}x{args.height} · {args.num_frames} frames · {args.steps} steps",
     }
+
+
+def _resolve_prompt_submission(form: Any) -> tuple[str, str, str | None, dict[str, list[tuple[str, str | None]]]]:
+    """Resolve inline or prompt-file submission into a single prompt payload."""
+    prompt_source = _text_or_default(form, "prompt_source", _DEFAULT_PROMPT_SOURCE)
+    if prompt_source not in _PROMPT_SOURCE_VALUES:
+        raise ValueError(f"Unknown prompt source '{prompt_source}'.")
+    if prompt_source == "file":
+        _normalized_path, option = resolve_prompt_file_option(
+            _required_text(form, "prompts_file"),
+            _required_text(form, "prompt_option_id"),
+            accepted_extensions=_PROMPT_FILE_EXTENSIONS,
+        )
+        prompts_data = {option.set_name: [(option.prompt, option.negative_prompt)]}
+        return prompt_source, option.prompt, option.negative_prompt, prompts_data
+
+    prompt = _required_text(form, "prompt")
+    negative_prompt = _optional_text(form, "negative_prompt")
+    return prompt_source, prompt, negative_prompt, {"web": [(prompt, negative_prompt)]}
+
+
+def _replace_prompt_negatives(
+    prompts_data: dict[str, list[tuple[str, str | None]]],
+    *,
+    negative_prompt: str | None,
+) -> dict[str, list[tuple[str, str | None]]]:
+    return {set_name: [(prompt, negative_prompt) for prompt, _existing_negative in entries] for set_name, entries in prompts_data.items()}
 
 
 def _required_text(form: Any, key: str) -> str:
@@ -1473,6 +1671,13 @@ def _coerce_optional_string(value: Any) -> str | None:
     return text or None
 
 
+def _required_json_string(payload: dict[str, Any], key: str) -> str:
+    value = _coerce_optional_string(payload.get(key))
+    if value is None:
+        raise HTTPException(status_code=422, detail=f"Field '{key}' is required.")
+    return value
+
+
 def _pick_directory(initial_dir: str | None) -> str | None:
     if sys.platform == "darwin":
         return _pick_directory_macos(initial_dir)
@@ -1695,6 +1900,9 @@ async def api_workspace() -> dict[str, Any]:
         "image_size_options": {ratio: list(options) for ratio, options in web_config.image_size_options.items()},
         "video_size_options": {ratio: list(options) for ratio, options in web_config.video_size_options.items()},
         "scheduler_options": list(web_config.scheduler_options),
+        "prompt_sources": list(_PROMPT_SOURCE_VALUES),
+        "default_prompt_source": _DEFAULT_PROMPT_SOURCE,
+        "prompt_file": dict(_PROMPT_FILE_CONTRACT),
         "workflow_contract": _build_workflow_contract(),
         "config": {
             "visible_sections": list(web_config.visible_sections),
@@ -1775,7 +1983,6 @@ async def api_models() -> dict[str, Any]:
         "image_models": image_models,
         "video_models": video_models,
         "loras": loras,
-        "available_surfaces": [],
         "huggingface_configured": token_var is not None,
         "huggingface_token_env_var": token_var,
     }

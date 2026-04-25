@@ -80,7 +80,9 @@ ziv ui
 ziv
 ```
 
-The Web UI starts a local server on `http://127.0.0.1:8080/` by default and opens your browser automatically. Open the printed address, or go directly to `/app`; the root URL redirects there automatically. Inside the app, use the top navigation to switch between Workspace, Models, Gallery, and Configuration.
+The Web UI starts a local server on `http://127.0.0.1:8080/` by default and opens your browser automatically. Open the printed address, or go directly to `/app`; the root URL redirects there automatically. Inside the app, use the top navigation to switch between Workspace, Models, Gallery, and Configuration. In Workspace, you can either type prompts inline or load a YAML prompt file from the machine running the Z-Vision server, select one active prompt option from it, and edit that server-machine file in place from the browser. If you open the UI from another device, Browse and Edit YAML still operate on the server host filesystem, not on the remote browser device.
+
+The browser UI still excludes a few CLI-only features: full prompt-file batch execution, per-run output-directory override, and image `upscale_save_pre`.
 
 > **Tip:** `ziv image`, `ziv video`, and `ziv model` are also available as subcommands of the unified `ziv` parent command. Use `ziv -h` or `ziv --help` to print terminal help without starting the browser UI.
 

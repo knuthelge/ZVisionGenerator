@@ -68,8 +68,48 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
     workflow_contract: {
       values: ['txt2img', 'img2img', 'txt2vid', 'img2vid'],
       legacy_aliases: {},
-      definitions: {} as WorkspaceContext['workflow_contract']['definitions'],
+      definitions: {
+        txt2img: {
+          mode: 'image',
+          model_kind: 'image',
+          visible_controls: ['workflow', 'model', 'prompt_inline', 'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed'],
+          supports_reference_image: false,
+          requires_reference_image: false,
+          clear_fields: ['image_path', 'image_strength', 'frames', 'audio', 'low_memory'],
+        },
+        img2img: {
+          mode: 'image',
+          model_kind: 'image',
+          visible_controls: ['workflow', 'model', 'prompt_inline', 'negative_prompt', 'reference_image', 'reference_image_path', 'reference_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'image_strength', 'seed'],
+          supports_reference_image: true,
+          requires_reference_image: true,
+          clear_fields: ['frames', 'audio', 'low_memory'],
+        },
+        txt2vid: {
+          mode: 'video',
+          model_kind: 'video',
+          visible_controls: ['workflow', 'model', 'prompt_inline', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
+          supports_reference_image: false,
+          requires_reference_image: false,
+          clear_fields: ['negative_prompt', 'guidance', 'image_path', 'image_strength', 'quantize'],
+        },
+        img2vid: {
+          mode: 'video',
+          model_kind: 'video',
+          visible_controls: ['workflow', 'model', 'prompt_inline', 'reference_image', 'reference_image_path', 'reference_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
+          supports_reference_image: true,
+          requires_reference_image: true,
+          clear_fields: ['negative_prompt', 'guidance', 'quantize'],
+        },
+      },
       field_precedence: { defaults: [], dimensions: '' },
+    },
+    prompt_sources: ['inline', 'file'],
+    default_prompt_source: 'inline',
+    prompt_file: {
+      accepted_extensions: ['.yaml', '.yml'],
+      browse_kind: 'existing_file',
+      selection_required: true,
     },
     ...overrides,
   };
@@ -136,6 +176,16 @@ describe('draft store', () => {
   });
 
   describe('hydrateFromContext', () => {
+    it('hydrates the backend default prompt source into draft state', () => {
+      const ctx = makeContext({ default_prompt_source: 'file' });
+      draft.update('workflow', 'txt2img');
+      draft.update('promptSource', 'inline');
+
+      draft.hydrateFromContext(ctx, null);
+
+      expect(draft.state.promptSource).toBe('file');
+    });
+
     it('sets image model and defaults for txt2img workflow', () => {
       const ctx = makeContext();
       draft.update('workflow', 'txt2img');

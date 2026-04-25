@@ -23,7 +23,7 @@
     children
   }: Props = $props();
 
-  const base = 'inline-flex items-center justify-center font-medium rounded-md transition-colors focus-visible:focus-ring disabled:opacity-50 disabled:cursor-not-allowed';
+  const base = 'inline-flex items-center justify-center font-medium rounded-md transition-colors focus-visible:focus-ring cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed';
 
   const variants: Record<string, string> = {
     primary: 'bg-teal-600 hover:bg-teal-500 active:bg-teal-700 text-white',

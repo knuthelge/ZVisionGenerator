@@ -22,14 +22,20 @@
   const isImageMode = $derived(
     draft.state.workflow === 'txt2img' || draft.state.workflow === 'img2img'
   );
+  const authorityReady = $derived(context !== null && draft.authorityReady);
 
   const imageModels = $derived(context?.image_models ?? []);
   const videoModels = $derived(context?.video_models ?? []);
   const currentModels = $derived(isImageMode ? imageModels : videoModels);
   const loraOptions = $derived(context?.loras ?? []);
   const quantizeOptions = $derived(context?.quantize_options ?? []);
+  const visibleControls = $derived(
+    new Set(context?.workflow_contract.definitions[draft.state.workflow]?.visible_controls ?? [])
+  );
   const supportsQuantize = $derived(
-    isImageMode
+    authorityReady
+      && visibleControls.has('quantize')
+      && isImageMode
       ? (context?.image_model_defaults?.[draft.state.model]?.supports_quantize ?? context?.defaults?.supports_quantize ?? false)
       : false
   );
@@ -118,7 +124,7 @@
         // Re-apply remaining URL params on top of the backend defaults so that
         // explicit URL values (prompt, steps, ratio, etc.) take precedence.
         if (hasUrlParams) {
-          draft.loadFromUrl(urlParams);
+          draft.loadFromUrl(urlParams, ctx);
         }
 
         // After full hydration, sync _prevWorkflow so the workflow-change $effect
@@ -142,7 +148,10 @@
 
   async function handleSubmit(e: Event): Promise<void> {
     e.preventDefault();
-    if (!formEl || busy) return;
+    if (!formEl || busy || !authorityReady) return;
+    if (draft.state.promptSource === 'file' && (!draft.state.promptFilePath || !draft.state.promptFileOptionId)) {
+      return;
+    }
     busy = true;
     draft.saveDraft();
 
@@ -215,6 +224,7 @@
           testId="model-shell"
           class="w-56"
           value={draft.state.model}
+          disabled={!authorityReady || currentModels.length === 0}
           onchange={onModelChange}
         >
           {#snippet children()}
@@ -222,7 +232,7 @@
               <svg class="text-primary-main h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path>
               </svg>
-              <span class="truncate">{draft.state.model || (currentModels[0]?.label ?? 'No models')}</span>
+              <span class="truncate">{authorityReady ? (draft.state.model || (currentModels[0]?.label ?? 'No models')) : 'Loading models…'}</span>
             </span>
           {/snippet}
           {#snippet options()}
@@ -239,6 +249,7 @@
             testId="quantize-shell"
             class="w-44 font-mono"
             value={draft.state.quantize !== null ? String(draft.state.quantize) : ''}
+            disabled={!authorityReady}
             onchange={(e) => {
               const v = (e.currentTarget as HTMLSelectElement).value;
               draft.update('quantize', v ? Number(v) : null);
@@ -262,61 +273,65 @@
       <!-- LoRA chips area -->
       <div class="flex items-center gap-2 flex-1 min-w-0">
         <span class="field-label mt-0.5 shrink-0">LoRAs</span>
-        <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
-          <!-- Chips -->
-          {#each loraChips as chip}
-            <div class="surface-chip flex items-center gap-1 px-2 py-0.5 text-xs">
-              <span class="max-w-20 truncate">{chip.name}</span>
-              <input
-                type="number"
-                step="0.1"
-                min="0"
-                max="2"
-                value={chip.weight}
-                class="w-10 bg-transparent text-zinc-400 font-mono text-center focus:outline-none"
-                onchange={(e) => updateLoraWeight(chip.name, Number((e.currentTarget as HTMLInputElement).value))}
-              >
+        {#if authorityReady}
+          <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+            <!-- Chips -->
+            {#each loraChips as chip}
+              <div class="surface-chip flex items-center gap-1 px-2 py-0.5 text-xs">
+                <span class="max-w-20 truncate">{chip.name}</span>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="2"
+                  value={chip.weight}
+                  class="w-10 bg-transparent text-zinc-400 font-mono text-center focus:outline-none"
+                  onchange={(e) => updateLoraWeight(chip.name, Number((e.currentTarget as HTMLInputElement).value))}
+                >
+                <button
+                  type="button"
+                  class="surface-link-muted ml-0.5"
+                  onclick={() => removeLora(chip.name)}
+                  aria-label="Remove {chip.name}"
+                >×</button>
+              </div>
+            {/each}
+
+            <!-- Add LoRA popover -->
+            <div class="relative shrink-0">
               <button
                 type="button"
-                class="surface-link-muted ml-0.5"
-                onclick={() => removeLora(chip.name)}
-                aria-label="Remove {chip.name}"
-              >×</button>
-            </div>
-          {/each}
-
-          <!-- Add LoRA popover -->
-          <div class="relative shrink-0">
-            <button
-              type="button"
-              class="surface-chip-muted flex items-center gap-1 rounded-md border-dashed px-2.5 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={loraOptions.length === 0}
-              onclick={() => (loraPopoverOpen = !loraPopoverOpen)}
-            >
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-              </svg>
-              Add LoRA
-            </button>
-            {#if loraPopoverOpen}
-              <div class="surface-popover absolute left-0 top-full z-20 mt-2 w-64 p-2 shadow-2xl shadow-black/40">
-                <p class="field-label px-2 pb-2">Available LoRAs</p>
-                <div class="max-h-56 overflow-y-auto custom-scrollbar flex flex-col gap-1">
-                  {#each loraOptions as lora}
-                    <button
-                      type="button"
-                      class="surface-popover-option flex items-center justify-between rounded-md px-2 py-2 text-left text-sm"
-                      onclick={() => addLora(lora.name)}
-                    >
-                      <span class="truncate">{lora.name}</span>
-                      <span class="text-[10px] uppercase tracking-wide text-zinc-500">Add</span>
-                    </button>
-                  {/each}
+                class="surface-chip-muted flex items-center gap-1 rounded-md border-dashed px-2.5 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={loraOptions.length === 0}
+                onclick={() => (loraPopoverOpen = !loraPopoverOpen)}
+              >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                </svg>
+                Add LoRA
+              </button>
+              {#if loraPopoverOpen}
+                <div class="surface-popover absolute left-0 top-full z-20 mt-2 w-64 p-2 shadow-2xl shadow-black/40">
+                  <p class="field-label px-2 pb-2">Available LoRAs</p>
+                  <div class="max-h-56 overflow-y-auto custom-scrollbar flex flex-col gap-1">
+                    {#each loraOptions as lora}
+                      <button
+                        type="button"
+                        class="surface-popover-option flex items-center justify-between rounded-md px-2 py-2 text-left text-sm"
+                        onclick={() => addLora(lora.name)}
+                      >
+                        <span class="truncate">{lora.name}</span>
+                        <span class="text-[10px] uppercase tracking-wide text-zinc-500">Add</span>
+                      </button>
+                    {/each}
+                  </div>
                 </div>
-              </div>
-            {/if}
+              {/if}
+            </div>
           </div>
-        </div>
+        {:else}
+          <p class="text-sm text-zinc-500">Loading authoritative model options…</p>
+        {/if}
       </div>
     </div>
   </div>

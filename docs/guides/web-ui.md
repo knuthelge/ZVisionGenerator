@@ -52,16 +52,36 @@ You usually do not need to type these URLs manually. Open the app once, then mov
 
 The Workspace is where you run image and video generations.
 
+When the page first opens, the Workspace keeps editable controls disabled until it receives the server's authoritative model defaults and visible control set. The same brief loading state can appear again after workflow or model changes that require a backend-driven reset.
+
+### Choose a Prompt Source
+
+The Workspace supports two prompt sources:
+
+- **Inline prompt** keeps the prompt and negative-prompt text areas in the browser form.
+- **Prompt file** loads a YAML prompt file from the machine running the Z-Vision Generator server, then lets you choose one active prompt option from that file.
+
+When you switch to **Prompt file** mode:
+
+- **Browse**, **Load**, and **Edit YAML** all operate on the machine running the Z-Vision Generator server, not on the remote browser device.
+- The path field updates to the normalized absolute path returned by the backend after validation.
+- You must select one active prompt option before **Generate** becomes available.
+- The browser submits only the selected prompt-file path and option id for that run; inline prompt fields are left out.
+
+The editor writes changes atomically. If the YAML is invalid, the save stays in the dialog and the file on disk is left unchanged.
+
 ### Text to Image
 
 1. Open **Workspace**.
 2. Choose an image model.
 3. Keep the workflow on **Text to Image**.
 4. Enter your prompt.
-5. Adjust size, ratio, steps, seed, LoRA, quantization, or image upscale if needed.
+5. Adjust size, ratio, steps, seed, scheduler, LoRA, quantization, post-processing, or image upscale if needed.
 6. Click **Generate**.
 
 The newest result appears in the preview area, and the current session also updates in the history pane.
+
+If you prefer prompt files, switch **Prompt Source** to **Prompt file**, load the YAML file, choose one active option, and generate from that selection instead of typing inline text.
 
 ### Image to Image
 
@@ -80,7 +100,7 @@ Text-to-video is available when your installation and available models support v
 1. Switch the workflow to **Text to Video**.
 2. Choose a video model.
 3. Enter your prompt.
-4. Adjust ratio, size, frame count, steps, seed, audio, or low-memory mode as needed.
+4. Adjust ratio, size, frame count, steps, seed, audio, low-memory mode, or video upscale as needed.
 5. Click **Generate**.
 
 On Windows, the Web UI is currently image-only because video generation is not supported there.
@@ -105,15 +125,16 @@ The right-side history pane shows recent items from the current session. Use **O
 
 The Workspace intentionally stays limited to controls that are fully wired in the browser app.
 
-- Advanced image post-processing flags such as sharpen, contrast, and saturation remain CLI-only.
-- Video upscale controls and advanced image upscale tuning remain CLI-only.
+- Prompt files in the Web UI are single-option runs only. Full prompt-file batch execution stays on the CLI.
+- Per-run output-directory override stays on the CLI.
+- Image `upscale_save_pre` stays on the CLI.
 - If you need those options, run the matching `ziv-image` or `ziv-video` command from the terminal.
 
 ## Use the Models Page
 
 Open **Models** when you need to prepare assets for later runs.
 
-- Review which image models, video models, and LoRAs are currently available.
+- Review which image models, video models, and LoRAs are currently available, along with whether the running server process has Hugging Face access configured.
 - Check the model and LoRA directories shown at the top of the page.
 - Convert a checkpoint into an installed model entry.
 - Import a LoRA from a local file.
@@ -158,3 +179,4 @@ If you want future runs to save somewhere else, change **Output Directory** in *
 - If `8080` is busy, open the exact port printed in the terminal.
 - If you do not see any video workflows, confirm that your platform and installed models support video generation.
 - If downloads from Hugging Face fail for gated assets, start the app with `HF_TOKEN` set in your environment.
+- If a prompt file will not load, confirm that the path points to a readable `.yaml` or `.yml` file on the server host and that the file contains at least one active prompt option.

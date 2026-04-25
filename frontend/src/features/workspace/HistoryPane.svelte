@@ -55,7 +55,7 @@
       {:else}
         <div class="divide-y divide-zinc-900">
           {#each assets as asset (asset.path)}
-            <div class="cursor-pointer p-3 transition group hover:bg-zinc-900/40">
+            <div class="p-3">
               <div class="flex gap-3">
                 <div class="surface-card h-14 w-14 shrink-0 overflow-hidden">
                   {#if asset.media_type === 'video'}

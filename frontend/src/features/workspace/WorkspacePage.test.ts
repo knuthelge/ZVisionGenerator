@@ -13,6 +13,13 @@ const workspaceApiMocks = vi.hoisted(() => ({
   parseUrlPrefill: vi.fn<() => Record<string, string>>(),
 }));
 
+const promptFileApiMocks = vi.hoisted(() => ({
+  openPathPicker: vi.fn(),
+  inspectPromptFile: vi.fn(),
+  readPromptFile: vi.fn(),
+  writePromptFile: vi.fn(),
+}));
+
 vi.mock('$lib/api/workspace', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/workspace')>();
   return {
@@ -22,6 +29,13 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
     parseUrlPrefill: workspaceApiMocks.parseUrlPrefill,
   };
 });
+
+vi.mock('$lib/api/promptFiles', () => ({
+  openPathPicker: promptFileApiMocks.openPathPicker,
+  inspectPromptFile: promptFileApiMocks.inspectPromptFile,
+  readPromptFile: promptFileApiMocks.readPromptFile,
+  writePromptFile: promptFileApiMocks.writePromptFile,
+}));
 
 import WorkspacePage from './WorkspacePage.svelte';
 import ControlsSidebar from './ControlsSidebar.svelte';
@@ -135,6 +149,14 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         txt2img: {
           mode: 'image',
           model_kind: 'image',
+          visible_controls: [
+            'workflow', 'model', 'quantize', 'loras', 'prompt_source', 'prompt_inline', 'negative_prompt',
+            'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
+            'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed', 'scheduler',
+            'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation',
+            'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',
+            'image_upscale_guidance', 'image_upscale_sharpen'
+          ],
           supports_reference_image: false,
           requires_reference_image: false,
           clear_fields: ['image_path', 'image_strength', 'frames', 'audio', 'low_memory'],
@@ -142,6 +164,15 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         img2img: {
           mode: 'image',
           model_kind: 'image',
+          visible_controls: [
+            'workflow', 'model', 'quantize', 'loras', 'prompt_source', 'prompt_inline', 'negative_prompt',
+            'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
+            'reference_image', 'reference_image_path', 'reference_image_clear',
+            'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'image_strength', 'seed', 'scheduler',
+            'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation',
+            'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',
+            'image_upscale_guidance', 'image_upscale_sharpen'
+          ],
           supports_reference_image: true,
           requires_reference_image: true,
           clear_fields: ['frames', 'audio', 'low_memory'],
@@ -149,6 +180,12 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         txt2vid: {
           mode: 'video',
           model_kind: 'video',
+          visible_controls: [
+            'workflow', 'model', 'loras', 'prompt_source', 'prompt_inline',
+            'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
+            'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
+            'video_upscale_enabled', 'video_upscale_factor'
+          ],
           supports_reference_image: false,
           requires_reference_image: false,
           clear_fields: ['negative_prompt', 'guidance', 'image_path', 'image_strength', 'quantize'],
@@ -156,6 +193,13 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         img2vid: {
           mode: 'video',
           model_kind: 'video',
+          visible_controls: [
+            'workflow', 'model', 'loras', 'prompt_source', 'prompt_inline',
+            'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
+            'reference_image', 'reference_image_path', 'reference_image_clear',
+            'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
+            'video_upscale_enabled', 'video_upscale_factor'
+          ],
           supports_reference_image: true,
           requires_reference_image: true,
           clear_fields: ['negative_prompt', 'guidance', 'quantize'],
@@ -165,6 +209,13 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         defaults: ['cli', 'model_variant', 'model_family', 'global'],
         dimensions: 'explicit_width_height_overrides_ratio_size',
       },
+    },
+    prompt_sources: ['inline', 'file'],
+    default_prompt_source: 'inline',
+    prompt_file: {
+      accepted_extensions: ['.yaml', '.yml'],
+      browse_kind: 'existing_file',
+      selection_required: true,
     },
     ...overrides,
   };
@@ -302,6 +353,10 @@ describe('WorkspacePage', () => {
     workspaceApiMocks.getWorkspaceContext.mockReset();
     workspaceApiMocks.submitGenerate.mockReset();
     workspaceApiMocks.parseUrlPrefill.mockReset();
+    promptFileApiMocks.openPathPicker.mockReset();
+    promptFileApiMocks.inspectPromptFile.mockReset();
+    promptFileApiMocks.readPromptFile.mockReset();
+    promptFileApiMocks.writePromptFile.mockReset();
     // Default: no URL prefill params (plain workspace navigation)
     workspaceApiMocks.parseUrlPrefill.mockReturnValue({});
     workspaceApiMocks.submitGenerate.mockResolvedValue({
@@ -312,6 +367,7 @@ describe('WorkspacePage', () => {
       runs: 1,
       created_at: '2026-04-23T10:00:00Z',
     });
+    promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'cancelled', path: null, message: null });
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
       value: vi.fn(() => 'blob:test-image'),
@@ -337,10 +393,61 @@ describe('WorkspacePage', () => {
     await settle();
   }
 
+  it('renders a loading-safe shell before workspace authority resolves', async () => {
+    draft.update('model', 'stale-model');
+    draft.update('prompt', 'stale prompt');
+    draft.update('steps', 99);
+    workspaceApiMocks.getWorkspaceContext.mockImplementation(
+      () => new Promise<WorkspaceContext>(() => undefined)
+    );
+
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+
+    expect(target.querySelector('#ws-prompt')).toBeNull();
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
+    expect((target.querySelector('#ws-model') as HTMLSelectElement | null)?.disabled).toBe(true);
+    expect(target.textContent).toContain('Loading Workspace Controls');
+    expect(target.textContent).not.toContain('stale-model');
+  });
+
+  it('uses backend visible_controls instead of workflow-name literals for sidebar visibility', async () => {
+    const context = makeContext({
+      workflow_contract: {
+        ...makeContext().workflow_contract,
+        definitions: {
+          ...makeContext().workflow_contract.definitions,
+          txt2vid: {
+            ...makeContext().workflow_contract.definitions.txt2vid,
+            visible_controls: ['workflow', 'model', 'prompt_inline', 'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'seed'],
+          },
+        },
+      },
+    });
+    draft.update('workflow', 'txt2vid');
+    draft.update('model', 'ltx-8');
+    draft.hydrateFromContext(context, 'ltx-8');
+    app = flushSync(() => mount(ControlsSidebar, {
+      target,
+      props: {
+        context,
+        busy: false,
+        imageFile: null,
+        onImageFileChange: vi.fn(),
+      },
+    }));
+    await settle();
+
+    expect(target.querySelector('input[name="audio"]')).toBeNull();
+    expect(target.querySelector('input[name="low_memory"]')).toBeNull();
+    expect(target.querySelector('input[name="frames"]')).toBeNull();
+  });
+
   it('shows only truthful controls for the active workflow and model capabilities', async () => {
     const context = makeContext();
     draft.update('workflow', 'txt2vid');
     draft.update('model', 'ltx-8');
+    draft.hydrateFromContext(context, 'ltx-8');
     app = flushSync(() => mount(ControlsSidebar, {
       target,
       props: {
@@ -376,6 +483,71 @@ describe('WorkspacePage', () => {
     expect(target.querySelector('#ws-negative-prompt')).not.toBeNull();
   });
 
+  it('shows scheduler for txt2img and hides it for txt2vid', async () => {
+    const context = makeContext();
+    await mountWorkspace(context);
+
+    expect(target.querySelector('#ws-scheduler')).not.toBeNull();
+
+    draft.update('workflow', 'txt2vid');
+    draft.update('model', 'ltx-8');
+    await settle();
+
+    expect(target.querySelector('#ws-scheduler')).toBeNull();
+  });
+
+  it('serializes post-processing hidden fields when enabled controls are active', async () => {
+    const context = makeContext();
+    await mountWorkspace(context);
+
+    draft.update('postprocessSharpenEnabled', true);
+    draft.update('postprocessSharpenAmount', 0.75);
+    draft.update('postprocessContrastEnabled', false);
+    draft.update('postprocessSaturationEnabled', true);
+    draft.update('postprocessSaturationAmount', 1.2);
+    await settle();
+
+    const form = target.querySelector('form');
+    expect(form).not.toBeNull();
+    form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+
+    expect(workspaceApiMocks.submitGenerate).toHaveBeenCalledTimes(1);
+    const [submittedFormData] = workspaceApiMocks.submitGenerate.mock.calls[0] ?? [];
+    expect(submittedFormData).toBeInstanceOf(FormData);
+    expect(submittedFormData.get('sharpen_enabled')).toBe('true');
+    expect(submittedFormData.get('sharpen_amount')).toBe('0.75');
+    expect(submittedFormData.get('contrast_enabled')).toBe('false');
+    expect(submittedFormData.has('contrast_amount')).toBe(false);
+    expect(submittedFormData.get('saturation_enabled')).toBe('true');
+    expect(submittedFormData.get('saturation_amount')).toBe('1.2');
+  });
+
+  it('renders video upscale controls for txt2vid/img2vid and serializes upscale fields', async () => {
+    const context = makeContext();
+    await mountWorkspace(context);
+
+    for (const workflow of ['txt2vid', 'img2vid'] as const) {
+      draft.update('workflow', workflow);
+      draft.update('model', 'ltx-8');
+      await settle();
+
+      draft.update('videoUpscaleEnabled', true);
+      draft.update('videoUpscaleFactor', 4);
+      await settle();
+
+      expect(target.querySelector('#ws-video-upscale')).not.toBeNull();
+      expect(target.querySelector('input[name="video_upscale_factor"]')).not.toBeNull();
+
+      const form = target.querySelector('form');
+      expect(form).not.toBeNull();
+      const serializedFormData = new FormData(form!);
+      expect(serializedFormData.get('workflow')).toBe(workflow);
+      expect(serializedFormData.get('upscale')).toBe('4');
+      expect(serializedFormData.get('video_upscale_factor')).toBe('4');
+    }
+  });
+
   it('keeps rendered workspace labels associated with controls across workflow states', async () => {
     const context = makeContext();
     await mountWorkspace(context);
@@ -397,6 +569,7 @@ describe('WorkspacePage', () => {
 
   it('renders the required 4px primary focus treatment on workspace form inputs', async () => {
     const context = makeContext();
+    draft.hydrateFromContext(context, null);
     app = flushSync(() => mount(ControlsSidebar, {
       target,
       props: {
@@ -609,5 +782,211 @@ describe('WorkspacePage', () => {
     expect(submittedFormData).toBeInstanceOf(FormData);
     expect(submittedFormData.get('audio')).toBe('false');
     expect(submittedFormData.get('low_memory')).toBe('false');
+  });
+
+  it('submits normalized prompt-file fields and omits inline prompt fields in file mode', async () => {
+    promptFileApiMocks.inspectPromptFile.mockResolvedValue({
+      path: '/server/prompts.yaml',
+      options: [
+        {
+          id: 'portrait:0',
+          set_name: 'portrait',
+          source_index: 0,
+          label: 'portrait #1 · first option',
+          prompt_preview: 'first option',
+          negative_preview: null,
+        },
+        {
+          id: 'portrait:1',
+          set_name: 'portrait',
+          source_index: 1,
+          label: 'portrait #2 · second option',
+          prompt_preview: 'second option',
+          negative_preview: 'muddy',
+        },
+      ],
+    });
+
+    const context = makeContext();
+    await mountWorkspace(context);
+
+    draft.update('prompt', 'stale inline prompt');
+    draft.update('negativePrompt', 'stale negative');
+    await settle();
+
+    const promptSource = target.querySelector('#ws-prompt-source') as HTMLSelectElement | null;
+    expect(promptSource).not.toBeNull();
+    promptSource!.value = 'file';
+    promptSource!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    const submitButton = target.querySelector('#ws-submit') as HTMLButtonElement | null;
+    expect(submitButton?.disabled).toBe(true);
+
+    const pathInput = target.querySelector('#ws-prompts-file') as HTMLInputElement | null;
+    expect(pathInput).not.toBeNull();
+    pathInput!.value = '~/prompts.yaml';
+    pathInput!.dispatchEvent(new Event('input', { bubbles: true }));
+    const loadButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Load');
+    expect(loadButton).not.toBeUndefined();
+    loadButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+
+    expect(pathInput!.value).toBe('/server/prompts.yaml');
+    const hiddenPath = target.querySelector('input[name="prompts_file"]') as HTMLInputElement | null;
+    expect(hiddenPath?.value).toBe('/server/prompts.yaml');
+
+    const optionSelect = target.querySelector('#ws-prompt-option') as HTMLSelectElement | null;
+    expect(optionSelect).not.toBeNull();
+    optionSelect!.value = 'portrait:1';
+    optionSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(submitButton?.disabled).toBe(false);
+
+    const form = target.querySelector('form');
+    expect(form).not.toBeNull();
+    form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+
+    expect(workspaceApiMocks.submitGenerate).toHaveBeenCalledTimes(1);
+    const [submittedFormData] = workspaceApiMocks.submitGenerate.mock.calls[0] ?? [];
+    expect(submittedFormData).toBeInstanceOf(FormData);
+    expect(submittedFormData.get('prompt_source')).toBe('file');
+    expect(submittedFormData.get('prompts_file')).toBe('/server/prompts.yaml');
+    expect(submittedFormData.get('prompt_option_id')).toBe('portrait:1');
+    expect(submittedFormData.has('prompt')).toBe(false);
+    expect(submittedFormData.has('negative_prompt')).toBe(false);
+  });
+
+  it('keeps the previous prompt-file selection when a manual reload fails', async () => {
+    promptFileApiMocks.inspectPromptFile.mockResolvedValueOnce({
+      path: '/server/prompts.yaml',
+      options: [
+        {
+          id: 'portrait:0',
+          set_name: 'portrait',
+          source_index: 0,
+          label: 'portrait #1 · first option',
+          prompt_preview: 'first option',
+          negative_preview: null,
+        },
+      ],
+    });
+
+    const context = makeContext();
+    await mountWorkspace(context);
+
+    const promptSource = target.querySelector('#ws-prompt-source') as HTMLSelectElement | null;
+    promptSource!.value = 'file';
+    promptSource!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    const pathInput = target.querySelector('#ws-prompts-file') as HTMLInputElement | null;
+    pathInput!.value = '~/prompts.yaml';
+    pathInput!.dispatchEvent(new Event('input', { bubbles: true }));
+    const loadButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Load');
+    loadButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+
+    const optionSelect = target.querySelector('#ws-prompt-option') as HTMLSelectElement | null;
+    optionSelect!.value = 'portrait:0';
+    optionSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    promptFileApiMocks.inspectPromptFile.mockRejectedValueOnce(new Error('POST /api/prompt-files/inspect → 422: missing file'));
+    pathInput!.value = '/missing/prompts.yaml';
+    pathInput!.dispatchEvent(new Event('input', { bubbles: true }));
+    loadButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+
+    const hiddenPath = target.querySelector('input[name="prompts_file"]') as HTMLInputElement | null;
+    expect(pathInput!.value).toBe('/server/prompts.yaml');
+    expect(hiddenPath?.value).toBe('/server/prompts.yaml');
+    expect((target.querySelector('#ws-prompt-option') as HTMLSelectElement | null)?.value).toBe('portrait:0');
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
+    expect(target.textContent).toContain('missing file');
+  });
+
+  it('clears a stale prompt-file selection after saving edited yaml', async () => {
+    promptFileApiMocks.inspectPromptFile.mockResolvedValue({
+      path: '/server/prompts.yaml',
+      options: [
+        {
+          id: 'portrait:0',
+          set_name: 'portrait',
+          source_index: 0,
+          label: 'portrait #1 · first option',
+          prompt_preview: 'first option',
+          negative_preview: null,
+        },
+      ],
+    });
+    promptFileApiMocks.readPromptFile.mockResolvedValue({
+      path: '/server/prompts.yaml',
+      options: [
+        {
+          id: 'portrait:0',
+          set_name: 'portrait',
+          source_index: 0,
+          label: 'portrait #1 · first option',
+          prompt_preview: 'first option',
+          negative_preview: null,
+        },
+      ],
+      raw_text: 'portrait:\n  - prompt: first option\n',
+    });
+    promptFileApiMocks.writePromptFile.mockResolvedValue({
+      path: '/server/prompts.yaml',
+      options: [
+        {
+          id: 'portrait:9',
+          set_name: 'portrait',
+          source_index: 9,
+          label: 'portrait #10 · replacement option',
+          prompt_preview: 'replacement option',
+          negative_preview: null,
+        },
+      ],
+    });
+
+    const context = makeContext();
+    await mountWorkspace(context);
+
+    const promptSource = target.querySelector('#ws-prompt-source') as HTMLSelectElement | null;
+    promptSource!.value = 'file';
+    promptSource!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    const pathInput = target.querySelector('#ws-prompts-file') as HTMLInputElement | null;
+    pathInput!.value = '~/prompts.yaml';
+    pathInput!.dispatchEvent(new Event('input', { bubbles: true }));
+    const loadButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Load');
+    loadButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+
+    const optionSelect = target.querySelector('#ws-prompt-option') as HTMLSelectElement | null;
+    optionSelect!.value = 'portrait:0';
+    optionSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    const editButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Edit YAML');
+    expect(editButton).not.toBeUndefined();
+    editButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+
+    const editor = target.querySelector('#ws-prompt-file-editor') as HTMLTextAreaElement | null;
+    expect(editor?.value).toContain('first option');
+    editor!.value = 'portrait:\n  - prompt: replacement option\n';
+    editor!.dispatchEvent(new Event('input', { bubbles: true }));
+    const saveButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Save File');
+    expect(saveButton).not.toBeUndefined();
+    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+
+    expect(promptFileApiMocks.writePromptFile).toHaveBeenCalledWith('/server/prompts.yaml', 'portrait:\n  - prompt: replacement option\n');
+    expect((target.querySelector('#ws-prompt-option') as HTMLSelectElement | null)?.value).toBe('');
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
+    expect(target.textContent).toContain('no longer active');
   });
 });

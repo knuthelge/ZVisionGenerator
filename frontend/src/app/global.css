@@ -62,6 +62,10 @@
       transition-duration: 0.01ms !important;
     }
   }
+
+  button:not(:disabled) {
+    cursor: pointer;
+  }
 }
 
 @layer components {

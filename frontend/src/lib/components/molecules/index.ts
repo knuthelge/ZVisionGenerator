@@ -6,3 +6,5 @@ export { default as Modal } from './Modal.svelte';
 export { default as ImageCard } from './ImageCard.svelte';
 export { default as JobCard } from './JobCard.svelte';
 export { default as NavItem } from './NavItem.svelte';
+export { default as PathField } from './PathField.svelte';
+export { default as PromptFileField } from './PromptFileField.svelte';
