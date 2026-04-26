@@ -45,10 +45,10 @@ generation:
 sharpening:
   normal: 0.8
   upscaled: 1.2
-  pre_upscale: 0.4
+  pre_upscale: 0.8
 
 upscale:
-  default_denoise_2x: 0.3
+  default_denoise_2x: 0.4
   default_denoise_4x: 0.4
 
 contrast:
@@ -73,7 +73,9 @@ model_presets:
   zimage:
     supports_negative_prompt: true
     default_steps: 10
-    default_guidance: 0.5
+    default_guidance: 0.0
+    upscale:
+      default_upscale_steps: 3
     default_scheduler:
       mflux: beta
       diffusers: null

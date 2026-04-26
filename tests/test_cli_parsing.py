@@ -224,6 +224,40 @@ class TestCLIValidation:
                 main()
         assert recorded["size"] == "s"
 
+    def test_upscale_steps_defaults_from_resolved_model_defaults(self):
+        """--upscale uses resolve_defaults()['upscale_steps'] when --upscale-steps is omitted."""
+        recorded = {}
+
+        def _capture_run_batch(_backend, _model, _prompts, _config, args, **kw):
+            recorded["upscale_steps"] = args.upscale_steps
+
+        mocks = {k.split(".")[-1]: v for k, v in self._MAIN_MOCKS.items() if k.split(".")[-1] not in ("run_batch", "resolve_defaults")}
+        mocks["run_batch"] = _capture_run_batch
+        mocks["resolve_defaults"] = lambda *a, **kw: {"steps": 10, "guidance": 0.5, "scheduler": None, "upscale_steps": 12}
+
+        with patch("sys.argv", ["ziv-image", "-m", "fake", "--upscale", "2"]):
+            with patch.multiple("zvisiongenerator.image_cli", **mocks):
+                main()
+
+        assert recorded["upscale_steps"] == 12
+
+    def test_explicit_upscale_steps_wins_over_model_default(self):
+        """Explicit --upscale-steps must not be overwritten by resolve_defaults upscale default."""
+        recorded = {}
+
+        def _capture_run_batch(_backend, _model, _prompts, _config, args, **kw):
+            recorded["upscale_steps"] = args.upscale_steps
+
+        mocks = {k.split(".")[-1]: v for k, v in self._MAIN_MOCKS.items() if k.split(".")[-1] not in ("run_batch", "resolve_defaults")}
+        mocks["run_batch"] = _capture_run_batch
+        mocks["resolve_defaults"] = lambda *a, **kw: {"steps": 10, "guidance": 0.5, "scheduler": None, "upscale_steps": 12}
+
+        with patch("sys.argv", ["ziv-image", "-m", "fake", "--upscale", "2", "--upscale-steps", "21"]):
+            with patch.multiple("zvisiongenerator.image_cli", **mocks):
+                main()
+
+        assert recorded["upscale_steps"] == 21
+
 
 # ── Post-processing flag parsing ────────────────────────────────────────────
 
