@@ -239,6 +239,9 @@ class TestResolveDefaults:
                 "supports_negative_prompt": True,
                 "default_steps": 8,
                 "default_guidance": 0.7,
+                "upscale": {
+                    "default_upscale_steps": 8,
+                },
                 "default_scheduler": {
                     "mflux": "beta",
                     "diffusers": None,
@@ -293,6 +296,7 @@ class TestResolveDefaults:
         result = resolve_defaults(info, self.config, {}, "mflux")
         assert result["steps"] == 8
         assert result["guidance"] == 0.7
+        assert result["upscale_steps"] == 8
         assert result["scheduler"] == "beta"
 
     def test_zimage_diffusers(self):
@@ -300,7 +304,14 @@ class TestResolveDefaults:
         result = resolve_defaults(info, self.config, {}, "diffusers")
         assert result["steps"] == 8
         assert result["guidance"] == 0.7
+        assert result["upscale_steps"] == 8
         assert result["scheduler"] is None
+
+    def test_cli_overrides_upscale_steps(self):
+        """CLI --upscale-steps override takes precedence over preset upscale default."""
+        info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
+        result = resolve_defaults(info, self.config, {"upscale_steps": 20}, "mflux")
+        assert result["upscale_steps"] == 20
 
     def test_flux2_klein_distilled(self):
         info = ImageModelInfo(family="flux2_klein", is_distilled=True, size="4b")

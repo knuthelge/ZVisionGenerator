@@ -141,7 +141,8 @@ def resolve_defaults(
         backend_name: ``"mflux"`` or ``"diffusers"`` — for scheduler default lookup.
 
     Returns:
-        Dict with resolved ``steps``, ``guidance``, and ``scheduler`` values.
+        Dict with resolved ``steps``, ``guidance``, ``scheduler``, and
+        optional ``upscale_steps`` values.
     """
     preset = config.get("model_presets", {}).get(model_info.family, {})
 
@@ -150,6 +151,7 @@ def resolve_defaults(
         "steps": config["generation"]["default_steps"],
         "guidance": config["generation"]["default_guidance"],
         "scheduler": None,
+        "upscale_steps": None,
         "supports_negative_prompt": preset.get("supports_negative_prompt", False),
     }
 
@@ -158,6 +160,9 @@ def resolve_defaults(
         effective["steps"] = preset["default_steps"]
     if "default_guidance" in preset:
         effective["guidance"] = preset["default_guidance"]
+    preset_upscale = preset.get("upscale", {})
+    if isinstance(preset_upscale, dict) and "default_upscale_steps" in preset_upscale:
+        effective["upscale_steps"] = preset_upscale["default_upscale_steps"]
 
     # Layer variant defaults
     variant_key = get_variant_key(model_info)
@@ -167,6 +172,9 @@ def resolve_defaults(
             effective["steps"] = variant["default_steps"]
         if "default_guidance" in variant:
             effective["guidance"] = variant["default_guidance"]
+        variant_upscale = variant.get("upscale", {})
+        if isinstance(variant_upscale, dict) and "default_upscale_steps" in variant_upscale:
+            effective["upscale_steps"] = variant_upscale["default_upscale_steps"]
 
     # Layer scheduler default (keyed by backend name, NOT platform)
     sched_defaults = preset.get("default_scheduler", {})

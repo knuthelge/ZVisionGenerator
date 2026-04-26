@@ -178,7 +178,8 @@ def main(*, prog: str = "ziv-image") -> None:
     except ValueError as e:
         parser.error(str(e))
     if args.upscale and args.upscale_steps is None:
-        args.upscale_steps = max(1, args.steps // 2)
+        resolved_upscale_steps = defaults.get("upscale_steps")
+        args.upscale_steps = resolved_upscale_steps if resolved_upscale_steps is not None else max(1, args.steps // 2)
     if args.image_path is not None and not os.path.isfile(args.image_path):
         parser.error(f"Reference image not found: {args.image_path}")
     if not (0.0 <= args.image_strength <= 1.0):
