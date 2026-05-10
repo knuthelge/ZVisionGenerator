@@ -1044,7 +1044,7 @@
 <h1 id="development">Development</h1>
 <h2 id="development-setup">Development Setup</h2>
 <pre><code class="language-bash">git clone https://github.com/knuthelge/ZVisionGenerator &amp;&amp; cd ZVisionGenerator
-uv sync
+make install
 </code></pre>
 <h2 id="make-targets">Make Targets</h2>
 <table>
@@ -1057,7 +1057,7 @@ uv sync
 <tbody>
 <tr>
 <td><code>make install</code></td>
-<td>Install all dependencies (<code>uv sync</code>)</td>
+<td>Install Python dependencies with <code>uv sync</code> and frontend dependencies with <code>npm ci --prefix frontend</code></td>
 </tr>
 <tr>
 <td><code>make lock</code></td>
@@ -1084,8 +1084,24 @@ uv sync
 <td>Run tests with pytest</td>
 </tr>
 <tr>
+<td><code>make docs-check</code></td>
+<td>Build documentation with <code>mkdocs build --strict</code></td>
+</tr>
+<tr>
 <td><code>make check</code></td>
-<td>Full CI gate: lint + format-check + test</td>
+<td>Full CI gate: lint + format-check + pytest + frontend checks + docs build + packaged SPA static gate</td>
+</tr>
+<tr>
+<td><code>make frontend-build</code></td>
+<td>Build the Svelte app into <code>zvisiongenerator/web/static/app/</code></td>
+</tr>
+<tr>
+<td><code>make frontend-static-check</code></td>
+<td>Rebuild the Svelte app and fail if packaged static artifacts changed or are untracked</td>
+</tr>
+<tr>
+<td><code>make frontend-test</code></td>
+<td>Run frontend type checks and Vitest tests</td>
 </tr>
 <tr>
 <td><code>make build</code></td>
@@ -1105,6 +1121,7 @@ uv sync
 </tr>
 </tbody>
 </table>
+<p><code>make check</code> covers the full verification gate: the Python test suite, frontend type checks and Vitest tests, packaged SPA artifact drift detection, and a strict docs build. The narrower targets (<code>make frontend-test</code>, <code>make frontend-static-check</code>, <code>make docs-check</code>) are available for iterating on a single surface.</p>
 <h2 id="testing-conventions">Testing Conventions</h2>
 <ul>
 <li>Tests live in <code>tests/</code>. Name files <code>test_&lt;module&gt;.py</code>, functions <code>test_&lt;behavior&gt;</code>.</li>
@@ -1115,6 +1132,8 @@ uv sync
 <li>Use <code>tmp_path</code> fixture for filesystem operations.</li>
 <li>Use <code>@pytest.mark.parametrize</code> for data-driven tests with many input/output pairs.</li>
 <li>Skip heavy dependencies: <code>pytest.importorskip("torch")</code>, <code>@pytest.mark.skipif(sys.platform == ...)</code> for platform-specific tests.</li>
+<li>Assert behavior and machine-readable contracts, not documentation prose, help text wording, CSS utility classes, source-code text, or incidental selector details.</li>
+<li>String assertions are appropriate only when the string is the contract under test, such as routes, config keys, storage keys, parser options, event names, filenames, enum values, structured statuses, and accessibility or control names required for operability.</li>
 </ul>
 <h2 id="code-style">Code Style</h2>
 <ul>
@@ -1144,6 +1163,7 @@ uv sync
 │   └── lora_import.py             LoRA import — local copy and HF download (ziv-model lora)
 ├── core/
 │   ├── types.py                   Shared types (StageOutcome)
+│   ├── progress_events.py         Shared image/video workflow progress event helpers
 │   ├── image_types.py             Image request and artifacts
 │   ├── video_types.py             Video request and artifacts
 │   ├── image_backend.py           Image backend protocol
@@ -1167,7 +1187,16 @@ uv sync
 │   ├── paths.py                   ~/.ziv/ model store resolution
 │   ├── prompt_compose.py          Structured prompt flattening &amp; snippets
 │   ├── prompts.py                 Prompt file loading
+│   ├── provenance.py              Embedded asset config (PNG/MP4) and full provenance payload builders
 │   └── video_model_detect.py      Video model type detection
+├── web/
+│   ├── config.py                  Web UI config loading and model inventory discovery
+│   ├── config_api.py              JSON config response assembly
+│   ├── config_contract.py         Writable config semantics and path readback helpers
+│   ├── gallery.py                 Gallery inventory and response serialization
+│   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
+│   ├── workspace_contract.py      Workflow aliases and static workspace capabilities
+│   └── server.py                  FastAPI route wiring and request parsing
 └── workflows/
     ├── image_stages.py            Image pipeline stage definitions
     └── video_stages.py            Video pipeline stage definitions

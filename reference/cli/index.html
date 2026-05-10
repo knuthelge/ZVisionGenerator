@@ -728,6 +728,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#ziv-ui-ziv-ui-web-ui-launcher" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ziv ui / ziv-ui — Web UI Launcher
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ziv-image-image-generation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -896,6 +907,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#ziv-ui-ziv-ui-web-ui-launcher" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ziv ui / ziv-ui — Web UI Launcher
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ziv-image-image-generation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1004,7 +1026,11 @@
 <tbody>
 <tr>
 <td><code>ziv</code></td>
-<td>Unified parent command with subcommands: <code>image</code>, <code>video</code>, <code>model</code></td>
+<td>Unified parent command with subcommands: <code>image</code>, <code>video</code>, <code>model</code>, <code>ui</code></td>
+</tr>
+<tr>
+<td><code>ziv-ui</code></td>
+<td>Standalone Web UI launcher</td>
 </tr>
 <tr>
 <td><code>ziv-image</code></td>
@@ -1025,8 +1051,38 @@
 <pre><code class="language-bash">ziv image [options]    # Same as ziv-image
 ziv video [options]    # Same as ziv-video
 ziv model [options]    # Same as ziv-model
+ziv ui [options]       # Same as ziv-ui
 </code></pre>
+<p>Running <code>ziv</code> with no subcommand prints command-discovery help and exits without starting a server. Use <code>ziv ui</code> or <code>ziv-ui</code> when you want to launch the Web UI.</p>
 <p>Run <code>ziv --help</code> for available subcommands, or <code>ziv &lt;command&gt; --help</code> for command-specific options.</p>
+<h2 id="ziv-ui-ziv-ui-web-ui-launcher"><code>ziv ui</code> / <code>ziv-ui</code> — Web UI Launcher</h2>
+<p>The base package install includes the Web UI runtime, so <code>ziv ui</code> and <code>ziv-ui</code> work after a normal <code>uv tool install z-vision-generator</code> or <code>uv sync</code>. If a local environment is missing required Web UI packages, the launcher exits with repair guidance for the base install instead of pointing users at a second install step.</p>
+<table>
+<thead>
+<tr>
+<th>Argument</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--host</code></td>
+<td><code>127.0.0.1</code></td>
+<td>Host interface to bind the local Web UI server to</td>
+</tr>
+<tr>
+<td><code>--port</code></td>
+<td><code>8080</code></td>
+<td>Preferred local port; the app chooses the next available port if this one is busy</td>
+</tr>
+<tr>
+<td><code>--no-browser</code></td>
+<td>off</td>
+<td>Start the server without opening a browser tab</td>
+</tr>
+</tbody>
+</table>
 <h2 id="ziv-image-image-generation"><code>ziv-image</code> — Image Generation</h2>
 <table>
 <thead>
