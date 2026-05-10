@@ -1,4 +1,4 @@
-"""Backend smoke test and load_model guard tests."""
+"""Test backend selection and load_model guard contracts."""
 
 from __future__ import annotations
 
@@ -11,27 +11,23 @@ from PIL import Image
 from zvisiongenerator.core.image_backend import ImageBackend
 
 
-# ---------------------------------------------------------------------------
-# Smoke: get_backend() returns a working backend for this platform
-# ---------------------------------------------------------------------------
-
-
-def test_get_backend_returns_backend_instance():
-    from zvisiongenerator.backends import get_backend
-
-    backend = get_backend()
-    assert isinstance(backend, ImageBackend)
-
-
-def test_backend_name_is_correct_for_platform():
-    from zvisiongenerator.backends import get_backend
-
-    backend = get_backend()
-    expected = "mflux" if sys.platform == "darwin" else "diffusers"
-    assert backend.name == expected
-
-
 class TestBackendRegistryLookup:
+    def test_get_backend_name_uses_dict_lookup_for_darwin(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends.sys, "platform", "darwin")
+        monkeypatch.setattr(backends, "_IMAGE_BACKENDS_MAP", {"darwin": ("mflux", lambda: MagicMock(spec=ImageBackend))})
+
+        assert backends.get_backend_name() == "mflux"
+
+    def test_get_backend_name_uses_dict_lookup_for_win32(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends.sys, "platform", "win32")
+        monkeypatch.setattr(backends, "_IMAGE_BACKENDS_MAP", {"win32": ("diffusers", lambda: MagicMock(spec=ImageBackend))})
+
+        assert backends.get_backend_name() == "diffusers"
+
     def test_get_backend_uses_dict_lookup_for_darwin(self, monkeypatch):
         import zvisiongenerator.backends as backends
 

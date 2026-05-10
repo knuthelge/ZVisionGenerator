@@ -22,6 +22,7 @@ from zvisiongenerator.workflows.image_stages import (
     sharpen_stage,
     save_image_stage,
 )
+from zvisiongenerator.utils.provenance import IMAGE_CONFIG_SCHEMA, read_png_config
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +189,83 @@ class TestE2EWorkflow:
 
         assert artifacts.filepath is not None
         assert os.path.isfile(artifacts.filepath)
+
+    def test_default_workflow_embeds_config_in_png_and_writes_no_sidecar(self, tmp_path):
+        mock_backend = _make_mock_backend()
+        workflow = build_workflow(_default_args())
+
+        request = ImageGenerationRequest(
+            backend=mock_backend,
+            model="fake",
+            model_name="zit",
+            model_family="zimage",
+            supports_negative_prompt=True,
+            prompt="a cat",
+            ratio="1:1",
+            size="s",
+            seed=42,
+            width=64,
+            height=64,
+            steps=10,
+            guidance=3.5,
+            output_dir=str(tmp_path),
+            filename_base="test",
+        )
+        artifacts = ImageWorkingArtifacts(filename="test")
+        workflow.run(request, artifacts)
+
+        assert artifacts.filepath is not None
+
+        # No sidecar written (neither asset.ext.json nor asset.json)
+        from pathlib import Path as _Path
+
+        fp = _Path(artifacts.filepath)
+        assert not fp.with_name(f"{fp.name}.json").exists()
+        assert not fp.with_suffix(".json").exists()
+
+        # Config embedded in PNG
+        payload = read_png_config(artifacts.filepath)
+        assert payload is not None
+        assert payload["schema"] == IMAGE_CONFIG_SCHEMA
+        assert payload["workflow"] == "txt2img"
+        assert payload["prompt"] == "a cat"
+        assert payload["model"] == "zit"
+        assert payload["seed"] == 42
+        assert payload["steps"] == 10
+        assert payload["guidance"] == 3.5
+        assert payload["width"] == 64
+        assert payload["height"] == 64
+        assert payload["ratio"] == "1:1"
+        assert payload["size"] == "s"
+
+    def test_default_workflow_keeps_description_and_exif_metadata(self, tmp_path):
+        mock_backend = _make_mock_backend()
+        workflow = build_workflow(_default_args())
+
+        request = ImageGenerationRequest(
+            backend=mock_backend,
+            model="fake",
+            model_name="zit",
+            model_family="zimage",
+            supports_negative_prompt=True,
+            prompt="a glowing forest",
+            seed=42,
+            width=64,
+            height=64,
+            steps=10,
+            guidance=3.5,
+            output_dir=str(tmp_path),
+            filename_base="test",
+        )
+        artifacts = ImageWorkingArtifacts(filename="test")
+
+        workflow.run(request, artifacts)
+
+        assert artifacts.filepath is not None
+        with Image.open(artifacts.filepath) as saved_image:
+            exif = saved_image.getexif()
+            assert saved_image.info.get("Description") == "a glowing forest"
+            assert exif.get(0x010E) == "a glowing forest"
 
     def test_default_workflow_with_upscale(self, tmp_path):
         mock_backend = _make_mock_backend()

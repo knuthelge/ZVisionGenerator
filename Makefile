@@ -13,7 +13,7 @@ help: ## Show available targets
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*##"}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
-install: ## Install all dependencies
+install: frontend-install ## Install all dependencies
 	uv sync
 
 lock: ## Regenerate uv.lock
@@ -21,7 +21,7 @@ lock: ## Regenerate uv.lock
 
 # ——— Quality ——————————————————————————————————————————————
 
-.PHONY: lint lint-fix format format-check test check
+.PHONY: lint lint-fix format format-check test docs-check check
 
 lint: ## Run ruff linter
 	uv run --frozen ruff check zvisiongenerator/ tests/
@@ -38,7 +38,10 @@ format-check: ## Check formatting without changes
 test: ## Run tests with pytest
 	uv run --frozen pytest
 
-check: lint format-check test ## Run lint + format-check + test (full CI gate)
+docs-check: ## Build documentation strictly with MkDocs
+	uv run --frozen mkdocs build --strict
+
+check: lint format-check test frontend-test frontend-static-check docs-check ## Run lint + format-check + pytest + frontend checks + docs build + packaged SPA static gate (full CI gate)
 
 # ——— Vendored Dependencies ————————————————————————————————
 
@@ -58,11 +61,47 @@ update-ltx: ## Update vendored ltx-core-mlx and ltx-pipelines-mlx
 	rm -rf $(TMP)
 	@echo "✓ Vendored ltx packages updated to $(LTX_COMMIT)"
 
+# ——— Frontend ————————————————————————————————————————————
+
+.PHONY: frontend-install frontend-build frontend-static-check frontend-test frontend-dev
+
+frontend-install: ## Install frontend npm dependencies
+	npm ci --prefix frontend
+
+frontend-build: ## Build the Svelte frontend into the static dir
+	npm run --prefix frontend build
+
+frontend-static-check: ## Verify packaged SPA artifacts match the frontend build
+	$(eval TMP := $(shell mktemp -d))
+	@mkdir -p $(TMP)/app
+	@if [ -d zvisiongenerator/web/static/app ]; then cp -R zvisiongenerator/web/static/app/. $(TMP)/app/; fi
+	npm run --prefix frontend build
+	@diff -qr $(TMP)/app zvisiongenerator/web/static/app >/dev/null || { \
+		echo "Packaged SPA artifacts are stale. Run 'make frontend-build' and commit the updated zvisiongenerator/web/static/app files."; \
+		diff -qr $(TMP)/app zvisiongenerator/web/static/app; \
+		rm -rf $(TMP); \
+		exit 1; \
+	}
+	@test -z "$$(git ls-files --others --exclude-standard -- zvisiongenerator/web/static/app)" || { \
+		echo "Packaged SPA artifacts include untracked files:"; \
+		git ls-files --others --exclude-standard -- zvisiongenerator/web/static/app; \
+		rm -rf $(TMP); \
+		exit 1; \
+	}
+	@rm -rf $(TMP)
+
+frontend-test: ## TypeScript check + vitest tests
+	npm run --prefix frontend check
+	npm run --prefix frontend test
+
+frontend-dev: ## Start Vite dev server (for development)
+	npm run --prefix frontend dev
+
 # ——— Build ————————————————————————————————————————————————
 
 .PHONY: build clean
 
-build: ## Build wheel and sdist
+build: frontend-build ## Build wheel and sdist
 	uv build
 
 clean: ## Remove build artifacts, caches, and venv

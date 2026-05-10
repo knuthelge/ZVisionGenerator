@@ -34,16 +34,17 @@ Every module, function, and class should be **atomic**: a single, self-contained
 ## Build & Test
 
 ```bash
-make install    # Install dependencies (uv sync)
+make install    # Install Python and frontend dependencies (uv sync + npm ci)
 make lint       # Ruff linter
 make format     # Ruff formatter
 make test       # pytest
-make check      # Full CI gate: lint + format-check + test
+make docs-check # mkdocs build --strict
+make check      # Full CI gate: lint + format-check + pytest + frontend checks + docs build + packaged SPA gate
 ```
 
 Package manager is `uv`. Run tools with `uv run`.
 
-After making changes, run `make check` to validate (lint + format-check + test).
+After making changes, run `make check` to validate (lint + format-check + pytest + frontend checks + docs build + packaged SPA gate).
 
 ## Testing Conventions
 
@@ -53,3 +54,5 @@ After making changes, run `make check` to validate (lint + format-check + test).
 - Skip heavy dependencies: `pytest.importorskip("torch")`, `@pytest.mark.skipif(sys.platform == ...)` for platform-specific tests.
 - Use `tmp_path` fixture for filesystem operations.
 - Use `@pytest.mark.parametrize` for data-driven tests with many input/output pairs.
+- Write tests against behavior and machine-readable contracts, not documentation prose, help text wording, CSS utility classes, source-code text, or incidental selector details.
+- Keep string assertions for contract values only, such as routes, config keys, storage keys, parser options, event names, filenames, enum values, structured statuses, and accessibility or control names when operability depends on them.

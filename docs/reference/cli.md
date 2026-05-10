@@ -4,7 +4,8 @@
 
 | Command | Description |
 |---|---|
-| `ziv` | Unified parent command with subcommands: `image`, `video`, `model` |
+| `ziv` | Unified parent command with subcommands: `image`, `video`, `model`, `ui` |
+| `ziv-ui` | Standalone Web UI launcher |
 | `ziv-image` | Image generation (standalone entry point) |
 | `ziv-video` | Video generation (standalone entry point) |
 | `ziv-model` | Model/LoRA management (standalone entry point) |
@@ -17,9 +18,22 @@
 ziv image [options]    # Same as ziv-image
 ziv video [options]    # Same as ziv-video
 ziv model [options]    # Same as ziv-model
+ziv ui [options]       # Same as ziv-ui
 ```
 
+Running `ziv` with no subcommand prints command-discovery help and exits without starting a server. Use `ziv ui` or `ziv-ui` when you want to launch the Web UI.
+
 Run `ziv --help` for available subcommands, or `ziv <command> --help` for command-specific options.
+
+## `ziv ui` / `ziv-ui` — Web UI Launcher
+
+The base package install includes the Web UI runtime, so `ziv ui` and `ziv-ui` work after a normal `uv tool install z-vision-generator` or `uv sync`. If a local environment is missing required Web UI packages, the launcher exits with repair guidance for the base install instead of pointing users at a second install step.
+
+| Argument | Default | Description |
+|---|---|---|
+| `--host` | `127.0.0.1` | Host interface to bind the local Web UI server to |
+| `--port` | `8080` | Preferred local port; the app chooses the next available port if this one is busy |
+| `--no-browser` | off | Start the server without opening a browser tab |
 
 ## `ziv-image` — Image Generation
 

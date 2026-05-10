@@ -9,7 +9,7 @@ from pathlib import Path
 
 from zvisiongenerator.backends import get_backend
 from zvisiongenerator.image_runner import run_batch
-from zvisiongenerator.utils.config import load_config, resolve_defaults, validate_scheduler
+from zvisiongenerator.utils.config import load_config, resolve_defaults, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import parse_lora_arg
 from zvisiongenerator.utils.paths import resolve_model_path, resolve_lora_path
@@ -112,12 +112,20 @@ def main(*, prog: str = "ziv-image") -> None:
         parser.error(str(e))
 
     gen_cfg = config.get("generation", {})
-    if args.ratio is None:
-        args.ratio = gen_cfg.get("default_ratio", "2:3")
-    if args.size is None:
-        args.size = gen_cfg.get("default_size", "m")
-
     sizes = config.get("sizes", {})
+    default_ratio, default_size = select_ratio_size_defaults(
+        gen_cfg.get("default_ratio"),
+        tuple(sizes.keys()),
+        {ratio: tuple(size_map.keys()) for ratio, size_map in sizes.items()},
+        gen_cfg.get("default_size"),
+        fallback_ratio="2:3",
+        fallback_size="m",
+    )
+    if args.ratio is None:
+        args.ratio = default_ratio
+    if args.size is None:
+        args.size = default_size
+
     if args.ratio not in sizes:
         parser.error(f"Unknown ratio '{args.ratio}'. Valid: {list(sizes.keys())}")
     if args.size not in sizes[args.ratio]:

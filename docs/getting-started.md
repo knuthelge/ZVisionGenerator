@@ -11,7 +11,7 @@
 ## Installation
 
 ```bash
-# Install globally — provides `ziv` (unified), `ziv-image`, `ziv-video`, and `ziv-model` commands
+# Install globally — provides `ziv`, `ziv-ui`, `ziv-image`, `ziv-video`, and `ziv-model`
 uv tool install z-vision-generator
 
 # Install globally from repository
@@ -66,6 +66,21 @@ ziv-model lora -i /path/to/style.safetensors --name my-style
 # List installed assets
 ziv-model list
 ```
+
+### Web UI
+
+```bash
+# Start the Web UI
+ziv ui
+
+# From a repository checkout
+uv run ziv ui --no-browser
+```
+
+By default, the Web UI listens on `http://127.0.0.1:8080/` and opens your browser automatically. If port `8080` is busy, Z-Vision Generator chooses the next available local port and prints the final address in the terminal. If a local environment is missing required Web UI packages, `ziv ui` and `ziv-ui` print repair guidance for the base install instead of failing with an import traceback.
+
+While a generation is running, the Web UI keeps the active job attached to the current browser tab. Refreshing the tab reconnects to the running job when the server still has it, and stale completed or missing jobs are cleared automatically. Job controls are shown only when the running job supports them.
+
 
 ## Model Store (`~/.ziv/`)
 

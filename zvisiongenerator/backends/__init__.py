@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from zvisiongenerator.core.image_backend import ImageBackend
 
-__all__ = ["get_backend", "get_video_backend"]
+__all__ = ["get_backend", "get_backend_name", "get_video_backend"]
 
 BACKENDS: dict[str, "ImageBackend"] = {}
 
@@ -50,6 +50,12 @@ def get_backend() -> "ImageBackend":
         _register_platform_backend()
     backend_key, _ = _get_image_backend_registration()
     return BACKENDS[backend_key]
+
+
+def get_backend_name() -> str:
+    """Return the registered image backend key for the current platform."""
+    backend_key, _ = _get_image_backend_registration()
+    return backend_key
 
 
 # --- Video backends ---

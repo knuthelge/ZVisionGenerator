@@ -358,6 +358,7 @@ class TextToVideoPipeline:
         num_frames: int = 97,
         seed: int = 42,
         num_steps: int | None = None,
+        progress_callback=None,
     ) -> tuple[mx.array, mx.array]:
         """Generate video and audio latents.
 
@@ -402,6 +403,17 @@ class TextToVideoPipeline:
             video_text_embeds=video_embeds,
             audio_text_embeds=audio_embeds,
             sigmas=sigmas,
+            step_callback=(
+                None
+                if progress_callback is None
+                else lambda event: progress_callback(
+                    {
+                        "phase": "video_generate",
+                        "current_step": event["current_step"],
+                        "total_steps": event["total_steps"],
+                    }
+                )
+            ),
         )
         if self.low_memory:
             aggressive_cleanup()
@@ -421,6 +433,7 @@ class TextToVideoPipeline:
         num_frames: int = 97,
         seed: int = 42,
         num_steps: int | None = None,
+        progress_callback=None,
     ) -> str:
         """Generate and save video+audio to file.
 
@@ -443,6 +456,7 @@ class TextToVideoPipeline:
             num_frames=num_frames,
             seed=seed,
             num_steps=num_steps,
+            progress_callback=progress_callback,
         )
 
         # Free transformer + text encoder to make room for VAE decode
@@ -513,6 +527,7 @@ class ImageToVideoPipeline(TextToVideoPipeline):
         num_frames: int = 97,
         seed: int = 42,
         num_steps: int | None = None,
+        progress_callback=None,
     ) -> tuple[mx.array, mx.array]:
         """Generate video conditioned on a reference image.
 
@@ -575,6 +590,17 @@ class ImageToVideoPipeline(TextToVideoPipeline):
             video_text_embeds=video_embeds,
             audio_text_embeds=audio_embeds,
             sigmas=sigmas,
+            step_callback=(
+                None
+                if progress_callback is None
+                else lambda event: progress_callback(
+                    {
+                        "phase": "video_image_conditioned",
+                        "current_step": event["current_step"],
+                        "total_steps": event["total_steps"],
+                    }
+                )
+            ),
         )
         if self.low_memory:
             aggressive_cleanup()
@@ -594,6 +620,7 @@ class ImageToVideoPipeline(TextToVideoPipeline):
         num_frames: int = 97,
         seed: int = 42,
         num_steps: int | None = None,
+        progress_callback=None,
     ) -> str:
         """Generate and save I2V video+audio.
 
@@ -611,7 +638,7 @@ class ImageToVideoPipeline(TextToVideoPipeline):
             Path to output video.
         """
         if image is None:
-            return super().generate_and_save(prompt, output_path, height, width, num_frames, seed, num_steps)
+            return super().generate_and_save(prompt, output_path, height, width, num_frames, seed, num_steps, progress_callback)
 
         video_latent, audio_latent = self.generate_from_image(
             prompt=prompt,
@@ -621,6 +648,7 @@ class ImageToVideoPipeline(TextToVideoPipeline):
             num_frames=num_frames,
             seed=seed,
             num_steps=num_steps,
+            progress_callback=progress_callback,
         )
 
         return self._decode_and_save_video(video_latent, audio_latent, output_path)

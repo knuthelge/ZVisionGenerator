@@ -161,6 +161,8 @@ During batch generation:
 | `p` | **Pause** | Finish current image, pause until keypress |
 | `r` | **Repeat** | Finish current image, re-run same prompt with new seed |
 
+In the Web UI, image job controls appear only while the backend reports that the running job supports them.
+
 ## Related Guides
 
 - [Prompts Guide](prompts.md) — prompt files, variables, structured prompts, and snippets

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import textwrap
 
-from zvisiongenerator.utils.prompts import load_prompts_file
+from zvisiongenerator.utils.prompts import inspect_prompts_file, load_prompts_file
 
 
 def test_load_prompts_filters_inactive(tmp_path):
@@ -106,3 +106,32 @@ def test_malformed_yaml_prompts_raises_valueerror(tmp_path):
 
     with pytest.raises(ValueError, match="Failed to parse prompts file"):
         load_prompts_file(str(bad))
+
+
+def test_inspect_prompts_preserves_stable_source_indexes_for_active_options(tmp_path):
+    """Active prompt options keep stable ids based on original source positions."""
+    yaml_content = textwrap.dedent("""\
+        snippets:
+          mood: cinematic lighting
+        portrait:
+          - prompt: ["hero", $mood]
+          - prompt: "inactive"
+            active: false
+          - prompt: "second active"
+            negative: "blurry"
+    """)
+    prompt_file = tmp_path / "prompts.yaml"
+    prompt_file.write_text(yaml_content, encoding="utf-8")
+
+    inspection = inspect_prompts_file(str(prompt_file))
+
+    assert inspection.prompts_data == {
+        "portrait": [
+            ("hero. cinematic lighting", None),
+            ("second active", "blurry"),
+        ]
+    }
+    assert [(option.id, option.prompt, option.negative_prompt) for option in inspection.options] == [
+        ("portrait:0", "hero. cinematic lighting", None),
+        ("portrait:2", "second active", "blurry"),
+    ]

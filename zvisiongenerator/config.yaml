@@ -130,24 +130,23 @@ model_presets:
 # --- Video generation ---
 
 video_sizes:
-  ltx:
-    # All dimensions are 64-aligned for lossless half→double roundtrip with --upscale.
-    # Frames follow 8k+1 pattern.
-    "16:9":
-      s:  { width: 512,  height: 256,  frames: 49 }
-      m:  { width: 704,  height: 448,  frames: 49 }
-      l:  { width: 960,  height: 512,  frames: 33 }
-      xl: { width: 1408, height: 896,  frames: 25 }
-    "9:16":
-      s:  { width: 256,  height: 512,  frames: 49 }
-      m:  { width: 448,  height: 704,  frames: 49 }
-      l:  { width: 512,  height: 960,  frames: 33 }
-      xl: { width: 896,  height: 1408, frames: 25 }
-    "1:1":
-      s:  { width: 384,  height: 384,  frames: 49 }
-      m:  { width: 512,  height: 512,  frames: 33 }
-      l:  { width: 768,  height: 768,  frames: 33 }
-      xl: { width: 1024, height: 1024, frames: 25 }
+  # All dimensions are 64-aligned for lossless half→double roundtrip with --upscale.
+  # Frames follow 8k+1 pattern.
+  "16:9":
+    s:  { width: 512,  height: 256,  frames: 49 }
+    m:  { width: 704,  height: 448,  frames: 49 }
+    l:  { width: 960,  height: 512,  frames: 33 }
+    xl: { width: 1408, height: 896,  frames: 25 }
+  "9:16":
+    s:  { width: 256,  height: 512,  frames: 49 }
+    m:  { width: 448,  height: 704,  frames: 49 }
+    l:  { width: 512,  height: 960,  frames: 33 }
+    xl: { width: 896,  height: 1408, frames: 25 }
+  "1:1":
+    s:  { width: 384,  height: 384,  frames: 49 }
+    m:  { width: 512,  height: 512,  frames: 33 }
+    l:  { width: 768,  height: 768,  frames: 33 }
+    xl: { width: 1024, height: 1024, frames: 25 }
 
 video_generation:
   default_ratio: "16:9"
@@ -158,3 +157,11 @@ video_model_presets:
     default_steps: 8
     upscale:
       default_upscale_steps: 8
+
+ui:
+  startup_view: workspace
+  gallery_page_size: 12
+  output_dir: ~/.ziv/outputs
+  default_models:
+    image: klein9b
+    video: ltx-8

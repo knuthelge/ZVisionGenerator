@@ -48,6 +48,7 @@ class ImageBackend(Protocol):
         scheduler: str | None = None,
         negative_prompt: str | None = None,
         skip_signal: Any | None = None,
+        step_callback: Any | None = None,
     ) -> Image.Image | None:
         """Generate image from text. Returns None if skipped."""
         ...
@@ -64,6 +65,7 @@ class ImageBackend(Protocol):
         scheduler: str | None = None,
         negative_prompt: str | None = None,
         skip_signal: Any | None = None,
+        step_callback: Any | None = None,
     ) -> Image.Image | None:
         """Refine image. Returns None if skipped."""
         ...

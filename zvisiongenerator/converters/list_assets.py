@@ -45,6 +45,8 @@ def list_models(data_dir: Path) -> list[ModelEntry]:
             info: ImageModelInfo = detect_image_model(str(child))
         except Exception:
             info = ImageModelInfo(family="unknown", is_distilled=False, size=None)
+        if info.family == "unknown":
+            continue
         entries.append(
             ModelEntry(
                 name=child.name,

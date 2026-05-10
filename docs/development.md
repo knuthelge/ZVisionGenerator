@@ -4,25 +4,31 @@
 
 ```bash
 git clone https://github.com/knuthelge/ZVisionGenerator && cd ZVisionGenerator
-uv sync
+make install
 ```
 
 ## Make Targets
 
 | Target | Description |
 |--------|-------------|
-| `make install` | Install all dependencies (`uv sync`) |
+| `make install` | Install Python dependencies with `uv sync` and frontend dependencies with `npm ci --prefix frontend` |
 | `make lock` | Regenerate uv.lock |
 | `make lint` | Run ruff linter |
 | `make lint-fix` | Run ruff linter with auto-fix |
 | `make format` | Format code with ruff |
 | `make format-check` | Check formatting without changes |
 | `make test` | Run tests with pytest |
-| `make check` | Full CI gate: lint + format-check + test |
+| `make docs-check` | Build documentation with `mkdocs build --strict` |
+| `make check` | Full CI gate: lint + format-check + pytest + frontend checks + docs build + packaged SPA static gate |
+| `make frontend-build` | Build the Svelte app into `zvisiongenerator/web/static/app/` |
+| `make frontend-static-check` | Rebuild the Svelte app and fail if packaged static artifacts changed or are untracked |
+| `make frontend-test` | Run frontend type checks and Vitest tests |
 | `make build` | Build wheel and sdist |
 | `make clean` | Remove build artifacts, caches, venv |
 | `make run` | Run `ziv-image` CLI (use `ARGS="..."`) |
 | `make model` | Run `ziv-model` CLI (use `ARGS="..."`) |
+
+`make check` covers the full verification gate: the Python test suite, frontend type checks and Vitest tests, packaged SPA artifact drift detection, and a strict docs build. The narrower targets (`make frontend-test`, `make frontend-static-check`, `make docs-check`) are available for iterating on a single surface.
 
 ## Testing Conventions
 
@@ -34,6 +40,8 @@ uv sync
 - Use `tmp_path` fixture for filesystem operations.
 - Use `@pytest.mark.parametrize` for data-driven tests with many input/output pairs.
 - Skip heavy dependencies: `pytest.importorskip("torch")`, `@pytest.mark.skipif(sys.platform == ...)` for platform-specific tests.
+- Assert behavior and machine-readable contracts, not documentation prose, help text wording, CSS utility classes, source-code text, or incidental selector details.
+- String assertions are appropriate only when the string is the contract under test, such as routes, config keys, storage keys, parser options, event names, filenames, enum values, structured statuses, and accessibility or control names required for operability.
 
 ## Code Style
 
@@ -65,6 +73,7 @@ zvisiongenerator/
 │   └── lora_import.py             LoRA import — local copy and HF download (ziv-model lora)
 ├── core/
 │   ├── types.py                   Shared types (StageOutcome)
+│   ├── progress_events.py         Shared image/video workflow progress event helpers
 │   ├── image_types.py             Image request and artifacts
 │   ├── video_types.py             Video request and artifacts
 │   ├── image_backend.py           Image backend protocol
@@ -88,7 +97,16 @@ zvisiongenerator/
 │   ├── paths.py                   ~/.ziv/ model store resolution
 │   ├── prompt_compose.py          Structured prompt flattening & snippets
 │   ├── prompts.py                 Prompt file loading
+│   ├── provenance.py              Embedded asset config (PNG/MP4) and full provenance payload builders
 │   └── video_model_detect.py      Video model type detection
+├── web/
+│   ├── config.py                  Web UI config loading and model inventory discovery
+│   ├── config_api.py              JSON config response assembly
+│   ├── config_contract.py         Writable config semantics and path readback helpers
+│   ├── gallery.py                 Gallery inventory and response serialization
+│   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
+│   ├── workspace_contract.py      Workflow aliases and static workspace capabilities
+│   └── server.py                  FastAPI route wiring and request parsing
 └── workflows/
     ├── image_stages.py            Image pipeline stage definitions
     └── video_stages.py            Video pipeline stage definitions

@@ -69,7 +69,7 @@ class TestVideoCLIResolvesModelPath:
         "zvisiongenerator.video_cli.load_config",
         return_value={
             "video_generation": {"default_ratio": "16:9", "default_size": "m"},
-            "video_sizes": {"ltx": {"16:9": {"m": {"width": 704, "height": 480, "frames": 49}}}},
+            "video_sizes": {"16:9": {"m": {"width": 704, "height": 480, "frames": 49}}},
             "video_model_presets": {"ltx": {"default_steps": 8}},
         },
     )
