@@ -9,7 +9,7 @@ updates:
     groups:
       minor-and-patch:
         update-types:
-          - minor
+          - major
 
   - package-ecosystem: github-actions
     directory: /
