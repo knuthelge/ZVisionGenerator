@@ -19,7 +19,7 @@ Open a [feature request](https://github.com/knuthelge/ZVisionGenerator/issues/ne
 1. Fork the repository
 2. Create a feature branch (`git checkout -b my-feature`)
 3. Make your changes
-4. Run `make check` (lint + format-check + tests must all pass)
+4. Run `make check` (lint + format-check + pytest + frontend checks + docs build + packaged SPA static/drift verification must all pass)
 5. Open a Pull Request against `main`
 
 See the [Development Guide](docs/development.md) for setup, testing, and code style details.
@@ -30,6 +30,14 @@ See the [Development Guide](docs/development.md) for setup, testing, and code st
 - Google-style docstrings
 - `from __future__ import annotations` in every `.py` file
 - Python 3.14+ type syntax (`str | None`, `list[str]`)
+
+### Frontend Development
+
+- Node.js ≥ 22.0.0 and npm ≥ 10.0.0 are required to build and test the web frontend.
+- Install frontend dependencies: `make frontend-install`
+- Build frontend assets: `make frontend-build`
+- Run frontend tests: `make frontend-test`
+- Start Vite dev server: `make frontend-dev`
 
 ## License
 

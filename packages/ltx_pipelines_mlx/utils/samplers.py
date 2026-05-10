@@ -6,6 +6,7 @@ Ported from ltx-pipelines denoising loop.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import mlx.core as mx
 from tqdm import tqdm
@@ -105,6 +106,7 @@ def denoise_loop(
     video_attention_mask: mx.array | None = None,
     audio_attention_mask: mx.array | None = None,
     show_progress: bool = True,
+    step_callback: Any | None = None,
 ) -> DenoiseOutput:
     """Run the Euler denoising loop for joint audio+video.
 
@@ -153,7 +155,8 @@ def denoise_loop(
     video_uniform = _is_uniform_mask(video_state.denoise_mask)
     audio_uniform = _is_uniform_mask(audio_state.denoise_mask)
 
-    for sigma, sigma_next in iterator:
+    total_steps = len(steps)
+    for step_index, (sigma, sigma_next) in enumerate(iterator, start=1):
         # Build sigma / per-token timesteps
         sigma_arr = mx.array([sigma], dtype=mx.bfloat16)
         B = video_x.shape[0]
@@ -189,6 +192,8 @@ def denoise_loop(
 
         # Force computation for memory efficiency
         mx.async_eval(video_x, audio_x)
+        if step_callback is not None:
+            step_callback({"current_step": step_index, "total_steps": total_steps})
 
     aggressive_cleanup()
 

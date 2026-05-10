@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from argparse import Namespace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -12,7 +11,7 @@ import pytest
 from tests.conftest import _make_video_args
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
-from zvisiongenerator.video_cli import _build_video_parser
+from zvisiongenerator.video_cli import _build_video_parser, _resolve_upscale_steps
 from zvisiongenerator.workflows import build_video_workflow
 from zvisiongenerator.workflows.video_stages import (
     image_to_video_stage,
@@ -50,13 +49,10 @@ class TestUpscaleCLIParsing:
         assert args.upscale == 2
 
     def test_upscale_3_rejected(self):
-        """--upscale 3 should cause a parser error (only 2 is supported)."""
-        # The actual validation happens in main(), which calls parser.error().
-        # At parse level, argparse accepts any int. The check is:
-        #   if args.upscale is not None and args.upscale != 2: parser.error(...)
+        """The parser preserves unsupported values so CLI validation can reject them."""
         parser = _build_video_parser()
         args = parser.parse_args(["-m", "model", "--upscale", "3"])
-        assert args.upscale == 3  # parsing succeeds; validation is in main()
+        assert args.upscale == 3
 
     def test_upscale_default_is_none(self):
         parser = _build_video_parser()
@@ -65,17 +61,12 @@ class TestUpscaleCLIParsing:
 
     def test_upscale_steps_from_config_default(self):
         """--upscale 2 without --steps resolves upscale_steps to 8 from config."""
-        args = _make_video_args(upscale=2, steps=8)
+        args = _make_video_args(upscale=2, steps=50)
         config = {"video_model_presets": {"ltx": {"upscale": {"default_upscale_steps": 8}}}}
 
-        # Replicate the CLI logic for upscale defaults
-        steps_explicitly_set = False
-        if args.upscale:
-            upscale_cfg = config.get("video_model_presets", {}).get("ltx", {}).get("upscale", {})
-            if not steps_explicitly_set:
-                args.steps = upscale_cfg.get("default_upscale_steps", 8)
-            args.upscale_steps = args.steps
+        _resolve_upscale_steps(args, config, "ltx", steps_explicitly_set=False)
 
+        assert args.steps == 8
         assert args.upscale_steps == 8
 
     def test_upscale_steps_from_explicit_steps(self):
@@ -83,12 +74,7 @@ class TestUpscaleCLIParsing:
         args = _make_video_args(upscale=2, steps=20)
         config = {"video_model_presets": {"ltx": {"upscale": {"default_upscale_steps": 8}}}}
 
-        steps_explicitly_set = True  # user passed --steps 20
-        if args.upscale:
-            upscale_cfg = config.get("video_model_presets", {}).get("ltx", {}).get("upscale", {})
-            if not steps_explicitly_set:
-                args.steps = upscale_cfg.get("default_upscale_steps", 8)
-            args.upscale_steps = args.steps
+        _resolve_upscale_steps(args, config, "wan", steps_explicitly_set=True)
 
         assert args.upscale_steps == 20
 
@@ -96,22 +82,19 @@ class TestUpscaleCLIParsing:
         """--upscale 2 still applies the LTX distilled step cap (steps capped at 8)."""
         args = _make_video_args(upscale=2, steps=30)
 
-        _LTX_MAX_STEPS = 8
-        if args.steps > _LTX_MAX_STEPS:
-            args.steps = _LTX_MAX_STEPS
+        _resolve_upscale_steps(args, {}, "ltx", steps_explicitly_set=True)
 
-        assert args.steps == 8  # capped
+        assert args.steps == 8
+        assert args.upscale_steps == 8
 
     def test_without_upscale_step_cap_applies(self):
         """Without --upscale, steps are capped at 8 for distilled LTX."""
         args = _make_video_args(upscale=None, steps=20)
 
-        _LTX_MAX_STEPS = 8
-        if not args.upscale:
-            if args.steps > _LTX_MAX_STEPS:
-                args.steps = _LTX_MAX_STEPS
+        _resolve_upscale_steps(args, {}, "ltx", steps_explicitly_set=True)
 
         assert args.steps == 8
+        assert args.upscale_steps is None
 
     def test_audio_flag_defaults_enabled(self):
         """--audio defaults to True (BooleanOptionalAction)."""
@@ -379,15 +362,16 @@ class TestRunnerUpscaleFieldPropagation:
 class TestDistilledTwoStageBackend:
     """Verify LtxVideoBackend dispatches to _generate_upscaled when upscaling."""
 
-    def test_text_to_video_upscale_calls_generate_upscaled(self):
-        """text_to_video() with stage1_steps dispatches to _generate_upscaled."""
+    def test_image_to_video_upscale_calls_generate_upscaled_with_image_path(self):
+        """image_to_video() with stage1_steps dispatches to _generate_upscaled."""
         from zvisiongenerator.backends.video_mac import LtxVideoBackend
 
         backend = LtxVideoBackend()
         backend._generate_upscaled = MagicMock(return_value=Path("/tmp/upscaled.mp4"))
 
-        result = backend.text_to_video(
+        result = backend.image_to_video(
             model=MagicMock(),
+            image_path="/tmp/reference.png",
             prompt="test prompt",
             width=704,
             height=480,
@@ -404,6 +388,7 @@ class TestDistilledTwoStageBackend:
         assert call_args[0][2] == 704  # width
         assert call_args[0][3] == 480  # height
         assert call_args[0][6] == 8  # stage1_steps
+        assert call_args.kwargs["image_path"] == "/tmp/reference.png"
         assert result == Path("/tmp/upscaled.mp4")
 
     def test_text_to_video_no_upscale_calls_generate_and_save(self):
@@ -429,12 +414,12 @@ class TestDistilledTwoStageBackend:
 
 
 # ---------------------------------------------------------------------------
-# Distilled Two-Stage Internals — formulas, sigmas, signature
+# Distilled Two-Stage Internals — formulas, sigmas, behavior
 # ---------------------------------------------------------------------------
 
 
 class TestDistilledTwoStageInternals:
-    """Unit tests for distilled two-stage upscale internals."""
+    """Unit tests for distilled two-stage upscale behavior."""
 
     @pytest.mark.parametrize(
         "dim, expected_half",
@@ -476,14 +461,6 @@ class TestDistilledTwoStageInternals:
         assert len(stage2) == 4, f"STAGE_2_SIGMAS should have 4 values (3 steps), got {len(stage2)}"
         assert stage2[0] == pytest.approx(0.909375), f"STAGE_2_SIGMAS[0] should be 0.909375, got {stage2[0]}"
 
-    def test_generate_upscaled_signature_has_image_path(self):
-        """_generate_upscaled() should accept image_path for I2V upscale."""
-        from zvisiongenerator.backends.video_mac import LtxVideoBackend
-
-        sig = inspect.signature(LtxVideoBackend._generate_upscaled)
-        param_names = set(sig.parameters.keys())
-        assert "image_path" in param_names, f"_generate_upscaled should have image_path, params: {param_names}"
-
     def test_i2v_upscale_allowed_in_cli(self):
         """--upscale 2 --image path.png should NOT cause a parser error at parse time."""
         parser = _build_video_parser()
@@ -491,34 +468,9 @@ class TestDistilledTwoStageInternals:
         assert args.upscale == 2
         assert args.image_path == "photo.png"
 
-    def test_generate_upscaled_uses_noise_latent_state_for_audio(self):
-        """_generate_upscaled source must call noise_latent_state for audio re-noising."""
-        from zvisiongenerator.backends.video_mac import LtxVideoBackend
-
-        source = inspect.getsource(LtxVideoBackend._generate_upscaled)
-        assert "noise_latent_state" in source, "_generate_upscaled must call noise_latent_state for audio re-noising"
-        # Verify the sigma comes from STAGE_2_SIGMAS (via start_sigma)
-        assert "sigma=start_sigma" in source, "Audio re-noising must use start_sigma from STAGE_2_SIGMAS"
-
-    def test_decode_receives_both_video_and_audio_latents(self):
-        """_decode_and_save_video must be called with both video_latent and audio_latent."""
-        from zvisiongenerator.backends.video_mac import LtxVideoBackend
-
-        source = inspect.getsource(LtxVideoBackend._generate_upscaled)
-        assert "_decode_and_save_video(video_latent, audio_latent" in source, "_decode_and_save_video must receive both video_latent and audio_latent"
-
-    def test_stage2_uses_same_x0_model_no_reload(self):
-        """Stage 2 must reuse the same x0_model (no transformer reload)."""
-        from zvisiongenerator.backends.video_mac import LtxVideoBackend
-
-        source = inspect.getsource(LtxVideoBackend._generate_upscaled)
-        # x0_model is created once, used in both denoise_loop calls
-        assert source.count("X0Model(") == 1, "x0_model should be created once (same transformer for both stages)"
-        assert source.count("denoise_loop(") == 2, "Two denoise_loop calls expected (Stage 1 and Stage 2)"
-
     @pytest.mark.parametrize("stage1_steps", [4, 8])
-    def test_sigma_slice_passed_to_first_denoise_loop(self, stage1_steps):
-        """First denoise_loop receives DISTILLED_SIGMAS[:stage1_steps + 1]."""
+    def test_two_stage_upscale_handoff_contracts(self, stage1_steps):
+        """Two-stage upscaling passes scheduler, audio, model, and decode contracts."""
         from zvisiongenerator.backends.video_mac import LtxVideoBackend
 
         # Known sigma schedule (9 values for up to 8 steps)
@@ -533,6 +485,7 @@ class TestDistilledTwoStageInternals:
         mock_patchifiers = MagicMock()
         mock_patchifiers.compute_video_latent_shape.return_value = (3, 7, 11)
         mock_latent_cond = MagicMock()
+        mock_latent_cond.LatentState.side_effect = lambda **kwargs: MagicMock(**kwargs)
         mock_transformer_model = MagicMock()
         mock_memory = MagicMock()
         mock_positions = MagicMock()
@@ -572,7 +525,12 @@ class TestDistilledTwoStageInternals:
         pipeline.dit = MagicMock()  # skip transformer loading
         pipeline.low_memory = False
         pipeline._encode_text.return_value = (MagicMock(), MagicMock())
-        pipeline.video_patchifier.patchify.return_value = (MagicMock(), MagicMock())
+        video_tokens = MagicMock()
+        pipeline.video_patchifier.patchify.return_value = (video_tokens, MagicMock())
+        decoded_video_latent = MagicMock()
+        decoded_audio_latent = MagicMock()
+        pipeline.video_patchifier.unpatchify.side_effect = [MagicMock(), decoded_video_latent]
+        pipeline.audio_patchifier.unpatchify.return_value = decoded_audio_latent
 
         backend = LtxVideoBackend()
 
@@ -591,3 +549,9 @@ class TestDistilledTwoStageInternals:
         expected_sigmas = fake_distilled_sigmas[: stage1_steps + 1]
         first_call_kwargs = mock_denoise_loop.call_args_list[0].kwargs
         assert first_call_kwargs["sigmas"] == expected_sigmas, f"Stage 1 sigmas should be DISTILLED_SIGMAS[:{stage1_steps + 1}] = {expected_sigmas}, got {first_call_kwargs['sigmas']}"
+        second_call_kwargs = mock_denoise_loop.call_args_list[1].kwargs
+        assert second_call_kwargs["sigmas"] == fake_stage2_sigmas
+        assert second_call_kwargs["model"] is first_call_kwargs["model"]
+        mock_latent_cond.noise_latent_state.assert_called_once()
+        assert mock_latent_cond.noise_latent_state.call_args.kwargs == {"sigma": fake_stage2_sigmas[0], "seed": 44}
+        pipeline._decode_and_save_video.assert_called_once_with(decoded_video_latent, decoded_audio_latent, "/tmp/out.mp4")

@@ -42,6 +42,8 @@ woman:
 - Multiple prompts per set are supported.
 - The set name becomes the output filename prefix.
 
+In the Web UI, choose **Prompt file** as the prompt source, type or browse to a YAML file on the machine running the server, then select one of the active prompt options loaded from that file. The YAML editor reloads the file from disk each time you open it, so reopening the same path reflects changes made outside the browser. If you edit the path manually, the visible value is the value submitted; use Enter or Browse when you want the UI to inspect the file and refresh the option list before generating.
+
 ## Prompt Variables
 
 Use `{option1|option2|option3}` syntax for random selection each run:

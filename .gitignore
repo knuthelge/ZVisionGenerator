@@ -6,6 +6,9 @@ dist/
 wheels/
 *.egg-info
 
+# Node modules
+node_modules/
+
 # Auto-generated version file (hatch-vcs)
 zvisiongenerator/_version.py
 .ruff_cache/

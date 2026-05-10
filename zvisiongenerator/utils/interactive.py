@@ -8,6 +8,7 @@ import threading
 
 class SkipSignal:
     _INTERRUPT_ACTIONS = frozenset({"skip", "quit"})
+    _KNOWN_ACTIONS = frozenset({"skip", "quit", "pause", "repeat"})
 
     def __init__(self):
         self._action = None
@@ -45,6 +46,23 @@ class SkipSignal:
             action = self._action
             self._action = None
             return action
+
+    def queue_action(self, action: str) -> None:
+        normalized = action.strip().lower()
+        if normalized not in self._KNOWN_ACTIONS:
+            raise ValueError(f"Unknown action '{action}'.")
+        with self._lock:
+            self._action = normalized
+
+    def resume(self) -> None:
+        with self._lock:
+            if not self._waiting_for_resume:
+                return
+            self._resume_event.set()
+
+    def is_waiting_for_resume(self) -> bool:
+        with self._lock:
+            return self._waiting_for_resume
 
     def wait_for_key(self):
         with self._lock:

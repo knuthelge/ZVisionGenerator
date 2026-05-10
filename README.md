@@ -72,9 +72,19 @@ ziv-video -m dgrauet/ltx-2.3-mlx-q4 --prompt "A cat walking through a garden"
 
 # Image-to-video
 ziv-video -m dgrauet/ltx-2.3-mlx-q4 --image photo.jpg --prompt "Camera zooms in slowly"
+
+# Launch the Web UI
+ziv ui
+
+# Show command help and available subcommands
+ziv
 ```
 
-> **Tip:** `ziv image`, `ziv video`, and `ziv model` are also available as subcommands of the unified `ziv` parent command.
+The Web UI is an explicit local launcher: use `ziv ui` or `ziv-ui`. Running bare `ziv` prints command-discovery help without starting a browser or server. If a local environment is missing required Web UI packages, the launcher reports how to repair the base install instead of failing with an import traceback.
+
+The packaged Web UI is served from local static files and does not fetch cloud fonts or other font assets at runtime. It uses local system font fallbacks when Inter or JetBrains Mono are not installed.
+
+> **Tip:** `ziv image`, `ziv video`, and `ziv model` are also available as subcommands of the unified `ziv` parent command. Use `ziv -h` or `ziv --help` to print terminal help.
 
 ## Documentation
 

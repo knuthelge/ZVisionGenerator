@@ -12,6 +12,19 @@ from .interactive import SkipSignal
 from .lora import parse_lora_arg
 from .paths import resolve_model_path, resolve_lora_path, get_ziv_data_dir
 from .platform import AliasMap, AliasValue, PlatformInfo, get_platform_info, resolve_alias
+from .provenance import (
+    IMAGE_CONFIG_SCHEMA,
+    PROVENANCE_SCHEMA,
+    VIDEO_CONFIG_SCHEMA,
+    build_image_config_payload,
+    build_image_provenance,
+    build_video_config_payload,
+    build_video_provenance,
+    embed_mp4_config,
+    embed_png_config,
+    read_mp4_config,
+    read_png_config,
+)
 from .prompt_compose import expand_random_choices
 from .prompts import load_prompts_file
 from .video_model_detect import VideoModelInfo, detect_video_model
@@ -20,11 +33,20 @@ __all__ = [
     "ImageModelInfo",
     "AliasMap",
     "AliasValue",
+    "IMAGE_CONFIG_SCHEMA",
     "PlatformInfo",
+    "PROVENANCE_SCHEMA",
+    "VIDEO_CONFIG_SCHEMA",
     "SkipSignal",
     "VideoModelInfo",
+    "build_image_config_payload",
+    "build_image_provenance",
+    "build_video_config_payload",
+    "build_video_provenance",
     "detect_image_model",
     "detect_video_model",
+    "embed_mp4_config",
+    "embed_png_config",
     "ensure_ffmpeg",
     "expand_random_choices",
     "format_generation_info",
@@ -34,6 +56,8 @@ __all__ = [
     "load_config",
     "load_prompts_file",
     "parse_lora_arg",
+    "read_mp4_config",
+    "read_png_config",
     "resolve_alias",
     "resolve_defaults",
     "resolve_lora_path",

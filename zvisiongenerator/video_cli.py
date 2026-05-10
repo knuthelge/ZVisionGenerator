@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.backends import get_video_backend
-from zvisiongenerator.utils.config import load_config, resolve_video_defaults
+from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
+from zvisiongenerator.utils.config import load_config, resolve_video_defaults, select_ratio_size_defaults
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.lora import parse_lora_arg
 from zvisiongenerator.utils.paths import resolve_lora_path, resolve_model_path
@@ -48,29 +49,26 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
     return parser
 
 
-def _align_resolution(width: int, height: int, divisor: int, label: str = "Video") -> tuple[int, int]:
-    """Round width/height to nearest multiple of divisor."""
-    half = divisor // 2
-    aligned_w = ((width + half) // divisor) * divisor
-    aligned_h = ((height + half) // divisor) * divisor
-    if aligned_w != width or aligned_h != height:
-        warnings.warn(
-            f"{label} requires dimensions divisible by {divisor}. Adjusted {width}x{height} -> {aligned_w}x{aligned_h}",
-            stacklevel=2,
-        )
-    return aligned_w, aligned_h
+def _resolve_upscale_steps(args: argparse.Namespace, config: dict[str, Any], model_family: str, *, steps_explicitly_set: bool) -> None:
+    """Apply video upscale step defaults and model step caps to parsed args."""
+    if args.upscale:
+        upscale_cfg = config.get("video_model_presets", {}).get("ltx", {}).get("upscale", {})
+        if not steps_explicitly_set:
+            args.steps = upscale_cfg.get("default_upscale_steps", 8)
+        args.upscale_steps = args.steps
+    else:
+        args.upscale_steps = None
 
-
-def _align_ltx_frames(frames: int, alignment: int = 8) -> int:
-    """Round frame count to nearest valid alignment*k+1 value."""
-    # For LTX (alignment=8): 9, 17, 25, 33, 41, 49, 57, 65, 73, 81, 89, 97, 105, 113, 121
-    if alignment <= 0:
-        return frames
-    k = max(1, round((frames - 1) / alignment))
-    aligned = alignment * k + 1
-    if aligned != frames:
-        warnings.warn(f"Video model requires frames = {alignment}k+1. Adjusted {frames} -> {aligned}", stacklevel=2)
-    return aligned
+    if model_family == "ltx":
+        max_steps = 8
+        if args.steps > max_steps:
+            warnings.warn(
+                f"LTX distilled model supports max {max_steps} denoising steps; capping {args.steps} -> {max_steps}",
+                stacklevel=2,
+            )
+            args.steps = max_steps
+            if args.upscale_steps is not None:
+                args.upscale_steps = args.steps
 
 
 def main(*, prog: str = "ziv-video") -> None:
@@ -128,21 +126,28 @@ def main(*, prog: str = "ziv-video") -> None:
     if args.image_path and not model_info.supports_i2v:
         parser.error(f"Model '{args.model}' does not support image-to-video.")
 
-    # Default ratio/size from config (matching image CLI pattern)
+    # Default ratio/size from shared config-backed semantics.
     vgen_cfg = config.get("video_generation", {})
-    if args.ratio is None:
-        args.ratio = vgen_cfg.get("default_ratio", "16:9")
-    if args.size is None:
-        args.size = vgen_cfg.get("default_size", "m")
-
-    # Validate ratio/size for this model family
     vsizes = config.get("video_sizes", {})
-    family_sizes = vsizes.get(model_info.family, {})
-    if family_sizes:
-        if args.ratio not in family_sizes:
-            parser.error(f"Unknown ratio '{args.ratio}' for {model_info.family}. Valid: {list(family_sizes.keys())}")
-        if args.size not in family_sizes.get(args.ratio, {}):
-            parser.error(f"Unknown size '{args.size}' for ratio '{args.ratio}'. Valid: {list(family_sizes.get(args.ratio, {}).keys())}")
+    default_ratio, default_size = select_ratio_size_defaults(
+        vgen_cfg.get("default_ratio"),
+        tuple(vsizes.keys()),
+        {ratio: tuple(size_map.keys()) for ratio, size_map in vsizes.items()},
+        vgen_cfg.get("default_size"),
+        fallback_ratio="16:9",
+        fallback_size="m",
+    )
+    if args.ratio is None:
+        args.ratio = default_ratio
+    if args.size is None:
+        args.size = default_size
+
+    # Validate ratio/size from flat video size config. Model family remains authoritative for presets/backend behavior.
+    if vsizes:
+        if args.ratio not in vsizes:
+            parser.error(f"Unknown ratio '{args.ratio}'. Valid: {list(vsizes.keys())}")
+        if args.size not in vsizes.get(args.ratio, {}):
+            parser.error(f"Unknown size '{args.size}' for ratio '{args.ratio}'. Valid: {list(vsizes.get(args.ratio, {}).keys())}")
 
     # Parse LoRA args (matching image CLI pattern)
     lora_paths, lora_weights = None, None
@@ -179,27 +184,8 @@ def main(*, prog: str = "ziv-video") -> None:
     args.height = defaults["height"]
     args.num_frames = defaults["num_frames"]
 
-    # Resolve upscale defaults from config (before step cap so cap applies to final value)
     steps_explicitly_set = "steps" in cli_overrides
-    if args.upscale:
-        upscale_cfg = config.get("video_model_presets", {}).get("ltx", {}).get("upscale", {})
-        if not steps_explicitly_set:
-            args.steps = upscale_cfg.get("default_upscale_steps", 8)
-        args.upscale_steps = args.steps
-    else:
-        args.upscale_steps = None
-
-    # LTX: cap steps at max supported value (after upscale defaults)
-    if model_info.family == "ltx":
-        _LTX_MAX_STEPS = 8
-        if args.steps > _LTX_MAX_STEPS:
-            warnings.warn(
-                f"LTX distilled model supports max {_LTX_MAX_STEPS} denoising steps; capping {args.steps} \u2192 {_LTX_MAX_STEPS}",
-                stacklevel=2,
-            )
-            args.steps = _LTX_MAX_STEPS
-            if args.upscale_steps is not None:
-                args.upscale_steps = args.steps
+    _resolve_upscale_steps(args, config, model_info.family, steps_explicitly_set=steps_explicitly_set)
 
     # Audio flag normalization
     args.no_audio = not getattr(args, "audio", True)
@@ -207,13 +193,13 @@ def main(*, prog: str = "ziv-video") -> None:
     # Alignment corrections using model metadata
     # When upscaling, use 64-alignment so half-res (dim//2) stays 32-aligned
     alignment = 64 if args.upscale else model_info.resolution_alignment
-    args.width, args.height = _align_resolution(
+    args.width, args.height = align_resolution(
         args.width,
         args.height,
         alignment,
         model_info.family.upper(),
     )
-    args.num_frames = _align_ltx_frames(args.num_frames, model_info.frame_alignment)
+    args.num_frames = align_ltx_frames(args.num_frames, model_info.frame_alignment)
 
     if args.width < 64 or args.height < 64:
         parser.error(f"Resolved dimensions {args.width}x{args.height} are too small (minimum 64x64)")

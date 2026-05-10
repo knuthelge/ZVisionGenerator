@@ -661,23 +661,24 @@ class TestResolveVideoDefaults:
             "default_size": "m",
         },
         "video_sizes": {
-            "ltx": {
-                "16:9": {
-                    "s": {"width": 512, "height": 288, "frames": 49},
-                    "m": {"width": 704, "height": 480, "frames": 65},
-                },
-                "9:16": {
-                    "s": {"width": 288, "height": 512, "frames": 49},
-                    "m": {"width": 480, "height": 704, "frames": 49},
-                },
-                "1:1": {
-                    "m": {"width": 512, "height": 512, "frames": 33},
-                },
+            "16:9": {
+                "s": {"width": 512, "height": 288, "frames": 49},
+                "m": {"width": 704, "height": 480, "frames": 65},
+            },
+            "9:16": {
+                "s": {"width": 288, "height": 512, "frames": 49},
+                "m": {"width": 480, "height": 704, "frames": 49},
+            },
+            "1:1": {
+                "m": {"width": 512, "height": 512, "frames": 33},
             },
         },
         "video_model_presets": {
             "ltx": {
                 "default_steps": 8,
+            },
+            "other": {
+                "default_steps": 12,
             },
         },
     }
@@ -697,6 +698,13 @@ class TestResolveVideoDefaults:
         assert result["steps"] == 10
         # Non-overridden values still come from preset
         assert result["width"] == 704
+
+    def test_model_family_selects_preset_but_not_dimensions(self):
+        result = resolve_video_defaults("other", self._VIDEO_CONFIG, {})
+        assert result["steps"] == 12
+        assert result["width"] == 704
+        assert result["height"] == 480
+        assert result["num_frames"] == 65
 
     def test_cli_none_values_ignored(self):
         overrides = {"steps": None}

@@ -49,6 +49,7 @@ class VideoBackend(Protocol):
         seed: int,
         steps: int,
         output_path: str,
+        step_callback: Any | None = None,
         **kwargs: Any,
     ) -> Path | None:
         """Generate video from text. Returns output path or None if failed."""
@@ -65,6 +66,7 @@ class VideoBackend(Protocol):
         seed: int,
         steps: int,
         output_path: str,
+        step_callback: Any | None = None,
         **kwargs: Any,
     ) -> Path | None:
         """Generate video from image + text. Returns output path or None if failed."""

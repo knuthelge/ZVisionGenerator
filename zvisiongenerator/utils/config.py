@@ -117,6 +117,31 @@ def load_config() -> dict[str, Any]:
         if default_size not in sizes.get(default_ratio, {}):
             raise ValueError(f"config 'generation.default_size' value '{default_size}' is not a valid size for ratio '{default_ratio}'. Valid: {list(sizes.get(default_ratio, {}).keys())}")
 
+    video_sizes = config.get("video_sizes", {})
+    for ratio_key, scales in video_sizes.items():
+        if not isinstance(scales, dict):
+            raise ValueError(f"config 'video_sizes.{ratio_key}' must be a mapping of size → dimensions.")
+        for size_key, dims in scales.items():
+            if not isinstance(dims, dict):
+                raise ValueError(f"config 'video_sizes.{ratio_key}.{size_key}' must be a mapping with 'width', 'height', and 'frames'.")
+            if not isinstance(dims.get("width"), int):
+                raise ValueError(f"config 'video_sizes.{ratio_key}.{size_key}.width' must be an integer.")
+            if not isinstance(dims.get("height"), int):
+                raise ValueError(f"config 'video_sizes.{ratio_key}.{size_key}.height' must be an integer.")
+            if not isinstance(dims.get("frames"), int):
+                raise ValueError(f"config 'video_sizes.{ratio_key}.{size_key}.frames' must be an integer.")
+
+    vgen = config.get("video_generation", {})
+    default_video_ratio = vgen.get("default_ratio")
+    default_video_size = vgen.get("default_size")
+    if default_video_ratio is not None and default_video_ratio not in video_sizes:
+        raise ValueError(f"config 'video_generation.default_ratio' value '{default_video_ratio}' is not a valid ratio. Valid: {list(video_sizes.keys())}")
+    if default_video_ratio is not None and default_video_size is not None:
+        if default_video_size not in video_sizes.get(default_video_ratio, {}):
+            raise ValueError(
+                f"config 'video_generation.default_size' value '{default_video_size}' is not a valid size for ratio '{default_video_ratio}'. Valid: {list(video_sizes.get(default_video_ratio, {}).keys())}"
+            )
+
     return config
 
 
@@ -231,6 +256,22 @@ def validate_scheduler(scheduler_name: str | None, config: dict[str, Any]) -> No
         raise ValueError(f"Unknown scheduler '{scheduler_name}'. Valid options: {list(known.keys())}")
 
 
+def select_ratio_size_defaults(
+    preferred_ratio: str | None,
+    ratios: tuple[str, ...],
+    size_options_map: dict[str, tuple[str, ...]],
+    preferred_size: str | None,
+    *,
+    fallback_ratio: str,
+    fallback_size: str,
+) -> tuple[str, str]:
+    """Resolve the nearest valid ratio and size from config-backed options."""
+    ratio = preferred_ratio if preferred_ratio in ratios else (ratios[0] if ratios else fallback_ratio)
+    size_options = size_options_map.get(ratio, ())
+    size = preferred_size if preferred_size in size_options else (size_options[0] if size_options else fallback_size)
+    return ratio, size
+
+
 def resolve_video_defaults(
     model_family: str,
     config: dict,
@@ -265,9 +306,8 @@ def resolve_video_defaults(
     ratio = cli_overrides.get("ratio") or vgen.get("default_ratio", "16:9")
     size = cli_overrides.get("size") or vgen.get("default_size", "m")
 
-    # Look up dimensions from video_sizes[family][ratio][size]
-    family_sizes = vsizes.get(model_family, {})
-    ratio_sizes = family_sizes.get(ratio, {})
+    # Look up dimensions from flat video_sizes[ratio][size]. Model family still selects video_model_presets.
+    ratio_sizes = vsizes.get(ratio, {})
     size_entry = ratio_sizes.get(size, {})
 
     effective: dict[str, Any] = {
