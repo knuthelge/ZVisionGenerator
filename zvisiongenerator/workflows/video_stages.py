@@ -16,6 +16,7 @@ from pathlib import Path
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.ffmpeg import strip_audio
+from zvisiongenerator.utils.provenance import build_video_config_payload, embed_mp4_config
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
 
 
@@ -69,6 +70,7 @@ def text_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorking
         seed=request.seed,
         steps=request.steps,
         output_path=output_path,
+        step_callback=request.step_callback,
         **kwargs,
     )
     artifacts.generation_time = time.monotonic() - t0
@@ -104,6 +106,7 @@ def image_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
         seed=request.seed,
         steps=request.steps,
         output_path=output_path,
+        step_callback=request.step_callback,
         **kwargs,
     )
     artifacts.generation_time = time.monotonic() - t0
@@ -114,8 +117,15 @@ def image_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
 
 
 def log_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:
-    """Print video generation info to console."""
+    """Embed config metadata in the video file and print generation info to console."""
     path = artifacts.video_path or "unknown"
+    if artifacts.video_path is not None:
+        payload = build_video_config_payload(request, artifacts)
+        try:
+            embed_mp4_config(artifacts.video_path, payload)
+        except subprocess.CalledProcessError as e:
+            err_msg = e.stderr.decode("utf-8", "replace").strip() if e.stderr else str(e)
+            warnings.warn(f"ffmpeg metadata embed failed: {err_msg}", stacklevel=2)
     t = artifacts.generation_time
     print(f"  Video saved: {path}  ({t:.1f}s)")
     return StageOutcome.success

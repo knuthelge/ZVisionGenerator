@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import warnings
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from zvisiongenerator.video_cli import _align_ltx_frames, _align_resolution, _build_video_parser
+from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
+from zvisiongenerator.utils.video_model_detect import VideoModelInfo
+from zvisiongenerator.video_cli import _build_video_parser
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +125,65 @@ class TestBuildVideoParser:
         assert args.width == 640
 
 
+class TestVideoCliExecution:
+    """Verify executable CLI behavior beyond argument parsing."""
+
+    def test_main_caps_upscale_steps_before_running_batch(self, monkeypatch, tmp_path):
+        import zvisiongenerator.video_cli as video_cli
+
+        model_info = VideoModelInfo(
+            family="ltx",
+            backend="ltx",
+            supports_i2v=True,
+            default_fps=24,
+            frame_alignment=8,
+            resolution_alignment=32,
+        )
+        backend = MagicMock()
+        backend.load_model.return_value = (MagicMock(), model_info)
+        captured: dict[str, int] = {}
+
+        monkeypatch.setattr(
+            video_cli,
+            "load_config",
+            lambda: {
+                "video_generation": {"default_ratio": "16:9", "default_size": "m"},
+                "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
+                "video_model_presets": {"ltx": {"upscale": {"default_upscale_steps": 8}}},
+            },
+        )
+        monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
+        monkeypatch.setattr(video_cli, "detect_video_model", lambda _model: model_info)
+        monkeypatch.setattr(
+            video_cli,
+            "resolve_video_defaults",
+            lambda _family, _config, cli_overrides: {
+                "steps": cli_overrides.get("steps", 8),
+                "width": 704,
+                "height": 448,
+                "num_frames": 49,
+            },
+        )
+        monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
+        monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args: object())
+
+        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args):
+            captured["steps"] = args.steps
+            captured["upscale_steps"] = args.upscale_steps
+
+        monkeypatch.setattr(video_cli, "run_video_batch", _fake_run_video_batch)
+
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3-mlx-q4", "--prompt", "a dog", "--upscale", "2", "--steps", "12", "-o", str(tmp_path)]):
+            with warnings.catch_warnings(record=True) as seen:
+                warnings.simplefilter("always")
+                video_cli.main()
+
+        assert captured["steps"] == 8
+        assert captured["upscale_steps"] == 8
+        assert any("max 8 denoising steps" in str(item.message) for item in seen)
+
+
 # ---------------------------------------------------------------------------
 # _align_resolution
 # ---------------------------------------------------------------------------
@@ -142,7 +204,7 @@ class TestAlignResolution:
         ids=["already-aligned-704x480", "already-aligned-512x512", "rounded-700x475", "rounded-710x490", "small-100x100"],
     )
     def test_alignment(self, w_in, h_in, w_out, h_out):
-        result_w, result_h = _align_resolution(w_in, h_in, 32, "Test")
+        result_w, result_h = align_resolution(w_in, h_in, 32, "Test")
         assert result_w % 32 == 0
         assert result_h % 32 == 0
         assert result_w == w_out
@@ -151,13 +213,13 @@ class TestAlignResolution:
     def test_already_aligned_no_warning(self):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            _align_resolution(704, 480, 32, "Test")
+            align_resolution(704, 480, 32, "Test")
             assert len(w) == 0
 
     def test_unaligned_emits_warning(self):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            _align_resolution(700, 475, 32, "Test")
+            align_resolution(700, 475, 32, "Test")
             assert len(w) == 1
             assert "divisible by 32" in str(w[0].message)
 
@@ -187,7 +249,7 @@ class TestAlignLtxFrames:
         ids=["9", "17", "49", "97", "121", "50->49", "48->49", "10->9", "14->17", "1->9"],
     )
     def test_alignment(self, frames_in, frames_out):
-        result = _align_ltx_frames(frames_in)
+        result = align_ltx_frames(frames_in)
         assert result == frames_out
         # Verify 8k+1 pattern
         assert (result - 1) % 8 == 0
@@ -195,12 +257,12 @@ class TestAlignLtxFrames:
     def test_valid_no_warning(self):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            _align_ltx_frames(49)
+            align_ltx_frames(49)
             assert len(w) == 0
 
     def test_invalid_emits_warning(self):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            _align_ltx_frames(50)
+            align_ltx_frames(50)
             assert len(w) == 1
             assert "8k+1" in str(w[0].message)

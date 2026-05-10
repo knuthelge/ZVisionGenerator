@@ -28,6 +28,25 @@ class _SkipChecker:
             raise StopImageGenerationException("Skipped by user")
 
 
+class _ProgressChecker:
+    """InLoopCallback that reports denoising progress for each step."""
+
+    def __init__(self, total_steps: int, step_callback):
+        self._total_steps = max(total_steps, 1)
+        self._step_callback = step_callback
+        self._current_step = 0
+
+    def call_in_loop(self, t, seed, prompt, latents, config, time_steps):
+        del t, seed, prompt, latents, config, time_steps
+        self._current_step = min(self._current_step + 1, self._total_steps)
+        self._step_callback(
+            {
+                "current_step": self._current_step,
+                "total_steps": self._total_steps,
+            }
+        )
+
+
 def _upcast_model_weights(model, components):
     """Cast model component weights to float32."""
 
@@ -119,6 +138,7 @@ class MfluxBackend:
         scheduler: str | None = None,
         negative_prompt: str | None = None,
         skip_signal: Any | None = None,
+        step_callback: Any | None = None,
     ) -> Image.Image | None:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
@@ -128,9 +148,13 @@ class MfluxBackend:
             temp_path = f.name
 
         checker = None
+        progress_checker = None
         if skip_signal is not None:
             checker = _SkipChecker(skip_signal)
             model.callbacks.register(checker)
+        if step_callback is not None:
+            progress_checker = _ProgressChecker(steps, step_callback)
+            model.callbacks.register(progress_checker)
 
         try:
             image_strength = 1.0 - strength  # invert: mflux convention
@@ -165,6 +189,11 @@ class MfluxBackend:
                     model.callbacks.in_loop.remove(checker)
                 except ValueError:
                     pass
+            if progress_checker is not None:
+                try:
+                    model.callbacks.in_loop.remove(progress_checker)
+                except ValueError:
+                    pass
             try:
                 os.unlink(temp_path)
             except OSError:
@@ -182,6 +211,7 @@ class MfluxBackend:
         scheduler: str | None = None,
         negative_prompt: str | None = None,
         skip_signal: Any | None = None,
+        step_callback: Any | None = None,
     ) -> Image.Image | None:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
@@ -191,9 +221,13 @@ class MfluxBackend:
         mx.random.seed(seed)
 
         checker = None
+        progress_checker = None
         if skip_signal is not None:
             checker = _SkipChecker(skip_signal)
             model.callbacks.register(checker)
+        if step_callback is not None:
+            progress_checker = _ProgressChecker(steps, step_callback)
+            model.callbacks.register(progress_checker)
 
         try:
             _is_flux = self._model_info is not None and self._model_info.family in ("flux1", "flux2", "flux2_klein")
@@ -219,5 +253,10 @@ class MfluxBackend:
             if checker is not None:
                 try:
                     model.callbacks.in_loop.remove(checker)
+                except ValueError:
+                    pass
+            if progress_checker is not None:
+                try:
+                    model.callbacks.in_loop.remove(progress_checker)
                 except ValueError:
                     pass

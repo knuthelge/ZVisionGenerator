@@ -36,6 +36,50 @@ class TestRunnerOutcome:
     """Verify run_batch() reacts correctly to each StageOutcome."""
 
     @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_success_emits_generation_finished_with_shared_payload(self, mock_build_wf):
+        """Successful image generations should emit the shared generation_finished payload."""
+        events: list[dict[str, object]] = []
+
+        def _capture_and_succeed(request, artifacts):
+            artifacts.filename = "image.png"
+            artifacts.filepath = "/tmp/image.png"
+            return StageOutcome.success
+
+        stage = MagicMock(side_effect=_capture_and_succeed)
+        mock_build_wf.return_value = GenerationWorkflow(name="test", stages=[stage])
+
+        backend = MagicMock()
+        model = MagicMock(spec=[])
+
+        run_batch(
+            backend,
+            model,
+            _prompts(),
+            _CONFIG,
+            _make_args(seed=42),
+            model_info=_MODEL_INFO,
+            progress_callback=events.append,
+        )
+
+        finished_events = [event for event in events if event["type"] == "generation_finished"]
+
+        assert len(finished_events) == 1
+        assert finished_events[0]["mode"] == "image"
+        assert finished_events[0]["status"] == "success"
+        assert finished_events[0]["run_index"] == 0
+        assert finished_events[0]["total_runs"] == 1
+        assert finished_events[0]["ran_iterations"] == 1
+        assert finished_events[0]["total_iterations"] == 1
+        assert finished_events[0]["set_name"] == "set1"
+        assert finished_events[0]["prompt_index"] == 0
+        assert finished_events[0]["total_prompts"] == 1
+        assert finished_events[0]["prompt"] == "a photo of a cat"
+        assert finished_events[0]["seed"] == 42
+        assert finished_events[0]["filename"] == "image.png"
+        assert finished_events[0]["output_path"] == "/tmp/image.png"
+        assert isinstance(finished_events[0]["generation_time"], float)
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
     def test_success_continues_normally(self, mock_build_wf):
         wf = _mock_workflow(StageOutcome.success)
         mock_build_wf.return_value = wf
@@ -80,6 +124,58 @@ class TestRunnerOutcome:
         assert wf.stages[0].call_count == 2
 
     @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_all_failed_batch_emits_failed_terminal_event(self, mock_build_wf):
+        wf = _mock_workflow(StageOutcome.failed)
+        mock_build_wf.return_value = wf
+
+        backend = MagicMock()
+        model = MagicMock(spec=[])
+        events: list[dict[str, object]] = []
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            run_batch(
+                backend,
+                model,
+                _prompts(),
+                _CONFIG,
+                _make_args(seed=42),
+                model_info=_MODEL_INFO,
+                progress_callback=events.append,
+                enable_interactive_controls=False,
+            )
+
+        failed_warnings = [warning for warning in w if "failed" in str(warning.message).lower()]
+        finished_events = [event for event in events if event["type"] == "generation_finished"]
+        batch_failed_events = [event for event in events if event["type"] == "batch_failed"]
+
+        assert len(failed_warnings) >= 1
+        assert len(finished_events) == 1
+        assert finished_events[0]["type"] == "generation_finished"
+        assert finished_events[0]["mode"] == "image"
+        assert finished_events[0]["run_index"] == 0
+        assert finished_events[0]["total_runs"] == 1
+        assert finished_events[0]["ran_iterations"] == 1
+        assert finished_events[0]["total_iterations"] == 1
+        assert finished_events[0]["set_name"] == "set1"
+        assert finished_events[0]["prompt_index"] == 0
+        assert finished_events[0]["total_prompts"] == 1
+        assert finished_events[0]["prompt"] == "a photo of a cat"
+        assert finished_events[0]["seed"] == 42
+        assert finished_events[0]["status"] == "failed"
+        assert isinstance(finished_events[0]["filename"], str)
+        assert isinstance(finished_events[0]["generation_time"], float)
+        assert "output_path" not in finished_events[0]
+        assert len(batch_failed_events) == 1
+        assert not [event for event in events if event["type"] == "batch_completed"]
+        assert batch_failed_events[0] == {
+            "type": "batch_failed",
+            "mode": "image",
+            "completed_iterations": 1,
+            "total_iterations": 1,
+        }
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
     def test_retry_warns_and_continues(self, mock_build_wf):
         wf = _mock_workflow(StageOutcome.retry)
         mock_build_wf.return_value = wf
@@ -98,6 +194,49 @@ class TestRunnerOutcome:
 
         # 4 attempts per prompt (1 initial + 3 retries) × 2 prompts = 8
         assert wf.stages[0].call_count == 8
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_retry_exhaustion_emits_failed_generation_and_batch_failed(self, mock_build_wf):
+        wf = _mock_workflow(StageOutcome.retry)
+        mock_build_wf.return_value = wf
+
+        backend = MagicMock()
+        model = MagicMock(spec=[])
+        events: list[dict[str, object]] = []
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            run_batch(
+                backend,
+                model,
+                _prompts(),
+                _CONFIG,
+                _make_args(seed=42),
+                model_info=_MODEL_INFO,
+                progress_callback=events.append,
+                enable_interactive_controls=False,
+            )
+
+        retry_exhausted_warnings = [warning for warning in w if "failed after" in str(warning.message).lower()]
+        finished_events = [event for event in events if event["type"] == "generation_finished"]
+        batch_failed_events = [event for event in events if event["type"] == "batch_failed"]
+
+        assert len(retry_exhausted_warnings) == 1
+        assert wf.stages[0].call_count == 4
+        assert len(finished_events) == 1
+        assert finished_events[0]["status"] == "failed"
+        assert finished_events[0]["seed"] == 42
+        assert isinstance(finished_events[0]["filename"], str)
+        assert isinstance(finished_events[0]["generation_time"], float)
+        assert "output_path" not in finished_events[0]
+        assert len(batch_failed_events) == 1
+        assert batch_failed_events[0] == {
+            "type": "batch_failed",
+            "mode": "image",
+            "completed_iterations": 1,
+            "total_iterations": 1,
+        }
+        assert not [event for event in events if event["type"] == "batch_completed"]
 
     @patch("zvisiongenerator.image_runner.build_workflow")
     def test_repeat_regenerates_seed(self, mock_build_wf):
@@ -399,3 +538,42 @@ class TestAmountPropagation:
         req = self._capture_request({"saturation": 0.0})
         assert req.saturation is True
         assert req.saturation_amount == 0.0
+
+
+class TestProgressCallbacks:
+    """Verify run_batch forwards low-level generation progress through the structured callback API."""
+
+    def test_step_progress_includes_image_generation_context(self):
+        events: list[dict[str, object]] = []
+
+        def _emit_step_then_succeed(request, artifacts):
+            assert request.step_callback is not None
+            request.step_callback({"current_step": 2, "total_steps": request.steps})
+            return StageOutcome.success
+
+        workflow = GenerationWorkflow(name="test", stages=[_emit_step_then_succeed])
+
+        with patch("zvisiongenerator.image_runner.build_workflow", return_value=workflow):
+            run_batch(
+                MagicMock(),
+                MagicMock(spec=[]),
+                _prompts(1),
+                _CONFIG,
+                _make_args(steps=4),
+                model_info=_MODEL_INFO,
+                progress_callback=events.append,
+            )
+
+        step_events = [event for event in events if event["type"] == "step_progress"]
+
+        assert len(step_events) == 1
+        assert step_events[0]["mode"] == "image"
+        assert step_events[0]["current_step"] == 2
+        assert step_events[0]["total_steps"] == 4
+        assert step_events[0]["run_index"] == 0
+        assert step_events[0]["total_runs"] == 1
+        assert step_events[0]["ran_iterations"] == 1
+        assert step_events[0]["total_iterations"] == 1
+        assert step_events[0]["set_name"] == "set1"
+        assert step_events[0]["prompt_index"] == 0
+        assert step_events[0]["total_prompts"] == 1

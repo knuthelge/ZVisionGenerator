@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Model aliases may now resolve to different repositories depending on your operating system
 - If a model alias is unavailable on your platform, a guidance message now explains why and suggests alternatives
 - `ziv model list` now shows platform-specific availability for model aliases
+- Bare `ziv` now shows command discovery/help, and the local Web UI is launched explicitly with `ziv ui` or `ziv-ui`
 
 ## [0.6.4] - 2026-04
 

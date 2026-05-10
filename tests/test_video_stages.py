@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
+import warnings
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
@@ -201,25 +203,71 @@ class TestImageToVideoStage:
 
 
 class TestLogVideoStage:
-    """Verify log_video_stage runs without error."""
+    """Verify log_video_stage embeds config metadata and logs correctly."""
 
-    def test_prints_output(self, capsys):
+    def test_returns_success_without_mutating_artifacts(self):
         req = _req()
         arts = VideoWorkingArtifacts()
         arts.video_path = Path("/tmp/out.mp4")
         arts.generation_time = 12.5
 
-        outcome = log_video_stage(req, arts)
-        assert outcome is StageOutcome.success
-        captured = capsys.readouterr()
-        assert "/tmp/out.mp4" in captured.out
-        assert "12.5s" in captured.out
+        with patch("zvisiongenerator.workflows.video_stages.embed_mp4_config"):
+            outcome = log_video_stage(req, arts)
 
-    def test_none_path_prints_unknown(self, capsys):
+        assert outcome is StageOutcome.success
+        assert arts.video_path == Path("/tmp/out.mp4")
+        assert arts.generation_time == 12.5
+
+    def test_calls_embed_mp4_config_with_video_path(self, tmp_path):
+        video_path = tmp_path / "out.mp4"
+        video_path.write_bytes(b"fake-video")
+        req = _req(
+            prompt="a moving scene",
+            model_name="ltx-8",
+            model_family="ltx",
+            width=704,
+            height=448,
+            num_frames=49,
+            seed=77,
+            steps=8,
+            image_path="/tmp/ref.png",
+        )
+        arts = VideoWorkingArtifacts(video_path=video_path, generation_time=12.5, filename="out.mp4")
+
+        with patch("zvisiongenerator.workflows.video_stages.embed_mp4_config") as mock_embed:
+            outcome = log_video_stage(req, arts)
+
+        assert outcome is StageOutcome.success
+        mock_embed.assert_called_once()
+        call_path, call_payload = mock_embed.call_args[0]
+        assert call_path == video_path
+        assert call_payload["prompt"] == "a moving scene"
+        assert call_payload["model"] == "ltx-8"
+        assert call_payload["seed"] == 77
+        assert call_payload["frame_count"] == 49
+        assert call_payload["workflow"] == "img2vid"
+
+    def test_warns_and_succeeds_on_ffmpeg_embed_failure(self):
+        req = _req(prompt="test", model_name="ltx")
+        arts = VideoWorkingArtifacts(video_path=Path("/tmp/out.mp4"), generation_time=5.0)
+
+        with patch("zvisiongenerator.workflows.video_stages.embed_mp4_config") as mock_embed:
+            mock_embed.side_effect = subprocess.CalledProcessError(1, "ffmpeg", stderr=b"mux error")
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                outcome = log_video_stage(req, arts)
+
+        assert outcome is StageOutcome.success
+        assert any("ffmpeg metadata embed failed" in str(w.message) for w in caught)
+
+    def test_none_path_still_succeeds(self):
         req = _req()
         arts = VideoWorkingArtifacts()
         arts.video_path = None
+        arts.generation_time = 0.0
 
-        log_video_stage(req, arts)
-        captured = capsys.readouterr()
-        assert "unknown" in captured.out
+        outcome = log_video_stage(req, arts)
+
+        assert outcome is StageOutcome.success
+        assert arts.video_path is None
+        assert arts.generation_time == 0.0

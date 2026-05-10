@@ -95,15 +95,15 @@ class TestResolveModelAlias:
         result = resolve_model_path("nonexistent", aliases={"ltx-4": "dgrauet/ltx-2.3-mlx-q4"})
         assert result == "nonexistent"
 
-    def test_none_aliases_backward_compat(self, monkeypatch, tmp_path):
-        """Calling without aliases kwarg works as before (backward compat)."""
+    def test_default_aliases_leave_unknown_name_unchanged(self, monkeypatch, tmp_path):
+        """Calling without aliases leaves an unknown model name unchanged."""
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
         (tmp_path / "models").mkdir(parents=True, exist_ok=True)
         result = resolve_model_path("some-model")
         assert result == "some-model"
 
-    def test_empty_aliases_backward_compat(self, monkeypatch, tmp_path):
-        """Empty dict aliases works as before (backward compat)."""
+    def test_empty_aliases_leave_unknown_name_unchanged(self, monkeypatch, tmp_path):
+        """Empty aliases leave an unknown model name unchanged."""
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
         (tmp_path / "models").mkdir(parents=True, exist_ok=True)
         result = resolve_model_path("some-model", aliases={})

@@ -39,6 +39,7 @@ class ImageGenerationRequest:
     guidance: float = 0.5
     scheduler: str | None = None
     skip_signal: Any | None = None
+    step_callback: Callable[[dict[str, Any]], None] | None = None
 
     # Upscale params
     upscale_factor: int | None = None
