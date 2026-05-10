@@ -21,11 +21,11 @@ zvisiongenerator/_version.py
 .venv
 
 # Model weights
-models/
-loras/
+/models/
+/loras/
 
 # Output files
-output/
+/output/
 
 # Agent work files
 .agent-work/
