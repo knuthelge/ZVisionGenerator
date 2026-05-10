@@ -6,11 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Packaged local Web UI with workspace, gallery, config, and model views
+- FastAPI-backed local job APIs, status streaming, and background web runner support for browser-submitted image and video jobs
+- Frontend build, test, and packaged static asset verification integrated into the standard Makefile and CI workflows
+
 ### Changed
+- Base installs now include the local Web UI runtime dependencies and packaged SPA assets
+- Web configuration and model resolution now expose backend-aware defaults to the local UI without duplicating platform selection logic
 - Model aliases may now resolve to different repositories depending on your operating system
 - If a model alias is unavailable on your platform, a guidance message now explains why and suggests alternatives
 - `ziv model list` now shows platform-specific availability for model aliases
 - Bare `ziv` now shows command discovery/help, and the local Web UI is launched explicitly with `ziv ui` or `ziv-ui`
+
+## [0.6.5] - 2026-04
+
+### Added
+- New logo asset set for project and documentation branding
+
+### Changed
+- README branding updated to use the new logo treatment
+- Documentation home page and MkDocs site branding updated to use the new logo assets
+
+### Removed
+- Older root-level logo assets replaced by the new documentation asset set
 
 ## [0.6.4] - 2026-04
 
