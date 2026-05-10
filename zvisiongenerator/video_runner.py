@@ -8,6 +8,11 @@ import time
 import warnings
 from typing import Any
 
+from zvisiongenerator.core.progress_events import ProgressCallback
+from zvisiongenerator.core.progress_events import emit_generation_finished as _emit_generation_finished
+from zvisiongenerator.core.progress_events import emit_progress as _emit_progress
+from zvisiongenerator.core.progress_events import make_step_progress_callback as _make_step_progress_callback
+from zvisiongenerator.core.progress_events import run_workflow_with_progress as _run_workflow_with_progress
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.core.workflow import GenerationWorkflow
@@ -22,6 +27,7 @@ def run_video_batch(
     prompts_data: dict[str, list[tuple[str, str | None]]],
     config: dict[str, Any],
     args: argparse.Namespace,
+    progress_callback: ProgressCallback | None = None,
 ) -> None:
     """Run the video batch generation loop.
 
@@ -42,14 +48,17 @@ def run_video_batch(
     total_iterations = args.runs * total_prompts
     if total_iterations == 0:
         print("No active prompt sets found. Exiting.")
+        _emit_progress(progress_callback, "batch_completed", mode="video", total_iterations=0, completed_iterations=0)
         return
 
     ran_iterations = 0
     completed_iterations = 0
     batch_start = time.time()
     gen_times: list[float] = []
+    failed_generations = 0
 
     print(f"Total video iterations to run: {total_iterations}\n")
+    _emit_progress(progress_callback, "batch_started", mode="video", total_iterations=total_iterations, total_runs=args.runs)
 
     for run_idx in range(args.runs):
         for set_name, prompts in prompts_data.items():
@@ -60,6 +69,41 @@ def run_video_batch(
                 eta = avg * remaining if avg is not None else None
 
                 seed = args.seed if args.seed is not None else random.randint(seed_min, seed_max)
+                _emit_progress(
+                    progress_callback,
+                    "prompt_started",
+                    mode="video",
+                    run_index=run_idx,
+                    total_runs=args.runs,
+                    ran_iterations=ran_iterations,
+                    total_iterations=total_iterations,
+                    set_name=set_name,
+                    prompt_index=prompt_idx,
+                    total_prompts=len(prompts),
+                    prompt=prompt,
+                    seed=seed,
+                    elapsed_secs=time.time() - batch_start,
+                    avg_secs=avg,
+                    eta_secs=eta,
+                )
+
+                _emit_progress(
+                    progress_callback,
+                    "generation_started",
+                    mode="video",
+                    run_index=run_idx,
+                    total_runs=args.runs,
+                    ran_iterations=ran_iterations,
+                    total_iterations=total_iterations,
+                    set_name=set_name,
+                    prompt_index=prompt_idx,
+                    total_prompts=len(prompts),
+                    prompt=prompt,
+                    seed=seed,
+                    elapsed_secs=time.time() - batch_start,
+                    avg_secs=avg,
+                    eta_secs=eta,
+                )
 
                 # Display progress
                 eta_str = f"  ETA: {eta:.0f}s" if eta is not None else ""
@@ -84,6 +128,17 @@ def run_video_batch(
                     num_frames=args.num_frames,
                     seed=seed,
                     steps=args.steps,
+                    step_callback=_make_step_progress_callback(
+                        progress_callback,
+                        mode="video",
+                        run_index=run_idx,
+                        total_runs=args.runs,
+                        ran_iterations=ran_iterations,
+                        total_iterations=total_iterations,
+                        set_name=set_name,
+                        prompt_index=prompt_idx,
+                        total_prompts=len(prompts),
+                    ),
                     image_path=getattr(args, "image_path", None),
                     upscale=getattr(args, "upscale", None),
                     upscale_steps=getattr(args, "upscale_steps", None),
@@ -93,7 +148,25 @@ def run_video_batch(
                 )
                 artifacts = VideoWorkingArtifacts()
                 try:
-                    outcome = workflow.run(request, artifacts)
+                    event_context = {
+                        "mode": "video",
+                        "run_index": run_idx,
+                        "total_runs": args.runs,
+                        "ran_iterations": ran_iterations,
+                        "total_iterations": total_iterations,
+                        "set_name": set_name,
+                        "prompt_index": prompt_idx,
+                        "total_prompts": len(prompts),
+                        "prompt": prompt,
+                        "seed": seed,
+                    }
+                    outcome = _run_workflow_with_progress(
+                        workflow,
+                        request,
+                        artifacts,
+                        progress_callback=progress_callback,
+                        event_context=event_context,
+                    )
                 except Exception as exc:
                     warnings.warn(f"Video generation failed: {exc}", stacklevel=2)
                     outcome = StageOutcome.failed
@@ -101,8 +174,32 @@ def run_video_batch(
 
                 if outcome is StageOutcome.success:
                     gen_times.append(artifacts.generation_time)
+                    _emit_generation_finished(
+                        progress_callback,
+                        event_context=event_context,
+                        status="success",
+                        filename=artifacts.filename,
+                        generation_time=artifacts.generation_time,
+                        output_path=str(artifacts.video_path) if artifacts.video_path is not None else None,
+                    )
                 elif outcome is StageOutcome.failed:
                     print("  Video generation failed.")
+                    failed_generations += 1
+                    _emit_generation_finished(
+                        progress_callback,
+                        event_context=event_context,
+                        status="failed",
+                        output_path=str(artifacts.video_path) if artifacts.video_path is not None else None,
+                    )
 
     total_time = time.time() - batch_start
     print(f"\nBatch complete: {len(gen_times)}/{total_iterations} videos generated in {total_time:.1f}s")
+    terminal_event = "batch_failed" if len(gen_times) == 0 and failed_generations > 0 else "batch_completed"
+    _emit_progress(
+        progress_callback,
+        terminal_event,
+        mode="video",
+        completed_iterations=completed_iterations,
+        total_iterations=total_iterations,
+        total_time=total_time,
+    )

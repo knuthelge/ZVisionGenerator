@@ -11,5 +11,5 @@
 - [ ] Changes are described clearly above
 - [ ] Related issue is linked (if applicable)
 - [ ] Tests added or updated for new/changed behavior
-- [ ] `make check` passes (lint + format-check + tests)
+- [ ] `make check` passes (lint + format-check + pytest + frontend checks + docs build + packaged SPA static/drift verification)
 - [ ] Documentation updated (if applicable)

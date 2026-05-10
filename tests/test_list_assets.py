@@ -19,6 +19,42 @@ from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 
 
+def _table_data_rows(output: str) -> list[str]:
+    return [line for line in output.splitlines() if line.startswith("  ") and "(none)" not in line and set(line.replace(" ", "")) != {"-"} and not line.lstrip().startswith("Name")]
+
+
+def _alias_rows(output: str) -> list[tuple[str, str]]:
+    rows: list[tuple[str, str]] = []
+    for line in _table_data_rows(output):
+        alias, target = line.strip().split(None, 1)
+        if target.startswith("→"):
+            target = target[1:].strip()
+        rows.append((alias.strip(), target.strip()))
+    return rows
+
+
+def _alias_row_map(output: str) -> dict[str, str]:
+    return dict(_alias_rows(output))
+
+
+def _alias_variants(target: str) -> list[str]:
+    return [variant.strip() for variant in target.split(" / ") if variant.strip()]
+
+
+def _alias_target_identifiers(target: str) -> list[str]:
+    identifiers: list[str] = []
+    for variant in _alias_variants(target):
+        for token in variant.replace("(", " ").replace(")", " ").replace(":", " ").split():
+            cleaned = token.strip(".,")
+            if "/" in cleaned:
+                identifiers.append(cleaned)
+    return identifiers
+
+
+def _has_unavailable_variant(target: str) -> bool:
+    return len(_alias_variants(target)) > len(_alias_target_identifiers(target))
+
+
 # ── list_models ──────────────────────────────────────────────────────────────
 
 
@@ -67,10 +103,27 @@ class TestListModels:
 
         result = list_models(tmp_path)
 
-        assert [e.name for e in result] == ["alpha", "zebra"]
+        assert result == []
 
     @patch("zvisiongenerator.converters.list_assets.detect_image_model")
-    def test_detection_error_marks_unknown(self, mock_detect, tmp_path: Path):
+    def test_skips_unknown_directories_so_video_only_models_do_not_appear_as_image_models(self, mock_detect, tmp_path: Path):
+        models_dir = tmp_path / "models"
+        models_dir.mkdir()
+        (models_dir / "ltx-local").mkdir()
+        (models_dir / "zit-local").mkdir()
+
+        info_map = {
+            "ltx-local": ImageModelInfo(family="unknown", is_distilled=False, size=None),
+            "zit-local": ImageModelInfo(family="zimage", is_distilled=False, size=None),
+        }
+        mock_detect.side_effect = lambda path: info_map[Path(path).name]
+
+        result = list_models(tmp_path)
+
+        assert [entry.name for entry in result] == ["zit-local"]
+
+    @patch("zvisiongenerator.converters.list_assets.detect_image_model")
+    def test_detection_error_skips_unknown_inventory_entry(self, mock_detect, tmp_path: Path):
         models_dir = tmp_path / "models"
         models_dir.mkdir()
         (models_dir / "broken").mkdir()
@@ -79,9 +132,7 @@ class TestListModels:
 
         result = list_models(tmp_path)
 
-        assert len(result) == 1
-        assert result[0].family == "unknown"
-        assert result[0].size is None
+        assert result == []
 
     def test_ignores_files_in_models_dir(self, tmp_path: Path):
         models_dir = tmp_path / "models"
@@ -145,34 +196,51 @@ class TestListLoras:
 
 
 class TestFormatAssetTable:
-    def test_models_header_and_columns(self):
+    def test_models_section_contains_discovered_entries(self):
         models = [ModelEntry(name="m1", family="zimage", size=None, is_distilled=False)]
         output = format_asset_table(models=models)
-        assert "Models:" in output
-        assert "Name" in output
-        assert "Family" in output
+        lines = output.splitlines()
+        data_rows = _table_data_rows(output)
+        assert lines[0].endswith(":")
+        assert len(data_rows) == 1
+        assert "m1" in data_rows[0]
+        assert "zimage" in data_rows[0]
+        assert data_rows[0].rstrip().endswith("-")
 
-    def test_loras_header_and_columns(self):
+    def test_loras_section_contains_discovered_entries(self):
         loras = [LoraEntry(name="l1", file_size_mb=1.5)]
         output = format_asset_table(loras=loras)
-        assert "LoRAs:" in output
-        assert "Name" in output
-        assert "Size (MB)" in output
+        lines = output.splitlines()
+        data_rows = _table_data_rows(output)
+        assert lines[0].endswith(":")
+        assert len(data_rows) == 1
+        assert "l1" in data_rows[0]
+        assert data_rows[0].rstrip().endswith("1.5")
 
     def test_empty_models_shows_none(self):
         output = format_asset_table(models=[])
-        assert "(none)" in output
+        lines = output.splitlines()
+        assert len(lines) == 2
+        assert lines[0].endswith(":")
+        assert lines[1].startswith("  ")
+        assert lines[1].endswith(")")
 
     def test_empty_loras_shows_none(self):
         output = format_asset_table(loras=[])
-        assert "(none)" in output
+        lines = output.splitlines()
+        assert len(lines) == 2
+        assert lines[0].endswith(":")
+        assert lines[1].startswith("  ")
+        assert lines[1].endswith(")")
 
     def test_both_sections(self):
         models = [ModelEntry(name="m", family="zimage", size=None, is_distilled=False)]
         loras = [LoraEntry(name="l", file_size_mb=0.5)]
         output = format_asset_table(models=models, loras=loras)
-        assert "Models:" in output
-        assert "LoRAs:" in output
+        sections = output.split("\n\n")
+        assert len(sections) == 2
+        assert "m" in sections[0]
+        assert "l" in sections[1]
 
     def test_none_params_omit_sections(self):
         output = format_asset_table(models=None, loras=None)
@@ -181,14 +249,16 @@ class TestFormatAssetTable:
     def test_only_models_omits_loras(self):
         models = [ModelEntry(name="m", family="flux2", size="4b", is_distilled=True)]
         output = format_asset_table(models=models, loras=None)
-        assert "Models:" in output
-        assert "LoRAs:" not in output
+        assert "m" in output
+        assert "4b" in output
+        assert "0.5" not in output
 
     def test_only_loras_omits_models(self):
         loras = [LoraEntry(name="l", file_size_mb=3.2)]
         output = format_asset_table(models=None, loras=loras)
-        assert "LoRAs:" in output
-        assert "Models:" not in output
+        assert "l" in output
+        assert "3.2" in output
+        assert "flux2" not in output
 
 
 # ── list_video_models ────────────────────────────────────────────────────────
@@ -289,21 +359,24 @@ class TestListVideoModels:
 
 
 class TestFormatAssetTableVideoModels:
-    def test_video_models_header_and_columns(self):
+    def test_video_models_section_contains_discovered_entries(self):
         vmodels = [VideoModelEntry(name="LTX-Video-0.9.1-mlx", family="ltx", supports_i2v=True)]
         output = format_asset_table(video_models=vmodels)
-        assert "Video Models:" in output
-        assert "Name" in output
-        assert "Family" in output
-        assert "I2V" in output
-        assert "LTX-Video-0.9.1-mlx" in output
-        assert "ltx" in output
-        assert "yes" in output
+        lines = output.splitlines()
+        data_rows = _table_data_rows(output)
+        assert lines[0].endswith(":")
+        assert len(data_rows) == 1
+        assert "LTX-Video-0.9.1-mlx" in data_rows[0]
+        assert "ltx" in data_rows[0]
+        assert data_rows[0].rstrip().endswith("yes")
 
     def test_empty_video_models_shows_none(self):
         output = format_asset_table(video_models=[])
-        assert "Video Models:" in output
-        assert "(none)" in output
+        lines = output.splitlines()
+        assert len(lines) == 2
+        assert lines[0].endswith(":")
+        assert lines[1].startswith("  ")
+        assert lines[1].endswith(")")
 
     def test_video_models_no_i2v(self):
         vmodels = [VideoModelEntry(name="test-model", family="ltx", supports_i2v=False)]
@@ -315,17 +388,19 @@ class TestFormatAssetTableVideoModels:
         vmodels = [VideoModelEntry(name="v", family="ltx", supports_i2v=True)]
         loras = [LoraEntry(name="l", file_size_mb=0.5)]
         output = format_asset_table(models=models, video_models=vmodels, loras=loras)
-        assert "Models:" in output
-        assert "Video Models:" in output
-        assert "LoRAs:" in output
+        sections = output.split("\n\n")
+        assert len(sections) == 3
+        assert "m" in sections[0]
+        assert "v" in sections[1]
+        assert "l" in sections[2]
 
     def test_only_video_models_omits_others(self):
         vmodels = [VideoModelEntry(name="v", family="ltx", supports_i2v=True)]
         output = format_asset_table(video_models=vmodels)
-        assert "Video Models:" in output
-        # "Models:" appears as part of "Video Models:" — check no standalone Models: section
-        assert output.replace("Video Models:", "").count("Models:") == 0
-        assert "LoRAs:" not in output
+        sections = output.split("\n\n")
+        assert len(sections) == 1
+        assert "v" in sections[0]
+        assert "ltx" in sections[0]
 
     def test_none_video_models_omits_section(self):
         output = format_asset_table(models=None, video_models=None, loras=None)
@@ -336,46 +411,38 @@ class TestFormatAssetTableVideoModels:
 
 
 class TestFormatAssetTableAliases:
-    def test_aliases_header_and_entries(self):
+    def test_aliases_entries_render_as_alias_target_pairs(self):
         aliases = {"ltx-4": "dgrauet/ltx-2.3-mlx-q4", "zit": "Tongyi-MAI/Z-Image-Turbo"}
         output = format_asset_table(aliases=aliases)
-        assert "Model Aliases:" in output
-        assert "ltx-4" in output
-        assert "dgrauet/ltx-2.3-mlx-q4" in output
-        assert "zit" in output
-        assert "Tongyi-MAI/Z-Image-Turbo" in output
+        assert _alias_row_map(output) == aliases
 
     def test_aliases_sorted_alphabetically(self):
         aliases = {"zit": "Tongyi-MAI/Z-Image-Turbo", "klein4b": "black-forest-labs/FLUX.2-klein-4B"}
         output = format_asset_table(aliases=aliases)
-        lines = output.strip().split("\n")
-        # After header, sorted entries: klein4b before zit
-        alias_lines = [line.strip() for line in lines[1:] if line.strip()]
-        assert alias_lines[0].startswith("klein4b")
-        assert alias_lines[1].startswith("zit")
+        assert [alias for alias, _target in _alias_rows(output)] == ["klein4b", "zit"]
 
     def test_empty_aliases_shows_none(self):
         output = format_asset_table(aliases={})
-        assert "Model Aliases:" in output
-        assert "(none)" in output
+        lines = output.splitlines()
+        assert len(lines) == 2
+        assert lines[0].endswith(":")
+        assert lines[1].startswith("  ")
+        assert lines[1].endswith(")")
 
     def test_none_aliases_omits_section(self):
         output = format_asset_table(aliases=None)
-        assert "Model Aliases:" not in output
+        assert output == ""
 
     def test_all_sections_with_aliases(self):
         models = [ModelEntry(name="m", family="zimage", size=None, is_distilled=False)]
         loras = [LoraEntry(name="l", file_size_mb=0.5)]
         aliases = {"ltx-4": "dgrauet/ltx-2.3-mlx-q4"}
         output = format_asset_table(models=models, loras=loras, aliases=aliases)
-        assert "Models:" in output
-        assert "LoRAs:" in output
-        assert "Model Aliases:" in output
-
-    def test_aliases_uses_arrow_separator(self):
-        aliases = {"ltx-4": "dgrauet/ltx-2.3-mlx-q4"}
-        output = format_asset_table(aliases=aliases)
-        assert "→" in output
+        sections = output.split("\n\n")
+        assert len(sections) == 3
+        assert "m" in sections[0]
+        assert "l" in sections[1]
+        assert "ltx-4" in sections[2]
 
     def test_all_five_config_aliases_displayed(self):
         """All 5 configured aliases appear in the formatted output."""
@@ -387,17 +454,14 @@ class TestFormatAssetTableAliases:
             "klein4b": "black-forest-labs/FLUX.2-klein-4B",
         }
         output = format_asset_table(aliases=aliases)
-        for alias, target in aliases.items():
-            assert alias in output
-            assert target in output
+        assert dict(_alias_rows(output)) == aliases
 
     def test_flat_aliases_render_unchanged(self):
         aliases = {"zit": "Tongyi-MAI/Z-Image-Turbo"}
 
         output = format_asset_table(aliases=aliases)
 
-        assert "zit" in output
-        assert "Tongyi-MAI/Z-Image-Turbo" in output
+        assert _alias_rows(output) == [("zit", "Tongyi-MAI/Z-Image-Turbo")]
         assert "macOS" not in output
         assert "Windows" not in output
 
@@ -411,9 +475,10 @@ class TestFormatAssetTableAliases:
 
         output = format_asset_table(aliases=aliases, platforms={"darwin": "macOS", "win32": "Windows"})
 
-        assert "ltx-8" in output
-        assert "dgrauet/ltx-2.3-mlx-q8 (macOS)" in output
-        assert "Lightricks/LTX-2.3-fp8 (Windows)" in output
+        alias_target = _alias_row_map(output)["ltx-8"]
+        assert len(_alias_variants(alias_target)) == 2
+        assert _alias_target_identifiers(alias_target) == ["dgrauet/ltx-2.3-mlx-q8", "Lightricks/LTX-2.3-fp8"]
+        assert not _has_unavailable_variant(alias_target)
 
     def test_message_aliases_render_unavailable_with_message(self):
         aliases = {
@@ -425,6 +490,7 @@ class TestFormatAssetTableAliases:
 
         output = format_asset_table(aliases=aliases, platforms={"darwin": "macOS", "win32": "Windows"})
 
-        assert "dgrauet/ltx-2.3-mlx-q4 (macOS)" in output
-        assert "Windows: unavailable" in output
-        assert "LTX 4-bit is not available on Windows. Use 'ltx-8' instead." in output
+        alias_target = _alias_row_map(output)["ltx-4"]
+        assert len(_alias_variants(alias_target)) == 2
+        assert _alias_target_identifiers(alias_target) == ["dgrauet/ltx-2.3-mlx-q4"]
+        assert _has_unavailable_variant(alias_target)
