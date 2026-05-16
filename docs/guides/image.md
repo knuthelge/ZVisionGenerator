@@ -1,6 +1,8 @@
 # Image Generation Guide
 
-Generate images from text prompts using `ziv-image`. Supports Z-Image / FLUX models on macOS (Apple Silicon via mflux/MLX) and Windows (NVIDIA GPU via diffusers/CUDA).
+Generate images from text prompts using `ziv-image`. Supports Z-Image / FLUX models on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux with NVIDIA GPUs via diffusers/CUDA.
+
+On Windows and Linux, image generation requires CUDA to be visible to PyTorch. CPU fallback is not available for the diffusers image backend.
 
 ## Model Aliases
 
@@ -63,7 +65,7 @@ ziv-image -m my-model --prompt "A woman in a red dress" --image photo.jpg --imag
 ziv-image -m my-model --prompt "Cyberpunk cityscape" --image sketch.png --image-strength 0.8
 ```
 
-The reference image is automatically resized to match target dimensions. Works on both macOS and Windows.
+The reference image is automatically resized to match target dimensions. Works on macOS, Windows, and Linux.
 
 ## LoRA Support
 
@@ -119,7 +121,7 @@ Reduces memory usage and speeds up generation at the cost of some quality.
 | Platform | Levels | Method |
 |----------|--------|--------|
 | macOS | 4-bit, 8-bit | mflux quantization |
-| Windows | 4-bit (NF4), 8-bit (INT8) | bitsandbytes |
+| Windows / Linux | 4-bit (NF4), 8-bit (INT8) | bitsandbytes |
 
 ```bash
 ziv-image -m my-model -q 4    # 4-bit quantization
