@@ -11,7 +11,7 @@ make install
 
 | Target | Description |
 |--------|-------------|
-| `make install` | Install Python dependencies with `uv sync` and frontend dependencies with `npm ci --prefix frontend` |
+| `make install` | Install Python dependencies with `uv sync` and frontend dependencies with `pnpm --dir frontend install --frozen-lockfile` |
 | `make lock` | Regenerate uv.lock |
 | `make lint` | Run ruff linter |
 | `make lint-fix` | Run ruff linter with auto-fix |

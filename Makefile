@@ -65,17 +65,17 @@ update-ltx: ## Update vendored ltx-core-mlx and ltx-pipelines-mlx
 
 .PHONY: frontend-install frontend-build frontend-static-check frontend-test frontend-dev
 
-frontend-install: ## Install frontend npm dependencies
-	npm ci --prefix frontend
+frontend-install: ## Install frontend pnpm dependencies
+	pnpm --dir frontend install --frozen-lockfile
 
 frontend-build: ## Build the Svelte frontend into the static dir
-	npm run --prefix frontend build
+	pnpm --dir frontend run build
 
 frontend-static-check: ## Verify packaged SPA artifacts match the frontend build
 	$(eval TMP := $(shell mktemp -d))
 	@mkdir -p $(TMP)/app
 	@if [ -d zvisiongenerator/web/static/app ]; then cp -R zvisiongenerator/web/static/app/. $(TMP)/app/; fi
-	npm run --prefix frontend build
+	pnpm --dir frontend run build
 	@diff -qr $(TMP)/app zvisiongenerator/web/static/app >/dev/null || { \
 		echo "Packaged SPA artifacts are stale. Run 'make frontend-build' and commit the updated zvisiongenerator/web/static/app files."; \
 		diff -qr $(TMP)/app zvisiongenerator/web/static/app; \
@@ -91,11 +91,11 @@ frontend-static-check: ## Verify packaged SPA artifacts match the frontend build
 	@rm -rf $(TMP)
 
 frontend-test: ## TypeScript check + vitest tests
-	npm run --prefix frontend check
-	npm run --prefix frontend test
+	pnpm --dir frontend run check
+	pnpm --dir frontend run test
 
 frontend-dev: ## Start Vite dev server (for development)
-	npm run --prefix frontend dev
+	pnpm --dir frontend run dev
 
 # ——— Build ————————————————————————————————————————————————
 
