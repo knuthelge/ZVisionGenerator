@@ -29,6 +29,7 @@ def _create_diffusers_backend() -> "ImageBackend":
 _IMAGE_BACKENDS_MAP: dict[str, tuple[str, Callable[[], "ImageBackend"]]] = {
     "darwin": ("mflux", _create_mflux_backend),
     "win32": ("diffusers", _create_diffusers_backend),
+    "linux": ("diffusers", _create_diffusers_backend),
 }
 
 
@@ -36,7 +37,7 @@ def _get_image_backend_registration() -> tuple[str, Callable[[], "ImageBackend"]
     try:
         return _IMAGE_BACKENDS_MAP[sys.platform]
     except KeyError as exc:
-        raise RuntimeError(f"Unsupported platform: {sys.platform}. ZVisionGenerator supports macOS and Windows.") from exc
+        raise RuntimeError(f"Unsupported platform: {sys.platform}. Image generation supports macOS, Windows, and Linux.") from exc
 
 
 def _register_platform_backend() -> None:

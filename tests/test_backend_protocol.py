@@ -28,6 +28,14 @@ class TestBackendRegistryLookup:
 
         assert backends.get_backend_name() == "diffusers"
 
+    def test_get_backend_name_uses_dict_lookup_for_linux(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends.sys, "platform", "linux")
+        monkeypatch.setattr(backends, "_IMAGE_BACKENDS_MAP", {"linux": ("diffusers", lambda: MagicMock(spec=ImageBackend))})
+
+        assert backends.get_backend_name() == "diffusers"
+
     def test_get_backend_uses_dict_lookup_for_darwin(self, monkeypatch):
         import zvisiongenerator.backends as backends
 
@@ -53,6 +61,28 @@ class TestBackendRegistryLookup:
 
         assert result is backend
         assert backends.BACKENDS["diffusers"] is backend
+
+    def test_get_backend_uses_dict_lookup_for_linux(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        backend = MagicMock(spec=ImageBackend)
+        monkeypatch.setattr(backends, "BACKENDS", {})
+        monkeypatch.setattr(backends.sys, "platform", "linux")
+        monkeypatch.setattr(backends, "_IMAGE_BACKENDS_MAP", {"linux": ("diffusers", lambda: backend)})
+
+        result = backends.get_backend()
+
+        assert result is backend
+        assert backends.BACKENDS["diffusers"] is backend
+
+    def test_unsupported_platform_error_lists_supported_image_platforms(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends.sys, "platform", "freebsd")
+        monkeypatch.setattr(backends, "BACKENDS", {})
+
+        with pytest.raises(RuntimeError, match="macOS, Windows, and Linux"):
+            backends.get_backend()
 
 
 # ---------------------------------------------------------------------------
