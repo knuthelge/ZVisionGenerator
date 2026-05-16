@@ -102,3 +102,23 @@ def test_golden_with_num_frames():
     assert "_cfg3.0_" in result
     assert "_seed42" in result
     assert result.startswith("video_")
+
+
+def test_cross_platform_model_and_lora_display_parts_are_clean():
+    result = generate_filename(
+        set_name="xplat",
+        width=640,
+        height=320,
+        seed=7,
+        steps=4,
+        guidance=None,
+        scheduler=None,
+        model=r"C:\models\model.fp16.SAFETENSORS",
+        lora_paths=["owner/style.v1.safetensors", "C:/loras/detail.ckpt", "model.safetensors.backup"],
+        lora_weights=[0.8, 0.5, 1.0],
+    )
+
+    assert "_model.fp16_" in result
+    assert "_style.v1_80_" in result
+    assert "_detail_50_" in result
+    assert "_model.safetensors.backup_100_" in result

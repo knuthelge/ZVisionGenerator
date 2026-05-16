@@ -23,7 +23,7 @@ classifiers = [
 dependencies = [
     "accelerate>=1.13.0",
     "bitsandbytes>=0.49.0; sys_platform != 'darwin'",
-    "diffusers>=0.37.1",
+    "diffusers==0.38.0",
     "fastapi>=0.116.0",
     "hf-transfer>=0.1.9",
     "huggingface-hub>=0.30.0",

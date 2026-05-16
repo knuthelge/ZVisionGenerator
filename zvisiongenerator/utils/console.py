@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+from zvisiongenerator.utils.paths import display_stem
+
 if TYPE_CHECKING:
     from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 
@@ -43,11 +45,12 @@ def format_generation_info(
 
     model_name = request.model_name
     model_type = request.model_family if request.model_family != "unknown" else None
-    model_status = f"Model: {model_name.split('/')[-1]} ({model_type})" if model_type else f"Model: {model_name.split('/')[-1]}" if model_name else "Model: default"
+    model_display = display_stem(model_name) if model_name else "default"
+    model_status = f"Model: {model_display} ({model_type})" if model_type else f"Model: {model_display}" if model_name else "Model: default"
     lora_paths = request.lora_paths
     lora_weights = request.lora_weights or []
     if lora_paths:
-        lora_status = ", ".join(f"{os.path.basename(p.replace('.safetensors', ''))} ({w})" for p, w in zip(lora_paths, lora_weights))
+        lora_status = ", ".join(f"{display_stem(p)} ({w})" for p, w in zip(lora_paths, lora_weights))
     else:
         lora_status = "disabled"
     try:

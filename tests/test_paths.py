@@ -4,7 +4,116 @@ from __future__ import annotations
 
 import pytest
 
-from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_lora_path, resolve_model_path
+from zvisiongenerator.utils.paths import (
+    display_basename,
+    display_stem,
+    get_ziv_data_dir,
+    is_explicit_local_path,
+    is_huggingface_repo_id,
+    is_remote_lora_reference,
+    parse_huggingface_repo_reference,
+    resolve_lora_path,
+    resolve_model_path,
+)
+
+
+class TestPathClassification:
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("models/foo", True),
+            ("models/ltx-mlx", True),
+            ("checkpoints/ltx", True),
+            ("loras/style.safetensors", True),
+            ("owner/repo", False),
+            ("owner/repo@revision", False),
+            ("owner/repo/subfolder", True),
+            ("C:/repo", True),
+            (r"C:\repo", True),
+            ("C:repo", True),
+            ("/abs/model", True),
+            ("./models/foo", True),
+            ("../models/foo", True),
+            ("~/models/foo", True),
+            ("//server/share/model", True),
+            (r"\\server\share\model", True),
+            ("models/foo/", True),
+            ("models//foo", True),
+            ("owner//repo", True),
+            ("models/my model", True),
+            ("my model", False),
+            ("owner/my model", True),
+            ("https://huggingface.co/owner/repo", False),
+            ("hf://owner/repo", False),
+        ],
+    )
+    def test_explicit_local_path_table(self, value, expected):
+        assert is_explicit_local_path(value) is expected
+
+    @pytest.mark.parametrize(
+        ("value", "repo_id", "revision"),
+        [
+            ("owner/repo", "owner/repo", None),
+            ("owner-name/repo_name", "owner-name/repo_name", None),
+            ("owner.name/repo.v1", "owner.name/repo.v1", None),
+            ("Owner123/Repo-2", "Owner123/Repo-2", None),
+            ("owner/repo@main", "owner/repo", "main"),
+            ("owner/repo@v1.2.3", "owner/repo", "v1.2.3"),
+        ],
+    )
+    def test_huggingface_repo_reference_accepts_conservative_contract(self, value, repo_id, revision):
+        parsed = parse_huggingface_repo_reference(value)
+        assert parsed is not None
+        assert parsed.repo_id == repo_id
+        assert parsed.revision == revision
+        assert is_huggingface_repo_id(value) is True
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            "models/foo",
+            "checkpoints/ltx",
+            "loras/style",
+            "owner/repo/subfolder",
+            "owner//repo",
+            "/owner/repo",
+            "./owner/repo",
+            "../owner/repo",
+            "~/owner/repo",
+            "C:/repo",
+            r"C:\repo",
+            "C:repo",
+            r"\\server\share",
+            "owner/re po",
+            "owner/repo?x=1",
+            "owner/repo@",
+            "owner/repo@feature/branch",
+            "https://huggingface.co/owner/repo",
+        ],
+    )
+    def test_huggingface_repo_reference_rejects_non_contract_values(self, value):
+        assert parse_huggingface_repo_reference(value) is None
+        assert is_huggingface_repo_id(value) is False
+
+    def test_remote_lora_detection_uses_repo_reference_contract(self):
+        assert is_remote_lora_reference("org/lora") is True
+        assert is_remote_lora_reference("loras/style.safetensors") is False
+
+    @pytest.mark.parametrize(
+        ("value", "basename", "stem"),
+        [
+            ("/models/style.SAFETENSORS", "style.SAFETENSORS", "style"),
+            (r"C:\models\model.fp16.safetensors", "model.fp16.safetensors", "model.fp16"),
+            ("C:/models/foo.ckpt", "foo.ckpt", "foo"),
+            ("owner/model.v1", "model.v1", "model.v1"),
+            ("owner/model.v1.safetensors", "model.v1.safetensors", "model.v1"),
+            ("model.safetensors.backup", "model.safetensors.backup", "model.safetensors.backup"),
+            ("models/foo/", "foo", "foo"),
+        ],
+    )
+    def test_display_helpers_are_cross_platform(self, value, basename, stem):
+        assert display_basename(value) == basename
+        assert display_stem(value) == stem
 
 
 class TestGetZivDataDir:
@@ -48,6 +157,16 @@ class TestResolveModelPath:
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
         hf_id = "org/model-name"
         assert resolve_model_path(hf_id) == hf_id
+
+    @pytest.mark.parametrize("model_path", ["models/foo", "C:/models/foo", r"C:\models\foo", "owner/repo", "owner/repo@main"])
+    def test_cross_platform_or_repo_strings_pass_through(self, monkeypatch, tmp_path, model_path):
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        assert resolve_model_path(model_path) == model_path
+
+    def test_tilde_local_model_expands_inside_resolver(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / "ziv"))
+        monkeypatch.setenv("HOME", str(tmp_path))
+        assert resolve_model_path("~/models/foo") == str(tmp_path / "models" / "foo")
 
     def test_bare_name_resolves_to_models_dir_when_exists(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
@@ -155,15 +274,15 @@ class TestResolveModelAliasPlatformAware:
         (tmp_path / "models").mkdir(parents=True, exist_ok=True)
 
         aliases = {
-            "ltx-8": {
-                "darwin": "dgrauet/ltx-2.3-mlx-q8",
-                "win32": "Lightricks/LTX-2.3-fp8",
+            "ltx-2.3": {
+                "win32": "dg845/LTX-2.3-Diffusers",
+                "linux": "dg845/LTX-2.3-Diffusers",
             }
         }
 
-        result = resolve_model_path("ltx-8", aliases=aliases, platform_key="win32")
+        result = resolve_model_path("ltx-2.3", aliases=aliases, platform_key="win32")
 
-        assert result == "Lightricks/LTX-2.3-fp8"
+        assert result == "dg845/LTX-2.3-Diffusers"
 
     def test_per_platform_message_raises_value_error(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
@@ -172,11 +291,11 @@ class TestResolveModelAliasPlatformAware:
         aliases = {
             "ltx-4": {
                 "darwin": "dgrauet/ltx-2.3-mlx-q4",
-                "win32": {"message": "LTX 4-bit is not available on Windows. Use 'ltx-8' instead."},
+                "win32": {"message": "Alias 'ltx-4' is macOS-only. On Windows, use 'ltx-2.3' for the CUDA diffusers backend."},
             }
         }
 
-        with pytest.raises(ValueError, match="LTX 4-bit is not available on Windows"):
+        with pytest.raises(ValueError, match="macOS-only"):
             resolve_model_path("ltx-4", aliases=aliases, platform_key="win32")
 
     def test_platform_key_none_keeps_dict_alias_unresolved(self, monkeypatch, tmp_path):
@@ -184,15 +303,15 @@ class TestResolveModelAliasPlatformAware:
         (tmp_path / "models").mkdir(parents=True, exist_ok=True)
 
         aliases = {
-            "ltx-8": {
-                "darwin": "dgrauet/ltx-2.3-mlx-q8",
-                "win32": "Lightricks/LTX-2.3-fp8",
+            "ltx-2.3": {
+                "win32": "dg845/LTX-2.3-Diffusers",
+                "linux": "dg845/LTX-2.3-Diffusers",
             }
         }
 
-        result = resolve_model_path("ltx-8", aliases=aliases, platform_key=None)
+        result = resolve_model_path("ltx-2.3", aliases=aliases, platform_key=None)
 
-        assert result == "ltx-8"
+        assert result == "ltx-2.3"
 
     def test_flat_alias_still_resolves_when_platform_key_is_present(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
@@ -212,6 +331,11 @@ class TestResolveLoraPath:
     def test_path_with_slash_passes_through(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
         assert resolve_lora_path("some/dir/lora") == "some/dir/lora"
+
+    @pytest.mark.parametrize("lora_path", ["loras/style.safetensors", "C:/loras/style.safetensors", r"C:\loras\style.safetensors", "org/lora"])
+    def test_cross_platform_or_remote_strings_pass_through(self, monkeypatch, tmp_path, lora_path):
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        assert resolve_lora_path(lora_path) == lora_path
 
     def test_bare_name_resolves_safetensors(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))

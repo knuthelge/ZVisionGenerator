@@ -66,7 +66,8 @@ zvisiongenerator/
 ├── backends/
 │   ├── image_mac.py               macOS image backend (mflux/MLX)
 │   ├── image_win.py               Windows image backend (diffusers/CUDA)
-│   └── video_mac.py               macOS video backend (LTX via MLX)
+│   ├── video_mac.py               macOS video backend (LTX via MLX)
+│   └── video_diffusers.py         Windows/Linux video backend (LTX via diffusers/CUDA)
 ├── converters/
 │   ├── convert_checkpoint.py      Safetensors checkpoint → diffusers converter (ziv-model model)
 │   ├── list_assets.py             List installed models, video models, and LoRAs (ziv-model list)
@@ -118,7 +119,11 @@ prompts.yaml                       Default prompt definitions
 
 ### Backend Protocol
 
-Platform backends live in `backends/image_mac.py` (mflux/MLX) and `backends/image_win.py` (diffusers/CUDA). Image backends implement the `ImageBackend` Protocol from `core/image_backend.py`; video backends implement the `VideoBackend` Protocol from `core/video_backend.py`. Platform selection uses `sys.platform` in `backends/__init__.py` — never check platform elsewhere.
+Platform backends live in `backends/image_mac.py` (mflux/MLX), `backends/image_win.py` (diffusers/CUDA), `backends/video_mac.py` (MLX video), and `backends/video_diffusers.py` (Windows/Linux diffusers video). Image backends implement the `ImageBackend` Protocol from `core/image_backend.py`; video backends implement the `VideoBackend` Protocol from `core/video_backend.py`. Platform selection stays centralized in `backends/__init__.py` — never branch on `sys.platform` elsewhere.
+
+Windows and Linux video resolution is config-driven through `video_model_presets.ltx.diffusers.default_repo` and the `ltx-2.3` alias. The backend assumes a diffusers-compatible repository layout and keeps the configured default overrideable from user config. macOS keeps the MLX-only `ltx-4` and `ltx-8` aliases.
+
+The Windows/Linux video backend is CUDA-only. Validation happens lazily during backend load so importing the package or running non-video code paths does not require torch, diffusers, or a GPU.
 
 ### Workflow Stages
 
@@ -135,3 +140,7 @@ CLI flags > model preset variant > model preset family > global defaults. Config
 ### Error Conventions
 
 Raise `ValueError`, `FileNotFoundError`, `RuntimeError` directly with descriptive f-string messages. Use `warnings.warn()` with `stacklevel=2` for non-fatal conditions. No custom exception classes except private sentinels.
+
+### Test Strategy
+
+Mock heavy video dependencies in tests. Video backend tests patch the lazy diffusers runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.

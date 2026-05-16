@@ -6,7 +6,8 @@
 - [uv](https://docs.astral.sh/uv/) package manager (**required** — pip is not supported)
 - **macOS:** Apple Silicon (M1+) — mflux requires MLX
 - **Windows:** NVIDIA GPU with CUDA support
-- **Video:** ffmpeg (auto-offered on first run via Homebrew)
+- **Linux:** NVIDIA GPU with CUDA support
+- **Video:** ffmpeg
 
 ## Installation
 
@@ -24,7 +25,7 @@ uv sync
 
 > **uv is required.** This package cannot be installed with pip — some dependencies require uv-specific resolution that pip does not support.
 
-> **Note:** Video generation requires ffmpeg. If missing, `ziv-video` will offer to install it via Homebrew on first run.
+> **Note:** Video generation requires ffmpeg. Windows and Linux video generation are CUDA-only and fail fast when PyTorch cannot see an NVIDIA CUDA device.
 
 ## Quick Start
 
@@ -43,16 +44,38 @@ ziv-image -m my-model -p prompts.yaml -r 3
 
 ### Video Generation
 
+Use `MODEL` below as follows: `ltx-4` or `ltx-8` on macOS, `ltx-2.3` on Windows and Linux.
+
 ```bash
-# Text-to-video with LTX
-ziv-video -m dgrauet/ltx-2.3-mlx-q4 --prompt "A cat walking through a garden"
+# Text-to-video with LTX on macOS
+ziv-video -m ltx-4 --prompt "A cat walking through a garden"
 
-# Image-to-video with LTX
-ziv-video -m dgrauet/ltx-2.3-mlx-q4 --image photo.jpg --prompt "Camera slowly zooms in"
+# Text-to-video with LTX on Windows or Linux
+ziv-video -m ltx-2.3 --prompt "A cat walking through a garden"
 
-# Batch from prompts file
-ziv-video -m dgrauet/ltx-2.3-mlx-q4 -p prompts.yaml -r 3
+# Image-to-video with your platform alias
+ziv-video -m MODEL --image photo.jpg --prompt "Camera slowly zooms in"
+
+# Batch from prompts file with your platform alias
+ziv-video -m MODEL -p prompts.yaml -r 3
 ```
+
+### Video Model Defaults And Overrides
+
+- macOS exposes `ltx-4` and `ltx-8`, which resolve to the MLX LTX repositories and are the shipped Q4/Q8 presets.
+- Windows and Linux expose `ltx-2.3`, which resolves to the configurable diffusers repository in `video_model_presets.ltx.diffusers.default_repo`.
+- The packaged default is `dg845/LTX-2.3-Diffusers`, a diffusers-converted repository with the layout required by the Windows/Linux diffusers video backend. It is a configurable diffusers default, not a shipped Q4/Q8 alias.
+
+To override the Windows/Linux default video repository, add a user config file at `~/.ziv/config.yaml`:
+
+```yaml
+video_model_presets:
+  ltx:
+    diffusers:
+      default_repo: your-org/your-ltx-diffusers-repo
+```
+
+After the override, `ziv-video -m ltx-2.3 ...` and the Web UI both resolve to the new repository.
 
 ### Model & LoRA Management
 
@@ -114,6 +137,8 @@ When you pass `-m <name>` (both `ziv-image` and `ziv-video`):
 4. **Otherwise** → treated as a HuggingFace repo ID (downloaded on first use)
 
 > **Note:** A local model directory at `~/.ziv/models/<name>/` takes priority over an alias with the same name.
+
+LoRA generation inputs are local paths or bare names from `~/.ziv/loras/`. To use a HuggingFace LoRA, import it first with `ziv-model lora --hf ...`, then reference the local LoRA name or path during generation.
 
 ### `ZIV_DATA_DIR` Override
 

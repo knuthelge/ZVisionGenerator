@@ -11,20 +11,20 @@
 [![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue)](https://www.python.org/downloads/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 
-Local AI image and video generation — hassle-free and fun. No tangled node graphs, no cloud dependencies, just prompts and results. Runs on macOS (Apple Silicon / MLX) and Windows (NVIDIA / CUDA), tuned for an M-series Mac with 32 GB unified memory and an NVIDIA RTX 3080.
+Local AI image and video generation — hassle-free and fun. No tangled node graphs, no cloud dependencies, just prompts and results. Runs on macOS (Apple Silicon / MLX), with NVIDIA CUDA video generation on Windows and Linux.
 
 ## Features
 
 - **Image generation** — text-to-image with Z-Image and FLUX.2 Klein (4B/9B) model families
-- **Video generation** — text-to-video and image-to-video with LTX-2.3 (macOS)
-- **Cross-platform** — automatic backend selection: MLX on macOS, CUDA on Windows
+- **Video generation** — text-to-video and image-to-video with platform-specific LTX aliases across macOS, Windows, and Linux
+- **Cross-platform** — automatic backend selection: MLX on macOS, diffusers/CUDA on Windows for images, and the shared diffusers/CUDA LTX backend on Windows and Linux for video
 - **Prompt system** — YAML prompt files with variables, structured prompts, snippets, and batch runs
 - **Model store** — central `~/.ziv/` directory with bare-name resolution and HuggingFace fallback
 - **LoRA support** — single or stacked, configurable weights, bare-name resolution
 - **Image upscale** — generate small → Lanczos → img2img refine → CAS sharpen
-- **Video upscale** — distilled-only two-stage 2× spatial upscaling
+- **Video upscale** — 2× spatial upscaling through the platform LTX backend when supported by the selected runtime
 - **Reference images** — img2img steering from any starting image
-- **Quantization** — 4-bit and 8-bit on both platforms
+- **Model variants** — image quantization across supported image backends, plus macOS MLX video Q4/Q8 aliases
 - **Post-processing** — contrast, saturation, and CAS sharpening (image only)
 - **Interactive controls** — skip, quit, pause, and repeat during batch runs (image only)
 
@@ -32,8 +32,9 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 
 | Platform | Image Generation | Video Generation |
 |----------|------------------|------------------|
-| macOS (Apple Silicon) | ✅ Z-Image / FLUX via mflux/MLX | ✅ LTX-2.3 via MLX |
-| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX via diffusers/CUDA | ❌ Not supported |
+| macOS (Apple Silicon) | ✅ Z-Image / FLUX via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`) |
+| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
+| Linux (NVIDIA GPU) | Not supported | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
 
 ## Installation
 
@@ -53,7 +54,11 @@ git clone https://github.com/knuthelge/ZVisionGenerator && cd ZVisionGenerator
 uv sync
 ```
 
-> Video generation requires [ffmpeg](https://ffmpeg.org/). On macOS, `ziv-video` offers to install it via Homebrew on first run.
+> Video generation requires [ffmpeg](https://ffmpeg.org/). Windows and Linux video generation also require an NVIDIA GPU with CUDA available to PyTorch.
+
+> The packaged Windows/Linux `ltx-2.3` alias defaults to the configurable diffusers-converted repository `dg845/LTX-2.3-Diffusers`. This is the diffusers layout used by the merged support work, not an official Lightricks alias. Override it in `~/.ziv/config.yaml` if you want to point `ltx-2.3` at a different compatible diffusers repository.
+
+> The macOS video aliases `ltx-4` and `ltx-8` are the shipped MLX Q4/Q8 presets. Windows and Linux use the diffusers-backed `ltx-2.3` alias instead, so the Q4/Q8 naming does not carry across platforms.
 
 ## Quick Start
 
@@ -67,11 +72,17 @@ ziv-image -m Tongyi-MAI/Z-Image-Turbo --prompt "a cat in a garden"
 # Batch run from a prompts file
 ziv-image -m my-model -p prompts.yaml -r 3
 
-# Generate a video
-ziv-video -m dgrauet/ltx-2.3-mlx-q4 --prompt "A cat walking through a garden"
+# Generate a video on macOS
+ziv-video -m ltx-4 --prompt "A cat walking through a garden"
 
-# Image-to-video
-ziv-video -m dgrauet/ltx-2.3-mlx-q4 --image photo.jpg --prompt "Camera zooms in slowly"
+# Generate a video on Windows or Linux
+ziv-video -m ltx-2.3 --prompt "A cat walking through a garden"
+
+# Image-to-video on macOS
+ziv-video -m ltx-4 --image photo.jpg --prompt "Camera zooms in slowly"
+
+# Image-to-video on Windows or Linux
+ziv-video -m ltx-2.3 --image photo.jpg --prompt "Camera zooms in slowly"
 
 # Launch the Web UI
 ziv ui

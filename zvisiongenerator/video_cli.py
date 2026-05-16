@@ -14,7 +14,7 @@ from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
 from zvisiongenerator.utils.config import load_config, resolve_video_defaults, select_ratio_size_defaults
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.lora import parse_lora_arg
-from zvisiongenerator.utils.paths import resolve_lora_path, resolve_model_path
+from zvisiongenerator.utils.paths import is_remote_lora_reference, resolve_lora_path, resolve_model_path
 from zvisiongenerator.utils.prompts import load_prompts_file
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.video_runner import run_video_batch
@@ -28,7 +28,7 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
         description="Z-Vision Video Generator — text-to-video and image-to-video.",
         epilog=f"Example usage: {prog} -m models/ltx-mlx --ratio 16:9 --size m --prompt 'a sunset'",
     )
-    parser.add_argument("-m", "--model", type=str, default=None, help="Model path or HF repo ID.")
+    parser.add_argument("-m", "--model", type=str, default=None, help="Model alias, local path, or supported/configured HuggingFace repo ID.")
     parser.add_argument("-p", "--prompts-file", type=str, default="prompts.yaml", help="Path to YAML prompts file.")
     parser.add_argument("-r", "--runs", type=int, default=1, help="Number of batch runs.")
     parser.add_argument("--prompt", type=str, default=None, help="Inline prompt (overrides --prompts-file).")
@@ -71,6 +71,19 @@ def _resolve_upscale_steps(args: argparse.Namespace, config: dict[str, Any], mod
                 args.upscale_steps = args.steps
 
 
+def _unknown_video_model_guidance(platform_key: str) -> str:
+    """Return platform-aware guidance for unknown video model selections."""
+
+    suffix = "supported/configured HuggingFace LTX repo IDs, or a local path containing 'ltx'."
+    if platform_key == "darwin":
+        return f"Use a supported LTX model: 'ltx-4' or 'ltx-8' on macOS, known LTX repo prefixes, {suffix}"
+    if platform_key == "win32":
+        return f"Use a supported LTX model: 'ltx-2.3' on Windows, known LTX repo prefixes, {suffix}"
+    if platform_key.startswith("linux"):
+        return f"Use a supported LTX model: 'ltx-2.3' on Linux, known LTX repo prefixes, {suffix}"
+    return f"Use a supported LTX model: 'ltx-4' or 'ltx-8' on macOS, 'ltx-2.3' on Windows/Linux, known LTX repo prefixes, {suffix}"
+
+
 def main(*, prog: str = "ziv-video") -> None:
     """Entry point for ziv-video CLI."""
     parser = _build_video_parser(prog=prog)
@@ -78,7 +91,7 @@ def main(*, prog: str = "ziv-video") -> None:
 
     # Validation (matching image CLI pattern)
     if args.model is None:
-        parser.error("--model is required. Provide a model path or HuggingFace repo ID.")
+        parser.error("--model is required. Provide a model alias, local path, or supported/configured HuggingFace repo ID.")
     if args.runs < 1:
         parser.error("--runs must be at least 1")
     if args.steps is not None and args.steps < 1:
@@ -86,8 +99,7 @@ def main(*, prog: str = "ziv-video") -> None:
     if args.upscale is not None and args.upscale != 2:
         parser.error("--upscale only supports factor 2 (LTX spatial upscaler)")
 
-    # Expand ~ in path arguments
-    args.model = str(Path(args.model).expanduser())
+    # Expand ~ in filesystem-only path arguments. Model/LoRA tokens are resolved by shared helpers.
     if args.image_path:
         args.image_path = str(Path(args.image_path).expanduser())
     args.output = str(Path(args.output).expanduser())
@@ -100,7 +112,10 @@ def main(*, prog: str = "ziv-video") -> None:
         parser.error(str(e))
 
     # Resolve friendly model names (e.g. "ltx-2-mlx" → ~/.ziv/models/...)
-    args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+    try:
+        args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+    except ValueError as e:
+        parser.error(str(e))
 
     # Validate prompt source BEFORE heavy operations (model loading, ffmpeg check)
     if args.prompt is not None and not args.prompt.strip():
@@ -116,7 +131,7 @@ def main(*, prog: str = "ziv-video") -> None:
     # Detect video model family
     model_info = detect_video_model(args.model)
     if model_info.family == "unknown":
-        parser.error(f"Could not detect video model family for '{args.model}'. Use a supported model: dgrauet/ltx-*")
+        parser.error(f"Could not detect video model family for '{args.model}'. {_unknown_video_model_guidance(sys.platform)}")
 
     # Validate --image file exists
     if args.image_path and not os.path.isfile(args.image_path):
@@ -156,7 +171,10 @@ def main(*, prog: str = "ziv-video") -> None:
             parsed = parse_lora_arg(args.lora)
         except ValueError as e:
             parser.error(str(e))
-        lora_paths = [resolve_lora_path(str(Path(name).expanduser())) for name, _ in parsed]
+        remote_loras = [name for name, _ in parsed if is_remote_lora_reference(name)]
+        if remote_loras:
+            parser.error(f"Remote HuggingFace LoRA references are not supported: {', '.join(remote_loras)}. Import the LoRA locally or pass a local LoRA path.")
+        lora_paths = [resolve_lora_path(name) for name, _ in parsed]
         lora_weights = [weight for _, weight in parsed]
     args.lora_paths = lora_paths
     args.lora_weights = lora_weights
@@ -208,7 +226,10 @@ def main(*, prog: str = "ziv-video") -> None:
     os.makedirs(args.output, exist_ok=True)
 
     # Select backend
-    backend = get_video_backend(model_info.backend)
+    try:
+        backend = get_video_backend(model_info.backend)
+    except RuntimeError as e:
+        parser.error(str(e))
 
     # Determine mode hint
     mode = "i2v" if args.image_path else "t2v"
@@ -223,13 +244,16 @@ def main(*, prog: str = "ziv-video") -> None:
     load_kwargs: dict[str, Any] = {}
     if args.upscale:
         load_kwargs["upscale"] = True
-    model, model_info = backend.load_model(
-        args.model,
-        mode=mode,
-        low_memory=args.low_memory,
-        loras=loras,
-        **load_kwargs,
-    )
+    try:
+        model, model_info = backend.load_model(
+            args.model,
+            mode=mode,
+            low_memory=args.low_memory,
+            loras=loras,
+            **load_kwargs,
+        )
+    except (RuntimeError, ValueError, FileNotFoundError, ImportError) as e:
+        parser.error(str(e))
 
     # Load prompts
     if args.prompt is not None:
