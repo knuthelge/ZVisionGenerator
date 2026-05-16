@@ -33,7 +33,7 @@ See the [Development Guide](docs/development.md) for setup, testing, and code st
 
 ### Frontend Development
 
-- Node.js ≥ 22.0.0 and npm ≥ 10.0.0 are required to build and test the web frontend.
+- Node.js ≥ 22.0.0 and pnpm ≥ 11.0.0 are required to build and test the web frontend.
 - Install frontend dependencies: `make frontend-install`
 - Build frontend assets: `make frontend-build`
 - Run frontend tests: `make frontend-test`
