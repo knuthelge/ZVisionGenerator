@@ -65,7 +65,7 @@ zvisiongenerator/
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/
 │   ├── image_mac.py               macOS image backend (mflux/MLX)
-│   ├── image_win.py               Windows image backend (diffusers/CUDA)
+│   ├── image_win.py               Windows/Linux image backend (diffusers/CUDA)
 │   ├── video_mac.py               macOS video backend (LTX via MLX)
 │   └── video_diffusers.py         Windows/Linux video backend (LTX via diffusers/CUDA)
 ├── converters/
@@ -119,11 +119,15 @@ prompts.yaml                       Default prompt definitions
 
 ### Backend Protocol
 
-Platform backends live in `backends/image_mac.py` (mflux/MLX), `backends/image_win.py` (diffusers/CUDA), `backends/video_mac.py` (MLX video), and `backends/video_diffusers.py` (Windows/Linux diffusers video). Image backends implement the `ImageBackend` Protocol from `core/image_backend.py`; video backends implement the `VideoBackend` Protocol from `core/video_backend.py`. Platform selection stays centralized in `backends/__init__.py` — never branch on `sys.platform` elsewhere.
+Platform backends live in `backends/image_mac.py` (mflux/MLX), `backends/image_win.py` (Windows/Linux diffusers image), `backends/video_mac.py` (MLX video), and `backends/video_diffusers.py` (Windows/Linux diffusers video). Image backends implement the `ImageBackend` Protocol from `core/image_backend.py`; video backends implement the `VideoBackend` Protocol from `core/video_backend.py`. Platform selection stays centralized in `backends/__init__.py` — never branch on `sys.platform` elsewhere.
+
+The `image_win.py` module is the shared diffusers/CUDA image backend for both Windows and Linux. The filename is historical; platform selection still happens only in `backends/__init__.py`.
 
 Windows and Linux video resolution is config-driven through `video_model_presets.ltx.diffusers.default_repo` and the `ltx-2.3` alias. The backend assumes a diffusers-compatible repository layout and keeps the configured default overrideable from user config. macOS keeps the MLX-only `ltx-4` and `ltx-8` aliases.
 
 The Windows/Linux video backend is CUDA-only. Validation happens lazily during backend load so importing the package or running non-video code paths does not require torch, diffusers, or a GPU.
+
+The Windows/Linux diffusers image backend is also CUDA-only. Validation happens lazily during image backend load so importing the package or running non-image code paths does not require torch, diffusers, or a GPU.
 
 ### Workflow Stages
 
@@ -143,4 +147,4 @@ Raise `ValueError`, `FileNotFoundError`, `RuntimeError` directly with descriptiv
 
 ### Test Strategy
 
-Mock heavy video dependencies in tests. Video backend tests patch the lazy diffusers runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.
+Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.
