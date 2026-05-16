@@ -30,7 +30,7 @@ def test_make_install_installs_python_and_frontend_dependencies() -> None:
     assert frontend_match is not None
     assert "frontend-install" in install_match.group("deps").split()
     assert "uv sync" in install_match.group("body")
-    assert "npm ci --prefix frontend" in frontend_match.group("body")
+    assert "pnpm --dir frontend install --frozen-lockfile" in frontend_match.group("body")
 
 
 def test_release_workflow_validates_packaged_spa_before_build() -> None:

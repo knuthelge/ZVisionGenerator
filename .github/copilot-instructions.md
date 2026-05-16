@@ -34,7 +34,7 @@ Every module, function, and class should be **atomic**: a single, self-contained
 ## Build & Test
 
 ```bash
-make install    # Install Python and frontend dependencies (uv sync + npm ci)
+make install    # Install Python and frontend dependencies (uv sync + pnpm install --frozen-lockfile)
 make lint       # Ruff linter
 make format     # Ruff formatter
 make test       # pytest

@@ -6,8 +6,9 @@ dist/
 wheels/
 *.egg-info
 
-# Node modules
+# Node modules and pnpm store
 node_modules/
+.pnpm-store/
 
 # Auto-generated version file (hatch-vcs)
 zvisiongenerator/_version.py
