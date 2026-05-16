@@ -39,7 +39,7 @@ The base package install includes the Web UI runtime, so `ziv ui` and `ziv-ui` w
 
 | Argument | Default | Description |
 |---|---|---|
-| `-m`, `--model` | *(required)* | Model name, path, or HuggingFace repo ID |
+| `-m`, `--model` | *(required)* | Model name, local path, alias, or supported HuggingFace repo ID |
 | `-q`, `--quantize` | `None` | Quantization level: `4` or `8` |
 | `--scheduler` | model-aware | Scheduler name (e.g., `beta`) |
 | `--lora` | `None` | LoRA specifier: `name:weight,name2:weight2` (weight optional, default 1.0) |
@@ -70,9 +70,16 @@ Run `ziv-image --help` for the full list.
 
 ## `ziv-video` — Video Generation
 
+Platform-aware aliases:
+
+- macOS: `ltx-4`, `ltx-8`
+- Windows and Linux: `ltx-2.3`
+- The Windows/Linux alias resolves through `video_model_presets.ltx.diffusers.default_repo`, which defaults to `dg845/LTX-2.3-Diffusers` and can be overridden in `~/.ziv/config.yaml`.
+- `ltx-4` and `ltx-8` are the shipped macOS MLX Q4/Q8 aliases. `ltx-2.3` is the Windows/Linux diffusers alias and does not imply a packaged Q4/Q8 tier.
+
 | Argument | Default | Description |
 |---|---|---|
-| `-m`, `--model` | *(required)* | Model path or HuggingFace repo ID |
+| `-m`, `--model` | *(required)* | Model alias, local path, or supported/configured LTX HuggingFace repo ID |
 | `--prompt` | `None` | Inline prompt; overrides `--prompts-file` |
 | `-p`, `--prompts-file` | `prompts.yaml` | YAML prompt file path |
 | `--image` | `None` | Input image for image-to-video |
@@ -84,12 +91,18 @@ Run `ziv-image --help` for the full list.
 | `--steps` | model-aware | Inference steps |
 | `--seed` | `None` (random) | Seed for reproducible video generation |
 | `--low-memory` / `--no-low-memory` | enabled | Low-memory mode for LTX |
-| `--upscale` | disabled | Upscale factor: `2` (two-stage pipeline, 2× spatial resolution) |
+| `--upscale` | disabled | Upscale factor: `2` only. Fails explicitly when the active backend cannot provide the LTX latent upscaler. |
 | `--audio` / `--no-audio` | enabled | Include or strip audio in video output |
-| `--lora` | `None` | Comma-separated LoRAs with optional weights: `name:0.8,name2:0.5` |
+| `--lora` | `None` | Comma-separated LoRAs with optional weights: `name:0.8,name2:0.5`. Windows/Linux require diffusers-compatible LTX LoRA adapters. |
 | `-r`, `--runs` | `1` | Number of batch runs |
 | `-o`, `--output` | `.` | Output directory |
 | `--format` | `mp4` | Output format |
+
+Operational notes:
+
+- Video generation requires `ffmpeg` on every platform.
+- Windows and Linux video generation are CUDA-only.
+- Alias mismatches are reported directly, for example `ltx-4` on Windows or `ltx-2.3` on macOS.
 
 ## `ziv-model model` — Checkpoint Conversion
 

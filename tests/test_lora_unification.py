@@ -145,6 +145,17 @@ class TestRuntimeHandoff:
 
         assert backend.load_model.call_args.kwargs["loras"] == [("/resolved/style", 0.8), ("/resolved/detail", 1.0)]
 
+    def test_image_main_rejects_remote_lora_before_backend_load(self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]):
+        backend = _patch_image_main_dependencies(monkeypatch)
+        monkeypatch.setattr(sys, "argv", ["ziv-image", "-m", "model", "--prompt", "a cat", "--lora", "org/lora:0.8"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            image_cli.main()
+
+        assert exc_info.value.code == 2
+        assert "Remote HuggingFace LoRA references are not supported" in capsys.readouterr().err
+        backend.load_model.assert_not_called()
+
 
 class TestInvalidLoraInputInCli:
     def test_image_main_rejects_invalid_lora_value(self, monkeypatch: pytest.MonkeyPatch):

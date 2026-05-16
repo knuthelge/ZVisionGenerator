@@ -155,6 +155,47 @@ def test_load_web_config_skips_unavailable_platform_aliases(monkeypatch, tmp_pat
     assert web_config.default_models.image == "portable-image"
 
 
+def test_load_web_config_exposes_windows_linux_video_aliases_and_hides_macos_only_ones(monkeypatch, tmp_path):
+    """Windows/Linux inventory should include ltx-2.3 and omit macOS-only video aliases."""
+    app_config = _make_app_config()
+    app_config["model_aliases"] = {
+        "ltx-8": {
+            "darwin": "dgrauet/ltx-2.3-mlx-q8",
+            "win32": {"message": "Alias 'ltx-8' is macOS-only. On Windows, use 'ltx-2.3' for the CUDA diffusers backend."},
+            "linux": {"message": "Alias 'ltx-8' is macOS-only. On Linux, use 'ltx-2.3' for the CUDA diffusers backend."},
+        },
+        "ltx-2.3": {
+            "darwin": {"message": "Alias 'ltx-2.3' is available on Windows and Linux only. On macOS, use 'ltx-4' or 'ltx-8'."},
+            "win32": "dg845/LTX-2.3-Diffusers",
+            "linux": "dg845/LTX-2.3-Diffusers",
+        },
+    }
+    app_config["ui"]["default_models"] = {"video": "ltx-8"}
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(web_config_module, "load_config", lambda: app_config)
+    monkeypatch.setattr(web_config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+    monkeypatch.setattr(web_config_module, "list_models", lambda _: [])
+    monkeypatch.setattr(web_config_module, "list_video_models", lambda _: [])
+    monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
+    monkeypatch.setattr(model_inventory_module.sys, "platform", "win32")
+    monkeypatch.setattr(
+        web_config_module,
+        "detect_image_model",
+        lambda _value: ImageModelInfo(family="unknown", is_distilled=False, size=None),
+    )
+    monkeypatch.setattr(
+        web_config_module,
+        "detect_video_model",
+        lambda value: SimpleNamespace(family="ltx" if "Diffusers" in str(value) else "unknown", supports_i2v=True),
+    )
+
+    web_config = web_config_module.load_web_config()
+
+    assert web_config.video_model_options == ("ltx-2.3",)
+    assert web_config.default_models.video == "ltx-2.3"
+
+
 def test_load_web_config_rejects_invalid_ui_mapping(monkeypatch):
     """The Web UI config loader should reject non-mapping UI config values."""
     monkeypatch.setattr(web_config_module, "load_config", lambda: {"ui": "invalid"})
