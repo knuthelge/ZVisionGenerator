@@ -6,8 +6,13 @@ updates:
       interval: weekly
     target-branch: main
     open-pull-requests-limit: 10
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
     groups:
-      minor-and-patch:
+      major-releases:
         update-types:
           - major
 
@@ -17,7 +22,12 @@ updates:
       interval: weekly
     target-branch: main
     open-pull-requests-limit: 10
-    groups:
-      minor-and-patch:
+    ignore:
+      - dependency-name: "*"
         update-types:
-          - minor
+          - version-update:semver-minor
+          - version-update:semver-patch
+    groups:
+      major-releases:
+        update-types:
+          - major
