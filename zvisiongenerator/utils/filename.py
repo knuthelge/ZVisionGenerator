@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-import os
 import re
+
+from zvisiongenerator.utils.paths import display_stem
 
 
 def generate_filename(
@@ -28,18 +29,14 @@ def generate_filename(
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     if model:
-        name = os.path.basename(model)
-        for ext in (".safetensors", ".ckpt", ".bin", ".pt"):
-            if name.endswith(ext):
-                name = name[: -len(ext)]
-                break
+        name = display_stem(model)
         model_part = f"_{name.replace(' ', '_')}"
     else:
         model_part = ""
     if lora_paths:
         lora_parts = []
         for p, w in zip(lora_paths, lora_weights or []):
-            name = os.path.basename(p).split(".")[0]
+            name = display_stem(p)
             lora_parts.append(f"{name}_{int(w * 100)}")
         lora_part = "_" + "_".join(lora_parts)
     else:

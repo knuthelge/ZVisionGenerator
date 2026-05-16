@@ -467,24 +467,24 @@ class TestFormatAssetTableAliases:
 
     def test_per_platform_aliases_render_platform_labels_and_targets(self):
         aliases = {
-            "ltx-8": {
-                "darwin": "dgrauet/ltx-2.3-mlx-q8",
-                "win32": "Lightricks/LTX-2.3-fp8",
+            "ltx-2.3": {
+                "win32": "dg845/LTX-2.3-Diffusers",
+                "linux": "dg845/LTX-2.3-Diffusers",
             }
         }
 
-        output = format_asset_table(aliases=aliases, platforms={"darwin": "macOS", "win32": "Windows"})
+        output = format_asset_table(aliases=aliases, platforms={"win32": "Windows", "linux": "Linux"})
 
-        alias_target = _alias_row_map(output)["ltx-8"]
+        alias_target = _alias_row_map(output)["ltx-2.3"]
         assert len(_alias_variants(alias_target)) == 2
-        assert _alias_target_identifiers(alias_target) == ["dgrauet/ltx-2.3-mlx-q8", "Lightricks/LTX-2.3-fp8"]
+        assert _alias_target_identifiers(alias_target) == ["dg845/LTX-2.3-Diffusers", "dg845/LTX-2.3-Diffusers"]
         assert not _has_unavailable_variant(alias_target)
 
     def test_message_aliases_render_unavailable_with_message(self):
         aliases = {
             "ltx-4": {
                 "darwin": "dgrauet/ltx-2.3-mlx-q4",
-                "win32": {"message": "LTX 4-bit is not available on Windows. Use 'ltx-8' instead."},
+                "win32": {"message": "Alias 'ltx-4' is macOS-only. On Windows, use 'ltx-2.3' for the CUDA diffusers backend."},
             }
         }
 

@@ -10,6 +10,7 @@ resolve_defaults() for the config layering precedence:
 from __future__ import annotations
 
 import importlib.resources
+from copy import deepcopy
 from typing import Any
 
 import yaml
@@ -45,6 +46,8 @@ def load_config() -> dict[str, Any]:
                 raise ValueError(f"Failed to parse config file: {e}") from e
         if user and isinstance(user, dict):
             _deep_merge(config, user)
+
+    _resolve_config_references(config)
 
     # Validate that known sections have the right types after merge
     _EXPECTED_DICTS = (
@@ -143,6 +146,35 @@ def load_config() -> dict[str, Any]:
             )
 
     return config
+
+
+def _resolve_config_references(config: dict[str, Any]) -> None:
+    """Resolve ${path.to.value} references inside the merged config tree."""
+
+    def _resolve_value(value: Any) -> Any:
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                value[key] = _resolve_value(nested)
+            return value
+        if isinstance(value, list):
+            return [_resolve_value(item) for item in value]
+        if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+            resolved = _lookup_config_path(config, value[2:-1])
+            return deepcopy(resolved)
+        return value
+
+    _resolve_value(config)
+
+
+def _lookup_config_path(config: dict[str, Any], dotted_path: str) -> Any:
+    """Look up a dotted config path from the merged config tree."""
+
+    current: Any = config
+    for key in dotted_path.split("."):
+        if not isinstance(current, dict) or key not in current:
+            raise ValueError(f"Config reference '${{{dotted_path}}}' could not be resolved.")
+        current = current[key]
+    return current
 
 
 def _deep_merge(base: dict, override: dict) -> None:
