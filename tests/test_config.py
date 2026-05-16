@@ -166,6 +166,46 @@ class TestNestedConfigValidation:
             with pytest.raises(ValueError, match=r"default_size.*xxl.*not a valid size.*1:1"):
                 load_config()
 
+    def test_model_alias_reference_resolves_after_user_override(self, tmp_path):
+        """Config references should follow the merged default repo value."""
+        from unittest.mock import patch
+        import yaml
+
+        packaged = {
+            "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
+            "generation": {"default_steps": 10, "default_guidance": 3.5, "default_ratio": "1:1", "default_size": "m"},
+            "sharpening": {},
+            "upscale": {},
+            "contrast": {},
+            "saturation": {},
+            "schedulers": {},
+            "platforms": {"darwin": "macOS", "win32": "Windows", "linux": "Linux"},
+            "model_aliases": {
+                "ltx-2.3": {
+                    "win32": "${video_model_presets.ltx.diffusers.default_repo}",
+                    "linux": "${video_model_presets.ltx.diffusers.default_repo}",
+                }
+            },
+            "model_presets": {},
+            "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
+            "video_generation": {"default_ratio": "16:9", "default_size": "m"},
+            "video_model_presets": {"ltx": {"diffusers": {"default_repo": "dg845/LTX-2.3-Diffusers"}}},
+        }
+        config_file = _write_packaged_config(tmp_path, packaged)
+        user_dir = tmp_path / ".ziv"
+        user_dir.mkdir()
+        (user_dir / "config.yaml").write_text(
+            yaml.dump({"video_model_presets": {"ltx": {"diffusers": {"default_repo": "custom/LTX-2.3"}}}}),
+            encoding="utf-8",
+        )
+
+        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir", return_value=user_dir):
+            mock_files.return_value.joinpath.return_value = config_file
+            config = load_config()
+
+        assert config["model_aliases"]["ltx-2.3"]["win32"] == "custom/LTX-2.3"
+        assert config["model_aliases"]["ltx-2.3"]["linux"] == "custom/LTX-2.3"
+
 
 # ---------------------------------------------------------------------------
 # _deep_merge
@@ -482,7 +522,7 @@ class TestPlatformConfigValidation:
         "alias_value",
         [
             "Tongyi-MAI/Z-Image-Turbo",
-            {"darwin": "dgrauet/ltx-2.3-mlx-q8", "win32": "Lightricks/LTX-2.3-fp8"},
+            {"win32": "dg845/LTX-2.3-Diffusers", "linux": "dg845/LTX-2.3-Diffusers"},
             {"darwin": "dgrauet/ltx-2.3-mlx-q4", "win32": {"message": "Use ltx-8 instead."}},
         ],
     )
@@ -499,7 +539,7 @@ class TestPlatformConfigValidation:
                 "contrast": {},
                 "saturation": {},
                 "schedulers": {},
-                "platforms": {"darwin": "macOS", "win32": "Windows"},
+                "platforms": {"darwin": "macOS", "win32": "Windows", "linux": "Linux"},
                 "model_aliases": {"ltx": alias_value},
                 "model_presets": {},
                 "video_sizes": {},
@@ -538,7 +578,7 @@ class TestPlatformConfigValidation:
                 "contrast": {},
                 "saturation": {},
                 "schedulers": {},
-                "platforms": {"darwin": "macOS", "win32": "Windows"},
+                "platforms": {"darwin": "macOS", "win32": "Windows", "linux": "Linux"},
                 "model_aliases": {"ltx": alias_value},
                 "model_presets": {},
                 "video_sizes": {},

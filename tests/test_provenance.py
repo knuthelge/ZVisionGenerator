@@ -176,6 +176,19 @@ class TestBuildImageConfigPayload:
         assert payload["lora"] == "/models/style.safetensors:0.7"
         json.dumps(payload)
 
+    def test_lora_display_name_is_clean_but_paths_are_preserved(self):
+        request = _make_image_request(
+            lora_paths=[r"C:\loras\style.SAFETENSORS", "owner/detail.v1.safetensors"],
+            lora_weights=[0.8, 0.5],
+        )
+        payload = build_image_provenance("asset.png", request, ImageWorkingArtifacts(image=Image.new("RGB", (32, 32))))
+
+        assert payload["loras"] == [
+            {"name": "style", "path": r"C:\loras\style.SAFETENSORS", "weight": 0.8},
+            {"name": "detail.v1", "path": "owner/detail.v1.safetensors", "weight": 0.5},
+        ]
+        assert payload["lora"] == r"C:\loras\style.SAFETENSORS:0.8,owner/detail.v1.safetensors:0.5"
+
     def test_excludes_non_reusable_fields(self):
         request = _make_image_request()
         artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (512, 384)), generation_time=3.1)

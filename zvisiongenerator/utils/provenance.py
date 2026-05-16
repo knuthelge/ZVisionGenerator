@@ -11,6 +11,7 @@ from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.utils.paths import display_stem
 
 PROVENANCE_SCHEMA = "zvisiongenerator.asset-provenance.v1"
 IMAGE_CONFIG_SCHEMA = "zvisiongenerator.config.v1"
@@ -221,7 +222,7 @@ def _build_loras(paths: list[str] | None, weights: list[float] | None) -> list[d
         return []
     return [
         {
-            "name": Path(path).stem,
+            "name": display_stem(path),
             "path": path,
             "weight": weights[index] if weights is not None and index < len(weights) else 1.0,
         }

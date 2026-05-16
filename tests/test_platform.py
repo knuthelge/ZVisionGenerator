@@ -31,13 +31,15 @@ class TestResolveAlias:
         ("platform_key", "expected"),
         [
             ("darwin", "dgrauet/ltx-2.3-mlx-q8"),
-            ("win32", "Lightricks/LTX-2.3-fp8"),
+            ("win32", "dg845/LTX-2.3-Diffusers"),
+            ("linux", "dg845/LTX-2.3-Diffusers"),
         ],
     )
     def test_dict_value_returns_platform_target(self, platform_key, expected):
         alias_value = {
             "darwin": "dgrauet/ltx-2.3-mlx-q8",
-            "win32": "Lightricks/LTX-2.3-fp8",
+            "win32": "dg845/LTX-2.3-Diffusers",
+            "linux": "dg845/LTX-2.3-Diffusers",
         }
 
         assert resolve_alias(alias_value, platform_key) == expected
@@ -54,7 +56,7 @@ class TestResolveAlias:
     def test_missing_platform_raises_value_error_listing_available_platforms(self):
         alias_value = {
             "darwin": "dgrauet/ltx-2.3-mlx-q8",
-            "win32": "Lightricks/LTX-2.3-fp8",
+            "win32": "dg845/LTX-2.3-Diffusers",
         }
 
         with pytest.raises(ValueError, match=r"Available platforms: darwin, win32"):
@@ -63,7 +65,7 @@ class TestResolveAlias:
     def test_platform_labels_are_used_in_missing_platform_errors(self):
         alias_value = {
             "darwin": "dgrauet/ltx-2.3-mlx-q8",
-            "win32": "Lightricks/LTX-2.3-fp8",
+            "win32": "dg845/LTX-2.3-Diffusers",
         }
 
         with pytest.raises(ValueError, match=r"Model alias is not available for Linux\. Available platforms: macOS, Windows"):

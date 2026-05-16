@@ -162,6 +162,18 @@ class TestFormatGenerationInfo:
         assert "style (0.8)" in model_line
         assert "detail (0.5)" in model_line
 
+    def test_cross_platform_model_and_lora_display_names(self):
+        req = _make_request(
+            model_name=r"C:\models\model.fp16.SAFETENSORS",
+            lora_paths=["owner/style.v1.safetensors", "C:/loras/detail.CKPT"],
+            lora_weights=[0.8, 0.5],
+        )
+        output = _call_format(request=req)
+
+        assert "Model: model.fp16 (zimage)" in output
+        assert "style.v1 (0.8)" in output
+        assert "detail (0.5)" in output
+
     def test_lora_slot_is_present_when_none(self):
         output = _call_format()
         model_parts = _model_line(output).split(". ")

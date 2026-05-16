@@ -28,6 +28,11 @@ class TestVideoBackendProtocol:
 
         assert isinstance(LtxVideoBackend(), VideoBackend)
 
+    def test_diffusers_video_backend_satisfies_protocol(self):
+        from zvisiongenerator.backends.video_diffusers import DiffusersVideoBackend
+
+        assert isinstance(DiffusersVideoBackend(), VideoBackend)
+
     def test_protocol_requires_name(self):
         """An object missing 'name' does not satisfy the protocol."""
 
@@ -54,6 +59,27 @@ class TestGetVideoBackend:
         backend = get_video_backend("ltx")
         assert backend.name == "ltx"
         assert isinstance(backend, VideoBackend)
+
+    @pytest.mark.parametrize("platform_key", ["win32", "linux"])
+    def test_get_ltx_backend_on_diffusers_platforms(self, monkeypatch, platform_key):
+        import zvisiongenerator.backends as backends_module
+
+        monkeypatch.setattr(backends_module.sys, "platform", platform_key)
+        backends_module.VIDEO_BACKENDS.clear()
+
+        backend = backends_module.get_video_backend("ltx")
+
+        assert backend.name == "ltx"
+        assert isinstance(backend, VideoBackend)
+
+    def test_unsupported_platform_error_lists_supported_video_platforms(self, monkeypatch):
+        import zvisiongenerator.backends as backends_module
+
+        monkeypatch.setattr(backends_module.sys, "platform", "freebsd")
+        backends_module.VIDEO_BACKENDS.clear()
+
+        with pytest.raises(RuntimeError, match="macOS, Windows, and Linux"):
+            backends_module.get_video_backend("ltx")
 
     def test_get_nonexistent_backend_raises(self):
         from zvisiongenerator.backends import VIDEO_BACKENDS, get_video_backend

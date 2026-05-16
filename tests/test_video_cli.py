@@ -128,6 +128,137 @@ class TestBuildVideoParser:
 class TestVideoCliExecution:
     """Verify executable CLI behavior beyond argument parsing."""
 
+    def test_main_reports_unknown_model_guidance_with_platform_alias(self, monkeypatch, capsys):
+        import zvisiongenerator.video_cli as video_cli
+
+        monkeypatch.setattr(video_cli, "load_config", lambda: {"model_aliases": {}})
+        monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
+        monkeypatch.setattr(
+            video_cli,
+            "detect_video_model",
+            lambda _model: VideoModelInfo(
+                family="unknown",
+                backend="unknown",
+                supports_i2v=False,
+                default_fps=24,
+                frame_alignment=1,
+                resolution_alignment=1,
+            ),
+        )
+        monkeypatch.setattr(video_cli.sys, "platform", "win32")
+
+        with patch("sys.argv", ["ziv-video", "-m", "unknown/repo", "--prompt", "a dog"]):
+            with pytest.raises(SystemExit, match="2"):
+                video_cli.main()
+
+        err = capsys.readouterr().err
+        assert "ltx-2.3" in err
+        assert "dgrauet/ltx" not in err
+        assert "supported/configured HuggingFace LTX repo IDs" in err
+        assert "local path containing 'ltx'" in err
+        assert "compatible local path/HuggingFace LTX repo" not in err
+
+    def test_main_rejects_remote_lora_before_backend_load(self, monkeypatch, capsys):
+        import zvisiongenerator.video_cli as video_cli
+
+        model_info = VideoModelInfo(
+            family="ltx",
+            backend="ltx",
+            supports_i2v=True,
+            default_fps=24,
+            frame_alignment=8,
+            resolution_alignment=32,
+        )
+        backend = MagicMock()
+
+        monkeypatch.setattr(
+            video_cli,
+            "load_config",
+            lambda: {
+                "video_generation": {"default_ratio": "16:9", "default_size": "m"},
+                "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
+                "video_model_presets": {"ltx": {"upscale": {}}},
+                "model_aliases": {},
+            },
+        )
+        monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
+        monkeypatch.setattr(video_cli, "detect_video_model", lambda _model: model_info)
+        monkeypatch.setattr(
+            video_cli,
+            "resolve_video_defaults",
+            lambda _family, _config, cli_overrides: {"steps": 8, "width": 704, "height": 448, "num_frames": 49, **cli_overrides},
+        )
+        monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
+
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog", "--lora", "org/lora:0.8"]):
+            with pytest.raises(SystemExit, match="2"):
+                video_cli.main()
+
+        err = capsys.readouterr().err
+        assert "Remote HuggingFace LoRA references are not supported" in err
+        assert "org/lora" in err
+        backend.load_model.assert_not_called()
+
+    def test_main_reports_platform_alias_mismatch_via_parser_error(self, monkeypatch):
+        import zvisiongenerator.video_cli as video_cli
+
+        monkeypatch.setattr(
+            video_cli,
+            "load_config",
+            lambda: {
+                "model_aliases": {
+                    "ltx-4": {
+                        "darwin": "dgrauet/ltx-2.3-mlx-q4",
+                        "win32": {"message": "Alias 'ltx-4' is macOS-only. On Windows, use 'ltx-2.3' for the CUDA diffusers backend."},
+                    }
+                }
+            },
+        )
+        monkeypatch.setattr(video_cli.sys, "platform", "win32")
+
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog"]):
+            with pytest.raises(SystemExit, match="2"):
+                video_cli.main()
+
+    def test_main_reports_backend_load_errors_via_parser_error(self, monkeypatch, tmp_path):
+        import zvisiongenerator.video_cli as video_cli
+
+        model_info = VideoModelInfo(
+            family="ltx",
+            backend="ltx",
+            supports_i2v=True,
+            default_fps=24,
+            frame_alignment=8,
+            resolution_alignment=32,
+        )
+        backend = MagicMock()
+        backend.load_model.side_effect = RuntimeError("CUDA is not available. The Linux diffusers video backend requires an NVIDIA GPU with CUDA support.")
+
+        monkeypatch.setattr(
+            video_cli,
+            "load_config",
+            lambda: {
+                "video_generation": {"default_ratio": "16:9", "default_size": "m"},
+                "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
+                "video_model_presets": {"ltx": {"upscale": {"default_upscale_steps": 8}}},
+            },
+        )
+        monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
+        monkeypatch.setattr(video_cli, "detect_video_model", lambda _model: model_info)
+        monkeypatch.setattr(
+            video_cli,
+            "resolve_video_defaults",
+            lambda _family, _config, cli_overrides: {"steps": 8, "width": 704, "height": 448, "num_frames": 49, **cli_overrides},
+        )
+        monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
+
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog", "-o", str(tmp_path)]):
+            with pytest.raises(SystemExit, match="2"):
+                video_cli.main()
+
     def test_main_caps_upscale_steps_before_running_batch(self, monkeypatch, tmp_path):
         import zvisiongenerator.video_cli as video_cli
 

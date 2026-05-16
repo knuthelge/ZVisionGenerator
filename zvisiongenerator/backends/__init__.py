@@ -72,8 +72,16 @@ def _create_ltx_video_backend() -> "VideoBackend":
     return LtxVideoBackend()
 
 
+def _create_diffusers_video_backend() -> "VideoBackend":
+    from zvisiongenerator.backends.video_diffusers import DiffusersVideoBackend
+
+    return DiffusersVideoBackend()
+
+
 _VIDEO_BACKENDS_MAP: dict[str, tuple[str, Callable[[], "VideoBackend"]]] = {
     "darwin": ("ltx", _create_ltx_video_backend),
+    "win32": ("ltx", _create_diffusers_video_backend),
+    "linux": ("ltx", _create_diffusers_video_backend),
 }
 
 
@@ -81,11 +89,11 @@ def _get_video_backend_registration() -> tuple[str, Callable[[], "VideoBackend"]
     try:
         return _VIDEO_BACKENDS_MAP[sys.platform]
     except KeyError as exc:
-        raise RuntimeError(f"Video generation is currently macOS-only. Current platform: {sys.platform}") from exc
+        raise RuntimeError(f"Unsupported video platform: {sys.platform}. Video generation supports macOS, Windows, and Linux.") from exc
 
 
 def _register_video_backends() -> None:
-    """Register available video backends. macOS only for now."""
+    """Register the platform video backend for the active OS."""
     backend_key, factory = _get_video_backend_registration()
     VIDEO_BACKENDS[backend_key] = factory()
 

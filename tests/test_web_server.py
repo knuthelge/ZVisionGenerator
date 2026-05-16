@@ -599,6 +599,30 @@ def test_models_route_uses_shared_alias_inventory(monkeypatch, tmp_path):
     assert video_models["alias-video"]["supports_i2v"] is False
 
 
+def test_submit_video_job_surfaces_platform_alias_mismatch(monkeypatch):
+    """Video submissions should return the alias mismatch message from platform-aware resolution."""
+    web_config = _make_web_config()
+    web_config.app_config = {
+        "model_aliases": {
+            "ltx-2.3": {
+                "darwin": {"message": "Alias 'ltx-2.3' is available on Windows and Linux only. On macOS, use 'ltx-4' or 'ltx-8'."},
+                "win32": "dg845/LTX-2.3-Diffusers",
+                "linux": "dg845/LTX-2.3-Diffusers",
+            }
+        },
+        "video_generation": {"default_ratio": "16:9", "default_size": "m"},
+        "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
+        "video_model_presets": {"ltx": {"default_steps": 8}},
+    }
+    web_config.default_models = WebUiDefaultModels(image="zit", video="ltx-2.3")
+    web_config.video_model_options = ("ltx-2.3",)
+
+    monkeypatch.setattr(web_server.sys, "platform", "darwin")
+
+    with pytest.raises(ValueError, match="available on Windows and Linux only"):
+        web_server._submit_video_job({"model": "ltx-2.3", "prompt": "a lake"}, web_config)
+
+
 def test_gallery_asset_id_contract_serves_and_deletes_relative_assets(monkeypatch, tmp_path):
     """Gallery list, media, and delete should share output-root-relative POSIX IDs."""
     web_config = _make_web_config()

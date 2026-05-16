@@ -10,7 +10,18 @@ from .filename import generate_filename
 from .image_model_detect import ImageModelInfo, detect_image_model
 from .interactive import SkipSignal
 from .lora import parse_lora_arg
-from .paths import resolve_model_path, resolve_lora_path, get_ziv_data_dir
+from .paths import (
+    HuggingFaceRepoReference,
+    display_basename,
+    display_stem,
+    get_ziv_data_dir,
+    is_explicit_local_path,
+    is_huggingface_repo_id,
+    is_remote_lora_reference,
+    parse_huggingface_repo_reference,
+    resolve_lora_path,
+    resolve_model_path,
+)
 from .platform import AliasMap, AliasValue, PlatformInfo, get_platform_info, resolve_alias
 from .provenance import (
     IMAGE_CONFIG_SCHEMA,
@@ -33,6 +44,7 @@ __all__ = [
     "ImageModelInfo",
     "AliasMap",
     "AliasValue",
+    "HuggingFaceRepoReference",
     "IMAGE_CONFIG_SCHEMA",
     "PlatformInfo",
     "PROVENANCE_SCHEMA",
@@ -45,6 +57,8 @@ __all__ = [
     "build_video_provenance",
     "detect_image_model",
     "detect_video_model",
+    "display_basename",
+    "display_stem",
     "embed_mp4_config",
     "embed_png_config",
     "ensure_ffmpeg",
@@ -53,8 +67,12 @@ __all__ = [
     "generate_filename",
     "get_platform_info",
     "get_ziv_data_dir",
+    "is_explicit_local_path",
+    "is_huggingface_repo_id",
+    "is_remote_lora_reference",
     "load_config",
     "load_prompts_file",
+    "parse_huggingface_repo_reference",
     "parse_lora_arg",
     "read_mp4_config",
     "read_png_config",

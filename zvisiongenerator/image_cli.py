@@ -12,7 +12,7 @@ from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.config import load_config, resolve_defaults, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import parse_lora_arg
-from zvisiongenerator.utils.paths import resolve_model_path, resolve_lora_path
+from zvisiongenerator.utils.paths import is_remote_lora_reference, resolve_lora_path, resolve_model_path
 from zvisiongenerator.utils.prompts import load_prompts_file
 
 
@@ -131,9 +131,7 @@ def main(*, prog: str = "ziv-image") -> None:
     if args.size not in sizes[args.ratio]:
         parser.error(f"Unknown size '{args.size}'. Valid: {list(sizes[args.ratio].keys())}")
 
-    # Expand ~ in path arguments
-    if args.model:
-        args.model = str(Path(args.model).expanduser())
+    # Expand ~ in filesystem-only path arguments. Model/LoRA tokens are resolved by shared helpers.
     if args.image_path:
         args.image_path = str(Path(args.image_path).expanduser())
     if args.output:
@@ -151,7 +149,10 @@ def main(*, prog: str = "ziv-image") -> None:
             parsed = parse_lora_arg(args.lora)
         except ValueError as e:
             parser.error(str(e))
-        lora_paths = [resolve_lora_path(str(Path(name).expanduser())) for name, _ in parsed]
+        remote_loras = [name for name, _ in parsed if is_remote_lora_reference(name)]
+        if remote_loras:
+            parser.error(f"Remote HuggingFace LoRA references are not supported: {', '.join(remote_loras)}. Import the LoRA locally or pass a local LoRA path.")
+        lora_paths = [resolve_lora_path(name) for name, _ in parsed]
         lora_weights = [weight for _, weight in parsed]
     if lora_paths:
         for p in lora_paths:

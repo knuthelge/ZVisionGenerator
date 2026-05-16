@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from zvisiongenerator.utils.paths import resolve_model_path
 
 
@@ -110,3 +112,27 @@ class TestVideoCLIResolvesModelPath:
         mock_resolve.assert_called_once()
         # The argument to resolve_model_path should be the tilde-expanded model name
         assert "ltx-2.3-mlx-q4" in mock_resolve.call_args[0][0]
+
+
+class TestVideoAliasPolicy:
+    def test_windows_and_linux_alias_resolve_to_diffusers_repo(self):
+        aliases = {
+            "ltx-2.3": {
+                "win32": "dg845/LTX-2.3-Diffusers",
+                "linux": "dg845/LTX-2.3-Diffusers",
+            }
+        }
+
+        assert resolve_model_path("ltx-2.3", aliases=aliases, platform_key="win32") == "dg845/LTX-2.3-Diffusers"
+        assert resolve_model_path("ltx-2.3", aliases=aliases, platform_key="linux") == "dg845/LTX-2.3-Diffusers"
+
+    def test_macos_only_aliases_retain_platform_mismatch_message(self):
+        aliases = {
+            "ltx-8": {
+                "darwin": "dgrauet/ltx-2.3-mlx-q8",
+                "win32": {"message": "Alias 'ltx-8' is macOS-only. On Windows, use 'ltx-2.3' for the CUDA diffusers backend."},
+            }
+        }
+
+        with pytest.raises(ValueError, match="macOS-only"):
+            resolve_model_path("ltx-8", aliases=aliases, platform_key="win32")
