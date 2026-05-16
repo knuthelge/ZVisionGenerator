@@ -185,6 +185,13 @@ class TestLoadModelCudaCheck:
         with pytest.raises(RuntimeError, match="CUDA"):
             backend.load_model("fake-model-path")
 
+    def test_raises_when_cuda_unavailable_with_platform_aware_message(self, win_backend_no_cuda):
+        mod, _, _ = win_backend_no_cuda
+        backend = mod.DiffusersBackend()
+
+        with pytest.raises(RuntimeError, match="Windows and Linux"):
+            backend.load_model("fake-model-path")
+
 
 # ---------------------------------------------------------------------------
 # load_model: full-precision path (no quantize)
@@ -616,12 +623,12 @@ class TestMakeSkipCallback:
 
 
 # ---------------------------------------------------------------------------
-# get_backend() returns diffusers on win32
+# get_backend() returns diffusers on Windows and Linux
 # ---------------------------------------------------------------------------
 
 
-class TestGetBackendWin32:
-    """get_backend() returns the DiffusersBackend when platform is win32."""
+class TestGetBackendDiffusersPlatforms:
+    """get_backend() returns the diffusers backend on Windows and Linux."""
 
     def test_get_backend_returns_diffusers_on_win32(self, win_backend):
         mod, _, _ = win_backend
@@ -633,6 +640,22 @@ class TestGetBackendWin32:
         try:
             with patch.object(backends_mod, "sys") as mock_sys:
                 mock_sys.platform = "win32"
+                backend = backends_mod.get_backend()
+                assert backend.name == "diffusers"
+        finally:
+            backends_mod.BACKENDS.clear()
+            backends_mod.BACKENDS.update(saved)
+
+    def test_get_backend_returns_diffusers_on_linux(self, win_backend):
+        mod, _, _ = win_backend
+
+        import zvisiongenerator.backends as backends_mod
+
+        saved = dict(backends_mod.BACKENDS)
+        backends_mod.BACKENDS.clear()
+        try:
+            with patch.object(backends_mod, "sys") as mock_sys:
+                mock_sys.platform = "linux"
                 backend = backends_mod.get_backend()
                 assert backend.name == "diffusers"
         finally:

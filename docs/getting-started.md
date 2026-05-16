@@ -25,7 +25,7 @@ uv sync
 
 > **uv is required.** This package cannot be installed with pip — some dependencies require uv-specific resolution that pip does not support.
 
-> **Note:** Video generation requires ffmpeg. Windows and Linux video generation are CUDA-only and fail fast when PyTorch cannot see an NVIDIA CUDA device.
+> **Note:** Video generation requires ffmpeg. On Windows and Linux, image and video generation use diffusers/CUDA and fail fast when PyTorch cannot see an NVIDIA CUDA device.
 
 ## Quick Start
 

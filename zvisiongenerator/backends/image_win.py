@@ -1,4 +1,4 @@
-"""Windows/CUDA image backend using diffusers."""
+"""diffusers/CUDA image backend for Windows and Linux."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from diffusers import AutoPipelineForText2Image
 
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 
-# CUDA optimization hints for Windows/WDDM
+# CUDA allocation and kernel tuning hints for the diffusers image backend.
 os.environ.setdefault(
     "PYTORCH_CUDA_ALLOC_CONF",
     "expandable_segments:True,garbage_collection_threshold:0.8",
@@ -115,7 +115,7 @@ def _make_skip_callback(skip_signal):
 
 
 class DiffusersBackend:
-    """diffusers/CUDA backend for Windows — implements ImageBackend Protocol.
+    """diffusers/CUDA backend for Windows and Linux.
 
     Stateful: holds a lazy-initialized img2img pipeline in self._img2img_pipe.
     """
@@ -136,7 +136,7 @@ class DiffusersBackend:
     ) -> tuple[Any, "ImageModelInfo"]:
         self._img2img_pipe = None
         if not torch.cuda.is_available():
-            raise RuntimeError("CUDA is not available. The Windows backend requires an NVIDIA GPU with CUDA support.")
+            raise RuntimeError("CUDA is not available. The diffusers/CUDA image backend requires an NVIDIA GPU with CUDA support on Windows and Linux.")
         dtype_map = {
             "bfloat16": torch.bfloat16,
             "float16": torch.float16,

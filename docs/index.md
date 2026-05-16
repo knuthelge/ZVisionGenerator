@@ -5,7 +5,7 @@
 
 # Z-Vision Generator
 
-Local AI image and video generation — hassle-free and fun. No tangled node graphs, no cloud dependencies, just prompts and results. Runs on macOS (Apple Silicon / MLX), with NVIDIA CUDA video generation on Windows and Linux.
+Local AI image and video generation — hassle-free and fun. No tangled node graphs, no cloud dependencies, just prompts and results. Runs on macOS (Apple Silicon / MLX) and on Windows and Linux with NVIDIA CUDA through diffusers.
 
 Z-Vision Generator gives you a unified CLI for both image and video generation, with batch runs, prompt variables, LoRA support, upscaling, and more — all while abstracting away platform-specific details.
 
@@ -13,7 +13,7 @@ Z-Vision Generator gives you a unified CLI for both image and video generation, 
 
 - **Image generation** — text-to-image with Z-Image and FLUX.2 Klein (4B/9B) model families
 - **Video generation** — text-to-video and image-to-video with platform-specific LTX aliases, audio included by default
-- **Cross-platform** — automatic backend selection: MLX on macOS, diffusers/CUDA on Windows for images, and the shared diffusers/CUDA LTX backend on Windows and Linux for video
+- **Cross-platform** — automatic backend selection: MLX on macOS, diffusers/CUDA on Windows and Linux for images, and the shared diffusers/CUDA LTX backend on Windows and Linux for video
 - **Prompt system** — YAML prompt files with variables (`{red|blue|green}`), structured prompts, snippets, and batch runs
 - **Model store** — central `~/.ziv/` directory with bare-name resolution, aliases, local paths, and supported HuggingFace model references
 - **LoRA support** — single or stacked, configurable weights, bare-name resolution (image and video)
@@ -30,7 +30,7 @@ Z-Vision Generator gives you a unified CLI for both image and video generation, 
 |----------|------------------|------------------|
 | macOS (Apple Silicon) | ✅ Z-Image / FLUX models via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`) |
 | Windows (NVIDIA GPU) | ✅ Z-Image / FLUX models via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
-| Linux (NVIDIA GPU) | Not supported | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
+| Linux (NVIDIA GPU) | ✅ Z-Image / FLUX models via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
 
 ## Quick Links
 
