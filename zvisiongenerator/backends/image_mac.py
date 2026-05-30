@@ -51,7 +51,9 @@ def _upcast_model_weights(model, components):
     """Cast model component weights to float32."""
 
     def to_float32(p):
-        return p.astype(mx.float32) if isinstance(p, mx.array) else p
+        if isinstance(p, mx.array) and p.dtype in (mx.bfloat16, mx.float16):
+            return p.astype(mx.float32)
+        return p
 
     for name in components:
         component = getattr(model, name, None)
