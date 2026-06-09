@@ -22,7 +22,7 @@
     "tailwindcss": "^4.1.0",
     "typescript": "^5.9.3",
     "vite": "^7.1.11",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.6"
   },
   "engines": {
     "node": ">=22.0.0",
