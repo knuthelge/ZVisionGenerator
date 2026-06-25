@@ -1096,7 +1096,7 @@ ziv ui [options]       # Same as ziv-ui
 <tr>
 <td><code>-m</code>, <code>--model</code></td>
 <td><em>(required)</em></td>
-<td>Model name, path, or HuggingFace repo ID</td>
+<td>Model name, local path, alias, or supported HuggingFace repo ID</td>
 </tr>
 <tr>
 <td><code>-q</code>, <code>--quantize</code></td>
@@ -1227,6 +1227,13 @@ ziv ui [options]       # Same as ziv-ui
 </table>
 <p>Run <code>ziv-image --help</code> for the full list.</p>
 <h2 id="ziv-video-video-generation"><code>ziv-video</code> — Video Generation</h2>
+<p>Platform-aware aliases:</p>
+<ul>
+<li>macOS: <code>ltx-4</code>, <code>ltx-8</code></li>
+<li>Windows and Linux: <code>ltx-2.3</code></li>
+<li>The Windows/Linux alias resolves through <code>video_model_presets.ltx.diffusers.default_repo</code>, which defaults to <code>dg845/LTX-2.3-Diffusers</code> and can be overridden in <code>~/.ziv/config.yaml</code>.</li>
+<li><code>ltx-4</code> and <code>ltx-8</code> are the shipped macOS MLX Q4/Q8 aliases. <code>ltx-2.3</code> is the Windows/Linux diffusers alias and does not imply a packaged Q4/Q8 tier.</li>
+</ul>
 <table>
 <thead>
 <tr>
@@ -1239,7 +1246,7 @@ ziv ui [options]       # Same as ziv-ui
 <tr>
 <td><code>-m</code>, <code>--model</code></td>
 <td><em>(required)</em></td>
-<td>Model path or HuggingFace repo ID</td>
+<td>Model alias, local path, or supported/configured LTX HuggingFace repo ID</td>
 </tr>
 <tr>
 <td><code>--prompt</code></td>
@@ -1299,7 +1306,7 @@ ziv ui [options]       # Same as ziv-ui
 <tr>
 <td><code>--upscale</code></td>
 <td>disabled</td>
-<td>Upscale factor: <code>2</code> (two-stage pipeline, 2× spatial resolution)</td>
+<td>Upscale factor: <code>2</code> only. Fails explicitly when the active backend cannot provide the LTX latent upscaler.</td>
 </tr>
 <tr>
 <td><code>--audio</code> / <code>--no-audio</code></td>
@@ -1309,7 +1316,7 @@ ziv ui [options]       # Same as ziv-ui
 <tr>
 <td><code>--lora</code></td>
 <td><code>None</code></td>
-<td>Comma-separated LoRAs with optional weights: <code>name:0.8,name2:0.5</code></td>
+<td>Comma-separated LoRAs with optional weights: <code>name:0.8,name2:0.5</code>. Windows/Linux require diffusers-compatible LTX LoRA adapters.</td>
 </tr>
 <tr>
 <td><code>-r</code>, <code>--runs</code></td>
@@ -1328,6 +1335,12 @@ ziv ui [options]       # Same as ziv-ui
 </tr>
 </tbody>
 </table>
+<p>Operational notes:</p>
+<ul>
+<li>Video generation requires <code>ffmpeg</code> on every platform.</li>
+<li>Windows and Linux video generation are CUDA-only.</li>
+<li>Alias mismatches are reported directly, for example <code>ltx-4</code> on Windows or <code>ltx-2.3</code> on macOS.</li>
+</ul>
 <h2 id="ziv-model-model-checkpoint-conversion"><code>ziv-model model</code> — Checkpoint Conversion</h2>
 <table>
 <thead>

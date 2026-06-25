@@ -651,6 +651,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#common-platform-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Platform Errors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#related-guides" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -962,6 +973,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#common-platform-errors" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Platform Errors
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#related-guides" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -993,31 +1015,45 @@
 
 
 <h1 id="video-generation-guide">Video Generation Guide</h1>
-<p>Generate videos from text prompts or images using <code>ziv-video</code>. macOS (Apple Silicon) only.</p>
+<p>Generate videos from text prompts or images using <code>ziv-video</code>. macOS uses the MLX LTX backend, while Windows and Linux use the shared diffusers/CUDA LTX backend.</p>
 <h2 id="supported-models">Supported Models</h2>
 <table>
 <thead>
 <tr>
-<th>Model</th>
+<th>Platform</th>
+<th>Alias</th>
 <th>Backend</th>
-<th>Path / HF Repo ID</th>
-<th>Quantization</th>
+<th>Default Target</th>
 <th>I2V</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>LTX-2.3</td>
-<td>ltx-pipelines-mlx</td>
+<td>macOS</td>
+<td><code>ltx-4</code></td>
+<td>MLX (<code>ltx-pipelines-mlx</code>)</td>
 <td><code>dgrauet/ltx-2.3-mlx-q4</code></td>
-<td>Pre-quantized Q4</td>
 <td>✅</td>
 </tr>
 <tr>
-<td>LTX-2.3</td>
-<td>ltx-pipelines-mlx</td>
+<td>macOS</td>
+<td><code>ltx-8</code></td>
+<td>MLX (<code>ltx-pipelines-mlx</code>)</td>
 <td><code>dgrauet/ltx-2.3-mlx-q8</code></td>
-<td>Pre-quantized Q8</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Windows</td>
+<td><code>ltx-2.3</code></td>
+<td>diffusers/CUDA</td>
+<td><code>dg845/LTX-2.3-Diffusers</code> by default</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Linux</td>
+<td><code>ltx-2.3</code></td>
+<td>diffusers/CUDA</td>
+<td><code>dg845/LTX-2.3-Diffusers</code> by default</td>
 <td>✅</td>
 </tr>
 </tbody>
@@ -1039,21 +1075,30 @@
 <td><code>ltx-8</code></td>
 <td><code>dgrauet/ltx-2.3-mlx-q8</code></td>
 </tr>
+<tr>
+<td><code>ltx-2.3</code></td>
+<td><code>video_model_presets.ltx.diffusers.default_repo</code> on Windows and Linux</td>
+</tr>
 </tbody>
 </table>
+<p><code>ltx-4</code> and <code>ltx-8</code> are macOS-only aliases. They are the shipped MLX Q4/Q8 presets. <code>ltx-2.3</code> is a Windows/Linux-only alias for the configurable diffusers default and does not select a packaged Q4 or Q8 tier. The mismatch errors are intentional and point to the platform-appropriate alias.</p>
 <p>See <a href="../image/#model-aliases">Image Guide → Model Aliases</a> for the full alias list.</p>
 <h2 id="quick-start">Quick Start</h2>
-<pre><code class="language-bash"># Text-to-video with LTX
+<p>Use <code>MODEL</code> below as follows: <code>ltx-4</code> or <code>ltx-8</code> on macOS, <code>ltx-2.3</code> on Windows and Linux.</p>
+<pre><code class="language-bash"># Text-to-video with LTX on macOS
 ziv-video -m ltx-4 --prompt &quot;A cat walking through a garden&quot;
 
-# Image-to-video with LTX
-ziv-video -m ltx-4 --image photo.jpg --prompt &quot;Camera slowly zooms in&quot;
+# Text-to-video with LTX on Windows or Linux
+ziv-video -m ltx-2.3 --prompt &quot;A cat walking through a garden&quot;
 
-# Batch from prompts file
-ziv-video -m ltx-4 -p prompts.yaml -r 3
+# Image-to-video with your platform alias
+ziv-video -m MODEL --image photo.jpg --prompt &quot;Camera slowly zooms in&quot;
+
+# Batch from prompts file with your platform alias
+ziv-video -m MODEL -p prompts.yaml -r 3
 
 # Square aspect, small size
-ziv-video -m ltx-4 --ratio 1:1 --size s --prompt &quot;Abstract art&quot;
+ziv-video -m MODEL --ratio 1:1 --size s --prompt &quot;Abstract art&quot;
 </code></pre>
 <h2 id="video-upscale-audio">Video Upscale &amp; Audio</h2>
 <pre><code class="language-bash"># Generate upscaled video (2x resolution)
@@ -1071,20 +1116,19 @@ ziv-video -m MODEL --no-audio --prompt &quot;...&quot;
 # Upscale + no audio
 ziv-video -m MODEL --upscale 2 --no-audio --prompt &quot;...&quot;
 </code></pre>
-<p>Both Q4 and full models include all required weights for upscaling — no extra downloads needed. The upscaler uses a distilled-only two-stage pipeline (8 denoising steps at half resolution, then 3 refinement steps at full resolution).</p>
-<blockquote>
-<p><strong>Memory:</strong> 32 GB unified memory is sufficient for upscaled generation with Q4 model (~13 GB peak).</p>
-</blockquote>
+<p><code>--upscale 2</code> is the only supported video upscale mode. On macOS it uses the existing MLX distilled two-stage path. On Windows and Linux it uses the diffusers latent upscaler when that API is present in the installed diffusers build. If the selected runtime or model layout does not expose the latent upscaler, <code>ziv-video</code> fails explicitly instead of silently ignoring the request.</p>
+<p>Windows and Linux video generation require CUDA. CPU fallback is not available for the diffusers video backend.</p>
 <h2 id="video-lora">Video LoRA</h2>
 <pre><code class="language-bash"># Single LoRA
-ziv-video -m ltx-4 --prompt &quot;A sunset&quot; --lora /path/to/style.safetensors
+ziv-video -m MODEL --prompt &quot;A sunset&quot; --lora /path/to/style.safetensors
 
 # LoRA with custom weight
-ziv-video -m ltx-4 --prompt &quot;A sunset&quot; --lora /path/to/style.safetensors:0.8
+ziv-video -m MODEL --prompt &quot;A sunset&quot; --lora /path/to/style.safetensors:0.8
 
 # Multiple LoRAs
-ziv-video -m ltx-4 --prompt &quot;A dance&quot; --lora style.safetensors:0.5,motion.safetensors:0.8
+ziv-video -m MODEL --prompt &quot;A dance&quot; --lora style.safetensors:0.5,motion.safetensors:0.8
 </code></pre>
+<p>macOS keeps the existing MLX LoRA behavior. Windows and Linux accept LoRAs only when the selected asset and installed diffusers runtime support the LTX adapter APIs in a diffusers-compatible format. Unsupported adapter APIs, unsupported file formats, and unsupported explicit scales fail before generation with a descriptive error.</p>
 <h2 id="video-sizes">Video Sizes</h2>
 <p>Default ratio is <code>16:9</code>. Dimensions vary by <code>--ratio</code>.</p>
 <table>
@@ -1129,13 +1173,24 @@ ziv-video -m ltx-4 --prompt &quot;A dance&quot; --lora style.safetensors:0.5,mot
 <ul>
 <li><strong>Resolution</strong>: width and height must be divisible by 32 (64 when using <code>--upscale</code>)</li>
 <li><strong>Frames</strong>: must follow 8k+1 pattern (9, 17, 25, 33, 41, 49, ..., 97, 121)</li>
-<li><strong>32GB safe</strong>: Q4 pre-quantized, 704×448, ≤49 frames with <code>--low-memory</code></li>
+<li><strong>macOS MLX Q4 baseline</strong>: <code>ltx-4</code>, 704×448, ≤49 frames with <code>--low-memory</code></li>
 </ul>
+<p>Windows and Linux use the configurable diffusers repository behind <code>ltx-2.3</code> instead of shipped Q4/Q8 aliases.</p>
 <h2 id="model-detection">Model Detection</h2>
-<p><code>ziv-video</code> auto-detects the model family from the path:</p>
+<p><code>ziv-video</code> auto-detects the model family from supported model values:</p>
 <ul>
-<li><strong>HF repo IDs</strong> — prefix matching: <code>dgrauet/ltx*</code> → LTX</li>
-<li><strong>Local paths</strong> — substring matching: paths containing "ltx" → LTX</li>
+<li><strong>Aliases</strong> — <code>ltx-4</code> and <code>ltx-8</code> on macOS, <code>ltx-2.3</code> on Windows and Linux</li>
+<li><strong>Supported/configured repo IDs</strong> — known LTX prefixes such as <code>dgrauet/ltx*</code> and <code>Lightricks/LTX-Video*</code>, plus the configured <code>video_model_presets.ltx.diffusers.default_repo</code></li>
+<li><strong>Local paths</strong> — local paths containing <code>ltx</code> are treated as LTX candidates, including Windows-style path strings on any host</li>
+</ul>
+<p>For Windows/Linux direct repo swaps, point <code>ltx-2.3</code> at a compatible diffusers repository in <code>~/.ziv/config.yaml</code>. Arbitrary unconfigured HuggingFace repositories are not accepted solely because their names contain <code>ltx</code>.</p>
+<p>Runtime <code>--lora</code> values must be local LoRA files or bare LoRA names that resolve from <code>~/.ziv/loras/</code>. HuggingFace-shaped LoRA references such as <code>org/lora:0.8</code> are import inputs for <code>ziv-model lora --hf</code>, not direct generation inputs.</p>
+<h2 id="common-platform-errors">Common Platform Errors</h2>
+<ul>
+<li><code>Alias 'ltx-4' is macOS-only...</code> or <code>Alias 'ltx-8' is macOS-only...</code>: use <code>ltx-2.3</code> on Windows or Linux.</li>
+<li><code>Alias 'ltx-2.3' is available on Windows and Linux only...</code>: use <code>ltx-4</code> or <code>ltx-8</code> on macOS.</li>
+<li><code>CUDA is not available...</code>: the diffusers video backend requires an NVIDIA CUDA device on Windows and Linux.</li>
+<li><code>Could not detect video model family...</code>: use the platform alias (<code>ltx-4</code>/<code>ltx-8</code> on macOS or <code>ltx-2.3</code> on Windows/Linux), a known/configured LTX repo ID, or a local path containing <code>ltx</code>.</li>
 </ul>
 <h2 id="related-guides">Related Guides</h2>
 <ul>

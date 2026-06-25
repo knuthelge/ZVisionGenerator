@@ -507,6 +507,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#video-model-defaults-and-overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Video Model Defaults And Overrides
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#model-lora-management" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -948,6 +959,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#video-model-defaults-and-overrides" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Video Model Defaults And Overrides
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#model-lora-management" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1040,7 +1062,8 @@
 <li><a href="https://docs.astral.sh/uv/">uv</a> package manager (<strong>required</strong> — pip is not supported)</li>
 <li><strong>macOS:</strong> Apple Silicon (M1+) — mflux requires MLX</li>
 <li><strong>Windows:</strong> NVIDIA GPU with CUDA support</li>
-<li><strong>Video:</strong> ffmpeg (auto-offered on first run via Homebrew)</li>
+<li><strong>Linux:</strong> NVIDIA GPU with CUDA support</li>
+<li><strong>Video:</strong> ffmpeg</li>
 </ul>
 <h2 id="installation">Installation</h2>
 <pre><code class="language-bash"># Install globally — provides `ziv`, `ziv-ui`, `ziv-image`, `ziv-video`, and `ziv-model`
@@ -1055,7 +1078,7 @@ uv sync
 </code></pre>
 <blockquote>
 <p><strong>uv is required.</strong> This package cannot be installed with pip — some dependencies require uv-specific resolution that pip does not support.</p>
-<p><strong>Note:</strong> Video generation requires ffmpeg. If missing, <code>ziv-video</code> will offer to install it via Homebrew on first run.</p>
+<p><strong>Note:</strong> Video generation requires ffmpeg. On Windows and Linux, image and video generation use diffusers/CUDA and fail fast when PyTorch cannot see an NVIDIA CUDA device.</p>
 </blockquote>
 <h2 id="quick-start">Quick Start</h2>
 <h3 id="image-generation">Image Generation</h3>
@@ -1069,15 +1092,32 @@ ziv-image -m Tongyi-MAI/Z-Image-Turbo --prompt &quot;a cat&quot;
 ziv-image -m my-model -p prompts.yaml -r 3
 </code></pre>
 <h3 id="video-generation">Video Generation</h3>
-<pre><code class="language-bash"># Text-to-video with LTX
-ziv-video -m dgrauet/ltx-2.3-mlx-q4 --prompt &quot;A cat walking through a garden&quot;
+<p>Use <code>MODEL</code> below as follows: <code>ltx-4</code> or <code>ltx-8</code> on macOS, <code>ltx-2.3</code> on Windows and Linux.</p>
+<pre><code class="language-bash"># Text-to-video with LTX on macOS
+ziv-video -m ltx-4 --prompt &quot;A cat walking through a garden&quot;
 
-# Image-to-video with LTX
-ziv-video -m dgrauet/ltx-2.3-mlx-q4 --image photo.jpg --prompt &quot;Camera slowly zooms in&quot;
+# Text-to-video with LTX on Windows or Linux
+ziv-video -m ltx-2.3 --prompt &quot;A cat walking through a garden&quot;
 
-# Batch from prompts file
-ziv-video -m dgrauet/ltx-2.3-mlx-q4 -p prompts.yaml -r 3
+# Image-to-video with your platform alias
+ziv-video -m MODEL --image photo.jpg --prompt &quot;Camera slowly zooms in&quot;
+
+# Batch from prompts file with your platform alias
+ziv-video -m MODEL -p prompts.yaml -r 3
 </code></pre>
+<h3 id="video-model-defaults-and-overrides">Video Model Defaults And Overrides</h3>
+<ul>
+<li>macOS exposes <code>ltx-4</code> and <code>ltx-8</code>, which resolve to the MLX LTX repositories and are the shipped Q4/Q8 presets.</li>
+<li>Windows and Linux expose <code>ltx-2.3</code>, which resolves to the configurable diffusers repository in <code>video_model_presets.ltx.diffusers.default_repo</code>.</li>
+<li>The packaged default is <code>dg845/LTX-2.3-Diffusers</code>, a diffusers-converted repository with the layout required by the Windows/Linux diffusers video backend. It is a configurable diffusers default, not a shipped Q4/Q8 alias.</li>
+</ul>
+<p>To override the Windows/Linux default video repository, add a user config file at <code>~/.ziv/config.yaml</code>:</p>
+<pre><code class="language-yaml">video_model_presets:
+  ltx:
+    diffusers:
+      default_repo: your-org/your-ltx-diffusers-repo
+</code></pre>
+<p>After the override, <code>ziv-video -m ltx-2.3 ...</code> and the Web UI both resolve to the new repository.</p>
 <h3 id="model-lora-management">Model &amp; LoRA Management</h3>
 <pre><code class="language-bash"># Convert a Z-Image checkpoint
 ziv-model model -i checkpoint.safetensors --name my-model
@@ -1120,6 +1160,7 @@ uv run ziv ui --no-browser
 <blockquote>
 <p><strong>Note:</strong> A local model directory at <code>~/.ziv/models/&lt;name&gt;/</code> takes priority over an alias with the same name.</p>
 </blockquote>
+<p>LoRA generation inputs are local paths or bare names from <code>~/.ziv/loras/</code>. To use a HuggingFace LoRA, import it first with <code>ziv-model lora --hf ...</code>, then reference the local LoRA name or path during generation.</p>
 <h3 id="ziv_data_dir-override"><code>ZIV_DATA_DIR</code> Override</h3>
 <p>Set the <code>ZIV_DATA_DIR</code> environment variable to use a custom location instead of <code>~/.ziv/</code>:</p>
 <pre><code class="language-bash">export ZIV_DATA_DIR=/mnt/fast-ssd/ziv

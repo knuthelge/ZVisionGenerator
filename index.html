@@ -858,20 +858,20 @@
 </p>
 <p>&nbsp;</p>
 <h1 id="z-vision-generator">Z-Vision Generator</h1>
-<p>Local AI image and video generation — hassle-free and fun. No tangled node graphs, no cloud dependencies, just prompts and results. Runs on macOS (Apple Silicon / MLX) and Windows (NVIDIA / CUDA), tuned for an M-series Mac with 32 GB unified memory and an NVIDIA RTX 3080.</p>
+<p>Local AI image and video generation — hassle-free and fun. No tangled node graphs, no cloud dependencies, just prompts and results. Runs on macOS (Apple Silicon / MLX) and on Windows and Linux with NVIDIA CUDA through diffusers.</p>
 <p>Z-Vision Generator gives you a unified CLI for both image and video generation, with batch runs, prompt variables, LoRA support, upscaling, and more — all while abstracting away platform-specific details.</p>
 <h2 id="features">Features</h2>
 <ul>
 <li><strong>Image generation</strong> — text-to-image with Z-Image and FLUX.2 Klein (4B/9B) model families</li>
-<li><strong>Video generation</strong> — text-to-video and image-to-video with LTX-2.3 (macOS), audio included by default</li>
-<li><strong>Cross-platform</strong> — automatic backend selection: MLX on macOS, CUDA on Windows</li>
+<li><strong>Video generation</strong> — text-to-video and image-to-video with platform-specific LTX aliases, audio included by default</li>
+<li><strong>Cross-platform</strong> — automatic backend selection: MLX on macOS, diffusers/CUDA on Windows and Linux for images, and the shared diffusers/CUDA LTX backend on Windows and Linux for video</li>
 <li><strong>Prompt system</strong> — YAML prompt files with variables (<code>{red|blue|green}</code>), structured prompts, snippets, and batch runs</li>
-<li><strong>Model store</strong> — central <code>~/.ziv/</code> directory with bare-name resolution and HuggingFace fallback</li>
+<li><strong>Model store</strong> — central <code>~/.ziv/</code> directory with bare-name resolution, aliases, local paths, and supported HuggingFace model references</li>
 <li><strong>LoRA support</strong> — single or stacked, configurable weights, bare-name resolution (image and video)</li>
 <li><strong>Image upscale</strong> — generate small → Lanczos → img2img refine → CAS sharpen</li>
-<li><strong>Video upscale</strong> — distilled-only two-stage 2× spatial upscaling</li>
+<li><strong>Video upscale</strong> — macOS MLX uses distilled two-stage 2× spatial upscaling; Windows/Linux diffusers uses latent upscaling when the model supports it and fails explicitly when it does not</li>
 <li><strong>Reference images</strong> — img2img steering from any starting image</li>
-<li><strong>Quantization</strong> — 4-bit and 8-bit on both platforms</li>
+<li><strong>Model variants</strong> — image quantization across supported image backends, plus macOS MLX video Q4/Q8 aliases</li>
 <li><strong>Post-processing</strong> — contrast, saturation, and CAS sharpening (image only)</li>
 <li><strong>Interactive controls</strong> — skip, quit, pause, and repeat during batch runs (image only)</li>
 </ul>
@@ -888,12 +888,17 @@
 <tr>
 <td>macOS (Apple Silicon)</td>
 <td>✅ Z-Image / FLUX models via mflux/MLX</td>
-<td>✅ LTX-2.3 via MLX</td>
+<td>✅ LTX via MLX aliases (<code>ltx-4</code>, <code>ltx-8</code>)</td>
 </tr>
 <tr>
 <td>Windows (NVIDIA GPU)</td>
 <td>✅ Z-Image / FLUX models via diffusers/CUDA</td>
-<td>❌ Not supported</td>
+<td>✅ LTX via diffusers/CUDA alias (<code>ltx-2.3</code>)</td>
+</tr>
+<tr>
+<td>Linux (NVIDIA GPU)</td>
+<td>✅ Z-Image / FLUX models via diffusers/CUDA</td>
+<td>✅ LTX via diffusers/CUDA alias (<code>ltx-2.3</code>)</td>
 </tr>
 </tbody>
 </table>

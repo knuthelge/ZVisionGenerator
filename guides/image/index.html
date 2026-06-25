@@ -1139,7 +1139,8 @@
 
 
 <h1 id="image-generation-guide">Image Generation Guide</h1>
-<p>Generate images from text prompts using <code>ziv-image</code>. Supports Z-Image / FLUX models on macOS (Apple Silicon via mflux/MLX) and Windows (NVIDIA GPU via diffusers/CUDA).</p>
+<p>Generate images from text prompts using <code>ziv-image</code>. Supports Z-Image / FLUX models on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux with NVIDIA GPUs via diffusers/CUDA.</p>
+<p>On Windows and Linux, image generation requires CUDA to be visible to PyTorch. CPU fallback is not available for the diffusers image backend.</p>
 <h2 id="model-aliases">Model Aliases</h2>
 <p>Built-in shorthands for common image models.</p>
 <table>
@@ -1243,7 +1244,7 @@ ziv-image -m klein4b --prompt &quot;a portrait&quot;
 <pre><code class="language-bash">ziv-image -m my-model --prompt &quot;A woman in a red dress&quot; --image photo.jpg --image-strength 0.4
 ziv-image -m my-model --prompt &quot;Cyberpunk cityscape&quot; --image sketch.png --image-strength 0.8
 </code></pre>
-<p>The reference image is automatically resized to match target dimensions. Works on both macOS and Windows.</p>
+<p>The reference image is automatically resized to match target dimensions. Works on macOS, Windows, and Linux.</p>
 <h2 id="lora-support">LoRA Support</h2>
 <p>Both platforms support LoRA weights. Place <code>.safetensors</code> files in <code>~/.ziv/loras/</code>:</p>
 <pre><code class="language-bash"># Single LoRA at default weight (1.0)
@@ -1331,7 +1332,7 @@ ziv-image -m my-model --prompt &quot;a landscape&quot; --upscale 2 --no-upscale-
 <td>mflux quantization</td>
 </tr>
 <tr>
-<td>Windows</td>
+<td>Windows / Linux</td>
 <td>4-bit (NF4), 8-bit (INT8)</td>
 <td>bitsandbytes</td>
 </tr>

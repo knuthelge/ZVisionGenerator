@@ -855,6 +855,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#test-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1016,6 +1027,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#test-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test Strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1057,7 +1079,7 @@ make install
 <tbody>
 <tr>
 <td><code>make install</code></td>
-<td>Install Python dependencies with <code>uv sync</code> and frontend dependencies with <code>npm ci --prefix frontend</code></td>
+<td>Install Python dependencies with <code>uv sync</code> and frontend dependencies with <code>pnpm --dir frontend install --frozen-lockfile</code></td>
 </tr>
 <tr>
 <td><code>make lock</code></td>
@@ -1155,8 +1177,9 @@ make install
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/
 │   ├── image_mac.py               macOS image backend (mflux/MLX)
-│   ├── image_win.py               Windows image backend (diffusers/CUDA)
-│   └── video_mac.py               macOS video backend (LTX via MLX)
+│   ├── image_win.py               Windows/Linux image backend (diffusers/CUDA)
+│   ├── video_mac.py               macOS video backend (LTX via MLX)
+│   └── video_diffusers.py         Windows/Linux video backend (LTX via diffusers/CUDA)
 ├── converters/
 │   ├── convert_checkpoint.py      Safetensors checkpoint → diffusers converter (ziv-model model)
 │   ├── list_assets.py             List installed models, video models, and LoRAs (ziv-model list)
@@ -1205,7 +1228,11 @@ prompts.yaml                       Default prompt definitions
 </code></pre>
 <h2 id="architecture-overview">Architecture Overview</h2>
 <h3 id="backend-protocol">Backend Protocol</h3>
-<p>Platform backends live in <code>backends/image_mac.py</code> (mflux/MLX) and <code>backends/image_win.py</code> (diffusers/CUDA). Image backends implement the <code>ImageBackend</code> Protocol from <code>core/image_backend.py</code>; video backends implement the <code>VideoBackend</code> Protocol from <code>core/video_backend.py</code>. Platform selection uses <code>sys.platform</code> in <code>backends/__init__.py</code> — never check platform elsewhere.</p>
+<p>Platform backends live in <code>backends/image_mac.py</code> (mflux/MLX), <code>backends/image_win.py</code> (Windows/Linux diffusers image), <code>backends/video_mac.py</code> (MLX video), and <code>backends/video_diffusers.py</code> (Windows/Linux diffusers video). Image backends implement the <code>ImageBackend</code> Protocol from <code>core/image_backend.py</code>; video backends implement the <code>VideoBackend</code> Protocol from <code>core/video_backend.py</code>. Platform selection stays centralized in <code>backends/__init__.py</code> — never branch on <code>sys.platform</code> elsewhere.</p>
+<p>The <code>image_win.py</code> module is the shared diffusers/CUDA image backend for both Windows and Linux. The filename is historical; platform selection still happens only in <code>backends/__init__.py</code>.</p>
+<p>Windows and Linux video resolution is config-driven through <code>video_model_presets.ltx.diffusers.default_repo</code> and the <code>ltx-2.3</code> alias. The backend assumes a diffusers-compatible repository layout and keeps the configured default overrideable from user config. macOS keeps the MLX-only <code>ltx-4</code> and <code>ltx-8</code> aliases.</p>
+<p>The Windows/Linux video backend is CUDA-only. Validation happens lazily during backend load so importing the package or running non-video code paths does not require torch, diffusers, or a GPU.</p>
+<p>The Windows/Linux diffusers image backend is also CUDA-only. Validation happens lazily during image backend load so importing the package or running non-image code paths does not require torch, diffusers, or a GPU.</p>
 <h3 id="workflow-stages">Workflow Stages</h3>
 <p>Image stage functions in <code>workflows/image_stages.py</code> have the uniform signature <code>(ImageGenerationRequest, ImageWorkingArtifacts) -&gt; StageOutcome</code>. Video stage functions in <code>workflows/video_stages.py</code> have the signature <code>(VideoGenerationRequest, VideoWorkingArtifacts) -&gt; StageOutcome</code>. Stages are composed dynamically by <code>build_workflow()</code> and <code>build_video_workflow()</code>.</p>
 <h3 id="data-types">Data Types</h3>
@@ -1214,6 +1241,8 @@ prompts.yaml                       Default prompt definitions
 <p>CLI flags &gt; model preset variant &gt; model preset family &gt; global defaults. Config is a plain <code>dict</code> loaded from YAML, not a dataclass.</p>
 <h3 id="error-conventions">Error Conventions</h3>
 <p>Raise <code>ValueError</code>, <code>FileNotFoundError</code>, <code>RuntimeError</code> directly with descriptive f-string messages. Use <code>warnings.warn()</code> with <code>stacklevel=2</code> for non-fatal conditions. No custom exception classes except private sentinels.</p>
+<h3 id="test-strategy">Test Strategy</h3>
+<p>Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.</p>
 
 
 
