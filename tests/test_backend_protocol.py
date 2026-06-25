@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from unittest.mock import MagicMock
 
 import pytest
@@ -154,3 +155,58 @@ class TestLoadModelGuard:
                 seed=42,
                 guidance=0.5,
             )
+
+
+class _FakeModelComponent:
+    def __init__(self, params):
+        self._params = params
+        self.updated = None
+
+    def parameters(self):
+        return self._params
+
+    def update(self, params):
+        self.updated = params
+
+
+def _flatten_params(params):
+    for value in params.values():
+        if isinstance(value, Mapping):
+            yield from _flatten_params(value)
+        else:
+            yield value
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="Selective MLX upcast only runs on macOS")
+class TestSelectiveMacWeightUpcast:
+    def test_upcast_model_weights_preserves_uint32_quantized_weights(self):
+        mx = pytest.importorskip("mlx.core")
+
+        from zvisiongenerator.backends.image_mac import _upcast_model_weights
+
+        uint_weights = mx.array([1, 2, 3], dtype=mx.uint32)
+        fp16_weights = mx.array([1.5, 2.5], dtype=mx.float16)
+        bf16_weights = mx.array([3.0, 4.0], dtype=mx.bfloat16)
+        float32_weights = mx.array([5.0], dtype=mx.float32)
+        component = _FakeModelComponent(
+            {
+                "quantized": uint_weights,
+                "nested": {
+                    "fp16": fp16_weights,
+                    "bf16": bf16_weights,
+                    "fp32": float32_weights,
+                },
+            }
+        )
+        model = MagicMock(transformer=component)
+
+        _upcast_model_weights(model, ["transformer"])
+
+        assert component.updated is not None
+        assert component.updated["quantized"] is uint_weights
+        assert component.updated["quantized"].dtype == mx.uint32
+        assert component.updated["nested"]["fp16"].dtype == mx.float32
+        assert component.updated["nested"]["bf16"].dtype == mx.float32
+        assert component.updated["nested"]["fp32"] is float32_weights
+        assert all(value.dtype != mx.float16 for value in _flatten_params(component.updated))
+        assert all(value.dtype != mx.bfloat16 for value in _flatten_params(component.updated))
