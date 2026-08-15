@@ -361,6 +361,8 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         get_backend_name(),
     )
     _prompt_source, prompt, negative_prompt, prompts_data = _resolve_prompt_submission(form)
+    steps_explicit = args.steps is not None
+    guidance_explicit = args.guidance is not None
     args.steps = defaults["steps"]
     args.guidance = defaults["guidance"]
     args.scheduler = defaults["scheduler"]
@@ -393,6 +395,10 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         steps=args.steps,
         guidance=args.guidance,
         scheduler=args.scheduler,
+        steps_explicit=steps_explicit,
+        guidance_explicit=guidance_explicit,
+        first_sigma=None,
+        json_prompt=False,
         upscale_factor=args.upscale,
         upscale_denoise=args.upscale_denoise,
         upscale_steps=args.upscale_steps,

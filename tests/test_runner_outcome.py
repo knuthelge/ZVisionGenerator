@@ -6,6 +6,7 @@ import warnings
 from unittest.mock import MagicMock, patch
 
 from conftest import _make_args
+from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.image_runner import run_batch
@@ -89,6 +90,63 @@ class TestRunnerOutcome:
 
         run_batch(backend, model, _prompts(), _CONFIG, _make_args(), model_info=_MODEL_INFO)
         wf.stages[0].assert_called_once()
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_request_json_prompt_defaults_false(self, mock_build_wf):
+        wf = _mock_workflow(StageOutcome.success)
+        mock_build_wf.return_value = wf
+
+        backend = MagicMock()
+        model = MagicMock(spec=[])
+
+        run_batch(backend, model, _prompts(), _CONFIG, _make_args(), model_info=_MODEL_INFO)
+
+        request = wf.stages[0].call_args[0][0]
+        assert request.json_prompt is False
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_request_threads_json_prompt_from_args(self, mock_build_wf):
+        wf = _mock_workflow(StageOutcome.success)
+        mock_build_wf.return_value = wf
+
+        backend = MagicMock()
+        model = MagicMock(spec=[])
+
+        run_batch(backend, model, _prompts(), _CONFIG, _make_args(json_prompt_enabled=True), model_info=_MODEL_INFO)
+
+        request = wf.stages[0].call_args[0][0]
+        assert request.json_prompt is True
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_request_threads_first_sigma_from_args(self, mock_build_wf):
+        wf = _mock_workflow(StageOutcome.success)
+        mock_build_wf.return_value = wf
+
+        backend = MagicMock()
+        model = MagicMock(spec=[])
+
+        run_batch(backend, model, _prompts(), _CONFIG, _make_args(first_sigma=1.005), model_info=_MODEL_INFO)
+
+        request = wf.stages[0].call_args[0][0]
+        assert request.first_sigma == 1.005
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_request_first_sigma_defaults_to_none_when_args_omit_it(self, mock_build_wf):
+        wf = _mock_workflow(StageOutcome.success)
+        mock_build_wf.return_value = wf
+
+        backend = MagicMock()
+        model = MagicMock(spec=[])
+
+        run_batch(backend, model, _prompts(), _CONFIG, _make_args(), model_info=_MODEL_INFO)
+
+        request = wf.stages[0].call_args[0][0]
+        assert request.first_sigma is None
+
+    def test_image_generation_request_first_sigma_default_is_none(self):
+        request = ImageGenerationRequest(backend=MagicMock(), model=MagicMock(), prompt="prompt")
+
+        assert request.first_sigma is None
 
     @patch("zvisiongenerator.image_runner.build_workflow")
     def test_skipped_warns_and_continues(self, mock_build_wf):

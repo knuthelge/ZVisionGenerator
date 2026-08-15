@@ -6,9 +6,6 @@ resolution-markers = [
     "sys_platform == 'darwin'",
 ]
 
-[options]
-prerelease-mode = "allow"
-
 [[package]]
 name = "accelerate"
 version = "1.13.0"
@@ -654,7 +651,7 @@ wheels = [
 
 [[package]]
 name = "mflux"
-version = "0.17.5"
+version = "0.18.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "filelock", marker = "sys_platform == 'darwin'" },
@@ -681,9 +678,9 @@ dependencies = [
     { name = "twine", marker = "sys_platform == 'darwin'" },
     { name = "urllib3", marker = "sys_platform == 'darwin'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d3/ee/20bcf2a71c24882f79f861321ab82d61b3ad1943f702d7b3763683069016/mflux-0.17.5.tar.gz", hash = "sha256:f5e23b1d5a1ed8de13daff069d3fa034406839bdd4109b5714f06d2e7e597a3a", size = 780106, upload-time = "2026-04-10T09:09:54.523Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2a/ee/f5b15139538f2c20a84660a9ff02860acef2ecdb56b266dc339680d566c9/mflux-0.18.1.tar.gz", hash = "sha256:477998cf4c012be9a2cc56125e687617f546044fa0e252b749a83c29fd1a775f", size = 842203, upload-time = "2026-08-07T16:12:32.988Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/a7/2d2d2e9e800be079b675ca75b980d99c2254223a73efe25026015e6cc900/mflux-0.17.5-py3-none-any.whl", hash = "sha256:bb4c61242e0a47bfc558ac33ecc79e7022ad8d27fee43e85332131f0a9ec011e", size = 1038092, upload-time = "2026-04-10T09:09:53.225Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/bd/658cb7a3c71b8da0ddbe3bf28f1ea5317b277b5ab41c91d123d273380a96/mflux-0.18.1-py3-none-any.whl", hash = "sha256:1b98bab53f9da0cb4d1e8deaa819342ba2f8aa72a3965f47a4fa769c72ccf784", size = 1139866, upload-time = "2026-08-07T16:12:31.537Z" },
 ]
 
 [[package]]
@@ -1834,7 +1831,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.116.0" },
     { name = "hf-transfer", specifier = ">=0.1.9" },
     { name = "huggingface-hub", specifier = ">=0.30.0" },
-    { name = "mflux", marker = "sys_platform == 'darwin'", specifier = ">=0.17.4" },
+    { name = "mflux", marker = "sys_platform == 'darwin'", specifier = ">=0.18.0" },
     { name = "mlx", marker = "sys_platform == 'darwin'", specifier = ">=0.31.0" },
     { name = "mlx-lm", marker = "sys_platform == 'darwin'", specifier = ">=0.31.0" },
     { name = "numpy", specifier = ">=2.0.0" },

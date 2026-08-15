@@ -166,6 +166,28 @@ class TestE2EWorkflow:
         assert call_kwargs["height"] == 64
         assert call_kwargs["steps"] == 10
 
+    def test_text_to_image_stage_forwards_first_sigma_to_backend(self):
+        mock_backend = _make_mock_backend()
+        request = ImageGenerationRequest(
+            backend=mock_backend,
+            model="fake",
+            model_family="ideogram4",
+            supports_negative_prompt=False,
+            prompt="a cat",
+            seed=42,
+            width=64,
+            height=64,
+            steps=10,
+            guidance=3.5,
+            first_sigma=1.005,
+        )
+        artifacts = ImageWorkingArtifacts(resolved_prompt="a cat")
+
+        outcome = text_to_image_stage(request, artifacts)
+
+        assert outcome is StageOutcome.success
+        assert mock_backend.text_to_image.call_args.kwargs["first_sigma"] == 1.005
+
     def test_default_workflow_saves_image(self, tmp_path):
         mock_backend = _make_mock_backend()
         workflow = build_workflow(_default_args())

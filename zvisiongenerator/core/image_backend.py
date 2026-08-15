@@ -49,8 +49,20 @@ class ImageBackend(Protocol):
         negative_prompt: str | None = None,
         skip_signal: Any | None = None,
         step_callback: Any | None = None,
+        steps_explicit: bool = False,
+        guidance_explicit: bool = False,
+        first_sigma: float | None = None,
     ) -> Image.Image | None:
-        """Generate image from text. Returns None if skipped."""
+        """Generate image from text. Returns None if skipped.
+
+        steps_explicit/guidance_explicit mark whether the user explicitly set
+        steps/guidance (rather than a resolved config default). They are consumed
+        only by families with tuned default schedules (e.g. ideogram4); other
+        families ignore them.
+
+        first_sigma overrides Ideogram 4's first-step sigma for this run; other
+        families ignore it.
+        """
         ...
 
     def image_to_image(

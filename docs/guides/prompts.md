@@ -56,6 +56,8 @@ Use `{option1|option2|option3}` syntax for random selection each run:
 
 Variables are resolved independently each run, so repeated runs (`-r 3`) produce different combinations. The `{a|b|c}` random choice syntax works within structured prompt values too.
 
+Pass a JSON object as the value of `--json-prompt` (mutually exclusive with `--prompt`) to provide a literal structured JSON caption inline. The value opts out of `{a|b|c}` expansion and is sent verbatim (used for Ideogram 4). It must be a valid JSON object, or generation is rejected before the model loads.
+
 ## Structured Prompts
 
 The `prompt` (and `negative`) field accepts dicts, lists, and nested combinations — not just strings. Structured values are flattened into a single prompt string with `". "` as separator. Dict keys become prefixes; list items are joined.

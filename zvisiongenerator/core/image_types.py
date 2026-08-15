@@ -30,6 +30,7 @@ class ImageGenerationRequest:
 
     # Generation params
     negative_prompt: str | None = None
+    json_prompt: bool = False
     ratio: str | None = None
     size: str | None = None
     width: int = 832
@@ -38,6 +39,9 @@ class ImageGenerationRequest:
     steps: int = 10
     guidance: float = 0.5
     scheduler: str | None = None
+    steps_explicit: bool = False
+    guidance_explicit: bool = False
+    first_sigma: float | None = None
     skip_signal: Any | None = None
     step_callback: Callable[[dict[str, Any]], None] | None = None
 
