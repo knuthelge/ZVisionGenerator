@@ -35,6 +35,8 @@ ziv-model model -i checkpoint.safetensors --name my-model --copy
 | `--base-model` | `Tongyi-MAI/Z-Image-Turbo` | Base HF repo (only for zimage type) |
 | `--copy` | off | Copy files instead of symlinking |
 
+> **Ideogram 4** is used via the `ideo` alias or a local FP8 model directory and is distributed ready-to-use. It has no checkpoint-convert path, so it is not a `--model-type` option.
+
 ## Importing LoRAs (`lora` subcommand)
 
 Import LoRA `.safetensors` files into `~/.ziv/loras/` from local paths or HuggingFace.

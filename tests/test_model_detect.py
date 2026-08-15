@@ -18,6 +18,13 @@ class TestDetectModelType:
         assert info.is_distilled is False
         assert info.size is None
 
+    def test_ideogram4_pipeline(self, tmp_path):
+        (tmp_path / "model_index.json").write_text(json.dumps({"_class_name": "Ideogram4Pipeline"}))
+        info = detect_image_model(str(tmp_path))
+        assert info.family == "ideogram4"
+        assert info.is_distilled is False
+        assert info.size is None
+
     def test_flux2_klein_pipeline(self, tmp_path):
         (tmp_path / "model_index.json").write_text(json.dumps({"_class_name": "Flux2KleinPipeline", "is_distilled": True}))
         # Need "4b" in path for size detection

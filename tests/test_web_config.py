@@ -123,6 +123,33 @@ def test_load_web_config_uses_image_model_detection_for_aliases(monkeypatch, tmp
     assert web_config.image_model_options == ("custom-default",)
 
 
+def test_load_web_config_surfaces_ideo_alias_via_dynamic_inventory(monkeypatch, tmp_path):
+    app_config = _make_app_config()
+    app_config["model_aliases"] = {
+        "ideo": "ideogram-ai/ideogram-4-fp8",
+    }
+    app_config["ui"]["default_models"] = {"image": "ideo"}
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(web_config_module, "load_config", lambda: app_config)
+    monkeypatch.setattr(web_config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+    monkeypatch.setattr(web_config_module, "list_models", lambda _: [])
+    monkeypatch.setattr(web_config_module, "list_video_models", lambda _: [])
+    monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
+    monkeypatch.setattr(web_config_module, "resolve_model_path", lambda name, **_: app_config["model_aliases"].get(name, name))
+    monkeypatch.setattr(
+        web_config_module,
+        "detect_image_model",
+        lambda value: ImageModelInfo(family="ideogram4" if "ideogram-4" in str(value) else "unknown", is_distilled=False, size=None),
+    )
+    monkeypatch.setattr(web_config_module, "detect_video_model", lambda _value: SimpleNamespace(family="unknown"))
+
+    web_config = web_config_module.load_web_config()
+
+    assert web_config.default_models.image == "ideo"
+    assert web_config.image_model_options == ("ideo",)
+
+
 def test_load_web_config_skips_unavailable_platform_aliases(monkeypatch, tmp_path):
     """Unavailable platform-aware aliases should be ignored during inventory discovery."""
     app_config = _make_app_config()

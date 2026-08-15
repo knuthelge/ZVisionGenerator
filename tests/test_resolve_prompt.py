@@ -27,8 +27,40 @@ def _resolve(prompt: str, seed: int = 0) -> str:
 
 
 class TestResolvePromptStage:
+    def test_json_prompt_true_keeps_structured_json_verbatim(self):
+        prompt = '{"high_level_description": "a red car", "compositional_deconstruction": {"background": "a red car", "elements": []}}'
+        req = ImageGenerationRequest(
+            backend=MagicMock(),
+            model=MagicMock(),
+            prompt=prompt,
+            json_prompt=True,
+        )
+        arts = ImageWorkingArtifacts()
+
+        outcome = resolve_prompt_stage(req, arts)
+
+        assert outcome is StageOutcome.success
+        assert arts.resolved_prompt == prompt
+
     def test_no_braces_passthrough(self):
         assert _resolve("a beautiful sunset") == "a beautiful sunset"
+
+    def test_json_prompt_false_still_expands_random_choice_blocks(self):
+        result = _resolve("a {red|blue} car")
+        assert result in {"a red car", "a blue car"}
+        assert "{" not in result
+        assert "}" not in result
+        assert "|" not in result
+
+    def test_json_prompt_false_does_not_preserve_json_looking_prompt(self):
+        prompt = '{"high_level_description": "a red car", "compositional_deconstruction": {"background": "a red car", "elements": []}}'
+
+        result = _resolve(prompt)
+
+        assert result != prompt
+        assert "{" not in result
+        assert "}" not in result
+        assert "|" not in result
 
     def test_flat_single_group(self):
         result = _resolve("{a|b|c}", seed=42)
