@@ -1,7 +1,7 @@
 """Image model type detection for Z-Vision Generator.
 
-Detects image model family (ZImage, FLUX.2 Klein, etc.) from model_index.json
-for both local model directories and HuggingFace repo IDs.
+Detects image model family (ZImage, FLUX.2 Klein, Ideogram 4, etc.) from
+model_index.json for both local model directories and HuggingFace repo IDs.
 """
 
 from __future__ import annotations
@@ -18,12 +18,13 @@ _CLASS_NAME_MAP: dict[str, str] = {
     "Flux2KleinPipeline": "flux2_klein",
     "Flux2Pipeline": "flux2",
     "FluxPipeline": "flux1",
+    "Ideogram4Pipeline": "ideogram4",
 }
 
 
 @dataclass(frozen=True)
 class ImageModelInfo:
-    family: str  # "zimage" | "flux2_klein" | "flux2" | "flux1" | "unknown"
+    family: str  # "zimage" | "flux2_klein" | "flux2" | "flux1" | "ideogram4" | "unknown"
     is_distilled: bool  # True for distilled Klein, False otherwise
     size: str | None  # "4b" | "9b" | None
 
@@ -74,6 +75,8 @@ def detect_image_model(model_path: str) -> ImageModelInfo:
         info = ImageModelInfo(family="flux1", is_distilled=False, size=None)
     elif family == "zimage":
         info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
+    elif family == "ideogram4":
+        info = ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
     else:
         info = ImageModelInfo(family="unknown", is_distilled=False, size=None)
 

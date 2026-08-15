@@ -3,6 +3,7 @@
 ARGS ?=
 ZIMAGE_MODEL ?= zit
 KLEIN_MODEL  ?= klein9b
+IDEOGRAM_MODEL ?= ideo
 LTX_MODEL    ?= ltx-8
 
 # ——— Setup ———————————————————————————————————————————————
@@ -121,7 +122,7 @@ model: ## Run ziv-model CLI (use ARGS="..." for arguments)
 
 # ——— E2E Image ————————————————————————————————————————————
 
-.PHONY: e2e-image e2e-image-zimage e2e-image-klein
+.PHONY: e2e-image e2e-image-zimage e2e-image-klein e2e-image-ideogram
 
 e2e-image-zimage: ## Run Z-Image E2E tests
 	@mkdir -p output
@@ -133,7 +134,12 @@ e2e-image-klein: ## Run FLUX.2-klein E2E tests
 	@echo "=== E2E: klein — smoke test ==="
 	uv run ziv-image -m $(KLEIN_MODEL) --prompt "a red circle on white background" -W 64 -H 64 -o output --steps 2 --seed 42
 
-e2e-image: e2e-image-zimage e2e-image-klein ## Run all image E2E tests
+e2e-image-ideogram: ## Run Ideogram 4 E2E tests
+	@mkdir -p output
+	@echo "=== E2E: ideogram — smoke test ==="
+	uv run ziv-image -m $(IDEOGRAM_MODEL) --prompt "a red circle on white background" -W 256 -H 256 -o output --steps 2 --seed 42
+
+e2e-image: e2e-image-zimage e2e-image-klein e2e-image-ideogram ## Run all image E2E tests
 
 # ——— E2E Video —————————————————————————————————————————————
 

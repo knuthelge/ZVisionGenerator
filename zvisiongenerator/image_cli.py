@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
+import warnings
 from pathlib import Path
 
 from zvisiongenerator.backends import get_backend
@@ -31,11 +33,27 @@ def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
     parser.add_argument("-W", "--width", type=int, default=None, help="Override image width (integer). If omitted, uses size preset.")
     parser.add_argument("-H", "--height", type=int, default=None, help="Override image height (integer). If omitted, uses size preset.")
     parser.add_argument("-o", "--output", type=str, default=".", help="Output directory for generated images (default: current directory).")
-    parser.add_argument("--prompt", type=str, default=None, help="Inline prompt string for quick one-off generation. Overrides --prompts-file when set.")
+    prompt_group = parser.add_mutually_exclusive_group()
+    prompt_group.add_argument("--prompt", type=str, default=None, help="Inline prompt string for quick one-off generation. Overrides --prompts-file when set.")
+    prompt_group.add_argument(
+        "--json-prompt",
+        type=str,
+        default=None,
+        metavar="JSON",
+        help="Inline structured JSON caption for a one-off generation (mutually exclusive with --prompt). Skips random-choice {a|b|c} expansion and is passed verbatim; must be a valid JSON object. Overrides --prompts-file.",
+    )
     parser.add_argument("--lora", type=str, default=None, help="Comma-separated LoRAs with optional weights: name1:0.8,name2:0.5. Bare names resolve from ~/.ziv/loras/.")
     parser.add_argument("--steps", type=int, default=None, help="Number of steps for image generation (e.g., 10, 20).")
     parser.add_argument("--guidance", type=float, default=None, help="Guidance scale for image generation (float).")
     parser.add_argument("--scheduler", type=str, default=None, help="Scheduler to use (e.g., 'beta').")
+    parser.add_argument(
+        "--first-sigma",
+        dest="first_sigma",
+        type=float,
+        default=None,
+        metavar="SIGMA",
+        help="Override Ideogram 4's first-step sigma for this run (default 1.004; valid range (0.0, 2.0]). Higher values (e.g. 1.005-1.006) more reliably avoid the safety-filter grey frame; Ideogram 4 only.",
+    )
     parser.add_argument("--upscale", type=int, default=None, help="Upscale factor (2 or 4). Default: disabled.")
     parser.add_argument("--upscale-denoise", type=float, default=None, help="Denoising strength for upscaling (float). Defaults to config value based on upscale factor.")
     parser.add_argument("--upscale-steps", type=int, default=None, help="Number of steps for upscaling (integer).")
@@ -80,6 +98,8 @@ def main(*, prog: str = "ziv-image") -> None:
         parser.error("--upscale-steps must be at least 1")
     if args.guidance is not None and args.guidance < 0:
         parser.error("--guidance must be non-negative")
+    if args.first_sigma is not None and not (0.0 < args.first_sigma <= 2.0):
+        parser.error("--first-sigma must be a positive float in (0.0, 2.0]")
     if args.upscale_guidance is not None and args.upscale_guidance < 0:
         parser.error("--upscale-guidance must be non-negative")
     if isinstance(args.sharpen, float) and args.sharpen < 0:
@@ -176,6 +196,8 @@ def main(*, prog: str = "ziv-image") -> None:
         }.items()
         if v is not None
     }
+    args.steps_explicit = "steps" in cli_overrides
+    args.guidance_explicit = "guidance" in cli_overrides
     defaults = resolve_defaults(
         model_info,
         config,
@@ -195,7 +217,18 @@ def main(*, prog: str = "ziv-image") -> None:
     if not (0.0 <= args.image_strength <= 1.0):
         parser.error(f"--image-strength must be between 0.0 and 1.0, got {args.image_strength}")
 
-    if args.prompt is not None:
+    args.json_prompt_enabled = args.json_prompt is not None
+    if args.json_prompt_enabled:
+        if not args.json_prompt.strip():
+            parser.error("--json-prompt must not be empty")
+        try:
+            parsed_json_prompt = json.loads(args.json_prompt)
+        except json.JSONDecodeError as e:
+            parser.error(f'--json-prompt must be a JSON object, e.g. \'{{"high_level_description": "..."}}\': {e}')
+        if not isinstance(parsed_json_prompt, dict):
+            parser.error(f'--json-prompt must be a JSON object, e.g. \'{{"high_level_description": "..."}}\', got {type(parsed_json_prompt).__name__}')
+        prompts_data = {"prompt": [(args.json_prompt, None)]}
+    elif args.prompt is not None:
         if not args.prompt.strip():
             parser.error("--prompt must not be empty")
         prompts_data = {"prompt": [(args.prompt, None)]}
@@ -206,6 +239,26 @@ def main(*, prog: str = "ziv-image") -> None:
             parser.error(str(e))
     model_suffix = f" ({model_info.size or 'unknown size'})" if model_info.family == "flux2_klein" else ""
     print(f"Model type: {model_info.family}{model_suffix}")
+
+    if model_info.family == "ideogram4":
+        if args.image_path is not None:
+            parser.error("img2img is not supported for Ideogram 4.")
+        if args.upscale is not None:
+            parser.error("Upscaling requires img2img, which is not supported for Ideogram 4.")
+        dims = sizes[args.ratio][args.size]
+        eff_w = args.width if args.width is not None else dims["width"]
+        eff_h = args.height if args.height is not None else dims["height"]
+        for eff in (eff_w, eff_h):
+            if eff < 256 or eff > 2048 or eff % 16 != 0:
+                parser.error(f"Ideogram 4 requires width/height between 256 and 2048 (multiple of 16), got {eff_w}x{eff_h} for --size {args.size} --ratio {args.ratio}")
+    else:
+        if args.first_sigma is not None:
+            warnings.warn(f"--first-sigma only affects Ideogram 4 and is ignored for the '{model_info.family}' family.", stacklevel=2)
+        if args.json_prompt is not None:
+            warnings.warn(
+                f"--json-prompt is intended for Ideogram 4 structured captions; for the '{model_info.family}' family it is passed as a literal prompt and skips {{a|b|c}} random-choice expansion.",
+                stacklevel=2,
+            )
 
     args.lora_paths, args.lora_weights = lora_paths, lora_weights
     try:

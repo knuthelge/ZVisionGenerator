@@ -300,6 +300,10 @@ def run_batch(
                             steps=args.steps,
                             guidance=args.guidance,
                             scheduler=_resolve_scheduler_class(args.scheduler, config, backend.name),
+                            steps_explicit=getattr(args, "steps_explicit", False),
+                            guidance_explicit=getattr(args, "guidance_explicit", False),
+                            first_sigma=getattr(args, "first_sigma", None),
+                            json_prompt=getattr(args, "json_prompt_enabled", False),
                             skip_signal=skip,
                             step_callback=_make_step_progress_callback(
                                 progress_callback,

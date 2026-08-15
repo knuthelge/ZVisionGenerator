@@ -169,6 +169,30 @@ class TestLoadModelGuardMocked:
                 guidance=0.5,
             )
 
+    def test_text_to_image_accepts_first_sigma_kwarg_for_signature_parity(self, win_backend):
+        mod, _, _ = win_backend
+        backend = mod.DiffusersBackend()
+        backend._model_info = _make_model_info()
+        model = MagicMock()
+        model.scheduler = MagicMock(config={})
+        result = MagicMock()
+        result.images = [Image.new("RGB", (64, 64))]
+        model.return_value = result
+
+        image = backend.text_to_image(
+            model=model,
+            prompt="test",
+            width=64,
+            height=64,
+            seed=42,
+            steps=4,
+            guidance=0.5,
+            first_sigma=1.005,
+        )
+
+        assert image == result.images[0]
+        assert "first_sigma" not in model.call_args.kwargs
+
 
 # ---------------------------------------------------------------------------
 # load_model: CUDA unavailable → RuntimeError
@@ -191,6 +215,16 @@ class TestLoadModelCudaCheck:
 
         with pytest.raises(RuntimeError, match="Windows and Linux"):
             backend.load_model("fake-model-path")
+
+
+class TestIdeogram4PlatformGuard:
+    def test_ideogram4_unsupported_on_this_platform(self, win_backend):
+        mod, _, _ = win_backend
+        backend = mod.DiffusersBackend()
+
+        with patch.object(mod, "detect_image_model", return_value=_make_model_info(family="ideogram4")):
+            with pytest.raises(RuntimeError, match="macOS.*only"):
+                backend.load_model("ideogram-ai/ideogram-4-fp8")
 
 
 # ---------------------------------------------------------------------------

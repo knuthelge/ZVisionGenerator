@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import re
+import warnings
+
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from zvisiongenerator.image_cli import _build_parser, main
 from zvisiongenerator.utils.lora import parse_lora_arg
@@ -89,6 +92,17 @@ class TestCLIValidation:
             with patch.multiple("zvisiongenerator.image_cli", **{k.split(".")[-1]: v for k, v in self._MAIN_MOCKS.items()}):
                 main()
 
+    def _run_main_with_overrides(self, argv: list[str], **overrides):
+        mocks = {k.split(".")[-1]: v for k, v in self._MAIN_MOCKS.items()}
+        mocks.update(overrides)
+        with patch("sys.argv", ["ziv-image"] + argv):
+            with patch.multiple("zvisiongenerator.image_cli", **mocks):
+                main()
+
+    @staticmethod
+    def _flag_misuse_warning_messages(caught_warnings: list[warnings.WarningMessage]) -> list[str]:
+        return [str(warning.message) for warning in caught_warnings if "--first-sigma only affects Ideogram 4" in str(warning.message) or "passed as a literal prompt" in str(warning.message)]
+
     def test_runs_zero_exits(self):
         with pytest.raises(SystemExit, match="2"):
             self._run_main(["--runs", "0", "-m", "fake"])
@@ -114,6 +128,37 @@ class TestCLIValidation:
         with pytest.raises(SystemExit, match="2"):
             self._run_main(["--height", "500", "-m", "fake"])
 
+    @pytest.mark.parametrize("width", [240, 3072])
+    def test_ideogram4_dimension_bounds_error_on_in_grid_out_of_range_widths(self, width, capsys):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["--prompt", "ok", "--width", str(width), "--height", "1024", "-m", "fake"],
+                detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+                get_backend=lambda: mock_backend,
+                resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
+            )
+
+        assert "between 256 and 2048" in capsys.readouterr().err
+        mock_backend.load_model.assert_not_called()
+
+    def test_ideogram4_dimension_bounds_accept_1024_square(self):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+
+        self._run_main_with_overrides(
+            ["--prompt", "ok", "--width", "1024", "--height", "1024", "-m", "fake"],
+            detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+            get_backend=lambda: mock_backend,
+            resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
+        )
+
+        mock_backend.load_model.assert_called_once()
+
     def test_default_runs_is_1(self):
         parser = _build_parser()
         args = parser.parse_args(["-m", "fake"])
@@ -123,6 +168,155 @@ class TestCLIValidation:
         parser = _build_parser()
         args = parser.parse_args(["-m", "fake"])
         assert args.size is None
+
+    def test_first_sigma_parses_as_float(self):
+        parser = _build_parser()
+        args = parser.parse_args(["--first-sigma", "1.005", "-m", "fake"])
+
+        assert args.first_sigma == 1.005
+
+    def test_first_sigma_default_is_none(self):
+        parser = _build_parser()
+        args = parser.parse_args(["-m", "fake"])
+
+        assert args.first_sigma is None
+
+    def test_first_sigma_help_mentions_valid_range(self):
+        parser = _build_parser()
+
+        first_sigma_action = next(action for action in parser._actions if "--first-sigma" in action.option_strings)
+
+        assert "(0.0, 2.0]" in first_sigma_action.help
+
+    def test_first_sigma_invalid_float_exits_before_load_model(self):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["--first-sigma", "abc", "-m", "fake"],
+                get_backend=lambda: mock_backend,
+            )
+
+        mock_backend.load_model.assert_not_called()
+
+    @pytest.mark.parametrize("value", ["-1", "0", "2.5"])
+    def test_first_sigma_out_of_band_exits_before_load_model(self, value):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["--first-sigma", value, "--prompt", "ok", "-m", "fake"],
+                get_backend=lambda: mock_backend,
+            )
+
+        mock_backend.load_model.assert_not_called()
+
+    @pytest.mark.parametrize("value", [1.006, 2.0])
+    def test_first_sigma_accepts_in_band_values(self, value):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+        recorded = {}
+
+        def _capture_run_batch(_backend, _model, _prompts_data, _config, args, **_kwargs):
+            recorded["first_sigma"] = args.first_sigma
+
+        self._run_main_with_overrides(
+            ["--first-sigma", str(value), "--prompt", "ok", "-m", "fake"],
+            detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+            get_backend=lambda: mock_backend,
+            run_batch=_capture_run_batch,
+            resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
+        )
+
+        assert recorded["first_sigma"] == value
+        mock_backend.load_model.assert_called_once()
+
+    def test_non_ideogram_first_sigma_warns_before_load_model(self):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(side_effect=AssertionError("load_model reached after warning"))
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+
+            with pytest.raises(AssertionError, match="load_model reached after warning"):
+                self._run_main_with_overrides(
+                    ["--first-sigma", "1.006", "--prompt", "ok", "-m", "fake"],
+                    detect_image_model=lambda _path: MagicMock(family="zimage", size=None),
+                    get_backend=lambda: mock_backend,
+                )
+
+        warning_messages = self._flag_misuse_warning_messages(caught)
+
+        assert any("--first-sigma only affects Ideogram 4" in message and "zimage" in message for message in warning_messages)
+
+    def test_non_ideogram_json_prompt_warns_before_load_model(self):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(side_effect=AssertionError("load_model reached after warning"))
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+
+            with pytest.raises(AssertionError, match="load_model reached after warning"):
+                self._run_main_with_overrides(
+                    ["--json-prompt", '{"a": 1}', "-m", "fake"],
+                    detect_image_model=lambda _path: MagicMock(family="zimage", size=None),
+                    get_backend=lambda: mock_backend,
+                )
+
+        warning_messages = self._flag_misuse_warning_messages(caught)
+
+        assert any("passed as a literal prompt" in message and "skips {a|b|c}" in message and "zimage" in message for message in warning_messages)
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["--first-sigma", "1.006", "--prompt", "ok", "-m", "fake"],
+            ["--json-prompt", '{"a": 1}', "-m", "fake"],
+        ],
+    )
+    def test_ideogram4_flag_usage_does_not_emit_non_ideogram_warnings(self, argv):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self._run_main_with_overrides(
+                argv,
+                detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+                get_backend=lambda: mock_backend,
+                resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
+            )
+
+        warning_messages = self._flag_misuse_warning_messages(caught)
+
+        assert not any("--first-sigma only affects Ideogram 4" in message for message in warning_messages)
+        assert not any("passed as a literal prompt" in message for message in warning_messages)
+
+    def test_non_ideogram_without_first_sigma_or_json_prompt_does_not_emit_flag_warnings(self):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="zimage")))
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            self._run_main_with_overrides(
+                ["--prompt", "ok", "-m", "fake"],
+                detect_image_model=lambda _path: MagicMock(family="zimage", size=None),
+                get_backend=lambda: mock_backend,
+            )
+
+        warning_messages = self._flag_misuse_warning_messages(caught)
+
+        assert not any("--first-sigma only affects Ideogram 4" in message for message in warning_messages)
+        assert not any("passed as a literal prompt" in message for message in warning_messages)
 
     # ── Upscale size drift validation ───────────────────────────────────
 
@@ -199,6 +393,96 @@ class TestCLIValidation:
         with pytest.raises(SystemExit, match="2"):
             self._run_main(["--prompt", "   ", "-m", "fake"])
 
+    def test_json_prompt_accepts_inline_json_object_value(self):
+        recorded = {}
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+
+        def _capture_run_batch(_backend, _model, prompts_data, _config, args, **_kwargs):
+            recorded["prompt"] = prompts_data["prompt"][0][0]
+            recorded["json_prompt"] = args.json_prompt
+            recorded["json_prompt_enabled"] = args.json_prompt_enabled
+
+        self._run_main_with_overrides(
+            ["--json-prompt", '{"a": 1}', "-m", "fake"],
+            detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+            get_backend=lambda: mock_backend,
+            run_batch=_capture_run_batch,
+            resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
+        )
+
+        assert recorded == {
+            "prompt": '{"a": 1}',
+            "json_prompt": '{"a": 1}',
+            "json_prompt_enabled": True,
+        }
+
+    def test_json_prompt_rejects_prompt_argument_combination_before_load_model(self, capsys):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="zimage")))
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["--prompt", "x", "--json-prompt", '{"a": 1}', "-m", "fake"],
+                get_backend=lambda: mock_backend,
+            )
+
+        assert "not allowed with argument" in capsys.readouterr().err
+        mock_backend.load_model.assert_not_called()
+
+    def test_json_prompt_rejects_empty_value_before_load_model(self, capsys):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="zimage")))
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["--json-prompt", "   ", "-m", "fake"],
+                get_backend=lambda: mock_backend,
+            )
+
+        assert "must not be empty" in capsys.readouterr().err
+        mock_backend.load_model.assert_not_called()
+
+    def test_json_prompt_rejects_invalid_json_before_load_model(self, capsys):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="zimage")))
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["--json-prompt", "a red car", "-m", "fake"],
+                get_backend=lambda: mock_backend,
+            )
+
+        assert "must be a JSON object" in capsys.readouterr().err
+        mock_backend.load_model.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("json_value", "type_name"),
+        [
+            ("[1,2,3]", "list"),
+            ('"hi"', "str"),
+        ],
+    )
+    def test_json_prompt_rejects_non_object_json_before_load_model(self, json_value, type_name, capsys):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="zimage")))
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["--json-prompt", json_value, "-m", "fake"],
+                get_backend=lambda: mock_backend,
+            )
+
+        err = capsys.readouterr().err
+        assert "must be a JSON object" in err
+        assert type_name in err
+        mock_backend.load_model.assert_not_called()
+
     # ── --size defaults to config value ─────────────────────────────
 
     def test_size_defaults_to_config_default_size(self):
@@ -257,6 +541,68 @@ class TestCLIValidation:
                 main()
 
         assert recorded["upscale_steps"] == 21
+
+    def test_ideogram4_preset_size_guard_errors_before_load_model(self, capsys):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+
+        def _load_config():
+            return {
+                "sizes": {
+                    "16:9": {"xl": {"width": 2112, "height": 1184}},
+                    "2:3": {"m": {"width": 832, "height": 1216}},
+                },
+                "model_presets": {},
+                "schedulers": {},
+                "generation": {"default_ratio": "2:3", "default_size": "m"},
+            }
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["--prompt", "ok", "--size", "xl", "--ratio", "16:9", "-m", "ideo"],
+                load_config=_load_config,
+                detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+                get_backend=lambda: mock_backend,
+                resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
+            )
+
+        assert "2048" in capsys.readouterr().err
+        mock_backend.load_model.assert_not_called()
+
+    def test_ideogram4_img2img_early_guard_errors_before_load_model(self, tmp_path, capsys):
+        image_path = tmp_path / "reference.png"
+        image_path.write_bytes(b"fake")
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["--prompt", "ok", "--image", str(image_path), "-m", "ideo"],
+                detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+                get_backend=lambda: mock_backend,
+                resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
+            )
+
+        assert "img2img is not supported" in capsys.readouterr().err.lower()
+        mock_backend.load_model.assert_not_called()
+
+    def test_ideogram4_upscale_early_guard_errors_before_load_model(self, capsys):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+        mock_backend.load_model = MagicMock(return_value=(MagicMock(), MagicMock(family="ideogram4")))
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["--prompt", "ok", "--upscale", "2", "-m", "ideo"],
+                detect_image_model=lambda _path: MagicMock(family="ideogram4", size=None),
+                get_backend=lambda: mock_backend,
+                resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None},
+            )
+
+        assert re.search(r"upscal.*not supported", capsys.readouterr().err, re.IGNORECASE)
+        mock_backend.load_model.assert_not_called()
 
 
 # ── Post-processing flag parsing ────────────────────────────────────────────

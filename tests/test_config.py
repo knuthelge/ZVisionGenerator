@@ -330,6 +330,15 @@ class TestResolveDefaults:
                     "diffusers": None,
                 },
             },
+            "ideogram4": {
+                "supports_negative_prompt": False,
+                "default_steps": 20,
+                "default_guidance": 7.0,
+                "default_scheduler": {
+                    "mflux": None,
+                    "diffusers": None,
+                },
+            },
         },
     }
 
@@ -379,6 +388,20 @@ class TestResolveDefaults:
         result = resolve_defaults(info, self.config, {}, "mflux")
         assert result["steps"] == 22
         assert result["guidance"] == 3.0
+
+    def test_ideogram4(self):
+        info = ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
+        result = resolve_defaults(info, self.config, {}, "mflux")
+        assert result["steps"] == 20
+        assert result["guidance"] == 7.0
+        assert result["scheduler"] is None
+        assert result["supports_negative_prompt"] is False
+
+    def test_ideogram4_cli_overrides_win(self):
+        info = ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
+        result = resolve_defaults(info, self.config, {"steps": 12, "guidance": 3.5}, "mflux")
+        assert result["steps"] == 12
+        assert result["guidance"] == 3.5
 
     def test_unknown_falls_to_global(self):
         info = ImageModelInfo(family="unknown", is_distilled=False, size=None)

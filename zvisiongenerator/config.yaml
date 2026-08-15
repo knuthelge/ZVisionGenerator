@@ -88,6 +88,7 @@ model_aliases:
   zit: "Tongyi-MAI/Z-Image-Turbo"
   klein9b: "black-forest-labs/FLUX.2-klein-9B"
   klein4b: "black-forest-labs/FLUX.2-klein-4B"
+  ideo: "ideogram-ai/ideogram-4-fp8"
 
 model_presets:
   zimage:
@@ -125,6 +126,14 @@ model_presets:
     supports_negative_prompt: false
     default_steps: 20
     default_guidance: 3.5
+    default_scheduler:
+      mflux: null
+      diffusers: null
+
+  ideogram4:
+    supports_negative_prompt: false
+    default_steps: 20
+    default_guidance: 7.0
     default_scheduler:
       mflux: null
       diffusers: null

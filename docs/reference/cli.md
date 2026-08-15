@@ -43,7 +43,8 @@ The base package install includes the Web UI runtime, so `ziv ui` and `ziv-ui` w
 | `-q`, `--quantize` | `None` | Quantization level: `4` or `8` |
 | `--scheduler` | model-aware | Scheduler name (e.g., `beta`) |
 | `--lora` | `None` | LoRA specifier: `name:weight,name2:weight2` (weight optional, default 1.0) |
-| `--prompt` | `None` | Inline prompt; overrides `--prompts-file` |
+| `--prompt` | `None` | Inline prompt; overrides `--prompts-file` (mutually exclusive with `--json-prompt`) |
+| `--json-prompt` | `None` | Inline structured JSON caption for a one-off generation (mutually exclusive with `--prompt`). Takes a JSON value, must be a valid JSON object, skips random-choice `{a|b|c}` expansion, is passed verbatim, and overrides `--prompts-file` |
 | `-p`, `--prompts-file` | `prompts.yaml` | YAML prompt file path |
 | `-r`, `--runs` | `1` | Number of generation runs |
 | `-s`, `--size` | `m` | Size preset: `xs`, `s`, `m`, `l`, `xl` |
@@ -52,6 +53,7 @@ The base package install includes the Web UI runtime, so `ziv ui` and `ziv-ui` w
 | `-H`, `--height` | from preset | Override image height |
 | `--steps` | model-aware | Number of diffusion steps |
 | `--guidance` | model-aware | Guidance scale |
+| `--first-sigma` | `1.004` | Ideogram 4 only: override the first-step sigma (valid range `(0.0, 2.0]`, default `1.004`). Higher values (e.g. `1.005`-`1.006`) more reliably avoid the grey "blocked by safety filter" frame (best-effort mitigation, not a guaranteed bypass) |
 | `--seed` | `None` (random) | Seed for reproducible image generation |
 | `--upscale` | disabled | Upscale factor: `2` or `4` |
 | `--upscale-denoise` | `0.3` (2×) / `0.4` (4×) | Denoising strength for upscale pass |
@@ -67,6 +69,8 @@ The base package install includes the Web UI runtime, so `ziv ui` and `ziv-ui` w
 | `-o`, `--output` | `.` | Output directory for generated images |
 
 Run `ziv-image --help` for the full list.
+
+The `ideo` alias selects Ideogram 4 (`ideogram-ai/ideogram-4-fp8`), a macOS/MLX-only image model. Its width and height must be in the 256–2048 range and multiples of 16. Size presets that exceed this range — `--size xl` with `--ratio 16:9` or `--ratio 9:16` (2112 px) — are rejected before the model loads, as are `--image` and `--upscale` (both require img2img, which Ideogram 4 does not support).
 
 ## `ziv-video` — Video Generation
 

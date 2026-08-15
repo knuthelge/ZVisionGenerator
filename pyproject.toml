@@ -28,7 +28,7 @@ dependencies = [
     "fastapi>=0.116.0",
     "hf-transfer>=0.1.9",
     "huggingface-hub>=0.30.0",
-    "mflux>=0.17.4; sys_platform == 'darwin'",
+    "mflux>=0.18.0; sys_platform == 'darwin'",
     "numpy>=2.0.0",
     "Pillow>=12.0.0",
     "python-multipart>=0.0.20",

@@ -50,8 +50,15 @@ def _emit_step_progress(
 
 
 def resolve_prompt_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
-    """Replace {a|b|c} random choice blocks in prompt, supporting nesting."""
-    artifacts.resolved_prompt = expand_random_choices(request.prompt)
+    """Replace {a|b|c} random choice blocks in prompt, supporting nesting.
+
+    When ``request.json_prompt`` is set, the prompt is a literal structured JSON
+    caption and is passed through verbatim without random-choice expansion.
+    """
+    if request.json_prompt:
+        artifacts.resolved_prompt = request.prompt
+    else:
+        artifacts.resolved_prompt = expand_random_choices(request.prompt)
     return StageOutcome.success
 
 
@@ -135,6 +142,9 @@ def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorking
             negative_prompt=neg,
             skip_signal=request.skip_signal,
             step_callback=_emit_step_progress(request.step_callback, phase="image_generate", total_steps=request.steps),
+            steps_explicit=request.steps_explicit,
+            guidance_explicit=request.guidance_explicit,
+            first_sigma=request.first_sigma,
         )
     elapsed = time.perf_counter() - start
     artifacts.generation_time += elapsed
