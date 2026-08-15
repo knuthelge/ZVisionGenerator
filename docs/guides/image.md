@@ -1,6 +1,6 @@
 # Image Generation Guide
 
-Generate images from text prompts using `ziv-image`. Supports Z-Image / FLUX models on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux with NVIDIA GPUs via diffusers/CUDA.
+Generate images from text prompts using `ziv-image`. Supports Z-Image / FLUX models on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux with NVIDIA GPUs via diffusers/CUDA, plus Ideogram 4 on macOS.
 
 On Windows and Linux, image generation requires CUDA to be visible to PyTorch. CPU fallback is not available for the diffusers image backend.
 
@@ -13,13 +13,35 @@ Built-in shorthands for common image models.
 | `zit` | `Tongyi-MAI/Z-Image-Turbo` |
 | `klein4b` | `black-forest-labs/FLUX.2-klein-4B` |
 | `klein9b` | `black-forest-labs/FLUX.2-klein-9B` |
+| `ideo` | `ideogram-ai/ideogram-4-fp8` |
 
 For video aliases, see [Video Guide → Model Aliases](video.md#model-aliases).
 
 ```bash
 ziv-image -m zit --prompt "a beautiful sunset"
 ziv-image -m klein4b --prompt "a portrait"
+ziv-image -m ideo --prompt "a portrait"
 ```
+
+### Ideogram 4
+
+Ideogram 4 runs on macOS (Apple Silicon via mflux/MLX) only; it is unavailable on Windows and Linux. It ships as a single FP8 model, so quantization tiers (`-q 4` / `-q 8`) do not apply. Width and height must be in the 256–2048 range and multiples of 16; size presets that exceed this range (for example `--size xl` with `--ratio 16:9`) are rejected before the model loads.
+
+```bash
+ziv-image -m ideo --prompt "a portrait"
+```
+
+Ideogram 4 does not support negative prompts or reference-image (img2img) steering; a negative prompt is dropped with a warning, and both `--image` and `--upscale` are rejected (each requires img2img, which Ideogram 4 does not support). LoRA weights work at parity with other mflux models via `--lora`.
+
+Plain-text prompts are automatically wrapped into Ideogram 4's structured JSON caption format, so they generate without a plain-text caption warning while preserving the original wording. To supply a full structured JSON caption instead, pass it as the value of `--json-prompt` (mutually exclusive with `--prompt`): this skips random-choice `{a|b|c}` expansion and sends the caption verbatim. Without `--json-prompt`, `{...}` in a prompt is treated as random-choice syntax and corrupts a JSON caption. The `--json-prompt` value must be a valid JSON object, or generation is rejected before the model loads:
+
+```bash
+ziv-image -m ideo --json-prompt '{"high_level_description": "a portrait"}'
+```
+
+When neither `--steps` nor `--guidance` is given, Ideogram 4 uses its built-in tuned quality schedule. Supplying `--steps` and/or `--guidance` overrides that schedule with the explicit values.
+
+Ideogram 4 applies an automatic first-step adjustment to its denoising schedule that reduces spurious "Image blocked by safety filter" grey results at no change to the prompt, seed, or resolution. This mitigation is best-effort and not guaranteed to recover every refused generation. The adjustment defaults to a first-step sigma of `1.004` and can be overridden per run with `--first-sigma` (for example `--first-sigma 1.005` or `--first-sigma 1.006`) when a benign prompt is still blocked.
 
 ### Custom Aliases
 

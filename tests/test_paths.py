@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.paths import (
     display_basename,
     display_stem,
@@ -320,6 +321,16 @@ class TestResolveModelAliasPlatformAware:
         result = resolve_model_path("zit", aliases={"zit": "Tongyi-MAI/Z-Image-Turbo"}, platform_key="darwin")
 
         assert result == "Tongyi-MAI/Z-Image-Turbo"
+
+    def test_ideogram4_alias_resolves_for_darwin_platform(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
+
+        aliases = load_config()["model_aliases"]
+
+        result = resolve_model_path("ideo", aliases=aliases, platform_key="darwin")
+
+        assert result == "ideogram-ai/ideogram-4-fp8"
 
 
 class TestResolveLoraPath:

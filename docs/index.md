@@ -11,7 +11,7 @@ Z-Vision Generator gives you a unified CLI for both image and video generation, 
 
 ## Features
 
-- **Image generation** — text-to-image with Z-Image and FLUX.2 Klein (4B/9B) model families
+- **Image generation** — text-to-image with Z-Image and FLUX.2 Klein (4B/9B) model families, plus Ideogram 4 (FP8) on macOS/MLX
 - **Video generation** — text-to-video and image-to-video with platform-specific LTX aliases, audio included by default
 - **Cross-platform** — automatic backend selection: MLX on macOS, diffusers/CUDA on Windows and Linux for images, and the shared diffusers/CUDA LTX backend on Windows and Linux for video
 - **Prompt system** — YAML prompt files with variables (`{red|blue|green}`), structured prompts, snippets, and batch runs
@@ -28,7 +28,7 @@ Z-Vision Generator gives you a unified CLI for both image and video generation, 
 
 | Platform | Image Generation | Video Generation |
 |----------|------------------|------------------|
-| macOS (Apple Silicon) | ✅ Z-Image / FLUX models via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`) |
+| macOS (Apple Silicon) | ✅ Z-Image / FLUX / Ideogram 4 via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`) |
 | Windows (NVIDIA GPU) | ✅ Z-Image / FLUX models via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
 | Linux (NVIDIA GPU) | ✅ Z-Image / FLUX models via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
 

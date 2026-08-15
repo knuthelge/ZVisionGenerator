@@ -147,6 +147,9 @@ class DiffusersBackend:
         model_info = detect_image_model(model_path)
         self._model_info = model_info
 
+        if model_info.family == "ideogram4":
+            raise RuntimeError("Ideogram 4 is not supported on this platform (macOS/MLX only).")
+
         if quantize in (4, 8):
             pipeline = _load_quantized(model_path, quantize, torch_dtype)
         else:
@@ -276,6 +279,9 @@ class DiffusersBackend:
         negative_prompt: str | None = None,
         skip_signal: Any | None = None,
         step_callback: Any | None = None,
+        steps_explicit: bool = False,
+        guidance_explicit: bool = False,
+        first_sigma: float | None = None,
     ) -> Image.Image | None:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
