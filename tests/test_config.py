@@ -12,6 +12,7 @@ from zvisiongenerator.utils.config import (
     resolve_video_defaults,
 )
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.paths import resolve_model_path
 
 
 def _write_packaged_config(tmp_path, data):
@@ -207,6 +208,16 @@ class TestNestedConfigValidation:
         assert config["model_aliases"]["ltx-2.3"]["linux"] == "custom/LTX-2.3"
 
 
+def test_packaged_config_resolves_ideo_alias_on_darwin(monkeypatch, tmp_path):
+    from zvisiongenerator.utils import config as config_module
+
+    monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+
+    config = load_config()
+
+    assert resolve_model_path("ideo", aliases=config["model_aliases"], platform_key="darwin") == "ideogram-ai/ideogram-4-fp8"
+
+
 # ---------------------------------------------------------------------------
 # _deep_merge
 # ---------------------------------------------------------------------------
@@ -332,6 +343,14 @@ class TestResolveDefaults:
             },
             "ideogram4": {
                 "supports_negative_prompt": False,
+                "supports_quantize": False,
+                "supports_img2img": False,
+                "supports_upscale": False,
+                "supports_json_prompt": True,
+                "supports_first_sigma": True,
+                "dimension_min": 256,
+                "dimension_max": 2048,
+                "dimension_step": 16,
                 "default_steps": 20,
                 "default_guidance": 7.0,
                 "default_scheduler": {
@@ -355,6 +374,14 @@ class TestResolveDefaults:
         assert result["guidance"] == 0.7
         assert result["upscale_steps"] == 8
         assert result["scheduler"] == "beta"
+        assert result["supports_quantize"] is True
+        assert result["supports_img2img"] is True
+        assert result["supports_upscale"] is True
+        assert result["supports_json_prompt"] is False
+        assert result["supports_first_sigma"] is False
+        assert result["dimension_min"] == 16
+        assert result["dimension_max"] is None
+        assert result["dimension_step"] == 16
 
     def test_zimage_diffusers(self):
         info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
@@ -396,6 +423,14 @@ class TestResolveDefaults:
         assert result["guidance"] == 7.0
         assert result["scheduler"] is None
         assert result["supports_negative_prompt"] is False
+        assert result["supports_quantize"] is False
+        assert result["supports_img2img"] is False
+        assert result["supports_upscale"] is False
+        assert result["supports_json_prompt"] is True
+        assert result["supports_first_sigma"] is True
+        assert result["dimension_min"] == 256
+        assert result["dimension_max"] == 2048
+        assert result["dimension_step"] == 16
 
     def test_ideogram4_cli_overrides_win(self):
         info = ImageModelInfo(family="ideogram4", is_distilled=False, size=None)

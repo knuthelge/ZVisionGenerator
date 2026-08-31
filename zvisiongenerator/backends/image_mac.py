@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import tempfile
+import threading
 from collections.abc import Iterator
 from typing import Any
 
@@ -29,31 +30,36 @@ IDEOGRAM4_INITIAL_SIGMA: float | None = 1.004
 # Per-run override slot, distinct from the always-on default constant above.
 # The sentinel distinguishes "no override" (use the default) from "override to
 # None" (disable the sigma adjustment for one run).
-# Assumes single-threaded generation: this per-run override is process-global (safe for serial CLI batches; web passes None).
+# The override is thread-local so concurrent web generations (the web runner uses a
+# ThreadPoolExecutor) are isolated: each thread only sees its own override, and the
+# always-on default (no override set on a thread) uses the module constant.
 _INITIAL_SIGMA_UNSET = object()
-_initial_sigma_override: object | float | None = _INITIAL_SIGMA_UNSET
+_initial_sigma_override = threading.local()
 
 
 def _effective_initial_sigma() -> float | None:
-    """Return the sigma the shim should apply: the per-run override when set, else the default."""
-    return IDEOGRAM4_INITIAL_SIGMA if _initial_sigma_override is _INITIAL_SIGMA_UNSET else _initial_sigma_override
+    """Return the sigma the shim should apply: the per-thread override when set, else the default."""
+    value = getattr(_initial_sigma_override, "value", _INITIAL_SIGMA_UNSET)
+    return IDEOGRAM4_INITIAL_SIGMA if value is _INITIAL_SIGMA_UNSET else value
 
 
 @contextlib.contextmanager
 def _use_initial_sigma(value: float | None) -> Iterator[None]:
-    """Temporarily override the Ideogram 4 first-step sigma, restoring the prior state on exit.
+    """Temporarily override the Ideogram 4 first-step sigma for the current thread, restoring the prior state on exit.
+
+    The override is stored thread-locally so concurrent generations do not race on a
+    shared slot.
 
     Args:
         value: Sigma to apply for the duration of the block. ``None`` disables the
             adjustment for that run without touching the always-on default constant.
     """
-    global _initial_sigma_override
-    prev = _initial_sigma_override
-    _initial_sigma_override = value
+    prev = getattr(_initial_sigma_override, "value", _INITIAL_SIGMA_UNSET)
+    _initial_sigma_override.value = value
     try:
         yield
     finally:
-        _initial_sigma_override = prev
+        _initial_sigma_override.value = prev
 
 
 def _install_ideogram4_initial_sigma() -> None:

@@ -51,6 +51,7 @@ def _make_web_config() -> SimpleNamespace:
         lora_options=("style",),
         image_ratios=("2:3",),
         image_size_options={"2:3": ("m", "l")},
+        image_size_dimensions={"2:3": {"m": (832, 1216), "l": (1152, 1728)}},
         video_ratios=("16:9",),
         video_size_options={"16:9": ("m",)},
         scheduler_options=("beta",),
@@ -69,6 +70,13 @@ def _make_workspace_bootstrap_view() -> dict[str, object]:
         "scheduler": None,
         "supports_negative_prompt": True,
         "supports_quantize": True,
+        "supports_img2img": True,
+        "supports_upscale": True,
+        "supports_json_prompt": False,
+        "supports_first_sigma": False,
+        "dimension_min": 16,
+        "dimension_max": None,
+        "dimension_step": 16,
         "quantize": None,
         "image_strength": 0.5,
         "postprocess": {"sharpen": 0.8, "contrast": False, "saturation": False},
@@ -129,6 +137,55 @@ def _assert_non_empty_string(value: object) -> None:
     assert value
 
 
+def _make_resolved_image_defaults(
+    *,
+    supports_negative_prompt: bool = True,
+    supports_quantize: bool = True,
+    supports_img2img: bool = True,
+    supports_upscale: bool = True,
+    supports_json_prompt: bool = False,
+    supports_first_sigma: bool = False,
+    dimension_min: int = 16,
+    dimension_max: int | None = None,
+    dimension_step: int = 16,
+) -> dict[str, object]:
+    return {
+        "steps": 10,
+        "guidance": 3.5,
+        "scheduler": None,
+        "supports_negative_prompt": supports_negative_prompt,
+        "supports_quantize": supports_quantize,
+        "supports_img2img": supports_img2img,
+        "supports_upscale": supports_upscale,
+        "supports_json_prompt": supports_json_prompt,
+        "supports_first_sigma": supports_first_sigma,
+        "dimension_min": dimension_min,
+        "dimension_max": dimension_max,
+        "dimension_step": dimension_step,
+    }
+
+
+def _patch_image_submit_dependencies(
+    monkeypatch,
+    *,
+    model_info: ImageModelInfo,
+    defaults: dict[str, object],
+    submitted: list[dict[str, object]] | None = None,
+) -> None:
+    monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(web_server, "detect_image_model", lambda _model: model_info)
+    monkeypatch.setattr(web_server, "get_backend_name", lambda: "mflux")
+    monkeypatch.setattr(web_server, "validate_scheduler", lambda _scheduler, _config: None)
+    monkeypatch.setattr(web_server, "resolve_defaults", lambda _model_info, _config, _cli_overrides, _backend_name: defaults)
+
+    def _capture_submit(**kwargs):
+        if submitted is not None:
+            submitted.append(kwargs)
+        return "job-123"
+
+    monkeypatch.setattr(web_server.web_runner, "submit_image_request_job", _capture_submit)
+
+
 def test_phase_a_routes_share_config_and_path_authority(monkeypatch):
     """Config, workspace, and models routes should expose the same backend-owned authority."""
     web_config = _make_web_config()
@@ -187,6 +244,7 @@ def test_phase_a_routes_share_config_and_path_authority(monkeypatch):
     assert config_payload["ui"]["loras_dir"] == "/tmp/loras"
     assert models_payload["loras_dir"] == "/tmp/loras"
     assert workspace_payload["loras"][0]["path"] == "/tmp/loras/style.safetensors"
+    assert workspace_payload["image_size_dimensions"]["2:3"]["m"] == [832, 1216]
 
     assert sorted(schema_fields) == [
         "generation.default_size",
@@ -308,6 +366,384 @@ def test_workspace_bootstrap_uses_backend_registry_name(monkeypatch):
 
     assert captured["backend_name"] == "registry-owned"
     assert defaults["scheduler"] == "beta"
+
+
+def test_workspace_bootstrap_defaults_include_ideogram_capability_flags(monkeypatch):
+    """Bootstrap defaults should surface the declared-family capability contract."""
+    web_config = _make_web_config()
+    web_config.app_config["model_aliases"] = {
+        "ideo": "ideogram-ai/ideogram-4-fp8",
+        "zit": "Tongyi-MAI/Z-Image-Turbo",
+    }
+    web_config.app_config["model_alias_families"] = {"ideo": "ideogram4"}
+    web_config.image_model_options = ("ideo", "zit")
+
+    detect_calls: list[str] = []
+
+    def _fake_detect_image_model(value: object) -> ImageModelInfo:
+        detect_calls.append(str(value))
+        return ImageModelInfo(family="zimage", is_distilled=False, size="xl")
+
+    def _fake_resolve_defaults(model_info, _config, _cli_overrides, _backend_name):
+        if model_info.family == "ideogram4":
+            return _make_resolved_image_defaults(
+                supports_negative_prompt=False,
+                supports_quantize=False,
+                supports_img2img=False,
+                supports_upscale=False,
+                supports_json_prompt=True,
+                supports_first_sigma=True,
+                dimension_min=256,
+                dimension_max=2048,
+                dimension_step=16,
+            )
+        return _make_resolved_image_defaults()
+
+    monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: web_config.app_config["model_aliases"].get(model, model))
+    monkeypatch.setattr(workspace_api_module, "detect_image_model", _fake_detect_image_model)
+    monkeypatch.setattr(workspace_api_module, "get_backend_name", lambda: "mflux")
+    monkeypatch.setattr(workspace_api_module, "resolve_defaults", _fake_resolve_defaults)
+
+    ideogram_defaults = workspace_api_module._build_image_bootstrap_defaults("ideo", web_config)
+    zimage_defaults = workspace_api_module._build_image_bootstrap_defaults("zit", web_config)
+
+    assert ideogram_defaults["supports_img2img"] is False
+    assert ideogram_defaults["supports_upscale"] is False
+    assert ideogram_defaults["supports_quantize"] is False
+    assert ideogram_defaults["supports_json_prompt"] is True
+    assert ideogram_defaults["supports_first_sigma"] is True
+    assert ideogram_defaults["dimension_min"] == 256
+    assert ideogram_defaults["dimension_max"] == 2048
+    assert ideogram_defaults["dimension_step"] == 16
+    assert zimage_defaults["supports_img2img"] is True
+    assert zimage_defaults["supports_upscale"] is True
+    assert zimage_defaults["supports_quantize"] is True
+    assert zimage_defaults["supports_json_prompt"] is False
+    assert zimage_defaults["supports_first_sigma"] is False
+    assert zimage_defaults["dimension_min"] == 16
+    assert zimage_defaults["dimension_max"] is None
+    assert zimage_defaults["dimension_step"] == 16
+    assert detect_calls == ["Tongyi-MAI/Z-Image-Turbo"]
+
+
+def test_workspace_bootstrap_defaults_disable_quantize_when_globally_unavailable(monkeypatch):
+    web_config = _make_web_config()
+    web_config.app_config["model_aliases"] = {
+        "ideo": "ideogram-ai/ideogram-4-fp8",
+        "zit": "Tongyi-MAI/Z-Image-Turbo",
+    }
+    web_config.app_config["model_alias_families"] = {"ideo": "ideogram4"}
+    web_config.image_model_options = ("ideo", "zit")
+    web_config.quantize_options = ()
+
+    def _fake_detect_image_model(value: object) -> ImageModelInfo:
+        return ImageModelInfo(family="zimage", is_distilled=False, size="xl")
+
+    def _fake_resolve_defaults(model_info, _config, _cli_overrides, _backend_name):
+        if model_info.family == "ideogram4":
+            return _make_resolved_image_defaults(supports_negative_prompt=False, supports_quantize=False)
+        return _make_resolved_image_defaults(supports_quantize=True)
+
+    monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: web_config.app_config["model_aliases"].get(model, model))
+    monkeypatch.setattr(workspace_api_module, "detect_image_model", _fake_detect_image_model)
+    monkeypatch.setattr(workspace_api_module, "get_backend_name", lambda: "mflux")
+    monkeypatch.setattr(workspace_api_module, "resolve_defaults", _fake_resolve_defaults)
+
+    ideogram_defaults = workspace_api_module._build_image_bootstrap_defaults("ideo", web_config)
+    zimage_defaults = workspace_api_module._build_image_bootstrap_defaults("zit", web_config)
+
+    assert ideogram_defaults["supports_quantize"] is False
+    assert zimage_defaults["supports_quantize"] is False
+
+
+def test_submit_image_job_threads_json_prompt_and_first_sigma_to_authoritative_args(monkeypatch, tmp_path):
+    """JSON-only submissions should thread their authoritative args and prompt payloads."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    web_config.default_models = WebUiDefaultModels(image="ideo", video="ltx-8")
+    submitted: list[dict[str, object]] = []
+    _patch_image_submit_dependencies(
+        monkeypatch,
+        model_info=ImageModelInfo(family="ideogram4", is_distilled=False, size=None),
+        defaults=_make_resolved_image_defaults(
+            supports_negative_prompt=False,
+            supports_img2img=False,
+            supports_upscale=False,
+            supports_json_prompt=True,
+            supports_first_sigma=True,
+            dimension_min=256,
+            dimension_max=2048,
+            dimension_step=16,
+        ),
+        submitted=submitted,
+    )
+
+    response = web_server._submit_image_job(
+        {
+            "model": "ideo",
+            "json_prompt": '{"high_level_description":"x"}',
+            "first_sigma": "1.005",
+        },
+        web_config,
+    )
+
+    assert response["job_id"] == "job-123"
+    assert len(submitted) == 1
+    assert submitted[0]["args"].first_sigma == 1.005
+    assert submitted[0]["args"].json_prompt_enabled is True
+    assert submitted[0]["prompts_data"] == {"prompt": [('{"high_level_description":"x"}', None)]}
+    assert submitted[0]["request"].first_sigma == 1.005
+    assert submitted[0]["request"].json_prompt is True
+    assert submitted[0]["request"].prompt == '{"high_level_description":"x"}'
+
+
+@pytest.mark.parametrize(
+    ("form", "expected_steps", "expected_guidance", "expected_steps_explicit", "expected_guidance_explicit"),
+    [
+        ({"model": "ideo", "prompt": "hello", "steps": "28", "guidance": "6.0"}, 28, 6.0, True, True),
+        ({"model": "ideo", "prompt": "hello"}, 10, 3.5, False, False),
+    ],
+)
+def test_submit_image_job_threads_steps_and_guidance_explicit_flags_to_authoritative_args(
+    monkeypatch,
+    tmp_path,
+    form,
+    expected_steps,
+    expected_guidance,
+    expected_steps_explicit,
+    expected_guidance_explicit,
+):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    defaults = _make_resolved_image_defaults(
+        supports_negative_prompt=False,
+        supports_img2img=False,
+        supports_upscale=False,
+        supports_json_prompt=True,
+        supports_first_sigma=True,
+        dimension_min=256,
+        dimension_max=2048,
+        dimension_step=16,
+    )
+    _patch_image_submit_dependencies(
+        monkeypatch,
+        model_info=ImageModelInfo(family="ideogram4", is_distilled=False, size=None),
+        defaults=defaults,
+        submitted=submitted,
+    )
+
+    def _resolve_defaults(_model_info, _config, cli_overrides, _backend_name):
+        resolved = dict(defaults)
+        resolved["steps"] = cli_overrides.get("steps", defaults["steps"])
+        resolved["guidance"] = cli_overrides.get("guidance", defaults["guidance"])
+        resolved["scheduler"] = cli_overrides.get("scheduler", defaults["scheduler"])
+        return resolved
+
+    monkeypatch.setattr(web_server, "resolve_defaults", _resolve_defaults)
+
+    response = web_server._submit_image_job(form, web_config)
+
+    assert response["job_id"] == "job-123"
+    assert len(submitted) == 1
+    assert submitted[0]["args"].steps == expected_steps
+    assert submitted[0]["args"].guidance == expected_guidance
+    assert submitted[0]["args"].steps_explicit is expected_steps_explicit
+    assert submitted[0]["args"].guidance_explicit is expected_guidance_explicit
+    assert submitted[0]["request"].steps == expected_steps
+    assert submitted[0]["request"].guidance == expected_guidance
+    assert submitted[0]["request"].steps_explicit is expected_steps_explicit
+    assert submitted[0]["request"].guidance_explicit is expected_guidance_explicit
+
+
+@pytest.mark.parametrize(
+    ("form", "expected_substring"),
+    [
+        (
+            {
+                "model": "ideo",
+                "prompt": "plain prompt",
+                "json_prompt": '{"high_level_description":"x"}',
+            },
+            "Provide either a prompt or a structured JSON caption, not both.",
+        ),
+        (
+            {
+                "model": "ideo",
+                "prompt_source": "file",
+                "json_prompt": '{"high_level_description":"x"}',
+            },
+            "A structured JSON caption cannot be combined with prompt-file mode.",
+        ),
+    ],
+)
+def test_submit_image_job_rejects_json_prompt_mutual_exclusion_cases(monkeypatch, tmp_path, form, expected_substring):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    _patch_image_submit_dependencies(
+        monkeypatch,
+        model_info=ImageModelInfo(family="ideogram4", is_distilled=False, size=None),
+        defaults=_make_resolved_image_defaults(supports_json_prompt=True, supports_first_sigma=True),
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        web_server._submit_image_job(form, web_config)
+
+    assert expected_substring in str(exc_info.value)
+
+
+@pytest.mark.parametrize("value", ["0", "2.5", "-1"])
+def test_submit_image_job_rejects_out_of_band_first_sigma(monkeypatch, tmp_path, value):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    _patch_image_submit_dependencies(
+        monkeypatch,
+        model_info=ImageModelInfo(family="ideogram4", is_distilled=False, size=None),
+        defaults=_make_resolved_image_defaults(supports_json_prompt=True, supports_first_sigma=True),
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        web_server._submit_image_job({"model": "ideo", "prompt": "hello", "first_sigma": value}, web_config)
+
+    assert "first_sigma must be in (0.0, 2.0]" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("json_prompt_value", ["not json", "[]", '"caption"'])
+def test_submit_image_job_rejects_invalid_json_prompt_values(monkeypatch, tmp_path, json_prompt_value):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    _patch_image_submit_dependencies(
+        monkeypatch,
+        model_info=ImageModelInfo(family="ideogram4", is_distilled=False, size=None),
+        defaults=_make_resolved_image_defaults(supports_json_prompt=True, supports_first_sigma=True),
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        web_server._submit_image_job({"model": "ideo", "json_prompt": json_prompt_value}, web_config)
+
+    assert "json_prompt must be a JSON object" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("form", "expected_substring"),
+    [
+        ({"model": "zit", "json_prompt": '{"high_level_description":"x"}'}, "This model does not support structured JSON captions."),
+        ({"model": "zit", "prompt": "hello", "first_sigma": "1.005"}, "This model does not support the first-step sigma control."),
+    ],
+)
+def test_submit_image_job_rejects_unsupported_model_json_prompt_and_first_sigma(monkeypatch, tmp_path, form, expected_substring):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    _patch_image_submit_dependencies(
+        monkeypatch,
+        model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None),
+        defaults=_make_resolved_image_defaults(supports_json_prompt=False, supports_first_sigma=False),
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        web_server._submit_image_job(form, web_config)
+
+    assert expected_substring in str(exc_info.value)
+
+
+def test_submit_image_job_rejects_ideogram_capability_violations_before_queue(monkeypatch, tmp_path):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    web_config.app_config["sizes"]["16:9"] = {"xl": {"width": 2112, "height": 1184}}
+    web_config.image_ratios = ("2:3", "16:9")
+    web_config.image_size_options["16:9"] = ("xl",)
+    submitted: list[dict[str, object]] = []
+    _patch_image_submit_dependencies(
+        monkeypatch,
+        model_info=ImageModelInfo(family="ideogram4", is_distilled=False, size=None),
+        defaults=_make_resolved_image_defaults(
+            supports_quantize=False,
+            supports_img2img=False,
+            supports_upscale=False,
+            supports_json_prompt=True,
+            supports_first_sigma=True,
+            dimension_min=256,
+            dimension_max=2048,
+            dimension_step=16,
+        ),
+        submitted=submitted,
+    )
+
+    image_path = tmp_path / "reference.png"
+    _write_png(image_path)
+
+    with pytest.raises(ValueError) as exc_info:
+        web_server._submit_image_job({"model": "ideo", "prompt": "hello", "image_path": str(image_path)}, web_config)
+    assert "does not support reference-image (img2img) steering." in str(exc_info.value)
+
+    with pytest.raises(ValueError) as exc_info:
+        web_server._submit_image_job({"model": "ideo", "prompt": "hello", "upscale": "2"}, web_config)
+    assert "does not support upscaling." in str(exc_info.value)
+
+    with pytest.raises(ValueError) as exc_info:
+        web_server._submit_image_job({"model": "ideo", "prompt": "hello", "quantize": "4"}, web_config)
+    assert "This model does not support quantization." in str(exc_info.value)
+
+    with pytest.raises(ValueError) as exc_info:
+        web_server._submit_image_job({"model": "ideo", "prompt": "hello", "ratio": "16:9", "size": "xl"}, web_config)
+    error_text = str(exc_info.value)
+    assert "must be between" in error_text
+    assert "multiple of" in error_text
+    assert submitted == []
+
+
+def test_submit_image_job_accepts_quantize_for_supported_models(monkeypatch, tmp_path):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    _patch_image_submit_dependencies(
+        monkeypatch,
+        model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None),
+        defaults=_make_resolved_image_defaults(supports_negative_prompt=True, supports_quantize=True),
+        submitted=submitted,
+    )
+
+    response = web_server._submit_image_job(
+        {
+            "model": "zit",
+            "prompt": "hello world",
+            "quantize": "4",
+        },
+        web_config,
+    )
+
+    assert response["job_id"] == "job-123"
+    assert len(submitted) == 1
+    assert submitted[0]["args"].quantize == 4
+    assert submitted[0]["request"].prompt == "hello world"
+
+
+def test_submit_image_job_standard_prompt_path_remains_unchanged_for_non_ideogram(monkeypatch, tmp_path):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    _patch_image_submit_dependencies(
+        monkeypatch,
+        model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None),
+        defaults=_make_resolved_image_defaults(supports_negative_prompt=True),
+        submitted=submitted,
+    )
+
+    response = web_server._submit_image_job(
+        {
+            "model": "zit",
+            "prompt": "hello world",
+            "negative_prompt": "avoid blur",
+        },
+        web_config,
+    )
+
+    assert response["job_id"] == "job-123"
+    assert len(submitted) == 1
+    assert submitted[0]["args"].json_prompt_enabled is False
+    assert submitted[0]["args"].first_sigma is None
+    assert submitted[0]["prompts_data"] == {"web": [("hello world", "avoid blur")]}
+    assert submitted[0]["request"].prompt == "hello world"
 
 
 def test_picker_route_rejects_unknown_or_mismatched_host_local_purpose():

@@ -233,6 +233,14 @@ def resolve_defaults(
         "scheduler": None,
         "upscale_steps": None,
         "supports_negative_prompt": preset.get("supports_negative_prompt", False),
+        "supports_img2img": preset.get("supports_img2img", True),
+        "supports_upscale": preset.get("supports_upscale", True),
+        "supports_quantize": preset.get("supports_quantize", True),
+        "supports_json_prompt": preset.get("supports_json_prompt", False),
+        "supports_first_sigma": preset.get("supports_first_sigma", False),
+        "dimension_min": preset.get("dimension_min", 16),
+        "dimension_max": preset.get("dimension_max", None),
+        "dimension_step": preset.get("dimension_step", 16),
     }
 
     # Layer family defaults
