@@ -135,7 +135,11 @@ def test_load_web_config_uses_image_model_detection_for_aliases(monkeypatch, tmp
 def test_load_web_config_surfaces_ideo_alias_offline_via_declared_family(monkeypatch, tmp_path):
     app_config = _make_app_config()
     app_config["model_aliases"] = {
-        "ideo": "ideogram-ai/ideogram-4-fp8",
+        "ideo": {
+            "darwin": "ideogram-ai/ideogram-4-fp8",
+            "win32": {"message": "Alias 'ideo' is macOS-only."},
+            "linux": {"message": "Alias 'ideo' is macOS-only."},
+        },
         "custom-default": str(tmp_path / "models" / "custom-default"),
     }
     app_config["model_alias_families"] = {"ideo": "ideogram4"}
@@ -147,7 +151,7 @@ def test_load_web_config_surfaces_ideo_alias_offline_via_declared_family(monkeyp
     monkeypatch.setattr(web_config_module, "list_models", lambda _: [])
     monkeypatch.setattr(web_config_module, "list_video_models", lambda _: [])
     monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
-    monkeypatch.setattr(web_config_module, "resolve_model_path", lambda name, **_: app_config["model_aliases"].get(name, name))
+    monkeypatch.setattr(model_inventory_module.sys, "platform", "darwin")
 
     detect_calls: list[str] = []
 
@@ -165,6 +169,39 @@ def test_load_web_config_surfaces_ideo_alias_offline_via_declared_family(monkeyp
     assert web_config.default_models.image == "ideo"
     assert web_config.image_model_options == ("custom-default", "ideo")
     assert detect_calls == [str(tmp_path / "models" / "custom-default")]
+
+
+def test_load_web_config_hides_ideo_alias_on_windows(monkeypatch, tmp_path):
+    app_config = _make_app_config()
+    app_config["model_aliases"] = {
+        "ideo": {
+            "darwin": "ideogram-ai/ideogram-4-fp8",
+            "win32": {"message": "Alias 'ideo' is macOS-only."},
+            "linux": {"message": "Alias 'ideo' is macOS-only."},
+        },
+        "portable-image": "Tongyi-MAI/Z-Image-Turbo",
+    }
+    app_config["model_alias_families"] = {"ideo": "ideogram4"}
+    app_config["ui"]["default_models"] = {"image": "ideo"}
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(web_config_module, "load_config", lambda: app_config)
+    monkeypatch.setattr(web_config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+    monkeypatch.setattr(web_config_module, "list_models", lambda _: [])
+    monkeypatch.setattr(web_config_module, "list_video_models", lambda _: [])
+    monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
+    monkeypatch.setattr(model_inventory_module.sys, "platform", "win32")
+    monkeypatch.setattr(
+        web_config_module,
+        "detect_image_model",
+        lambda value: ImageModelInfo(family="zimage" if "Z-Image" in str(value) else "unknown", is_distilled=False, size=None),
+    )
+    monkeypatch.setattr(web_config_module, "detect_video_model", lambda _value: SimpleNamespace(family="unknown"))
+
+    web_config = web_config_module.load_web_config()
+
+    assert web_config.image_model_options == ("portable-image",)
+    assert web_config.default_models.image == "portable-image"
 
 
 def test_load_web_config_skips_unavailable_platform_aliases(monkeypatch, tmp_path):
