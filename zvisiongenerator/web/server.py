@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 import uuid
@@ -344,6 +345,8 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         saturation=_resolve_numeric_toggle(form, "saturation_enabled", "saturation_amount", default_enabled=False),
         lora_paths=None,
         lora_weights=None,
+        first_sigma=None,
+        json_prompt_enabled=False,
     )
     args.size = _resolve_image_size(form, web_config, args.ratio)
     if args.image_strength is None:
@@ -360,9 +363,40 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         {key: value for key, value in {"steps": args.steps, "guidance": args.guidance, "scheduler": args.scheduler}.items() if value is not None},
         get_backend_name(),
     )
-    _prompt_source, prompt, negative_prompt, prompts_data = _resolve_prompt_submission(form)
-    steps_explicit = args.steps is not None
-    guidance_explicit = args.guidance is not None
+    json_prompt_text = _optional_text(form, "json_prompt")
+    if json_prompt_text is not None:
+        # JSON caption mode: bypass _resolve_prompt_submission so a JSON-only submission
+        # is not rejected by the required-prompt check.
+        if _optional_text(form, "prompt") is not None:
+            raise ValueError("Provide either a prompt or a structured JSON caption, not both.")
+        prompt_source = _optional_text(form, "prompt_source") or DEFAULT_PROMPT_SOURCE
+        if prompt_source == "file":
+            raise ValueError("A structured JSON caption cannot be combined with prompt-file mode.")
+        try:
+            parsed = json.loads(json_prompt_text)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f'json_prompt must be a JSON object, e.g. \'{{"high_level_description": "..."}}\': {exc}') from exc
+        if not isinstance(parsed, dict):
+            raise ValueError(f"json_prompt must be a JSON object, got {type(parsed).__name__}.")
+        prompt = json_prompt_text
+        negative_prompt = None
+        prompts_data = {"prompt": [(json_prompt_text, None)]}
+        args.json_prompt_enabled = True
+    else:
+        _prompt_source, prompt, negative_prompt, prompts_data = _resolve_prompt_submission(form)
+    first_sigma = _optional_float(form, "first_sigma")
+    if first_sigma is not None and not (0.0 < first_sigma <= 2.0):
+        raise ValueError(f"first_sigma must be in (0.0, 2.0], got {first_sigma}.")
+    args.first_sigma = first_sigma
+    if args.json_prompt_enabled and not defaults.get("supports_json_prompt", False):
+        raise ValueError("This model does not support structured JSON captions.")
+    if args.first_sigma is not None and not defaults.get("supports_first_sigma", False):
+        raise ValueError("This model does not support the first-step sigma control.")
+    # Capture explicit-intent flags on args BEFORE the resolved defaults overwrite
+    # args.steps/args.guidance, so run_batch's authoritative request rebuild sees them
+    # via getattr(args, ...) (mirrors image_cli.py's args.steps_explicit assignment).
+    args.steps_explicit = args.steps is not None
+    args.guidance_explicit = args.guidance is not None
     args.steps = defaults["steps"]
     args.guidance = defaults["guidance"]
     args.scheduler = defaults["scheduler"]
@@ -376,6 +410,9 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
 
     args.lora_paths, args.lora_weights = _resolve_loras(form)
     dims = app_config["sizes"][args.ratio][args.size]
+    eff_width = args.width or dims["width"]
+    eff_height = args.height or dims["height"]
+    _validate_model_capabilities(args, defaults, eff_width, eff_height)
 
     request = ImageGenerationRequest(
         backend=None,
@@ -395,10 +432,10 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         steps=args.steps,
         guidance=args.guidance,
         scheduler=args.scheduler,
-        steps_explicit=steps_explicit,
-        guidance_explicit=guidance_explicit,
-        first_sigma=None,
-        json_prompt=False,
+        steps_explicit=args.steps_explicit,
+        guidance_explicit=args.guidance_explicit,
+        first_sigma=args.first_sigma,
+        json_prompt=args.json_prompt_enabled,
         upscale_factor=args.upscale,
         upscale_denoise=args.upscale_denoise,
         upscale_steps=args.upscale_steps,
@@ -729,6 +766,35 @@ def _resolve_loras(form: Any) -> tuple[list[str] | None, list[float] | None]:
         [resolve_lora_path(name) for name, _ in parsed],
         [weight for _, weight in parsed],
     )
+
+
+def _validate_model_capabilities(args: argparse.Namespace, defaults: dict[str, Any], eff_width: int, eff_height: int) -> None:
+    """Reject requests that violate the resolved model's capability flags.
+
+    Args:
+        args: The resolved image-generation args Namespace.
+        defaults: The per-model effective defaults from ``resolve_defaults``.
+        eff_width: The effective width (custom or size-preset) to validate.
+        eff_height: The effective height (custom or size-preset) to validate.
+
+    Raises:
+        ValueError: When the model does not support a requested reference
+            image / upscale / quantization, or when effective dimensions fall
+            outside the model's ``dimension_min``/``dimension_max``/``dimension_step``.
+    """
+    if args.image_path is not None and not defaults.get("supports_img2img", True):
+        raise ValueError("This model does not support reference-image (img2img) steering.")
+    if args.upscale is not None and not defaults.get("supports_upscale", True):
+        raise ValueError("This model does not support upscaling.")
+    if getattr(args, "quantize", None) is not None and not defaults.get("supports_quantize", True):
+        raise ValueError("This model does not support quantization.")
+    dmin = int(defaults.get("dimension_min", 16))
+    dmax = defaults.get("dimension_max", None)
+    dstep = int(defaults.get("dimension_step", 16))
+    for label, value in (("Width", eff_width), ("Height", eff_height)):
+        if value < dmin or (dmax is not None and value > dmax) or value % dstep != 0:
+            upper = dmax if dmax is not None else "∞"
+            raise ValueError(f"{label} {value} must be between {dmin} and {upper} and a multiple of {dstep} for this model.")
 
 
 def _validate_image_args(args: argparse.Namespace, *, quantize_options: tuple[int, ...] = (4, 8)) -> None:
