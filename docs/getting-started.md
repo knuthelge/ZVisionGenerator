@@ -104,6 +104,8 @@ By default, the Web UI listens on `http://127.0.0.1:8080/` and opens your browse
 
 While a generation is running, the Web UI keeps the active job attached to the current browser tab. Refreshing the tab reconnects to the running job when the server still has it, and stale completed or missing jobs are cleared automatically. Job controls are shown only when the running job supports them.
 
+Ideogram 4 (`ideo`) is selectable in the workspace model dropdown. When it is selected, the workspace offers a structured-JSON-caption input and a first-step-sigma control, while reference-image (img2img) and upscale are unavailable, and width and height are constrained to the 256–2048 range in multiples of 16.
+
 
 ## Model Store (`~/.ziv/`)
 

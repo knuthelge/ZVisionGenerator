@@ -12,6 +12,9 @@ const DEFAULT_DRAFT: DraftState = {
   workflow: 'txt2img',
   promptSource: 'inline',
   prompt: '',
+  jsonPromptEnabled: false,
+  jsonPrompt: '',
+  firstSigma: null,
   negativePrompt: '',
   promptFilePath: null,
   promptFileOptionId: null,
@@ -249,13 +252,16 @@ export const draft = {
     }
 
     if (isVideoMode) {
-      nextState = { ...nextState, negativePrompt: '', quantize: null };
+      nextState = { ...nextState, negativePrompt: '', quantize: null, jsonPromptEnabled: false, jsonPrompt: '', firstSigma: null };
     } else {
       const imageDefaults = modelDefaults as ImageModelDefaults | null;
       nextState = {
         ...nextState,
         negativePrompt: imageDefaults?.supports_negative_prompt ? nextState.negativePrompt : '',
         quantize: imageDefaults?.supports_quantize ? nextState.quantize : null,
+        jsonPromptEnabled: imageDefaults?.supports_json_prompt ? nextState.jsonPromptEnabled : false,
+        jsonPrompt: imageDefaults?.supports_json_prompt ? nextState.jsonPrompt : '',
+        firstSigma: imageDefaults?.supports_first_sigma ? nextState.firstSigma : null,
       };
     }
 

@@ -70,8 +70,35 @@ function makeImageDefaults(overrides: Partial<ImageModelDefaults> = {}): ImageMo
       sharpen: true,
       save_pre: false,
     },
+    supports_img2img: true,
+    supports_upscale: true,
+    supports_json_prompt: false,
+    supports_first_sigma: false,
+    dimension_min: 16,
+    dimension_max: null,
+    dimension_step: 16,
     ...overrides,
   };
+}
+
+function makeIdeogramDefaults(overrides: Partial<ImageModelDefaults> = {}): ImageModelDefaults {
+  return makeImageDefaults({
+    ratio: '16:9',
+    size: 'l',
+    steps: 20,
+    guidance: 7,
+    width: 1664,
+    height: 928,
+    supports_negative_prompt: false,
+    supports_img2img: false,
+    supports_upscale: false,
+    supports_json_prompt: true,
+    supports_first_sigma: true,
+    dimension_min: 256,
+    dimension_max: 2048,
+    dimension_step: 16,
+    ...overrides,
+  });
 }
 
 function makeVideoDefaults(overrides: Partial<VideoModelDefaults> = {}): VideoModelDefaults {
@@ -141,6 +168,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
     image_ratios: ['2:3', '16:9'],
     video_ratios: ['16:9'],
     image_size_options: { '2:3': ['m'], '16:9': ['l'] },
+    image_size_dimensions: {},
     video_size_options: { '16:9': ['m'] },
     scheduler_options: ['beta'],
     workflow_contract: {
@@ -465,6 +493,250 @@ describe('WorkspacePage', () => {
     await settle();
 
     expect(target.querySelector('#ws-scheduler')).toBeNull();
+  });
+
+  it('gates reference image and upscale controls by selected model capabilities', async () => {
+    draft.update('workflow', 'img2img');
+
+    const ideogramDefaults = makeIdeogramDefaults();
+    const permissiveDefaults = makeImageDefaults({
+      ratio: '16:9',
+      size: 'l',
+      width: 1664,
+      height: 928,
+    });
+    const context = makeContext({
+      image_models: [
+        { id: 'ideo', label: 'ideo', type: 'image' },
+        { id: 'zit', label: 'zit', type: 'image' },
+      ],
+      defaults: ideogramDefaults,
+      current_image_model: 'ideo',
+      image_model_defaults: {
+        ideo: ideogramDefaults,
+        zit: permissiveDefaults,
+      },
+      image_ratios: ['16:9'],
+      image_size_options: { '16:9': ['m', 'l', 'xl'] },
+      image_size_dimensions: {
+        '16:9': {
+          m: [1344, 768],
+          l: [1664, 928],
+          xl: [2112, 1184],
+        },
+      },
+    });
+
+    await mountWorkspace(context);
+
+    expect(target.querySelector('#ws-image-file')).toBeNull();
+    expect(target.querySelector('input[name="image_path"]')).toBeNull();
+    expect(target.querySelector('label[aria-label="Enable upscale"]')).toBeNull();
+
+    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement | null;
+    expect(modelSelect).not.toBeNull();
+    modelSelect!.value = 'zit';
+    modelSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(target.querySelector('#ws-image-file')).not.toBeNull();
+    expect(target.querySelector('input[name="image_path"]')).not.toBeNull();
+    expect(target.querySelector('label[aria-label="Enable upscale"]')).not.toBeNull();
+  });
+
+  it('applies ideogram dimension bounds and filters xl presets only for constrained models', async () => {
+    const ideogramDefaults = makeIdeogramDefaults();
+    const permissiveDefaults = makeImageDefaults({
+      ratio: '16:9',
+      size: 'xl',
+      width: 2112,
+      height: 1184,
+    });
+    const context = makeContext({
+      image_models: [
+        { id: 'ideo', label: 'ideo', type: 'image' },
+        { id: 'zit', label: 'zit', type: 'image' },
+      ],
+      defaults: ideogramDefaults,
+      current_image_model: 'ideo',
+      image_model_defaults: {
+        ideo: ideogramDefaults,
+        zit: permissiveDefaults,
+      },
+      image_ratios: ['16:9'],
+      image_size_options: { '16:9': ['m', 'l', 'xl'] },
+      image_size_dimensions: {
+        '16:9': {
+          m: [1344, 768],
+          l: [1664, 928],
+          xl: [2112, 1184],
+        },
+      },
+    });
+
+    await mountWorkspace(context);
+
+    const sizeSelect = target.querySelector('#ws-size') as HTMLSelectElement | null;
+    expect(sizeSelect).not.toBeNull();
+    expect(Array.from(sizeSelect!.options).map((option) => option.value)).toEqual(['m', 'l']);
+
+    const customDimensionsButton = Array.from(target.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Custom W/H'
+    ) as HTMLButtonElement | undefined;
+    expect(customDimensionsButton).not.toBeUndefined();
+    customDimensionsButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+
+    const widthInput = target.querySelector('#ws-width') as HTMLInputElement | null;
+    const heightInput = target.querySelector('#ws-height') as HTMLInputElement | null;
+    expect(widthInput?.min).toBe('256');
+    expect(widthInput?.max).toBe('2048');
+    expect(widthInput?.step).toBe('16');
+    expect(heightInput?.min).toBe('256');
+    expect(heightInput?.max).toBe('2048');
+    expect(heightInput?.step).toBe('16');
+
+    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement | null;
+    expect(modelSelect).not.toBeNull();
+    modelSelect!.value = 'zit';
+    modelSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    const ratioModeButton = Array.from(target.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Ratio'
+    ) as HTMLButtonElement | undefined;
+    expect(ratioModeButton).not.toBeUndefined();
+    ratioModeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+
+    const permissiveSizeSelect = target.querySelector('#ws-size') as HTMLSelectElement | null;
+    expect(permissiveSizeSelect).not.toBeNull();
+    expect(Array.from(permissiveSizeSelect!.options).map((option) => option.value)).toEqual(['m', 'l', 'xl']);
+  });
+
+  it('submits either prompt or json_prompt based on the structured caption toggle', async () => {
+    const ideogramDefaults = makeIdeogramDefaults();
+    const permissiveDefaults = makeImageDefaults({ ratio: '16:9', size: 'l', width: 1664, height: 928 });
+    const context = makeContext({
+      image_models: [
+        { id: 'ideo', label: 'ideo', type: 'image' },
+        { id: 'zit', label: 'zit', type: 'image' },
+      ],
+      defaults: ideogramDefaults,
+      current_image_model: 'ideo',
+      image_model_defaults: {
+        ideo: ideogramDefaults,
+        zit: permissiveDefaults,
+      },
+      image_ratios: ['16:9'],
+      image_size_options: { '16:9': ['m', 'l'] },
+      image_size_dimensions: {
+        '16:9': {
+          m: [1344, 768],
+          l: [1664, 928],
+        },
+      },
+    });
+
+    await mountWorkspace(context);
+
+    const jsonToggle = target.querySelector('#ws-json-prompt-toggle') as HTMLInputElement | null;
+    expect(jsonToggle).not.toBeNull();
+    expect(target.querySelector('#ws-prompt')).not.toBeNull();
+    expect(target.querySelector('textarea[name="json_prompt"]')).toBeNull();
+
+    const promptInput = target.querySelector('#ws-prompt') as HTMLTextAreaElement | null;
+    expect(promptInput).not.toBeNull();
+    promptInput!.value = 'plain caption';
+    promptInput!.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+
+    const form = target.querySelector('form');
+    expect(form).not.toBeNull();
+    let submittedFormData = new FormData(form!);
+    expect(submittedFormData).toBeInstanceOf(FormData);
+    expect(submittedFormData.get('prompt')).toBe('plain caption');
+    expect(submittedFormData.has('json_prompt')).toBe(false);
+
+    jsonToggle!.checked = true;
+    jsonToggle!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(target.querySelector('#ws-prompt')).toBeNull();
+    const jsonPromptInput = target.querySelector('textarea[name="json_prompt"]') as HTMLTextAreaElement | null;
+    expect(jsonPromptInput).not.toBeNull();
+    jsonPromptInput!.value = '{"high_level_description":"json caption"}';
+    jsonPromptInput!.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+
+    submittedFormData = new FormData(form!);
+    expect(submittedFormData).toBeInstanceOf(FormData);
+    expect(submittedFormData.get('json_prompt')).toBe('{"high_level_description":"json caption"}');
+    expect(submittedFormData.has('prompt')).toBe(false);
+
+    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement | null;
+    expect(modelSelect).not.toBeNull();
+    modelSelect!.value = 'zit';
+    modelSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(target.querySelector('#ws-json-prompt-toggle')).toBeNull();
+  });
+
+  it('submits first_sigma only when set and hides the control for unsupported models', async () => {
+    const ideogramDefaults = makeIdeogramDefaults();
+    const permissiveDefaults = makeImageDefaults({ ratio: '16:9', size: 'l', width: 1664, height: 928 });
+    const context = makeContext({
+      image_models: [
+        { id: 'ideo', label: 'ideo', type: 'image' },
+        { id: 'zit', label: 'zit', type: 'image' },
+      ],
+      defaults: ideogramDefaults,
+      current_image_model: 'ideo',
+      image_model_defaults: {
+        ideo: ideogramDefaults,
+        zit: permissiveDefaults,
+      },
+      image_ratios: ['16:9'],
+      image_size_options: { '16:9': ['m', 'l'] },
+      image_size_dimensions: {
+        '16:9': {
+          m: [1344, 768],
+          l: [1664, 928],
+        },
+      },
+    });
+
+    await mountWorkspace(context);
+
+    const firstSigmaInput = target.querySelector('#ws-first-sigma') as HTMLInputElement | null;
+    expect(firstSigmaInput).not.toBeNull();
+    expect(firstSigmaInput?.placeholder).toBe('1.004');
+    expect(target.querySelector('input[name="first_sigma"]')).toBeNull();
+
+    const form = target.querySelector('form');
+    expect(form).not.toBeNull();
+    let submittedFormData = new FormData(form!);
+    expect(submittedFormData).toBeInstanceOf(FormData);
+    expect(submittedFormData.has('first_sigma')).toBe(false);
+
+    firstSigmaInput!.value = '1.005';
+    firstSigmaInput!.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+
+    expect(target.querySelector('input[name="first_sigma"]')).not.toBeNull();
+
+    submittedFormData = new FormData(form!);
+    expect(submittedFormData).toBeInstanceOf(FormData);
+    expect(submittedFormData.get('first_sigma')).toBe('1.005');
+
+    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement | null;
+    expect(modelSelect).not.toBeNull();
+    modelSelect!.value = 'zit';
+    modelSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(target.querySelector('#ws-first-sigma')).toBeNull();
   });
 
   it('serializes post-processing hidden fields when enabled controls are active', async () => {

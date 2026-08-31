@@ -43,6 +43,10 @@ When neither `--steps` nor `--guidance` is given, Ideogram 4 uses its built-in t
 
 Ideogram 4 applies an automatic first-step adjustment to its denoising schedule that reduces spurious "Image blocked by safety filter" grey results at no change to the prompt, seed, or resolution. This mitigation is best-effort and not guaranteed to recover every refused generation. The adjustment defaults to a first-step sigma of `1.004` and can be overridden per run with `--first-sigma` (for example `--first-sigma 1.005` or `--first-sigma 1.006`) when a benign prompt is still blocked.
 
+#### In the Web UI
+
+Ideogram 4 is selectable in the workspace model dropdown. When it is selected, the workspace exposes a structured-JSON-caption input and a first-step-sigma control that mirror `--json-prompt` and `--first-sigma`. Reference-image (img2img) and upscale are unavailable for it, and width and height are constrained to the 256–2048 range in multiples of 16.
+
 ### Custom Aliases
 
 Add your own aliases in `~/.ziv/config.yaml`:

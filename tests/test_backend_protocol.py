@@ -456,7 +456,6 @@ class TestIdeogram4MfluxBackend:
         backend._model_info = image_mac_module.ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
         model = MagicMock()
         captured_effective_sigmas: list[float | None] = []
-        sentinel = image_mac_module._INITIAL_SIGMA_UNSET
 
         def _capture_generate_image(**kwargs):
             del kwargs
@@ -467,26 +466,35 @@ class TestIdeogram4MfluxBackend:
 
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(image_mac_module, "IDEOGRAM4_INITIAL_SIGMA", 1.004)
-            monkeypatch.setattr(image_mac_module, "_initial_sigma_override", sentinel)
+            had_previous_value = hasattr(image_mac_module._initial_sigma_override, "value")
+            previous_value = getattr(image_mac_module._initial_sigma_override, "value", image_mac_module._INITIAL_SIGMA_UNSET)
+            if had_previous_value:
+                delattr(image_mac_module._initial_sigma_override, "value")
 
-            image = backend.text_to_image(
-                model=model,
-                prompt='{"type":"caption","text":"keep verbatim"}',
-                width=1024,
-                height=1024,
-                seed=123,
-                steps=20,
-                guidance=7.0,
-                steps_explicit=True,
-                guidance_explicit=True,
-                first_sigma=first_sigma,
-            )
+            try:
+                image = backend.text_to_image(
+                    model=model,
+                    prompt='{"type":"caption","text":"keep verbatim"}',
+                    width=1024,
+                    height=1024,
+                    seed=123,
+                    steps=20,
+                    guidance=7.0,
+                    steps_explicit=True,
+                    guidance_explicit=True,
+                    first_sigma=first_sigma,
+                )
+            finally:
+                if had_previous_value:
+                    image_mac_module._initial_sigma_override.value = previous_value
+                elif hasattr(image_mac_module._initial_sigma_override, "value"):
+                    delattr(image_mac_module._initial_sigma_override, "value")
 
             assert image is not None
             model.generate_image.assert_called_once()
             assert captured_effective_sigmas[0] == pytest.approx(expected_effective_sigma)
             assert "first_sigma" not in model.generate_image.call_args.kwargs
-            assert image_mac_module._initial_sigma_override is sentinel
+            assert image_mac_module._effective_initial_sigma() == 1.004
 
     def test_ideogram4_image_to_image_raises(self):
         image_mac_module = self._import_backend_module()

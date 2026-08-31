@@ -39,6 +39,7 @@ def _make_app_config() -> dict[str, object]:
             "zit": "Tongyi-MAI/Z-Image-Turbo",
             "ltx-8": "dgrauet/ltx-2.3-mlx-q8",
         },
+        "model_alias_families": {},
         "ui": {
             "startup_view": "gallery",
             "gallery_page_size": 8,
@@ -54,6 +55,14 @@ def _make_app_config() -> dict[str, object]:
 def _assert_non_empty_string(value: object) -> None:
     assert isinstance(value, str)
     assert value
+
+
+def test_declared_image_family_returns_configured_family():
+    app_config = _make_app_config()
+    app_config["model_alias_families"] = {"ideo": "ideogram4"}
+
+    assert model_inventory_module.declared_image_family(app_config, "ideo") == "ideogram4"
+    assert model_inventory_module.declared_image_family(app_config, "zit") is None
 
 
 def test_load_web_config_loads_declarative_ui_settings(monkeypatch, tmp_path):
@@ -123,11 +132,13 @@ def test_load_web_config_uses_image_model_detection_for_aliases(monkeypatch, tmp
     assert web_config.image_model_options == ("custom-default",)
 
 
-def test_load_web_config_surfaces_ideo_alias_via_dynamic_inventory(monkeypatch, tmp_path):
+def test_load_web_config_surfaces_ideo_alias_offline_via_declared_family(monkeypatch, tmp_path):
     app_config = _make_app_config()
     app_config["model_aliases"] = {
         "ideo": "ideogram-ai/ideogram-4-fp8",
+        "custom-default": str(tmp_path / "models" / "custom-default"),
     }
+    app_config["model_alias_families"] = {"ideo": "ideogram4"}
     app_config["ui"]["default_models"] = {"image": "ideo"}
 
     monkeypatch.chdir(tmp_path)
@@ -137,17 +148,23 @@ def test_load_web_config_surfaces_ideo_alias_via_dynamic_inventory(monkeypatch, 
     monkeypatch.setattr(web_config_module, "list_video_models", lambda _: [])
     monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
     monkeypatch.setattr(web_config_module, "resolve_model_path", lambda name, **_: app_config["model_aliases"].get(name, name))
-    monkeypatch.setattr(
-        web_config_module,
-        "detect_image_model",
-        lambda value: ImageModelInfo(family="ideogram4" if "ideogram-4" in str(value) else "unknown", is_distilled=False, size=None),
-    )
+
+    detect_calls: list[str] = []
+
+    def _fake_detect_image_model(value: object) -> ImageModelInfo:
+        detect_calls.append(str(value))
+        if "ideogram-4" in str(value):
+            raise RuntimeError("offline")
+        return ImageModelInfo(family="zimage" if "custom-default" in str(value) else "unknown", is_distilled=False, size=None)
+
+    monkeypatch.setattr(web_config_module, "detect_image_model", _fake_detect_image_model)
     monkeypatch.setattr(web_config_module, "detect_video_model", lambda _value: SimpleNamespace(family="unknown"))
 
     web_config = web_config_module.load_web_config()
 
     assert web_config.default_models.image == "ideo"
-    assert web_config.image_model_options == ("ideo",)
+    assert web_config.image_model_options == ("custom-default", "ideo")
+    assert detect_calls == [str(tmp_path / "models" / "custom-default")]
 
 
 def test_load_web_config_skips_unavailable_platform_aliases(monkeypatch, tmp_path):

@@ -35,6 +35,25 @@ class VideoInventoryEntry:
     resolved_path: str
 
 
+def declared_image_family(app_config: dict[str, Any], alias_name: str) -> str | None:
+    """Return the config-declared image family for *alias_name*, if any.
+
+    Declared families let the Web UI surface known aliases (e.g. ``ideo``)
+    without a network round-trip through ``detect_image_model``.
+
+    Args:
+        app_config: Loaded config.yaml dict.
+        alias_name: The model alias to look up.
+
+    Returns:
+        The declared family string, or ``None`` when the alias has no
+        declared family.
+    """
+    families = app_config.get("model_alias_families", {})
+    value = families.get(alias_name)
+    return value if isinstance(value, str) and value else None
+
+
 def discover_image_inventory(
     app_config: dict[str, Any],
     data_dir: Path,
@@ -64,16 +83,22 @@ def discover_image_inventory(
         resolved_path = _resolve_alias_path(alias_name, aliases, resolve_alias_path)
         if resolved_path is None:
             continue
-        try:
-            info = detect_model(resolved_path)
-        except Exception:
-            continue
-        if getattr(info, "family", "unknown") == "unknown":
-            continue
+        declared = declared_image_family(app_config, alias_name)
+        if declared is not None:
+            family, size = declared, None
+        else:
+            try:
+                info = detect_model(resolved_path)
+            except Exception:
+                continue
+            family = getattr(info, "family", "unknown")
+            size = getattr(info, "size", None)
+            if family == "unknown":
+                continue
         entries[alias_name] = ImageInventoryEntry(
             name=alias_name,
-            family=getattr(info, "family", "unknown"),
-            size=getattr(info, "size", None),
+            family=family,
+            size=size,
             source="alias",
             resolved_path=resolved_path,
         )
