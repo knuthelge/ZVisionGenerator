@@ -90,6 +90,11 @@ model_aliases:
   klein4b: "black-forest-labs/FLUX.2-klein-4B"
   ideo: "ideogram-ai/ideogram-4-fp8"
 
+# Declared per-alias image families let the Web UI surface known aliases offline
+# (no network round-trip through detect_image_model).
+model_alias_families:
+  ideo: ideogram4
+
 model_presets:
   zimage:
     supports_negative_prompt: true
@@ -132,6 +137,14 @@ model_presets:
 
   ideogram4:
     supports_negative_prompt: false
+    supports_img2img: false
+    supports_upscale: false
+    supports_quantize: false
+    supports_json_prompt: true
+    supports_first_sigma: true
+    dimension_min: 256
+    dimension_max: 2048
+    dimension_step: 16
     default_steps: 20
     default_guidance: 7.0
     default_scheduler:

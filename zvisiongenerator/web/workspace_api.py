@@ -9,12 +9,12 @@ from typing import Any
 from zvisiongenerator.backends import get_backend_name
 from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.utils.config import resolve_defaults, resolve_video_defaults
-from zvisiongenerator.utils.image_model_detect import detect_image_model
+from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
-from zvisiongenerator.web.model_inventory import discover_image_inventory, discover_video_inventory
+from zvisiongenerator.web.model_inventory import declared_image_family, discover_image_inventory, discover_video_inventory
 
 
 _IMAGE_BOOTSTRAP_STRENGTH = 0.5
@@ -95,6 +95,7 @@ def build_workspace_response(
         "video_ratios": list(web_config.video_ratios),
         "image_size_options": {ratio: list(options) for ratio, options in web_config.image_size_options.items()},
         "video_size_options": {ratio: list(options) for ratio, options in web_config.video_size_options.items()},
+        "image_size_dimensions": {ratio: {size: list(wh) for size, wh in sizes.items()} for ratio, sizes in web_config.image_size_dimensions.items()},
         "scheduler_options": list(web_config.scheduler_options),
         "prompt_sources": prompt_sources,
         "default_prompt_source": default_prompt_source,
@@ -174,7 +175,11 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
     ratio, size = resolve_image_ratio_size_defaults(web_config)
     try:
         resolved_model = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
-        model_info = detect_image_model(resolved_model)
+        declared = declared_image_family(app_config, model_name)
+        if declared is not None:
+            model_info = ImageModelInfo(family=declared, is_distilled=False, size=None)
+        else:
+            model_info = detect_image_model(resolved_model)
         defaults = resolve_defaults(model_info, app_config, {}, get_backend_name())
     except Exception:
         defaults = {
@@ -182,6 +187,13 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
             "guidance": app_config.get("generation", {}).get("default_guidance", 3.5),
             "scheduler": None,
             "supports_negative_prompt": False,
+            "supports_img2img": True,
+            "supports_upscale": True,
+            "supports_json_prompt": False,
+            "supports_first_sigma": False,
+            "dimension_min": 16,
+            "dimension_max": None,
+            "dimension_step": 16,
         }
     dims = _resolve_image_bootstrap_dimensions(app_config, ratio, size)
     return {
@@ -193,11 +205,18 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         "guidance": defaults["guidance"],
         "scheduler": defaults.get("scheduler"),
         "supports_negative_prompt": bool(defaults.get("supports_negative_prompt", False)),
-        "supports_quantize": bool(web_config.quantize_options),
+        "supports_quantize": bool(web_config.quantize_options) and bool(defaults.get("supports_quantize", True)),
         "quantize": None,
         "image_strength": _IMAGE_BOOTSTRAP_STRENGTH,
         "postprocess": _image_bootstrap_postprocess(),
         "upscale": _image_bootstrap_upscale(),
+        "supports_img2img": bool(defaults.get("supports_img2img", True)),
+        "supports_upscale": bool(defaults.get("supports_upscale", True)),
+        "supports_json_prompt": bool(defaults.get("supports_json_prompt", False)),
+        "supports_first_sigma": bool(defaults.get("supports_first_sigma", False)),
+        "dimension_min": int(defaults.get("dimension_min", 16)),
+        "dimension_max": defaults.get("dimension_max", None),
+        "dimension_step": int(defaults.get("dimension_step", 16)),
     }
 
 

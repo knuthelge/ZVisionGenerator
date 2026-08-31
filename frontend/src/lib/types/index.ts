@@ -68,6 +68,7 @@ export interface WorkspaceContext {
   video_ratios: string[];
   image_size_options: Record<string, string[]>;
   video_size_options: Record<string, string[]>;
+  image_size_dimensions: Record<string, Record<string, [number, number]>>;
   scheduler_options: string[];
   prompt_sources: PromptSource[];
   default_prompt_source: PromptSource;
@@ -158,6 +159,13 @@ export interface ImageModelDefaults {
   image_strength: number;
   postprocess: ImagePostprocessDefaults;
   upscale: ImageUpscaleDefaults;
+  supports_img2img: boolean;
+  supports_upscale: boolean;
+  supports_json_prompt: boolean;
+  supports_first_sigma: boolean;
+  dimension_min: number;
+  dimension_max: number | null;
+  dimension_step: number;
 }
 
 export interface VideoModelDefaults {
@@ -247,6 +255,9 @@ export interface DraftState {
   workflow: Workflow;
   promptSource: PromptSource;
   prompt: string;
+  jsonPromptEnabled: boolean;
+  jsonPrompt: string;
+  firstSigma: number | null;
   negativePrompt: string;
   promptFilePath: string | null;
   promptFileOptionId: string | null;

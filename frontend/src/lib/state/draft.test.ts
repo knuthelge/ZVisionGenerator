@@ -19,8 +19,35 @@ function makeImageDefaults(overrides: Partial<ImageModelDefaults> = {}): ImageMo
     image_strength: 0.5,
     postprocess: { sharpen: 0.8, contrast: false, saturation: false },
     upscale: { enabled: false, factor: null, denoise: null, steps: null, guidance: null, sharpen: true, save_pre: false },
+    supports_img2img: true,
+    supports_upscale: true,
+    supports_json_prompt: false,
+    supports_first_sigma: false,
+    dimension_min: 16,
+    dimension_max: null,
+    dimension_step: 16,
     ...overrides,
   };
+}
+
+function makeIdeogramDefaults(overrides: Partial<ImageModelDefaults> = {}): ImageModelDefaults {
+  return makeImageDefaults({
+    ratio: '16:9',
+    size: 'l',
+    steps: 20,
+    guidance: 7,
+    width: 1664,
+    height: 928,
+    supports_negative_prompt: false,
+    supports_img2img: false,
+    supports_upscale: false,
+    supports_json_prompt: true,
+    supports_first_sigma: true,
+    dimension_min: 256,
+    dimension_max: 2048,
+    dimension_step: 16,
+    ...overrides,
+  });
 }
 
 function makeVideoDefaults(overrides: Partial<VideoModelDefaults> = {}): VideoModelDefaults {
@@ -65,6 +92,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
     video_ratios: ['16:9', '9:16'],
     image_size_options: { '1:1': ['s', 'm', 'l'], '2:3': ['s', 'm', 'l'], '16:9': ['s', 'm', 'l'] },
     video_size_options: { '16:9': ['s', 'm'], '9:16': ['s', 'm'] },
+    image_size_dimensions: {},
     scheduler_options: ['euler', 'dpm'],
     workflow_contract: {
       values: ['txt2img', 'img2img', 'txt2vid', 'img2vid'],
@@ -320,6 +348,84 @@ describe('draft store', () => {
       draft.hydrateFromContext(ctx, null);
 
       expect(draft.state.model).toBe('ltx-v-0.9');
+    });
+
+    it('clears structured-json and first-sigma draft fields when switching to a non-supporting image model', () => {
+      const ideogramDefaults = makeIdeogramDefaults();
+      const permissiveDefaults = makeImageDefaults({ ratio: '16:9', size: 'l', width: 1664, height: 928 });
+      const ctx = makeContext({
+        image_models: [
+          { id: 'ideo', label: 'Ideogram 4', type: 'image' },
+          { id: 'flux-dev', label: 'FLUX Dev', type: 'image' },
+        ],
+        current_image_model: 'ideo',
+        defaults: ideogramDefaults,
+        image_model_defaults: {
+          ideo: ideogramDefaults,
+          'flux-dev': permissiveDefaults,
+        },
+      });
+
+      draft.update('workflow', 'txt2img');
+      draft.hydrateFromContext(ctx, 'ideo');
+      draft.update('jsonPromptEnabled', true);
+      draft.update('jsonPrompt', '{"high_level_description":"caption"}');
+      draft.update('firstSigma', 1.004);
+
+      draft.hydrateFromContext(ctx, 'flux-dev');
+
+      expect(draft.state.jsonPromptEnabled).toBe(false);
+      expect(draft.state.jsonPrompt).toBe('');
+      expect(draft.state.firstSigma).toBeNull();
+    });
+
+    it('retains structured-json and first-sigma draft fields when hydrating on an ideogram-capable model', () => {
+      const ideogramDefaults = makeIdeogramDefaults();
+      const ctx = makeContext({
+        image_models: [{ id: 'ideo', label: 'Ideogram 4', type: 'image' }],
+        current_image_model: 'ideo',
+        defaults: ideogramDefaults,
+        image_model_defaults: {
+          ideo: ideogramDefaults,
+        },
+      });
+
+      draft.update('workflow', 'txt2img');
+      draft.hydrateFromContext(ctx, 'ideo');
+      draft.update('jsonPromptEnabled', true);
+      draft.update('jsonPrompt', '{"high_level_description":"caption"}');
+      draft.update('firstSigma', 1.006);
+
+      draft.hydrateFromContext(ctx, 'ideo');
+
+      expect(draft.state.jsonPromptEnabled).toBe(true);
+      expect(draft.state.jsonPrompt).toBe('{"high_level_description":"caption"}');
+      expect(draft.state.firstSigma).toBe(1.006);
+    });
+
+    it('clears structured-json and first-sigma draft fields when hydrating a video workflow', () => {
+      const ideogramDefaults = makeIdeogramDefaults();
+      const ctx = makeContext({
+        image_models: [{ id: 'ideo', label: 'Ideogram 4', type: 'image' }],
+        current_image_model: 'ideo',
+        defaults: ideogramDefaults,
+        image_model_defaults: {
+          ideo: ideogramDefaults,
+        },
+      });
+
+      draft.update('workflow', 'txt2img');
+      draft.hydrateFromContext(ctx, 'ideo');
+      draft.update('jsonPromptEnabled', true);
+      draft.update('jsonPrompt', '{"high_level_description":"caption"}');
+      draft.update('firstSigma', 1.004);
+      draft.update('workflow', 'txt2vid');
+
+      draft.hydrateFromContext(ctx, null);
+
+      expect(draft.state.jsonPromptEnabled).toBe(false);
+      expect(draft.state.jsonPrompt).toBe('');
+      expect(draft.state.firstSigma).toBeNull();
     });
   });
 

@@ -21,8 +21,29 @@
   const isImageMode = $derived(
     context?.workflow_contract.definitions[draft.state.workflow]?.mode === 'image'
   );
+  // Capability flags from backend defaults for the current image model.
+  const currentImageDefaults = $derived(
+    isImageMode
+      ? ((context?.image_model_defaults?.[draft.state.model] ?? context?.defaults) as ImageModelDefaults | undefined)
+      : undefined
+  );
+  const supportsNegativePrompt = $derived(
+    isImageMode ? (currentImageDefaults?.supports_negative_prompt ?? false) : false
+  );
+  // Model-level capability gates (permissive fallbacks keep non-ideogram models unaffected).
+  const supportsImg2img = $derived(currentImageDefaults?.supports_img2img ?? true);
+  const supportsUpscale = $derived(currentImageDefaults?.supports_upscale ?? true);
+  const supportsJsonPrompt = $derived(
+    isImageMode ? (currentImageDefaults?.supports_json_prompt ?? false) : false
+  );
+  const supportsFirstSigma = $derived(
+    isImageMode ? (currentImageDefaults?.supports_first_sigma ?? false) : false
+  );
+  const dimensionMin = $derived(currentImageDefaults?.dimension_min ?? 16);
+  const dimensionMax = $derived(currentImageDefaults?.dimension_max ?? null);
+  const dimensionStep = $derived(currentImageDefaults?.dimension_step ?? 16);
   const showRefImage = $derived(
-    visibleControls.has('reference_image') || visibleControls.has('reference_image_path')
+    (visibleControls.has('reference_image') || visibleControls.has('reference_image_path')) && supportsImg2img
   );
   const showVideoControls = $derived(
     visibleControls.has('audio') || visibleControls.has('low_memory') || visibleControls.has('video_upscale_enabled')
@@ -46,7 +67,7 @@
   const showFrameCount = $derived(visibleControls.has('frame_count'));
   const showSteps = $derived(visibleControls.has('steps'));
   const showSeed = $derived(visibleControls.has('seed'));
-  const showImageUpscale = $derived(visibleControls.has('image_upscale_enabled'));
+  const showImageUpscale = $derived(visibleControls.has('image_upscale_enabled') && supportsUpscale);
 
   const showScheduler = $derived(
     isImageMode && visibleControls.has('scheduler') && (context?.scheduler_options.length ?? 0) > 0
@@ -60,15 +81,6 @@
   );
   const showVideoUpscale = $derived(visibleControls.has('video_upscale_enabled'));
 
-  // Capability flags from backend defaults for the current image model.
-  const currentImageDefaults = $derived(
-    isImageMode
-      ? ((context?.image_model_defaults?.[draft.state.model] ?? context?.defaults) as ImageModelDefaults | undefined)
-      : undefined
-  );
-  const supportsNegativePrompt = $derived(
-    isImageMode ? (currentImageDefaults?.supports_negative_prompt ?? false) : false
-  );
   const showNegativePrompt = $derived(visibleControls.has('negative_prompt') && supportsNegativePrompt);
   const promptFileMode = $derived(draft.state.promptSource === 'file');
   const submitDisabled = $derived(
@@ -82,13 +94,24 @@
 
   const imageSizeOptions = $derived(context?.image_size_options ?? {});
   const videoSizeOptions = $derived(context?.video_size_options ?? {});
+  // Resolved [width, height] per ratio/size, used to hide presets exceeding the model's dimension_max.
+  const imageSizeDimensions = $derived(context?.image_size_dimensions ?? {});
 
-  // Size options for the currently selected ratio
-  const currentSizeOptions = $derived(
-    isImageMode
-      ? (imageSizeOptions[draft.state.ratio] ?? [])
-      : (videoSizeOptions[draft.state.ratio] ?? [])
-  );
+  // Size options for the currently selected ratio (image presets exceeding dimension_max are filtered out).
+  const currentSizeOptions = $derived.by(() => {
+    if (!isImageMode) {
+      return videoSizeOptions[draft.state.ratio] ?? [];
+    }
+    const options = imageSizeOptions[draft.state.ratio] ?? [];
+    if (dimensionMax === null) {
+      return options;
+    }
+    const dimsForRatio = imageSizeDimensions[draft.state.ratio] ?? {};
+    return options.filter((size) => {
+      const wh = dimsForRatio[size];
+      return !wh || (wh[0] <= dimensionMax && wh[1] <= dimensionMax);
+    });
+  });
 
   // Dimension mode toggle
   let dimensionMode = $state<'ratio' | 'custom'>('ratio');
@@ -206,20 +229,48 @@
     <!-- Prompts -->
     {#if draft.state.promptSource === 'inline' && (showPromptInline || showNegativePrompt)}
     <div>
-      <label class="field-label mb-2 block" for="ws-prompt">
-        Prompt
-      </label>
-      {#if showPromptInline}
+      {#if showPromptInline && supportsJsonPrompt}
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <label class="field-label block" for="ws-json-prompt-toggle">Structured JSON caption</label>
+          <Toggle
+            id="ws-json-prompt-toggle"
+            checked={draft.state.jsonPromptEnabled}
+            disabled={busy}
+            onchange={(e) => draft.update('jsonPromptEnabled', (e.currentTarget as HTMLInputElement).checked)}
+          />
+        </div>
+      {/if}
+
+      {#if showPromptInline && supportsJsonPrompt && draft.state.jsonPromptEnabled}
+        <label class="field-label mb-2 block" for="ws-json-prompt">
+          Prompt (JSON)
+        </label>
         <textarea
-          id="ws-prompt"
-          name="prompt"
-          rows="4"
-          class="surface-textarea mb-3 w-full rounded-md shadow-sm transition placeholder-zinc-600 focus:border-primary-main focus:ring-4 focus:ring-primary-main"
-          placeholder="Describe the scene..."
-          required
-          value={draft.state.prompt}
-          oninput={(e) => draft.update('prompt', (e.currentTarget as HTMLTextAreaElement).value)}
+          id="ws-json-prompt"
+          name="json_prompt"
+          rows="6"
+          class="surface-textarea mb-1 w-full rounded-md font-mono shadow-sm transition placeholder-zinc-600 focus:border-primary-main focus:ring-4 focus:ring-primary-main"
+          placeholder={'{"high_level_description": "..."}'}
+          value={draft.state.jsonPrompt}
+          oninput={(e) => draft.update('jsonPrompt', (e.currentTarget as HTMLTextAreaElement).value)}
         ></textarea>
+        <p class="field-hint-label mb-3">Must be a JSON object. Replaces the normal prompt.</p>
+      {:else}
+        <label class="field-label mb-2 block" for="ws-prompt">
+          Prompt
+        </label>
+        {#if showPromptInline}
+          <textarea
+            id="ws-prompt"
+            name="prompt"
+            rows="4"
+            class="surface-textarea mb-3 w-full rounded-md shadow-sm transition placeholder-zinc-600 focus:border-primary-main focus:ring-4 focus:ring-primary-main"
+            placeholder="Describe the scene..."
+            required
+            value={draft.state.prompt}
+            oninput={(e) => draft.update('prompt', (e.currentTarget as HTMLTextAreaElement).value)}
+          ></textarea>
+        {/if}
       {/if}
 
       <!-- Negative prompt: only visible when the current model supports it -->
@@ -371,8 +422,9 @@
               id="ws-width"
               name="width"
               type="number"
-              min="16"
-              step="16"
+              min={dimensionMin}
+              max={dimensionMax ?? undefined}
+              step={dimensionStep}
               value={draft.state.width}
               class="surface-input w-full rounded-md font-mono focus:border-primary-main focus:ring-4 focus:ring-primary-main"
               oninput={(e) => draft.update('width', Number((e.currentTarget as HTMLInputElement).value))}
@@ -384,8 +436,9 @@
               id="ws-height"
               name="height"
               type="number"
-              min="16"
-              step="16"
+              min={dimensionMin}
+              max={dimensionMax ?? undefined}
+              step={dimensionStep}
               value={draft.state.height}
               class="surface-input w-full rounded-md font-mono focus:border-primary-main focus:ring-4 focus:ring-primary-main"
               oninput={(e) => draft.update('height', Number((e.currentTarget as HTMLInputElement).value))}
@@ -521,6 +574,30 @@
             onclick={randomizeSeed}
           >🎲</button>
         </div>
+      </div>
+      {/if}
+
+      {#if supportsFirstSigma}
+      <div>
+        <label class="field-hint-label mb-1 block" for="ws-first-sigma">First-step Sigma</label>
+        <input
+          id="ws-first-sigma"
+          type="number"
+          min="0.001"
+          max="2"
+          step="0.001"
+          placeholder="1.004"
+          value={draft.state.firstSigma ?? ''}
+          class="surface-input w-full rounded-md font-mono focus:border-primary-main focus:ring-4 focus:ring-primary-main"
+          oninput={(e) => {
+            const v = (e.currentTarget as HTMLInputElement).value;
+            draft.update('firstSigma', v ? Number(v) : null);
+          }}
+        >
+        {#if draft.state.firstSigma !== null}
+          <input type="hidden" name="first_sigma" value={String(draft.state.firstSigma)}>
+        {/if}
+        <p class="field-hint-label mt-1">Best-effort: a smaller first-step sigma may reduce the grey "blocked by safety filter" frame. Not guaranteed.</p>
       </div>
       {/if}
     </div>

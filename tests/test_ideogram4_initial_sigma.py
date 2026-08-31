@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 
 import numpy as np
 import pytest
@@ -34,8 +35,15 @@ def _import_backend_module():
 def image_mac_module(monkeypatch):
     image_mac = _import_backend_module()
     monkeypatch.setattr(image_mac, "IDEOGRAM4_INITIAL_SIGMA", _DEFAULT_INITIAL_SIGMA)
-    monkeypatch.setattr(image_mac, "_initial_sigma_override", image_mac._INITIAL_SIGMA_UNSET)
-    return image_mac
+    had_previous_value = hasattr(image_mac._initial_sigma_override, "value")
+    previous_value = getattr(image_mac._initial_sigma_override, "value", image_mac._INITIAL_SIGMA_UNSET)
+    if had_previous_value:
+        delattr(image_mac._initial_sigma_override, "value")
+    yield image_mac
+    if had_previous_value:
+        image_mac._initial_sigma_override.value = previous_value
+    elif hasattr(image_mac._initial_sigma_override, "value"):
+        delattr(image_mac._initial_sigma_override, "value")
 
 
 def test_make_timesteps_is_wrapped_on_image_mac_import(image_mac_module):
@@ -96,12 +104,12 @@ def test_use_initial_sigma_sets_and_restores_previous_value(image_mac_module):
 
         restored_t_values, _ = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
 
-        assert image_mac_module._initial_sigma_override == 1.006
+        assert image_mac_module._effective_initial_sigma() == 1.006
         assert restored_t_values[-1] == pytest.approx(1.0 - 1.006)
 
     default_t_values, _ = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
 
-    assert image_mac_module._initial_sigma_override is image_mac_module._INITIAL_SIGMA_UNSET
+    assert image_mac_module._effective_initial_sigma() == _DEFAULT_INITIAL_SIGMA
     assert default_t_values[-1] == pytest.approx(1.0 - _DEFAULT_INITIAL_SIGMA)
 
 
@@ -116,19 +124,45 @@ def test_use_initial_sigma_none_disables_override_for_one_run(image_mac_module):
 
     restored_t_values, _ = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
 
-    assert image_mac_module._initial_sigma_override is image_mac_module._INITIAL_SIGMA_UNSET
+    assert image_mac_module._effective_initial_sigma() == _DEFAULT_INITIAL_SIGMA
     assert restored_t_values[-1] == pytest.approx(1.0 - _DEFAULT_INITIAL_SIGMA)
 
 
-def test_effective_initial_sigma_distinguishes_sentinel_from_none(image_mac_module, monkeypatch):
-    monkeypatch.setattr(image_mac_module, "_initial_sigma_override", image_mac_module._INITIAL_SIGMA_UNSET)
+def test_effective_initial_sigma_distinguishes_default_none_and_override(image_mac_module):
     assert image_mac_module._effective_initial_sigma() == _DEFAULT_INITIAL_SIGMA
 
-    monkeypatch.setattr(image_mac_module, "_initial_sigma_override", 1.006)
-    assert image_mac_module._effective_initial_sigma() == 1.006
+    with image_mac_module._use_initial_sigma(None):
+        assert image_mac_module._effective_initial_sigma() is None
 
-    monkeypatch.setattr(image_mac_module, "_initial_sigma_override", None)
-    assert image_mac_module._effective_initial_sigma() is None
+    assert image_mac_module._effective_initial_sigma() == _DEFAULT_INITIAL_SIGMA
+
+    with image_mac_module._use_initial_sigma(1.006):
+        assert image_mac_module._effective_initial_sigma() == 1.006
+
+    assert image_mac_module._effective_initial_sigma() == _DEFAULT_INITIAL_SIGMA
+
+
+def test_use_initial_sigma_is_thread_local_and_isolates_concurrent_generations(image_mac_module):
+    pytest.importorskip("mflux")
+    scheduler_class = image_mac_module.Ideogram4Scheduler
+    observed: dict[str, float | None] = {}
+
+    def _read_worker_state() -> None:
+        observed["effective_sigma"] = image_mac_module._effective_initial_sigma()
+        t_values, _ = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
+        observed["last_timestep"] = float(t_values[-1])
+
+    with image_mac_module._use_initial_sigma(1.006):
+        main_thread_t_values, _ = scheduler_class.make_timesteps(**_TIMESTEP_KWARGS)
+        worker = threading.Thread(target=_read_worker_state)
+        worker.start()
+        worker.join()
+
+        assert image_mac_module._effective_initial_sigma() == 1.006
+        assert main_thread_t_values[-1] == pytest.approx(1.0 - 1.006)
+
+    assert observed["effective_sigma"] == _DEFAULT_INITIAL_SIGMA
+    assert observed["last_timestep"] == pytest.approx(1.0 - _DEFAULT_INITIAL_SIGMA)
 
 
 def test_install_ideogram4_initial_sigma_is_idempotent(image_mac_module):
