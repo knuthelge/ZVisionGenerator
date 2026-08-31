@@ -426,6 +426,44 @@ def test_workspace_bootstrap_defaults_include_ideogram_capability_flags(monkeypa
     assert detect_calls == ["Tongyi-MAI/Z-Image-Turbo"]
 
 
+def test_workspace_bootstrap_defaults_fall_back_to_supported_ideogram_preset(monkeypatch):
+    web_config = _make_web_config()
+    web_config.app_config["generation"] = {
+        "default_ratio": "16:9",
+        "default_size": "xl",
+    }
+    web_config.app_config["sizes"] = {
+        "16:9": {
+            "m": {"width": 1344, "height": 768},
+            "l": {"width": 1888, "height": 1056},
+            "xl": {"width": 2112, "height": 1184},
+        },
+        "2:3": {
+            "m": {"width": 832, "height": 1216},
+        },
+    }
+    web_config.image_ratios = ("16:9", "2:3")
+    web_config.image_size_options = {
+        "16:9": ("m", "l", "xl"),
+        "2:3": ("m",),
+    }
+    web_config.app_config["model_aliases"] = {
+        "ideo": "ideogram-ai/ideogram-4-fp8",
+    }
+    web_config.app_config["model_alias_families"] = {"ideo": "ideogram4"}
+
+    monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: web_config.app_config["model_aliases"].get(model, model))
+    monkeypatch.setattr(workspace_api_module, "get_backend_name", lambda: "mflux")
+    monkeypatch.setattr(workspace_api_module, "resolve_defaults", lambda *_args, **_kwargs: _make_resolved_image_defaults(dimension_min=256, dimension_max=2048, dimension_step=16))
+
+    defaults = workspace_api_module._build_image_bootstrap_defaults("ideo", web_config)
+
+    assert defaults["ratio"] == "16:9"
+    assert defaults["size"] == "l"
+    assert defaults["width"] == 1888
+    assert defaults["height"] == 1056
+
+
 def test_workspace_bootstrap_defaults_disable_quantize_when_globally_unavailable(monkeypatch):
     web_config = _make_web_config()
     web_config.app_config["model_aliases"] = {

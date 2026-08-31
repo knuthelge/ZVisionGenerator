@@ -144,6 +144,53 @@ def _resolve_image_bootstrap_dimensions(app_config: dict[str, Any], ratio: str, 
     }
 
 
+def _dimension_is_supported(value: int, *, minimum: int, maximum: int | None, step: int) -> bool:
+    return value >= minimum and (maximum is None or value <= maximum) and value % step == 0
+
+
+def _is_supported_image_preset(app_config: dict[str, Any], ratio: str, size: str, defaults: dict[str, Any]) -> bool:
+    dims = _resolve_image_bootstrap_dimensions(app_config, ratio, size)
+    minimum = int(defaults.get("dimension_min", 16))
+    maximum = defaults.get("dimension_max", None)
+    step = int(defaults.get("dimension_step", 16))
+    return _dimension_is_supported(dims["width"], minimum=minimum, maximum=maximum, step=step) and _dimension_is_supported(
+        dims["height"], minimum=minimum, maximum=maximum, step=step
+    )
+
+
+def _pick_supported_image_bootstrap_preset(web_config: WebUiConfig, defaults: dict[str, Any], preferred_ratio: str, preferred_size: str) -> tuple[str, str]:
+    app_config = web_config.app_config
+    ratios = list(getattr(web_config, "image_ratios", ()))
+    if preferred_ratio in ratios:
+        ratio_candidates = [preferred_ratio, *[ratio for ratio in ratios if ratio != preferred_ratio]]
+    else:
+        ratio_candidates = ratios
+
+    for ratio in ratio_candidates:
+        size_options = list(getattr(web_config, "image_size_options", {}).get(ratio, ()))
+        if not size_options:
+            continue
+        if ratio == preferred_ratio and preferred_size in size_options:
+            preferred_index = size_options.index(preferred_size)
+            candidate_indices = [preferred_index]
+            for offset in range(1, len(size_options)):
+                lower = preferred_index - offset
+                upper = preferred_index + offset
+                if lower >= 0:
+                    candidate_indices.append(lower)
+                if upper < len(size_options):
+                    candidate_indices.append(upper)
+            ordered_sizes = [size_options[index] for index in candidate_indices]
+        else:
+            ordered_sizes = size_options
+
+        for size in ordered_sizes:
+            if _is_supported_image_preset(app_config, ratio, size, defaults):
+                return ratio, size
+
+    return preferred_ratio, preferred_size
+
+
 def _resolve_video_bootstrap_family(app_config: dict[str, Any], family: str | None) -> str:
     if family and family != "unknown":
         return family
@@ -172,7 +219,7 @@ def _video_bootstrap_upscale() -> dict[str, Any]:
 
 def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) -> dict[str, Any]:
     app_config = web_config.app_config
-    ratio, size = resolve_image_ratio_size_defaults(web_config)
+    preferred_ratio, preferred_size = resolve_image_ratio_size_defaults(web_config)
     try:
         resolved_model = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
         declared = declared_image_family(app_config, model_name)
@@ -195,6 +242,7 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
             "dimension_max": None,
             "dimension_step": 16,
         }
+    ratio, size = _pick_supported_image_bootstrap_preset(web_config, defaults, preferred_ratio, preferred_size)
     dims = _resolve_image_bootstrap_dimensions(app_config, ratio, size)
     return {
         "ratio": ratio,

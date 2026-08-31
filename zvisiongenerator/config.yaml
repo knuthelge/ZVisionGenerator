@@ -88,7 +88,12 @@ model_aliases:
   zit: "Tongyi-MAI/Z-Image-Turbo"
   klein9b: "black-forest-labs/FLUX.2-klein-9B"
   klein4b: "black-forest-labs/FLUX.2-klein-4B"
-  ideo: "ideogram-ai/ideogram-4-fp8"
+  ideo:
+    darwin: "ideogram-ai/ideogram-4-fp8"
+    win32:
+      message: "Alias 'ideo' is macOS-only. Ideogram 4 requires the mflux/MLX backend."
+    linux:
+      message: "Alias 'ideo' is macOS-only. Ideogram 4 requires the mflux/MLX backend."
 
 # Declared per-alias image families let the Web UI surface known aliases offline
 # (no network round-trip through detect_image_model).
