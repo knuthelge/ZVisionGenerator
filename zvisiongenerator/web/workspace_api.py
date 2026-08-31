@@ -153,9 +153,7 @@ def _is_supported_image_preset(app_config: dict[str, Any], ratio: str, size: str
     minimum = int(defaults.get("dimension_min", 16))
     maximum = defaults.get("dimension_max", None)
     step = int(defaults.get("dimension_step", 16))
-    return _dimension_is_supported(dims["width"], minimum=minimum, maximum=maximum, step=step) and _dimension_is_supported(
-        dims["height"], minimum=minimum, maximum=maximum, step=step
-    )
+    return _dimension_is_supported(dims["width"], minimum=minimum, maximum=maximum, step=step) and _dimension_is_supported(dims["height"], minimum=minimum, maximum=maximum, step=step)
 
 
 def _pick_supported_image_bootstrap_preset(web_config: WebUiConfig, defaults: dict[str, Any], preferred_ratio: str, preferred_size: str) -> tuple[str, str]:
