@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/zvision-white.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -1116,7 +1116,12 @@ ziv ui [options]       # Same as ziv-ui
 <tr>
 <td><code>--prompt</code></td>
 <td><code>None</code></td>
-<td>Inline prompt; overrides <code>--prompts-file</code></td>
+<td>Inline prompt; overrides <code>--prompts-file</code> (mutually exclusive with <code>--json-prompt</code>)</td>
+</tr>
+<tr>
+<td><code>--json-prompt</code></td>
+<td><code>None</code></td>
+<td>Inline structured JSON caption for a one-off generation (mutually exclusive with <code>--prompt</code>). Takes a JSON value, must be a valid JSON object, skips random-choice <code>{a|b|c}</code> expansion, is passed verbatim, and overrides <code>--prompts-file</code></td>
 </tr>
 <tr>
 <td><code>-p</code>, <code>--prompts-file</code></td>
@@ -1157,6 +1162,11 @@ ziv ui [options]       # Same as ziv-ui
 <td><code>--guidance</code></td>
 <td>model-aware</td>
 <td>Guidance scale</td>
+</tr>
+<tr>
+<td><code>--first-sigma</code></td>
+<td><code>1.004</code></td>
+<td>Ideogram 4 only: override the first-step sigma (valid range <code>(0.0, 2.0]</code>, default <code>1.004</code>). Higher values (e.g. <code>1.005</code>-<code>1.006</code>) more reliably avoid the grey "blocked by safety filter" frame (best-effort mitigation, not a guaranteed bypass)</td>
 </tr>
 <tr>
 <td><code>--seed</code></td>
@@ -1226,6 +1236,7 @@ ziv ui [options]       # Same as ziv-ui
 </tbody>
 </table>
 <p>Run <code>ziv-image --help</code> for the full list.</p>
+<p>The <code>ideo</code> alias selects Ideogram 4 (<code>ideogram-ai/ideogram-4-fp8</code>), a macOS/MLX-only image model. Its width and height must be in the 256–2048 range and multiples of 16. Size presets that exceed this range — <code>--size xl</code> with <code>--ratio 16:9</code> or <code>--ratio 9:16</code> (2112 px) — are rejected before the model loads, as are <code>--image</code> and <code>--upscale</code> (both require img2img, which Ideogram 4 does not support).</p>
 <h2 id="ziv-video-video-generation"><code>ziv-video</code> — Video Generation</h2>
 <p>Platform-aware aliases:</p>
 <ul>
@@ -1584,7 +1595,7 @@ ziv ui [options]       # Same as ziv-ui
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "content.code.copy", "navigation.top"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

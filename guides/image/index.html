@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/zvision-white.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -547,6 +547,34 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#ideogram-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ideogram 4
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Ideogram 4">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In the Web UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#custom-aliases" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -959,6 +987,34 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#ideogram-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ideogram 4
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Ideogram 4">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In the Web UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#custom-aliases" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1139,7 +1195,7 @@
 
 
 <h1 id="image-generation-guide">Image Generation Guide</h1>
-<p>Generate images from text prompts using <code>ziv-image</code>. Supports Z-Image / FLUX models on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux with NVIDIA GPUs via diffusers/CUDA.</p>
+<p>Generate images from text prompts using <code>ziv-image</code>. Supports Z-Image / FLUX models on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux with NVIDIA GPUs via diffusers/CUDA, plus Ideogram 4 on macOS.</p>
 <p>On Windows and Linux, image generation requires CUDA to be visible to PyTorch. CPU fallback is not available for the diffusers image backend.</p>
 <h2 id="model-aliases">Model Aliases</h2>
 <p>Built-in shorthands for common image models.</p>
@@ -1163,12 +1219,29 @@
 <td><code>klein9b</code></td>
 <td><code>black-forest-labs/FLUX.2-klein-9B</code></td>
 </tr>
+<tr>
+<td><code>ideo</code></td>
+<td><code>ideogram-ai/ideogram-4-fp8</code></td>
+</tr>
 </tbody>
 </table>
 <p>For video aliases, see <a href="../video/#model-aliases">Video Guide → Model Aliases</a>.</p>
 <pre><code class="language-bash">ziv-image -m zit --prompt &quot;a beautiful sunset&quot;
 ziv-image -m klein4b --prompt &quot;a portrait&quot;
+ziv-image -m ideo --prompt &quot;a portrait&quot;
 </code></pre>
+<h3 id="ideogram-4">Ideogram 4</h3>
+<p>Ideogram 4 runs on macOS (Apple Silicon via mflux/MLX) only; it is unavailable on Windows and Linux. It ships as a single FP8 model, so quantization tiers (<code>-q 4</code> / <code>-q 8</code>) do not apply. Width and height must be in the 256–2048 range and multiples of 16; size presets that exceed this range (for example <code>--size xl</code> with <code>--ratio 16:9</code>) are rejected before the model loads.</p>
+<pre><code class="language-bash">ziv-image -m ideo --prompt &quot;a portrait&quot;
+</code></pre>
+<p>Ideogram 4 does not support negative prompts or reference-image (img2img) steering; a negative prompt is dropped with a warning, and both <code>--image</code> and <code>--upscale</code> are rejected (each requires img2img, which Ideogram 4 does not support). LoRA weights work at parity with other mflux models via <code>--lora</code>.</p>
+<p>Plain-text prompts are automatically wrapped into Ideogram 4's structured JSON caption format, so they generate without a plain-text caption warning while preserving the original wording. To supply a full structured JSON caption instead, pass it as the value of <code>--json-prompt</code> (mutually exclusive with <code>--prompt</code>): this skips random-choice <code>{a|b|c}</code> expansion and sends the caption verbatim. Without <code>--json-prompt</code>, <code>{...}</code> in a prompt is treated as random-choice syntax and corrupts a JSON caption. The <code>--json-prompt</code> value must be a valid JSON object, or generation is rejected before the model loads:</p>
+<pre><code class="language-bash">ziv-image -m ideo --json-prompt '{&quot;high_level_description&quot;: &quot;a portrait&quot;}'
+</code></pre>
+<p>When neither <code>--steps</code> nor <code>--guidance</code> is given, Ideogram 4 uses its built-in tuned quality schedule. Supplying <code>--steps</code> and/or <code>--guidance</code> overrides that schedule with the explicit values.</p>
+<p>Ideogram 4 applies an automatic first-step adjustment to its denoising schedule that reduces spurious "Image blocked by safety filter" grey results at no change to the prompt, seed, or resolution. This mitigation is best-effort and not guaranteed to recover every refused generation. The adjustment defaults to a first-step sigma of <code>1.004</code> and can be overridden per run with <code>--first-sigma</code> (for example <code>--first-sigma 1.005</code> or <code>--first-sigma 1.006</code>) when a benign prompt is still blocked.</p>
+<h4 id="in-the-web-ui">In the Web UI</h4>
+<p>Ideogram 4 is selectable in the workspace model dropdown. When it is selected, the workspace exposes a structured-JSON-caption input and a first-step-sigma control that mirror <code>--json-prompt</code> and <code>--first-sigma</code>. Reference-image (img2img) and upscale are unavailable for it, and width and height are constrained to the 256–2048 range in multiples of 16.</p>
 <h3 id="custom-aliases">Custom Aliases</h3>
 <p>Add your own aliases in <code>~/.ziv/config.yaml</code>:</p>
 <pre><code class="language-yaml">model_aliases:
@@ -1451,7 +1524,7 @@ ziv-image -m my-model --prompt &quot;a sunset&quot; --no-sharpen           # dis
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "content.code.copy", "navigation.top"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

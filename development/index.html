@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../assets/zvision-white.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -27,7 +27,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -845,6 +845,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#web-model-inventory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web Model Inventory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#error-conventions" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1010,6 +1021,17 @@
     <span class="md-ellipsis">
       
         Config Layering
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#web-model-inventory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web Model Inventory
       
     </span>
   </a>
@@ -1239,6 +1261,9 @@ prompts.yaml                       Default prompt definitions
 <p>Use <code>@dataclass(frozen=True)</code> for immutable value objects (inputs, detection results). Use mutable <code>@dataclass</code> only for working state. No pydantic or attrs.</p>
 <h3 id="config-layering">Config Layering</h3>
 <p>CLI flags &gt; model preset variant &gt; model preset family &gt; global defaults. Config is a plain <code>dict</code> loaded from YAML, not a dataclass.</p>
+<h3 id="web-model-inventory">Web Model Inventory</h3>
+<p>A repo-id alias can declare its image family in config via <code>model_alias_families</code> (for example <code>ideo: ideogram4</code>). The Web UI inventory and workspace bootstrap consult this declared family as an offline fast-path, so a known alias is surfaced without the network <code>detect_image_model</code> round-trip that a bare Hugging Face repo id would otherwise require. Content-based detection for arbitrary local model directories is unaffected; only aliases with a declared family skip detection.</p>
+<p>Per-model Web UI capability flags — <code>supports_img2img</code>, <code>supports_upscale</code>, <code>supports_json_prompt</code>, <code>supports_first_sigma</code>, <code>dimension_min</code>, <code>dimension_max</code>, and <code>dimension_step</code> — are data-driven: they originate in the <code>model_presets</code> family entries, flow through <code>resolve_defaults</code>, and are emitted into the SPA's <code>ImageModelDefaults</code>. Families that do not set them inherit permissive defaults (img2img and upscale enabled, JSON caption and first-sigma disabled, <code>16</code>/<code>null</code>/<code>16</code> dimension bounds), so gating is centralized in config rather than branching on family in the web layer.</p>
 <h3 id="error-conventions">Error Conventions</h3>
 <p>Raise <code>ValueError</code>, <code>FileNotFoundError</code>, <code>RuntimeError</code> directly with descriptive f-string messages. Use <code>warnings.warn()</code> with <code>stacklevel=2</code> for non-fatal conditions. No custom exception classes except private sentinels.</p>
 <h3 id="test-strategy">Test Strategy</h3>
@@ -1301,7 +1326,7 @@ prompts.yaml                       Default prompt definitions
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "content.code.copy", "navigation.top"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
