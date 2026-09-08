@@ -6,7 +6,28 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
+from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg, require_ffmpeg
+
+
+class TestRequireFfmpeg:
+    """The Web UI prerequisite check must never enter the CLI install flow."""
+
+    @patch("zvisiongenerator.utils.ffmpeg.shutil.which", return_value="/usr/local/bin/ffmpeg")
+    def test_ffmpeg_found_returns_without_interaction(self, mock_which):
+        require_ffmpeg()
+
+        mock_which.assert_called_once_with("ffmpeg")
+
+    @patch("zvisiongenerator.utils.ffmpeg.subprocess.run")
+    @patch("zvisiongenerator.utils.ffmpeg.input")
+    @patch("zvisiongenerator.utils.ffmpeg.shutil.which", return_value=None)
+    def test_missing_ffmpeg_raises_without_prompting_or_installing(self, mock_which, mock_input, mock_run):
+        with pytest.raises(RuntimeError, match=r"ffmpeg.*Install.*retry"):
+            require_ffmpeg()
+
+        mock_which.assert_called_once_with("ffmpeg")
+        mock_input.assert_not_called()
+        mock_run.assert_not_called()
 
 
 class TestEnsureFfmpegFound:

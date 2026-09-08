@@ -18,6 +18,7 @@
   let mediaFilter = $state<'all' | 'image' | 'video'>('all');
   let sortOrder = $state<'newest' | 'oldest'>('newest');
   let selected = $state<Set<string>>(new Set());
+  let deletingSelected = $state(false);
 
   let selectedAsset = $state<GalleryAsset | null>(null);
   let lightboxOpen = $state(false);
@@ -30,6 +31,9 @@
   // Pending URL-based selection to restore after the first page load.
   let _pendingSelected: string | null = null;
 
+  // Non-reactive commit authority for replacement and pagination requests.
+  let _requestGeneration = 0;
+
   // Sentinel element for infinite scroll
   let sentinelEl = $state<HTMLDivElement | undefined>(undefined);
 
@@ -41,6 +45,11 @@
     }
 
     loadPage(1, mediaFilter, sortOrder);
+
+    return () => {
+      // Invalidate every request still awaiting a response after unmount.
+      _requestGeneration += 1;
+    };
   });
 
   const viewerIndex = $derived(
@@ -62,10 +71,13 @@
   });
 
   async function loadPage(p: number, filter: string = mediaFilter, sort: string = sortOrder): Promise<void> {
+    const requestGeneration = ++_requestGeneration;
     loading = true;
+    loadingMore = false;
     error = null;
     try {
       const result = await getGallery(p, filter, sort);
+      if (requestGeneration !== _requestGeneration) return;
       assets = result.assets;
       page = result.page;
       totalPages = result.total_pages;
@@ -79,24 +91,34 @@
         _pendingSelected = null;
       }
     } catch (e) {
+      if (requestGeneration !== _requestGeneration) return;
       error = e instanceof Error ? e.message : 'Failed to load gallery';
     } finally {
-      loading = false;
+      if (requestGeneration === _requestGeneration) {
+        loading = false;
+      }
     }
   }
 
   async function loadMorePages(): Promise<void> {
     if (loadingMore || !hasMore) return;
+    const requestGeneration = _requestGeneration;
+    const requestedPage = page + 1;
+    const requestedFilter = mediaFilter;
+    const requestedSort = sortOrder;
     loadingMore = true;
     try {
-      const result = await getGallery(page + 1, mediaFilter, sortOrder);
+      const result = await getGallery(requestedPage, requestedFilter, requestedSort);
+      if (requestGeneration !== _requestGeneration) return;
       assets = [...assets, ...result.assets];
       page = result.page;
       totalPages = result.total_pages;
     } catch {
       // ignore load-more errors silently
     } finally {
-      loadingMore = false;
+      if (requestGeneration === _requestGeneration) {
+        loadingMore = false;
+      }
     }
   }
 
@@ -137,13 +159,57 @@
   }
 
   async function deleteSelected(): Promise<void> {
-    if (!confirm(`Delete ${selectedCount} selected asset${selectedCount !== 1 ? 's' : ''}?`)) return;
-    const paths = Array.from(selected);
-    await Promise.allSettled(paths.map((p) => deleteAsset(p)));
-    assets = assets.filter((a) => !selected.has(a.id));
-    selected = new Set();
-    if (selectedAsset && paths.includes(selectedAsset.id)) {
-      selectedAsset = null;
+    if (deletingSelected || selectedCount === 0) return;
+
+    const originalIds = Array.from(selected);
+    if (!confirm(`Delete ${originalIds.length} selected asset${originalIds.length !== 1 ? 's' : ''}?`)) return;
+
+    deletingSelected = true;
+    try {
+      const results = await Promise.allSettled(
+        originalIds.map(async (id) => deleteAsset(id))
+      );
+      const deletedIds = new Set<string>();
+      const failedIds = new Set<string>();
+
+      results.forEach((result, index) => {
+        const id = originalIds[index];
+        if (result.status === 'fulfilled') {
+          deletedIds.add(id);
+        } else {
+          failedIds.add(id);
+        }
+      });
+
+      assets = assets.filter((asset) => !deletedIds.has(asset.id));
+      totalCount = Math.max(0, totalCount - deletedIds.size);
+      if (selectedAsset && deletedIds.has(selectedAsset.id)) {
+        selectedAsset = null;
+      }
+
+      const reconciledSelection = new Set(selected);
+      for (const id of originalIds) reconciledSelection.delete(id);
+      for (const id of failedIds) reconciledSelection.add(id);
+      selected = reconciledSelection;
+
+      if (failedIds.size === 0) {
+        addToast(
+          `Deleted ${deletedIds.size} selected asset${deletedIds.size !== 1 ? 's' : ''}.`,
+          'success'
+        );
+      } else if (deletedIds.size > 0) {
+        addToast(
+          `Deleted ${deletedIds.size}; ${failedIds.size} failed and remain selected for retry.`,
+          'warning'
+        );
+      } else {
+        addToast(
+          `Delete failed for ${failedIds.size} selected asset${failedIds.size !== 1 ? 's' : ''}; they remain selected for retry.`,
+          'error'
+        );
+      }
+    } finally {
+      deletingSelected = false;
     }
   }
 
@@ -240,9 +306,9 @@
           <button
             type="button"
             class="surface-button-danger rounded-md px-3 py-1.5 text-sm disabled:opacity-50"
-            disabled={selectedCount === 0}
+            disabled={selectedCount === 0 || deletingSelected}
             onclick={deleteSelected}
-          >Delete Selected</button>
+          >{deletingSelected ? 'Deleting…' : 'Delete Selected'}</button>
           <span class="text-xs font-mono uppercase tracking-[0.18em] text-zinc-500">{selectedCount} selected</span>
         </div>
       </div>

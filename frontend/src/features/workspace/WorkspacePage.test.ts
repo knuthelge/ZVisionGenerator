@@ -993,6 +993,54 @@ describe('WorkspacePage', () => {
     expect(activeJobCard!.querySelectorAll('button')).toHaveLength(0);
   });
 
+  it('rebinds completion ownership across a workspace remount without opening another EventSource', async () => {
+    const context = makeContext({
+      active_job: {
+        id: 'job-remount',
+        job_id: 'job-remount',
+        workflow: 'txt2img',
+        job_type: 'Text to Image',
+        status: 'running',
+        created_at: '2026-04-30T10:00:00Z',
+        completed_at: null,
+        event_count: 1,
+        last_event: { type: 'job_submitted' },
+        supported_controls: [],
+        paused: false,
+        result_path: null,
+        prompt: 'Remain active while navigating',
+        model: 'zit',
+        runs: 1,
+      },
+    });
+
+    await mountWorkspace(context);
+    const MockEventSource = globalThis.EventSource as unknown as {
+      instances: Array<{ emit: (type: string, data: unknown) => void; closeCalls: number }>;
+      lastInstance: { emit: (type: string, data: unknown) => void; closeCalls: number };
+    };
+    const source = MockEventSource.lastInstance;
+    const constructionCount = MockEventSource.instances.length;
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
+
+    await unmount(app!);
+    app = null;
+    target.replaceChildren();
+
+    await mountWorkspace(context);
+    expect(MockEventSource.instances).toHaveLength(constructionCount);
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
+
+    workspaceApiMocks.getHistory.mockClear();
+    source.emit('job_completed', { type: 'job_completed', job_id: 'job-remount', total_runs: 1, outputs: [] });
+    await settle();
+
+    expect(jobStore.current?.status).toBe('completed');
+    expect(source.closeCalls).toBe(1);
+    expect(workspaceApiMocks.getHistory).toHaveBeenCalledOnce();
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
+  });
+
   it('reconnects the active job across workspace remounts from stored continuity state', async () => {
     const context = makeContext({ active_job: null });
     const runningSnapshot: JobSnapshot = {

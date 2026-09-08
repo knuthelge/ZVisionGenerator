@@ -23,6 +23,7 @@ from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
 from zvisiongenerator.utils.config import resolve_defaults, resolve_video_defaults, validate_scheduler
+from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import parse_lora_arg
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_lora_path, resolve_model_path
@@ -229,15 +230,18 @@ async def get_job(job_id: str) -> dict[str, object]:
 
 
 @app.get("/jobs/{job_id}/events")
-async def stream_job_events(job_id: str) -> StreamingResponse:
+async def stream_job_events(job_id: str, request: Request) -> StreamingResponse:
     """Stream job progress as SSE frames for browser and programmatic consumers."""
     try:
         web_runner.get_job_snapshot(job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}") from exc
 
+    last_event_id = request.headers.get("last-event-id")
+    after_event_id = int(last_event_id) if last_event_id and last_event_id.isascii() and last_event_id.isdecimal() else None
+
     return StreamingResponse(
-        web_runner.stream_job_events(job_id),
+        web_runner.stream_job_events(job_id, after_event_id=after_event_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -570,6 +574,11 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         output_dir=args.output,
         output_format=args.format,
     )
+    try:
+        require_ffmpeg()
+    except RuntimeError as exc:
+        raise ValueError(str(exc)) from exc
+
     job_id = web_runner.submit_video_request_job(
         request=request,
         prompts_data=prompts_data,
