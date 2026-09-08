@@ -269,13 +269,13 @@
 <div id="gallery-view" class="flex-1 flex overflow-hidden">
 
   <!-- Left: scrollable grid -->
-  <section id="gallery-scroll-region" class="panel-scroll-surface custom-scrollbar flex-1 overflow-y-auto p-6">
+  <section id="gallery-scroll-region" class="panel-scroll-surface custom-scrollbar min-w-0 flex-1 overflow-y-auto p-4">
     <div class="max-w-7xl mx-auto">
       <!-- Header -->
-      <div class="flex flex-wrap items-start justify-between mb-6 gap-4">
+      <div class="flex flex-wrap items-center justify-between mb-4 gap-3 border-b border-border-subtle pb-3">
         <div>
-          <h2 class="text-xl font-semibold text-zinc-100">Gallery History</h2>
-          <p class="text-sm text-zinc-500">
+          <h2 class="text-base font-semibold text-zinc-100">Gallery History</h2>
+          <p class="text-xs text-zinc-500 mt-1">
             Browsing {assets.length} loaded asset{assets.length !== 1 ? 's' : ''} of {totalCount}, {sortOrder === 'newest' ? 'newest' : 'oldest'} first.
           </p>
         </div>
@@ -309,7 +309,7 @@
             disabled={selectedCount === 0 || deletingSelected}
             onclick={deleteSelected}
           >{deletingSelected ? 'Deleting…' : 'Delete Selected'}</button>
-          <span class="text-xs font-mono uppercase tracking-[0.18em] text-zinc-500">{selectedCount} selected</span>
+          <span class="text-xs text-zinc-500">{selectedCount} selected</span>
         </div>
       </div>
 

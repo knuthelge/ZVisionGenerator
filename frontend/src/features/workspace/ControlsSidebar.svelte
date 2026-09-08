@@ -180,21 +180,21 @@
   }
 </script>
 
-<section id="ws-controls-sidebar" class="panel-shell panel-shell-left relative hidden h-full w-80 flex-col sm:flex">
+<section id="ws-controls-sidebar" class="panel-shell panel-shell-left relative flex min-h-0 w-full shrink-0 flex-col sm:h-full sm:w-72">
   {#if !authorityReady || !context}
-    <div class="p-4 flex-1 overflow-y-auto custom-scrollbar pb-24">
+    <div class="p-3 flex-1 overflow-y-auto custom-scrollbar">
       <div class="surface-card-muted space-y-3 rounded-md p-4">
         <p class="field-label">Loading Workspace Controls</p>
         <p class="text-sm text-zinc-400">Loading editable defaults and controls.</p>
       </div>
     </div>
 
-    <div class="panel-footer absolute bottom-0 left-0 right-0 z-10 w-full shrink-0 p-4 backdrop-blur-sm">
+    <div class="panel-footer z-10 w-full shrink-0 p-3">
       <button
         id="ws-submit"
         type="submit"
         disabled={true}
-        class="surface-button surface-button-primary surface-button-glow flex w-full items-center justify-center gap-2 rounded-md py-2.5 font-medium active:scale-[0.98]"
+        class="surface-button surface-button-primary flex w-full items-center justify-center gap-2 rounded-md py-2.5 font-medium active:scale-[0.98]"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
@@ -204,18 +204,18 @@
       </button>
     </div>
   {:else}
-  <div class="p-4 space-y-6 flex-1 overflow-y-auto custom-scrollbar pb-24">
+  <div class="p-3 space-y-4 flex-1 overflow-y-auto custom-scrollbar">
 
     <!-- Prompt Source -->
     {#if showPromptSource}
-      <div>
-        <label class="field-label mb-2 block" for="ws-prompt-source">
+      <div class="flex items-center gap-3">
+        <label class="field-label shrink-0" for="ws-prompt-source">
           Prompt Source
         </label>
         <select
           id="ws-prompt-source"
           name="prompt_source"
-          class="surface-select w-full rounded-md focus:border-primary-main focus:ring-4 focus:ring-primary-main"
+          class="surface-select min-w-0 flex-1 rounded-md focus:border-primary-main focus:ring-4 focus:ring-primary-main"
           value={draft.state.promptSource}
           onchange={(e) => draft.update('promptSource', (e.currentTarget as HTMLSelectElement).value as 'inline' | 'file')}
         >
@@ -384,7 +384,7 @@
       </div>
 
       {#if dimensionMode === 'ratio'}
-        <div class="space-y-3 mb-4">
+        <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="field-hint-label mb-1 block" for="ws-ratio">Aspect Ratio</label>
             <select
@@ -400,7 +400,7 @@
             </select>
           </div>
           <div>
-            <label class="field-hint-label mb-1 block" for="ws-size">Size / Base Resolution</label>
+            <label class="field-hint-label mb-1 block" for="ws-size">Resolution</label>
             <select
               id="ws-size"
               name="size"
@@ -415,7 +415,7 @@
           </div>
         </div>
       {:else}
-        <div class="grid grid-cols-2 gap-3 mb-4">
+        <div class="grid grid-cols-2 gap-2">
           <div>
             <label class="field-hint-label mb-1 block" for="ws-width">Width</label>
             <input
@@ -450,12 +450,12 @@
     {/if}
 
     <!-- Generation Settings -->
-    <div class="space-y-4 border-t border-border-subtle pt-4">
-      <span class="field-label mb-2 block">
+    <div class="generation-grid grid grid-cols-2 gap-x-3 gap-y-2 border-t border-border-subtle pt-3">
+      <span class="field-label col-span-2 block">
         Generation Settings
       </span>
 
-      <div class="flex gap-3 mb-2">
+      <div class="col-span-2 flex gap-2">
         {#if showRuns}
           <div class="flex-1">
             <label class="field-hint-label mb-1 block" for="ws-runs">Batch Size</label>
@@ -551,7 +551,7 @@
       {/if}
 
       {#if showSeed}
-      <div>
+      <div class="col-span-2">
         <label class="field-hint-label mb-1 block" for="ws-seed">Seed</label>
         <div class="flex gap-2">
           <input
@@ -561,7 +561,7 @@
             min="0"
             placeholder="Random"
             value={draft.state.seed ?? ''}
-            class="surface-input flex-1 rounded-md font-mono focus:border-primary-main focus:ring-4 focus:ring-primary-main"
+            class="surface-input min-w-0 flex-1 rounded-md font-mono focus:border-primary-main focus:ring-4 focus:ring-primary-main"
             oninput={(e) => {
               const v = (e.currentTarget as HTMLInputElement).value;
               draft.update('seed', v ? Number(v) : null);
@@ -578,7 +578,7 @@
       {/if}
 
       {#if supportsFirstSigma}
-      <div>
+      <div class="col-span-2">
         <label class="field-hint-label mb-1 block" for="ws-first-sigma">First-step Sigma</label>
         <input
           id="ws-first-sigma"
@@ -618,8 +618,9 @@
 
     <!-- Post-processing (image workflows only) -->
     {#if showPostprocess}
-      <div class="space-y-3 border-t border-border-subtle pt-4">
-        <span class="field-label mb-2 block">Post-processing</span>
+      <details class="control-group">
+        <summary><span>Post-processing</span><span class="group-status">{[draft.state.postprocessSharpenEnabled, draft.state.postprocessContrastEnabled, draft.state.postprocessSaturationEnabled].filter(Boolean).length || 'Off'}</span></summary>
+        <div class="group-content space-y-2">
 
         {#if visibleControls.has('postprocess_sharpen')}
           <div class="surface-card-muted space-y-2 rounded-md p-3">
@@ -710,15 +711,15 @@
             <input type="hidden" name="saturation_amount" value={String(draft.state.postprocessSaturationAmount)}>
           {/if}
         {/if}
-      </div>
+        </div>
+      </details>
     {/if}
 
     <!-- Upscale (image workflows only) -->
     {#if isImageMode && showImageUpscale}
-      <div class="space-y-4 border-t border-border-subtle pb-4 pt-4">
-        <span class="field-label mb-2 block">
-          Enhancements &amp; System
-        </span>
+      <details class="control-group">
+        <summary><span>Upscale</span><span class="group-status">{draft.state.upscaleEnabled ? `${draft.state.upscaleFactor}×` : 'Off'}</span></summary>
+        <div class="group-content space-y-2">
 
         <!-- Upscale toggle + factor — wired to draft state and submitted in form -->
         <div class="surface-card-muted space-y-3 p-3">
@@ -834,15 +835,15 @@
             </div>
           {/if}
         {/if}
-      </div>
+        </div>
+      </details>
     {/if}
 
     <!-- Video-only: Audio + Low Memory -->
     {#if showVideoControls}
-      <div class="space-y-3 border-t border-border-subtle pb-4 pt-4">
-        <span class="field-label mb-2 block">
-          Video Settings
-        </span>
+      <details class="control-group">
+        <summary><span>Video Settings</span><span class="group-status">{draft.state.audio ? 'Audio' : ''}{draft.state.lowMemory ? ' · Low memory' : ''}{draft.state.videoUpscaleEnabled ? ' · Upscale' : ''}</span></summary>
+        <div class="group-content space-y-3">
 
         {#if visibleControls.has('audio')}
         <label class="flex items-center gap-3 cursor-pointer group">
@@ -917,13 +918,14 @@
             {/if}
           </div>
         {/if}
-      </div>
+        </div>
+      </details>
     {/if}
 
   </div><!-- end scroll area -->
 
   <!-- Sticky submit bar -->
-  <div class="panel-footer absolute bottom-0 left-0 right-0 z-10 w-full shrink-0 p-4 backdrop-blur-sm">
+  <div class="panel-footer z-10 w-full shrink-0 p-3">
     <p
       id="ws-busy-note"
       class="surface-card-muted {busy ? '' : 'hidden'} mb-3 px-3 py-2 text-xs text-zinc-400"
@@ -939,7 +941,7 @@
       id="ws-submit"
       type="submit"
       disabled={submitDisabled}
-      class="surface-button surface-button-primary surface-button-glow flex w-full items-center justify-center gap-2 rounded-md py-2.5 font-medium active:scale-[0.98]"
+      class="surface-button surface-button-primary flex w-full items-center justify-center gap-2 rounded-md py-2.5 font-medium active:scale-[0.98]"
     >
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
@@ -950,3 +952,22 @@
   </div>
   {/if}
 </section>
+
+<style>
+  #ws-controls-sidebar :global(.surface-input),
+  #ws-controls-sidebar :global(.surface-select),
+  #ws-controls-sidebar :global(.surface-textarea) {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+  .generation-grid > div { min-width: 0; }
+  .control-group { border-top: 1px solid var(--color-border-subtle); }
+  .control-group summary { display: flex; align-items: center; gap: 8px; padding: 10px 0; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--color-text-secondary); list-style: none; }
+  .control-group summary::-webkit-details-marker { display: none; }
+  .control-group summary::before { content: '›'; font-size: 16px; line-height: 1; transition: transform 120ms; }
+  .control-group[open] summary::before { transform: rotate(90deg); }
+  .control-group summary:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
+  .group-status { margin-left: auto; font-size: 11px; font-weight: 400; color: var(--color-text-muted); }
+  .group-content { padding-bottom: 4px; }
+  .group-content :global(.surface-card-muted) { padding: 8px; }
+</style>

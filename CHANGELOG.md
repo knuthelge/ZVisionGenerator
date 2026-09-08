@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-08
+
+### Changed
+- Refined the Web UI with compact navigation, neutral surfaces, improved text contrast, and the original teal brand accent
+- Tightened workspace controls with paired fields and collapsible post-processing, upscale, and video settings
+- Expanded preview space with slimmer side panels and responsive workspace controls
+- Redesigned generation cards with compact timing, readable stage labels, visual batch tracking, and a subtle progress sweep that respects reduced-motion preferences
+
+### Fixed
+- Generation controls now show pending, accepted, and failed requests and prevent duplicate clicks while a request is in flight
+- Removed duplicate running-stage messages and conflicting pause/resume controls
+- Kept the Generate bar clear of scrolling form controls
+
 ## [0.7.0] - 2026-09-08
 
 ### Added

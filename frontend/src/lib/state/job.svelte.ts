@@ -128,7 +128,11 @@ function applyStatusEvent(type: string, event: SSEEvent): void {
   if (!_job) return;
   const data = event as unknown as Record<string, unknown>;
   const msg = statusMessageForEvent(type, data);
-  if (msg) _job = { ..._job, message: msg };
+  if (msg) _job = {
+    ..._job,
+    message: msg,
+    ...(type === 'workflow_stage_started' ? { stageName: eventFieldString(data, 'stage_name') } : {}),
+  };
 }
 
 function reportLifecycleError(callbackName: keyof JobLifecycleCallbacks, error: unknown): void {
