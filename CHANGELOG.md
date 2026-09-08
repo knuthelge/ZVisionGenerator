@@ -6,10 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-08
+
 ### Added
 - Packaged local Web UI with workspace, gallery, config, and model views
 - FastAPI-backed local job APIs, status streaming, and background web runner support for browser-submitted image and video jobs
 - Frontend build, test, and packaged static asset verification integrated into the standard Makefile and CI workflows
+- Ideogram 4 image generation with structured JSON captions, configurable first-step sigma, and Web UI capability controls
+- Windows and Linux video generation through the diffusers/CUDA LTX backend
+- Generation provenance metadata for saved image and video outputs
 
 ### Changed
 - Base installs now include the local Web UI runtime dependencies and packaged SPA assets
@@ -18,6 +23,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - If a model alias is unavailable on your platform, a guidance message now explains why and suggests alternatives
 - `ziv model list` now shows platform-specific availability for model aliases
 - Bare `ziv` now shows command discovery/help, and the local Web UI is launched explicitly with `ziv ui` or `ziv-ui`
+- Frontend dependency management now uses pnpm
+- Dependency automation now groups major updates while ignoring minor and patch updates
+
+### Fixed
+- Local Web UI job recovery, status streaming, gallery updates, and runtime delivery are more resilient
+- Image backend weight casting now handles both `bfloat16` and `float16` tensors correctly
+- Model management frontend assets are included in packaged builds
 
 ## [0.6.5] - 2026-04
 
