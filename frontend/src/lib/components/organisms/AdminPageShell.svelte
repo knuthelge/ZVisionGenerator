@@ -20,13 +20,13 @@
   }: Props = $props();
 </script>
 
-<main class="flex-1 bg-zinc-900 overflow-y-auto p-6 custom-scrollbar {extraClass}">
-  <div class="max-w-6xl mx-auto space-y-8">
+<main class="flex-1 bg-zinc-900 overflow-y-auto p-4 custom-scrollbar {extraClass}">
+  <div class="max-w-7xl mx-auto space-y-5">
     <!-- Header -->
-    <header class="mb-8">
-      <h1 class="text-2xl font-bold text-white tracking-tight">{title}</h1>
+    <header class="border-b border-border-subtle pb-3">
+      <h1 class="text-base font-semibold text-white tracking-tight">{title}</h1>
       {#if description}
-        <p class="text-zinc-400 mt-2 text-sm">{description}</p>
+        <p class="text-zinc-400 mt-1 text-xs">{description}</p>
       {/if}
     </header>
 

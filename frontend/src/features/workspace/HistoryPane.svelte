@@ -24,14 +24,14 @@
 
 <section
   id="ws-history-shell"
-  class="panel-shell panel-shell-right relative z-30 hidden shrink-0 overflow-hidden transition-[width] duration-200 ease-out sm:flex"
-  style="width: {collapsed ? '3rem' : '20rem'}"
+  class="panel-shell panel-shell-right relative z-30 hidden shrink-0 overflow-hidden transition-[width] duration-200 ease-out lg:flex"
+  style="width: {collapsed ? '2rem' : '16rem'}"
 >
   {#if !collapsed}
     <div class="min-w-0 flex-1 overflow-y-auto flex flex-col custom-scrollbar transition-opacity duration-150 ease-out">
-      <div class="panel-header sticky top-0 z-30 flex items-center justify-between px-4 py-3 backdrop-blur">
+      <div class="panel-header sticky top-0 z-30 flex h-10 shrink-0 items-center justify-between px-3">
         <div>
-          <h2 class="field-label">Session History</h2>
+          <h2 class="field-label">History <span class="ml-1 text-text-muted font-normal">{assets.length}</span></h2>
         </div>
         <div class="flex items-center gap-2">
           <button
@@ -39,7 +39,7 @@
             class="surface-link-muted text-xs"
             onclick={openGallery}
           >
-            Open Gallery
+            Gallery ↗
           </button>
         </div>
       </div>
@@ -94,11 +94,11 @@
   {/if}
 
   <!-- Toggle handle -->
-  <div class="panel-handle w-12 shrink-0 backdrop-blur">
+  <div class="panel-handle w-8 shrink-0">
     <button
       type="button"
       id="ws-history-toggle"
-      class="panel-handle-button flex h-full w-full flex-col items-center justify-start gap-4 px-2 py-4"
+      class="panel-handle-button flex h-full w-full flex-col items-center justify-start gap-5 px-1 py-3"
       aria-label="{collapsed ? 'Expand' : 'Collapse'} history pane"
       aria-expanded={!collapsed}
       onclick={toggle}
@@ -112,7 +112,7 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
       </svg>
       <span class="sr-only">Toggle session history</span>
-      <span class="text-[10px] font-semibold uppercase tracking-[0.25em] text-current whitespace-nowrap -rotate-90 origin-center select-none">
+      <span class="text-[11px] text-current whitespace-nowrap select-none [writing-mode:vertical-rl]">
         History
       </span>
     </button>

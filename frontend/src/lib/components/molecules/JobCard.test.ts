@@ -72,6 +72,91 @@ describe('JobCard', () => {
     expect(text).toContain('2 / 3');
     expect(text).toContain('4 / 20');
     expect(text).toContain('02:05');
+    expect(target.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('20');
+  });
+
+  it.each([
+    { currentStep: 30, totalSteps: 20, expected: '100' },
+    { currentStep: -1, totalSteps: 20, expected: '0' },
+    { currentStep: 0, totalSteps: 0, expected: null },
+  ])('keeps progress valid when step data is $currentStep / $totalSteps', ({ currentStep, totalSteps, expected }) => {
+    component = mount(JobCard, { target, props: { job: makeJob({ currentStep, totalSteps }) } });
+    flushSync();
+    expect(target.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe(expected);
+  });
+
+  it('shows resume without pause when a running job is paused', () => {
+    const onresume = vi.fn();
+    component = mount(JobCard, { target, props: {
+      job: makeJob({ paused: true, supported_controls: ['pause', 'resume'] }), onresume,
+    } });
+    flushSync();
+    const buttons = Array.from(target.querySelectorAll('button'));
+    expect(buttons.map((button) => button.textContent?.trim())).toEqual(['Resume']);
+    buttons[0].click();
+    expect(onresume).toHaveBeenCalledWith('job-card');
+  });
+
+  it.each([
+    { status: 'running' as const, states: ['Previous', 'Current', 'Waiting'] },
+    { status: 'paused' as const, states: ['Previous', 'Paused', 'Waiting'] },
+    { status: 'queued' as const, states: ['Waiting', 'Waiting', 'Waiting'] },
+    { status: 'failed' as const, states: ['Previous', 'Failed', 'Waiting'] },
+    { status: 'cancelled' as const, states: ['Previous', 'Stopped', 'Waiting'] },
+    { status: 'completed' as const, states: ['Completed', 'Completed', 'Completed'] },
+  ])('visualizes $status batch runs', ({ status, states }) => {
+    component = mount(JobCard, { target, props: { job: makeJob({ runs: 3, batchIndex: 1, status }) } });
+    flushSync();
+    expect(Array.from(target.querySelectorAll('[aria-label="Batch runs"] li')).map((run) => run.getAttribute('data-state'))).toEqual(states);
+  });
+
+  it('keeps large batches compact and includes the current run', () => {
+    component = mount(JobCard, { target, props: { job: makeJob({ runs: 100, batchIndex: 40 }) } });
+    flushSync();
+    expect(target.querySelectorAll('[aria-label="Batch runs"] li')).toHaveLength(16);
+    expect(target.querySelector('[aria-current="step"]')?.getAttribute('aria-label')).toBe('Run 41: Current');
+  });
+
+  it('shows one readable stage label without the duplicate running message', () => {
+    component = mount(JobCard, { target, props: { job: makeJob({ stageName: 'text_to_image', message: 'Running text to image.' }) } });
+    flushSync();
+    expect(target.textContent).toContain('Text to image');
+    expect(target.textContent).not.toContain('Running text to image.');
+    expect(target.textContent).not.toContain('text_to_image');
+  });
+
+  it('immediately shows pending feedback, prevents duplicate clicks, then confirms acceptance', async () => {
+    let resolve!: () => void;
+    const onpause = vi.fn(() => new Promise<void>((done) => { resolve = done; }));
+    component = mount(JobCard, { target, props: { job: makeJob({ supported_controls: ['pause'] }), onpause } });
+    flushSync();
+    const button = target.querySelector('button')!;
+    button.click();
+    button.click();
+    flushSync();
+    expect(onpause).toHaveBeenCalledTimes(1);
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toContain('Sending…');
+    expect(target.textContent).toContain('Sending pause request…');
+    resolve();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(button.disabled).toBe(false);
+      expect(target.textContent).toContain('Pause request accepted.');
+    });
+  });
+
+  it('shows rejected controls and allows retry', async () => {
+    const onpause = vi.fn().mockRejectedValue(new Error('This job is no longer running.'));
+    component = mount(JobCard, { target, props: { job: makeJob({ supported_controls: ['pause'] }), onpause } });
+    flushSync();
+    const button = target.querySelector('button')!;
+    button.click();
+    await vi.waitFor(() => {
+      flushSync();
+      expect(target.textContent).toContain('Pause failed. This job is no longer running.');
+      expect(button.disabled).toBe(false);
+    });
   });
 
   it('renders repeat controls and status messages through live callbacks', () => {

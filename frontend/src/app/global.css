@@ -4,17 +4,24 @@
 
 @theme {
   /* Custom zinc step between zinc-800 and zinc-900 */
-  --color-zinc-850: #202024;
+  --color-zinc-950: #141516;
+  --color-zinc-900: #1c1e20;
+  --color-zinc-850: #222426;
+  --color-zinc-800: #2b2e31;
+  --color-zinc-700: #3c4044;
+  --color-zinc-600: #83888e;
+  --color-zinc-500: #94999f;
+  --color-zinc-400: #b0b5ba;
 
   /* Semantic color tokens */
-  --color-bg-base: #09090b;
-  --color-bg-surface: #18181b;
-  --color-bg-surface-hover: #27272a;
-  --color-border-subtle: #27272a;
-  --color-border-strong: #3f3f46;
-  --color-text-primary: #fafafa;
-  --color-text-secondary: #a1a1aa;
-  --color-text-muted: #71717a;
+  --color-bg-base: #141516;
+  --color-bg-surface: #1c1e20;
+  --color-bg-surface-hover: #2b2e31;
+  --color-border-subtle: #303336;
+  --color-border-strong: #3c4044;
+  --color-text-primary: #eceeef;
+  --color-text-secondary: #b0b5ba;
+  --color-text-muted: #94999f;
   --color-primary-main: #2dd4bf;
   --color-primary-hover: #14b8a6;
   --color-primary-subtle: #115e59;
@@ -65,6 +72,22 @@
 
   button:not(:disabled) {
     cursor: pointer;
+  }
+
+  :root {
+    color-scheme: dark;
+    font-synthesis: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :where(button, a, input, select, textarea):focus-visible {
+    outline: 2px solid var(--color-primary-main);
+    outline-offset: 3px;
+  }
+
+  ::selection {
+    background: var(--color-primary-subtle);
+    color: #fff;
   }
 }
 
@@ -140,8 +163,7 @@
 
   .panel-toolbar {
     background-color: var(--color-bg-surface);
-    border-bottom: 1px solid var(--color-border-strong);
-    box-shadow: 0 1px 0 rgb(0 0 0 / 0.22);
+    border-bottom: 1px solid var(--color-border-subtle);
   }
 
   .panel-scroll-surface {
@@ -175,10 +197,9 @@
 
   .field-label {
     color: var(--color-text-secondary);
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0;
   }
 
   .field-hint-label {
@@ -327,10 +348,6 @@
     color: var(--color-text-muted);
   }
 
-  .surface-button-glow {
-    box-shadow: 0 0 15px rgb(45 212 191 / 0.3);
-  }
-
   .surface-button-secondary {
     background-color: var(--color-bg-surface);
     border: 1px solid var(--color-border-strong);
@@ -357,10 +374,10 @@
   }
 
   .surface-shortcut {
-    background-color: color-mix(in srgb, var(--color-primary-main) 14%, transparent);
-    border: 1px solid color-mix(in srgb, var(--color-primary-hover) 35%, transparent);
+    background-color: rgb(15 23 42 / 0.06);
+    border: 1px solid rgb(15 23 42 / 0.18);
     border-radius: 0.375rem;
-    color: color-mix(in srgb, var(--color-primary-hover) 72%, black 10%);
+    color: inherit;
   }
 
   .surface-gallery-card {
@@ -375,7 +392,7 @@
   .surface-gallery-card-selected {
     background-color: color-mix(in srgb, var(--color-primary-main) 7%, var(--color-bg-base));
     border: 1px solid color-mix(in srgb, var(--color-primary-main) 60%, transparent);
-    box-shadow: 0 0 0 2px rgb(45 212 191 / 0.28);
+    box-shadow: 0 0 0 1px var(--color-primary-main);
   }
 
   .surface-media-frame {

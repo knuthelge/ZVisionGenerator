@@ -33,7 +33,7 @@
 </script>
 
 {#if ready}
-  <div class="h-screen flex flex-col overflow-hidden bg-zinc-950 text-zinc-50 font-sans">
+  <div class="h-dvh flex flex-col overflow-hidden bg-zinc-950 text-zinc-50 font-sans">
     <TopNav currentPage={router.page} />
     <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
       {#if router.page === 'workspace'}

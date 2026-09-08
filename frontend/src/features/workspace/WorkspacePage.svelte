@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { api } from '$lib/api/client';
   import { draft } from '$lib/state/draft.svelte';
   import { jobStore } from '$lib/state/job.svelte';
   import { historyStore } from '$lib/state/history.svelte';
@@ -268,16 +269,16 @@
 
   <!-- Toolbar bar: model, quantize, loras -->
   <div class="panel-toolbar z-10 shrink-0">
-    <div class="flex flex-wrap items-center px-4 py-2 gap-4">
+    <div class="flex flex-wrap items-center px-3 py-2 gap-3">
 
       <!-- Model selector -->
-      <div class="flex items-center gap-2 shrink-0">
+      <div class="flex flex-wrap items-center gap-2 min-w-0">
         <label class="field-label" for="ws-model">Model</label>
         <ToolbarSelectShell
           id="ws-model"
           name="model"
           testId="model-shell"
-          class="w-56"
+          class="w-48"
           value={draft.state.model}
           disabled={!authorityReady || currentModels.length === 0}
           onchange={onModelChange}
@@ -392,7 +393,7 @@
   </div>
 
   <!-- Main 3-column layout -->
-  <main class="flex-1 flex overflow-hidden">
+  <main class="workspace-layout min-h-0 flex-1 flex overflow-hidden">
 
     <!-- Left: Controls Sidebar -->
     <ControlsSidebar
@@ -403,9 +404,13 @@
     />
 
     <!-- Center: Canvas -->
-    <section class="panel-scroll-surface relative z-0 flex min-w-0 flex-1 flex-col p-6">
+    <section class="workspace-preview relative z-0 flex min-w-0 flex-1 flex-col bg-bg-base">
+      <div class="panel-header flex h-10 shrink-0 items-center justify-between px-3">
+        <h2 class="field-label">Preview</h2>
+        <span class="text-xs text-text-muted">{jobStore.isRunning ? 'Generating…' : completedOutput || historyStore.assets.length ? 'Latest output' : 'Ready'}</span>
+      </div>
       <div
-        class="surface-panel-frame relative flex flex-1 items-center justify-center overflow-hidden shadow-inner"
+        class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden"
       >
         {#if loadError}
           <div class="text-center p-8">
@@ -440,11 +445,11 @@
             <div class="w-full max-w-md">
               <JobCard
                 job={jobStore.current!}
-                oncancel={(id) => fetch(`/jobs/${id}/controls/quit`, { method: 'POST' })}
-                onpause={(id) => fetch(`/jobs/${id}/controls/pause`, { method: 'POST' })}
-                onresume={(id) => fetch(`/jobs/${id}/controls/resume`, { method: 'POST' })}
-                onnext={(id) => fetch(`/jobs/${id}/controls/next`, { method: 'POST' })}
-                onrepeat={(id) => fetch(`/jobs/${id}/controls/repeat`, { method: 'POST' })}
+                oncancel={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/quit`)}
+                onpause={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/pause`)}
+                onresume={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/resume`)}
+                onnext={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/next`)}
+                onrepeat={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/repeat`)}
               />
             </div>
           </div>
@@ -468,9 +473,9 @@
             {/if}
           </div>
         {:else}
-          <div class="flex flex-col items-center justify-center gap-4 text-center p-8">
-            <div class="surface-card rounded-full p-4">
-              <svg class="w-8 h-8 text-zinc-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div class="flex flex-col items-center justify-center gap-3 text-center p-4">
+            <div class="text-text-muted">
+              <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
             </div>
@@ -496,3 +501,10 @@
   onclose={closeLightbox}
   onnavigate={(i) => { lightboxIndex = i; }}
 />
+
+<style>
+  @media (max-width: 639px) {
+    .workspace-layout { flex-direction: column; overflow-y: auto; }
+    .workspace-preview { flex: none; min-height: 320px; }
+  }
+</style>
