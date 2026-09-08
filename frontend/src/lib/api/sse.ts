@@ -23,6 +23,14 @@ export function connectJobSSE(
 ): SSESubscription {
   const es = new EventSource(`/jobs/${jobId}/events`);
   const TERMINAL_EVENTS: ReadonlySet<string> = new Set(['job_completed', 'job_failed', 'job_cancelled']);
+  let closed = false;
+
+  function close(): void {
+    if (closed) return;
+    closed = true;
+    es.close();
+    handlers.onClose?.();
+  }
 
   function handleEvent(type: string, data: SSEEvent): void {
     switch (type) {
@@ -49,10 +57,6 @@ export function connectJobSSE(
       case 'job_resumed': handlers.onJobResumed?.(data); break;
     }
 
-    if (TERMINAL_EVENTS.has(type)) {
-      es.close();
-      handlers.onClose?.();
-    }
   }
 
   const eventTypes = ['step_progress', 'batch_completed', 'job_completed', 'job_failed', 'job_cancelled', 'progress_text', 'job_paused', 'job_resumed', 'model_loading', 'batch_started', 'workflow_stage_started', 'workflow_stage_completed', 'generation_finished'];
@@ -60,17 +64,24 @@ export function connectJobSSE(
     es.addEventListener(type, (event: Event) => {
       try {
         const data = JSON.parse((event as MessageEvent).data) as SSEEvent;
-        handleEvent(type, data);
+        if (TERMINAL_EVENTS.has(type)) {
+          try {
+            handleEvent(type, data);
+          } finally {
+            close();
+          }
+        } else {
+          handleEvent(type, data);
+        }
       } catch {
         // ignore malformed events
       }
     });
   });
 
-  es.onerror = () => {
-    es.close();
-    handlers.onClose?.();
-  };
+  // EventSource reconnects automatically and sends Last-Event-ID after a
+  // transient failure. Only explicit or terminal closure ends the stream.
+  es.onerror = () => {};
 
-  return { close: () => { es.close(); handlers.onClose?.(); } };
+  return { close };
 }

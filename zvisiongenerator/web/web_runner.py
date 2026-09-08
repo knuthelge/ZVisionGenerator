@@ -24,7 +24,7 @@ from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.image_runner import run_batch
-from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
+from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
@@ -437,12 +437,12 @@ class WebRunner:
         self._publish_event(job_id, {"type": "control_queued", "action": normalized})
         return {"job_id": job_id, "action": normalized, "status": "queued"}
 
-    async def stream_job_events(self, job_id: str) -> AsyncIterator[str]:
+    async def stream_job_events(self, job_id: str, *, after_event_id: int | None = None) -> AsyncIterator[str]:
         """Yield a job's progress events as SSE frames."""
         record = self._get_job(job_id)
         subscriber: queue.Queue[EventPayload] | None = None
         with record.lock:
-            history = [dict(event) for event in record.history]
+            history = [dict(event) for event in record.history if after_event_id is None or event["event_id"] > after_event_id]
             if record.status not in self._TERMINAL_STATUSES:
                 subscriber = queue.Queue()
                 record.subscribers.add(subscriber)
@@ -507,8 +507,9 @@ class WebRunner:
         try:
             with _worker_runtime_context():
                 target()
-        except Exception as exc:
-            self._publish_event(job_id, {"type": FAILED_TERMINAL_EVENT, "message": str(exc)})
+        except (Exception, SystemExit) as exc:
+            message = str(exc).strip() or f"{type(exc).__name__} stopped the generation worker."
+            self._publish_event(job_id, {"type": FAILED_TERMINAL_EVENT, "message": message})
             return
 
         record = self._get_job(job_id)
@@ -563,7 +564,7 @@ class WebRunner:
     ) -> None:
         """Load the video model inside the worker thread, then run the batch."""
         progress_callback({"type": "model_loading", "mode": "video", "model": request.model_name or model_ref})
-        ensure_ffmpeg()
+        require_ffmpeg()
         backend = get_video_backend(request.model_family)
         workflow = build_video_workflow(args)
         lora_paths = request.lora_paths or []

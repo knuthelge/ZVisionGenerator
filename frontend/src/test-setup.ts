@@ -6,12 +6,14 @@ class MockEventSource {
 
   // Tracks the most recently constructed instance — used by SSE tests
   static lastInstance: MockEventSource | null = null;
+  static instances: MockEventSource[] = [];
 
   readonly CONNECTING = 0;
   readonly OPEN = 1;
   readonly CLOSED = 2;
 
   readyState = MockEventSource.CONNECTING;
+  closeCalls = 0;
   url: string;
   withCredentials = false;
 
@@ -24,6 +26,7 @@ class MockEventSource {
   constructor(url: string) {
     this.url = url;
     MockEventSource.lastInstance = this;
+    MockEventSource.instances.push(this);
     setTimeout(() => {
       this.readyState = MockEventSource.OPEN;
       this.onopen?.(new Event('open'));
@@ -40,6 +43,7 @@ class MockEventSource {
   }
 
   close(): void {
+    this.closeCalls += 1;
     this.readyState = MockEventSource.CLOSED;
   }
 
@@ -48,6 +52,11 @@ class MockEventSource {
     const event = new MessageEvent(type, { data: JSON.stringify(data) });
     this.listeners.get(type)?.forEach(l => l(event));
     if (type === 'message') this.onmessage?.(event);
+  }
+
+  // Test helper: simulate an EventSource transport error without closing it.
+  emitError(): void {
+    this.onerror?.(new Event('error'));
   }
 }
 
