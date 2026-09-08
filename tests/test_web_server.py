@@ -924,6 +924,59 @@ def test_generate_route_returns_requested_runs_from_job_context(monkeypatch):
     assert payload["supported_controls"] == ["next", "pause"]
 
 
+def test_video_submission_missing_ffmpeg_returns_422_before_job_registration(monkeypatch):
+    """The Web UI rejects missing ffmpeg as validation without entering a worker/install flow."""
+    web_config = _make_web_config()
+    submitted: list[dict[str, object]] = []
+    monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(
+        web_server,
+        "detect_video_model",
+        lambda _model: SimpleNamespace(family="ltx", supports_i2v=True, resolution_alignment=64, frame_alignment=8),
+    )
+    monkeypatch.setattr(web_server, "resolve_video_defaults", lambda *_args: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
+    monkeypatch.setattr(web_server, "_normalize_video_args", lambda *_args: None)
+    monkeypatch.setattr(web_server, "require_ffmpeg", lambda: (_ for _ in ()).throw(RuntimeError("ffmpeg is missing; install it and retry")))
+    monkeypatch.setattr(web_server.web_runner, "submit_video_request_job", lambda **kwargs: submitted.append(kwargs) or "job-123")
+
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/generate", data={"mode": "video", "model": "ltx-8", "prompt": "a lake"})
+
+    assert response.status_code == 422
+    assert set(response.json()) == {"detail"}
+    assert "ffmpeg" in response.json()["detail"].lower()
+    assert "install" in response.json()["detail"].lower()
+    assert submitted == []
+
+
+def test_image_submission_does_not_require_ffmpeg(monkeypatch):
+    """Image submissions retain their existing path when the video prerequisite is unavailable."""
+    monkeypatch.setattr(web_server, "load_web_config", _make_web_config)
+    monkeypatch.setattr(web_server, "require_ffmpeg", lambda: (_ for _ in ()).throw(AssertionError("image submissions must not check ffmpeg")))
+    monkeypatch.setattr(
+        web_server,
+        "_submit_image_job",
+        lambda _form, _web_config: {
+            "job_id": "job-123",
+            "job_type": "txt2img",
+            "title": "zit",
+            "prompt": "prompt",
+            "events_url": "/jobs/job-123/events",
+            "status_url": "/jobs/job-123",
+            "supported_controls": (),
+            "runs": 1,
+            "meta": "",
+        },
+    )
+
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/generate", data={"mode": "image"})
+
+    assert response.status_code == 200
+    assert response.json()["job_id"] == "job-123"
+
+
 def test_generate_route_rejects_unsupported_workflow_alias(monkeypatch):
     """Generate submissions should accept canonical workflow values only."""
     monkeypatch.setattr(web_server, "load_web_config", _make_web_config)

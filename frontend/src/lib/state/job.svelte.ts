@@ -7,15 +7,21 @@ import { clearActiveJobId, readActiveJobId, writeActiveJobId } from './activeJob
 let _job = $state<ActiveJobState | null>(null);
 let _subscription: SSESubscription | null = null;
 
-type JobCallbacks = {
-  onComplete?: (outputs: GalleryAsset[]) => void;
-  onFailed?: () => void;
-  onCancelled?: () => void;
+export type JobLifecycleCallbacks = {
+  onComplete?: (outputs: GalleryAsset[]) => void | Promise<void>;
+  onFailed?: () => void | Promise<void>;
+  onCancelled?: () => void | Promise<void>;
 };
 
-type ReconnectJobOptions = JobCallbacks & {
+type ReconnectJobOptions = {
   snapshot?: JobSnapshot | null;
 };
+
+type LifecycleRegistration = {
+  callbacks: JobLifecycleCallbacks;
+};
+
+const _lifecycleSubscribers = new Set<LifecycleRegistration>();
 
 function eventFieldNumber(event: Record<string, unknown> | null | undefined, key: string): number {
   const value = event?.[key];
@@ -111,10 +117,10 @@ function closeSubscription(): void {
   subscription?.close();
 }
 
-function connectSnapshot(snapshot: JobSnapshot, callbacks: JobCallbacks): true {
+function connectSnapshot(snapshot: JobSnapshot): true {
   _job = makeJobStateFromSnapshot(snapshot);
   writeActiveJobId(snapshot.job_id ?? snapshot.id);
-  attachJobEvents(snapshot.job_id ?? snapshot.id, callbacks);
+  attachJobEvents(snapshot.job_id ?? snapshot.id);
   return true;
 }
 
@@ -125,7 +131,33 @@ function applyStatusEvent(type: string, event: SSEEvent): void {
   if (msg) _job = { ..._job, message: msg };
 }
 
-function attachJobEvents(jobId: string, callbacks: JobCallbacks = {}): void {
+function reportLifecycleError(callbackName: keyof JobLifecycleCallbacks, error: unknown): void {
+  console.error(`Job lifecycle subscriber ${callbackName} failed`, error);
+}
+
+function notifyLifecycle(
+  callbackName: keyof JobLifecycleCallbacks,
+  outputs: GalleryAsset[] = []
+): void {
+  for (const registration of Array.from(_lifecycleSubscribers)) {
+    try {
+      const result = callbackName === 'onComplete'
+        ? registration.callbacks.onComplete?.(outputs)
+        : callbackName === 'onFailed'
+          ? registration.callbacks.onFailed?.()
+          : registration.callbacks.onCancelled?.();
+      if (result) {
+        void Promise.resolve(result).catch((error: unknown) => {
+          reportLifecycleError(callbackName, error);
+        });
+      }
+    } catch (error) {
+      reportLifecycleError(callbackName, error);
+    }
+  }
+}
+
+function attachJobEvents(jobId: string): void {
   closeSubscription();
   _subscription = connectJobSSE(jobId, {
     onStep(event) {
@@ -160,19 +192,19 @@ function attachJobEvents(jobId: string, callbacks: JobCallbacks = {}): void {
       const ev = event as { outputs?: GalleryAsset[] };
       _job = { ..._job, status: 'completed', paused: false, outputs: ev.outputs ?? _job.outputs, message: 'Job completed.' };
       clearActiveJobId(_job.job_id);
-      callbacks.onComplete?.(_job.outputs);
+      notifyLifecycle('onComplete', _job.outputs);
     },
     onJobFailed() {
       if (!_job) return;
       _job = { ..._job, status: 'failed', paused: false, message: 'Job failed.' };
       clearActiveJobId(_job.job_id);
-      callbacks.onFailed?.();
+      notifyLifecycle('onFailed');
     },
     onJobCancelled() {
       if (!_job) return;
       _job = { ..._job, status: 'cancelled', paused: false, message: 'Job stopped.' };
       clearActiveJobId(_job.job_id);
-      callbacks.onCancelled?.();
+      notifyLifecycle('onCancelled');
     },
     onJobPaused() {
       if (!_job) return;
@@ -193,21 +225,32 @@ export const jobStore = {
   get current(): ActiveJobState | null { return _job; },
   get isRunning(): boolean { return _job?.status === 'queued' || _job?.status === 'running' || _job?.status === 'paused'; },
 
-  startJob(ctx: JobContext, onComplete?: (outputs: GalleryAsset[]) => void, onFailed?: () => void, onCancelled?: () => void): void {
+  subscribeLifecycle(callbacks: JobLifecycleCallbacks): () => void {
+    const registration = { callbacks };
+    let subscribed = true;
+    _lifecycleSubscribers.add(registration);
+    return () => {
+      if (!subscribed) return;
+      subscribed = false;
+      _lifecycleSubscribers.delete(registration);
+    };
+  },
+
+  startJob(ctx: JobContext): void {
     _job = makeInitialJobState(ctx);
     writeActiveJobId(ctx.job_id);
-    attachJobEvents(ctx.job_id, { onComplete, onFailed, onCancelled });
+    attachJobEvents(ctx.job_id);
   },
 
   async reconnectActiveJob(options: ReconnectJobOptions = {}): Promise<boolean> {
-    const { snapshot = null, ...callbacks } = options;
+    const { snapshot = null } = options;
     if (_job && !isTerminalStatus(_job.status)) return true;
     const snapshotJobId = snapshot ? (snapshot.job_id ?? snapshot.id) : null;
     if (snapshot) {
       if (isTerminalStatus(snapshot.status)) {
         if (snapshotJobId) clearActiveJobId(snapshotJobId);
       } else {
-        return connectSnapshot(snapshot, callbacks);
+        return connectSnapshot(snapshot);
       }
     }
     const jobId = readActiveJobId();
@@ -218,7 +261,7 @@ export const jobStore = {
         clearActiveJobId(jobId);
         return false;
       }
-      return connectSnapshot(snapshot, callbacks);
+      return connectSnapshot(snapshot);
     } catch {
       clearActiveJobId(jobId);
       return false;

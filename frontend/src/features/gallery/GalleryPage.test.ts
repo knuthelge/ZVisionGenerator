@@ -16,6 +16,10 @@ const routerMocks = vi.hoisted(() => ({
   navigate: vi.fn<(page: string, params?: Record<string, string>) => void>(),
 }));
 
+const toastMocks = vi.hoisted(() => ({
+  addToast: vi.fn<(message: string, tone: 'success' | 'warning' | 'error') => void>(),
+}));
+
 vi.mock('$lib/api/gallery', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/gallery')>();
   return {
@@ -36,7 +40,7 @@ vi.mock('$lib/state/router.svelte', () => ({
 }));
 
 vi.mock('$lib/state/toasts.svelte', () => ({
-  addToast: vi.fn(),
+  addToast: toastMocks.addToast,
 }));
 
 import GalleryPage from './GalleryPage.svelte';
@@ -88,6 +92,24 @@ function queryButtonByName(container: ParentNode, name: string): HTMLButtonEleme
   return Array.from(container.querySelectorAll('button')).find((button) => button.textContent?.trim() === name) ?? null;
 }
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (reason?: unknown) => void } {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function selectAssetForBatch(container: ParentNode, asset: GalleryAsset): HTMLInputElement {
+  const checkbox = container.querySelector(`input[aria-label="Select ${asset.filename}"]`) as HTMLInputElement | null;
+  expect(checkbox).not.toBeNull();
+  checkbox!.checked = true;
+  checkbox!.dispatchEvent(new Event('change', { bubbles: true }));
+  return checkbox!;
+}
+
 let target: HTMLDivElement;
 let app: Record<string, unknown> | null = null;
 
@@ -96,6 +118,7 @@ beforeEach(() => {
   document.body.appendChild(target);
   galleryApiMocks.getGallery.mockReset();
   galleryApiMocks.deleteAsset.mockReset();
+  toastMocks.addToast.mockReset();
   routerMocks.params = {};
   routerMocks.replace.mockReset();
   routerMocks.navigate.mockReset();
@@ -632,3 +655,179 @@ describe('GalleryPage lightbox navigation (REC-UX-003)', () => {
   });
 });
 
+describe('GalleryPage request ownership (F07)', () => {
+  it('commits only the latest replacement request when older loads resolve or reject afterwards', async () => {
+    const initial = deferred<GalleryPageResponse>();
+    const filtered = deferred<GalleryPageResponse>();
+    const currentAsset = makeAsset({ id: 'current.mp4', filename: 'current.mp4', media_type: 'video' });
+    galleryApiMocks.getGallery.mockReturnValueOnce(initial.promise).mockReturnValueOnce(filtered.promise);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    const filterSelect = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
+    filterSelect.value = 'video';
+    filterSelect.dispatchEvent(new Event('change', { bubbles: true }));
+
+    filtered.resolve({ assets: [currentAsset], page: 1, total_pages: 1, total_count: 1 });
+    await settle();
+    initial.reject(new Error('stale request failed'));
+    await settle();
+
+    expect(target.textContent).toContain('current.mp4');
+    expect(target.textContent).not.toContain('stale request failed');
+    expect(target.textContent).not.toContain('stale.png');
+    expect(target.textContent).toContain('Browsing 1 loaded asset of 1');
+  });
+
+  it('invalidates an in-flight old pagination request and permits pagination for the new query', async () => {
+    const initialAsset = makeAsset({ id: 'old-page-1.png', filename: 'old-page-1.png' });
+    const stalePage = deferred<GalleryPageResponse>();
+    const filteredPage = deferred<GalleryPageResponse>();
+    const newPage = deferred<GalleryPageResponse>();
+    const filteredAsset = makeAsset({ id: 'video-page-1.mp4', filename: 'video-page-1.mp4', media_type: 'video' });
+    const pagedAsset = makeAsset({ id: 'video-page-2.mp4', filename: 'video-page-2.mp4', media_type: 'video' });
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce({ assets: [initialAsset], page: 1, total_pages: 2, total_count: 2 })
+      .mockReturnValueOnce(stalePage.promise)
+      .mockReturnValueOnce(filteredPage.promise)
+      .mockReturnValueOnce(newPage.promise);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    MockIntersectionObserver.instances.at(-1)?.trigger(true);
+    await settle();
+
+    const filterSelect = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
+    filterSelect.value = 'video';
+    filterSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    filteredPage.resolve({ assets: [filteredAsset], page: 1, total_pages: 2, total_count: 2 });
+    await settle();
+    stalePage.resolve({ assets: [makeAsset({ id: 'old-page-2.png', filename: 'old-page-2.png' })], page: 2, total_pages: 2, total_count: 2 });
+    await settle();
+
+    expect(target.textContent).toContain('video-page-1.mp4');
+    expect(target.textContent).not.toContain('old-page-2.png');
+    expect(target.textContent).not.toContain('old-page-1.png');
+
+    MockIntersectionObserver.instances.at(-1)?.trigger(true);
+    await settle();
+    newPage.resolve({ assets: [pagedAsset], page: 2, total_pages: 2, total_count: 2 });
+    await settle();
+
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(2, 'video', 'newest');
+    expect(target.textContent).toContain('video-page-2.mp4');
+  });
+
+  it('makes an unresolved response inert after unmount', async () => {
+    const request = deferred<GalleryPageResponse>();
+    galleryApiMocks.getGallery.mockReturnValueOnce(request.promise);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await unmount(app!);
+    app = null;
+    request.resolve({ assets: [makeAsset({ filename: 'late.png' })], page: 1, total_pages: 1, total_count: 1 });
+    await settle();
+
+    expect(target.textContent).not.toContain('late.png');
+  });
+});
+
+describe('GalleryPage bulk deletion settlement (F06)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('confirm', vi.fn(() => true));
+  });
+
+  it('keeps failed IDs selected and preserves selections added while a mixed deletion is in flight', async () => {
+    const assetA = makeAsset({ id: 'a.png', filename: 'a.png' });
+    const assetB = makeAsset({ id: 'b.png', filename: 'b.png' });
+    const assetC = makeAsset({ id: 'c.png', filename: 'c.png' });
+    const deleteA = deferred<void>();
+    const deleteB = deferred<void>();
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [assetA, assetB, assetC], page: 1, total_pages: 1, total_count: 3 });
+    galleryApiMocks.deleteAsset.mockImplementation((id) => id === assetA.id ? deleteA.promise : deleteB.promise);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    const cardA = target.querySelector(`[aria-label="Asset: ${assetA.filename}"]`) as HTMLElement;
+    cardA.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    selectAssetForBatch(target, assetA);
+    selectAssetForBatch(target, assetB);
+    await settle();
+
+    const deleteButton = queryButtonByName(target, 'Delete Selected')!;
+    deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    expect(deleteButton.disabled).toBe(true);
+    deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledTimes(2);
+
+    selectAssetForBatch(target, assetC);
+    deleteA.resolve();
+    deleteB.reject(new Error('blocked'));
+    await settle();
+
+    expect(target.textContent).not.toContain('a.png');
+    expect(target.textContent).toContain('b.png');
+    expect(target.textContent).toContain('c.png');
+    expect(target.textContent).toContain('Browsing 2 loaded assets of 2');
+    expect(target.textContent).toContain('2 selected');
+    expect(target.querySelector('#gallery-details')?.textContent).toContain('No asset selected');
+    expect(queryButtonByName(target, 'Delete Selected')?.disabled).toBe(false);
+    expect(toastMocks.addToast).toHaveBeenCalledWith('Deleted 1; 1 failed and remain selected for retry.', 'warning');
+  });
+
+  it('removes only successful originals, clears active detail on success, and reports a full success', async () => {
+    const assetA = makeAsset({ id: 'a.png', filename: 'a.png' });
+    const assetB = makeAsset({ id: 'b.png', filename: 'b.png' });
+    const assetC = makeAsset({ id: 'c.png', filename: 'c.png' });
+    const deleteA = deferred<void>();
+    const deleteB = deferred<void>();
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [assetA, assetB, assetC], page: 1, total_pages: 1, total_count: 3 });
+    galleryApiMocks.deleteAsset.mockImplementation((id) => id === assetA.id ? deleteA.promise : deleteB.promise);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    (target.querySelector(`[aria-label="Asset: ${assetA.filename}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    selectAssetForBatch(target, assetA);
+    selectAssetForBatch(target, assetB);
+    queryButtonByName(target, 'Delete Selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    selectAssetForBatch(target, assetC);
+    deleteA.resolve();
+    deleteB.resolve();
+    await settle();
+
+    expect(target.textContent).not.toContain('a.png');
+    expect(target.textContent).not.toContain('b.png');
+    expect(target.textContent).toContain('c.png');
+    expect(target.textContent).toContain('Browsing 1 loaded asset of 1');
+    expect(target.textContent).toContain('1 selected');
+    expect(target.querySelector('#gallery-details')?.textContent).toContain('No asset selected');
+    expect(toastMocks.addToast).toHaveBeenCalledWith('Deleted 2 selected assets.', 'success');
+  });
+
+  it('retains all failed originals, their active detail, retryability, and an error outcome', async () => {
+    const assetA = makeAsset({ id: 'a.png', filename: 'a.png' });
+    const assetB = makeAsset({ id: 'b.png', filename: 'b.png', prompt: 'active failed asset' });
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [assetA, assetB], page: 1, total_pages: 1, total_count: 2 });
+    galleryApiMocks.deleteAsset.mockRejectedValue(new Error('blocked'));
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    (target.querySelector(`[aria-label="Asset: ${assetB.filename}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    selectAssetForBatch(target, assetA);
+    selectAssetForBatch(target, assetB);
+    queryButtonByName(target, 'Delete Selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+
+    expect(target.textContent).toContain('a.png');
+    expect(target.textContent).toContain('b.png');
+    expect(target.textContent).toContain('Browsing 2 loaded assets of 2');
+    expect(target.textContent).toContain('2 selected');
+    expect(target.querySelector('#gallery-details')?.textContent).toContain('active failed asset');
+    expect(queryButtonByName(target, 'Delete Selected')?.disabled).toBe(false);
+    expect(toastMocks.addToast).toHaveBeenCalledWith('Delete failed for 2 selected assets; they remain selected for retry.', 'error');
+  });
+});

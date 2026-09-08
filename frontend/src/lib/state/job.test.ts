@@ -156,4 +156,103 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current?.outputs).toEqual([outputAsset]);
     expect(readActiveJobId()).toBe('job-bootstrap');
   });
+
+  it('keeps one transport while lifecycle ownership moves from a detached consumer to a new consumer', () => {
+    const ownerA = vi.fn();
+    const ownerB = vi.fn();
+    const detachA = jobStore.subscribeLifecycle({ onComplete: ownerA });
+
+    jobStore.startJob({
+      job_id: 'job-lifecycle',
+      workflow: 'txt2img',
+      prompt: 'Test prompt',
+      model: 'zit',
+      runs: 1,
+      created_at: '2026-04-22T00:00:00Z',
+    });
+
+    const MockEventSource = globalThis.EventSource as unknown as {
+      instances: Array<{ emit: (type: string, data: unknown) => void; closeCalls: number }>;
+      lastInstance: { emit: (type: string, data: unknown) => void; closeCalls: number };
+    };
+    const constructionCount = MockEventSource.instances.length;
+    const source = MockEventSource.lastInstance;
+
+    detachA();
+    detachA();
+    const detachB = jobStore.subscribeLifecycle({ onComplete: ownerB });
+    expect(jobStore.isRunning).toBe(true);
+
+    source.emit('job_completed', { type: 'job_completed', job_id: 'job-lifecycle', total_runs: 1, outputs: [] });
+
+    expect(ownerA).not.toHaveBeenCalled();
+    expect(ownerB).toHaveBeenCalledOnce();
+    expect(jobStore.current?.status).toBe('completed');
+    expect(source.closeCalls).toBe(1);
+    expect(MockEventSource.instances).toHaveLength(constructionCount);
+    detachB();
+  });
+
+  it('isolates lifecycle sync throws and async rejections while terminalizing and closing', async () => {
+    const reportError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const healthy = vi.fn();
+    const detachThrowing = jobStore.subscribeLifecycle({
+      onComplete: () => { throw new Error('sync consumer failure'); },
+    });
+    const detachRejecting = jobStore.subscribeLifecycle({
+      onComplete: async () => { throw new Error('async consumer failure'); },
+    });
+    const detachHealthy = jobStore.subscribeLifecycle({ onComplete: healthy });
+
+    jobStore.startJob({
+      job_id: 'job-isolation',
+      workflow: 'txt2img',
+      prompt: 'Test prompt',
+      model: 'zit',
+      runs: 1,
+      created_at: '2026-04-22T00:00:00Z',
+    });
+    const source = (globalThis.EventSource as unknown as {
+      lastInstance: { emit: (type: string, data: unknown) => void; closeCalls: number };
+    }).lastInstance;
+
+    source.emit('job_completed', { type: 'job_completed', job_id: 'job-isolation', total_runs: 1, outputs: [] });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(healthy).toHaveBeenCalledOnce();
+    expect(jobStore.current?.status).toBe('completed');
+    expect(source.closeCalls).toBe(1);
+    expect(reportError).toHaveBeenCalledTimes(2);
+
+    detachThrowing();
+    detachRejecting();
+    detachHealthy();
+    reportError.mockRestore();
+  });
+
+  it('retains its subscription after a transient EventSource error and clears it only after a real close', async () => {
+    jobStore.startJob({
+      job_id: 'job-retry',
+      workflow: 'txt2img',
+      prompt: 'Test prompt',
+      model: 'zit',
+      runs: 1,
+      created_at: '2026-04-22T00:00:00Z',
+    });
+    const MockEventSource = globalThis.EventSource as unknown as {
+      instances: Array<{ emitError: () => void; closeCalls: number }>;
+      lastInstance: { emitError: () => void; closeCalls: number };
+    };
+    const source = MockEventSource.lastInstance;
+    const constructionCount = MockEventSource.instances.length;
+
+    source.emitError();
+    await expect(jobStore.reconnectActiveJob()).resolves.toBe(true);
+
+    expect(MockEventSource.instances).toHaveLength(constructionCount);
+    expect(source.closeCalls).toBe(0);
+    jobStore.clearJob();
+    expect(source.closeCalls).toBe(1);
+  });
 });

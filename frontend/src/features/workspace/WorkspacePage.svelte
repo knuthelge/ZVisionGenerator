@@ -144,6 +144,11 @@
   });
 
   onMount(() => {
+    const unsubscribeLifecycle = jobStore.subscribeLifecycle({
+      onComplete: handleJobComplete,
+      onFailed: handleJobFailed,
+      onCancelled: handleJobCancelled,
+    });
     const urlParams = parseUrlPrefill();
     const hasUrlParams = Object.keys(urlParams).length > 0;
 
@@ -177,12 +182,7 @@
         // After full hydration, sync _prevWorkflow so the workflow-change $effect
         // does not fire for the initial state.
         _prevWorkflow = draft.state.workflow;
-        void jobStore.reconnectActiveJob({
-          snapshot: ctx.active_job,
-          onComplete: handleJobComplete,
-          onFailed: handleJobFailed,
-          onCancelled: handleJobCancelled,
-        }).then((reconnected) => {
+        void jobStore.reconnectActiveJob({ snapshot: ctx.active_job }).then((reconnected) => {
           if (!cancelled && reconnected) busy = true;
         });
 
@@ -205,6 +205,7 @@
     document.addEventListener('keydown', handleKeydown);
     return () => {
       cancelled = true;
+      unsubscribeLifecycle();
       if (historyTimer) clearTimeout(historyTimer);
       document.removeEventListener('keydown', handleKeydown);
     };
@@ -233,12 +234,7 @@
       formData.set('lora', draft.state.loraString);
 
       const jobCtx = await submitGenerate(formData);
-      jobStore.startJob(
-        jobCtx,
-        handleJobComplete,
-        handleJobFailed,
-        handleJobCancelled
-      );
+      jobStore.startJob(jobCtx);
     } catch (err) {
       busy = false;
       loadError = err instanceof Error ? err.message : 'Generate failed';

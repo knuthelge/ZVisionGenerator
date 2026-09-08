@@ -5,6 +5,7 @@ description = "Z-Vision Generator — cross-platform AI image and video generato
 readme = "README.md"
 requires-python = ">=3.14"
 license = "AGPL-3.0-or-later"
+license-files = ["LICENSE", "THIRD_PARTY_LICENSES.md"]
 authors = [{ name = "Knut Risheim" }]
 keywords = ["ai", "image-generation", "video-generation", "z-image", "flux", "mlx", "diffusers", "stable-diffusion"]
 classifiers = [

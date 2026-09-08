@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import os
@@ -14,6 +15,7 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 from PIL import Image
+import pytest
 
 from tests.conftest import _make_args
 from tests.conftest import _make_video_args
@@ -58,6 +60,14 @@ def _read_sse_events(response) -> list[dict[str, object]]:
         frame_lines.append(line)
 
     return events
+
+
+def _sse_payload(frame: str) -> dict[str, object]:
+    """Extract the JSON payload from one runner-formatted SSE frame."""
+    for line in frame.splitlines():
+        if line.startswith("data: "):
+            return json.loads(line.removeprefix("data: "))
+    raise AssertionError(f"SSE frame did not contain a data field: {frame!r}")
 
 
 def test_importing_web_runner_does_not_install_stdio_wrappers():
@@ -279,6 +289,62 @@ class TestWebRunner:
         finally:
             runner.shutdown()
 
+    def test_sse_cursor_replays_only_retained_events_after_the_browser_cursor(self):
+        """A reconnect must not replay progress/batch events the browser already applied."""
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = runner.submit_dummy_job(total_steps=2, delay_seconds=0.001)
+            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+            with runner._jobs_lock:
+                history = [dict(event) for event in runner._jobs[job_id].history]
+            cursor = history[-2]["event_id"]
+
+            async def _read_filtered_history() -> list[str]:
+                return [frame async for frame in runner.stream_job_events(job_id, after_event_id=cursor)]
+
+            async def _read_full_history() -> list[str]:
+                return [frame async for frame in runner.stream_job_events(job_id)]
+
+            filtered = asyncio.run(_read_filtered_history())
+            full = asyncio.run(_read_full_history())
+
+            assert [_sse_payload(frame)["event_id"] for frame in filtered] == [history[-1]["event_id"]]
+            assert _sse_payload(filtered[0])["type"] == "job_completed"
+            assert [_sse_payload(frame)["event_id"] for frame in full] == [event["event_id"] for event in history]
+        finally:
+            runner.shutdown()
+
+    def test_sse_filtered_history_subscribes_before_yielding_to_avoid_a_live_handoff_gap(self):
+        """An event published after replay begins is delivered live rather than lost."""
+        started = threading.Event()
+        release = threading.Event()
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        def _wait_for_release(_progress_callback):
+            started.set()
+            release.wait(timeout=1.0)
+
+        try:
+            job_id = runner._submit_job(job_type="test", target_factory=_wait_for_release)
+            assert started.wait(timeout=1.0)
+            runner._publish_event(job_id, {"type": "step_progress", "current_step": 1, "total_steps": 2})
+
+            async def _read_history_then_live() -> tuple[str, str]:
+                stream = runner.stream_job_events(job_id, after_event_id=1)
+                first = await anext(stream)
+                runner._publish_event(job_id, {"type": "progress_text", "message": "arrived while subscribed"})
+                second = await anext(stream)
+                await stream.aclose()
+                return first, second
+
+            first, second = asyncio.run(_read_history_then_live())
+            assert _sse_payload(first)["event_id"] == 2
+            assert _sse_payload(second)["event_id"] == 3
+            assert _sse_payload(second)["message"] == "arrived while subscribed"
+        finally:
+            release.set()
+            runner.shutdown()
+
     def test_terminal_jobs_are_pruned_by_count_without_evicting_active_jobs(self):
         """Terminal retention pruning should never remove still-running jobs."""
         started = threading.Event()
@@ -349,6 +415,81 @@ class TestWebRunner:
                 raise AssertionError("Expected JobConflictError for overlapping exclusive jobs")
         finally:
             release.set()
+            runner.shutdown()
+
+    @pytest.mark.parametrize(
+        ("error", "message_fragment"),
+        [
+            (RuntimeError("backend failed"), "backend failed"),
+            (SystemExit(), "SystemExit stopped the generation worker."),
+        ],
+    )
+    def test_worker_failures_terminalize_once_and_release_exclusive_slot(self, error, message_fragment):
+        """Expected worker failures must not leave an exclusive job active forever."""
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        def _fail(_progress_callback):
+            raise error
+
+        try:
+            failed_job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=_fail)
+            snapshot = _wait_for_status(runner, failed_job_id, "failed")
+
+            assert snapshot["terminal_event"] == "job_failed"
+            assert snapshot["completed_at"] is not None
+            assert snapshot["last_event"]["type"] == "job_failed"
+            assert message_fragment in snapshot["last_event"]["message"]
+            with runner._jobs_lock:
+                record = runner._jobs[failed_job_id]
+            with record.lock:
+                assert [event["type"] for event in record.history].count("job_failed") == 1
+
+            reusable_job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _progress_callback: None)
+            assert _wait_for_status(runner, reusable_job_id, "completed")["terminal_event"] == "job_completed"
+        finally:
+            runner.shutdown()
+
+    def test_video_worker_rechecks_ffmpeg_and_terminalizes_if_it_disappears(self, monkeypatch):
+        """The worker protects the preflight-to-start race without invoking the CLI flow."""
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        request = MagicMock(model_name="ltx-8", model_family="ltx", upscale=None, image_path=None)
+        monkeypatch.setattr(web_runner_module, "require_ffmpeg", lambda: (_ for _ in ()).throw(RuntimeError("ffmpeg disappeared")))
+        monkeypatch.setattr(web_runner_module, "get_video_backend", lambda _family: pytest.fail("backend must not load without ffmpeg"))
+
+        try:
+            job_id = runner.submit_video_request_job(
+                request=request,
+                prompts_data={"web": [("a lake", None)]},
+                config={},
+                args=_make_video_args(),
+                model_ref="ltx-8",
+            )
+            snapshot = _wait_for_status(runner, job_id, "failed")
+
+            assert snapshot["terminal_event"] == "job_failed"
+            assert snapshot["completed_at"] is not None
+            assert snapshot["last_event"]["message"] == "ffmpeg disappeared"
+        finally:
+            runner.shutdown()
+
+    @pytest.mark.parametrize("error", [KeyboardInterrupt(), GeneratorExit()])
+    def test_process_control_exceptions_propagate_from_direct_worker_target(self, error):
+        """Only SystemExit is terminalized; process-control exceptions retain their semantics."""
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        def _succeed(_progress_callback):
+            return None
+
+        def _raise_process_control():
+            raise error
+
+        try:
+            job_id = runner._submit_job(job_type="test", target_factory=_succeed)
+            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+
+            with pytest.raises(type(error)):
+                runner._run_target(job_id, _raise_process_control)
+        finally:
             runner.shutdown()
 
     def test_queue_job_control_records_control_event(self, monkeypatch):
@@ -478,6 +619,38 @@ class TestWebRunner:
 
 class TestWebServerSse:
     """Verify the FastAPI endpoints expose job state and SSE updates."""
+
+    @pytest.mark.parametrize(
+        ("last_event_id", "expected_cursor"),
+        [
+            (None, None),
+            ("7", 7),
+            ("", None),
+            ("-1", None),
+            ("7.5", None),
+            (" 7", None),
+        ],
+    )
+    def test_sse_endpoint_forwards_only_valid_non_negative_last_event_id(self, monkeypatch, last_event_id, expected_cursor):
+        """Missing or malformed browser cursors retain the initial replay behavior."""
+        captured: list[int | None] = []
+
+        async def _stream_job_events(_job_id: str, *, after_event_id: int | None = None):
+            captured.append(after_event_id)
+            yield 'id: 8\nevent: job_completed\ndata: {"event_id": 8, "type": "job_completed"}\n\n'
+
+        fake_runner = MagicMock()
+        fake_runner.get_job_snapshot.return_value = {"job_id": "job-cursor"}
+        fake_runner.stream_job_events.side_effect = _stream_job_events
+        monkeypatch.setattr(web_server, "web_runner", fake_runner)
+        headers = {} if last_event_id is None else {"Last-Event-ID": last_event_id}
+
+        with TestClient(web_server.app) as client:
+            response = client.get("/jobs/job-cursor/events", headers=headers)
+
+        assert response.status_code == 200
+        assert "job_completed" in response.text
+        assert captured == [expected_cursor]
 
     def test_dummy_job_sse_endpoint_streams_events(self, monkeypatch):
         """The SSE endpoint should emit structured progress frames for a background job."""

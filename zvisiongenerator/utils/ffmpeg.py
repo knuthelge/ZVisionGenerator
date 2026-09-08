@@ -8,6 +8,20 @@ import sys
 from pathlib import Path
 
 
+def require_ffmpeg() -> None:
+    """Require ffmpeg on PATH without prompting or attempting installation.
+
+    This check is suitable for non-interactive callers such as the Web UI.
+
+    Raises:
+        RuntimeError: If ffmpeg is not available on PATH.
+    """
+    if shutil.which("ffmpeg"):
+        return
+
+    raise RuntimeError("ffmpeg is required for video generation but was not found on PATH. Install ffmpeg from https://ffmpeg.org/download.html, ensure it is on PATH, then retry.")
+
+
 def strip_audio(video_path: Path) -> None:
     """Remove audio track from video in-place using ffmpeg.
 
