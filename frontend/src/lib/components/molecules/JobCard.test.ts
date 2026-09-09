@@ -6,6 +6,8 @@ import { jobStore } from '$lib/state/job.svelte';
 import type { ActiveJobState } from '$lib/types';
 
 import JobCard from './JobCard.svelte';
+// @ts-expect-error Vite resolves the raw source query during the Vitest transform.
+import jobCardSource from './JobCard.svelte?raw';
 import * as molecules from './index';
 
 describe('JobCard', () => {
@@ -253,5 +255,52 @@ describe('JobCard', () => {
     expect(target.querySelectorAll('a[href^="/media/"]')).toHaveLength(2);
     expect(target.querySelectorAll('img[alt="first.png"]')).toHaveLength(1);
     expect(target.querySelectorAll('video')).toHaveLength(1);
+  });
+
+  it('announces the unique progressive count and eagerly loads only the newest output', () => {
+    const first = {
+      id: 'outputs/first.png', url: '/media/first.png', thumbnail_url: '/media/first-thumb.png', filename: 'first.png',
+      created_at: '', workflow: 'txt2img' as const, prompt: '', model: 'zit', reuse_workspace_url: '', media_type: 'image' as const,
+    };
+    const olderVideo = {
+      id: 'outputs/older.mp4', url: '/media/older.mp4', thumbnail_url: '/media/older-thumb.mp4', filename: 'older.mp4',
+      created_at: '', workflow: 'txt2vid' as const, prompt: '', model: 'ltx-8', reuse_workspace_url: '', media_type: 'video' as const,
+    };
+    const newest = {
+      id: 'outputs/newest.png', url: '/media/newest.png', thumbnail_url: '/media/newest-thumb.png', filename: 'newest.png',
+      created_at: '', workflow: 'txt2img' as const, prompt: '', model: 'zit', reuse_workspace_url: '', media_type: 'image' as const,
+    };
+    component = mount(JobCard, { target, props: { job: makeJob({ outputs: [first, first, olderVideo, newest] }) } });
+    flushSync();
+
+    expect(target.textContent).toContain('Outputs · 3');
+    const liveRegion = target.querySelector('.sr-only[role="status"]');
+    expect(liveRegion?.getAttribute('aria-live')).toBe('polite');
+    expect(liveRegion?.getAttribute('aria-atomic')).toBe('true');
+    expect(liveRegion?.textContent).toContain('3 outputs ready');
+    expect(target.querySelectorAll('a[href^="/media/"]')).toHaveLength(3);
+    expect(target.querySelector('img[alt="first.png"]')?.getAttribute('loading')).toBe('lazy');
+    expect(target.querySelector('video')?.getAttribute('preload')).toBe('none');
+    expect(target.querySelector('img[alt="newest.png"]')?.getAttribute('loading')).toBe('eager');
+  });
+
+  it('bounds and scrolls its own many-output thumbnail grid instead of relying on an outer page scroller', () => {
+    const outputs = Array.from({ length: 15 }, (_, index) => ({
+      id: `outputs/many-${index}.png`, url: `/media/many-${index}.png`, thumbnail_url: `/media/many-${index}.png`,
+      filename: `many-${index}.png`, created_at: '', workflow: 'txt2img' as const, prompt: '', model: 'zit',
+      reuse_workspace_url: '', media_type: 'image' as const,
+    }));
+    component = mount(JobCard, { target, props: { job: makeJob({ outputs }) } });
+    flushSync();
+
+    const grid = target.querySelector<HTMLElement>('[aria-label="Generated outputs"]');
+    expect(grid).not.toBeNull();
+    expect(grid?.classList.contains('output-preview-grid')).toBe(true);
+    expect(grid?.classList.contains('custom-scrollbar')).toBe(true);
+    // jsdom does not apply component-scoped Svelte CSS, so assert the source rule
+    // against this exact inner grid rather than accidentally accepting page-level overflow.
+    expect(jobCardSource).toMatch(/\.output-preview-grid\s*\{[^}]*max-height:\s*min\(35vh,\s*14rem\);[^}]*overflow-y:\s*auto;/s);
+    expect(grid?.querySelectorAll('a[aria-label^="Open "]')).toHaveLength(outputs.length);
+    expect(grid?.querySelector(`img[alt="${outputs.at(-1)!.filename}"]`)).not.toBeNull();
   });
 });

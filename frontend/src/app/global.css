@@ -219,6 +219,33 @@
     border-radius: 0.5rem;
   }
 
+  .admin-section {
+    background-color: var(--color-bg-surface);
+    border: 1px solid var(--color-border-strong);
+    border-radius: 0.5rem;
+    padding: 1.25rem;
+  }
+
+  .admin-section-header {
+    align-items: center;
+    border-bottom: 1px solid var(--color-border-subtle);
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+    padding-bottom: 1rem;
+  }
+
+  .admin-section-header > svg {
+    color: var(--color-primary-main);
+    flex-shrink: 0;
+  }
+
+  .admin-section-title {
+    color: var(--color-text-primary);
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
   .surface-card-muted {
     background-color: color-mix(in srgb, var(--color-bg-surface) 72%, transparent);
     border: 1px solid var(--color-border-strong);

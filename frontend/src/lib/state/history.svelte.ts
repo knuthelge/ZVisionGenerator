@@ -12,6 +12,13 @@ export const historyStore = {
     _history = assets;
   },
 
+  mergeOutputs(assets: GalleryAsset[]): void {
+    if (assets.length === 0) return;
+    const newestFirst = [...assets].reverse();
+    const incomingIds = new Set(newestFirst.map((asset) => asset.id));
+    _history = [...newestFirst, ..._history.filter((asset) => !incomingIds.has(asset.id))];
+  },
+
   async refreshHistory(): Promise<void> {
     _loading = true;
     try {

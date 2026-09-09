@@ -1,5 +1,6 @@
 // @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
 import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/index-client.js';
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AppConfig, WritableConfigField } from '$lib/types';
@@ -279,5 +280,38 @@ describe('ConfigPage', () => {
     expect(configApiMocks.updateConfig.mock.calls[0][0]).toMatchObject({
       'ui.experimental_label': 'edited-from-schema',
     });
+  });
+
+  it('retains the shared admin-section hierarchy and responsive Config grids', async () => {
+    const config = makeConfig();
+    config.ui.model_cache_dir = `/cache/${'long-directory-segment/'.repeat(16)}`;
+    config.ui.loras_dir = `/loras/${'long-directory-segment/'.repeat(16)}`;
+    configApiMocks.getConfig.mockResolvedValue(config);
+
+    app = flushSync(() => mount(ConfigPage, { target }));
+    await settle();
+
+    const sections = Array.from(target.querySelectorAll('.admin-section'));
+    expect(sections).toHaveLength(3);
+    for (const section of sections) {
+      expect(section.querySelector('.admin-section-header')).not.toBeNull();
+      expect(section.querySelector('.admin-section-title')).not.toBeNull();
+    }
+
+    const responsiveGrids = Array.from(target.querySelectorAll('.grid'));
+    expect(responsiveGrids).toHaveLength(2);
+    for (const grid of responsiveGrids) {
+      expect(grid.className).toContain('grid-cols-1');
+      expect(grid.className).toContain('md:grid-cols-2');
+    }
+    expect(Array.from(target.querySelectorAll('.break-all')).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('uses token-based shared admin section styling', () => {
+    const styles = readFileSync('src/app/global.css', 'utf8');
+
+    expect(styles).toMatch(/\.admin-section\s*\{[\s\S]*background-color:\s*var\(--color-bg-surface\);[\s\S]*border:\s*1px solid var\(--color-border-strong\);[\s\S]*border-radius:\s*0\.5rem;[\s\S]*padding:\s*1\.25rem;/);
+    expect(styles).toMatch(/\.admin-section-header\s*\{[\s\S]*border-bottom:\s*1px solid var\(--color-border-subtle\);/);
+    expect(styles).toMatch(/\.admin-section-title\s*\{[\s\S]*color:\s*var\(--color-text-primary\);/);
   });
 });

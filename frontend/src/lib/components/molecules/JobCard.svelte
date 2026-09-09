@@ -109,6 +109,14 @@
   const workflowLabels = { txt2img: 'Text to image', img2img: 'Image to image', txt2vid: 'Text to video', img2vid: 'Image to video' };
   const jobTypeLabel = $derived(workflowLabels[job.workflow] ?? job.workflow);
   const statusLabel = $derived(active && job.paused ? 'paused' : job.status);
+  const uniqueOutputs = $derived.by(() => {
+    const seen = new Set<string>();
+    return job.outputs.filter((output) => {
+      if (seen.has(output.id)) return false;
+      seen.add(output.id);
+      return true;
+    });
+  });
 </script>
 
 <article class="job-card">
@@ -230,24 +238,32 @@
     {/if}
   </div>
 
-  <!-- Output previews (on completion) -->
-  {#if job.outputs.length > 0}
-    <div class="mt-3 grid grid-cols-3 gap-2">
-      {#each job.outputs as output (output.id)}
+  <!-- Output previews are shown as soon as each successful asset arrives. -->
+  {#if uniqueOutputs.length > 0}
+    <div class="mt-3 flex items-center justify-between gap-2 text-xs text-text-secondary">
+      <span>Outputs · {uniqueOutputs.length}</span>
+      <span class="sr-only" role="status" aria-live="polite" aria-atomic="true">{uniqueOutputs.length} {uniqueOutputs.length === 1 ? 'output' : 'outputs'} ready</span>
+    </div>
+    <div
+      class="output-preview-grid custom-scrollbar mt-3 grid grid-cols-3 gap-2"
+      aria-label="Generated outputs"
+    >
+      {#each uniqueOutputs as output, index (output.id)}
+        {@const newest = index === uniqueOutputs.length - 1}
         <a href={output.url} target="_blank" rel="noopener noreferrer" class="block" aria-label="Open {output.filename}">
           {#if output.media_type === 'video'}
             <video
               src={output.thumbnail_url || output.url}
               class="w-full aspect-square object-cover rounded-md border border-zinc-800"
               muted
-              preload="none"
+              preload={newest ? 'metadata' : 'none'}
             ></video>
           {:else}
             <img
               src={output.thumbnail_url || output.url}
               alt={output.filename}
               class="w-full aspect-square object-cover rounded-md border border-zinc-800"
-              loading="lazy"
+              loading={newest ? 'eager' : 'lazy'}
             />
           {/if}
         </a>
@@ -311,5 +327,11 @@
   .control-feedback { margin-top: 8px; font-size: 12px; color: var(--color-primary-main); overflow-wrap: anywhere; }
   .control-feedback.failed { color: var(--color-error); }
   .job-actions .cancel-button:hover { color: var(--color-error); border-color: var(--color-error); }
+  .output-preview-grid {
+    max-height: min(35vh, 14rem);
+    overflow-y: auto;
+    align-content: start;
+    padding-right: 2px;
+  }
   .job-footer { display: flex; gap: 8px; padding: 7px 14px; font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-base); border-top: 1px solid var(--color-border-subtle); }
 </style>

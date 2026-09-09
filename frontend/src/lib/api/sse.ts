@@ -1,4 +1,4 @@
-import type { SSEEvent, BatchCompletedEvent } from '$lib/types';
+import type { SSEEvent, BatchCompletedEvent, GenerationFinishedEvent } from '$lib/types';
 
 export type SSEEventHandler<T extends SSEEvent = SSEEvent> = (event: T) => void;
 
@@ -10,6 +10,7 @@ export function connectJobSSE(
   jobId: string,
   handlers: {
     onStep?: SSEEventHandler;
+    onGenerationFinished?: SSEEventHandler<GenerationFinishedEvent>;
     onBatchCompleted?: SSEEventHandler<BatchCompletedEvent>;
     onJobCompleted?: SSEEventHandler;
     onJobFailed?: SSEEventHandler;
@@ -39,9 +40,14 @@ export function connectJobSSE(
       case 'batch_started':
       case 'workflow_stage_started':
       case 'workflow_stage_completed':
-      case 'generation_finished':
         handlers.onStatus?.(type, data);
         break;
+      case 'generation_finished': {
+        const ev = data as GenerationFinishedEvent;
+        handlers.onGenerationFinished?.(ev);
+        handlers.onStatus?.(type, ev);
+        break;
+      }
       case 'batch_completed': {
         const ev = data as BatchCompletedEvent;
         handlers.onBatchCompleted?.(ev);

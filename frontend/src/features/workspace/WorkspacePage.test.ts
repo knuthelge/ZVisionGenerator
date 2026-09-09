@@ -408,6 +408,7 @@ describe('WorkspacePage', () => {
     const [submittedFormData] = workspaceApiMocks.submitGenerate.mock.calls[0] ?? [];
     expect(submittedFormData).toBeInstanceOf(FormData);
     expect(submittedFormData.get('seed')).toBe('9876');
+    expect(submittedFormData.has('output')).toBe(false);
   });
 
   it('uses backend visible_controls instead of workflow-name literals for sidebar visibility', async () => {
@@ -946,6 +947,51 @@ describe('WorkspacePage', () => {
 
     expect(jobStore.current?.status).toBe('cancelled');
     expect(submitButton?.disabled).toBe(false);
+  });
+
+  it('adds successful batch outputs to the history pane immediately', async () => {
+    await mountWorkspace(makeContext());
+    draft.update('prompt', 'Show each batch result');
+    await settle();
+
+    const form = target.querySelector('form');
+    expect(form).not.toBeNull();
+    form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+
+    const firstAsset = makeAsset({
+      id: 'batch/first.png',
+      url: '/media/batch/first.png',
+      filename: 'first.png',
+    });
+    const secondAsset = makeAsset({
+      id: 'batch/second.png',
+      url: '/media/batch/second.png',
+      filename: 'second.png',
+    });
+    const source = (globalThis.EventSource as unknown as {
+      lastInstance: { emit: (type: string, data: unknown) => void };
+    }).lastInstance;
+    source.emit('generation_finished', {
+      type: 'generation_finished',
+      job_id: 'job-123',
+      status: 'success',
+      run_index: 0,
+      asset: firstAsset,
+    });
+    await settle();
+    source.emit('generation_finished', {
+      type: 'generation_finished',
+      job_id: 'job-123',
+      status: 'success',
+      run_index: 1,
+      asset: secondAsset,
+    });
+    await settle();
+
+    expect(target.querySelector('button[aria-label="View first.png"]')).not.toBeNull();
+    expect(target.querySelector('button[aria-label="View second.png"]')).not.toBeNull();
+    expect(historyStore.assets.map((item) => item.id)).toEqual([secondAsset.id, firstAsset.id]);
   });
 
   it('restores an active job from the backend workspace snapshot on mount', async () => {
@@ -1621,7 +1667,7 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
     await settle();
   }
 
-  it('promotes the first completed job output into the center pane and hides the JobCard', async () => {
+  it('renders the full authoritative completed output grid and hides the JobCard', async () => {
     const context = makeContext();
     await mountWorkspace(context);
 
@@ -1633,25 +1679,73 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
     const submitButton = target.querySelector('#ws-submit') as HTMLButtonElement | null;
     expect(submitButton?.disabled).toBe(true);
 
-    const completedAsset = makeAsset();
+    const completedAsset = makeAsset({ id: 'out/first.png', filename: 'first.png' });
+    const secondAsset = makeAsset({ id: 'out/second.png', url: '/media/out/second.png', filename: 'second.png' });
     const mockEventSource = (globalThis.EventSource as unknown as {
       lastInstance: { emit: (type: string, data: unknown) => void };
     }).lastInstance;
-    mockEventSource.emit('job_completed', { type: 'job_completed', job_id: 'job-promo', total_runs: 1, outputs: [completedAsset] });
+    mockEventSource.emit('job_completed', { type: 'job_completed', job_id: 'job-promo', total_runs: 2, outputs: [completedAsset, secondAsset] });
     await settle();
 
-    // Completed output image is visible in center pane
-    const img = target.querySelector(`img[src="${completedAsset.url}"]`);
-    expect(img).not.toBeNull();
-
-    // Open fullscreen button is present
-    const openBtn = Array.from(target.querySelectorAll('button')).find(
-      (b) => b.textContent?.trim() === 'Open fullscreen'
-    );
-    expect(openBtn).not.toBeUndefined();
+    expect(target.textContent).toContain('Completed outputs');
+    expect(target.querySelectorAll('.completed-output-grid article')).toHaveLength(2);
+    expect(target.querySelector(`img[src="${completedAsset.url}"]`)).not.toBeNull();
+    expect(target.querySelector(`img[alt="${secondAsset.filename}"]`)).not.toBeNull();
+    expect(target.textContent).not.toContain('Waiting for worker allocation...');
   });
 
-  it('opens the workspace lightbox from a completed output open-fullscreen button', async () => {
+  it.each([
+    ['job_failed', 'Job failed.'],
+    ['job_cancelled', 'Job stopped.'],
+  ] as const)('shows generation_finished assets before %s and preserves them afterward', async (terminal, terminalMessage) => {
+    await mountWorkspace(makeContext());
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const source = (globalThis.EventSource as unknown as {
+      lastInstance: { emit: (type: string, data: unknown) => void };
+    }).lastInstance;
+    const output = makeAsset({ id: `out/${terminal}.png`, filename: `${terminal}.png` });
+
+    source.emit('generation_finished', {
+      type: 'generation_finished', job_id: 'job-promo', status: 'success', run_index: 0, asset: output,
+    });
+    await settle();
+    expect(target.textContent).toContain('Outputs · 1');
+    expect(target.querySelector(`.job-card img[alt="${output.filename}"]`)).not.toBeNull();
+
+    source.emit(terminal, { type: terminal, job_id: 'job-promo' });
+    await settle();
+    expect(target.textContent).toContain(terminalMessage);
+    expect(target.querySelector(`.job-card img[alt="${output.filename}"]`)).not.toBeNull();
+  });
+
+  it('keeps many running outputs reachable inside the constrained-height preview scroller', async () => {
+    target.style.height = '160px';
+    await mountWorkspace(makeContext());
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const source = (globalThis.EventSource as unknown as {
+      lastInstance: { emit: (type: string, data: unknown) => void };
+    }).lastInstance;
+    const outputs = Array.from({ length: 12 }, (_, index) => makeAsset({
+      id: `out/running-${index}.png`, filename: `running-${index}.png`, url: `/media/out/running-${index}.png`,
+    }));
+
+    for (const [index, output] of outputs.entries()) {
+      source.emit('generation_finished', {
+        type: 'generation_finished', job_id: 'job-promo', status: 'success', run_index: index, asset: output,
+      });
+    }
+    await settle();
+
+    const scroller = target.querySelector('.workspace-preview div.h-full.w-full.overflow-y-auto') as HTMLDivElement | null;
+    expect(scroller).not.toBeNull();
+    expect(scroller?.classList.contains('overflow-y-auto')).toBe(true);
+    expect(target.querySelectorAll('.job-card a[aria-label^="Open "]')).toHaveLength(outputs.length);
+    expect(target.querySelector(`.job-card img[alt="${outputs.at(-1)!.filename}"]`)).not.toBeNull();
+  });
+
+  it('opens indexed completed outputs in the workspace lightbox and navigates the full list', async () => {
     const context = makeContext();
     await mountWorkspace(context);
 
@@ -1669,6 +1763,13 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
       filename: 'completed.png',
       prompt: 'Fresh completed asset',
     });
+    const secondAsset = makeAsset({
+      id: 'out/completed-second.png',
+      url: '/media/out/completed-second.png',
+      thumbnail_url: '/media/out/completed-second-thumb.png',
+      filename: 'completed-second.png',
+      prompt: 'Second completed asset',
+    });
     historyStore.seedHistory([staleHistoryAsset]);
 
     const form = target.querySelector('form');
@@ -1678,20 +1779,28 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
     const mockEventSource = (globalThis.EventSource as unknown as {
       lastInstance: { emit: (type: string, data: unknown) => void };
     }).lastInstance;
-    mockEventSource.emit('job_completed', { type: 'job_completed', job_id: 'job-promo', total_runs: 1, outputs: [completedAsset] });
+    mockEventSource.emit('job_completed', { type: 'job_completed', job_id: 'job-promo', total_runs: 2, outputs: [completedAsset, secondAsset] });
     await settle();
 
-    const openBtn = Array.from(target.querySelectorAll('button')).find(
-      (b) => b.textContent?.trim() === 'Open fullscreen'
-    );
-    expect(openBtn).not.toBeUndefined();
-    openBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const secondButton = target.querySelector(`button[aria-label="View ${secondAsset.filename} fullscreen"]`);
+    expect(secondButton).not.toBeNull();
+    secondButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     expect(target.querySelector('[data-testid="lightbox"]')).not.toBeNull();
     const lightboxImage = target.querySelector('[data-testid="lightbox"] img') as HTMLImageElement | null;
-    expect(lightboxImage?.getAttribute('src')).toBe(completedAsset.url);
-    expect(lightboxImage?.getAttribute('alt')).toBe(completedAsset.filename);
+    expect(lightboxImage?.getAttribute('src')).toBe(secondAsset.url);
+    expect(lightboxImage?.getAttribute('alt')).toBe(secondAsset.filename);
+    expect(document.activeElement?.textContent?.trim()).toBe('Close');
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+    await settle();
+    expect((target.querySelector('[data-testid="lightbox"] img') as HTMLImageElement | null)?.getAttribute('src')).toBe(completedAsset.url);
+
+    const closeButton = Array.from(target.querySelectorAll('[data-testid="lightbox"] button')).find((button) => button.textContent?.trim() === 'Close');
+    closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    expect(document.activeElement).toBe(secondButton);
   });
 });
 

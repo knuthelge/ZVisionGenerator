@@ -13,17 +13,22 @@
   let totalCount = $state(0);
   let loading = $state(true);
   let loadingMore = $state(false);
+  let pageOnePending = $state(false);
   let error = $state<string | null>(null);
 
   let mediaFilter = $state<'all' | 'image' | 'video'>('all');
   let sortOrder = $state<'newest' | 'oldest'>('newest');
   let selected = $state<Set<string>>(new Set());
-  let deletingSelected = $state(false);
+  let deletingIds = $state<Set<string>>(new Set());
+  let bulkDeleteRuns = $state(0);
 
   let selectedAsset = $state<GalleryAsset | null>(null);
   let lightboxOpen = $state(false);
 
   const selectedCount = $derived(selected.size);
+  const deletableSelectedCount = $derived(
+    Array.from(selected).filter((id) => !deletingIds.has(id)).length
+  );
   const hasMore = $derived(page < totalPages);
   const emptyState = $derived(assets.length === 0 && !loading && !error);
   const filteredEmptyState = $derived(emptyState && mediaFilter !== 'all');
@@ -31,8 +36,12 @@
   // Pending URL-based selection to restore after the first page load.
   let _pendingSelected: string | null = null;
 
-  // Non-reactive commit authority for replacement and pagination requests.
-  let _requestGeneration = 0;
+  // View changes and mutations are independent commit authorities. Every request
+  // captures both, as well as its exact query, before it may update the UI.
+  let _viewGeneration = 0;
+  let _mutationRevision = 0;
+  let _pageOneRequestRevision = 0;
+  const _successfullyDeletedIds = new Set<string>();
 
   // Sentinel element for infinite scroll
   let sentinelEl = $state<HTMLDivElement | undefined>(undefined);
@@ -44,11 +53,13 @@
       _pendingSelected = params.selected;
     }
 
-    loadPage(1, mediaFilter, sortOrder);
+    _viewGeneration += 1;
+    void loadPageOne(mediaFilter, sortOrder, _viewGeneration, _mutationRevision, true);
 
     return () => {
       // Invalidate every request still awaiting a response after unmount.
-      _requestGeneration += 1;
+      _viewGeneration += 1;
+      _mutationRevision += 1;
     };
   });
 
@@ -57,10 +68,10 @@
   );
 
   $effect(() => {
-    if (!sentinelEl) return;
+    if (!sentinelEl || pageOnePending) return;
     const io = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && hasMore && !loadingMore) {
+        if (entries[0]?.isIntersecting && hasMore && !loadingMore && !pageOnePending) {
           loadMorePages();
         }
       },
@@ -70,78 +81,143 @@
     return () => io.disconnect();
   });
 
-  async function loadPage(p: number, filter: string = mediaFilter, sort: string = sortOrder): Promise<void> {
-    const requestGeneration = ++_requestGeneration;
-    loading = true;
+  function requestIsCurrent(
+    viewGeneration: number,
+    mutationRevision: number,
+    filter: string,
+    sort: string
+  ): boolean {
+    return viewGeneration === _viewGeneration
+      && mutationRevision === _mutationRevision
+      && filter === mediaFilter
+      && sort === sortOrder;
+  }
+
+  function clearActiveAsset(removeRoute = true): void {
+    selectedAsset = null;
+    lightboxOpen = false;
+    _pendingSelected = null;
+    if (removeRoute) router.replace('gallery', {});
+  }
+
+  async function loadPageOne(
+    filter: string,
+    sort: string,
+    viewGeneration: number,
+    mutationRevision: number,
+    restorePendingSelection = false,
+    preserveLocalOnError = false
+  ): Promise<void> {
+    const pageOneRequestRevision = ++_pageOneRequestRevision;
+    pageOnePending = true;
+    if (!preserveLocalOnError) loading = true;
     loadingMore = false;
+    // Preserve local assets during a mutation refill, but never let an error
+    // from an invalidated replacement request keep hiding those assets.
     error = null;
     try {
-      const result = await getGallery(p, filter, sort);
-      if (requestGeneration !== _requestGeneration) return;
-      assets = result.assets;
+      const result = await getGallery(1, filter, sort);
+      if (!requestIsCurrent(viewGeneration, mutationRevision, filter, sort)) return;
+      const returnedDeletedAssets = result.assets.filter((asset) => _successfullyDeletedIds.has(asset.id));
+      assets = result.assets.filter((asset) => !_successfullyDeletedIds.has(asset.id));
       page = result.page;
       totalPages = result.total_pages;
-      totalCount = result.total_count;
-      // Restore selection from a URL ?selected= param after the initial page load.
-      if (_pendingSelected && p === 1) {
+      const staleDeletedCount = returnedDeletedAssets.filter(
+        (asset) => filter === 'all' || asset.media_type === filter
+      ).length;
+      totalCount = Math.max(0, result.total_count - staleDeletedCount);
+      const visibleIds = new Set(assets.map((asset) => asset.id));
+      selected = new Set(Array.from(selected).filter((id) => visibleIds.has(id)));
+
+      if (restorePendingSelection && _pendingSelected) {
         const found = assets.find((a) => a.id === _pendingSelected) ?? null;
         if (found) {
           selectedAsset = found;
+        } else {
+          clearActiveAsset();
         }
         _pendingSelected = null;
+      } else if (selectedAsset) {
+        const refreshedActive = assets.find((asset) => asset.id === selectedAsset!.id) ?? null;
+        if (refreshedActive) {
+          selectedAsset = refreshedActive;
+        } else {
+          clearActiveAsset();
+        }
       }
     } catch (e) {
-      if (requestGeneration !== _requestGeneration) return;
-      error = e instanceof Error ? e.message : 'Failed to load gallery';
+      if (!requestIsCurrent(viewGeneration, mutationRevision, filter, sort)) return;
+      if (preserveLocalOnError) {
+        addToast('Gallery refresh failed; deleted assets remain removed. Change the view to retry.', 'warning');
+      } else {
+        error = e instanceof Error ? e.message : 'Failed to load gallery';
+      }
     } finally {
-      if (requestGeneration === _requestGeneration) {
+      if (pageOneRequestRevision === _pageOneRequestRevision) {
+        pageOnePending = false;
+      }
+      if (requestIsCurrent(viewGeneration, mutationRevision, filter, sort)) {
         loading = false;
       }
     }
   }
 
   async function loadMorePages(): Promise<void> {
-    if (loadingMore || !hasMore) return;
-    const requestGeneration = _requestGeneration;
+    if (loading || loadingMore || pageOnePending || !hasMore) return;
+    const viewGeneration = _viewGeneration;
+    const mutationRevision = _mutationRevision;
     const requestedPage = page + 1;
     const requestedFilter = mediaFilter;
     const requestedSort = sortOrder;
     loadingMore = true;
     try {
       const result = await getGallery(requestedPage, requestedFilter, requestedSort);
-      if (requestGeneration !== _requestGeneration) return;
-      assets = [...assets, ...result.assets];
+      if (!requestIsCurrent(viewGeneration, mutationRevision, requestedFilter, requestedSort)) return;
+      // Page one can reset pagination depth without changing the query. Do not
+      // append a response that would leave a gap in the current page sequence.
+      if (requestedPage !== page + 1) return;
+      const returnedDeletedAssets = result.assets.filter((asset) => _successfullyDeletedIds.has(asset.id));
+      assets = [
+        ...assets,
+        ...result.assets.filter((asset) => !_successfullyDeletedIds.has(asset.id))
+      ];
       page = result.page;
       totalPages = result.total_pages;
+      const staleDeletedCount = returnedDeletedAssets.filter(
+        (asset) => requestedFilter === 'all' || asset.media_type === requestedFilter
+      ).length;
+      totalCount = Math.max(0, result.total_count - staleDeletedCount);
     } catch {
       // ignore load-more errors silently
     } finally {
-      if (requestGeneration === _requestGeneration) {
+      if (requestIsCurrent(viewGeneration, mutationRevision, requestedFilter, requestedSort)) {
         loadingMore = false;
       }
     }
   }
 
-  function onFilterChange(value: 'all' | 'image' | 'video'): void {
-    mediaFilter = value;
+  function beginReplacementView(
+    filter: 'all' | 'image' | 'video',
+    sort: 'newest' | 'oldest'
+  ): void {
+    mediaFilter = filter;
+    sortOrder = sort;
     selected = new Set();
-    selectedAsset = null;
-    _pendingSelected = null;
-    loadPage(1, value, sortOrder);
+    clearActiveAsset();
+    _viewGeneration += 1;
+    void loadPageOne(filter, sort, _viewGeneration, _mutationRevision);
+  }
+
+  function onFilterChange(value: 'all' | 'image' | 'video'): void {
+    beginReplacementView(value, sortOrder);
   }
 
   function onSortChange(value: 'newest' | 'oldest'): void {
-    sortOrder = value;
-    selected = new Set();
-    loadPage(1, mediaFilter, value);
+    beginReplacementView(mediaFilter, value);
   }
 
   function clearMediaFilter(): void {
-    mediaFilter = 'all';
-    selected = new Set();
-    selectedAsset = null;
-    _pendingSelected = null;
-    loadPage(1, 'all', sortOrder);
+    beginReplacementView('all', sortOrder);
   }
 
   function openWorkspace(): void {
@@ -159,70 +235,98 @@
   }
 
   async function deleteSelected(): Promise<void> {
-    if (deletingSelected || selectedCount === 0) return;
+    const targets = assets.filter(
+      (asset) => selected.has(asset.id)
+        && !deletingIds.has(asset.id)
+        && !_successfullyDeletedIds.has(asset.id)
+    );
+    if (targets.length === 0) return;
+    if (!confirm(`Delete ${targets.length} selected asset${targets.length !== 1 ? 's' : ''}?`)) return;
 
-    const originalIds = Array.from(selected);
-    if (!confirm(`Delete ${originalIds.length} selected asset${originalIds.length !== 1 ? 's' : ''}?`)) return;
-
-    deletingSelected = true;
+    markDeleting(targets.map((asset) => asset.id), true);
+    bulkDeleteRuns += 1;
     try {
       const results = await Promise.allSettled(
-        originalIds.map(async (id) => deleteAsset(id))
+        targets.map(async (asset) => deleteAsset(asset.id))
       );
-      const deletedIds = new Set<string>();
-      const failedIds = new Set<string>();
+      const deletedTargets = targets.filter((_, index) => results[index].status === 'fulfilled');
+      const failedTargets = targets.filter((_, index) => results[index].status === 'rejected');
+      reconcileSuccessfulDeletes(deletedTargets);
 
-      results.forEach((result, index) => {
-        const id = originalIds[index];
-        if (result.status === 'fulfilled') {
-          deletedIds.add(id);
-        } else {
-          failedIds.add(id);
-        }
-      });
-
-      assets = assets.filter((asset) => !deletedIds.has(asset.id));
-      totalCount = Math.max(0, totalCount - deletedIds.size);
-      if (selectedAsset && deletedIds.has(selectedAsset.id)) {
-        selectedAsset = null;
-      }
-
-      const reconciledSelection = new Set(selected);
-      for (const id of originalIds) reconciledSelection.delete(id);
-      for (const id of failedIds) reconciledSelection.add(id);
-      selected = reconciledSelection;
-
-      if (failedIds.size === 0) {
+      if (failedTargets.length === 0) {
         addToast(
-          `Deleted ${deletedIds.size} selected asset${deletedIds.size !== 1 ? 's' : ''}.`,
+          `Deleted ${deletedTargets.length} selected asset${deletedTargets.length !== 1 ? 's' : ''}.`,
           'success'
         );
-      } else if (deletedIds.size > 0) {
+      } else if (deletedTargets.length > 0) {
         addToast(
-          `Deleted ${deletedIds.size}; ${failedIds.size} failed and remain selected for retry.`,
+          `Deleted ${deletedTargets.length}; ${failedTargets.length} failed and remain selected for retry.`,
           'warning'
         );
       } else {
         addToast(
-          `Delete failed for ${failedIds.size} selected asset${failedIds.size !== 1 ? 's' : ''}; they remain selected for retry.`,
+          `Delete failed for ${failedTargets.length} selected asset${failedTargets.length !== 1 ? 's' : ''}; they remain selected for retry.`,
           'error'
         );
       }
     } finally {
-      deletingSelected = false;
+      markDeleting(targets.map((asset) => asset.id), false);
+      bulkDeleteRuns = Math.max(0, bulkDeleteRuns - 1);
     }
   }
 
   async function deleteSingle(asset: GalleryAsset): Promise<void> {
+    if (deletingIds.has(asset.id) || _successfullyDeletedIds.has(asset.id)) return;
     if (!confirm(`Delete "${asset.filename}"?`)) return;
+    markDeleting([asset.id], true);
     try {
       await deleteAsset(asset.id);
-      assets = assets.filter((a) => a.id !== asset.id);
-      if (selectedAsset?.id === asset.id) selectedAsset = null;
+      reconcileSuccessfulDeletes([asset]);
       addToast('Deleted', 'success');
     } catch {
       addToast('Delete failed', 'error');
+    } finally {
+      markDeleting([asset.id], false);
     }
+  }
+
+  function markDeleting(ids: string[], pending: boolean): void {
+    const next = new Set(deletingIds);
+    for (const id of ids) {
+      if (pending) next.add(id);
+      else next.delete(id);
+    }
+    deletingIds = next;
+  }
+
+  function reconcileSuccessfulDeletes(targets: GalleryAsset[]): void {
+    const newlyDeleted = targets.filter((asset) => !_successfullyDeletedIds.has(asset.id));
+    if (newlyDeleted.length === 0) return;
+    for (const asset of newlyDeleted) _successfullyDeletedIds.add(asset.id);
+
+    const deletedIds = new Set(newlyDeleted.map((asset) => asset.id));
+    assets = assets.filter((asset) => !deletedIds.has(asset.id));
+    const visibleIds = new Set(assets.map((asset) => asset.id));
+    selected = new Set(
+      Array.from(selected).filter((id) => !deletedIds.has(id) && visibleIds.has(id))
+    );
+
+    const matchingCount = newlyDeleted.filter(
+      (asset) => mediaFilter === 'all' || asset.media_type === mediaFilter
+    ).length;
+    totalCount = Math.max(0, totalCount - matchingCount);
+
+    if (selectedAsset && deletedIds.has(selectedAsset.id)) {
+      clearActiveAsset();
+    }
+
+    // A mutation invalidates every earlier replacement/pagination/refill. The
+    // new refill deliberately captures the latest query, not the query at click time.
+    _mutationRevision += 1;
+    _viewGeneration += 1;
+    const filter = mediaFilter;
+    const sort = sortOrder;
+    void loadPageOne(filter, sort, _viewGeneration, _mutationRevision, false, true);
   }
 
   function selectAsset(asset: GalleryAsset): void {
@@ -306,9 +410,9 @@
           <button
             type="button"
             class="surface-button-danger rounded-md px-3 py-1.5 text-sm disabled:opacity-50"
-            disabled={selectedCount === 0 || deletingSelected}
+            disabled={selectedCount === 0 || deletableSelectedCount === 0}
             onclick={deleteSelected}
-          >{deletingSelected ? 'Deleting…' : 'Delete Selected'}</button>
+          >{bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete Selected'}</button>
           <span class="text-xs text-zinc-500">{selectedCount} selected</span>
         </div>
       </div>
@@ -514,12 +618,13 @@
           <button
             type="button"
             class="surface-button-danger flex w-full items-center justify-center gap-2 rounded-md py-2 font-medium"
+            disabled={deletingIds.has(selectedAsset.id)}
             onclick={() => deleteSingle(selectedAsset!)}
           >
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
             </svg>
-            Delete
+            {deletingIds.has(selectedAsset.id) ? 'Deleting…' : 'Delete'}
           </button>
         </div>
       {:else}

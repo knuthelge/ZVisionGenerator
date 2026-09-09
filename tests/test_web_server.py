@@ -336,9 +336,13 @@ def test_submit_image_job_uses_backend_registry_name(monkeypatch, tmp_path):
 
     monkeypatch.setattr(web_server, "resolve_defaults", _fake_resolve_defaults)
 
-    response = web_server._submit_image_job({"prompt": "hello world"}, web_config)
+    response = web_server._submit_image_job(
+        {"prompt": "hello world", "output": str(tmp_path / "stale-browser-output")},
+        web_config,
+    )
 
     assert response["job_id"] == "job-123"
+    assert response["output_dir"] == str(tmp_path)
     assert captured["backend_name"] == "registry-owned"
 
 
