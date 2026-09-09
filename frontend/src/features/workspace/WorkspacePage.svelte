@@ -259,7 +259,7 @@
   async function handleSubmit(e: Event): Promise<void> {
     e.preventDefault();
     if (!formEl || busy || !authorityReady) return;
-    if (draft.state.promptSource === 'file' && (!draft.state.promptFilePath || !draft.state.promptFileOptionId)) {
+    if (draft.state.promptSource === 'file' && (!draft.state.promptFilePath || draft.state.promptFileOptionIds.length === 0)) {
       return;
     }
     loadError = null;
@@ -381,8 +381,8 @@
                 <input
                   type="number"
                   step="0.1"
-                  min="0"
-                  max="2"
+                  min="-10"
+                  max="10"
                   value={chip.weight}
                   class="w-10 bg-transparent text-zinc-400 font-mono text-center focus:outline-none"
                   onchange={(e) => updateLoraWeight(chip.name, Number((e.currentTarget as HTMLInputElement).value))}
@@ -508,6 +508,7 @@
             <div class="mx-auto w-full max-w-md">
               <JobCard
                 job={jobStore.current!}
+                onopenoutput={(asset, trigger) => openCompletedOutputViewer(jobOutputs.findIndex((output) => output.id === asset.id), trigger)}
                 oncancel={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/quit`)}
                 onpause={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/pause`)}
                 onresume={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/resume`)}

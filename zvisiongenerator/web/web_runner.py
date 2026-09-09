@@ -170,6 +170,7 @@ class _JobRecord:
     history: list[EventPayload] = field(default_factory=list)
     event_count: int = 0
     last_event: EventPayload | None = None
+    prompt_progress: EventPayload = field(default_factory=dict)
     subscribers: set[queue.Queue[EventPayload]] = field(default_factory=set)
     next_event_id: int = 1
     exclusive: bool = False
@@ -601,7 +602,10 @@ class WebRunner:
         with record.lock:
             event = self._normalize_event(event)
             timestamp = time.time()
+            if event["type"] == "prompt_started":
+                record.prompt_progress = {key: event[key] for key in ("prompt", "run_index", "total_runs", "ran_iterations", "total_iterations") if key in event}
             enriched_event = {
+                **record.prompt_progress,
                 "event_id": record.next_event_id,
                 "job_id": job_id,
                 "job_type": record.job_type,

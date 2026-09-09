@@ -34,7 +34,7 @@ from zvisiongenerator.web.config_contract import persist_writable_config_patch, 
 from zvisiongenerator.web.defaults import default_image_size_for_ratio, default_video_size_for_ratio
 from zvisiongenerator.web.gallery import build_gallery_page_json, delete_gallery_assets, filter_and_sort_assets, gallery_asset_to_json, list_gallery_assets, resolve_output_asset_path
 from zvisiongenerator.web.path_picker import pick_path
-from zvisiongenerator.web.prompt_files import inspect_prompt_file, read_prompt_file, resolve_prompt_file_option, write_prompt_file
+from zvisiongenerator.web.prompt_files import inspect_prompt_file, read_prompt_file, resolve_prompt_file_options, write_prompt_file
 from zvisiongenerator.web.job_contract import IMAGE_SUPPORTED_CONTROLS, VIDEO_SUPPORTED_CONTROLS
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner
 from zvisiongenerator.web.workspace_api import build_models_response, build_workspace_bootstrap_view, build_workspace_response
@@ -605,18 +605,22 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
 
 
 def _resolve_prompt_submission(form: Any) -> tuple[str, str, str | None, dict[str, list[tuple[str, str | None]]]]:
-    """Resolve inline or prompt-file submission into a single prompt payload."""
+    """Resolve inline or prompt-file submission into a batch prompt payload."""
     prompt_source = _text_or_default(form, "prompt_source", DEFAULT_PROMPT_SOURCE)
     if prompt_source not in PROMPT_SOURCE_VALUES:
         raise ValueError(f"Unknown prompt source '{prompt_source}'.")
     if prompt_source == "file":
-        _normalized_path, option = resolve_prompt_file_option(
+        option_ids = form.getlist("prompt_option_id") if hasattr(form, "getlist") else [form.get("prompt_option_id")]
+        _normalized_path, options = resolve_prompt_file_options(
             _required_text(form, "prompts_file"),
-            _required_text(form, "prompt_option_id"),
+            [str(option_id).strip() for option_id in option_ids if option_id and str(option_id).strip()],
             accepted_extensions=_PROMPT_FILE_EXTENSIONS,
         )
-        prompts_data = {option.set_name: [(option.prompt, option.negative_prompt)]}
-        return prompt_source, option.prompt, option.negative_prompt, prompts_data
+        prompts_data: dict[str, list[tuple[str, str | None]]] = {}
+        for option in options:
+            prompts_data.setdefault(option.set_name, []).append((option.prompt, option.negative_prompt))
+        first = options[0]
+        return prompt_source, first.prompt, first.negative_prompt, prompts_data
 
     prompt = _required_text(form, "prompt")
     negative_prompt = _optional_text(form, "negative_prompt")

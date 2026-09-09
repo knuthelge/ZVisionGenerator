@@ -57,7 +57,7 @@ describe('JobCard', () => {
     expect('ProgressBar' in molecules).toBe(false);
   });
 
-  it('renders batch counters and remaining time from live job state', () => {
+  it('renders one run counter alongside stage progress and timing', () => {
     const jobProps = makeJob({
       runs: 3,
       batchIndex: 1,
@@ -70,11 +70,28 @@ describe('JobCard', () => {
     flushSync();
 
     const text = target.textContent ?? '';
-    expect(text).toContain(jobProps.batchLabel);
-    expect(text).toContain('2 / 3');
+    expect(text).not.toContain(jobProps.batchLabel);
+    expect(text.match(/Run 2 of 3/g)).toHaveLength(1);
+    expect(text).not.toContain('Batch');
+    expect(text).not.toContain('Current run');
     expect(text).toContain('4 / 20');
     expect(text).toContain('02:05');
     expect(target.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('20');
+  });
+
+  it('integrates the active prompt counter above the prompt with separate repeat-run context', () => {
+    component = mount(JobCard, { target, props: { job: makeJob({ prompt: 'Current landscape', promptNumber: 2, promptCount: 5, runs: 3, batchIndex: 1 }) } });
+    flushSync();
+    expect(target.textContent).toContain('Prompt 2 of 5');
+    expect(target.textContent).toContain('Run 2 of 3');
+    expect(target.querySelector('[aria-live="polite"]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Run 2 of 3 · Prompt 2 of 5');
+    expect(target.querySelector('[title="Current landscape"]')).not.toBeNull();
+  });
+
+  it('keeps single-prompt jobs free of redundant prompt counters', () => {
+    component = mount(JobCard, { target, props: { job: makeJob({ promptNumber: 1, promptCount: 1 }) } });
+    flushSync();
+    expect(target.textContent).not.toContain('Prompt 1 of 1');
   });
 
   it.each([
@@ -99,24 +116,30 @@ describe('JobCard', () => {
     expect(onresume).toHaveBeenCalledWith('job-card');
   });
 
-  it.each([
-    { status: 'running' as const, states: ['Previous', 'Current', 'Waiting'] },
-    { status: 'paused' as const, states: ['Previous', 'Paused', 'Waiting'] },
-    { status: 'queued' as const, states: ['Waiting', 'Waiting', 'Waiting'] },
-    { status: 'failed' as const, states: ['Previous', 'Failed', 'Waiting'] },
-    { status: 'cancelled' as const, states: ['Previous', 'Stopped', 'Waiting'] },
-    { status: 'completed' as const, states: ['Completed', 'Completed', 'Completed'] },
-  ])('visualizes $status batch runs', ({ status, states }) => {
+  it.each(['running', 'paused', 'failed', 'cancelled', 'completed'] as const)('keeps the run position separate from the %s status', (status) => {
     component = mount(JobCard, { target, props: { job: makeJob({ runs: 3, batchIndex: 1, status }) } });
     flushSync();
-    expect(Array.from(target.querySelectorAll('[aria-label="Batch runs"] li')).map((run) => run.getAttribute('data-state'))).toEqual(states);
+    expect(target.textContent?.match(/Run 2 of 3/g)).toHaveLength(1);
+    expect(target.querySelector('.job-status')?.textContent).toContain(status);
+    expect(target.textContent).not.toContain('Batch');
   });
 
-  it('keeps large batches compact and includes the current run', () => {
+  it('keeps large runs compact', () => {
     component = mount(JobCard, { target, props: { job: makeJob({ runs: 100, batchIndex: 40 }) } });
     flushSync();
-    expect(target.querySelectorAll('[aria-label="Batch runs"] li')).toHaveLength(16);
-    expect(target.querySelector('[aria-current="step"]')?.getAttribute('aria-label')).toBe('Run 41: Current');
+    expect(target.textContent).toContain('Run 41 of 100');
+    expect(target.querySelectorAll('[aria-label="Generation sequence"] [role="listitem"]')).toHaveLength(24);
+    expect(target.querySelector('[aria-current="step"]')?.getAttribute('aria-label')).toBe('Run 41: current');
+  });
+
+  it('groups prompt segments by run and highlights the current prompt', () => {
+    component = mount(JobCard, { target, props: { job: makeJob({ runs: 2, batchIndex: 1, promptCount: 3, promptNumber: 2 }) } });
+    flushSync();
+    const segments = target.querySelectorAll('[aria-label="Generation sequence"] [role="listitem"]');
+    expect(Array.from(segments).map((segment) => segment.getAttribute('data-state'))).toEqual(['previous', 'previous', 'previous', 'previous', 'current', 'waiting']);
+    expect(segments[3].classList.contains('run-boundary')).toBe(true);
+    expect(segments[4].getAttribute('aria-label')).toBe('Run 2 · Prompt 2: current');
+    expect(target.textContent?.match(/Run 2 of 2/g)).toHaveLength(1);
   });
 
   it('shows one readable stage label without the duplicate running message', () => {
@@ -252,7 +275,7 @@ describe('JobCard', () => {
     });
     flushSync();
 
-    expect(target.querySelectorAll('a[href^="/media/"]')).toHaveLength(2);
+    expect(target.querySelectorAll('button[aria-label^="View "]')).toHaveLength(2);
     expect(target.querySelectorAll('img[alt="first.png"]')).toHaveLength(1);
     expect(target.querySelectorAll('video')).toHaveLength(1);
   });
@@ -278,7 +301,7 @@ describe('JobCard', () => {
     expect(liveRegion?.getAttribute('aria-live')).toBe('polite');
     expect(liveRegion?.getAttribute('aria-atomic')).toBe('true');
     expect(liveRegion?.textContent).toContain('3 outputs ready');
-    expect(target.querySelectorAll('a[href^="/media/"]')).toHaveLength(3);
+    expect(target.querySelectorAll('button[aria-label^="View "]')).toHaveLength(3);
     expect(target.querySelector('img[alt="first.png"]')?.getAttribute('loading')).toBe('lazy');
     expect(target.querySelector('video')?.getAttribute('preload')).toBe('none');
     expect(target.querySelector('img[alt="newest.png"]')?.getAttribute('loading')).toBe('eager');
@@ -300,7 +323,7 @@ describe('JobCard', () => {
     // jsdom does not apply component-scoped Svelte CSS, so assert the source rule
     // against this exact inner grid rather than accidentally accepting page-level overflow.
     expect(jobCardSource).toMatch(/\.output-preview-grid\s*\{[^}]*max-height:\s*min\(35vh,\s*14rem\);[^}]*overflow-y:\s*auto;/s);
-    expect(grid?.querySelectorAll('a[aria-label^="Open "]')).toHaveLength(outputs.length);
+    expect(grid?.querySelectorAll('button[aria-label^="View "]')).toHaveLength(outputs.length);
     expect(grid?.querySelector(`img[alt="${outputs.at(-1)!.filename}"]`)).not.toBeNull();
   });
 });

@@ -37,6 +37,26 @@ describe('jobStore reconnect contract', () => {
     mockEventSource.close();
   });
 
+  it('tracks prompts across YAML groups and repeat runs, retaining context during steps', () => {
+    jobStore.startJob({ job_id: 'prompts', workflow: 'txt2img', prompt: 'First', model: 'zit', runs: 2, created_at: '' });
+    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    source.emit('prompt_started', { type: 'prompt_started', prompt: 'Third', run_index: 0, total_runs: 2, ran_iterations: 3, total_iterations: 6, prompt_index: 0, total_prompts: 1 });
+    expect(jobStore.current).toMatchObject({ prompt: 'Third', promptNumber: 3, promptCount: 3, batchIndex: 0, currentStep: 0, totalSteps: 0 });
+    source.emit('step_progress', { type: 'step_progress', current_step: 4, total_steps: 20, elapsed_secs: 1 });
+    expect(jobStore.current).toMatchObject({ prompt: 'Third', promptNumber: 3, currentStep: 4 });
+    source.emit('prompt_started', { type: 'prompt_started', prompt: 'First again', run_index: 1, total_runs: 2, ran_iterations: 4, total_iterations: 6 });
+    expect(jobStore.current).toMatchObject({ prompt: 'First again', promptNumber: 1, promptCount: 3, batchIndex: 1, currentStep: 0, totalSteps: 0 });
+  });
+
+  it('restores the current prompt and counter from a step snapshot', async () => {
+    await jobStore.reconnectActiveJob({ snapshot: {
+      id: 'restore-prompts', job_id: 'restore-prompts', workflow: 'txt2img', job_type: 'txt2img', status: 'running',
+      prompt: 'Original', model: 'zit', runs: 2, created_at: '', event_count: 10, paused: false,
+      last_event: { type: 'step_progress', prompt: 'Current', total_runs: 2, total_iterations: 6, ran_iterations: 5, run_index: 1, current_step: 2, total_steps: 20 },
+    } });
+    expect(jobStore.current).toMatchObject({ prompt: 'Current', promptNumber: 2, promptCount: 3, batchIndex: 1, currentStep: 2 });
+  });
+
   it('clears stored continuity when reconnect finds a terminal snapshot', async () => {
     sessionStorage.setItem('ziv-active-job-id-v1', 'job-terminal');
     const fetchMock = vi.fn().mockResolvedValue({

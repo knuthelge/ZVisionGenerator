@@ -1,6 +1,6 @@
 <script lang="ts">
   import { inspectPromptFile } from '$lib/api/promptFiles';
-  import { Button, Select } from '$lib/components/atoms';
+  import { Button } from '$lib/components/atoms';
   import PromptFileEditorDialog from '$lib/components/organisms/PromptFileEditorDialog.svelte';
   import type { PromptFileContract, PromptFileInspection, PromptFileOption, PromptSource, WorkflowMode } from '$lib/types';
   import FormField from './FormField.svelte';
@@ -10,19 +10,19 @@
     contract: PromptFileContract;
     promptSource: PromptSource;
     path: string | null;
-    selectedOptionId: string | null;
+    selectedOptionIds: string[];
     workflowMode: WorkflowMode;
     negativePromptSupported: boolean;
     disabled?: boolean;
     onPathChange: (path: string | null) => void;
-    onOptionChange: (optionId: string | null) => void;
+    onOptionChange: (optionIds: string[]) => void;
   }
 
   let {
     contract,
     promptSource,
     path,
-    selectedOptionId,
+    selectedOptionIds,
     workflowMode,
     negativePromptSupported,
     disabled = false,
@@ -39,12 +39,10 @@
   let manualPath = $state<string | null>(null);
   let editorOpen = $state(false);
   let editorRevision = $state(0);
+  let expandedOptionIds = $state<string[]>([]);
 
-  const selectOptions = $derived(
-    options.map((option) => ({ value: option.id, label: option.label }))
-  );
-  const selectedOption = $derived(
-    options.find((option) => option.id === selectedOptionId) ?? null
+  const selectedOptions = $derived(
+    options.filter((option) => selectedOptionIds.includes(option.id))
   );
 
   $effect(() => {
@@ -61,10 +59,11 @@
   });
 
   async function applyInspection(inspection: PromptFileInspection, successMessage: string | null): Promise<string> {
-    const previousSelection = selectedOptionId;
-    const selectionStillActive = previousSelection !== null && inspection.options.some((option) => option.id === previousSelection);
+    const previousSelection = selectedOptionIds;
+    const activeSelection = previousSelection.filter((id) => inspection.options.some((option) => option.id === id));
 
     options = inspection.options;
+    expandedOptionIds = [];
     loadedPath = inspection.path;
     manualPath = null;
     optionsError = null;
@@ -73,18 +72,18 @@
     onPathChange(inspection.path);
     editorRevision += 1;
 
-    if (!selectionStillActive) {
-      if (previousSelection !== null) {
+    if (activeSelection.length !== previousSelection.length) {
+      if (previousSelection.length > 0) {
         optionsStatus = contract.help.stale_selection;
         optionsStatusTone = 'warning';
       }
-      onOptionChange(null);
+      onOptionChange(activeSelection);
     }
 
     if (inspection.options.length === 0) {
       optionsStatus = contract.help.empty_options;
       optionsStatusTone = 'warning';
-      onOptionChange(null);
+      onOptionChange([]);
     }
 
     return inspection.path;
@@ -112,7 +111,7 @@
     optionsStatus = null;
     optionsStatusTone = 'muted';
     onPathChange(null);
-    onOptionChange(null);
+    onOptionChange([]);
   }
 
   function handleManualPathChange(value: string): void {
@@ -125,7 +124,7 @@
       optionsStatus = null;
       optionsStatusTone = 'muted';
       loadedPath = null;
-      onOptionChange(null);
+      onOptionChange([]);
     }
     onPathChange(nextPath);
   }
@@ -134,8 +133,11 @@
     void applyInspection(inspection, contract.help.saved);
   }
 
-  function handleOptionChange(optionId: string | null): void {
-    onOptionChange(optionId);
+  function handleOptionChange(optionId: string, checked: boolean): void {
+    const selected = new Set(selectedOptionIds);
+    if (checked) selected.add(optionId);
+    else selected.delete(optionId);
+    onOptionChange(options.filter((option) => selected.has(option.id)).map((option) => option.id));
   }
 </script>
 
@@ -163,50 +165,69 @@
   />
 
   <FormField
-    label="Prompt Option"
-    for="ws-prompt-option"
     helper={contract.selection_required ? contract.help.option_required : contract.help.option_optional}
     error={optionsError}
     status={optionsStatus}
     statusTone={optionsStatusTone}
   >
-    <Select
-      id="ws-prompt-option"
-      name="prompt_option_id"
-      value={selectedOptionId ?? ''}
-      options={selectOptions}
-      placeholder={loadingOptions ? 'Loading prompt options…' : 'Select a prompt option'}
-      disabled={disabled || loadingOptions || options.length === 0}
-      class="rounded-md focus:border-primary-main focus:ring-4 focus:ring-primary-main"
-      onchange={(event) => {
-        const nextValue = (event.currentTarget as HTMLSelectElement).value;
-        handleOptionChange(nextValue || null);
-      }}
-    />
+    <fieldset disabled={disabled || loadingOptions || options.length === 0} class="space-y-2">
+      <legend class="field-label mb-2">Prompts to Run</legend>
+      {#if loadingOptions}
+        <p class="text-xs text-zinc-400">Loading prompts…</p>
+      {:else if options.length > 0}
+        <div class="flex items-center gap-3 text-xs">
+          <button type="button" class="surface-link-muted" onclick={() => onOptionChange(options.map((option) => option.id))}>Select all</button>
+          <button type="button" class="surface-link-muted" onclick={() => onOptionChange([])}>Clear selection</button>
+          <span class="text-zinc-400">{selectedOptions.length} of {options.length} selected</span>
+        </div>
+        <div class="max-h-[60vh] space-y-2 overflow-y-auto" aria-label="Prompt choices">
+          {#each options as option (option.id)}
+            {@const expanded = expandedOptionIds.includes(option.id)}
+            <div class="rounded-md border p-3 text-sm text-zinc-200 transition-colors {selectedOptionIds.includes(option.id) ? 'border-teal-500/30 bg-teal-500/5' : 'border-transparent hover:bg-zinc-800'}">
+              <label class="flex cursor-pointer items-start gap-2">
+                <input
+                  type="checkbox"
+                  name="prompt_option_id"
+                  value={option.id}
+                  checked={selectedOptionIds.includes(option.id)}
+                  class="surface-checkbox mt-0.5 shrink-0"
+                  onchange={(event) => handleOptionChange(option.id, event.currentTarget.checked)}
+                >
+                <span class="min-w-0 flex-1 space-y-1.5">
+                  <span class="block text-xs font-medium text-zinc-400">{option.set_name} · #{option.source_index + 1}</span>
+                  <span id={`prompt-detail-${option.id}`} class="whitespace-pre-wrap break-words" class:block={expanded} class:line-clamp-2={!expanded}>{option.prompt_preview}</span>
+                  {#if expanded && option.negative_preview}
+                    <span class="block border-t border-zinc-700/50 pt-2 text-xs text-zinc-400">
+                      <span class="font-medium">Negative:</span> {option.negative_preview}
+                    </span>
+                  {/if}
+                </span>
+              </label>
+              <button
+                type="button"
+                class="surface-link-muted ml-5 mt-2 text-xs"
+                aria-expanded={expanded}
+                aria-controls={`prompt-detail-${option.id}`}
+                aria-label={`${expanded ? 'Show less' : 'Show more'} for ${option.set_name} #${option.source_index + 1}`}
+                onclick={() => {
+                  expandedOptionIds = expanded
+                    ? expandedOptionIds.filter((id) => id !== option.id)
+                    : [...expandedOptionIds, option.id];
+                }}
+              >{expanded ? 'Show less' : 'Show more'}</button>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </fieldset>
   </FormField>
 
-  {#if selectedOption}
-    <div class="surface-card-muted space-y-3 rounded-md p-3">
-      <div>
-        <p class="field-hint-label mb-1 block">Prompt Preview</p>
-        <p class="text-sm text-zinc-200">{selectedOption.prompt_preview}</p>
-      </div>
-
-      {#if selectedOption.negative_preview}
-        <div>
-          <p class="field-hint-label mb-1 block">Negative Preview</p>
-          <p class="text-sm text-zinc-400">{selectedOption.negative_preview}</p>
-        </div>
-
-        {#if workflowMode === 'video' || !negativePromptSupported}
-          <p class="text-xs text-amber-400">
-            {workflowMode === 'video'
-              ? contract.help.ignored_negative_video
-              : contract.help.ignored_negative_unsupported}
-          </p>
-        {/if}
-      {/if}
-    </div>
+  {#if selectedOptions.some((option) => option.negative_preview) && (workflowMode === 'video' || !negativePromptSupported)}
+    <p class="text-xs text-amber-400">
+      {workflowMode === 'video'
+        ? contract.help.ignored_negative_video
+        : contract.help.ignored_negative_unsupported}
+    </p>
   {/if}
 
   <PromptFileEditorDialog

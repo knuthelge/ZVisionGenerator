@@ -17,7 +17,7 @@ const DEFAULT_DRAFT: DraftState = {
   firstSigma: null,
   negativePrompt: '',
   promptFilePath: null,
-  promptFileOptionId: null,
+  promptFileOptionIds: [],
   model: '',
   ratio: '',
   size: '',
@@ -156,9 +156,14 @@ function loadFromStorage(): DraftState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_DRAFT };
-    const parsed = JSON.parse(raw) as Partial<DraftState>;
+    const parsed = JSON.parse(raw) as Partial<DraftState> & { promptFileOptionId?: string | null };
     if (parsed.version !== SCHEMA_VERSION) return { ...DEFAULT_DRAFT };
-    return { ...DEFAULT_DRAFT, ...parsed };
+    const { promptFileOptionId, ...saved } = parsed;
+    return {
+      ...DEFAULT_DRAFT,
+      ...saved,
+      promptFileOptionIds: saved.promptFileOptionIds ?? (promptFileOptionId ? [promptFileOptionId] : []),
+    };
   } catch {
     return { ...DEFAULT_DRAFT };
   }

@@ -260,7 +260,7 @@ export interface DraftState {
   firstSigma: number | null;
   negativePrompt: string;
   promptFilePath: string | null;
-  promptFileOptionId: string | null;
+  promptFileOptionIds: string[];
   model: string;
   ratio: string;
   size: string;
@@ -336,6 +336,8 @@ export interface ActiveJobState extends JobContext {
   remaining: number;
   stageName: string;
   stageIndex: number;
+  promptNumber?: number;
+  promptCount?: number;
   batchLabel: string;
   batchIndex: number;
   paused: boolean;

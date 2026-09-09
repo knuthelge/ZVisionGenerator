@@ -1,8 +1,9 @@
 <script lang="ts">
-  import type { ActiveJobState } from '$lib/types';
+  import type { ActiveJobState, GalleryAsset } from '$lib/types';
 
   interface Props {
     job: ActiveJobState;
+    onopenoutput?: (asset: GalleryAsset, trigger: HTMLElement) => void;
     oncancel?: (jobId: string) => void | Promise<unknown>;
     onpause?: (jobId: string) => void | Promise<unknown>;
     onresume?: (jobId: string) => void | Promise<unknown>;
@@ -12,6 +13,7 @@
 
   let {
     job,
+    onopenoutput,
     oncancel,
     onpause,
     onresume,
@@ -38,7 +40,9 @@
   }
 
   const readableStage = $derived(job.stageName.replaceAll('_', ' '));
-  const displayMessage = $derived(job.message === `Running ${readableStage}.` ? '' : job.message);
+  const displayMessage = $derived(
+    job.message === `Running ${readableStage}.` || job.message === 'Preparing generation.' || job.message.startsWith('Batch completed') ? '' : job.message
+  );
 
   const hasProgress = $derived(Number.isFinite(job.totalSteps) && job.totalSteps > 0 && Number.isFinite(job.currentStep));
   const stepPct = $derived(hasProgress ? Math.min(100, Math.max(0, job.currentStep / job.totalSteps * 100)) : 0);
@@ -71,21 +75,29 @@
   const elapsedStr = $derived(formatElapsed(job.elapsed));
   const remainingStr = $derived(job.remaining > 0 ? formatDuration(job.remaining) : '--:--');
   const stepLabel  = $derived(`${job.currentStep} / ${job.totalSteps}`);
-  const batchMeta  = $derived(`${job.batchIndex + 1} / ${job.runs}`);
+  const hasPromptProgress = $derived(Number.isInteger(job.promptNumber) && Number.isInteger(job.promptCount)
+    && (job.promptNumber ?? 0) > 0 && (job.promptCount ?? 0) > 1 && job.promptNumber! <= job.promptCount!);
   const runCount = $derived(Number.isFinite(job.runs) ? Math.max(0, Math.floor(job.runs)) : 0);
   const currentRun = $derived(Math.min(Math.max(0, Number.isFinite(job.batchIndex) ? Math.floor(job.batchIndex) : 0), Math.max(0, runCount - 1)));
-  const batchStart = $derived(Math.floor(currentRun / 16) * 16);
-  const visibleRuns = $derived(Array.from({ length: Math.min(16, Math.max(0, runCount - batchStart)) }, (_, index) => batchStart + index));
+  const promptsPerRun = $derived(hasPromptProgress ? job.promptCount! : 1);
+  const sequenceCount = $derived(Math.max(1, runCount) * promptsPerRun);
+  const sequenceIndex = $derived(currentRun * promptsPerRun + (hasPromptProgress ? job.promptNumber! - 1 : 0));
+  const sequenceStart = $derived(Math.max(0, Math.min(sequenceIndex - 11, sequenceCount - 24)));
+  const sequenceItems = $derived(Array.from({ length: Math.min(24, sequenceCount) }, (_, index) => sequenceStart + index));
 
-  function runState(index: number): string {
-    if (job.status === 'completed') return 'Completed';
-    if (job.status === 'queued' || job.status === 'pending') return 'Waiting';
-    // Advancing can also mean skipping a run; do not imply successful output.
-    if (index < currentRun) return 'Previous';
-    if (index > currentRun) return 'Waiting';
-    if (job.status === 'failed') return 'Failed';
-    if (job.status === 'cancelled') return 'Stopped';
-    return job.status === 'paused' || job.paused ? 'Paused' : 'Current';
+  function sequenceState(index: number): string {
+    if (job.status === 'queued' || job.status === 'pending') return 'waiting';
+    if (job.status === 'completed' || index < sequenceIndex) return 'previous';
+    if (index > sequenceIndex) return 'waiting';
+    if (job.paused || job.status === 'paused') return 'paused';
+    if (job.status === 'failed') return 'failed';
+    if (job.status === 'cancelled') return 'stopped';
+    return 'current';
+  }
+
+  function sequenceLabel(index: number): string {
+    const run = Math.floor(index / promptsPerRun) + 1;
+    return `Run ${run}${hasPromptProgress ? ` · Prompt ${(index % promptsPerRun) + 1}` : ''}: ${sequenceState(index)}`;
   }
   const stepPhase  = $derived(
     job.stageName
@@ -126,26 +138,29 @@
     <span class="job-status" data-status={statusLabel}><span class="status-dot"></span>{statusLabel}</span>
   </div>
   <div class="job-body">
-  <p class="text-sm text-text-primary line-clamp-2 break-words" title={job.prompt}>{job.prompt || 'No prompt supplied'}</p>
-  <p class="mt-1 text-xs text-text-muted truncate" title={job.model}>{job.model}</p>
-
-  {#if runCount > 1}
-    <div class="batch-info">
-      <div class="batch-heading"><span>Batch</span><span class="font-mono">{job.status === 'completed' ? `${runCount} / ${runCount}` : batchMeta}</span></div>
-      <ol class="batch-runs" aria-label="Batch runs">
-        {#each visibleRuns as index (index)}
-          {@const state = runState(index)}
-          <li data-state={state} aria-current={index === currentRun && active ? 'step' : undefined} aria-label="Run {index + 1}: {state}" title="Run {index + 1}: {state}">
-            <span aria-hidden="true">{state === 'Completed' ? '✓' : index + 1}</span>
-          </li>
-        {/each}
-      </ol>
-      <div class="batch-caption">
-        <span>{job.status === 'completed' ? 'Batch complete' : `Run ${currentRun + 1} · ${runState(currentRun)}`}</span>
-        {#if runCount > 16}<span>Showing {batchStart + 1}–{batchStart + visibleRuns.length}</span>{/if}
-      </div>
+  {#if runCount > 1 || hasPromptProgress}
+    <p class="mb-2 flex flex-wrap items-center gap-x-2 text-xs font-medium text-primary-main" role="status" aria-live="polite" aria-atomic="true">
+      <span>Run {currentRun + 1} of {runCount || 1}</span>
+      {#if hasPromptProgress}<span class="text-text-secondary">· Prompt {job.promptNumber} of {job.promptCount}</span>{/if}
+    </p>
+    <div class="sequence-strip" role="list" aria-label="Generation sequence">
+      {#if sequenceStart > 0}<span class="sequence-more" aria-hidden="true">…</span>{/if}
+      {#each sequenceItems as index (index)}
+        <div
+          role="listitem"
+          class="sequence-segment"
+          class:run-boundary={hasPromptProgress && index > sequenceStart && index % promptsPerRun === 0}
+          data-state={sequenceState(index)}
+          aria-label={sequenceLabel(index)}
+          aria-current={index === sequenceIndex && active ? 'step' : undefined}
+          title={sequenceLabel(index)}
+        ></div>
+      {/each}
+      {#if sequenceStart + sequenceItems.length < sequenceCount}<span class="sequence-more" aria-hidden="true">…</span>{/if}
     </div>
   {/if}
+  <p class="text-sm text-text-primary line-clamp-2 break-words" title={job.prompt}>{job.prompt || 'No prompt supplied'}</p>
+  <p class="mt-1 text-xs text-text-muted truncate" title={job.model}>{job.model}</p>
 
   <!-- Progress -->
   <div class="mt-4">
@@ -169,8 +184,7 @@
           style="width: {stepWidth}"
         ></div>
       </div>
-      <div class="mt-2 flex items-center justify-between gap-3 text-[11px] text-text-muted">
-        <span class="min-w-0 break-words">{job.batchLabel || (runCount > 1 ? 'Current run' : 'Single run')}</span>
+      <div class="mt-2 text-right text-[11px] text-text-muted">
         <span class="font-mono shrink-0">{hasProgress ? `${stepLabel} steps` : 'Awaiting steps'}</span>
       </div>
 
@@ -250,7 +264,7 @@
     >
       {#each uniqueOutputs as output, index (output.id)}
         {@const newest = index === uniqueOutputs.length - 1}
-        <a href={output.url} target="_blank" rel="noopener noreferrer" class="block" aria-label="Open {output.filename}">
+        <button type="button" class="block w-full rounded-md focus-visible:focus-ring" aria-label="View {output.filename} fullscreen" onclick={(event) => onopenoutput?.(output, event.currentTarget)}>
           {#if output.media_type === 'video'}
             <video
               src={output.thumbnail_url || output.url}
@@ -266,7 +280,7 @@
               loading={newest ? 'eager' : 'lazy'}
             />
           {/if}
-        </a>
+        </button>
       {/each}
     </div>
   {/if}
@@ -275,6 +289,16 @@
 </article>
 
 <style>
+  .sequence-strip { display: flex; align-items: center; gap: 4px; margin: 4px 0 14px; }
+  .sequence-segment { flex: 1; min-width: 0; height: 8px; border-radius: 3px; background: var(--color-bg-base); border: 1px solid var(--color-border-strong); }
+  .sequence-segment.run-boundary { margin-left: 5px; }
+  .sequence-segment[data-state='previous'] { background: var(--color-primary-subtle); border-color: var(--color-primary-main); opacity: 0.5; }
+  .sequence-segment[data-state='current'] { height: 12px; background: var(--color-primary-main); border-color: var(--color-primary-main); box-shadow: 0 0 8px var(--color-primary-subtle); }
+  .sequence-segment[data-state='paused'] { height: 12px; background: var(--color-warning); border-color: var(--color-warning); }
+  .sequence-segment[data-state='failed'] { height: 12px; background: var(--color-error); border-color: var(--color-error); }
+  .sequence-segment[data-state='stopped'] { height: 12px; border-style: dashed; }
+  .sequence-more { color: var(--color-text-muted); font-size: 11px; line-height: 1; }
+
   .progress-track { position: relative; isolation: isolate; }
   .step-pulse::after {
     content: '';
@@ -305,15 +329,6 @@
   .job-status[data-status='paused'] { color: var(--color-warning); }
   .job-status[data-status='failed'], .job-message.failed { color: var(--color-error); }
   .job-body { padding: 12px 14px; }
-  .batch-info { margin-top: 14px; }
-  .batch-heading, .batch-caption { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--color-text-muted); }
-  .batch-runs { display: flex; gap: 3px; margin: 6px 0; padding: 0; list-style: none; }
-  .batch-runs li { flex: 1; min-width: 0; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 3px; border: 1px solid var(--color-border-strong); background: var(--color-bg-base); color: var(--color-text-muted); font-size: 9px; font-variant-numeric: tabular-nums; }
-  .batch-runs li[data-state='Previous'], .batch-runs li[data-state='Completed'] { background: var(--color-primary-subtle); border-color: var(--color-primary-subtle); color: var(--color-text-primary); }
-  .batch-runs li[data-state='Current'] { border-color: var(--color-primary-main); color: var(--color-primary-main); box-shadow: inset 0 -2px var(--color-primary-main); font-weight: 600; }
-  .batch-runs li[data-state='Paused'] { border-color: var(--color-warning); color: var(--color-warning); }
-  .batch-runs li[data-state='Failed'] { border-color: var(--color-error); color: var(--color-error); }
-  .batch-runs li[data-state='Stopped'] { border-style: dashed; }
   .job-timing { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 14px; font-size: 11px; }
   .job-timing div { display: flex; align-items: baseline; gap: 8px; }
   dt { color: var(--color-text-muted); }
