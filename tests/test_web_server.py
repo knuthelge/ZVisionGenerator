@@ -1394,3 +1394,32 @@ def test_reference_upload_staging_still_accepts_generation_uploads(tmp_path):
     assert staged_path.is_file()
     assert staged_path.parent.name == ".web_uploads"
     assert list_gallery_assets(str(tmp_path)) == []
+
+
+@pytest.mark.parametrize("selected", [["portrait:1", "landscape:0", "portrait:0", "portrait:1"], ["portrait:0"]])
+def test_prompt_file_submission_batches_checked_prompts_in_file_order(tmp_path, selected):
+    from starlette.datastructures import FormData
+
+    path = tmp_path / "prompts.yaml"
+    path.write_text("portrait:\n  - prompt: first\n    negative: blur\n  - prompt: second\nlandscape:\n  - prompt: third\n  - prompt: unchecked\n", encoding="utf-8")
+    form = FormData([("prompt_source", "file"), ("prompts_file", str(path)), *[("prompt_option_id", option_id) for option_id in selected]])
+    source, prompt, negative, batch = web_server._resolve_prompt_submission(form)
+    assert source == "file"
+    assert prompt == "first"
+    assert negative == "blur"
+    expected = {"portrait": [("first", "blur")]}
+    if len(selected) > 1:
+        expected["portrait"].append(("second", None))
+        expected["landscape"] = [("third", None)]
+    assert batch == expected
+
+
+@pytest.mark.parametrize("selected", [[], ["portrait:1"], ["portrait:0", "missing:0"]])
+def test_prompt_file_submission_rejects_empty_inactive_or_stale_selection(tmp_path, selected):
+    from starlette.datastructures import FormData
+
+    path = tmp_path / "prompts.yaml"
+    path.write_text("portrait:\n  - prompt: first\n  - prompt: inactive\n    active: false\n", encoding="utf-8")
+    form = FormData([("prompt_source", "file"), ("prompts_file", str(path)), *[("prompt_option_id", option_id) for option_id in selected]])
+    with pytest.raises(ValueError, match="Select at least one|missing or inactive"):
+        web_server._resolve_prompt_submission(form)

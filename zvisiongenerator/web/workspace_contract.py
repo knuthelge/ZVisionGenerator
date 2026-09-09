@@ -21,10 +21,10 @@ PROMPT_FILE_CONTRACT = {
     "help": {
         "path": "Enter or browse for a prompt YAML file on the machine running the Web UI host. The submitted value stays visible until the backend accepts or rejects it.",
         "editor": "Reads and writes happen on the machine running the Web UI host. Saves replace the file atomically only after YAML validation succeeds.",
-        "option_required": "Select an active prompt option before generating.",
-        "option_optional": "Select an active prompt option from the file.",
+        "option_required": "Select one or more prompts to run together. Runs applies to each selected prompt.",
+        "option_optional": "Select prompts from the file.",
         "empty_options": "This prompt file has no active prompt options.",
-        "stale_selection": "The previously selected prompt option is no longer active.",
+        "stale_selection": "Some selected prompts are no longer active and have been unchecked.",
         "loaded": "Prompt file loaded.",
         "saved": "Prompt file saved.",
         "ignored_negative_video": "Negative prompt entries are ignored for video workflows.",

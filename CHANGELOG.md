@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-09
+
+### Added
+- Added multi-select prompt-file batches with select-all controls and preservation of valid selections after YAML edits
+- Added live run and prompt counters with a compact visual sequence indicator during generation
+
+### Changed
+- Expanded prompt-file selection with concise two-line previews and optional full prompt and negative-prompt details
+- Generation output previews now open in the shared Workspace lightbox with navigation and focus restoration
+- LoRA weights in the Workspace now accept values from -10 through 10
+
 ## [0.8.1] - 2026-09-09
 
 ### Changed

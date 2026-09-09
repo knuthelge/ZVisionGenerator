@@ -696,3 +696,20 @@ class TestWebServerSse:
         payloads = [event["data"] for event in events]
         assert all(payload["job_id"] == job_id for payload in payloads)
         assert [payload["event_id"] for payload in payloads] == sorted(payload["event_id"] for payload in payloads)
+
+
+def test_prompt_context_survives_steps_and_pause_for_reconnection():
+    runner = web_runner_module.WebRunner()
+    record = web_runner_module._JobRecord(job_id="prompt-context", job_type="image")
+    runner._jobs[record.job_id] = record
+    runner._publish_event(record.job_id, {"type": "prompt_started", "prompt": "Second prompt", "run_index": 0, "total_runs": 2, "ran_iterations": 2, "total_iterations": 6})
+    runner._publish_event(record.job_id, {"type": "step_progress", "current_step": 1, "total_steps": 20})
+    assert runner.get_job_snapshot(record.job_id)["last_event"]["prompt"] == "Second prompt"
+    runner._publish_event(record.job_id, {"type": "job_paused"})
+    event = runner.get_job_snapshot(record.job_id)["last_event"]
+    assert event["ran_iterations"] == 2
+    assert event["total_iterations"] == 6
+    assert event["prompt"] == "Second prompt"
+    runner._publish_event(record.job_id, {"type": "prompt_started", "prompt": "Third prompt", "run_index": 0, "total_runs": 2, "ran_iterations": 3, "total_iterations": 6})
+    runner._publish_event(record.job_id, {"type": "step_progress", "current_step": 1, "total_steps": 20})
+    assert runner.get_job_snapshot(record.job_id)["last_event"]["prompt"] == "Third prompt"

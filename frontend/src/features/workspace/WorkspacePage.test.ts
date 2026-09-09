@@ -1232,13 +1232,35 @@ describe('WorkspacePage', () => {
     const hiddenPath = target.querySelector('input[name="prompts_file"]') as HTMLInputElement | null;
     expect(hiddenPath?.value).toBe('/server/prompts.yaml');
 
-    const optionSelect = target.querySelector('#ws-prompt-option') as HTMLSelectElement | null;
+    const optionSelect = target.querySelector('input[name="prompt_option_id"]') as HTMLInputElement | null;
     expect(optionSelect).not.toBeNull();
-    optionSelect!.value = 'portrait:1';
+    optionSelect!.checked = true;
+    const secondOption = target.querySelector('input[value="portrait:1"]') as HTMLInputElement;
+    secondOption.checked = true;
+    secondOption.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
     optionSelect!.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
 
     expect(submitButton?.disabled).toBe(false);
+    const detail = target.querySelector('[id="prompt-detail-portrait:1"]') as HTMLElement;
+    expect(detail.classList.contains('line-clamp-2')).toBe(true);
+    expect(detail.classList.contains('block')).toBe(false);
+    expect(target.textContent).not.toContain('muddy');
+    const showMore = target.querySelector('[aria-label="Show more for portrait #2"]') as HTMLButtonElement;
+    showMore.click();
+    await settle();
+    expect(detail.classList.contains('line-clamp-2')).toBe(false);
+    expect(detail.classList.contains('block')).toBe(true);
+    expect(showMore.getAttribute('aria-expanded')).toBe('true');
+    expect(draft.state.promptFileOptionIds).toEqual(['portrait:0', 'portrait:1']);
+    showMore.click();
+    await settle();
+    expect(detail.classList.contains('line-clamp-2')).toBe(true);
+    expect(detail.classList.contains('block')).toBe(false);
+    expect(target.textContent).not.toContain('muddy');
+    showMore.click();
+    await settle();
 
     const form = target.querySelector('form');
     expect(form).not.toBeNull();
@@ -1250,9 +1272,42 @@ describe('WorkspacePage', () => {
     expect(submittedFormData).toBeInstanceOf(FormData);
     expect(submittedFormData.get('prompt_source')).toBe('file');
     expect(submittedFormData.get('prompts_file')).toBe('/server/prompts.yaml');
-    expect(submittedFormData.get('prompt_option_id')).toBe('portrait:1');
+    expect(submittedFormData.getAll('prompt_option_id')).toEqual(['portrait:0', 'portrait:1']);
+    expect(target.textContent?.match(/first option/g)).toHaveLength(1);
+    expect(target.textContent?.match(/second option/g)).toHaveLength(1);
+    expect(target.textContent?.match(/muddy/g)).toHaveLength(1);
+    expect(target.textContent).not.toContain('Prompt Preview');
     expect(submittedFormData.has('prompt')).toBe(false);
     expect(submittedFormData.has('negative_prompt')).toBe(false);
+  });
+
+  it('selects all prompts, unchecks individual prompts, and disables generation when cleared', async () => {
+    promptFileApiMocks.inspectPromptFile.mockResolvedValue({
+      path: '/server/prompts.yaml',
+      options: [0, 1, 2].map((index) => ({
+        id: `portrait:${index}`, set_name: 'portrait', source_index: index,
+        label: `Prompt ${index + 1}`, prompt_preview: `Prompt ${index + 1}`, negative_preview: null,
+      })),
+    });
+    await mountWorkspace(makeContext());
+    draft.update('promptSource', 'file');
+    draft.update('promptFilePath', '/server/prompts.yaml');
+    await settle();
+    const button = (label: string) => Array.from(target.querySelectorAll('button')).find((item) => item.textContent?.trim() === label)!;
+    button('Select all').click();
+    await settle();
+    expect(draft.state.promptFileOptionIds).toEqual(['portrait:0', 'portrait:1', 'portrait:2']);
+    expect(target.querySelectorAll('input[name="prompt_option_id"]:checked')).toHaveLength(3);
+    const checkbox = target.querySelector('input[value="portrait:1"]') as HTMLInputElement;
+    checkbox.click();
+    await settle();
+    expect(draft.state.promptFileOptionIds).toEqual(['portrait:0', 'portrait:2']);
+    expect(new FormData(target.querySelector('form')!).getAll('prompt_option_id')).toEqual(['portrait:0', 'portrait:2']);
+    button('Clear selection').click();
+    await settle();
+    expect(draft.state.promptFileOptionIds).toEqual([]);
+    expect(target.querySelectorAll('input[name="prompt_option_id"]:checked')).toHaveLength(0);
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement).disabled).toBe(true);
   });
 
   it('keeps the rejected prompt-file path visible when a manual reload fails', async () => {
@@ -1284,8 +1339,8 @@ describe('WorkspacePage', () => {
     pathInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await settle();
 
-    const optionSelect = target.querySelector('#ws-prompt-option') as HTMLSelectElement | null;
-    optionSelect!.value = 'portrait:0';
+    const optionSelect = target.querySelector('input[name="prompt_option_id"]') as HTMLInputElement | null;
+    optionSelect!.checked = true;
     optionSelect!.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
 
@@ -1298,7 +1353,7 @@ describe('WorkspacePage', () => {
     const hiddenPath = target.querySelector('input[name="prompts_file"]') as HTMLInputElement | null;
     expect(pathInput!.value).toBe('/missing/prompts.yaml');
     expect(hiddenPath?.value).toBe('/missing/prompts.yaml');
-    expect((target.querySelector('#ws-prompt-option') as HTMLSelectElement | null)?.value).toBe('');
+    expect(target.querySelectorAll('input[name="prompt_option_id"]:checked')).toHaveLength(0);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
   });
 
@@ -1389,8 +1444,8 @@ describe('WorkspacePage', () => {
     pathInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await settle();
 
-    const optionSelect = target.querySelector('#ws-prompt-option') as HTMLSelectElement | null;
-    optionSelect!.value = 'portrait:0';
+    const optionSelect = target.querySelector('input[name="prompt_option_id"]') as HTMLInputElement | null;
+    optionSelect!.checked = true;
     optionSelect!.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
@@ -1401,7 +1456,7 @@ describe('WorkspacePage', () => {
 
     const hiddenPath = target.querySelector('input[name="prompts_file"]') as HTMLInputElement | null;
     expect(hiddenPath?.value).toBe('/server/other-prompts.yaml');
-    expect((target.querySelector('#ws-prompt-option') as HTMLSelectElement | null)?.value).toBe('');
+    expect(target.querySelectorAll('input[name="prompt_option_id"]:checked')).toHaveLength(0);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
   });
 
@@ -1519,8 +1574,8 @@ describe('WorkspacePage', () => {
     pathInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await settle();
 
-    const optionSelect = target.querySelector('#ws-prompt-option') as HTMLSelectElement | null;
-    optionSelect!.value = 'portrait:0';
+    const optionSelect = target.querySelector('input[name="prompt_option_id"]') as HTMLInputElement | null;
+    optionSelect!.checked = true;
     optionSelect!.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
 
@@ -1539,7 +1594,7 @@ describe('WorkspacePage', () => {
     await settle();
 
     expect(promptFileApiMocks.writePromptFile).toHaveBeenCalledWith('/server/prompts.yaml', 'portrait:\n  - prompt: replacement option\n');
-    expect((target.querySelector('#ws-prompt-option') as HTMLSelectElement | null)?.value).toBe('');
+    expect(target.querySelectorAll('input[name="prompt_option_id"]:checked')).toHaveLength(0);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
     expect(target.textContent).toContain('no longer active');
   });
@@ -1741,8 +1796,37 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
     const scroller = target.querySelector('.workspace-preview div.h-full.w-full.overflow-y-auto') as HTMLDivElement | null;
     expect(scroller).not.toBeNull();
     expect(scroller?.classList.contains('overflow-y-auto')).toBe(true);
-    expect(target.querySelectorAll('.job-card a[aria-label^="Open "]')).toHaveLength(outputs.length);
+    expect(target.querySelectorAll('.job-card button[aria-label^="View "]')).toHaveLength(outputs.length);
     expect(target.querySelector(`.job-card img[alt="${outputs.at(-1)!.filename}"]`)).not.toBeNull();
+  });
+
+  it('opens running previews in the shared modal and keeps it open as the batch completes', async () => {
+    await mountWorkspace(makeContext());
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const first = makeAsset({ id: 'out/first.png', filename: 'first.png', url: '/media/first.png' });
+    const second = makeAsset({ id: 'out/second.png', filename: 'second.png', url: '/media/second.png' });
+    source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: first });
+    await settle();
+    const trigger = target.querySelector('.job-card button[aria-label="View first.png fullscreen"]') as HTMLButtonElement;
+    trigger.click();
+    await settle();
+    expect(target.querySelector('[data-testid="lightbox"] img')?.getAttribute('src')).toBe(first.url);
+    source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: second });
+    await settle();
+    (target.querySelector('[aria-label="Next asset"]') as HTMLButtonElement).click();
+    await settle();
+    expect(target.querySelector('[data-testid="lightbox"] img')?.getAttribute('src')).toBe(second.url);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await settle();
+    expect(target.querySelector('[data-testid="lightbox"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    trigger.click();
+    await settle();
+    source.emit('job_completed', { type: 'job_completed', outputs: [first, second] });
+    await settle();
+    expect(target.querySelector('[data-testid="lightbox"] img')?.getAttribute('src')).toBe(first.url);
   });
 
   it('opens indexed completed outputs in the workspace lightbox and navigates the full list', async () => {

@@ -33,6 +33,22 @@ function eventFieldString(event: Record<string, unknown> | null | undefined, key
   return typeof value === 'string' ? value : '';
 }
 
+function promptProgress(event: Record<string, unknown> | null | undefined): Partial<ActiveJobState> {
+  const runs = eventFieldNumber(event, 'total_runs');
+  const total = eventFieldNumber(event, 'total_iterations');
+  const iteration = eventFieldNumber(event, 'ran_iterations');
+  const count = total / runs;
+  const progress: Partial<ActiveJobState> = {};
+  // Iterations span all YAML groups; prompt_index is only local to one group.
+  if (Number.isInteger(count) && count > 0 && Number.isInteger(iteration) && iteration > 0 && iteration <= total) {
+    progress.promptCount = count;
+    progress.promptNumber = ((iteration - 1) % count) + 1;
+  }
+  if (typeof event?.prompt === 'string') progress.prompt = event.prompt;
+  if (typeof event?.run_index === 'number') progress.batchIndex = event.run_index;
+  return progress;
+}
+
 function statusMessageForEvent(type: string | undefined, event: Record<string, unknown> | null | undefined): string {
   if (type === 'model_loading') {
     const model = eventFieldString(event, 'model');
@@ -137,6 +153,7 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     batchIndex,
     paused: isPaused,
     message: isPaused ? 'Job paused. Resume to continue.' : (statusMessage || 'Reconnected to active job.'),
+    ...promptProgress(lastEvent),
     outputs: snapshot.outputs ?? []
   };
 }
@@ -162,9 +179,11 @@ function applyStatusEvent(type: string, event: SSEEvent): void {
   if (!_job) return;
   const data = event as unknown as Record<string, unknown>;
   const msg = statusMessageForEvent(type, data);
-  if (msg) _job = {
+  _job = {
     ..._job,
-    message: msg,
+    ...promptProgress(data),
+    ...(msg ? { message: msg } : {}),
+    ...(type === 'prompt_started' ? { currentStep: 0, totalSteps: 0, stageName: '', stageIndex: 0, message: 'Preparing generation.' } : {}),
     ...(type === 'workflow_stage_started' ? { stageName: eventFieldString(data, 'stage_name') } : {}),
   };
 }
@@ -204,6 +223,7 @@ function attachJobEvents(jobId: string): void {
       _job = {
         ..._job,
         status: _job.status === 'paused' ? 'paused' : 'running',
+        ...promptProgress(event as unknown as Record<string, unknown>),
         currentStep: ev.current_step,
         totalSteps: ev.total_steps,
         elapsed: ev.elapsed_secs,

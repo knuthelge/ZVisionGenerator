@@ -86,7 +86,7 @@ describe('Select native required semantics', () => {
         contract: promptFileContract,
         promptSource: 'inline',
         path: null,
-        selectedOptionId: null,
+        selectedOptionIds: [],
         workflowMode: 'image',
         negativePromptSupported: true,
         onPathChange: () => undefined,
@@ -94,8 +94,7 @@ describe('Select native required semantics', () => {
       },
     }));
 
-    const promptOption = form.querySelector('#ws-prompt-option') as HTMLSelectElement;
-    expect(promptOption.required).toBe(false);
+    expect(form.querySelector('input[required]')).toBeNull();
     expect(form.checkValidity()).toBe(true);
   });
 });

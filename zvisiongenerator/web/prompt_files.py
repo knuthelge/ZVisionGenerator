@@ -49,6 +49,18 @@ def resolve_prompt_file_option(path: str, option_id: str, *, accepted_extensions
     return str(normalized_path), option
 
 
+def resolve_prompt_file_options(path: str, option_ids: list[str], *, accepted_extensions: tuple[str, ...]) -> tuple[str, list[PromptFileOption]]:
+    """Resolve checked options from one file snapshot, in file order."""
+    if not option_ids:
+        raise ValueError("Select at least one prompt before generating.")
+    normalized_path = normalize_prompt_file_path(path, accepted_extensions=accepted_extensions)
+    inspection = inspect_prompts_file(str(normalized_path))
+    selected = set(option_ids)
+    for option_id in selected:
+        _find_option(inspection, option_id)
+    return str(normalized_path), [option for option in inspection.options if option.id in selected]
+
+
 def normalize_prompt_file_path(path: str, *, accepted_extensions: tuple[str, ...]) -> Path:
     """Expand and validate a prompt-file path as a host-local existing file."""
     text = path.strip()

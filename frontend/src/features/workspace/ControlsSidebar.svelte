@@ -84,7 +84,7 @@
   const showNegativePrompt = $derived(visibleControls.has('negative_prompt') && supportsNegativePrompt);
   const promptFileMode = $derived(draft.state.promptSource === 'file');
   const submitDisabled = $derived(
-    busy || (promptFileMode && (!draft.state.promptFilePath || !draft.state.promptFileOptionId))
+    busy || (promptFileMode && (!draft.state.promptFilePath || draft.state.promptFileOptionIds.length === 0))
   );
 
   // Size/ratio options from context only — no hard-coded fallbacks.
@@ -298,12 +298,12 @@
         contract={context.prompt_file}
         promptSource={draft.state.promptSource}
         path={draft.state.promptFilePath}
-        selectedOptionId={draft.state.promptFileOptionId}
+        selectedOptionIds={draft.state.promptFileOptionIds}
         workflowMode={isImageMode ? 'image' : 'video'}
         negativePromptSupported={supportsNegativePrompt}
         disabled={busy}
         onPathChange={(path) => draft.update('promptFilePath', path)}
-        onOptionChange={(optionId) => draft.update('promptFileOptionId', optionId)}
+        onOptionChange={(optionIds) => draft.update('promptFileOptionIds', optionIds)}
       />
     {/if}
 
@@ -932,7 +932,7 @@
     >
       An exclusive generation job is running. New runs are disabled until it finishes.
     </p>
-    {#if promptFileMode && !draft.state.promptFileOptionId}
+    {#if promptFileMode && draft.state.promptFileOptionIds.length === 0}
       <p class="surface-card-muted mb-3 px-3 py-2 text-xs text-amber-400">
         {context.prompt_file.help.option_required}
       </p>
