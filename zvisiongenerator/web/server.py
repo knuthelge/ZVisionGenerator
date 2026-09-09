@@ -322,7 +322,10 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     if not model_name:
         raise ValueError("An image model is required.")
 
-    output_dir = _resolve_output_dir(_text_or_default(form, "output", web_config.output_dir))
+    # The configured output directory is backend-owned. Accepting a copy from the
+    # Workspace form lets a stale browser tab write to one root while Gallery and
+    # /media serve another, which breaks previews and makes new assets disappear.
+    output_dir = _resolve_output_dir(web_config.output_dir)
     args = argparse.Namespace(
         ratio=_choice_or_default(form, "ratio", web_config.image_ratios, app_config["generation"].get("default_ratio", "2:3")),
         size=None,
@@ -487,7 +490,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
 
     ratio = _choice_or_default(form, "ratio", web_config.video_ratios, app_config.get("video_generation", {}).get("default_ratio", "16:9"))
     size = _resolve_video_size(form, web_config, ratio)
-    output_dir = _resolve_output_dir(_text_or_default(form, "output", web_config.output_dir))
+    output_dir = _resolve_output_dir(web_config.output_dir)
     image_path = _resolve_reference_image(form, output_dir)
     audio_enabled = _checkbox(form, "audio", default=True)
     _prompt_source, prompt, _negative_prompt, prompts_data = _resolve_prompt_submission(form)

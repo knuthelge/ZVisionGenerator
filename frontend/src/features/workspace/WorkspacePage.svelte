@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { api } from '$lib/api/client';
   import { draft } from '$lib/state/draft.svelte';
   import { jobStore } from '$lib/state/job.svelte';
@@ -21,18 +21,26 @@
   let lightboxOpen = $state(false);
   let lightboxIndex = $state(0);
   let lightboxMode = $state<'history' | 'completed-output'>('history');
+  let completedOutputTrigger = $state<HTMLElement | null>(null);
+  let completedOutputAssetId = $state<string | null>(null);
+  let completedOutputJobId = $state<string | null>(null);
 
-  // First completed final output from the most recently finished job.
-  const completedOutput = $derived<GalleryAsset | null>(
-    jobStore.current?.status === 'completed' && (jobStore.current.outputs?.length ?? 0) > 0
-      ? (jobStore.current.outputs[0] ?? null)
-      : null
-  );
+  const jobOutputs = $derived<GalleryAsset[]>(jobStore.current?.outputs ?? []);
+  const hasCompletedOutputs = $derived(jobStore.current?.status === 'completed' && jobOutputs.length > 0);
   const lightboxAssets = $derived<GalleryAsset[]>(
-    lightboxMode === 'completed-output' && completedOutput
-      ? [completedOutput]
+    lightboxMode === 'completed-output'
+      ? jobOutputs
       : historyStore.assets
   );
+
+  // Surface successful batch items in History as soon as their SSE event lands.
+  // The terminal refresh remains authoritative and reconciles the full inventory.
+  $effect(() => {
+    const outputs = jobOutputs;
+    if (jobStore.isRunning && outputs.length > 0) {
+      untrack(() => historyStore.mergeOutputs(outputs));
+    }
+  });
 
   // Mode derived from workflow
   const isImageMode = $derived(
@@ -121,17 +129,53 @@
     lightboxOpen = true;
   }
 
-  function openCompletedOutputViewer(): void {
-    if (!completedOutput) return;
+  function openCompletedOutputViewer(index: number, trigger: HTMLElement): void {
+    if (!jobOutputs[index]) return;
     lightboxMode = 'completed-output';
-    lightboxIndex = 0;
+    lightboxIndex = index;
+    completedOutputTrigger = trigger;
+    completedOutputAssetId = jobOutputs[index].id;
+    completedOutputJobId = jobStore.current?.job_id ?? null;
     lightboxOpen = true;
+    queueMicrotask(() => {
+      document.querySelector<HTMLElement>('[data-testid="lightbox"] [role="dialog"] button')?.focus();
+    });
   }
 
   function closeLightbox(): void {
     lightboxOpen = false;
+    const trigger = lightboxMode === 'completed-output' ? completedOutputTrigger : null;
     lightboxMode = 'history';
+    completedOutputTrigger = null;
+    completedOutputAssetId = null;
+    completedOutputJobId = null;
+    queueMicrotask(() => trigger?.focus());
   }
+
+  function navigateLightbox(index: number): void {
+    lightboxIndex = index;
+    if (lightboxMode === 'completed-output') {
+      completedOutputAssetId = jobOutputs[index]?.id ?? null;
+    }
+  }
+
+  $effect(() => {
+    if (lightboxMode !== 'completed-output') return;
+    if (jobOutputs.length === 0 || completedOutputJobId !== jobStore.current?.job_id) {
+      lightboxOpen = false;
+      lightboxIndex = 0;
+      completedOutputAssetId = null;
+      completedOutputJobId = null;
+      return;
+    }
+    const selectedIndex = jobOutputs.findIndex((output) => output.id === completedOutputAssetId);
+    if (selectedIndex >= 0) {
+      if (lightboxIndex !== selectedIndex) lightboxIndex = selectedIndex;
+    } else {
+      lightboxIndex = 0;
+      completedOutputAssetId = jobOutputs[0].id;
+    }
+  });
 
   // Track prev workflow to detect user-initiated changes after context loads.
   let _prevWorkflow: Workflow | null = null;
@@ -264,7 +308,6 @@
   <!-- Hidden fields -->
   <input type="hidden" name="mode" value={isImageMode ? 'image' : 'video'}>
   <input type="hidden" name="workflow" value={draft.state.workflow}>
-  <input type="hidden" name="output" value={context?.output_dir ?? context?.config?.output_dir ?? ''}>
   <input type="hidden" name="lora" value={draft.state.loraString}>
 
   <!-- Toolbar bar: model, quantize, loras -->
@@ -407,7 +450,7 @@
     <section class="workspace-preview relative z-0 flex min-w-0 flex-1 flex-col bg-bg-base">
       <div class="panel-header flex h-10 shrink-0 items-center justify-between px-3">
         <h2 class="field-label">Preview</h2>
-        <span class="text-xs text-text-muted">{jobStore.isRunning ? 'Generating…' : completedOutput || historyStore.assets.length ? 'Latest output' : 'Ready'}</span>
+        <span class="text-xs text-text-muted">{jobStore.isRunning ? 'Generating…' : hasCompletedOutputs || historyStore.assets.length ? 'Latest output' : 'Ready'}</span>
       </div>
       <div
         class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden"
@@ -417,32 +460,52 @@
             <p class="text-red-400 text-sm font-medium">Error</p>
             <p class="text-zinc-500 text-xs mt-1">{loadError}</p>
           </div>
-        {:else if completedOutput}
-          <div class="w-full h-full flex flex-col items-center justify-center p-4 gap-4">
-            {#if completedOutput.media_type === 'video'}
-              <video
-                src={completedOutput.url}
-                controls
-                muted
-                preload="metadata"
-                class="max-w-full max-h-[calc(100%-3rem)] object-contain rounded"
-              ></video>
-            {:else}
-              <img
-                src={completedOutput.url}
-                alt={completedOutput.prompt}
-                class="max-w-full max-h-[calc(100%-3rem)] object-contain rounded"
-              >
-            {/if}
-            <button
-              type="button"
-              class="surface-overlay-action shrink-0 rounded-md px-3 py-1.5 text-xs"
-              onclick={openCompletedOutputViewer}
-            >Open fullscreen</button>
+        {:else if hasCompletedOutputs}
+          <div class="completed-output-region h-full w-full min-w-0 overflow-y-auto p-4">
+            <div class="mb-3 flex items-center justify-between gap-3">
+              <h3 class="text-xs font-medium text-text-secondary">Completed outputs</h3>
+              <span class="text-xs text-text-muted">{jobOutputs.length}</span>
+            </div>
+            <div class="completed-output-grid grid min-w-0 gap-3">
+              {#each jobOutputs as output, index (output.id)}
+                <article class="surface-card min-w-0 overflow-hidden rounded-md">
+                  <button
+                    type="button"
+                    class="block w-full focus-visible:focus-ring"
+                    aria-label="View {output.filename} fullscreen"
+                    onclick={(event) => openCompletedOutputViewer(index, event.currentTarget)}
+                  >
+                    <span class="sr-only">Open fullscreen</span>
+                    {#if output.media_type === 'video'}
+                      <video
+                        src={output.thumbnail_url || output.url}
+                        muted
+                        preload="metadata"
+                        class="aspect-square w-full object-contain"
+                      ></video>
+                    {:else}
+                      <img
+                        src={output.thumbnail_url || output.url}
+                        alt={output.filename}
+                        loading={index === 0 ? 'eager' : 'lazy'}
+                        class="aspect-square w-full object-contain"
+                      >
+                    {/if}
+                  </button>
+                  <a
+                    href={output.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="surface-link-muted block truncate px-3 py-2 text-xs"
+                    title={output.filename}
+                  >Open {output.filename}</a>
+                </article>
+              {/each}
+            </div>
           </div>
-        {:else if jobStore.isRunning}
-          <div class="w-full h-full flex items-center justify-center p-6">
-            <div class="w-full max-w-md">
+        {:else if jobStore.current && (jobStore.isRunning || jobOutputs.length > 0)}
+          <div class="h-full w-full overflow-y-auto p-6">
+            <div class="mx-auto w-full max-w-md">
               <JobCard
                 job={jobStore.current!}
                 oncancel={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/quit`)}
@@ -499,12 +562,20 @@
   currentIndex={lightboxIndex}
   open={lightboxOpen}
   onclose={closeLightbox}
-  onnavigate={(i) => { lightboxIndex = i; }}
+  onnavigate={navigateLightbox}
 />
 
 <style>
   @media (max-width: 639px) {
     .workspace-layout { flex-direction: column; overflow-y: auto; }
     .workspace-preview { flex: none; min-height: 320px; }
+  }
+  .completed-output-region { container-type: inline-size; }
+  .completed-output-grid { grid-template-columns: minmax(0, 1fr); }
+  @container (min-width: 640px) {
+    .completed-output-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @container (min-width: 1024px) {
+    .completed-output-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   }
 </style>

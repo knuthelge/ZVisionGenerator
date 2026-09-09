@@ -42,16 +42,45 @@ describe('connectJobSSE', () => {
     mockES.emit('batch_completed', {
       type: 'batch_completed',
       job_id: 'test-job',
-      run_index: 0,
-      total_runs: 3,
-      ran_iterations: 20,
-      output_path: '/out/img.png',
-      asset: { id: 'img.png', url: '/media/img.png', thumbnail_url: '/media/img.png', filename: 'img.png', created_at: '', workflow: 'txt2img', prompt: '', model: '', media_type: 'image', reuse_workspace_url: '' }
+      completed_iterations: 20,
+      total_iterations: 60,
     });
     expect(onClose).not.toHaveBeenCalled();
     subscription.close();
     // only from manual close()
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('routes progressive assets from generation_finished while keeping batch completion informational', () => {
+    const onGenerationFinished = vi.fn();
+    const onBatchCompleted = vi.fn();
+    const onStatus = vi.fn();
+    const subscription = connectJobSSE('test-job', { onGenerationFinished, onBatchCompleted, onStatus });
+    const mockES = latestEventSource();
+    const asset = {
+      id: 'outputs/first.png', url: '/media/first.png', thumbnail_url: '/media/first.png', filename: 'first.png',
+      created_at: '', workflow: 'txt2img', prompt: '', model: '', media_type: 'image', reuse_workspace_url: '',
+    };
+
+    mockES.emit('generation_finished', {
+      type: 'generation_finished', job_id: 'test-job', status: 'success', run_index: 0, asset,
+    });
+    mockES.emit('generation_finished', {
+      type: 'generation_finished', job_id: 'test-job', status: 'failed', run_index: 1, filename: 'failed.png',
+    });
+    mockES.emit('batch_completed', {
+      type: 'batch_completed', job_id: 'test-job', completed_iterations: 2, total_iterations: 3,
+    });
+
+    expect(onGenerationFinished).toHaveBeenCalledTimes(2);
+    expect(onGenerationFinished).toHaveBeenNthCalledWith(1, expect.objectContaining({ status: 'success', asset }));
+    expect(onGenerationFinished).toHaveBeenNthCalledWith(2, expect.objectContaining({ status: 'failed' }));
+    expect(onBatchCompleted).toHaveBeenCalledWith(expect.objectContaining({ completed_iterations: 2, total_iterations: 3 }));
+    expect(onStatus).toHaveBeenNthCalledWith(1, 'generation_finished', expect.objectContaining({ asset }));
+    expect(onStatus).toHaveBeenNthCalledWith(2, 'generation_finished', expect.objectContaining({ status: 'failed' }));
+    expect(onStatus).not.toHaveBeenCalledWith('batch_completed', expect.anything());
+    expect(mockES.closeCalls).toBe(0);
+    subscription.close();
   });
 
   it('closes connection on job_completed', () => {

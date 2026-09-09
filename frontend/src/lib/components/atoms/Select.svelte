@@ -12,6 +12,7 @@
     options: SelectOption[];
     placeholder?: string;
     disabled?: boolean;
+    required?: boolean;
     error?: string | null;
     class?: string;
     onchange?: (event: Event) => void;
@@ -24,6 +25,7 @@
     options,
     placeholder,
     disabled = false,
+    required = false,
     error = null,
     class: extraClass = '',
     onchange
@@ -40,6 +42,7 @@
     {name}
     bind:value
     {disabled}
+    {required}
     class={cls}
     aria-invalid={error ? 'true' : undefined}
     aria-describedby={error ? `${id}-error` : undefined}

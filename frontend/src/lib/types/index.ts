@@ -360,14 +360,38 @@ export interface StepEvent {
   total_iterations?: number;
 }
 
+export interface GenerationFinishedEvent {
+  type: 'generation_finished';
+  job_id: string;
+  job_type?: string;
+  timestamp?: number;
+  elapsed_secs?: number;
+  mode?: WorkflowMode;
+  status: 'success' | 'failed' | 'skipped';
+  run_index?: number;
+  total_runs?: number;
+  ran_iterations?: number;
+  total_iterations?: number;
+  set_name?: string;
+  prompt_index?: number;
+  total_prompts?: number;
+  prompt?: string;
+  seed?: number;
+  filename?: string;
+  output_path?: string;
+  generation_time?: number;
+  asset?: GalleryAsset;
+}
+
 export interface BatchCompletedEvent {
   type: 'batch_completed';
   job_id: string;
-  run_index: number;
-  total_runs: number;
-  ran_iterations: number;
-  output_path: string;
-  asset: GalleryAsset;
+  job_type?: string;
+  timestamp?: number;
+  elapsed_secs?: number;
+  mode?: WorkflowMode;
+  completed_iterations: number;
+  total_iterations: number;
 }
 
 export interface JobCompletedEvent {
@@ -406,6 +430,7 @@ export interface JobResumedEvent {
 
 export type SSEEvent =
   | StepEvent
+  | GenerationFinishedEvent
   | BatchCompletedEvent
   | JobCompletedEvent
   | JobFailedEvent

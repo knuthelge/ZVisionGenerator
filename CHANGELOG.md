@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-09
+
+### Changed
+- Refactored host-local path selection into one compact, accessible selector shared by model conversion, LoRA import, prompt files, and output configuration
+- Reorganized the Models page for clearer responsive operation cards and reliable bottom spacing
+- Added progressive batch output previews in both the Workspace preview area and its History pane
+
+### Fixed
+- Model conversion and local LoRA import now submit the selected host path reliably and preserve retry state after failures
+- Configured output directories are now used consistently for generation, previews, Workspace history, and Gallery inventory
+- Gallery filtering, pagination, selection, lightbox navigation, concurrent loading, and partial deletion remain synchronized under overlapping operations
+- Required model and path controls now use native validation with accessible feedback
+- Generation output grids remain scrollable and reachable for large batches and constrained window sizes
+
 ## [0.8.0] - 2026-09-08
 
 ### Changed

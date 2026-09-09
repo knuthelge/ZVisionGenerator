@@ -209,6 +209,23 @@ class TestWebRunner:
             assert snapshot["outputs"][0]["url"] == "/media/result.png"
             assert snapshot["outputs"][0]["media_type"] == "image"
             assert snapshot["result_path"] == str(output_path)
+
+            async def _read_history() -> list[dict[str, object]]:
+                payloads: list[dict[str, object]] = []
+                async for frame in runner.stream_job_events(job_id):
+                    payloads.append(_sse_payload(frame))
+                return payloads
+
+            events = asyncio.run(_read_history())
+            generation = next(event for event in events if event["type"] == "generation_finished")
+            batch = next(event for event in events if event["type"] == "batch_completed")
+            terminal = next(event for event in events if event["type"] == "job_completed")
+            assert generation["status"] == "success"
+            assert generation["asset"] == snapshot["outputs"][0]
+            assert "asset" not in batch
+            assert batch["completed_iterations"] == 1
+            assert batch["total_iterations"] == 1
+            assert terminal["outputs"] == snapshot["outputs"]
         finally:
             runner.shutdown()
 

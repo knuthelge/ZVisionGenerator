@@ -50,10 +50,43 @@ function statusMessageForEvent(type: string | undefined, event: Record<string, u
     return name ? `Finished ${name.replaceAll('_', ' ')}.` : 'Stage complete.';
   }
   if (type === 'generation_finished') {
+    const status = eventFieldString(event, 'status');
     const filename = eventFieldString(event, 'filename');
-    return filename ? `Wrote ${filename}.` : 'Generation finished.';
+    if (status === 'success') return filename ? `Wrote ${filename}.` : 'Generation finished.';
+    if (status === 'failed') return filename ? `Generation failed for ${filename}.` : 'Generation failed.';
+    if (status === 'skipped') return filename ? `Skipped ${filename}.` : 'Generation skipped.';
+    return 'Generation finished.';
+  }
+  if (type === 'batch_completed') {
+    const completed = eventFieldNumber(event, 'completed_iterations');
+    const total = eventFieldNumber(event, 'total_iterations');
+    return total > 0 ? `Batch completed: ${completed} of ${total} iterations.` : 'Batch completed.';
   }
   return '';
+}
+
+function dedupeOutputs(outputs: GalleryAsset[]): GalleryAsset[] {
+  const seen = new Set<string>();
+  return outputs.filter((output) => {
+    if (seen.has(output.id)) return false;
+    seen.add(output.id);
+    return true;
+  });
+}
+
+function isGalleryAsset(value: unknown): value is GalleryAsset {
+  if (!value || typeof value !== 'object') return false;
+  const asset = value as Partial<GalleryAsset>;
+  return typeof asset.id === 'string' && asset.id.length > 0
+    && typeof asset.url === 'string'
+    && typeof asset.thumbnail_url === 'string'
+    && typeof asset.filename === 'string'
+    && (asset.media_type === 'image' || asset.media_type === 'video');
+}
+
+function validTerminalOutputs(value: unknown): GalleryAsset[] | null {
+  if (!Array.isArray(value) || !value.every(isGalleryAsset)) return null;
+  return dedupeOutputs(value);
 }
 
 function makeInitialJobState(ctx: JobContext): ActiveJobState {
@@ -78,9 +111,10 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
   const lastEvent = snapshot.last_event ?? null;
   const isPaused = snapshot.paused || snapshot.status === 'paused';
   const batchIndex = eventFieldNumber(lastEvent, 'run_index');
-  const totalRuns = eventFieldNumber(lastEvent, 'total_runs');
-  const batchLabel = lastEvent?.type === 'batch_completed' && totalRuns > 0
-    ? `Run ${batchIndex + 1} / ${totalRuns}`
+  const completedIterations = eventFieldNumber(lastEvent, 'completed_iterations');
+  const totalIterations = eventFieldNumber(lastEvent, 'total_iterations');
+  const batchLabel = lastEvent?.type === 'batch_completed' && totalIterations > 0
+    ? `${completedIterations} / ${totalIterations} iterations`
     : '';
   const statusMessage = statusMessageForEvent(typeof lastEvent?.type === 'string' ? lastEvent.type : undefined, lastEvent);
   return {
@@ -179,22 +213,33 @@ function attachJobEvents(jobId: string): void {
         batchIndex: ev.run_index ?? _job.batchIndex,
       };
     },
-    onBatchCompleted(event) {
+    onGenerationFinished(event) {
       if (!_job) return;
-      const hasRunIndex = typeof event.run_index === 'number';
-      const hasTotalRuns = typeof event.total_runs === 'number';
+      const asset = event.status === 'success' && isGalleryAsset(event.asset) ? event.asset : null;
+      const outputs = asset
+        ? dedupeOutputs([..._job.outputs, asset])
+        : _job.outputs;
       _job = {
         ..._job,
-        outputs: event.asset ? [..._job.outputs, event.asset] : _job.outputs,
-        batchLabel: hasRunIndex && hasTotalRuns ? `Run ${event.run_index + 1} / ${event.total_runs}` : 'Batch completed',
-        batchIndex: hasRunIndex ? event.run_index : _job.batchIndex,
-        message: 'Batch completed.',
+        outputs,
+        batchIndex: typeof event.run_index === 'number' ? event.run_index : _job.batchIndex,
+      };
+    },
+    onBatchCompleted(event) {
+      if (!_job) return;
+      const completed = typeof event.completed_iterations === 'number' ? event.completed_iterations : null;
+      const total = typeof event.total_iterations === 'number' ? event.total_iterations : null;
+      _job = {
+        ..._job,
+        batchLabel: completed !== null && total !== null ? `${completed} / ${total} iterations` : 'Batch completed',
+        message: completed !== null && total !== null ? `Batch completed: ${completed} of ${total} iterations.` : 'Batch completed.',
       };
     },
     onJobCompleted(event) {
       if (!_job) return;
-      const ev = event as { outputs?: GalleryAsset[] };
-      _job = { ..._job, status: 'completed', paused: false, outputs: ev.outputs ?? _job.outputs, message: 'Job completed.' };
+      const ev = event as { outputs?: unknown };
+      const terminalOutputs = validTerminalOutputs(ev.outputs);
+      _job = { ..._job, status: 'completed', paused: false, outputs: terminalOutputs ?? dedupeOutputs(_job.outputs), message: 'Job completed.' };
       clearActiveJobId(_job.job_id);
       notifyLifecycle('onComplete', _job.outputs);
     },

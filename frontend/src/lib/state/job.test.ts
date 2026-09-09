@@ -157,6 +157,37 @@ describe('jobStore reconnect contract', () => {
     expect(readActiveJobId()).toBe('job-bootstrap');
   });
 
+  it('reconnects batch progress from the backend iteration-shaped batch_completed snapshot', async () => {
+    await expect(jobStore.reconnectActiveJob({
+      snapshot: {
+        id: 'job-batch-reconnect',
+        job_id: 'job-batch-reconnect',
+        workflow: 'txt2img',
+        job_type: 'Text to Image',
+        status: 'running',
+        created_at: '2026-04-22T00:00:00Z',
+        completed_at: null,
+        event_count: 6,
+        last_event: {
+          type: 'batch_completed',
+          mode: 'image',
+          completed_iterations: 12,
+          total_iterations: 20,
+        },
+        supported_controls: [],
+        paused: false,
+        result_path: null,
+        outputs: [],
+        prompt: 'Recovered batch prompt',
+        model: 'zit',
+        runs: 2,
+      },
+    })).resolves.toBe(true);
+
+    expect(jobStore.current?.batchLabel).toBe('12 / 20 iterations');
+    expect(jobStore.current?.message).toBe('Batch completed: 12 of 20 iterations.');
+  });
+
   it('keeps one transport while lifecycle ownership moves from a detached consumer to a new consumer', () => {
     const ownerA = vi.fn();
     const ownerB = vi.fn();
@@ -255,4 +286,71 @@ describe('jobStore reconnect contract', () => {
     jobStore.clearJob();
     expect(source.closeCalls).toBe(1);
   });
+
+  it('shows successful generation assets immediately, ignores informational/failed events, then accepts terminal order', () => {
+    jobStore.startJob({
+      job_id: 'job-progressive', workflow: 'txt2img', prompt: 'Test prompt', model: 'zit', runs: 3,
+      created_at: '2026-04-22T00:00:00Z',
+    });
+    const source = (globalThis.EventSource as unknown as {
+      lastInstance: { emit: (type: string, data: unknown) => void };
+    }).lastInstance;
+    const first = makeOutput('first');
+    const second = makeOutput('second');
+    const terminalOnly = makeOutput('terminal');
+
+    source.emit('generation_finished', { type: 'generation_finished', job_id: 'job-progressive', status: 'success', run_index: 0, asset: first });
+    source.emit('generation_finished', { type: 'generation_finished', job_id: 'job-progressive', status: 'success', run_index: 1, asset: second });
+    source.emit('generation_finished', { type: 'generation_finished', job_id: 'job-progressive', status: 'success', run_index: 1, asset: first });
+    expect(jobStore.current?.outputs.map((asset) => asset.id)).toEqual([first.id, second.id]);
+
+    source.emit('generation_finished', { type: 'generation_finished', job_id: 'job-progressive', status: 'success', filename: 'no-asset.png' });
+    expect(jobStore.current?.outputs.map((asset) => asset.id)).toEqual([first.id, second.id]);
+    source.emit('generation_finished', { type: 'generation_finished', job_id: 'job-progressive', status: 'failed', filename: 'failed.png' });
+    expect(jobStore.current?.message).toBe('Generation failed for failed.png.');
+    source.emit('generation_finished', { type: 'generation_finished', job_id: 'job-progressive', status: 'skipped', filename: 'skipped.png' });
+    expect(jobStore.current?.message).toBe('Skipped skipped.png.');
+    source.emit('batch_completed', { type: 'batch_completed', job_id: 'job-progressive', completed_iterations: 2, total_iterations: 3 });
+    expect(jobStore.current?.outputs.map((asset) => asset.id)).toEqual([first.id, second.id]);
+    expect(jobStore.current?.message).toBe('Batch completed: 2 of 3 iterations.');
+
+    source.emit('job_completed', {
+      type: 'job_completed', job_id: 'job-progressive', total_runs: 3,
+      outputs: [second, terminalOnly, second, first],
+    });
+    expect(jobStore.current?.status).toBe('completed');
+    expect(jobStore.current?.outputs.map((asset) => asset.id)).toEqual([second.id, terminalOnly.id, first.id]);
+  });
+
+  it('preserves progressive assets for malformed or missing terminal output lists and for failed/cancelled jobs', () => {
+    const terminalCases: Array<{ terminal: 'job_completed' | 'job_failed' | 'job_cancelled'; outputs?: unknown }> = [
+      { terminal: 'job_completed' },
+      { terminal: 'job_completed', outputs: [{ id: 'not-a-gallery-asset' }] },
+      { terminal: 'job_failed' },
+      { terminal: 'job_cancelled' },
+    ];
+
+    for (const [index, testCase] of terminalCases.entries()) {
+      jobStore.clearJob();
+      const jobId = `job-preserve-${index}`;
+      jobStore.startJob({ job_id: jobId, workflow: 'txt2img', prompt: 'Test prompt', model: 'zit', runs: 1, created_at: '2026-04-22T00:00:00Z' });
+      const source = (globalThis.EventSource as unknown as {
+        lastInstance: { emit: (type: string, data: unknown) => void };
+      }).lastInstance;
+      const output = makeOutput(`preserved-${index}`);
+      source.emit('generation_finished', { type: 'generation_finished', job_id: jobId, status: 'success', asset: output });
+      source.emit(testCase.terminal, { type: testCase.terminal, job_id: jobId, total_runs: 1, ...(testCase.outputs === undefined ? {} : { outputs: testCase.outputs }) });
+
+      expect(jobStore.current?.outputs).toEqual([output]);
+      expect(jobStore.current?.status).toBe(testCase.terminal.replace('job_', ''));
+    }
+  });
 });
+
+function makeOutput(id: string) {
+  return {
+    id: `outputs/${id}.png`, url: `/media/${id}.png`, thumbnail_url: `/media/${id}.png`, filename: `${id}.png`,
+    created_at: '2026-04-22T00:00:00Z', workflow: 'txt2img' as const, prompt: 'Test prompt', model: 'zit',
+    media_type: 'image' as const, reuse_workspace_url: '#/workspace?workflow=txt2img',
+  };
+}

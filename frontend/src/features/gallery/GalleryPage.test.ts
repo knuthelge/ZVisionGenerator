@@ -110,6 +110,16 @@ function selectAssetForBatch(container: ParentNode, asset: GalleryAsset): HTMLIn
   return checkbox!;
 }
 
+function deleteAssetFromCard(container: ParentNode, asset: GalleryAsset): void {
+  const card = container.querySelector(`[aria-label="Asset: ${asset.filename}"]`) as HTMLElement | null;
+  expect(card).not.toBeNull();
+  card!.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+  flushSync();
+  const button = container.querySelector(`button[aria-label="Delete ${asset.filename}"]`) as HTMLButtonElement | null;
+  expect(button).not.toBeNull();
+  button!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+}
+
 let target: HTMLDivElement;
 let app: Record<string, unknown> | null = null;
 
@@ -829,5 +839,397 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     expect(target.querySelector('#gallery-details')?.textContent).toContain('active failed asset');
     expect(queryButtonByName(target, 'Delete Selected')?.disabled).toBe(false);
     expect(toastMocks.addToast).toHaveBeenCalledWith('Delete failed for 2 selected assets; they remain selected for retry.', 'error');
+  });
+});
+
+describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)', () => {
+  beforeEach(() => {
+    vi.stubGlobal('confirm', vi.fn(() => true));
+  });
+
+  it('uses the same complete reset for filter, sort, and clear-filter transitions', async () => {
+    const image = makeAsset({ id: 'image.png', filename: 'image.png' });
+    const video = makeAsset({ id: 'video.mp4', filename: 'video.mp4', media_type: 'video' });
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce({ assets: [image], page: 1, total_pages: 1, total_count: 1 })
+      .mockResolvedValueOnce({ assets: [video], page: 1, total_pages: 1, total_count: 1 })
+      .mockResolvedValueOnce({ assets: [video], page: 1, total_pages: 1, total_count: 1 })
+      .mockResolvedValueOnce({ assets: [], page: 1, total_pages: 1, total_count: 0 })
+      .mockResolvedValueOnce({ assets: [image, video], page: 1, total_pages: 1, total_count: 2 });
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    selectAssetForBatch(target, image);
+    (target.querySelector(`[aria-label="Asset: ${image.filename}"]`) as HTMLElement).dispatchEvent(
+      new MouseEvent('click', { bubbles: true })
+    );
+    await settle();
+    getSelectedAssetViewerButton(target)!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+
+    const filter = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
+    const sort = target.querySelector('select[aria-label="Sort gallery assets"]') as HTMLSelectElement;
+    routerMocks.replace.mockReset();
+    filter.value = 'video';
+    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'video', 'newest');
+    expect(routerMocks.replace).toHaveBeenCalledWith('gallery', {});
+    expect(target.textContent).toContain('0 selected');
+    expect(target.querySelector('#gallery-details')?.textContent).toContain('No asset selected');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+    sort.value = 'oldest';
+    sort.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'video', 'oldest');
+
+    // The empty filtered view exposes the clear-filter path, which must use the
+    // same reset and retain the selected sort order.
+    filter.value = 'image';
+    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    queryButtonByName(target, 'Show All Media')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(5, 1, 'all', 'oldest');
+  });
+
+  it('clears a pending selected route before its initial response can restore stale detail', async () => {
+    const pendingAsset = makeAsset({ id: 'pending.png', filename: 'pending.png' });
+    const video = makeAsset({ id: 'video.mp4', filename: 'video.mp4', media_type: 'video' });
+    const initial = deferred<GalleryPageResponse>();
+    galleryApiMocks.getGallery
+      .mockReturnValueOnce(initial.promise)
+      .mockResolvedValueOnce({ assets: [video], page: 1, total_pages: 1, total_count: 1 });
+    routerMocks.params = { selected: pendingAsset.id };
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    const filter = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
+    filter.value = 'video';
+    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    initial.resolve({ assets: [pendingAsset], page: 1, total_pages: 1, total_count: 1 });
+    await settle();
+
+    expect(routerMocks.replace).toHaveBeenCalledWith('gallery', {});
+    expect(target.textContent).toContain('video.mp4');
+    expect(target.textContent).not.toContain('pending.png');
+    expect(target.querySelector('#gallery-details')?.textContent).toContain('No asset selected');
+  });
+
+  it('prevents a stale sort response from resurrecting a successful deletion and refills page one', async () => {
+    const deleted = makeAsset({ id: 'deleted.png', filename: 'deleted.png' });
+    const survivor = makeAsset({ id: 'survivor.png', filename: 'survivor.png' });
+    const deleteRequest = deferred<void>();
+    const staleSort = deferred<GalleryPageResponse>();
+    const refill = deferred<GalleryPageResponse>();
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce({ assets: [deleted, survivor], page: 1, total_pages: 2, total_count: 2 })
+      .mockReturnValueOnce(staleSort.promise)
+      .mockReturnValueOnce(refill.promise);
+    galleryApiMocks.deleteAsset.mockReturnValue(deleteRequest.promise);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    deleteAssetFromCard(target, deleted);
+    await settle();
+
+    const sort = target.querySelector('select[aria-label="Sort gallery assets"]') as HTMLSelectElement;
+    sort.value = 'oldest';
+    sort.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'all', 'oldest');
+
+    deleteRequest.resolve();
+    await settle();
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'all', 'oldest');
+
+    staleSort.resolve({ assets: [deleted], page: 1, total_pages: 1, total_count: 2 });
+    refill.resolve({ assets: [deleted, survivor], page: 1, total_pages: 1, total_count: 2 });
+    await settle();
+
+    expect(target.textContent).not.toContain('deleted.png');
+    expect(target.textContent).toContain('survivor.png');
+    expect(target.textContent).toContain('Browsing 1 loaded asset of 1');
+  });
+
+  it('uses the latest filter and sort for count membership, even after the deleting asset leaves the page', async () => {
+    const deletedImage = makeAsset({ id: 'deleted-image.png', filename: 'deleted-image.png' });
+    const deleteRequest = deferred<void>();
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce({ assets: [deletedImage], page: 1, total_pages: 1, total_count: 10 })
+      .mockResolvedValueOnce({ assets: [deletedImage], page: 1, total_pages: 1, total_count: 4 })
+      .mockResolvedValueOnce({ assets: [deletedImage], page: 1, total_pages: 1, total_count: 4 })
+      .mockResolvedValueOnce({ assets: [deletedImage], page: 1, total_pages: 1, total_count: 4 });
+    galleryApiMocks.deleteAsset.mockReturnValue(deleteRequest.promise);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    deleteAssetFromCard(target, deletedImage);
+    await settle();
+
+    const filter = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
+    const sort = target.querySelector('select[aria-label="Sort gallery assets"]') as HTMLSelectElement;
+    filter.value = 'image';
+    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    sort.value = 'oldest';
+    sort.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    deleteRequest.resolve();
+    await settle();
+
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'image', 'oldest');
+    expect(target.textContent).not.toContain('deleted-image.png');
+    expect(target.textContent).toContain('Browsing 0 loaded assets of 3');
+  });
+
+  it('does not decrement the latest non-matching filter and preserves local deletion when its refill fails', async () => {
+    const deletedImage = makeAsset({ id: 'deleted-image.png', filename: 'deleted-image.png' });
+    const video = makeAsset({ id: 'video.mp4', filename: 'video.mp4', media_type: 'video' });
+    const deleteRequest = deferred<void>();
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce({ assets: [deletedImage], page: 1, total_pages: 1, total_count: 5 })
+      .mockResolvedValueOnce({ assets: [video], page: 1, total_pages: 1, total_count: 2 })
+      .mockRejectedValueOnce(new Error('refresh unavailable'));
+    galleryApiMocks.deleteAsset.mockReturnValue(deleteRequest.promise);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    deleteAssetFromCard(target, deletedImage);
+    await settle();
+
+    const filter = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
+    filter.value = 'video';
+    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    deleteRequest.resolve();
+    await settle();
+
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'video', 'newest');
+    expect(target.textContent).toContain('video.mp4');
+    expect(target.textContent).not.toContain('deleted-image.png');
+    expect(target.textContent).toContain('Browsing 1 loaded asset of 2');
+    expect(toastMocks.addToast).toHaveBeenCalledWith(
+      'Gallery refresh failed; deleted assets remain removed. Change the view to retry.',
+      'warning'
+    );
+  });
+
+  it('clears the active detail, lightbox, and selected route only when that active asset succeeds', async () => {
+    const active = makeAsset({ id: 'active.png', filename: 'active.png', prompt: 'active prompt' });
+    const other = makeAsset({ id: 'other.png', filename: 'other.png', prompt: 'other prompt' });
+    const nonActiveVictim = makeAsset({ id: 'victim.png', filename: 'victim.png' });
+    galleryApiMocks.getGallery.mockResolvedValue({
+      assets: [active, other, nonActiveVictim],
+      page: 1,
+      total_pages: 1,
+      total_count: 3,
+    });
+    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    (target.querySelector(`[aria-label="Asset: ${active.filename}"]`) as HTMLElement).dispatchEvent(
+      new MouseEvent('click', { bubbles: true })
+    );
+    await settle();
+    getSelectedAssetViewerButton(target)!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    routerMocks.replace.mockReset();
+
+    deleteAssetFromCard(target, active);
+    await settle();
+
+    expect(routerMocks.replace).toHaveBeenCalledWith('gallery', {});
+    expect(target.querySelector('#gallery-details')?.textContent).toContain('No asset selected');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(target.textContent).not.toContain('active.png');
+
+    // A non-active deletion leaves a still-present detail and its selected route alone.
+    (target.querySelector(`[aria-label="Asset: ${other.filename}"]`) as HTMLElement).dispatchEvent(
+      new MouseEvent('click', { bubbles: true })
+    );
+    await settle();
+    routerMocks.replace.mockReset();
+    deleteAssetFromCard(target, nonActiveVictim);
+    await settle();
+    expect(routerMocks.replace).not.toHaveBeenCalledWith('gallery', {});
+    expect(target.querySelector('#gallery-details')?.textContent).toContain('other prompt');
+  });
+
+  it('guards repeated IDs and single/bulk overlap while allowing distinct deletes to settle independently', async () => {
+    const assetA = makeAsset({ id: 'a.png', filename: 'a.png' });
+    const assetB = makeAsset({ id: 'b.png', filename: 'b.png' });
+    const deleteA = deferred<void>();
+    const deleteB = deferred<void>();
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [assetA, assetB], page: 1, total_pages: 1, total_count: 2 });
+    galleryApiMocks.deleteAsset.mockImplementation((id) => id === assetA.id ? deleteA.promise : deleteB.promise);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    selectAssetForBatch(target, assetA);
+    selectAssetForBatch(target, assetB);
+    deleteAssetFromCard(target, assetA);
+    await settle();
+    deleteAssetFromCard(target, assetA);
+    queryButtonByName(target, 'Delete Selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+
+    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledTimes(2);
+    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith(assetA.id);
+    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith(assetB.id);
+
+    deleteA.resolve();
+    await settle();
+    // B remains independently in flight after A has reconciled and requested a refill.
+    expect(target.textContent).toContain('b.png');
+    deleteB.resolve();
+    await settle();
+
+    expect(target.textContent).not.toContain('a.png');
+    expect(target.textContent).not.toContain('b.png');
+  });
+
+  it('does not call the API or alter active state when deletion is cancelled', async () => {
+    const asset = makeAsset({ id: 'cancelled.png', filename: 'cancelled.png', prompt: 'keep me' });
+    vi.stubGlobal('confirm', vi.fn(() => false));
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    (target.querySelector(`[aria-label="Asset: ${asset.filename}"]`) as HTMLElement).dispatchEvent(
+      new MouseEvent('click', { bubbles: true })
+    );
+    await settle();
+    routerMocks.replace.mockReset();
+    deleteAssetFromCard(target, asset);
+    await settle();
+
+    expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalled();
+    expect(target.textContent).toContain('cancelled.png');
+    expect(target.querySelector('#gallery-details')?.textContent).toContain('keep me');
+    expect(routerMocks.replace).not.toHaveBeenCalled();
+  });
+
+  it('holds pagination at page one during a delete refill, then resumes contiguously from page two', async () => {
+    const deleted = makeAsset({ id: 'page-one-deleted.png', filename: 'page-one-deleted.png' });
+    const pageTwo = makeAsset({ id: 'page-two.png', filename: 'page-two.png' });
+    const pageThree = makeAsset({ id: 'page-three.png', filename: 'page-three.png' });
+    const refill = deferred<GalleryPageResponse>();
+    const resumedPageTwo = deferred<GalleryPageResponse>();
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce({ assets: [deleted], page: 1, total_pages: 3, total_count: 3 })
+      .mockResolvedValueOnce({ assets: [pageTwo], page: 2, total_pages: 3, total_count: 3 })
+      .mockReturnValueOnce(refill.promise)
+      .mockReturnValueOnce(resumedPageTwo.promise);
+    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    MockIntersectionObserver.instances.at(-1)?.trigger(true);
+    await settle();
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 2, 'all', 'newest');
+    expect(target.textContent).toContain('page-two.png');
+
+    deleteAssetFromCard(target, deleted);
+    await settle();
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'all', 'newest');
+
+    // A callback held by a now-disconnected observer must not skip to page 3
+    // while the authoritative page-one refill is unresolved.
+    MockIntersectionObserver.instances.forEach((observer) => observer.trigger(true));
+    await settle();
+    expect(galleryApiMocks.getGallery).toHaveBeenCalledTimes(3);
+
+    refill.resolve({ assets: [pageTwo], page: 1, total_pages: 2, total_count: 2 });
+    await settle();
+    MockIntersectionObserver.instances.at(-1)?.trigger(true);
+    await settle();
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(4, 2, 'all', 'newest');
+
+    resumedPageTwo.resolve({ assets: [pageThree], page: 2, total_pages: 2, total_count: 2 });
+    await settle();
+    expect(target.textContent).toContain('page-two.png');
+    expect(target.textContent).toContain('page-three.png');
+    expect(target.textContent).not.toContain('page-one-deleted.png');
+  });
+
+  it('clears a stale replacement error when a successful delete starts its pending refill and retains local truth on failure', async () => {
+    const deleted = makeAsset({ id: 'error-deleted.png', filename: 'error-deleted.png' });
+    const survivor = makeAsset({ id: 'error-survivor.png', filename: 'error-survivor.png' });
+    const deleteRequest = deferred<void>();
+    const staleReplacement = deferred<GalleryPageResponse>();
+    const refill = deferred<GalleryPageResponse>();
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce({ assets: [deleted, survivor], page: 1, total_pages: 1, total_count: 2 })
+      .mockReturnValueOnce(staleReplacement.promise)
+      .mockReturnValueOnce(refill.promise);
+    galleryApiMocks.deleteAsset.mockReturnValue(deleteRequest.promise);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    deleteAssetFromCard(target, deleted);
+    await settle();
+    const sort = target.querySelector('select[aria-label="Sort gallery assets"]') as HTMLSelectElement;
+    sort.value = 'oldest';
+    sort.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    staleReplacement.reject(new Error('oldest view unavailable'));
+    await settle();
+    expect(target.textContent).toContain('oldest view unavailable');
+
+    deleteRequest.resolve();
+    await settle();
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'all', 'oldest');
+    expect(target.textContent).not.toContain('oldest view unavailable');
+    expect(target.textContent).toContain('error-survivor.png');
+    expect(target.textContent).not.toContain('error-deleted.png');
+    expect(target.textContent).toContain('Browsing 1 loaded asset of 1');
+
+    refill.reject(new Error('refill unavailable'));
+    await settle();
+    expect(target.textContent).not.toContain('refill unavailable');
+    expect(target.textContent).toContain('error-survivor.png');
+    expect(toastMocks.addToast).toHaveBeenCalledWith(
+      'Gallery refresh failed; deleted assets remain removed. Change the view to retry.',
+      'warning'
+    );
+  });
+
+  it('decrements matching latest-filter membership for a truly off-page target and keeps it decremented if refill fails', async () => {
+    const deletedImage = makeAsset({ id: 'off-page-image.png', filename: 'off-page-image.png' });
+    const visibleImage = makeAsset({ id: 'visible-image.png', filename: 'visible-image.png' });
+    const deleteRequest = deferred<void>();
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce({ assets: [deletedImage], page: 1, total_pages: 2, total_count: 8 })
+      .mockResolvedValueOnce({ assets: [visibleImage], page: 1, total_pages: 2, total_count: 4 })
+      .mockRejectedValueOnce(new Error('image refill unavailable'));
+    galleryApiMocks.deleteAsset.mockReturnValue(deleteRequest.promise);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    deleteAssetFromCard(target, deletedImage);
+    await settle();
+    const filter = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
+    filter.value = 'image';
+    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(target.textContent).toContain('visible-image.png');
+    expect(target.textContent).not.toContain('off-page-image.png');
+
+    deleteRequest.resolve();
+    await settle();
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'image', 'newest');
+    expect(target.textContent).toContain('visible-image.png');
+    expect(target.textContent).toContain('Browsing 1 loaded asset of 3');
+    expect(toastMocks.addToast).toHaveBeenCalledWith(
+      'Gallery refresh failed; deleted assets remain removed. Change the view to retry.',
+      'warning'
+    );
   });
 });

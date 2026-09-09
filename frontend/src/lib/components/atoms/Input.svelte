@@ -14,10 +14,14 @@
     max?: number | string;
     step?: number | string;
     autocomplete?: HTMLInputElement['autocomplete'];
+    ariaDescribedby?: string;
+    ariaInvalid?: boolean;
+    ariaBusy?: boolean;
     oninput?: (event: Event) => void;
     onchange?: (event: Event) => void;
     onblur?: (event: FocusEvent) => void;
     onkeydown?: (event: KeyboardEvent) => void;
+    oninvalid?: (event: Event) => void;
   }
 
   let {
@@ -35,15 +39,20 @@
     max,
     step,
     autocomplete,
+    ariaDescribedby,
+    ariaInvalid,
+    ariaBusy,
     oninput,
     onchange,
     onblur,
-    onkeydown
+    onkeydown,
+    oninvalid
   }: Props = $props();
 
   const baseCls = 'surface-input w-full transition-colors';
+  const invalid = $derived(ariaInvalid ?? Boolean(error));
   const errorCls = 'border-red-500 focus:border-red-500';
-  const cls = $derived(`${baseCls} ${error ? errorCls : ''} ${extraClass}`);
+  const cls = $derived(`${baseCls} ${invalid ? errorCls : ''} ${extraClass}`);
 </script>
 
 <input
@@ -60,12 +69,14 @@
   {step}
   {autocomplete}
   class={cls}
-  aria-invalid={error ? 'true' : undefined}
-  aria-describedby={error ? `${id}-error` : undefined}
+  aria-invalid={invalid ? 'true' : undefined}
+  aria-describedby={ariaDescribedby ?? (error ? `${id}-error` : undefined)}
+  aria-busy={ariaBusy ? 'true' : undefined}
   {oninput}
   {onchange}
   {onblur}
   {onkeydown}
+  {oninvalid}
 />
 {#if error}
   <p id="{id}-error" class="mt-1 text-xs text-red-400">{error}</p>

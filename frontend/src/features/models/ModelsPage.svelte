@@ -12,6 +12,10 @@
   let error = $state<string | null>(null);
   let notice = $state<{ tone: 'success' | 'error'; message: string } | null>(null);
   let formsBusy = $state(false);
+  let checkpointPath = $state('');
+  let localLoraPath = $state('');
+  let checkpointPathReset = $state(0);
+  let localLoraPathReset = $state(0);
 
   onMount(async () => {
     await loadInventory();
@@ -46,7 +50,11 @@
       const result = await convertCheckpoint(data);
       if (result.tone === 'success') {
         notice = { tone: 'success', message: result.message || 'Checkpoint converted successfully.' };
+        checkpointPath = '';
+        checkpointPathReset += 1;
         form.reset();
+        const pathControl = form.elements.namedItem('input_path');
+        if (pathControl instanceof HTMLInputElement) pathControl.value = '';
         await loadInventory();
         addToast('Operation started', 'success');
       } else {
@@ -75,7 +83,11 @@
       const result = await importLoraLocal(data);
       if (result.tone === 'success') {
         notice = { tone: 'success', message: result.message || 'LoRA imported successfully.' };
+        localLoraPath = '';
+        localLoraPathReset += 1;
         form.reset();
+        const pathControl = form.elements.namedItem('source_path');
+        if (pathControl instanceof HTMLInputElement) pathControl.value = '';
         await loadInventory();
         addToast('Operation started', 'success');
       } else {
@@ -128,52 +140,53 @@
   {error}
 >
   {#if inventory}
-    <!-- Directory paths -->
-    <div class="flex flex-wrap gap-4 mb-8">
-      <div class="rounded-md border border-zinc-800 bg-zinc-950 px-4 py-2">
-        <span class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Models Dir</span>
-        <p class="text-sm text-zinc-300 font-mono mt-0.5 break-all">{inventory.models_dir || '—'}</p>
+    <div class="min-w-0 space-y-8 pb-6">
+      <!-- Directory paths -->
+      <div class="grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-2">
+        <div class="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 px-4 py-2">
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Models Dir</span>
+          <p class="mt-0.5 break-all font-mono text-sm text-zinc-300">{inventory.models_dir || '—'}</p>
+        </div>
+        <div class="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 px-4 py-2">
+          <span class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">LoRAs Dir</span>
+          <p class="mt-0.5 break-all font-mono text-sm text-zinc-300">{inventory.loras_dir || '—'}</p>
+        </div>
       </div>
-      <div class="rounded-md border border-zinc-800 bg-zinc-950 px-4 py-2">
-        <span class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">LoRAs Dir</span>
-        <p class="text-sm text-zinc-300 font-mono mt-0.5 break-all">{inventory.loras_dir || '—'}</p>
-      </div>
-    </div>
 
-    {#if notice}
-      <div
-        class="rounded-lg border px-4 py-3 text-sm mb-8
-          {notice.tone === 'success'
-            ? 'border-teal-500/30 bg-teal-500/10 text-teal-100'
-            : 'border-red-500/30 bg-red-500/10 text-red-100'}"
-      >
-        {notice.message}
-      </div>
-    {/if}
+      {#if notice}
+        <div
+          class="rounded-lg border px-4 py-3 text-sm
+            {notice.tone === 'success'
+              ? 'border-teal-500/30 bg-teal-500/10 text-teal-100'
+              : 'border-red-500/30 bg-red-500/10 text-red-100'}"
+        >
+          {notice.message}
+        </div>
+      {/if}
 
-    <!-- Runtime access card -->
-    <div class="admin-section mb-8">
-      <div class="admin-section-header">
-        <svg class="w-5 h-5 text-teal-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
-        </svg>
-        <h3 class="admin-section-title">HuggingFace Access</h3>
+      <!-- Runtime access card -->
+      <div class="admin-section min-w-0">
+        <div class="admin-section-header">
+          <svg class="w-5 h-5 text-teal-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
+          </svg>
+          <h3 class="admin-section-title">HuggingFace Access</h3>
+        </div>
+        <p class="break-words text-sm text-zinc-300">
+          {#if inventory.huggingface_configured}
+            <span class="text-teal-400 font-medium">Configured.</span>
+            Token read from <span class="font-mono">{inventory.huggingface_token_env_var ?? 'HF_TOKEN'}</span>.
+          {:else}
+            <span class="text-zinc-400">Not configured.</span>
+            Set <span class="font-mono text-zinc-300">HF_TOKEN</span> for gated model downloads.
+          {/if}
+        </p>
       </div>
-      <p class="text-sm text-zinc-300">
-        {#if inventory.huggingface_configured}
-          <span class="text-teal-400 font-medium">Configured.</span>
-          Token read from <span class="font-mono">{inventory.huggingface_token_env_var ?? 'HF_TOKEN'}</span>.
-        {:else}
-          <span class="text-zinc-400">Not configured.</span>
-          Set <span class="font-mono text-zinc-300">HF_TOKEN</span> for gated model downloads.
-        {/if}
-      </p>
-    </div>
 
-    <!-- Inventory tables row -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+      <!-- Inventory tables row -->
+      <div class="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
       <!-- Image Models -->
-      <div class="admin-section">
+      <div class="admin-section min-w-0 overflow-hidden">
         <div class="flex items-center justify-between border-b border-zinc-900 pb-4 mb-4">
           <h3 class="text-sm font-semibold text-zinc-100">Image Models</h3>
           <span class="rounded-full bg-teal-500/10 border border-teal-500/20 px-2 py-0.5 text-xs font-semibold text-teal-400">{inventory.image_models.length}</span>
@@ -181,7 +194,7 @@
         {#if inventory.image_models.length === 0}
           <p class="text-xs text-zinc-500 text-center">None discovered</p>
         {:else}
-          <table class="w-full text-xs border-collapse">
+          <table class="w-full table-fixed border-collapse text-xs">
             <thead>
               <tr class="text-zinc-500 uppercase text-[10px] tracking-wider border-b border-zinc-900">
                 <th class="px-2 py-2 text-left">Name</th>
@@ -193,8 +206,8 @@
               {#each inventory.image_models as m}
                 <tr class="border-b border-zinc-900 hover:bg-zinc-900/50 transition">
                   <td class="px-2 py-2 text-zinc-200 truncate max-w-20" title={m.name}>{m.name}</td>
-                  <td class="px-2 py-2 text-zinc-400 font-mono">{m.family}</td>
-                  <td class="px-2 py-2 text-zinc-400 font-mono">{m.size_label ?? '—'}</td>
+                  <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.family}>{m.family}</td>
+                  <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.size_label ?? '—'}>{m.size_label ?? '—'}</td>
                 </tr>
               {/each}
             </tbody>
@@ -203,7 +216,7 @@
       </div>
 
       <!-- Video Models -->
-      <div class="admin-section">
+      <div class="admin-section min-w-0 overflow-hidden">
         <div class="flex items-center justify-between border-b border-zinc-900 pb-4 mb-4">
           <h3 class="text-sm font-semibold text-zinc-100">Video Models</h3>
           <span class="rounded-full bg-teal-500/10 border border-teal-500/20 px-2 py-0.5 text-xs font-semibold text-teal-400">{inventory.video_models.length}</span>
@@ -211,7 +224,7 @@
         {#if inventory.video_models.length === 0}
           <p class="text-xs text-zinc-500 text-center">None discovered</p>
         {:else}
-          <table class="w-full text-xs border-collapse">
+          <table class="w-full table-fixed border-collapse text-xs">
             <thead>
               <tr class="text-zinc-500 uppercase text-[10px] tracking-wider border-b border-zinc-900">
                 <th class="px-2 py-2 text-left">Name</th>
@@ -223,7 +236,7 @@
               {#each inventory.video_models as m}
                 <tr class="border-b border-zinc-900 hover:bg-zinc-900/50 transition">
                   <td class="px-2 py-2 text-zinc-200 truncate max-w-20" title={m.name}>{m.name}</td>
-                  <td class="px-2 py-2 text-zinc-400 font-mono">{m.family}</td>
+                  <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.family}>{m.family}</td>
                   <td class="px-2 py-2 text-zinc-400">{m.supports_i2v ? '✓' : '—'}</td>
                 </tr>
               {/each}
@@ -233,7 +246,7 @@
       </div>
 
       <!-- LoRAs -->
-      <div class="admin-section">
+      <div class="admin-section min-w-0 overflow-hidden">
         <div class="flex items-center justify-between border-b border-zinc-900 pb-4 mb-4">
           <h3 class="text-sm font-semibold text-zinc-100">Discovered LoRAs</h3>
           <span class="rounded-full bg-teal-500/10 border border-teal-500/20 px-2 py-0.5 text-xs font-semibold text-teal-400">{inventory.loras.length}</span>
@@ -241,7 +254,7 @@
         {#if inventory.loras.length === 0}
           <p class="text-xs text-zinc-500 text-center">None discovered</p>
         {:else}
-          <table class="w-full text-xs border-collapse">
+          <table class="w-full table-fixed border-collapse text-xs">
             <thead>
               <tr class="text-zinc-500 uppercase text-[10px] tracking-wider border-b border-zinc-900">
                 <th class="px-2 py-2 text-left">Name</th>
@@ -252,32 +265,37 @@
               {#each inventory.loras as l}
                 <tr class="border-b border-zinc-900 hover:bg-zinc-900/50 transition">
                   <td class="px-2 py-2 text-zinc-200 truncate max-w-25" title={l.name}>{l.name}</td>
-                  <td class="px-2 py-2 text-zinc-400 font-mono">{l.size_label ?? '—'}</td>
+                  <td class="truncate px-2 py-2 font-mono text-zinc-400" title={l.size_label ?? '—'}>{l.size_label ?? '—'}</td>
                 </tr>
               {/each}
             </tbody>
           </table>
         {/if}
       </div>
-    </div>
+      </div>
 
-    <!-- Operation Forms -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <!-- Operation Forms -->
+      <div class="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
 
       <!-- Convert Checkpoint -->
-      <form class="admin-section flex flex-col gap-5" onsubmit={handleConvertCheckpoint}>
+      <form class="admin-section min-w-0 flex flex-col gap-5" onsubmit={handleConvertCheckpoint}>
         <h3 class="text-sm font-semibold text-zinc-100 border-b border-zinc-900 pb-3">Convert a Checkpoint</h3>
         
-        <PathField
-          id="convert-input-path"
-          name="input_path"
-          label="Input Path"
-          placeholder="/path/to/model.safetensors"
-          helper="Path to the checkpoint file"
-          pickerKind="existing_file"
-          pickerPurpose="checkpoint_file"
-          onresolve={async (candidate) => candidate}
-        />
+        {#key checkpointPathReset}
+          <PathField
+            id="convert-input-path"
+            name="input_path"
+            label="Input Path"
+            value={checkpointPath}
+            placeholder="/path/to/model.safetensors"
+            helper="Path to the checkpoint file"
+            pickerKind="existing_file"
+            pickerPurpose="checkpoint_file"
+            required
+            onresolve={async (candidate) => candidate}
+            onvaluechange={(value) => (checkpointPath = value)}
+          />
+        {/key}
 
         <FormField label="Alias Name" for="convert-name" helper="Display name for this model">
           <Input
@@ -292,6 +310,7 @@
           <Select
             id="convert-model-type"
             name="model_type"
+            required
             options={[
               { value: '', label: '-- Select type --', disabled: true },
               { value: 'zimage', label: 'zimage' },
@@ -326,19 +345,24 @@
       </form>
 
       <!-- Import Local LoRA -->
-      <form class="admin-section flex flex-col gap-5" onsubmit={handleImportLoraLocal}>
+      <form class="admin-section min-w-0 flex flex-col gap-5" onsubmit={handleImportLoraLocal}>
         <h3 class="text-sm font-semibold text-zinc-100 border-b border-zinc-900 pb-3">Import Local LoRA</h3>
         
-        <PathField
-          id="import-local-source-path"
-          name="source_path"
-          label="Source Path"
-          placeholder="/path/to/lora.safetensors"
-          helper="Path to the LoRA file"
-          pickerKind="existing_file"
-          pickerPurpose="lora_file"
-          onresolve={async (candidate) => candidate}
-        />
+        {#key localLoraPathReset}
+          <PathField
+            id="import-local-source-path"
+            name="source_path"
+            label="Source Path"
+            value={localLoraPath}
+            placeholder="/path/to/lora.safetensors"
+            helper="Path to the LoRA file"
+            pickerKind="existing_file"
+            pickerPurpose="lora_file"
+            required
+            onresolve={async (candidate) => candidate}
+            onvaluechange={(value) => (localLoraPath = value)}
+          />
+        {/key}
 
         <FormField label="Alias Name" for="import-local-name" helper="Display name for this LoRA">
           <Input
@@ -355,7 +379,7 @@
       </form>
 
       <!-- Import HuggingFace LoRA -->
-      <form class="admin-section flex flex-col gap-5" onsubmit={handleImportLoraHF}>
+      <form class="admin-section min-w-0 flex flex-col gap-5" onsubmit={handleImportLoraHF}>
         <h3 class="text-sm font-semibold text-zinc-100 border-b border-zinc-900 pb-3">Import from HuggingFace</h3>
         
         <FormField label="Repository ID" for="import-hf-repo-id" required helper="Format: username/repository">
@@ -397,6 +421,7 @@
           Download LoRA
         </Button>
       </form>
+      </div>
     </div>
   {/if}
 </AdminPageShell>
