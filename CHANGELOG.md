@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-30
+
+### Added
+- Added Blob, an animated Workspace mascot that reacts to generation: thinking while queued or loading, painting while creating, cheering on completion, sad on failure, surprised when stopped, and sleeping while paused or idle
+- Blob waves on arrival, watches the prompt while you type, and hops smoothly between spots in the preview as the Workspace view changes
+- Latest-output previews now show a loading state until the image has painted instead of an empty stage
+
+### Changed
+- Replaced the app icon, favicon, and documentation logo with Blob-based artwork
+
 ## [0.9.0] - 2026-09-09
 
 ### Added

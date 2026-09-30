@@ -7,7 +7,16 @@
   import { router } from '$lib/state/router.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
   import { getWorkspaceCoreContext, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
-  import { ToolbarSelectShell } from '$lib/components/atoms';
+  import { MascotSpot, ToolbarSelectShell } from '$lib/components/atoms';
+  import { rememberMascotSpots } from '$lib/components/atoms/MascotSpot.svelte';
+  import {
+    DROWSY_AFTER_MS,
+    GREETING_DURATION_MS,
+    REACTION_DURATION_MS,
+    TYPING_DURATION_MS,
+    mascotMood as pickMascotMood,
+    type MascotReaction,
+  } from '$lib/state/mascot';
   import { JobCard, Lightbox } from '$lib/components/molecules';
   import ControlsSidebar from './ControlsSidebar.svelte';
   import HistoryPane from './HistoryPane.svelte';
@@ -24,9 +33,52 @@
   let completedOutputTrigger = $state<HTMLElement | null>(null);
   let completedOutputAssetId = $state<string | null>(null);
   let completedOutputJobId = $state<string | null>(null);
+  let reaction = $state<MascotReaction | null>(null);
+  let greeting = $state(true);
+  let typing = $state(false);
+  let drowsy = $state(false);
+  let loadedLatestUrl = $state<string | null>(null);
+  // False until the first history fetch settles, so a returning user never sees "no assets" first.
+  let historyChecked = $state(false);
+  let reactionTimer: ReturnType<typeof setTimeout> | undefined;
+  let typingTimer: ReturnType<typeof setTimeout> | undefined;
 
   const jobOutputs = $derived<GalleryAsset[]>(jobStore.current?.outputs ?? []);
   const hasCompletedOutputs = $derived(jobStore.current?.status === 'completed' && jobOutputs.length > 0);
+  const previewView = $derived<'error' | 'outputs' | 'job' | 'latest' | 'empty'>(
+    loadError ? 'error'
+      : hasCompletedOutputs ? 'outputs'
+      : jobStore.current && (jobStore.isRunning || jobOutputs.length > 0) ? 'job'
+      : historyStore.assets.length > 0 ? 'latest'
+      : 'empty'
+  );
+  const latestAsset = $derived<GalleryAsset | null>(historyStore.assets[0] ?? null);
+  // Keep the preview occupied until the latest image has painted. Videos show at once:
+  // some browsers load nothing until play is pressed, so no load event is guaranteed.
+  const latestLoading = $derived(
+    previewView === 'latest'
+      && latestAsset !== null
+      && latestAsset.media_type !== 'video'
+      && loadedLatestUrl !== latestAsset.url
+  );
+  // The latest asset fills the stage, so the mascot docks in a corner there (outputs have their own header spot).
+  const dockMascot = $derived(previewView === 'latest' && !latestLoading);
+  // Measure the mascot before the preview swaps views, so it hops from where it really was.
+  $effect.pre(() => {
+    void previewView;
+    void latestLoading;
+    untrack(rememberMascotSpots);
+  });
+  const lookingForHistory = $derived(!historyChecked || historyStore.loading);
+  const mascotMood = $derived(pickMascotMood({
+    job: jobStore.current,
+    reaction,
+    loadError: loadError !== null,
+    loading: latestLoading || (previewView === 'empty' && lookingForHistory),
+    greeting,
+    typing,
+    drowsy,
+  }));
   const lightboxAssets = $derived<GalleryAsset[]>(
     lightboxMode === 'completed-output'
       ? jobOutputs
@@ -107,18 +159,33 @@
     draft.update('loraString', newStr);
   }
 
+  function react(next: MascotReaction): void {
+    clearTimeout(reactionTimer);
+    reaction = next;
+    reactionTimer = setTimeout(() => { reaction = null; }, REACTION_DURATION_MS[next]);
+  }
+
+  function markTyping(): void {
+    clearTimeout(typingTimer);
+    typing = true;
+    typingTimer = setTimeout(() => { typing = false; }, TYPING_DURATION_MS);
+  }
+
   async function handleJobComplete(): Promise<void> {
+    react('cheerful');
     await historyStore.refreshHistory();
     busy = false;
     addToast('Generation complete', 'success');
   }
 
   function handleJobFailed(): void {
+    react('sad');
     busy = false;
     addToast('Generation failed', 'error');
   }
 
   function handleJobCancelled(): void {
+    react('surprised');
     busy = false;
     addToast('Generation stopped', 'info');
   }
@@ -232,7 +299,10 @@
         });
 
         historyTimer = setTimeout(() => {
-          if (!cancelled) void historyStore.refreshHistory();
+          if (cancelled) return;
+          void historyStore.refreshHistory().finally(() => {
+            if (!cancelled) historyChecked = true;
+          });
         }, 0);
       })
       .catch((e: unknown) => {
@@ -248,7 +318,26 @@
       }
     }
     document.addEventListener('keydown', handleKeydown);
+
+    // Mascot: wave hello, then doze off after a quiet minute.
+    const greetingTimer = setTimeout(() => { greeting = false; }, GREETING_DURATION_MS);
+    let lastActivity = Date.now();
+    function handleActivity(): void {
+      lastActivity = Date.now();
+      if (drowsy) drowsy = false;
+    }
+    const activityEvents = ['pointerdown', 'pointermove', 'keydown', 'wheel'] as const;
+    activityEvents.forEach((type) => document.addEventListener(type, handleActivity, { passive: true }));
+    const drowsyTimer = setInterval(() => {
+      drowsy = Date.now() - lastActivity > DROWSY_AFTER_MS;
+    }, 5000);
+
     return () => {
+      clearTimeout(greetingTimer);
+      clearTimeout(reactionTimer);
+      clearTimeout(typingTimer);
+      clearInterval(drowsyTimer);
+      activityEvents.forEach((type) => document.removeEventListener(type, handleActivity));
       cancelled = true;
       unsubscribeLifecycle();
       if (historyTimer) clearTimeout(historyTimer);
@@ -304,6 +393,7 @@
   bind:this={formEl}
   class="flex min-h-0 flex-1 flex-col"
   onsubmit={handleSubmit}
+  oninput={markTyping}
 >
   <!-- Hidden fields -->
   <input type="hidden" name="mode" value={isImageMode ? 'image' : 'video'}>
@@ -456,14 +546,18 @@
         class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden"
       >
         {#if loadError}
-          <div class="text-center p-8">
+          <div class="flex flex-col items-center gap-3 text-center p-8">
+            <MascotSpot mood={mascotMood} size={112} />
             <p class="text-red-400 text-sm font-medium">Error</p>
             <p class="text-zinc-500 text-xs mt-1">{loadError}</p>
           </div>
         {:else if hasCompletedOutputs}
           <div class="completed-output-region h-full w-full min-w-0 overflow-y-auto p-4">
             <div class="mb-3 flex items-center justify-between gap-3">
-              <h3 class="text-xs font-medium text-text-secondary">Completed outputs</h3>
+              <div class="flex items-center gap-2">
+                <MascotSpot mood={mascotMood} size={48} />
+                <h3 class="text-xs font-medium text-text-secondary">Completed outputs</h3>
+              </div>
               <span class="text-xs text-text-muted">{jobOutputs.length}</span>
             </div>
             <div class="completed-output-grid grid min-w-0 gap-3">
@@ -506,6 +600,7 @@
         {:else if jobStore.current && (jobStore.isRunning || jobOutputs.length > 0)}
           <div class="h-full w-full overflow-y-auto p-6">
             <div class="mx-auto w-full max-w-md">
+              <MascotSpot mood={mascotMood} size={112} class="mx-auto mb-2 w-fit" />
               <JobCard
                 job={jobStore.current!}
                 onopenoutput={(asset, trigger) => openCompletedOutputViewer(jobOutputs.findIndex((output) => output.id === asset.id), trigger)}
@@ -517,9 +612,11 @@
               />
             </div>
           </div>
-        {:else if historyStore.assets.length > 0}
-          {@const latest = historyStore.assets[0]}
-          <div class="w-full h-full flex items-center justify-center p-4">
+        {:else if latestAsset}
+          {@const latest = latestAsset}
+          {@const markLoaded = () => { loadedLatestUrl = latest.url; }}
+          <!-- Side padding keeps wide media clear of the docked mascot. -->
+          <div class="w-full h-full flex items-center justify-center px-20 py-4">
             {#if latest.media_type === 'video'}
               <video
                 src={latest.url}
@@ -532,21 +629,35 @@
               <img
                 src={latest.url}
                 alt={latest.prompt}
-                class="max-w-full max-h-full object-contain rounded"
+                class="latest-media max-w-full max-h-full object-contain rounded"
+                class:loaded={!latestLoading}
+                onload={markLoaded}
+                onerror={markLoaded}
               >
             {/if}
           </div>
+          {#if latestLoading}
+            <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-4" data-testid="latest-loading">
+              <MascotSpot mood={mascotMood} size={128} />
+              <p class="text-zinc-400 text-sm font-medium">Loading latest output…</p>
+            </div>
+          {/if}
         {:else}
           <div class="flex flex-col items-center justify-center gap-3 text-center p-4">
-            <div class="text-text-muted">
-              <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-            </div>
-            <div>
-              <p class="text-zinc-400 text-sm font-medium">No generated assets yet</p>
-              <p class="text-zinc-600 text-xs mt-1">Write a prompt and press Generate to get started</p>
-            </div>
+            <MascotSpot mood={mascotMood} size={128} />
+            {#if lookingForHistory}
+              <p class="text-zinc-400 text-sm font-medium">Looking for your latest work…</p>
+            {:else}
+              <div>
+                <p class="text-zinc-400 text-sm font-medium">No generated assets yet</p>
+                <p class="text-zinc-600 text-xs mt-1">Write a prompt and press Generate to get started</p>
+              </div>
+            {/if}
+          </div>
+        {/if}
+        {#if dockMascot}
+          <div class="mascot-dock pointer-events-none absolute top-3 left-3 z-10" data-testid="mascot-dock">
+            <MascotSpot mood={mascotMood} size={64} />
           </div>
         {/if}
       </div>
@@ -572,6 +683,9 @@
     .workspace-preview { flex: none; min-height: 320px; }
   }
   .completed-output-region { container-type: inline-size; }
+  .latest-media { opacity: 0; transition: opacity 250ms ease; }
+  .latest-media.loaded { opacity: 1; }
+  .mascot-dock { filter: drop-shadow(0 4px 10px rgb(0 0 0 / 0.45)); }
   .completed-output-grid { grid-template-columns: minmax(0, 1fr); }
   @container (min-width: 640px) {
     .completed-output-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
