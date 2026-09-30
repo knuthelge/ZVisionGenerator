@@ -23,13 +23,15 @@
     children
   }: Props = $props();
 
-  const base = 'inline-flex items-center justify-center font-medium rounded-md transition-colors focus-visible:focus-ring cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed';
+  // Font, weight, transitions, and disabled styling live per variant so they never fight surface-button-primary.
+  const base = 'inline-flex items-center justify-center rounded-md focus-visible:focus-ring cursor-pointer disabled:cursor-not-allowed';
+  const utilityVariant = 'font-display font-medium transition-colors disabled:opacity-50';
 
   const variants: Record<string, string> = {
-    primary: 'bg-teal-600 hover:bg-teal-500 active:bg-teal-700 text-white',
-    secondary: 'bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-900 text-zinc-100',
-    ghost: 'bg-transparent hover:bg-zinc-800 active:bg-zinc-700 text-zinc-400 hover:text-zinc-100',
-    danger: 'bg-red-900/40 hover:bg-red-900/60 active:bg-red-900/80 text-red-400 border border-red-800'
+    primary: 'surface-button-primary',
+    secondary: `${utilityVariant} bg-zinc-800 hover:bg-zinc-700 active:bg-zinc-900 text-zinc-100`,
+    ghost: `${utilityVariant} bg-transparent hover:bg-zinc-800 active:bg-zinc-700 text-zinc-400 hover:text-zinc-100`,
+    danger: `${utilityVariant} bg-red-900/40 hover:bg-red-900/60 active:bg-red-900/80 text-red-400 border border-red-800`
   };
 
   const sizes: Record<string, string> = {

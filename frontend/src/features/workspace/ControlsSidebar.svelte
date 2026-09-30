@@ -194,7 +194,7 @@
         id="ws-submit"
         type="submit"
         disabled={true}
-        class="surface-button surface-button-primary flex w-full items-center justify-center gap-2 rounded-md py-2.5 font-medium active:scale-[0.98]"
+        class="surface-button surface-button-primary flex w-full items-center justify-center gap-2 rounded-full py-2.5"
       >
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
@@ -941,7 +941,7 @@
       id="ws-submit"
       type="submit"
       disabled={submitDisabled}
-      class="surface-button surface-button-primary flex w-full items-center justify-center gap-2 rounded-md py-2.5 font-medium active:scale-[0.98]"
+      class="surface-button surface-button-primary flex w-full items-center justify-center gap-2 rounded-full py-2.5"
     >
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>

@@ -685,7 +685,6 @@
   .completed-output-region { container-type: inline-size; }
   .latest-media { opacity: 0; transition: opacity 250ms ease; }
   .latest-media.loaded { opacity: 1; }
-  .mascot-dock { filter: drop-shadow(0 4px 10px rgb(0 0 0 / 0.45)); }
   .completed-output-grid { grid-template-columns: minmax(0, 1fr); }
   @container (min-width: 640px) {
     .completed-output-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
