@@ -386,6 +386,67 @@ describe('WorkspacePage', () => {
     expect(target.querySelector(`button[aria-label="View ${asset.filename}"]`)).not.toBeNull();
   });
 
+  it('keeps the mascot on stage until the latest output paints, then docks it', async () => {
+    const asset = makeAsset({ id: 'out/latest.png', url: '/media/out/latest.png', filename: 'latest.png' });
+    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage([asset]));
+
+    await mountWorkspace(makeContext({ history_assets: [asset] }));
+
+    const preview = target.querySelector('.workspace-preview') as HTMLElement;
+    expect(preview.querySelector('[data-testid="latest-loading"] svg.mascot')).not.toBeNull();
+    expect(preview.querySelector('[data-testid="mascot-dock"]')).toBeNull();
+
+    const image = preview.querySelector(`img[src="${asset.url}"]`) as HTMLImageElement;
+    image.dispatchEvent(new Event('load'));
+    await settle();
+
+    expect(preview.querySelector('[data-testid="latest-loading"]')).toBeNull();
+    expect(preview.querySelector('[data-testid="mascot-dock"] svg.mascot')).not.toBeNull();
+  });
+
+  it('looks for history instead of claiming no assets until the first history check settles', async () => {
+    let resolveContext!: (context: WorkspaceContext) => void;
+    workspaceApiMocks.getWorkspaceCoreContext.mockImplementation(
+      () => new Promise<WorkspaceContext>((resolve) => { resolveContext = resolve; })
+    );
+    let resolveHistory!: (page: ReturnType<typeof makeGalleryPage>) => void;
+    workspaceApiMocks.getHistory.mockImplementation(
+      () => new Promise((resolve) => { resolveHistory = resolve; })
+    );
+
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    const preview = () => (target.querySelector('.workspace-preview') as HTMLElement).textContent ?? '';
+
+    // Before the core context arrives.
+    expect(preview()).toContain('Looking for your latest work…');
+    expect(preview()).not.toContain('No generated assets yet');
+
+    // Context arrived without history; the deferred history fetch is still pending.
+    resolveContext(makeContext({ history_assets: [] }));
+    await settle();
+    expect(preview()).toContain('Looking for your latest work…');
+    expect(preview()).not.toContain('No generated assets yet');
+
+    resolveHistory(makeGalleryPage([]));
+    await settle();
+    expect(preview()).toContain('No generated assets yet');
+  });
+
+  it('shows the latest video immediately without waiting for load events', async () => {
+    const asset = makeAsset({ id: 'out/latest.mp4', url: '/media/out/latest.mp4', filename: 'latest.mp4', media_type: 'video' });
+    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage([asset]));
+
+    await mountWorkspace(makeContext({ history_assets: [asset] }));
+
+    // Some browsers ignore preload and fire no load events until play is pressed.
+    const preview = target.querySelector('.workspace-preview') as HTMLElement;
+    const video = preview.querySelector(`video[src="${asset.url}"]`) as HTMLVideoElement;
+    expect(video).not.toBeNull();
+    expect(video.classList.contains('latest-media')).toBe(false);
+    expect(preview.querySelector('[data-testid="latest-loading"]')).toBeNull();
+    expect(preview.querySelector('[data-testid="mascot-dock"] svg.mascot')).not.toBeNull();
+  });
+
   it('prefills seed from Gallery reuse URL params after backend defaults hydrate', async () => {
     workspaceApiMocks.parseUrlPrefill.mockReturnValue({ workflow: 'txt2img', prompt: 'Reuse prompt', seed: '9876' });
 

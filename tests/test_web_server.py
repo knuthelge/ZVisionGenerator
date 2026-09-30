@@ -891,7 +891,7 @@ def test_packaged_spa_serves_packaged_logo_asset() -> None:
     """The SPA should reference and serve logo assets from the packaged app static tree."""
     with TestClient(web_server.app) as client:
         app_response = client.get("/app")
-        logo_response = client.get("/app-static/zvision-white.png")
+        logo_response = client.get("/app-static/ziv-icon.png")
 
     assert app_response.status_code == 200
     assert "/docs/assets/" not in app_response.text

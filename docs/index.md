@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="https://raw.githubusercontent.com/knuthelge/ZVisionGenerator/main/docs/assets/zvision-duo.png" alt="Z-Vision Generator Logo" width="300"/>
+    <img src="https://raw.githubusercontent.com/knuthelge/ZVisionGenerator/main/docs/assets/ziv-logo.png" alt="Z-Vision Generator logo with the Blob mascot" width="360"/>
 </p>
 &nbsp;
 

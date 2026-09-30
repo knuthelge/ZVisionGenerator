@@ -9,3 +9,5 @@ export { default as Spinner } from './Spinner.svelte';
 export { default as Separator } from './Separator.svelte';
 export { default as Label } from './Label.svelte';
 export { default as ToolbarSelectShell } from './ToolbarSelectShell.svelte';
+export { default as Mascot } from './Mascot.svelte';
+export { default as MascotSpot } from './MascotSpot.svelte';

@@ -22,13 +22,13 @@
     { id: 'txt2vid', label: 'Text to Video' }
   ];
 
-  const logoSrc = '/app-static/zvision-white.png';
+  const logoSrc = '/app-static/ziv-icon.svg';
 </script>
 
 <header class="app-nav">
   <div class="nav-workflows">
     <h1 class="text-sm font-semibold tracking-tight text-white flex items-center gap-2 shrink-0">
-      <img src={logoSrc} alt="ziv" class="w-4 h-4 object-contain">
+      <img src={logoSrc} alt="ziv" class="w-5 h-5 object-contain">
       ziv
     </h1>
 
