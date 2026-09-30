@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-30
+
+### Changed
+- Refreshed the Web UI to match Blob's style: teal-tinted surfaces, rounder corners, pill-shaped tabs, chips, and toggles, and round icon badges on settings panels
+- Headings, labels, tabs, and buttons now use the rounded Nunito typeface from Google Fonts, loaded without blocking render and falling back to rounded system fonts when unavailable
+- Primary actions share one flat teal style with dark-teal text and a subtle lift on hover, including buttons on the Config and Models pages
+
 ## [0.10.0] - 2026-09-30
 
 ### Added

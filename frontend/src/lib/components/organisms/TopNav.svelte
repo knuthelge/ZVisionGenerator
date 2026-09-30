@@ -27,8 +27,8 @@
 
 <header class="app-nav">
   <div class="nav-workflows">
-    <h1 class="text-sm font-semibold tracking-tight text-white flex items-center gap-2 shrink-0">
-      <img src={logoSrc} alt="ziv" class="w-5 h-5 object-contain">
+    <h1 class="brand flex items-center gap-2 shrink-0">
+      <img src={logoSrc} alt="ziv" class="w-6 h-6 object-contain">
       ziv
     </h1>
 
@@ -70,10 +70,11 @@
   .workflow-tabs, .main-tabs { display: flex; align-items: center; gap: 2px; }
   .workflow-tabs { overflow-x: auto; }
   .main-tabs { flex-shrink: 0; }
-  .nav-tab { white-space: nowrap; padding: 7px 10px; border-radius: 5px; font-size: 12px; font-weight: 500; color: var(--color-text-muted); transition: background-color 120ms, color 120ms; }
+  .brand { color: var(--color-text-primary); font-family: var(--font-heading); font-size: 16px; font-weight: 800; letter-spacing: -0.01em; }
+  .nav-tab { white-space: nowrap; padding: 6px 12px; border-radius: 9999px; font-family: var(--font-display); font-size: 12.5px; font-weight: 600; color: var(--color-text-muted); transition: background-color 120ms, color 120ms, box-shadow 120ms; }
   .nav-tab:hover { background: var(--color-bg-surface); color: var(--color-text-primary); }
   .main-tabs .active { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
-  .workflow-tabs .active { background: var(--color-primary-subtle); color: var(--color-primary-main); }
+  .workflow-tabs .active { background: var(--color-primary-subtle); color: var(--color-primary-main); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary-main) 35%, transparent); }
   @media (max-width: 900px) {
     .app-nav { flex-wrap: wrap; gap: 0; padding: 8px 12px; }
     .nav-workflows { display: contents; }
