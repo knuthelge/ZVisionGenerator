@@ -1083,6 +1083,7 @@ ziv ui [options]       # Same as ziv-ui
 </tr>
 </tbody>
 </table>
+<p>The server only answers requests addressed to an IP address, <code>localhost</code>, the <code>--host</code> value, or (when bound to <code>0.0.0.0</code>, <code>::</code> or a LAN IP) this machine's hostname in both bare and <code>.local</code> form, and rejects state-changing requests from other sites. This protects against DNS-rebinding and cross-site attacks from pages open in the same browser. To reach the UI through another hostname, list it in <code>ZIV_UI_ALLOWED_HOSTS</code> (comma-separated), for example <code>ZIV_UI_ALLOWED_HOSTS=studio.lan ziv-ui --host 0.0.0.0</code>.</p>
 <h2 id="ziv-image-image-generation"><code>ziv-image</code> — Image Generation</h2>
 <table>
 <thead>
