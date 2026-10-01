@@ -19,6 +19,7 @@ from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canoni
 
 _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 _VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".mkv"})
+GALLERY_MEDIA_EXTENSIONS = _IMAGE_EXTENSIONS | _VIDEO_EXTENSIONS
 _STAGING_DIR_NAMES = frozenset({".web_uploads"})
 
 

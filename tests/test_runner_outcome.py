@@ -11,6 +11,7 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.interactive import SkipSignal
 
 _MODEL_INFO = ImageModelInfo(family="zimage", is_distilled=False, size=None)
 
@@ -318,7 +319,8 @@ class TestRunnerOutcome:
         # Mock random.randint to return controlled, distinct values
         with patch("zvisiongenerator.image_runner.SkipSignal") as MockSkip, patch("zvisiongenerator.image_runner.random.randint", side_effect=[100, 200]):
             skip_inst = MockSkip.return_value
-            skip_inst.consume.side_effect = ["repeat", "skip"]
+            # None: nothing queued before each generation; then the post-generation action.
+            skip_inst.consume.side_effect = [None, "repeat", None, "skip"]
             skip_inst.reset = MagicMock()
             skip_inst.start = MagicMock()
             skip_inst.stop = MagicMock()
@@ -349,7 +351,8 @@ class TestRunnerOutcome:
 
         with patch("zvisiongenerator.image_runner.SkipSignal") as MockSkip:
             skip_inst = MockSkip.return_value
-            skip_inst.consume.side_effect = ["repeat", "skip"]
+            # None: nothing queued before each generation; then the post-generation action.
+            skip_inst.consume.side_effect = [None, "repeat", None, "skip"]
             skip_inst.reset = MagicMock()
             skip_inst.start = MagicMock()
             skip_inst.stop = MagicMock()
@@ -372,8 +375,8 @@ class TestRunnerOutcome:
 
         with patch("zvisiongenerator.image_runner.SkipSignal") as MockSkip:
             skip_inst = MockSkip.return_value
-            # consume() returns "quit" — simulating user pressed 'q' during generation
-            skip_inst.consume.return_value = "quit"
+            # Nothing queued before the first generation; consume() then returns "quit" — user pressed 'q' during it
+            skip_inst.consume.side_effect = [None, "quit"]
             skip_inst.reset = MagicMock()
             skip_inst.start = MagicMock()
             skip_inst.stop = MagicMock()
@@ -635,3 +638,92 @@ class TestProgressCallbacks:
         assert step_events[0]["set_name"] == "set1"
         assert step_events[0]["prompt_index"] == 0
         assert step_events[0]["total_prompts"] == 1
+
+
+class TestQueuedControlsBeforeGeneration:
+    """Controls queued before a generation starts (e.g. during model load) must not be discarded."""
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_quit_queued_before_batch_cancels_without_generating(self, mock_build_wf):
+        stage = MagicMock(return_value=StageOutcome.success)
+        mock_build_wf.return_value = GenerationWorkflow(name="test", stages=[stage])
+        skip = SkipSignal()
+        skip.queue_action("quit")
+        events: list[dict[str, object]] = []
+
+        run_batch(
+            MagicMock(),
+            MagicMock(spec=[]),
+            _prompts(3),
+            _CONFIG,
+            _make_args(),
+            model_info=_MODEL_INFO,
+            progress_callback=events.append,
+            enable_interactive_controls=False,
+            skip_signal=skip,
+        )
+
+        stage.assert_not_called()
+        event_types = [event["type"] for event in events]
+        assert "batch_cancelled" in event_types
+        assert "batch_completed" not in event_types
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_stale_skip_queued_before_generation_is_dropped(self, mock_build_wf):
+        stage = MagicMock(return_value=StageOutcome.success)
+        mock_build_wf.return_value = GenerationWorkflow(name="test", stages=[stage])
+        skip = SkipSignal()
+        skip.queue_action("skip")
+
+        run_batch(
+            MagicMock(),
+            MagicMock(spec=[]),
+            _prompts(2),
+            _CONFIG,
+            _make_args(),
+            model_info=_MODEL_INFO,
+            enable_interactive_controls=False,
+            skip_signal=skip,
+        )
+
+        assert stage.call_count == 2
+
+
+class TestQueuedPauseBeforeGeneration:
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_pause_queued_before_generation_waits_for_resume(self, mock_build_wf):
+        import threading
+        import time
+
+        stage = MagicMock(return_value=StageOutcome.success)
+        mock_build_wf.return_value = GenerationWorkflow(name="test", stages=[stage])
+        skip = SkipSignal()
+        skip.queue_action("pause")
+        events: list[dict[str, object]] = []
+
+        def _resume_once_waiting():
+            while not skip.is_waiting_for_resume():
+                time.sleep(0.001)
+            skip.resume()
+
+        def _resume_when_paused(event):
+            events.append(event)
+            if event["type"] == "job_paused":
+                assert stage.call_count == 0
+                threading.Thread(target=_resume_once_waiting, daemon=True).start()
+
+        run_batch(
+            MagicMock(),
+            MagicMock(spec=[]),
+            _prompts(1),
+            _CONFIG,
+            _make_args(),
+            model_info=_MODEL_INFO,
+            progress_callback=_resume_when_paused,
+            enable_interactive_controls=False,
+            skip_signal=skip,
+        )
+
+        event_types = [event["type"] for event in events]
+        assert event_types.index("job_paused") < event_types.index("job_resumed") < event_types.index("generation_finished")
+        assert stage.call_count == 1

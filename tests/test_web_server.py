@@ -1159,6 +1159,7 @@ def test_gallery_asset_id_contract_serves_and_deletes_relative_assets(monkeypatc
     web_config = _make_web_config()
     web_config.output_dir = str(tmp_path)
     monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    monkeypatch.setattr(web_server, "_media_output_root", lambda: tmp_path.resolve())
 
     asset_path = tmp_path / "nested" / "asset one.png"
     _write_png(asset_path)
@@ -1330,6 +1331,7 @@ def test_media_and_delete_reject_invalid_asset_ids(monkeypatch, tmp_path):
     web_config = _make_web_config()
     web_config.output_dir = str(tmp_path)
     monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    monkeypatch.setattr(web_server, "_media_output_root", lambda: tmp_path.resolve())
 
     valid_asset = tmp_path / "nested" / "asset.png"
     _write_png(valid_asset)
@@ -1423,3 +1425,172 @@ def test_prompt_file_submission_rejects_empty_inactive_or_stale_selection(tmp_pa
     form = FormData([("prompt_source", "file"), ("prompts_file", str(path)), *[("prompt_option_id", option_id) for option_id in selected]])
     with pytest.raises(ValueError, match="Select at least one|missing or inactive"):
         web_server._resolve_prompt_submission(form)
+
+
+@pytest.mark.parametrize(("preset_upscale_steps", "expected"), [(3, 3), (None, 5)])
+def test_submit_image_job_uses_preset_upscale_steps_default(monkeypatch, tmp_path, preset_upscale_steps, expected):
+    """Blank upscale steps should follow the preset default like the CLI, falling back to steps // 2."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    defaults = _make_resolved_image_defaults()
+    defaults["upscale_steps"] = preset_upscale_steps
+    _patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None), defaults=defaults, submitted=submitted)
+
+    web_server._submit_image_job({"model": "zit", "prompt": "hello", "upscale": "2"}, web_config)
+
+    assert submitted[0]["args"].upscale_steps == expected
+
+
+@pytest.mark.parametrize(
+    ("lora", "message"),
+    [
+        ("some-org/some-lora:0.8", "Remote HuggingFace LoRA references are not supported"),
+        ("/definitely/missing/lora.safetensors", "LoRA file not found"),
+        ("unknown-bare-name", "LoRA file not found"),
+    ],
+)
+def test_submit_image_job_rejects_unloadable_loras(monkeypatch, tmp_path, lora, message):
+    """Web submits should reject remote and missing LoRAs up front, matching the CLI."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / "data"))
+    submitted: list[dict[str, object]] = []
+    _patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None), defaults=_make_resolved_image_defaults(), submitted=submitted)
+
+    with pytest.raises(ValueError, match=message):
+        web_server._submit_image_job({"model": "zit", "prompt": "hello", "lora": lora}, web_config)
+
+    assert submitted == []
+
+
+def test_submit_image_job_accepts_existing_lora_file(monkeypatch, tmp_path):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    lora_file = tmp_path / "style.safetensors"
+    lora_file.write_bytes(b"")
+    submitted: list[dict[str, object]] = []
+    _patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None), defaults=_make_resolved_image_defaults(), submitted=submitted)
+
+    web_server._submit_image_job({"model": "zit", "prompt": "hello", "lora": f"{lora_file}:0.7"}, web_config)
+
+    assert submitted[0]["args"].lora_paths == [str(lora_file)]
+    assert submitted[0]["args"].lora_weights == [0.7]
+
+
+def test_media_only_serves_gallery_media_types(monkeypatch, tmp_path):
+    """/media must not serve arbitrary files under the output root (e.g. keys or configs)."""
+    (tmp_path / "id_rsa").write_text("secret", encoding="utf-8")
+    (tmp_path / "notes.json").write_text("{}", encoding="utf-8")
+    _write_png(tmp_path / "ok.png")
+    monkeypatch.setattr(web_server, "_media_output_root", lambda: tmp_path.resolve())
+
+    with TestClient(web_server.app) as client:
+        assert client.get("/media/id_rsa").status_code == 404
+        assert client.get("/media/notes.json").status_code == 404
+        assert client.get("/media/ok.png").status_code == 200
+
+
+def test_picker_macos_passes_initial_path_as_argv_not_script_source(monkeypatch, tmp_path):
+    """A hostile directory name must reach osascript as data, never as AppleScript source."""
+    hostile = tmp_path / 'a\\" & (do shell script "echo INJECTED") --'
+    hostile.mkdir()
+    calls: list[list[str]] = []
+
+    def _fake_run(cmd, **_kwargs):
+        calls.append(cmd)
+        return SimpleNamespace(returncode=0, stdout=str(hostile) + "/\n", stderr="")
+
+    monkeypatch.setattr(path_picker_module.subprocess, "run", _fake_run)
+
+    selected = path_picker_module._pick_macos("directory", str(hostile), path_picker_module._PICKER_PURPOSES["output_directory"])
+
+    assert selected == str(hostile) + "/"
+    cmd = calls[0]
+    script = cmd[2]
+    assert "INJECTED" not in script
+    assert "item 1 of argv" in script
+    assert cmd[3:] == [str(hostile.resolve())]
+
+
+def test_media_output_root_is_cached_until_user_config_changes(monkeypatch, tmp_path):
+    import yaml
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    monkeypatch.setenv("ZIV_DATA_DIR", str(data_dir))
+    monkeypatch.setattr(web_server, "_media_output_root_cache", None)
+    (data_dir / "config.yaml").write_text(yaml.safe_dump({"ui": {"output_dir": str(tmp_path / "first")}}), encoding="utf-8")
+    loads: list[int] = []
+    real_load_config = web_server.load_config
+    monkeypatch.setattr(web_server, "load_config", lambda: loads.append(1) or real_load_config())
+
+    assert web_server._media_output_root() == (tmp_path / "first").resolve()
+    assert web_server._media_output_root() == (tmp_path / "first").resolve()
+    assert len(loads) == 1
+
+    config_contract_module.write_user_config_override({"ui": {"output_dir": str(tmp_path / "second")}})
+    assert web_server._media_output_root() == (tmp_path / "second").resolve()
+    assert len(loads) == 2
+
+
+def test_picker_allows_only_one_dialog_at_a_time(monkeypatch):
+    """Concurrent picker requests (worker threads) must not open a second native dialog; Tk is not thread-safe."""
+    import threading
+
+    opened = threading.Event()
+    release = threading.Event()
+
+    def _slow_tk(kind, initial_path, picker_purpose):
+        opened.set()
+        release.wait(timeout=2.0)
+        return None
+
+    monkeypatch.setattr(path_picker_module.sys, "platform", "linux")
+    monkeypatch.setattr(path_picker_module, "_pick_tk", _slow_tk)
+    results: list[object] = []
+    first = threading.Thread(target=lambda: results.append(path_picker_module.pick_path("directory", purpose="output_directory")))
+    first.start()
+    assert opened.wait(timeout=2.0)
+
+    second = path_picker_module.pick_path("directory", purpose="output_directory")
+    release.set()
+    first.join(timeout=2.0)
+
+    assert second.status == "error"
+    assert "already open" in (second.message or "")
+    assert results[0].status == "cancelled"
+    assert path_picker_module.pick_path("directory", purpose="output_directory").status == "cancelled"
+
+
+@pytest.mark.parametrize(
+    ("completed", "expected_status", "expected_path"),
+    [
+        (SimpleNamespace(returncode=0, stdout="/picked/dir\n", stderr=""), "selected", "/picked/dir"),
+        (SimpleNamespace(returncode=0, stdout="", stderr=""), "cancelled", None),
+        (SimpleNamespace(returncode=1, stdout="", stderr="Traceback...\nModuleNotFoundError: No module named 'tkinter'"), "unsupported", None),
+        (SimpleNamespace(returncode=1, stdout="", stderr="Traceback...\n_tkinter.TclError: no display name and no $DISPLAY environment variable"), "error", None),
+    ],
+)
+def test_tk_picker_runs_in_child_process(monkeypatch, tmp_path, completed, expected_status, expected_path):
+    """On Linux/Windows the Tk dialog runs in a child Python so Tk owns that process's main thread."""
+    calls: list[list[str]] = []
+
+    def _fake_run(cmd, **_kwargs):
+        calls.append(cmd)
+        return completed
+
+    monkeypatch.setattr(path_picker_module.sys, "platform", "linux")
+    monkeypatch.setattr(path_picker_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(path_picker_module, "_validate_selected_path", lambda _path, _purpose: None)
+
+    result = path_picker_module.pick_path("directory", purpose="output_directory", initial_path=str(tmp_path))
+
+    cmd = calls[0]
+    assert cmd[0] == path_picker_module.sys.executable and cmd[1] == "-c"
+    assert cmd[3:5] == ["directory", str(tmp_path.resolve())]
+    assert result.status == expected_status
+    if expected_path is not None:
+        assert result.path == str(Path(expected_path).resolve())
+    if expected_status == "error":
+        assert "no display" in (result.message or "")

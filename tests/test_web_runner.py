@@ -713,3 +713,30 @@ def test_prompt_context_survives_steps_and_pause_for_reconnection():
     runner._publish_event(record.job_id, {"type": "prompt_started", "prompt": "Third prompt", "run_index": 0, "total_runs": 2, "ran_iterations": 3, "total_iterations": 6})
     runner._publish_event(record.job_id, {"type": "step_progress", "current_step": 1, "total_steps": 20})
     assert runner.get_job_snapshot(record.job_id)["last_event"]["prompt"] == "Third prompt"
+
+
+def test_pruned_jobs_keep_their_final_status_for_late_clients():
+    """A client that reconnects after its finished job was pruned must learn the real outcome, not get a 404."""
+    runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01, terminal_retention_seconds=0.0)
+    try:
+        job_id = runner.submit_dummy_job(total_steps=1, delay_seconds=0.001)
+        assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+        runner.submit_dummy_job(total_steps=1, delay_seconds=0.001)  # triggers pruning of the finished job
+
+        with runner._jobs_lock:
+            runner._prune_terminal_jobs_locked()
+            assert job_id not in runner._jobs
+
+        assert runner.get_job_snapshot(job_id)["status"] == "completed"
+
+        async def _collect() -> list[str]:
+            return [frame async for frame in runner.stream_job_events(job_id, after_event_id=10_000)]
+
+        frames = asyncio.run(_collect())
+        assert len(frames) == 1
+        assert "event: job_completed" in frames[0]
+
+        with pytest.raises(KeyError):
+            runner.get_job_snapshot("never-existed")
+    finally:
+        runner.shutdown()

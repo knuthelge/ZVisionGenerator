@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import json
 import os
 import queue
@@ -11,6 +12,7 @@ import sys
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
@@ -206,6 +208,10 @@ class WebRunner:
         self._terminal_retention_seconds = max(0.0, terminal_retention_seconds)
         self._max_terminal_jobs = max(0, max_terminal_jobs)
         self._jobs: dict[str, _JobRecord] = {}
+        # Final snapshot + terminal event of pruned jobs, so late clients (e.g. a laptop waking up) still learn the
+        # real outcome instead of a 404. Bounded; only a server restart makes a job truly unknown.
+        self._pruned: OrderedDict[str, tuple[dict[str, Any], EventPayload | None]] = OrderedDict()
+        self._max_pruned_jobs = 500
         self._jobs_lock = threading.RLock()
 
     def submit_image_job(
@@ -357,8 +363,17 @@ class WebRunner:
         return self._submit_job(job_type="dummy", target_factory=_run_dummy)
 
     def get_job_snapshot(self, job_id: str) -> dict[str, Any]:
-        """Return serializable state for a tracked job."""
-        record = self._get_job(job_id)
+        """Return serializable state for a tracked job (or the final state of a pruned one)."""
+        try:
+            record = self._get_job(job_id)
+        except KeyError:
+            with self._jobs_lock:
+                if job_id not in self._pruned:
+                    raise
+                return copy.deepcopy(self._pruned[job_id][0])
+        return self._snapshot_record(record)
+
+    def _snapshot_record(self, record: _JobRecord) -> dict[str, Any]:
         with record.lock:
             last_event = dict(record.last_event) if record.last_event is not None else None
             workflow = str(record.context.get("workflow") or record.job_type)
@@ -440,7 +455,17 @@ class WebRunner:
 
     async def stream_job_events(self, job_id: str, *, after_event_id: int | None = None) -> AsyncIterator[str]:
         """Yield a job's progress events as SSE frames."""
-        record = self._get_job(job_id)
+        try:
+            record = self._get_job(job_id)
+        except KeyError:
+            with self._jobs_lock:
+                if job_id not in self._pruned:
+                    raise
+                terminal_event = self._pruned[job_id][1]
+            # Pruned job: replay only its terminal event so the client finishes normally.
+            if terminal_event is not None:
+                yield self._format_sse(terminal_event)
+            return
         subscriber: queue.Queue[EventPayload] | None = None
         with record.lock:
             history = [dict(event) for event in record.history if after_event_id is None or event["event_id"] > after_event_id]
@@ -676,7 +701,13 @@ class WebRunner:
             retained_terminal.sort(key=lambda record: (record.completed_at or 0.0, record.created_at, record.job_id))
             expired_ids.update(record.job_id for record in retained_terminal[:overflow])
         for job_id in expired_ids:
-            self._jobs.pop(job_id, None)
+            record = self._jobs.pop(job_id, None)
+            if record is None:
+                continue
+            terminal_event = next((dict(event) for event in reversed(record.history) if event["type"] in self._TERMINAL_EVENT_TYPES), None)
+            self._pruned[job_id] = (self._snapshot_record(record), terminal_event)
+            while len(self._pruned) > self._max_pruned_jobs:
+                self._pruned.popitem(last=False)
 
     def _format_sse(self, event: EventPayload) -> str:
         """Serialize a structured event as a single SSE frame."""

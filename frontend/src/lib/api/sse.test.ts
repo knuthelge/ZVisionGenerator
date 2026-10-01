@@ -4,6 +4,7 @@ import { connectJobSSE } from './sse';
 type MockEventSource = {
   emit: (type: string, data: unknown) => void;
   emitError: () => void;
+  emitFatalError: () => void;
   close: () => void;
   closeCalls: number;
   readyState: number;
@@ -125,6 +126,28 @@ describe('connectJobSSE', () => {
     subscription.close();
     expect(mockES.closeCalls).toBe(1);
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('closes and reports a lost stream when the EventSource closes permanently', () => {
+    const onClose = vi.fn();
+    const onStreamLost = vi.fn();
+    const subscription = connectJobSSE('test-job', { onClose, onStreamLost });
+    const mockES = latestEventSource();
+
+    mockES.emitFatalError();
+
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(onStreamLost).toHaveBeenCalledOnce();
+    subscription.close();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('does not report a lost stream on a transient error', () => {
+    const onStreamLost = vi.fn();
+    const subscription = connectJobSSE('test-job', { onStreamLost });
+    latestEventSource().emitError();
+    expect(onStreamLost).not.toHaveBeenCalled();
+    subscription.close();
   });
 
   it('closes exactly once when a terminal handler throws', () => {

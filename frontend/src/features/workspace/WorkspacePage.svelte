@@ -184,6 +184,12 @@
     addToast('Generation failed', 'error');
   }
 
+  async function handleJobLost(): Promise<void> {
+    busy = false;
+    addToast('Lost track of the job. Refreshed the gallery with any results.', 'info');
+    await historyStore.refreshHistory();
+  }
+
   function handleJobCancelled(): void {
     react('surprised');
     busy = false;
@@ -260,6 +266,7 @@
       onComplete: handleJobComplete,
       onFailed: handleJobFailed,
       onCancelled: handleJobCancelled,
+      onLost: handleJobLost,
     });
     const urlParams = parseUrlPrefill();
     const hasUrlParams = Object.keys(urlParams).length > 0;

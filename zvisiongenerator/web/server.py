@@ -15,6 +15,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from PIL import Image, UnidentifiedImageError
 
 from zvisiongenerator.backends import get_backend_name
@@ -22,18 +23,27 @@ from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
-from zvisiongenerator.utils.config import resolve_defaults, resolve_video_defaults, validate_scheduler
+from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_upscale_steps, resolve_video_defaults, validate_scheduler
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
-from zvisiongenerator.utils.lora import parse_lora_arg
-from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_lora_path, resolve_model_path
+from zvisiongenerator.utils.lora import resolve_lora_references
+from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response, huggingface_token_env_var
 from zvisiongenerator.web.config_contract import persist_writable_config_patch, resolve_output_dir as resolve_config_output_dir
 from zvisiongenerator.web.defaults import default_image_size_for_ratio, default_video_size_for_ratio
-from zvisiongenerator.web.gallery import build_gallery_page_json, delete_gallery_assets, filter_and_sort_assets, gallery_asset_to_json, list_gallery_assets, resolve_output_asset_path
+from zvisiongenerator.web.gallery import (
+    GALLERY_MEDIA_EXTENSIONS,
+    build_gallery_page_json,
+    delete_gallery_assets,
+    filter_and_sort_assets,
+    gallery_asset_to_json,
+    list_gallery_assets,
+    resolve_output_asset_path,
+)
 from zvisiongenerator.web.path_picker import pick_path
+from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, read_prompt_file, resolve_prompt_file_options, write_prompt_file
 from zvisiongenerator.web.job_contract import IMAGE_SUPPORTED_CONTROLS, VIDEO_SUPPORTED_CONTROLS
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner
@@ -69,7 +79,11 @@ async def _lifespan(_: FastAPI):
         web_runner.shutdown()
 
 
+# Blocking handler work (native picker, conversion, imports) is offloaded with run_in_threadpool (AnyIO's worker
+# pool), not asyncio.to_thread: the SSE streams wait on asyncio's default executor, so long dialogs or conversions
+# must not occupy its threads and stall progress updates.
 app = FastAPI(title="Z-Vision Generator Web UI", lifespan=_lifespan)
+app.add_middleware(LocalRequestGuardMiddleware)
 app.mount("/app-static", StaticFiles(directory=str(Path(__file__).with_name("static") / "app"), check_dir=False), name="app-static")
 
 
@@ -83,13 +97,38 @@ async def docs_asset(asset_name: str) -> FileResponse:
 
 
 @app.get("/media/{asset_path:path}")
-async def output_media(asset_path: str) -> FileResponse:
+def output_media(asset_path: str) -> FileResponse:
     """Serve generated media files by output-root-relative asset ID."""
-    root = Path(load_web_config().output_dir).resolve()
-    candidate = resolve_output_asset_path(root, asset_path)
-    if candidate is None or not candidate.is_file():
+    candidate = resolve_output_asset_path(_media_output_root(), asset_path)
+    if candidate is None or candidate.suffix.lower() not in GALLERY_MEDIA_EXTENSIONS or not candidate.is_file():
         raise HTTPException(status_code=404, detail=f"Unknown media asset: {asset_path}")
     return FileResponse(candidate)
+
+
+_media_output_root_cache: tuple[tuple[object, ...], Path] | None = None
+
+
+def _media_output_root() -> Path:
+    """Resolve the output root without building the full Web UI config (model inventory) per media request.
+
+    Cached on the user config file's identity, so a gallery page of thumbnails parses the config once; a save
+    (atomic replace) changes the stat and refreshes it.
+    """
+    global _media_output_root_cache
+    data_dir = get_ziv_data_dir()
+    try:
+        config_stat = (data_dir / "config.yaml").stat()
+        cache_key: tuple[object, ...] = (str(data_dir), config_stat.st_ino, config_stat.st_mtime_ns, config_stat.st_size)
+    except OSError:
+        cache_key = (str(data_dir), None)
+    cached = _media_output_root_cache
+    if cached is not None and cached[0] == cache_key:
+        return cached[1]
+    ui_config = load_config().get("ui") or {}
+    output_dir = ui_config.get("output_dir") if isinstance(ui_config, dict) else None
+    root = resolve_config_output_dir(output_dir).resolve()
+    _media_output_root_cache = (cache_key, root)
+    return root
 
 
 @app.get("/")
@@ -115,9 +154,10 @@ async def open_picker(request: Request) -> dict[str, str | None]:
     purpose = _required_json_string(payload, "purpose")
     initial_path = _coerce_optional_string(payload.get("initial_path"))
     try:
-        return pick_path(kind, purpose=purpose, initial_path=initial_path).to_payload()
+        result = await run_in_threadpool(pick_path, kind, purpose=purpose, initial_path=initial_path)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return result.to_payload()
 
 
 @app.post("/api/prompt-files/inspect")
@@ -125,7 +165,7 @@ async def api_prompt_file_inspect(request: Request) -> dict[str, Any]:
     """Inspect a host-local prompt file and return active option metadata."""
     payload = await request.json()
     try:
-        document = inspect_prompt_file(_required_json_string(payload, "path"), accepted_extensions=_PROMPT_FILE_EXTENSIONS)
+        document = await run_in_threadpool(inspect_prompt_file, _required_json_string(payload, "path"), accepted_extensions=_PROMPT_FILE_EXTENSIONS)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"path": document.path, "options": document.options}
@@ -136,7 +176,7 @@ async def api_prompt_file_read(request: Request) -> dict[str, Any]:
     """Read raw prompt-file YAML plus active option metadata."""
     payload = await request.json()
     try:
-        document = read_prompt_file(_required_json_string(payload, "path"), accepted_extensions=_PROMPT_FILE_EXTENSIONS)
+        document = await run_in_threadpool(read_prompt_file, _required_json_string(payload, "path"), accepted_extensions=_PROMPT_FILE_EXTENSIONS)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"path": document.path, "raw_text": document.raw_text, "options": document.options}
@@ -147,7 +187,8 @@ async def api_prompt_file_write(request: Request) -> dict[str, Any]:
     """Validate and atomically replace a host-local prompt file."""
     payload = await request.json()
     try:
-        document = write_prompt_file(
+        document = await run_in_threadpool(
+            write_prompt_file,
             _required_json_string(payload, "path"),
             _required_json_string(payload, "raw_text"),
             accepted_extensions=_PROMPT_FILE_EXTENSIONS,
@@ -161,6 +202,11 @@ async def api_prompt_file_write(request: Request) -> dict[str, Any]:
 async def generate(request: Request) -> JSONResponse:
     """Accept multipart form submissions and queue image or video generation jobs."""
     form = await request.form()
+    return await run_in_threadpool(_generate_from_form, form)
+
+
+def _generate_from_form(form: Any) -> JSONResponse:
+    """Validate a parsed generate form and queue the job; runs off the event loop."""
     web_config = load_web_config()
     mode = str(form.get("mode", "image")).strip().lower() or "image"
 
@@ -409,13 +455,13 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     args.scheduler = defaults["scheduler"]
     validate_scheduler(args.scheduler, app_config)
     if args.upscale and args.upscale_steps is None:
-        args.upscale_steps = max(1, args.steps // 2)
+        args.upscale_steps = resolve_upscale_steps(defaults, args.steps)
 
     if not defaults.get("supports_negative_prompt", False):
         negative_prompt = None
         prompts_data = _replace_prompt_negatives(prompts_data, negative_prompt=None)
 
-    args.lora_paths, args.lora_weights = _resolve_loras(form)
+    args.lora_paths, args.lora_weights = _resolve_loras(form, require_file=True)
     dims = app_config["sizes"][args.ratio][args.size]
     eff_width = args.width or dims["width"]
     eff_height = args.height or dims["height"]
@@ -537,7 +583,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         if args.size not in video_sizes.get(args.ratio, {}):
             raise ValueError(f"Unknown size '{args.size}' for ratio '{args.ratio}'. Valid: {list(video_sizes.get(args.ratio, {}).keys())}")
 
-    args.lora_paths, args.lora_weights = _resolve_loras(form)
+    args.lora_paths, args.lora_weights = _resolve_loras(form, require_file=False)
     cli_overrides = {
         key: value
         for key, value in {
@@ -770,18 +816,11 @@ def _resolve_numeric_toggle(form: Any, enabled_key: str, amount_key: str, *, def
     return amount
 
 
-def _resolve_loras(form: Any) -> tuple[list[str] | None, list[float] | None]:
+def _resolve_loras(form: Any, *, require_file: bool) -> tuple[list[str] | None, list[float] | None]:
     lora_value = _optional_text(form, "lora")
     if lora_value is None:
         return None, None
-    try:
-        parsed = parse_lora_arg(lora_value)
-    except ValueError as exc:
-        raise ValueError(str(exc)) from exc
-    return (
-        [resolve_lora_path(name) for name, _ in parsed],
-        [weight for _, weight in parsed],
-    )
+    return resolve_lora_references(lora_value, require_file=require_file)
 
 
 def _validate_model_capabilities(args: argparse.Namespace, defaults: dict[str, Any], eff_width: int, eff_height: int) -> None:
@@ -988,7 +1027,7 @@ def _required_json_string(payload: dict[str, Any], key: str) -> str:
 
 
 @app.get("/api/workspace")
-async def api_workspace(include_history: bool = Query(True)) -> dict[str, Any]:
+def api_workspace(include_history: bool = Query(True)) -> dict[str, Any]:
     """Return WorkspaceContext JSON for the Svelte SPA."""
     web_config = load_web_config()
     history_assets: list[dict[str, Any]] = []
@@ -999,7 +1038,7 @@ async def api_workspace(include_history: bool = Query(True)) -> dict[str, Any]:
 
 
 @app.get("/api/history")
-async def api_history(
+def api_history(
     page: int = Query(1, ge=1),
     media_filter: str = Query("all"),
     sort_order: str = Query("newest"),
@@ -1015,7 +1054,7 @@ async def api_history(
 
 
 @app.get("/api/gallery")
-async def api_gallery_json(
+def api_gallery_json(
     page: int = Query(1, ge=1),
     filter: str = Query("all"),
     sort_order: str = Query("newest"),
@@ -1031,7 +1070,7 @@ async def api_gallery_json(
 
 
 @app.get("/api/config")
-async def api_get_config() -> dict[str, Any]:
+def api_get_config() -> dict[str, Any]:
     """Return current Web UI config as JSON for the Svelte SPA."""
     web_config = load_web_config()
     return build_api_config_response(web_config)
@@ -1042,15 +1081,15 @@ async def api_save_config(request: Request) -> dict[str, Any]:
     """Update Web UI config from a JSON body and return the updated config."""
     payload = await request.json()
     try:
-        _persist_web_config(payload)
+        await run_in_threadpool(_persist_web_config, payload)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    web_config = load_web_config()
+    web_config = await run_in_threadpool(load_web_config)
     return build_api_config_response(web_config)
 
 
 @app.get("/api/models")
-async def api_models() -> dict[str, Any]:
+def api_models() -> dict[str, Any]:
     """Return installed model inventory as JSON for the Svelte SPA."""
     web_config = load_web_config()
     token_var = huggingface_token_env_var()
@@ -1062,7 +1101,7 @@ async def api_models_convert(request: Request) -> dict[str, Any]:
     """Convert a local checkpoint into an installed model directory (JSON API)."""
     payload = await request.json()
     try:
-        notice = _convert_model_from_form(payload)
+        notice = await run_in_threadpool(_convert_model_from_form, payload)
     except (ValueError, FileNotFoundError, FileExistsError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "ok", "tone": notice["tone"], "message": notice["message"]}
@@ -1073,7 +1112,7 @@ async def api_models_import_lora_local(request: Request) -> dict[str, Any]:
     """Import a local LoRA file into the configured data directory (JSON API)."""
     payload = await request.json()
     try:
-        notice = _import_local_lora_from_form(payload)
+        notice = await run_in_threadpool(_import_local_lora_from_form, payload)
     except (ValueError, FileNotFoundError, FileExistsError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "ok", "tone": notice["tone"], "message": notice["message"]}
@@ -1084,7 +1123,7 @@ async def api_models_import_lora_hf(request: Request) -> dict[str, Any]:
     """Import a LoRA from Hugging Face into the configured data directory (JSON API)."""
     payload = await request.json()
     try:
-        notice = _import_hf_lora_from_form(payload)
+        notice = await run_in_threadpool(_import_hf_lora_from_form, payload)
     except (ValueError, FileNotFoundError, FileExistsError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "ok", "tone": notice["tone"], "message": notice["message"]}
@@ -1109,7 +1148,7 @@ async def api_cancel_job(job_id: str) -> dict[str, Any]:
 
 
 @app.delete("/api/gallery/{asset_path:path}")
-async def api_delete_gallery_asset(asset_path: str) -> dict[str, str]:
+def api_delete_gallery_asset(asset_path: str) -> dict[str, str]:
     """Delete a single gallery asset by output-root-relative asset ID."""
     web_config = load_web_config()
     root = Path(web_config.output_dir).resolve()

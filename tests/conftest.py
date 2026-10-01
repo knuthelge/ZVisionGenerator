@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import os
 from argparse import Namespace
 from pathlib import Path
 from unittest.mock import MagicMock
 
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
+
+# Starlette's TestClient sends ``Host: testserver``; allow it through the Web UI request guard.
+os.environ.setdefault("ZIV_UI_ALLOWED_HOSTS", "testserver")
 
 
 def _make_args(**overrides):

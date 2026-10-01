@@ -92,6 +92,7 @@
     if (job.paused || job.status === 'paused') return 'paused';
     if (job.status === 'failed') return 'failed';
     if (job.status === 'cancelled') return 'stopped';
+    if (job.status === 'unknown') return 'unknown';
     return 'current';
   }
 
@@ -109,7 +110,7 @@
   const progressState = $derived(
     job.status === 'completed' ? 'completed' :
     job.status === 'failed' ? 'failed' :
-    job.status === 'cancelled' ? 'cancelled' :
+    job.status === 'cancelled' || job.status === 'unknown' ? 'cancelled' :
                                  'running'
   );
   const progressFill = $derived(
@@ -296,7 +297,8 @@
   .sequence-segment[data-state='current'] { height: 12px; background: var(--color-primary-main); border-color: var(--color-primary-main); box-shadow: 0 0 8px var(--color-primary-subtle); }
   .sequence-segment[data-state='paused'] { height: 12px; background: var(--color-warning); border-color: var(--color-warning); }
   .sequence-segment[data-state='failed'] { height: 12px; background: var(--color-error); border-color: var(--color-error); }
-  .sequence-segment[data-state='stopped'] { height: 12px; border-style: dashed; }
+  .sequence-segment[data-state='stopped'],
+  .sequence-segment[data-state='unknown'] { height: 12px; border-style: dashed; }
   .sequence-more { color: var(--color-text-muted); font-size: 11px; line-height: 1; }
 
   .progress-track { position: relative; isolation: isolate; }
