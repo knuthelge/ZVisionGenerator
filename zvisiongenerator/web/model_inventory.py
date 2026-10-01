@@ -10,7 +10,7 @@ from typing import Any
 from zvisiongenerator.converters.list_assets import list_models, list_video_models
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.paths import resolve_model_path
-from zvisiongenerator.utils.video_model_detect import detect_video_model
+from zvisiongenerator.utils.video_model_detect import detect_video_model, is_known_video_repo
 
 
 @dataclass(frozen=True)
@@ -86,6 +86,9 @@ def discover_image_inventory(
         declared = declared_image_family(app_config, alias_name)
         if declared is not None:
             family, size = declared, None
+        elif is_known_video_repo(resolved_path):
+            # Video aliases are recognised offline; probing them as image repos costs a Hub request each time.
+            continue
         else:
             try:
                 info = detect_model(resolved_path)

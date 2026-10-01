@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import subprocess
 import sys
+import threading
 
 
 @dataclass(frozen=True)
@@ -39,9 +41,22 @@ _PICKER_PURPOSES: dict[str, PickerPurpose] = {
 }
 
 
+# One native dialog at a time: requests run on worker threads, and Tk is not safe across threads.
+_PICKER_LOCK = threading.Lock()
+
+
 def pick_path(kind: str, *, purpose: str, initial_path: str | None = None) -> PickerResult:
     """Open a native picker for one explicit host-local trust bucket."""
     picker_purpose = _resolve_picker_purpose(purpose, kind)
+    if not _PICKER_LOCK.acquire(blocking=False):
+        return PickerResult(status="error", message="A file picker is already open. Close it first.")
+    try:
+        return _pick_path_locked(kind, initial_path, picker_purpose)
+    finally:
+        _PICKER_LOCK.release()
+
+
+def _pick_path_locked(kind: str, initial_path: str | None, picker_purpose: PickerPurpose) -> PickerResult:
     try:
         if sys.platform == "darwin":
             selected_path = _pick_macos(kind, initial_path, picker_purpose)
@@ -94,11 +109,14 @@ def _pick_macos(kind: str, initial_path: str | None, picker_purpose: PickerPurpo
         raise RuntimeError(f"Unsupported picker kind: {kind}")
     default_location = _macos_default_location(initial_path)
     file_type_clause = _macos_file_type_clause(picker_purpose)
+    # The default location is passed as an argv item, never interpolated into the script source.
     if default_location:
-        script = f'set defaultLocation to POSIX file "{default_location}"\nset chosenItem to {command}{file_type_clause} default location defaultLocation\nPOSIX path of chosenItem'
+        script = f"on run argv\nset defaultLocation to POSIX file (item 1 of argv)\nset chosenItem to {command}{file_type_clause} default location defaultLocation\nPOSIX path of chosenItem\nend run"
+        argv = [default_location]
     else:
         script = f"set chosenItem to {command}{file_type_clause}\nPOSIX path of chosenItem"
-    result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, check=False)
+        argv = []
+    result = subprocess.run(["osascript", "-e", script, *argv], capture_output=True, text=True, check=False)
     if result.returncode != 0:
         stderr = (result.stderr or "").strip().lower()
         if "user canceled" in stderr or "cancelled" in stderr:
@@ -122,26 +140,42 @@ def _macos_default_location(initial_path: str | None) -> str | None:
     if candidate.is_file():
         candidate = candidate.parent
     if candidate.exists():
-        return str(candidate.resolve()).replace('"', '\\"')
+        return str(candidate.resolve())
     return None
 
 
-def _pick_tk(kind: str, initial_path: str | None, picker_purpose: PickerPurpose) -> str | None:
-    import tkinter as tk
-    from tkinter import filedialog
+# Runs in a child process: the web server calls the picker from worker threads, and Tk must own its thread.
+# Like the macOS osascript path, a separate process keeps Tk on its own main thread.
+_TK_PICKER_SCRIPT = """
+import json, sys
+import tkinter as tk
+from tkinter import filedialog
+kind, initial_dir, filetypes = sys.argv[1], sys.argv[2], [tuple(item) for item in json.loads(sys.argv[3])]
+root = tk.Tk()
+root.withdraw()
+try:
+    if kind == "directory":
+        selected = filedialog.askdirectory(initialdir=initial_dir, mustexist=True)
+    else:
+        selected = filedialog.askopenfilename(initialdir=initial_dir, filetypes=filetypes)
+finally:
+    root.destroy()
+sys.stdout.write(selected or "")
+"""
 
-    root = tk.Tk()
-    root.withdraw()
+
+def _pick_tk(kind: str, initial_path: str | None, picker_purpose: PickerPurpose) -> str | None:
+    if kind not in {"directory", "existing_file"}:
+        raise RuntimeError(f"Unsupported picker kind: {kind}")
     initial_dir = _tk_initial_dir(initial_path)
-    try:
-        if kind == "directory":
-            selected = filedialog.askdirectory(initialdir=initial_dir, mustexist=True)
-        elif kind == "existing_file":
-            selected = filedialog.askopenfilename(initialdir=initial_dir, filetypes=_tk_filetypes(picker_purpose))
-        else:
-            raise RuntimeError(f"Unsupported picker kind: {kind}")
-    finally:
-        root.destroy()
+    filetypes = json.dumps(_tk_filetypes(picker_purpose))
+    result = subprocess.run([sys.executable, "-c", _TK_PICKER_SCRIPT, kind, initial_dir, filetypes], capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        if "No module named" in stderr and "tkinter" in stderr:
+            raise ImportError("tkinter is not available")
+        raise RuntimeError(stderr.splitlines()[-1] if stderr else "Native path picker failed.")
+    selected = result.stdout.strip()
     return selected or None
 
 

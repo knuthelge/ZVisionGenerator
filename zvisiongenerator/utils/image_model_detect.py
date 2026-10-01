@@ -10,6 +10,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from typing import Any
 
 _HF_REPO_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
 
@@ -99,7 +100,7 @@ def _read_model_index(model_path: str, is_local: bool) -> dict:
         raise ImportError("huggingface_hub is required to detect model type from HuggingFace repo IDs. Install it with: uv add huggingface_hub")
 
     try:
-        downloaded_path = hf_hub_download(repo_id=model_path, filename="model_index.json")
+        downloaded_path = _hf_hub_file(hf_hub_download, model_path, "model_index.json")
     except Exception as e:
         first_segment = model_path.split("/")[0]
         if os.path.isdir(first_segment):
@@ -107,6 +108,14 @@ def _read_model_index(model_path: str, is_local: bool) -> dict:
         raise
     with open(downloaded_path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _hf_hub_file(hf_hub_download: Any, repo_id: str, filename: str) -> str:
+    """Return a Hub file path, preferring the local HF cache over a network metadata request."""
+    try:
+        return hf_hub_download(repo_id=repo_id, filename=filename, local_files_only=True)
+    except Exception:
+        return hf_hub_download(repo_id=repo_id, filename=filename)
 
 
 def _detect_klein_size(model_path: str, is_local: bool) -> str | None:
@@ -135,7 +144,7 @@ def _detect_klein_size(model_path: str, is_local: bool) -> str | None:
                 from huggingface_hub import hf_hub_download
             except ImportError:
                 return None
-            downloaded = hf_hub_download(repo_id=model_path, filename="transformer/config.json")
+            downloaded = _hf_hub_file(hf_hub_download, model_path, "transformer/config.json")
             with open(downloaded, encoding="utf-8") as f:
                 config = json.load(f)
 

@@ -1,6 +1,10 @@
-"""LoRA CLI argument parsing utilities."""
+"""LoRA CLI argument parsing and reference validation utilities."""
 
 from __future__ import annotations
+
+import os
+
+from zvisiongenerator.utils.paths import is_remote_lora_reference, resolve_lora_path
 
 
 def parse_lora_arg(value: str) -> list[tuple[str, float]]:
@@ -37,3 +41,27 @@ def parse_lora_arg(value: str) -> list[tuple[str, float]]:
             raise ValueError(f"Empty LoRA name in --lora value: '{entry}'")
         result.append((name, weight))
     return result
+
+
+def resolve_lora_references(value: str, *, require_file: bool) -> tuple[list[str], list[float]]:
+    """Parse a ``--lora`` value and resolve it to loadable local paths and weights.
+
+    Shared by the image/video CLIs and the Web UI so their validation cannot drift.
+
+    Args:
+        value: Raw ``name:weight,...`` specifier.
+        require_file: True when the backend needs a LoRA file (image backends);
+            False also accepts a directory (the diffusers video backend).
+
+    Raises:
+        ValueError: Malformed value, remote HuggingFace reference, or missing LoRA.
+    """
+    parsed = parse_lora_arg(value)
+    remote_loras = [name for name, _ in parsed if is_remote_lora_reference(name)]
+    if remote_loras:
+        raise ValueError(f"Remote HuggingFace LoRA references are not supported: {', '.join(remote_loras)}. Import the LoRA locally or pass a local LoRA path.")
+    lora_paths = [resolve_lora_path(name) for name, _ in parsed]
+    for path in lora_paths:
+        if not (os.path.isfile(path) if require_file else os.path.exists(path)):
+            raise ValueError(f"LoRA file not found: {path}")
+    return lora_paths, [weight for _, weight in parsed]

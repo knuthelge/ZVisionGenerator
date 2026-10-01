@@ -365,3 +365,9 @@ def resolve_video_defaults(
             effective[key] = value
 
     return effective
+
+
+def resolve_upscale_steps(defaults: dict[str, Any], steps: int) -> int:
+    """Return the upscale refinement steps when not set explicitly: the preset default, else ``max(1, steps // 2)``."""
+    preset_steps = defaults.get("upscale_steps")
+    return preset_steps if preset_steps is not None else max(1, steps // 2)

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import ipaddress
+import errno
 import socket
+import sys
 import threading
 import time
 import webbrowser
@@ -53,24 +56,61 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
     return parser
 
 
+def _socket_family(host: str) -> socket.AddressFamily:
+    return socket.AF_INET6 if ":" in host else socket.AF_INET
+
+
+def _connect_host(host: str) -> str:
+    """Return an address that reaches a server bound to *host* (loopback for wildcard binds)."""
+    return {"0.0.0.0": "127.0.0.1", "": "127.0.0.1", "::": "::1"}.get(host, host)
+
+
+def _port_is_available(host: str, port: int) -> bool:
+    """Return whether the Web UI can take *port* without colliding with another live server.
+
+    A plain bind fails both for a live listener and for TIME_WAIT leftovers of a just-stopped server (a quick
+    restart), which must not move the UI to another port and strand open pages. So an "address in use" bind is
+    retried the way uvicorn binds (SO_REUSEADDR): if even that fails the port is busy. On macOS SO_REUSEADDR also
+    lets 127.0.0.1:P bind while another process listens on 0.0.0.0:P (e.g. Docker), so finally check nothing answers.
+    """
+    family = _socket_family(host)
+
+    def _bind(*, reuse: bool) -> None:
+        with socket.socket(family, socket.SOCK_STREAM) as candidate:
+            if reuse:
+                candidate.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            candidate.bind((host, port))
+
+    try:
+        _bind(reuse=False)
+        return True
+    except OSError as exc:
+        if exc.errno != errno.EADDRINUSE or sys.platform == "win32":
+            # On Windows SO_REUSEADDR would allow binding over an active listener, and TIME_WAIT does not block binds.
+            return False
+    try:
+        _bind(reuse=True)
+    except OSError:
+        return False
+    with socket.socket(family, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.5)
+        return probe.connect_ex((_connect_host(host), port)) != 0
+
+
 def _find_available_port(host: str, preferred_port: int) -> int:
     """Return the preferred port or the next available local port."""
     for port in range(preferred_port, preferred_port + 100):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as candidate:
-            try:
-                candidate.bind((host, port))
-            except OSError:
-                continue
-        return port
+        if _port_is_available(host, port):
+            return port
     raise RuntimeError(f"No available port found starting at {preferred_port}")
 
 
 def _wait_for_server(host: str, port: int, *, attempts: int = 100, delay: float = 0.1) -> bool:
     """Wait for the HTTP server port to accept connections."""
     for _ in range(attempts):
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        with socket.socket(_socket_family(host), socket.SOCK_STREAM) as probe:
             probe.settimeout(delay)
-            if probe.connect_ex((host, port)) == 0:
+            if probe.connect_ex((_connect_host(host), port)) == 0:
                 return True
         time.sleep(delay)
     return False
@@ -91,13 +131,44 @@ def _open_browser(url: str, host: str, port: int) -> None:
         print(f"Web UI available at {url}")
 
 
+_WILDCARD_HOSTS = frozenset({"0.0.0.0", "::", ""})
+
+
+def _machine_hostnames() -> list[str]:
+    """Return this machine's name as reported plus bare and mDNS forms, e.g. ``mymac.lan``, ``mymac``, ``mymac.local``."""
+    machine = socket.gethostname().strip().lower()
+    if not machine:
+        return []
+    # gethostname() may carry a DHCP/search domain (mymac.lan) or .local; other devices typically use the bare name.
+    short = machine.split(".")[0]
+    return list(dict.fromkeys([machine, short, f"{short}.local"]))
+
+
+def _bound_hostnames(host: str) -> list[str]:
+    """Return the hostnames the Web UI should answer to for a given ``--host``.
+
+    A non-IP ``--host`` is allowed as-is. A wildcard or non-loopback IP bind (LAN
+    access) also allows this machine's hostname, so opening the UI by name works.
+    """
+    if host in _WILDCARD_HOSTS:
+        return _machine_hostnames()
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return [host]
+    return [] if address.is_loopback else _machine_hostnames()
+
+
 def run_server(*, host: str = "127.0.0.1", port: int = 8080, open_browser: bool = True) -> None:
     """Launch the FastAPI Web UI server."""
     _ensure_web_runtime_dependencies(prog="The Web UI launcher")
     import uvicorn
 
+    from zvisiongenerator.web.request_guard import configure_allowed_hostnames
+
+    configure_allowed_hostnames(_bound_hostnames(host))
     selected_port = _find_available_port(host, port)
-    url = f"http://{host}:{selected_port}"
+    url = f"http://[{host}]:{selected_port}" if ":" in host else f"http://{host}:{selected_port}"
 
     print(f"Starting Z-Vision Generator Web UI at {url}")
 

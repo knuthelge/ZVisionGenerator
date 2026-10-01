@@ -302,7 +302,8 @@ export type WorkspacePrefill = Partial<Omit<DraftState, 'historyCollapsed' | 'la
 
 // ── Job / SSE types ────────────────────────────────────────────────────────────
 
-export type JobStatus = 'queued' | 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled';
+// 'unknown' is client-only: the server restarted and no longer has the job, so its outcome cannot be known.
+export type JobStatus = 'queued' | 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'unknown';
 
 export interface JobContext {
   id?: string;

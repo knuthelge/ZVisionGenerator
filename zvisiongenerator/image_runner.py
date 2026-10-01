@@ -250,7 +250,20 @@ def run_batch(
                             lora_paths=getattr(args, "lora_paths", None),
                             lora_weights=getattr(args, "lora_weights", None),
                         )
-                        skip.reset()
+                        # Honour pause/quit queued before this generation started (e.g. during model load).
+                        # skip/repeat have no generation to act on yet, so they are dropped.
+                        pending_action = skip.consume()
+                        if pending_action == "pause":
+                            _emit_progress(progress_callback, "job_paused", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
+                            print("\n⏸ Paused. Press any key to continue...")
+                            skip.wait_for_key()
+                            pending_action = skip.consume()
+                            _emit_progress(progress_callback, "job_resumed", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
+                            print("▶ Resumed.\n")
+                        if pending_action == "quit":
+                            print("\n⏹ Quitting batch...")
+                            _emit_progress(progress_callback, "batch_cancelled", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
+                            raise _QuitBatch()
                         _img_start = time.time()
                         _emit_progress(
                             progress_callback,

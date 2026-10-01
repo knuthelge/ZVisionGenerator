@@ -87,6 +87,24 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current).toBeNull();
   });
 
+  it('keeps the stored job id when the reload snapshot lookup fails transiently', async () => {
+    sessionStorage.setItem('ziv-active-job-id-v1', 'job-503');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503, statusText: 'Unavailable', text: async () => 'busy' }));
+
+    await expect(jobStore.reconnectActiveJob()).resolves.toBe(false);
+
+    expect(readActiveJobId()).toBe('job-503');
+  });
+
+  it('forgets the stored job id when the server no longer knows the job on reload', async () => {
+    sessionStorage.setItem('ziv-active-job-id-v1', 'job-404');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, statusText: 'Not Found', text: async () => 'Unknown job' }));
+
+    await expect(jobStore.reconnectActiveJob()).resolves.toBe(false);
+
+    expect(readActiveJobId()).toBeNull();
+  });
+
   it('reconnects a stored active job from snapshot lookup and preserves continuity state', async () => {
     sessionStorage.setItem('ziv-active-job-id-v1', 'job-reconnect');
     const fetchMock = vi.fn().mockResolvedValue({
@@ -364,6 +382,120 @@ describe('jobStore reconnect contract', () => {
       expect(jobStore.current?.outputs).toEqual([output]);
       expect(jobStore.current?.status).toBe(testCase.terminal.replace('job_', ''));
     }
+  });
+
+  describe('when the event stream closes permanently', () => {
+    function startAndLoseStream(jobId: string): void {
+      jobStore.startJob({ job_id: jobId, workflow: 'txt2img', prompt: 'p', model: 'zit', runs: 1, created_at: '' });
+      (globalThis.EventSource as unknown as { lastInstance: { emitFatalError: () => void } }).lastInstance.emitFatalError();
+    }
+
+    function snapshot(jobId: string, status: string, extra: Record<string, unknown> = {}) {
+      return {
+        ok: true,
+        json: async () => ({ id: jobId, job_id: jobId, workflow: 'txt2img', job_type: 'txt2img', status, prompt: 'p', model: 'zit', runs: 1, created_at: '', event_count: 1, paused: false, supported_controls: [], ...extra }),
+      };
+    }
+
+    it('ends the job neutrally (not as failed) when the server no longer knows it', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404, statusText: 'Not Found', text: async () => 'Unknown job' }));
+      const onFailed = vi.fn();
+      const onLost = vi.fn();
+      const detach = jobStore.subscribeLifecycle({ onFailed, onLost });
+
+      startAndLoseStream('lost-job');
+
+      await vi.waitFor(() => expect(onLost).toHaveBeenCalledOnce());
+      expect(jobStore.current?.status).toBe('unknown');
+      expect(jobStore.current?.message).toContain('Check the gallery');
+      expect(jobStore.isRunning).toBe(false);
+      expect(onFailed).not.toHaveBeenCalled();
+      expect(readActiveJobId()).toBeNull();
+      detach();
+    });
+
+    it('keeps a running job and retries when the snapshot lookup fails transiently', async () => {
+      vi.useFakeTimers();
+      try {
+        const fetchMock = vi.fn()
+          .mockResolvedValueOnce({ ok: false, status: 503, statusText: 'Unavailable', text: async () => 'busy' })
+          .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+          .mockResolvedValue(snapshot('flaky-job', 'completed'));
+        vi.stubGlobal('fetch', fetchMock);
+        const onFailed = vi.fn();
+        const detach = jobStore.subscribeLifecycle({ onFailed });
+
+        startAndLoseStream('flaky-job');
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(jobStore.current?.status).toBe('running');
+        expect(readActiveJobId()).toBe('flaky-job');
+
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(jobStore.current?.status).toBe('running');
+
+        await vi.advanceTimersByTimeAsync(2000);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(jobStore.current?.status).toBe('completed');
+        expect(onFailed).not.toHaveBeenCalled();
+        detach();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('backs off instead of reconnecting in a tight loop when the stream keeps failing', async () => {
+      vi.useFakeTimers();
+      try {
+        const fetchMock = vi.fn().mockResolvedValue(snapshot('loop-job', 'running'));
+        vi.stubGlobal('fetch', fetchMock);
+        const source = () => (globalThis.EventSource as unknown as { lastInstance: { emitFatalError: () => void } }).lastInstance;
+
+        startAndLoseStream('loop-job');
+        await vi.advanceTimersByTimeAsync(0);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        source().emitFatalError();
+        await vi.advanceTimersByTimeAsync(999);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+
+        source().emitFatalError();
+        await vi.advanceTimersByTimeAsync(1999);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(jobStore.isRunning).toBe(true);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('adopts a terminal snapshot status', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(snapshot('done-job', 'completed')));
+      const onComplete = vi.fn();
+      const detach = jobStore.subscribeLifecycle({ onComplete });
+
+      startAndLoseStream('done-job');
+
+      await vi.waitFor(() => expect(jobStore.current?.status).toBe('completed'));
+      expect(onComplete).toHaveBeenCalledOnce();
+      detach();
+    });
+
+    it('reattaches to a job that is still running', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(snapshot('alive-job', 'running')));
+      const before = (globalThis.EventSource as unknown as { instances: unknown[] }).instances.length;
+
+      startAndLoseStream('alive-job');
+
+      await vi.waitFor(() => expect((globalThis.EventSource as unknown as { instances: unknown[] }).instances.length).toBe(before + 2));
+      expect(jobStore.current?.status).toBe('running');
+      expect(jobStore.isRunning).toBe(true);
+    });
   });
 });
 

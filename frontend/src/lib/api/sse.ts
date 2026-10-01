@@ -20,6 +20,8 @@ export function connectJobSSE(
     onJobResumed?: SSEEventHandler;
     onStatus?: (type: string, data: SSEEvent) => void;
     onClose?: () => void;
+    /** The stream closed for good without a terminal event (e.g. 404 after a server restart or job pruning). */
+    onStreamLost?: () => void;
   }
 ): SSESubscription {
   const es = new EventSource(`/jobs/${jobId}/events`);
@@ -87,8 +89,13 @@ export function connectJobSSE(
   });
 
   // EventSource reconnects automatically and sends Last-Event-ID after a
-  // transient failure. Only explicit or terminal closure ends the stream.
-  es.onerror = () => {};
+  // transient failure. A non-200 response instead closes it permanently
+  // (readyState CLOSED, no retry), so hand recovery to the caller.
+  es.onerror = () => {
+    if (closed || es.readyState !== EventSource.CLOSED) return;
+    close();
+    handlers.onStreamLost?.();
+  };
 
   return { close };
 }
