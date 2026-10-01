@@ -424,3 +424,133 @@ def test_persist_writable_config_patch_clears_output_dir_override(monkeypatch, t
             "default_models": {"image": "zit", "video": "ltx-8"},
         },
     }
+
+
+def test_image_inventory_does_not_probe_video_aliases(tmp_path):
+    """Video aliases are recognised offline; probing them as image repos cost a Hub request per page load."""
+    probed: list[str] = []
+
+    def _detect(path: str) -> ImageModelInfo:
+        probed.append(path)
+        return ImageModelInfo(family="zimage", is_distilled=False, size=None)
+
+    inventory = model_inventory_module.discover_image_inventory(
+        {"model_aliases": {"ltx-8": "dgrauet/ltx-2.3-mlx-q8", "zit": "Tongyi-MAI/Z-Image-Turbo"}},
+        tmp_path,
+        list_installed=lambda _data_dir: [],
+        resolve_alias_path=lambda name, **_kwargs: {"ltx-8": "dgrauet/ltx-2.3-mlx-q8", "zit": "Tongyi-MAI/Z-Image-Turbo"}[name],
+        detect_model=_detect,
+    )
+
+    assert probed == ["Tongyi-MAI/Z-Image-Turbo"]
+    assert [entry.name for entry in inventory] == ["zit"]
+
+
+def _persist_current() -> SimpleNamespace:
+    return SimpleNamespace(
+        image_model_options=("zit",),
+        video_model_options=("ltx-8",),
+        app_config={"generation": {"default_ratio": "2:3"}},
+        image_ratios=("2:3",),
+        image_size_options={"2:3": ("m", "l")},
+    )
+
+
+def test_concurrent_config_saves_do_not_drop_each_others_changes(monkeypatch, tmp_path):
+    """Web handlers run in worker threads; overlapping read-modify-write saves must both land."""
+    import threading
+    import time
+
+    import yaml
+
+    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+    real_read = config_contract_module.read_user_config_override
+
+    def _slow_read():
+        payload = real_read()
+        time.sleep(0.05)  # widen the window between read and write
+        return payload
+
+    monkeypatch.setattr(config_contract_module, "read_user_config_override", _slow_read)
+    patches = [{"ui.default_models.image": "zit"}, {"ui.default_models.video": "ltx-8"}, {"generation.default_size": "l"}]
+    threads = [threading.Thread(target=config_contract_module.persist_writable_config_patch, args=(patch, _persist_current())) for patch in patches]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    saved = yaml.safe_load((tmp_path / "config.yaml").read_text(encoding="utf-8"))
+    assert saved == {"ui": {"default_models": {"image": "zit", "video": "ltx-8"}}, "generation": {"default_size": "l"}}
+
+
+def test_user_config_write_is_atomic(monkeypatch, tmp_path):
+    """A failed write must leave the previous file intact and no temp files behind (never a truncated file)."""
+    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+    config_contract_module.write_user_config_override({"ui": {"output_dir": "/keep"}})
+    original = (tmp_path / "config.yaml").read_text(encoding="utf-8")
+
+    def _boom(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(type(tmp_path), "replace", _boom)
+    with pytest.raises(OSError, match="disk full"):
+        config_contract_module.write_user_config_override({"ui": {"output_dir": "/new"}})
+
+    assert (tmp_path / "config.yaml").read_text(encoding="utf-8") == original
+    assert [path.name for path in tmp_path.iterdir() if path.name.endswith(".tmp")] == []
+
+
+def test_image_inventory_still_probes_local_paths_containing_ltx(tmp_path):
+    """Only remote video repos are skipped; a local image model under e.g. /Volumes/Voltx must still be detected."""
+    local_dir = str(tmp_path / "Voltx" / "my-image-model")
+    inventory = model_inventory_module.discover_image_inventory(
+        {"model_aliases": {"mine": local_dir}},
+        tmp_path,
+        list_installed=lambda _data_dir: [],
+        resolve_alias_path=lambda _name, **_kwargs: local_dir,
+        detect_model=lambda _path: ImageModelInfo(family="zimage", is_distilled=False, size=None),
+    )
+    assert [entry.name for entry in inventory] == ["mine"]
+
+
+def test_user_config_write_preserves_symlink_and_permissions(monkeypatch, tmp_path):
+    """Saving from the Web UI must not replace a symlinked config.yaml or widen its permissions."""
+    import stat
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    target = tmp_path / "dotfiles" / "ziv-config.yaml"
+    target.parent.mkdir()
+    target.write_text("ui: {}\n", encoding="utf-8")
+    target.chmod(0o600)
+    (data_dir / "config.yaml").symlink_to(target)
+    monkeypatch.setenv("ZIV_DATA_DIR", str(data_dir))
+
+    config_contract_module.write_user_config_override({"ui": {"output_dir": "/new"}})
+
+    assert (data_dir / "config.yaml").is_symlink()
+    assert "/new" in target.read_text(encoding="utf-8")
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+def test_user_config_temp_file_never_has_wider_permissions(monkeypatch, tmp_path):
+    """The temp file must carry the target's mode before it holds the config, so a 0600 file never leaks as 0644."""
+    import stat
+    from pathlib import Path
+
+    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+    config = tmp_path / "config.yaml"
+    config.write_text("ui: {}\n", encoding="utf-8")
+    config.chmod(0o600)
+    seen: list[tuple[int, str]] = []
+    real_replace = Path.replace
+
+    def _capture(self, target):
+        seen.append((stat.S_IMODE(self.stat().st_mode), self.read_text(encoding="utf-8")))
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", _capture)
+    config_contract_module.write_user_config_override({"ui": {"output_dir": "/x"}})
+
+    assert seen and seen[0][0] == 0o600 and "/x" in seen[0][1]
+    assert stat.S_IMODE(config.stat().st_mode) == 0o600

@@ -13,8 +13,8 @@ from zvisiongenerator.backends import get_video_backend
 from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
 from zvisiongenerator.utils.config import load_config, resolve_video_defaults, select_ratio_size_defaults
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
-from zvisiongenerator.utils.lora import parse_lora_arg
-from zvisiongenerator.utils.paths import is_remote_lora_reference, resolve_lora_path, resolve_model_path
+from zvisiongenerator.utils.lora import resolve_lora_references
+from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.prompts import load_prompts_file
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.video_runner import run_video_batch
@@ -168,14 +168,10 @@ def main(*, prog: str = "ziv-video") -> None:
     lora_paths, lora_weights = None, None
     if args.lora is not None:
         try:
-            parsed = parse_lora_arg(args.lora)
+            # The diffusers backend also accepts a LoRA directory, so require existence rather than a file.
+            lora_paths, lora_weights = resolve_lora_references(args.lora, require_file=False)
         except ValueError as e:
             parser.error(str(e))
-        remote_loras = [name for name, _ in parsed if is_remote_lora_reference(name)]
-        if remote_loras:
-            parser.error(f"Remote HuggingFace LoRA references are not supported: {', '.join(remote_loras)}. Import the LoRA locally or pass a local LoRA path.")
-        lora_paths = [resolve_lora_path(name) for name, _ in parsed]
-        lora_weights = [weight for _, weight in parsed]
     args.lora_paths = lora_paths
     args.lora_weights = lora_weights
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import uuid
 
+from zvisiongenerator.utils.atomic_write import write_text_atomic
 from zvisiongenerator.utils.prompts import PromptFileInspection, PromptFileOption, inspect_prompts_file, inspect_prompts_text
 
 
@@ -37,7 +37,7 @@ def write_prompt_file(path: str, raw_text: str, *, accepted_extensions: tuple[st
     """Validate and atomically replace a prompt file with raw YAML text."""
     normalized_path = normalize_prompt_file_path(path, accepted_extensions=accepted_extensions)
     inspection = inspect_prompts_text(raw_text, source_name=str(normalized_path))
-    _write_atomic_text(normalized_path, raw_text)
+    write_text_atomic(normalized_path, raw_text)
     return PromptFileDocument(path=str(normalized_path), options=_serialize_options(inspection.options))
 
 
@@ -109,13 +109,3 @@ def _build_option_label(option: PromptFileOption) -> str:
     if len(excerpt) > 60:
         excerpt = f"{excerpt[:57].rstrip()}..."
     return f"{option.set_name} #{ordinal} · {excerpt}"
-
-
-def _write_atomic_text(path: Path, raw_text: str) -> None:
-    temp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
-    try:
-        temp_path.write_text(raw_text, encoding="utf-8")
-        temp_path.replace(path)
-    finally:
-        if temp_path.exists():
-            temp_path.unlink()

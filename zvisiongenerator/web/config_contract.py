@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from zvisiongenerator.utils.atomic_write import write_text_atomic
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults
 
@@ -150,21 +152,26 @@ def build_writable_config_schema(web_config: Any) -> dict[str, Any]:
     }
 
 
+_USER_CONFIG_WRITE_LOCK = threading.RLock()
+
+
 def persist_writable_config_patch(patch: dict[str, Any], current: Any) -> None:
     """Apply a writable config patch using omitted/null/empty-string semantics."""
-    override_config = read_user_config_override()
-    fields_by_key = {field.key: field for field in WRITABLE_CONFIG_FIELDS}
-    for key, raw_value in patch.items():
-        field = fields_by_key.get(key)
-        if field is None:
-            raise ValueError(f"Unknown writable config field: {key}")
-        path = tuple(key.split("."))
-        value = _normalize_patch_value(field, raw_value)
-        if value is None:
-            _delete_nested_mapping_value(override_config, path)
-            continue
-        _set_nested_mapping_value(override_config, path, _validate_config_value(field, value, current))
-    write_user_config_override(override_config)
+    # Web handlers run in worker threads; serialise read-modify-write so concurrent saves cannot drop each other's changes.
+    with _USER_CONFIG_WRITE_LOCK:
+        override_config = read_user_config_override()
+        fields_by_key = {field.key: field for field in WRITABLE_CONFIG_FIELDS}
+        for key, raw_value in patch.items():
+            field = fields_by_key.get(key)
+            if field is None:
+                raise ValueError(f"Unknown writable config field: {key}")
+            path = tuple(key.split("."))
+            value = _normalize_patch_value(field, raw_value)
+            if value is None:
+                _delete_nested_mapping_value(override_config, path)
+                continue
+            _set_nested_mapping_value(override_config, path, _validate_config_value(field, value, current))
+        write_user_config_override(override_config)
 
 
 def read_user_config_override() -> dict[str, Any]:
@@ -184,10 +191,15 @@ def read_user_config_override() -> dict[str, Any]:
 
 
 def write_user_config_override(payload: dict[str, Any]) -> None:
-    """Write the mutable user config override file."""
+    """Atomically replace the mutable user config override file.
+
+    Readers (config loads on other request threads) see either the old or the new file, never a truncated one;
+    a symlinked config.yaml and its permissions are preserved.
+    """
     config_path = get_ziv_data_dir() / "config.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    with _USER_CONFIG_WRITE_LOCK:
+        write_text_atomic(config_path, yaml.safe_dump(payload, sort_keys=False))
 
 
 def _normalize_patch_value(field: WritableConfigField, raw_value: Any) -> ConfigValue:

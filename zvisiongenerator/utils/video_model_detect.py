@@ -47,6 +47,19 @@ def _looks_like_local_model_path(model_path: str) -> bool:
     return is_explicit_local_path(stripped)
 
 
+def is_known_video_repo(model_path: str) -> bool:
+    """Return whether *model_path* is a remote repo ID with a known video-model prefix.
+
+    Cheap and offline (no config reads); local paths never match, so a local
+    image model directory whose path happens to contain "ltx" is not misclassified.
+    """
+    stripped = model_path.strip()
+    if not stripped or _looks_like_local_model_path(stripped):
+        return False
+    lowered = stripped.lower()
+    return any(lowered.startswith(prefix) for prefix in _VIDEO_MODEL_MAP)
+
+
 def detect_video_model(model_path: str) -> VideoModelInfo:
     """Detect video model family from model path or HF repo ID.
 

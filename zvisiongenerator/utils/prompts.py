@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import warnings
 
 import yaml
 
@@ -53,10 +54,31 @@ def inspect_prompts_file(path: str) -> PromptFileInspection:
     return inspect_prompts_text(raw_text, source_name=path)
 
 
+class _PromptFileLoader(yaml.SafeLoader):
+    """SafeLoader that keeps top-level keys (prompt set names) exactly as written.
+
+    Unquoted keys such as ``2025:``, ``true:`` or ``1.10:`` would otherwise load as int/bool/float and be
+    renamed (``True``, ``1.1``) in filenames and labels.
+    """
+
+    def construct_document(self, node: yaml.Node) -> Any:
+        if isinstance(node, yaml.MappingNode):
+            seen: set[str] = set()
+            for key_node, _ in node.value:
+                if isinstance(key_node, yaml.ScalarNode) and key_node.tag != "tag:yaml.org,2002:merge":
+                    key_node.tag = "tag:yaml.org,2002:str"
+                    # YAML keeps only the last of two equal keys (e.g. 1: and "1":); keep that behaviour so existing
+                    # files still load, but say so instead of dropping a set silently.
+                    if key_node.value in seen:
+                        warnings.warn(f"Duplicate prompt set name '{key_node.value}' (line {key_node.start_mark.line + 1}); only the last one is used.", stacklevel=2)
+                    seen.add(key_node.value)
+        return super().construct_document(node)
+
+
 def inspect_prompts_text(raw_text: str, *, source_name: str) -> PromptFileInspection:
     """Inspect raw prompt-file YAML text using the shared CLI parsing semantics."""
     try:
-        raw_data = yaml.safe_load(raw_text)
+        raw_data = yaml.load(raw_text, Loader=_PromptFileLoader)  # noqa: S506 - SafeLoader subclass
     except yaml.YAMLError as exc:
         raise ValueError(f"Failed to parse prompts file '{source_name}': {exc}") from exc
 
@@ -94,9 +116,13 @@ def _parse_prompt_mapping(raw_data: Any, source_name: str) -> tuple[dict[str, li
         raise ValueError(f"'snippets' block in {source_name} must be a mapping, got {type(snippets).__name__}.")
 
     raw_sets: dict[str, list[dict[str, Any]]] = {}
-    for set_name, prompts in raw_data.items():
-        if set_name == "snippets":
+    for raw_set_name, prompts in raw_data.items():
+        if raw_set_name == "snippets":
             continue
+        # Top-level keys load as written (see _PromptFileLoader); str() only covers non-scalar keys.
+        set_name = str(raw_set_name)
+        if not set_name.strip():
+            raise ValueError(f"Prompt set name in {source_name} is empty. Give the set a name.")
         if not isinstance(prompts, list):
             raise ValueError(f"Prompt set '{set_name}' in {source_name} must be a list of mappings, got {type(prompts).__name__}.")
         validated_entries: list[dict[str, Any]] = []

@@ -35,6 +35,8 @@ The base package install includes the Web UI runtime, so `ziv ui` and `ziv-ui` w
 | `--port` | `8080` | Preferred local port; the app chooses the next available port if this one is busy |
 | `--no-browser` | off | Start the server without opening a browser tab |
 
+The server only answers requests addressed to an IP address, `localhost`, the `--host` value, or (when bound to `0.0.0.0`, `::` or a LAN IP) this machine's hostname in both bare and `.local` form, and rejects state-changing requests from other sites. This protects against DNS-rebinding and cross-site attacks from pages open in the same browser. To reach the UI through another hostname, list it in `ZIV_UI_ALLOWED_HOSTS` (comma-separated), for example `ZIV_UI_ALLOWED_HOSTS=studio.lan ziv-ui --host 0.0.0.0`.
+
 ## `ziv-image` — Image Generation
 
 | Argument | Default | Description |

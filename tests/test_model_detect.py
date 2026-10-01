@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
@@ -71,7 +71,19 @@ class TestDetectModelType:
             mock_download,
         ):
             info = detect_image_model("org/some-model")
-        mock_download.assert_called_once_with(repo_id="org/some-model", filename="model_index.json")
+        mock_download.assert_called_once_with(repo_id="org/some-model", filename="model_index.json", local_files_only=True)
+        assert info.family == "zimage"
+
+    def test_huggingface_repo_id_falls_back_to_network_when_not_cached(self, tmp_path):
+        index_file = tmp_path / "model_index.json"
+        index_file.write_text(json.dumps({"_class_name": "ZImagePipeline"}))
+        mock_download = MagicMock(side_effect=[FileNotFoundError("not cached"), str(index_file)])
+        with patch("huggingface_hub.hf_hub_download", mock_download):
+            info = detect_image_model("org/some-model")
+        assert mock_download.call_args_list == [
+            call(repo_id="org/some-model", filename="model_index.json", local_files_only=True),
+            call(repo_id="org/some-model", filename="model_index.json"),
+        ]
         assert info.family == "zimage"
 
     # ── Local path error handling ──
@@ -180,7 +192,7 @@ class TestRelativePathDetection:
         mock_download = MagicMock(return_value=str(index_file))
         with patch("huggingface_hub.hf_hub_download", mock_download):
             info = detect_image_model("black-forest-labs/some-model")
-        mock_download.assert_called_once_with(repo_id="black-forest-labs/some-model", filename="model_index.json")
+        mock_download.assert_called_once_with(repo_id="black-forest-labs/some-model", filename="model_index.json", local_files_only=True)
         assert info.family == "zimage"
 
     def test_hf_repo_id_no_local_dir_passes(self, tmp_path):
@@ -190,7 +202,7 @@ class TestRelativePathDetection:
         mock_download = MagicMock(return_value=str(index_file))
         with patch("huggingface_hub.hf_hub_download", mock_download):
             info = detect_image_model("someorg/some-model")
-        mock_download.assert_called_once_with(repo_id="someorg/some-model", filename="model_index.json")
+        mock_download.assert_called_once_with(repo_id="someorg/some-model", filename="model_index.json", local_files_only=True)
         assert info.family == "zimage"
 
     def test_backslash_path_raises(self):

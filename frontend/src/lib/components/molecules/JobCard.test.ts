@@ -116,7 +116,7 @@ describe('JobCard', () => {
     expect(onresume).toHaveBeenCalledWith('job-card');
   });
 
-  it.each(['running', 'paused', 'failed', 'cancelled', 'completed'] as const)('keeps the run position separate from the %s status', (status) => {
+  it.each(['running', 'paused', 'failed', 'cancelled', 'unknown', 'completed'] as const)('keeps the run position separate from the %s status', (status) => {
     component = mount(JobCard, { target, props: { job: makeJob({ runs: 3, batchIndex: 1, status }) } });
     flushSync();
     expect(target.textContent?.match(/Run 2 of 3/g)).toHaveLength(1);

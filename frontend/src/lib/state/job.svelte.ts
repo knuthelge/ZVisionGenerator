@@ -1,16 +1,25 @@
 import type { ActiveJobState, JobContext, JobSnapshot, GalleryAsset, StepEvent, SSEEvent } from '$lib/types';
 import { connectJobSSE } from '$lib/api/sse';
 import type { SSESubscription } from '$lib/api/sse';
+import { ApiError } from '$lib/api/client';
 import { getJobSnapshot } from '$lib/api/workspace';
 import { clearActiveJobId, readActiveJobId, writeActiveJobId } from './activeJobStorage';
 
 let _job = $state<ActiveJobState | null>(null);
 let _subscription: SSESubscription | null = null;
+// Consecutive stream-loss recoveries for the current job; reset whenever an event arrives.
+let _recoveryAttempts = 0;
+let _recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+
+const RECOVERY_BASE_DELAY_MS = 1000;
+const RECOVERY_MAX_DELAY_MS = 30000;
 
 export type JobLifecycleCallbacks = {
   onComplete?: (outputs: GalleryAsset[]) => void | Promise<void>;
   onFailed?: () => void | Promise<void>;
   onCancelled?: () => void | Promise<void>;
+  /** The server no longer knows the job (pruned after finishing, or restarted); its outcome is unknown. */
+  onLost?: (outputs: GalleryAsset[]) => void | Promise<void>;
 };
 
 type ReconnectJobOptions = {
@@ -159,10 +168,18 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
 }
 
 function isTerminalStatus(status: string): boolean {
-  return status === 'completed' || status === 'failed' || status === 'cancelled';
+  return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'unknown';
+}
+
+function cancelRecovery(): void {
+  if (_recoveryTimer !== null) clearTimeout(_recoveryTimer);
+  _recoveryTimer = null;
+  _recoveryAttempts = 0;
 }
 
 function closeSubscription(): void {
+  if (_recoveryTimer !== null) clearTimeout(_recoveryTimer);
+  _recoveryTimer = null;
   const subscription = _subscription;
   _subscription = null;
   subscription?.close();
@@ -200,9 +217,11 @@ function notifyLifecycle(
     try {
       const result = callbackName === 'onComplete'
         ? registration.callbacks.onComplete?.(outputs)
-        : callbackName === 'onFailed'
-          ? registration.callbacks.onFailed?.()
-          : registration.callbacks.onCancelled?.();
+        : callbackName === 'onLost'
+          ? registration.callbacks.onLost?.(outputs)
+          : callbackName === 'onFailed'
+            ? registration.callbacks.onFailed?.()
+            : registration.callbacks.onCancelled?.();
       if (result) {
         void Promise.resolve(result).catch((error: unknown) => {
           reportLifecycleError(callbackName, error);
@@ -218,6 +237,7 @@ function attachJobEvents(jobId: string): void {
   closeSubscription();
   _subscription = connectJobSSE(jobId, {
     onStep(event) {
+      _recoveryAttempts = 0;
       if (!_job) return;
       const ev = event as unknown as StepEvent;
       _job = {
@@ -256,24 +276,13 @@ function attachJobEvents(jobId: string): void {
       };
     },
     onJobCompleted(event) {
-      if (!_job) return;
-      const ev = event as { outputs?: unknown };
-      const terminalOutputs = validTerminalOutputs(ev.outputs);
-      _job = { ..._job, status: 'completed', paused: false, outputs: terminalOutputs ?? dedupeOutputs(_job.outputs), message: 'Job completed.' };
-      clearActiveJobId(_job.job_id);
-      notifyLifecycle('onComplete', _job.outputs);
+      finishCompleted((event as { outputs?: unknown }).outputs);
     },
     onJobFailed() {
-      if (!_job) return;
-      _job = { ..._job, status: 'failed', paused: false, message: 'Job failed.' };
-      clearActiveJobId(_job.job_id);
-      notifyLifecycle('onFailed');
+      finishFailed('Job failed.');
     },
     onJobCancelled() {
-      if (!_job) return;
-      _job = { ..._job, status: 'cancelled', paused: false, message: 'Job stopped.' };
-      clearActiveJobId(_job.job_id);
-      notifyLifecycle('onCancelled');
+      finishCancelled();
     },
     onJobPaused() {
       if (!_job) return;
@@ -283,11 +292,99 @@ function attachJobEvents(jobId: string): void {
       if (!_job) return;
       _job = { ..._job, status: 'running', paused: false, message: 'Job resumed.' };
     },
-    onStatus: applyStatusEvent,
+    onStatus(type, event) {
+      _recoveryAttempts = 0;
+      applyStatusEvent(type, event);
+    },
     onClose() {
       _subscription = null;
+    },
+    onStreamLost() {
+      scheduleRecovery(jobId);
     }
   });
+}
+
+function finishCompleted(outputs: unknown): void {
+  if (!_job) return;
+  const terminalOutputs = validTerminalOutputs(outputs);
+  _job = { ..._job, status: 'completed', paused: false, outputs: terminalOutputs ?? dedupeOutputs(_job.outputs), message: 'Job completed.' };
+  clearActiveJobId(_job.job_id);
+  notifyLifecycle('onComplete', _job.outputs);
+}
+
+function finishFailed(message: string): void {
+  if (!_job) return;
+  _job = { ..._job, status: 'failed', paused: false, message };
+  clearActiveJobId(_job.job_id);
+  notifyLifecycle('onFailed');
+}
+
+function finishCancelled(): void {
+  if (!_job) return;
+  _job = { ..._job, status: 'cancelled', paused: false, message: 'Job stopped.' };
+  clearActiveJobId(_job.job_id);
+  notifyLifecycle('onCancelled');
+}
+
+function isCurrentLiveJob(jobId: string): boolean {
+  return _job !== null && _job.job_id === jobId && !isTerminalStatus(_job.status);
+}
+
+/** Retry recovery with exponential backoff; the first attempt after a healthy stream runs immediately. */
+function scheduleRecovery(jobId: string): void {
+  const delay = _recoveryAttempts === 0 ? 0 : Math.min(RECOVERY_BASE_DELAY_MS * 2 ** (_recoveryAttempts - 1), RECOVERY_MAX_DELAY_MS);
+  _recoveryAttempts += 1;
+  if (_recoveryTimer !== null) clearTimeout(_recoveryTimer);
+  _recoveryTimer = setTimeout(() => {
+    _recoveryTimer = null;
+    void recoverLostStream(jobId);
+  }, delay);
+}
+
+function finishLost(): void {
+  if (!_job) return;
+  // The server keeps the final status of pruned jobs, so a 404 means it restarted: the outcome is unknown.
+  _job = {
+    ..._job,
+    status: 'unknown',
+    paused: false,
+    outputs: dedupeOutputs(_job.outputs),
+    message: 'Outcome unknown: the server restarted and no longer has this job. Check the gallery for its results.',
+  };
+  clearActiveJobId(_job.job_id);
+  notifyLifecycle('onLost', _job.outputs);
+}
+
+/** Resolve the job's real state after its event stream closed without a terminal event. */
+async function recoverLostStream(jobId: string): Promise<void> {
+  if (!isCurrentLiveJob(jobId)) return;
+  let snapshot: JobSnapshot;
+  try {
+    snapshot = await getJobSnapshot(jobId);
+  } catch (error) {
+    // Ignore if the store moved on (new job, cleared, or already terminal) while the snapshot was loading.
+    if (!isCurrentLiveJob(jobId)) return;
+    if (error instanceof ApiError && error.status === 404) {
+      finishLost();
+    } else {
+      // Transient (network, 5xx, ...): keep the job and its stored id so a later attempt or reload can reattach.
+      _job = { ..._job!, message: 'Connection to the job lost. Retrying...' };
+      scheduleRecovery(jobId);
+    }
+    return;
+  }
+  if (!isCurrentLiveJob(jobId)) return;
+  if (snapshot.status === 'completed') {
+    finishCompleted(snapshot.outputs);
+  } else if (snapshot.status === 'cancelled') {
+    finishCancelled();
+  } else if (snapshot.status === 'failed') {
+    finishFailed('Job failed.');
+  } else {
+    // Still running: reattach. The attempt count persists until an event arrives, so a stream that keeps failing backs off.
+    connectSnapshot(snapshot);
+  }
 }
 
 export const jobStore = {
@@ -306,6 +403,7 @@ export const jobStore = {
   },
 
   startJob(ctx: JobContext): void {
+    cancelRecovery();
     _job = makeInitialJobState(ctx);
     writeActiveJobId(ctx.job_id);
     attachJobEvents(ctx.job_id);
@@ -331,14 +429,16 @@ export const jobStore = {
         return false;
       }
       return connectSnapshot(snapshot);
-    } catch {
-      clearActiveJobId(jobId);
+    } catch (error) {
+      // Only forget the job when the server says it does not exist; keep it on transient failures so a later reload can reattach.
+      if (error instanceof ApiError && error.status === 404) clearActiveJobId(jobId);
       return false;
     }
   },
 
   clearJob(): void {
     if (_job) clearActiveJobId(_job.job_id);
+    cancelRecovery();
     closeSubscription();
     _job = null;
   }

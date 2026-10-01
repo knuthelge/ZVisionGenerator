@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import textwrap
 
+import pytest
+
 from zvisiongenerator.utils.prompts import inspect_prompts_file, load_prompts_file
 
 
@@ -135,3 +137,37 @@ def test_inspect_prompts_preserves_stable_source_indexes_for_active_options(tmp_
         ("portrait:0", "hero. cinematic lighting", None),
         ("portrait:2", "second active", "blurry"),
     ]
+
+
+def test_set_names_are_kept_exactly_as_written(tmp_path):
+    """Unquoted YAML keys like 2025:, true: or 1.10: must not be renamed (True, 1.1) or crash filename generation."""
+    yaml_content = textwrap.dedent("""\
+        2025:
+          - prompt: "year prompt"
+        true:
+          - prompt: "bool prompt"
+        1.10:
+          - prompt: "float prompt"
+        null:
+          - prompt: "null prompt"
+    """)
+    f = tmp_path / "prompts.yaml"
+    f.write_text(yaml_content)
+    result = load_prompts_file(str(f))
+    assert set(result) == {"2025", "true", "1.10", "null"}
+
+
+def test_duplicate_set_names_warn_and_keep_last(tmp_path):
+    """Duplicate names (e.g. 1: and "1":) keep YAML's last-wins behaviour so existing files load, with a warning."""
+    f = tmp_path / "prompts.yaml"
+    f.write_text('1:\n  - prompt: "a"\n"1":\n  - prompt: "b"\n')
+    with pytest.warns(UserWarning, match="Duplicate prompt set name '1'"):
+        result = load_prompts_file(str(f))
+    assert [prompt for prompt, _ in result["1"]] == ["b"]
+
+
+def test_empty_set_name_raises(tmp_path):
+    f = tmp_path / "prompts.yaml"
+    f.write_text('"":\n  - prompt: "a"\n')
+    with pytest.raises(ValueError, match="Prompt set name .* is empty"):
+        load_prompts_file(str(f))

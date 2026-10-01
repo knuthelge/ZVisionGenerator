@@ -26,9 +26,11 @@ export default defineConfig({
     }
   },
   server: {
+    // Object form with changeOrigin: false keeps the browser's Host header, so it matches the Origin header
+    // the backend's request guard checks on writes (the string shorthand sets changeOrigin: true).
     proxy: {
-      '/api': 'http://localhost:8765',
-      '/jobs': 'http://localhost:8765'
+      '/api': { target: 'http://localhost:8765', changeOrigin: false },
+      '/jobs': { target: 'http://localhost:8765', changeOrigin: false }
     }
   }
 });

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -10,6 +11,7 @@ import pytest
 
 import zvisiongenerator.image_cli as image_cli
 import zvisiongenerator.utils as utils
+import zvisiongenerator.utils.lora as lora_utils
 import zvisiongenerator.video_cli as video_cli
 from zvisiongenerator.utils.lora import parse_lora_arg
 
@@ -35,9 +37,9 @@ def _patch_image_main_dependencies(monkeypatch: pytest.MonkeyPatch) -> MagicMock
     monkeypatch.setattr(image_cli, "validate_scheduler", lambda *args, **kwargs: None)
     monkeypatch.setattr(image_cli, "detect_image_model", lambda _: MagicMock(family="zimage", size=None))
     monkeypatch.setattr(image_cli, "get_backend", lambda: backend)
-    monkeypatch.setattr(image_cli, "resolve_lora_path", lambda name: f"/resolved/{Path(name).name}")
+    monkeypatch.setattr(lora_utils, "resolve_lora_path", lambda name: f"/resolved/{Path(name).name}")
     monkeypatch.setattr(image_cli, "run_batch", MagicMock())
-    monkeypatch.setattr(image_cli.os.path, "isfile", lambda _path: True)
+    monkeypatch.setattr(lora_utils.os.path, "isfile", lambda _path: True)
     return backend
 
 
@@ -64,7 +66,8 @@ def _patch_video_main_dependencies(monkeypatch: pytest.MonkeyPatch) -> MagicMock
         "detect_video_model",
         lambda _: MagicMock(family="ltx", supports_i2v=True, backend="stub-video-backend", resolution_alignment=32, frame_alignment=8),
     )
-    monkeypatch.setattr(video_cli, "resolve_lora_path", lambda name: f"/resolved/{Path(name).name}")
+    monkeypatch.setattr(lora_utils, "resolve_lora_path", lambda name: f"/resolved/{Path(name).name}")
+    monkeypatch.setattr(lora_utils.os.path, "exists", lambda path: str(path).startswith("/resolved/") or os.path.lexists(path))
     monkeypatch.setattr(video_cli, "get_video_backend", lambda _backend_name: backend)
     monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args: object())
     monkeypatch.setattr(video_cli, "run_video_batch", MagicMock())

@@ -1,5 +1,16 @@
 const BASE = '';
 
+/** Non-2xx API response; `status` lets callers tell "gone" (404) from transient failures. */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     method,
@@ -9,7 +20,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
   if (!response.ok) {
     const text = await response.text().catch(() => response.statusText);
-    throw new Error(`${method} ${path} → ${response.status}: ${text}`);
+    throw new ApiError(`${method} ${path} → ${response.status}: ${text}`, response.status);
   }
 
   return response.json() as Promise<T>;

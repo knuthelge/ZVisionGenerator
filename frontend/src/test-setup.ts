@@ -58,6 +58,12 @@ class MockEventSource {
   emitError(): void {
     this.onerror?.(new Event('error'));
   }
+
+  // Test helper: simulate a permanent failure (e.g. 404) — the browser sets CLOSED and does not retry.
+  emitFatalError(): void {
+    this.readyState = MockEventSource.CLOSED;
+    this.onerror?.(new Event('error'));
+  }
 }
 
 globalThis.EventSource = MockEventSource as unknown as typeof EventSource;

@@ -11,10 +11,10 @@ from pathlib import Path
 
 from zvisiongenerator.backends import get_backend
 from zvisiongenerator.image_runner import run_batch
-from zvisiongenerator.utils.config import load_config, resolve_defaults, select_ratio_size_defaults, validate_scheduler
+from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
-from zvisiongenerator.utils.lora import parse_lora_arg
-from zvisiongenerator.utils.paths import is_remote_lora_reference, resolve_lora_path, resolve_model_path
+from zvisiongenerator.utils.lora import resolve_lora_references
+from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.prompts import load_prompts_file
 
 
@@ -166,18 +166,9 @@ def main(*, prog: str = "ziv-image") -> None:
     lora_paths, lora_weights = None, None
     if args.lora is not None:
         try:
-            parsed = parse_lora_arg(args.lora)
+            lora_paths, lora_weights = resolve_lora_references(args.lora, require_file=True)
         except ValueError as e:
             parser.error(str(e))
-        remote_loras = [name for name, _ in parsed if is_remote_lora_reference(name)]
-        if remote_loras:
-            parser.error(f"Remote HuggingFace LoRA references are not supported: {', '.join(remote_loras)}. Import the LoRA locally or pass a local LoRA path.")
-        lora_paths = [resolve_lora_path(name) for name, _ in parsed]
-        lora_weights = [weight for _, weight in parsed]
-    if lora_paths:
-        for p in lora_paths:
-            if not os.path.isfile(p):
-                parser.error(f"LoRA file not found: {p}")
 
     try:
         model_info = detect_image_model(args.model)
@@ -210,8 +201,7 @@ def main(*, prog: str = "ziv-image") -> None:
     except ValueError as e:
         parser.error(str(e))
     if args.upscale and args.upscale_steps is None:
-        resolved_upscale_steps = defaults.get("upscale_steps")
-        args.upscale_steps = resolved_upscale_steps if resolved_upscale_steps is not None else max(1, args.steps // 2)
+        args.upscale_steps = resolve_upscale_steps(defaults, args.steps)
     if args.image_path is not None and not os.path.isfile(args.image_path):
         parser.error(f"Reference image not found: {args.image_path}")
     if not (0.0 <= args.image_strength <= 1.0):
