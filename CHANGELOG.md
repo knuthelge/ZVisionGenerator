@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-01
+
+### Security
+- The Web UI server now rejects requests addressed to unknown hostnames (DNS rebinding) and state-changing requests from other sites, so a page open in the same browser can no longer change settings, queue jobs or read files through the UI. IP addresses, `localhost`, the `--host` name and, for LAN binds, the machine's name are allowed; add others with `ZIV_UI_ALLOWED_HOSTS`
+- `/media` now serves only gallery images and videos
+- Fixed a command-injection issue in the macOS folder picker when the starting folder had a crafted name
+
+### Added
+- `ZIV_UI_ALLOWED_HOSTS` environment variable (comma-separated) for reaching the Web UI through extra hostnames
+
+### Changed
+- Gallery and page loads are much faster: model detection uses the local Hugging Face cache first, video models are no longer probed as image models, and thumbnails no longer rebuild the model list
+- Native pickers, model conversion and LoRA imports no longer freeze the Web UI or its progress updates while they run, and only one picker can be open at a time
+- On Linux and Windows the file picker now runs in a separate process
+- Duplicate prompt set names now log a warning (the last one is used, as before)
+
+### Fixed
+- Stop and Pause clicked while the model is loading now take effect instead of being silently dropped
+- The Workspace no longer stays stuck on "Generating…" when a job's progress stream ends; it recovers the job's real outcome, retries brief connection problems, and shows an "unknown" outcome only if the server restarted
+- Finished jobs keep their final status after cleanup, so a page that reconnects later (e.g. after sleep) still sees the real result
+- Restarting the Web UI quickly now keeps the same port instead of silently moving to the next one; `--host ::` works
+- The Web UI now rejects remote or missing LoRAs like the CLI does, and uses the preset's default upscale steps like the CLI
+- Prompt set names such as `2025:`, `true:` or `1.10:` are kept exactly as written instead of crashing the batch
+- Settings saves are atomic and safe when made at the same time as other requests, and keep a symlinked `config.yaml` and its permissions
+- Image models stored under a path containing "ltx" no longer disappear from the model list
+
 ## [0.11.0] - 2026-09-30
 
 ### Changed
