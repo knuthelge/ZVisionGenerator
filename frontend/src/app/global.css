@@ -329,6 +329,14 @@
     border-radius: var(--radius-xl);
   }
 
+  .surface-tooltip {
+    background-color: var(--color-bg-surface);
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-md);
+    color: var(--color-text-primary);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.4);
+  }
+
   .surface-popover-option {
     color: var(--color-text-secondary);
     transition: background-color 0.15s ease, color 0.15s ease;

@@ -12,6 +12,8 @@ from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config_contract import resolve_loras_dir, resolve_models_dir, resolve_output_dir
 from zvisiongenerator.web.model_inventory import (
+    ImageInventoryEntry,
+    VideoInventoryEntry,
     discover_image_inventory,
     discover_video_inventory,
     inventory_names,
@@ -53,6 +55,8 @@ class WebUiConfig:
     scheduler_options: tuple[str, ...]
     image_size_dimensions: dict[str, dict[str, tuple[int, int]]] = field(default_factory=dict)
     quantize_options: tuple[int, ...] = _DEFAULT_QUANTIZE_OPTIONS
+    image_inventory: tuple[ImageInventoryEntry, ...] = ()
+    video_inventory: tuple[VideoInventoryEntry, ...] = ()
 
 
 def load_web_config() -> WebUiConfig:
@@ -106,6 +110,8 @@ def load_web_config() -> WebUiConfig:
         scheduler_options=tuple(app_config.get("schedulers", {}).keys()),
         image_size_dimensions={ratio: {size: (dims["width"], dims["height"]) for size, dims in size_map.items()} for ratio, size_map in image_sizes.items()},
         quantize_options=_resolve_quantize_options(ui_config),
+        image_inventory=image_inventory,
+        video_inventory=video_inventory,
     )
 
 

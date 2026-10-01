@@ -11,3 +11,4 @@ export { default as Label } from './Label.svelte';
 export { default as ToolbarSelectShell } from './ToolbarSelectShell.svelte';
 export { default as Mascot } from './Mascot.svelte';
 export { default as MascotSpot } from './MascotSpot.svelte';
+export { default as Tooltip } from './Tooltip.svelte';

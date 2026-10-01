@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 import uuid
+import warnings
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -20,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import get_backend, get_video_backend
+from zvisiongenerator.backends import get_backend, get_video_backend, release_accelerator_memory
 from zvisiongenerator.core.image_backend import ImageBackend
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
@@ -525,17 +526,24 @@ class WebRunner:
             self._jobs[record.job_id] = record
         self._publish_event(record.job_id, {"type": "job_submitted", "mode": job_type})
         progress_callback = self._make_progress_callback(record.job_id)
-        record.future = self._executor.submit(self._run_target, record.job_id, lambda: target_factory(progress_callback))
+        record.future = self._executor.submit(self._run_target, record.job_id, lambda: target_factory(progress_callback), release_memory=exclusive)
         return record.job_id
 
-    def _run_target(self, job_id: str, target: Callable[[], None]) -> None:
-        """Wrap a synchronous worker target and publish terminal events."""
+    def _run_target(self, job_id: str, target: Callable[[], None], *, release_memory: bool = True) -> None:
+        """Wrap a synchronous worker target, free accelerator memory, and publish terminal events."""
+        failure_message: str | None = None
         try:
             with _worker_runtime_context():
                 target()
         except (Exception, SystemExit) as exc:
-            message = str(exc).strip() or f"{type(exc).__name__} stopped the generation worker."
-            self._publish_event(job_id, {"type": FAILED_TERMINAL_EVENT, "message": message})
+            failure_message = str(exc).strip() or f"{type(exc).__name__} stopped the generation worker."
+
+        # Released outside the except block: the active traceback pins the worker frames (and the loaded model).
+        # Only generation jobs hold models; skipping the rest avoids clearing caches under a running generation.
+        if release_memory:
+            _release_accelerator_memory()
+        if failure_message is not None:
+            self._publish_event(job_id, {"type": FAILED_TERMINAL_EVENT, "message": failure_message})
             return
 
         record = self._get_job(job_id)
@@ -741,6 +749,14 @@ class WebRunner:
         if event.get("type") == "batch_failed":
             return {**event, "type": FAILED_TERMINAL_EVENT}
         return event
+
+
+def _release_accelerator_memory() -> None:
+    """Free the finished job's model memory; a cleanup failure must never change the job outcome."""
+    try:
+        release_accelerator_memory()
+    except Exception as exc:  # noqa: BLE001
+        warnings.warn(f"Could not release accelerator memory after a web job: {exc}", stacklevel=2)
 
 
 def _output_asset_payload(context: dict[str, Any], output_path: Any) -> dict[str, Any] | None:

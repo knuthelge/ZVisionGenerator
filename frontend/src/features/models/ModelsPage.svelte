@@ -2,9 +2,10 @@
   import { onMount } from 'svelte';
   import { getModelInventory, convertCheckpoint, importLoraLocal, importLoraHF } from '$lib/api/models';
   import { addToast } from '$lib/state/toasts.svelte';
-  import type { ModelInventory } from '$lib/types';
-  import { Button, Input, Select } from '$lib/components/atoms';
-  import { FormField, PathField } from '$lib/components/molecules';
+  import type { ModelInventory, ModelStatusFields } from '$lib/types';
+  import { Button, Input, Select, Tooltip } from '$lib/components/atoms';
+  import { FormField, ModelStatusBadges, PathField } from '$lib/components/molecules';
+  import { DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
 
   let inventory = $state<ModelInventory | null>(null);
@@ -133,6 +134,33 @@
   }
 </script>
 
+{#snippet modelName(m: ModelStatusFields & { name: string })}
+  {#if m.downloaded === true || m.downloaded === false}
+    <Tooltip text={`${m.name}\n${m.downloaded ? DOWNLOADED_TOOLTIP : NOT_DOWNLOADED_TOOLTIP}`} focusable={false} class="max-w-full items-center gap-1.5">
+      {#if m.downloaded}
+        <svg class="h-3.5 w-3.5 shrink-0 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+        </svg>
+      {:else}
+        <svg class="h-3.5 w-3.5 shrink-0 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"></path>
+        </svg>
+      {/if}
+      <span class="truncate {m.downloaded ? 'text-zinc-200' : 'text-zinc-500'}" data-testid="model-name" data-downloaded={String(m.downloaded)}>{m.name}</span>
+    </Tooltip>
+  {:else}
+    <span class="block truncate text-zinc-200" title={m.name} data-testid="model-name" data-downloaded="unknown">{m.name}</span>
+  {/if}
+{/snippet}
+
+{#snippet memoryFitCell(m: ModelStatusFields)}
+  {#if m.memory_fit}
+    <ModelStatusBadges memoryFit={m.memory_fit} tooltipAlign="end" />
+  {:else}
+    <span class="text-zinc-600">—</span>
+  {/if}
+{/snippet}
+
 <AdminPageShell
   title="Models &amp; LoRAs"
   description="Manage installed models, convert checkpoints, and import LoRA adapters."
@@ -200,14 +228,16 @@
                 <th class="px-2 py-2 text-left">Name</th>
                 <th class="px-2 py-2 text-left">Family</th>
                 <th class="px-2 py-2 text-left">Size</th>
+                <th class="w-24 px-2 py-2 text-left">Memory</th>
               </tr>
             </thead>
             <tbody>
               {#each inventory.image_models as m}
                 <tr class="border-b border-zinc-900 hover:bg-zinc-900/50 transition">
-                  <td class="px-2 py-2 text-zinc-200 truncate max-w-20" title={m.name}>{m.name}</td>
+                  <td class="px-2 py-2">{@render modelName(m)}</td>
                   <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.family}>{m.family}</td>
                   <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.size_label ?? '—'}>{m.size_label ?? '—'}</td>
+                  <td class="px-2 py-2">{@render memoryFitCell(m)}</td>
                 </tr>
               {/each}
             </tbody>
@@ -230,14 +260,16 @@
                 <th class="px-2 py-2 text-left">Name</th>
                 <th class="px-2 py-2 text-left">Family</th>
                 <th class="px-2 py-2 text-left">I2V</th>
+                <th class="w-24 px-2 py-2 text-left">Memory</th>
               </tr>
             </thead>
             <tbody>
               {#each inventory.video_models as m}
                 <tr class="border-b border-zinc-900 hover:bg-zinc-900/50 transition">
-                  <td class="px-2 py-2 text-zinc-200 truncate max-w-20" title={m.name}>{m.name}</td>
+                  <td class="px-2 py-2">{@render modelName(m)}</td>
                   <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.family}>{m.family}</td>
                   <td class="px-2 py-2 text-zinc-400">{m.supports_i2v ? '✓' : '—'}</td>
+                  <td class="px-2 py-2">{@render memoryFitCell(m)}</td>
                 </tr>
               {/each}
             </tbody>

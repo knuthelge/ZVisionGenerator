@@ -104,6 +104,8 @@ By default, the Web UI listens on `http://127.0.0.1:8080/` and opens your browse
 
 While a generation is running, the Web UI keeps the active job attached to the current browser tab. Refreshing the tab reconnects to the running job when the server still has it, and stale completed or missing jobs are cleared automatically. Job controls are shown only when the running job supports them.
 
+The workspace model picker and the Models page show whether each model is already downloaded; models that are not download on first use. On macOS they also show whether a downloaded model fits this Mac's memory: **Fits**, **Tight**, or **Too large**, compared with the GPU memory Apple recommends for the machine. The workspace badge follows the selected quantize level, so you can see whether `q8` or `q4` brings a large model within reach. Hover the badge for the estimate. A model marked **Too large** will still run, but expect heavy swapping that can make the whole Mac unresponsive. After each job the Web UI returns the model's memory to the system.
+
 Ideogram 4 (`ideo`) is selectable in the workspace model dropdown. When it is selected, the workspace offers a structured-JSON-caption input and a first-step-sigma control, while reference-image (img2img) and upscale are unavailable, and width and height are constrained to the 256–2048 range in multiples of 16.
 
 

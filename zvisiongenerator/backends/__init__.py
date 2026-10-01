@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from zvisiongenerator.core.image_backend import ImageBackend
 
-__all__ = ["get_backend", "get_backend_name", "get_video_backend"]
+__all__ = ["get_accelerator_memory_budget", "get_backend", "get_backend_name", "get_video_backend", "release_accelerator_memory"]
 
 BACKENDS: dict[str, "ImageBackend"] = {}
 
@@ -116,3 +116,28 @@ def get_video_backend(family: str) -> "VideoBackend":
     if family not in VIDEO_BACKENDS:
         raise RuntimeError(f"No video backend for model family '{family}'. Available: {list(VIDEO_BACKENDS)}")
     return VIDEO_BACKENDS[family]
+
+
+# --- Accelerator memory ---
+
+
+def release_accelerator_memory() -> None:
+    """Return cached accelerator memory to the system after a generation job (macOS/MLX only)."""
+    if sys.platform != "darwin":
+        return
+    from zvisiongenerator.backends.memory_mac import release_memory
+
+    release_memory()
+
+
+def get_accelerator_memory_budget() -> int | None:
+    """Return the GPU memory a model may use without starving the system, or ``None`` when unknown.
+
+    Only macOS reports this: Apple Silicon shares one memory pool between CPU and GPU, so the
+    budget is Apple's recommended working set. CUDA has dedicated VRAM and is not estimated here.
+    """
+    if sys.platform != "darwin":
+        return None
+    from zvisiongenerator.backends.memory_mac import memory_budget_bytes
+
+    return memory_budget_bytes()

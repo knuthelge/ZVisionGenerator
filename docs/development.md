@@ -66,6 +66,7 @@ zvisiongenerator/
 ├── backends/
 │   ├── image_mac.py               macOS image backend (mflux/MLX)
 │   ├── image_win.py               Windows/Linux image backend (diffusers/CUDA)
+│   ├── memory_mac.py              MLX memory release and recommended GPU memory budget
 │   ├── video_mac.py               macOS video backend (LTX via MLX)
 │   └── video_diffusers.py         Windows/Linux video backend (LTX via diffusers/CUDA)
 ├── converters/
@@ -95,6 +96,8 @@ zvisiongenerator/
 │   ├── image_model_detect.py      Image model type detection
 │   ├── interactive.py             Keyboard interrupt handling
 │   ├── lora.py                    LoRA CLI argument parsing
+│   ├── model_files.py             Offline check for fully downloaded model weights
+│   ├── model_memory.py            Header-only memory estimates for MLX models
 │   ├── paths.py                   ~/.ziv/ model store resolution
 │   ├── prompt_compose.py          Structured prompt flattening & snippets
 │   ├── prompts.py                 Prompt file loading
@@ -106,6 +109,7 @@ zvisiongenerator/
 │   ├── config_contract.py         Writable config semantics and path readback helpers
 │   ├── gallery.py                 Gallery inventory and response serialization
 │   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
+│   ├── model_status.py            Per-model downloaded / memory-fit status for the SPA
 │   ├── workspace_contract.py      Workflow aliases and static workspace capabilities
 │   └── server.py                  FastAPI route wiring and request parsing
 └── workflows/

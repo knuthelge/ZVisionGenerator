@@ -740,3 +740,58 @@ def test_pruned_jobs_keep_their_final_status_for_late_clients():
             runner.get_job_snapshot("never-existed")
     finally:
         runner.shutdown()
+
+
+class TestAcceleratorMemoryRelease:
+    """Finished web jobs hand their model memory back, whatever the outcome."""
+
+    @staticmethod
+    def _run_job(monkeypatch, target_factory, *, expected_status: str, release=None):
+        calls: list[str] = []
+        monkeypatch.setattr(web_runner_module, "release_accelerator_memory", release or (lambda: calls.append("released")))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=target_factory)
+            snapshot = _wait_for_status(runner, job_id, expected_status)
+        finally:
+            runner.shutdown()
+        return snapshot, calls
+
+    def test_successful_job_releases_memory(self, monkeypatch):
+        snapshot, calls = self._run_job(monkeypatch, lambda _progress_callback: None, expected_status="completed")
+
+        assert snapshot["status"] == "completed"
+        assert calls == ["released"]
+
+    def test_failed_job_releases_memory_before_reporting_failure(self, monkeypatch):
+        def _fail(_progress_callback):
+            raise RuntimeError("backend failed")
+
+        snapshot, calls = self._run_job(monkeypatch, _fail, expected_status="failed")
+
+        assert snapshot["last_event"]["type"] == "job_failed"
+        assert "backend failed" in snapshot["last_event"]["message"]
+        assert calls == ["released"]
+
+    def test_release_failure_does_not_change_job_outcome(self, monkeypatch):
+        def _broken_release():
+            raise RuntimeError("metal unavailable")
+
+        with pytest.warns(UserWarning, match="metal unavailable"):
+            snapshot, _ = self._run_job(monkeypatch, lambda _progress_callback: None, expected_status="completed", release=_broken_release)
+
+        assert snapshot["status"] == "completed"
+
+
+def test_non_generation_jobs_do_not_release_accelerator_memory(monkeypatch):
+    """Only exclusive generation jobs hold models; others must not clear caches under a running generation."""
+    calls: list[str] = []
+    monkeypatch.setattr(web_runner_module, "release_accelerator_memory", lambda: calls.append("released"))
+    runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+    try:
+        job_id = runner.submit_dummy_job(total_steps=1, delay_seconds=0.001)
+        assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+    finally:
+        runner.shutdown()
+
+    assert calls == []

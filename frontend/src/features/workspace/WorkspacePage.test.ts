@@ -606,6 +606,48 @@ describe('WorkspacePage', () => {
     expect(target.querySelector('label[aria-label="Enable upscale"]')).not.toBeNull();
   });
 
+  it('shows download and memory-fit status for the selected model and quantize level', async () => {
+    const context = makeContext({
+      image_models: [
+        {
+          id: 'zit',
+          label: 'zit',
+          type: 'image',
+          downloaded: true,
+          memory_fit: {
+            budget_gb: 10.7,
+            by_quantize: {
+              none: { status: 'too_large', required_gb: 20.8 },
+              '8': { status: 'tight', required_gb: 9.5 },
+              '4': { status: 'fits', required_gb: 7.1 },
+            },
+          },
+        },
+        { id: 'flux-lite', label: 'flux-lite', type: 'image', downloaded: false, memory_fit: null },
+      ],
+    });
+
+    await mountWorkspace(context);
+
+    const fitBadge = () => target.querySelector('[data-testid="model-memory-fit"] [data-status]');
+    expect(fitBadge()?.getAttribute('data-status')).toBe('too_large');
+    expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
+
+    const quantizeSelect = target.querySelector('select[name="quantize"]') as HTMLSelectElement;
+    quantizeSelect.value = '8';
+    quantizeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(fitBadge()?.getAttribute('data-status')).toBe('tight');
+
+    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement;
+    expect(Array.from(modelSelect.options).map((option) => option.textContent)).toEqual(['zit', 'flux-lite (not downloaded)']);
+    modelSelect.value = 'flux-lite';
+    modelSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(target.querySelector('[data-testid="model-download-status"]')?.textContent).toContain('Not downloaded');
+    expect(fitBadge()).toBeNull();
+  });
+
   it('applies ideogram dimension bounds and filters xl presets only for constrained models', async () => {
     const ideogramDefaults = makeIdeogramDefaults();
     const permissiveDefaults = makeImageDefaults({
@@ -1008,6 +1050,37 @@ describe('WorkspacePage', () => {
 
     expect(jobStore.current?.status).toBe('cancelled');
     expect(submitButton?.disabled).toBe(false);
+  });
+
+  it('refreshes model download and memory status after a job ends', async () => {
+    const notDownloaded = makeContext({
+      image_models: [{ id: 'zit', label: 'zit', type: 'image', downloaded: false, memory_fit: null }],
+    });
+    await mountWorkspace(notDownloaded);
+    expect(target.querySelector('[data-testid="model-download-status"]')).not.toBeNull();
+
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext({
+      image_models: [{
+        id: 'zit',
+        label: 'zit',
+        type: 'image',
+        downloaded: true,
+        memory_fit: { budget_gb: 10.7, by_quantize: { none: { status: 'fits', required_gb: 7.1 } } },
+      }],
+    }));
+    draft.update('prompt', 'Download on first use');
+    await settle();
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+
+    const mockEventSource = (globalThis.EventSource as unknown as {
+      lastInstance: { emit: (type: string, data: unknown) => void };
+    }).lastInstance;
+    mockEventSource.emit('job_failed', { type: 'job_failed', job_id: 'job-123', message: 'boom' });
+    await settle();
+
+    expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
+    expect(target.querySelector('[data-testid="model-memory-fit"] [data-status]')?.getAttribute('data-status')).toBe('fits');
   });
 
   it('adds successful batch outputs to the history pane immediately', async () => {

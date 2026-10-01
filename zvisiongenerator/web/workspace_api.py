@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import functools
 import sys
+import warnings
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -10,13 +13,16 @@ from zvisiongenerator.backends import get_backend_name
 from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.utils.config import resolve_defaults, resolve_video_defaults
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
+from zvisiongenerator.utils.model_files import find_local_model_dir
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
-from zvisiongenerator.web.model_inventory import declared_image_family, discover_image_inventory, discover_video_inventory
+from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family
+from zvisiongenerator.web.model_status import describe_model_status, memory_budget_bytes
 
 
+_UNKNOWN_STATUS: dict[str, Any] = {"downloaded": None, "memory_fit": None}
 _IMAGE_BOOTSTRAP_STRENGTH = 0.5
 _IMAGE_BOOTSTRAP_POSTPROCESS = {
     "sharpen": 0.8,
@@ -65,15 +71,18 @@ def build_workspace_response(
     build_bootstrap_view: Any = build_workspace_bootstrap_view,
 ) -> dict[str, Any]:
     """Build the workspace bootstrap payload consumed by the SPA."""
-    image_models = [{"id": name, "label": name, "type": "image"} for name in web_config.image_model_options]
-    video_models = [{"id": name, "label": name, "type": "video"} for name in web_config.video_model_options]
-    loras = [{"name": name, "path": str(Path(web_config.loras_dir) / f"{name}.safetensors")} for name in web_config.lora_options]
-
     form_view = build_bootstrap_view(web_config)
     image_default_model = form_view["image_default_model"]
     video_default_model = form_view["video_default_model"]
     image_model_defaults_map = form_view["image_model_defaults"]
     video_model_defaults_map = form_view["video_model_defaults"]
+
+    status = _status_resolver(web_config, image_model_defaults_map)
+    image_entries = {entry.name: entry for entry in web_config.image_inventory}
+    video_entries = {entry.name: entry for entry in web_config.video_inventory}
+    image_models = [{"id": name, "label": name, "type": "image", **status(image_entries.get(name), "image")} for name in web_config.image_model_options]
+    video_models = [{"id": name, "label": name, "type": "video", **status(video_entries.get(name), "video")} for name in web_config.video_model_options]
+    loras = [{"name": name, "path": str(Path(web_config.loras_dir) / f"{name}.safetensors")} for name in web_config.lora_options]
     image_defaults = image_model_defaults_map.get(image_default_model) or _build_image_bootstrap_defaults(image_default_model or "", web_config)
     video_defaults = video_model_defaults_map.get(video_default_model) or _build_video_bootstrap_defaults(video_default_model or "", web_config)
 
@@ -113,21 +122,61 @@ def build_workspace_response(
     }
 
 
-def build_models_response(web_config: WebUiConfig, *, token_var: str | None) -> dict[str, Any]:
-    """Build the models inventory payload from the authoritative backend inventory."""
+def build_models_response(
+    web_config: WebUiConfig,
+    *,
+    token_var: str | None,
+    image_defaults_for: Callable[[str, WebUiConfig], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build the models inventory payload from the inventory discovered with the Web UI config.
+
+    Args:
+        web_config: The Web UI config, including its discovered model inventory.
+        token_var: The HuggingFace token environment variable in use, if any.
+        image_defaults_for: Resolves one image model's bootstrap defaults; only its ``supports_quantize`` is used.
+    """
     data_dir = Path(web_config.data_dir)
-    image_inventory = discover_image_inventory(web_config.app_config, data_dir)
-    video_inventory = discover_video_inventory(web_config.app_config, data_dir)
+    image_defaults_for = image_defaults_for or _build_image_bootstrap_defaults
+    # Quantize levels only shape memory estimates, so skip resolving them where there is no budget (off macOS).
+    image_defaults = {entry.name: image_defaults_for(entry.name, web_config) for entry in web_config.image_inventory} if memory_budget_bytes() else {}
+    status = _status_resolver(web_config, image_defaults)
     loras = [{"name": lora.name, "file_size_mb": lora.file_size_mb, "size_label": f"{lora.file_size_mb} MB"} for lora in list_loras(data_dir)]
     return {
         "models_dir": web_config.models_dir,
         "loras_dir": web_config.loras_dir,
-        "image_models": [{"name": entry.name, "family": entry.family, "size_label": entry.size or "Unknown", "source": entry.source} for entry in image_inventory],
-        "video_models": [{"name": entry.name, "family": entry.family, "supports_i2v": entry.supports_i2v, "source": entry.source} for entry in video_inventory],
+        "image_models": [{"name": entry.name, "family": entry.family, "size_label": entry.size or "Unknown", "source": entry.source, **status(entry, "image")} for entry in web_config.image_inventory],
+        "video_models": [{"name": entry.name, "family": entry.family, "supports_i2v": entry.supports_i2v, "source": entry.source, **status(entry, "video")} for entry in web_config.video_inventory],
         "loras": loras,
         "huggingface_configured": token_var is not None,
         "huggingface_token_env_var": token_var,
     }
+
+
+def _status_resolver(web_config: WebUiConfig, image_model_defaults: dict[str, dict[str, Any]]) -> Callable[[ImageInventoryEntry | VideoInventoryEntry | None, str], dict[str, Any]]:
+    """Return a per-request resolver for each model's ``downloaded``/``memory_fit`` fields.
+
+    Image quantize levels come from the same bootstrap defaults that drive the workspace quantize picker, and
+    download lookups are memoised for the request (LTX MLX models share one Gemma text-encoder lookup).
+    """
+    budget = memory_budget_bytes()
+    find_local_dir = functools.cache(find_local_model_dir)
+
+    def _status(entry: ImageInventoryEntry | VideoInventoryEntry | None, kind: str) -> dict[str, Any]:
+        if entry is None:
+            return dict(_UNKNOWN_STATUS)
+        quantize_options = _image_quantize_levels(web_config, image_model_defaults.get(entry.name, {})) if kind == "image" else ()
+        try:
+            return describe_model_status(entry.resolved_path, kind=kind, quantize_options=quantize_options, budget_bytes=budget, find_local_dir=find_local_dir)
+        except Exception as exc:  # noqa: BLE001 - one unreadable model must not break the whole listing
+            warnings.warn(f"Could not determine status for model '{entry.name}': {exc}", stacklevel=2)
+            return dict(_UNKNOWN_STATUS)
+
+    return _status
+
+
+def _image_quantize_levels(web_config: WebUiConfig, capabilities: dict[str, Any]) -> tuple[int, ...]:
+    """Return the quantize levels offered for an image model: one rule for the picker and the memory estimates."""
+    return tuple(web_config.quantize_options) if capabilities.get("supports_quantize", True) else ()
 
 
 def _preferred_option(preferred: str | None, options: tuple[str, ...]) -> str | None:
@@ -251,7 +300,7 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         "guidance": defaults["guidance"],
         "scheduler": defaults.get("scheduler"),
         "supports_negative_prompt": bool(defaults.get("supports_negative_prompt", False)),
-        "supports_quantize": bool(web_config.quantize_options) and bool(defaults.get("supports_quantize", True)),
+        "supports_quantize": bool(_image_quantize_levels(web_config, defaults)),
         "quantize": None,
         "image_strength": _IMAGE_BOOTSTRAP_STRENGTH,
         "postprocess": _image_bootstrap_postprocess(),
