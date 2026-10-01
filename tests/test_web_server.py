@@ -20,6 +20,7 @@ from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import workspace_api as workspace_api_module
 from zvisiongenerator.web.gallery import list_gallery_assets
 from zvisiongenerator.web.config import WebUiDefaultModels
+from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.provenance import embed_png_config
 
@@ -56,6 +57,8 @@ def _make_web_config() -> SimpleNamespace:
         video_size_options={"16:9": ("m",)},
         scheduler_options=("beta",),
         quantize_options=(4, 8),
+        image_inventory=(),
+        video_inventory=(),
     )
 
 
@@ -1109,6 +1112,10 @@ def test_models_route_uses_shared_alias_inventory(monkeypatch, tmp_path):
         lambda value: SimpleNamespace(family="ltx" if "alias-video" in str(value) else "unknown", supports_i2v=False),
     )
     monkeypatch.setattr(workspace_api_module, "list_loras", lambda _data_dir: [])
+    # load_web_config discovers the inventory once; the route must serve that instead of discovering again.
+    web_config.image_inventory = model_inventory_module.discover_image_inventory(web_config.app_config, tmp_path)
+    web_config.video_inventory = model_inventory_module.discover_video_inventory(web_config.app_config, tmp_path)
+    monkeypatch.setattr(model_inventory_module, "list_models", lambda _data_dir: pytest.fail("models route rediscovered the inventory"))
 
     with TestClient(web_server.app) as client:
         response = client.get("/api/models")
@@ -1594,3 +1601,121 @@ def test_tk_picker_runs_in_child_process(monkeypatch, tmp_path, completed, expec
         assert result.path == str(Path(expected_path).resolve())
     if expected_status == "error":
         assert "no display" in (result.message or "")
+
+
+def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
+    """Workspace and models payloads expose per-model download and memory-fit status from one source."""
+    web_config = _make_web_config()
+    web_config.data_dir = str(tmp_path)
+    web_config.image_inventory = (
+        ImageInventoryEntry(name="zit", family="zimage", size=None, source="alias", resolved_path="owner/zit"),
+        ImageInventoryEntry(name="local-image", family="ideogram4", size=None, source="installed", resolved_path=str(tmp_path / "local-image")),
+    )
+    web_config.video_inventory = (VideoInventoryEntry(name="ltx-8", family="ltx", supports_i2v=True, source="alias", resolved_path="owner/ltx"),)
+    web_config.app_config["model_presets"] = {"ideogram4": {"supports_quantize": False}}
+    calls: list[tuple[str, str, tuple[int, ...]]] = []
+
+    def _fake_status(resolved_path, *, kind, quantize_options=(), budget_bytes=None, find_local_dir=None):
+        calls.append((resolved_path, kind, quantize_options))
+        return {"downloaded": resolved_path != "owner/ltx", "memory_fit": None}
+
+    monkeypatch.setattr(workspace_api_module, "describe_model_status", _fake_status)
+    monkeypatch.setattr(workspace_api_module, "memory_budget_bytes", lambda: 10 * 1024**3)
+    monkeypatch.setattr(workspace_api_module, "list_loras", lambda _data_dir: [])
+    bootstrap_view = _make_workspace_bootstrap_view()
+    bootstrap_view["image_model_defaults"]["zit"]["supports_quantize"] = False  # the picker hides quantize for zit
+
+    workspace = workspace_api_module.build_workspace_response(
+        web_config,
+        [],
+        active_job=None,
+        prompt_sources=["inline"],
+        default_prompt_source="inline",
+        prompt_file_contract={},
+        workflow_contract={},
+        build_bootstrap_view=lambda _cfg: bootstrap_view,
+    )
+    workspace_calls = list(calls)
+    models = workspace_api_module.build_models_response(
+        web_config,
+        token_var=None,
+        image_defaults_for=lambda name, _cfg: bootstrap_view["image_model_defaults"].get(name, {}),
+    )
+
+    workspace_images = {entry["id"]: entry for entry in workspace["image_models"]}
+    assert workspace_images["zit"]["downloaded"] is True
+    assert workspace["video_models"][0]["downloaded"] is False
+    assert {entry["name"]: entry["downloaded"] for entry in models["video_models"]} == {"ltx-8": False}
+    assert all("memory_fit" in entry for entry in [*workspace["image_models"], *models["image_models"]])
+    # Both pages estimate exactly the quantize levels the workspace picker offers (from the bootstrap defaults).
+    assert ("owner/zit", "image", ()) in workspace_calls
+    assert calls[len(workspace_calls) :] == workspace_calls
+    assert ("owner/ltx", "video", ()) in calls
+
+
+def test_workspace_models_without_inventory_entry_report_unknown_status(monkeypatch):
+    """Names with no inventory entry (e.g. stale config) report unknown rather than guessing."""
+    web_config = _make_web_config()
+    monkeypatch.setattr(workspace_api_module, "memory_budget_bytes", lambda: None)
+
+    workspace = workspace_api_module.build_workspace_response(
+        web_config,
+        [],
+        active_job=None,
+        prompt_sources=["inline"],
+        default_prompt_source="inline",
+        prompt_file_contract={},
+        workflow_contract={},
+        build_bootstrap_view=lambda _cfg: _make_workspace_bootstrap_view(),
+    )
+
+    assert {(entry["downloaded"], entry["memory_fit"]) for entry in workspace["image_models"]} == {(None, None)}
+
+
+def test_one_failing_model_status_does_not_break_the_listing(monkeypatch):
+    """A model whose files cannot be inspected reports unknown status instead of failing the whole page."""
+    web_config = _make_web_config()
+    web_config.image_inventory = (
+        ImageInventoryEntry(name="zit", family="zimage", size=None, source="alias", resolved_path="owner/zit"),
+        ImageInventoryEntry(name="local-image", family="zimage", size=None, source="installed", resolved_path="/broken"),
+    )
+
+    def _fake_status(resolved_path, **_):
+        if resolved_path == "/broken":
+            raise AttributeError("corrupt header")
+        return {"downloaded": True, "memory_fit": None}
+
+    monkeypatch.setattr(workspace_api_module, "describe_model_status", _fake_status)
+    monkeypatch.setattr(workspace_api_module, "memory_budget_bytes", lambda: None)
+
+    with pytest.warns(UserWarning, match="local-image"):
+        workspace = workspace_api_module.build_workspace_response(
+            web_config,
+            [],
+            active_job=None,
+            prompt_sources=["inline"],
+            default_prompt_source="inline",
+            prompt_file_contract={},
+            workflow_contract={},
+            build_bootstrap_view=lambda _cfg: _make_workspace_bootstrap_view(),
+        )
+
+    statuses = {entry["id"]: entry["downloaded"] for entry in workspace["image_models"]}
+    assert statuses == {"zit": True, "local-image": None}
+
+
+def test_models_page_skips_quantize_resolution_without_a_memory_budget(monkeypatch):
+    """Off macOS there is no budget, so per-model defaults (and their detection lookups) are not resolved."""
+    web_config = _make_web_config()
+    web_config.image_inventory = (ImageInventoryEntry(name="zit", family="zimage", size=None, source="alias", resolved_path="owner/zit"),)
+    monkeypatch.setattr(workspace_api_module, "memory_budget_bytes", lambda: None)
+    monkeypatch.setattr(workspace_api_module, "describe_model_status", lambda resolved_path, **_: {"downloaded": True, "memory_fit": None})
+    monkeypatch.setattr(workspace_api_module, "list_loras", lambda _data_dir: [])
+
+    models = workspace_api_module.build_models_response(
+        web_config,
+        token_var=None,
+        image_defaults_for=lambda name, _cfg: pytest.fail("resolved image defaults without a memory budget"),
+    )
+
+    assert models["image_models"][0]["downloaded"] is True

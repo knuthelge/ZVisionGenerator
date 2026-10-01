@@ -17,7 +17,7 @@
     mascotMood as pickMascotMood,
     type MascotReaction,
   } from '$lib/state/mascot';
-  import { JobCard, Lightbox } from '$lib/components/molecules';
+  import { JobCard, Lightbox, ModelStatusBadges } from '$lib/components/molecules';
   import ControlsSidebar from './ControlsSidebar.svelte';
   import HistoryPane from './HistoryPane.svelte';
   import type { GalleryAsset, WorkspaceContext, Workflow } from '$lib/types';
@@ -103,6 +103,8 @@
   const imageModels = $derived(context?.image_models ?? []);
   const videoModels = $derived(context?.video_models ?? []);
   const currentModels = $derived(isImageMode ? imageModels : videoModels);
+  // Matches the toolbar label, which falls back to the first model when the draft has none.
+  const selectedModel = $derived(currentModels.find((m) => m.id === (draft.state.model || currentModels[0]?.id)) ?? null);
   const loraOptions = $derived(context?.loras ?? []);
   const quantizeOptions = $derived(context?.quantize_options ?? []);
   const visibleControls = $derived(
@@ -171,8 +173,22 @@
     typingTimer = setTimeout(() => { typing = false; }, TYPING_DURATION_MS);
   }
 
+  // Jobs download models on first use, so re-read download and memory status once one ends.
+  // Only the latest refresh applies, so a slow older response cannot overwrite newer status.
+  let modelStatusRequest = 0;
+  function refreshModelStatus(): void {
+    const request = ++modelStatusRequest;
+    getWorkspaceCoreContext()
+      .then((fresh) => {
+        if (request !== modelStatusRequest || !context) return;
+        context = { ...context, image_models: fresh.image_models, video_models: fresh.video_models };
+      })
+      .catch(() => undefined);
+  }
+
   async function handleJobComplete(): Promise<void> {
     react('cheerful');
+    refreshModelStatus();
     await historyStore.refreshHistory();
     busy = false;
     addToast('Generation complete', 'success');
@@ -180,18 +196,21 @@
 
   function handleJobFailed(): void {
     react('sad');
+    refreshModelStatus();
     busy = false;
     addToast('Generation failed', 'error');
   }
 
   async function handleJobLost(): Promise<void> {
     busy = false;
+    refreshModelStatus();
     addToast('Lost track of the job. Refreshed the gallery with any results.', 'info');
     await historyStore.refreshHistory();
   }
 
   function handleJobCancelled(): void {
     react('surprised');
+    refreshModelStatus();
     busy = false;
     addToast('Generation stopped', 'info');
   }
@@ -433,7 +452,7 @@
           {/snippet}
           {#snippet options()}
             {#each currentModels as m}
-              <option value={m.id}>{m.label}</option>
+              <option value={m.id}>{m.downloaded === false ? `${m.label} (not downloaded)` : m.label}</option>
             {/each}
           {/snippet}
         </ToolbarSelectShell>
@@ -461,6 +480,16 @@
               {/each}
             {/snippet}
           </ToolbarSelectShell>
+        {/if}
+
+        {#if authorityReady && selectedModel}
+          <ModelStatusBadges
+            downloaded={selectedModel.downloaded}
+            memoryFit={selectedModel.memory_fit}
+            quantize={supportsQuantize ? draft.state.quantize : null}
+            lowMemory={!visibleControls.has('low_memory') || draft.state.lowMemory}
+            tooltipPlacement="bottom"
+          />
         {/if}
       </div>
 

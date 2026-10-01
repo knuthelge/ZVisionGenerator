@@ -38,7 +38,30 @@ export interface GalleryAsset {
   media_type: 'image' | 'video';
 }
 
-export interface ModelOption {
+export type MemoryFitStatus = 'fits' | 'tight' | 'too_large';
+
+export interface MemoryFitEstimate {
+  status: MemoryFitStatus;
+  required_gb: number;
+}
+
+/** Estimated memory need per quantize level (`none`, `4`, `8`) against this machine's GPU budget. */
+export interface MemoryFit {
+  budget_gb: number;
+  by_quantize: Record<string, MemoryFitEstimate>;
+  /** LTX MLX video only: the estimate when low-memory mode is off and every component stays loaded. */
+  without_low_memory?: MemoryFitEstimate;
+  /** Caveat to show with the estimate, e.g. that video excludes the upscale pass. */
+  note?: string;
+}
+
+/** Local availability fields shared by every model listing; `null` means unknown. */
+export interface ModelStatusFields {
+  downloaded?: boolean | null;
+  memory_fit?: MemoryFit | null;
+}
+
+export interface ModelOption extends ModelStatusFields {
   id: string;
   label: string;
   type: 'image' | 'video';
@@ -481,13 +504,13 @@ export interface RouterState {
 
 // ── Model inventory types ──────────────────────────────────────────────────────
 
-export interface ModelEntry {
+export interface ModelEntry extends ModelStatusFields {
   name: string;
   family: string;
   size_label?: string;
 }
 
-export interface VideoModelEntry {
+export interface VideoModelEntry extends ModelStatusFields {
   name: string;
   family: string;
   supports_i2v: boolean;

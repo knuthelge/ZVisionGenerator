@@ -355,4 +355,40 @@ describe('ModelsPage Browse buttons', () => {
       expect(form.className).toContain('min-w-0');
     }
   });
+
+  it('marks download state on the name and shows one memory badge per model', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({
+      ...makeInventory(),
+      image_models: [
+        {
+          name: 'zit',
+          family: 'zimage',
+          downloaded: true,
+          memory_fit: { budget_gb: 10.7, by_quantize: { none: { status: 'too_large', required_gb: 20.8 }, '8': { status: 'fits', required_gb: 8.1 } } },
+        },
+        { name: 'klein4b', family: 'flux2_klein', downloaded: false, memory_fit: null },
+      ],
+      video_models: [{ name: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, memory_fit: null }],
+    });
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    const names = Object.fromEntries(
+      Array.from(target.querySelectorAll('[data-testid="model-name"]')).map((el) => [el.textContent, el.getAttribute('data-downloaded')]),
+    );
+    expect(names).toEqual({ zit: 'true', klein4b: 'false', 'ltx-4': 'true' });
+
+    const fits = Array.from(target.querySelectorAll('[data-testid="model-memory-fit"]'));
+    expect(fits.map((el) => el.querySelector('[data-status]')?.getAttribute('data-status'))).toEqual(['too_large']);
+    expect(fits[0].querySelector('[role="tooltip"]')?.textContent).toContain('q8');
+
+    const klein = Array.from(target.querySelectorAll('[data-testid="model-name"]')).find((el) => el.textContent === 'klein4b');
+    const kleinTooltip = klein?.parentElement?.querySelector('[role="tooltip"]')?.textContent ?? '';
+    expect(kleinTooltip.startsWith('klein4b')).toBe(true); // full name stays readable when the cell truncates
+    expect(kleinTooltip).toContain('Not downloaded');
+    // Only the memory badges are tab stops; the per-row name tooltips are hover-only.
+    expect(klein?.parentElement?.hasAttribute('tabindex')).toBe(false);
+    expect(fits[0].getAttribute('tabindex')).toBe('0');
+    expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
+  });
 });
