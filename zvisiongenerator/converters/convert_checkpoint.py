@@ -23,6 +23,7 @@ import shutil
 import sys
 from pathlib import Path
 
+from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 
 
@@ -578,6 +579,7 @@ def main(*, prog: str = "ziv-model") -> None:
     """Entry point for the model/LoRA management CLI."""
     parser = _build_model_parser(prog=prog)
     args = parser.parse_args()
+    setup_logging("model")
     if args.command is None:
         parser.print_help()
         sys.exit(0)

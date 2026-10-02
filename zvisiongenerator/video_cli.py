@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 import warnings
@@ -11,6 +12,7 @@ from typing import Any
 
 from zvisiongenerator.backends import get_video_backend
 from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
+from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.utils.config import load_config, resolve_video_defaults, select_ratio_size_defaults
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.lora import resolve_lora_references
@@ -19,6 +21,8 @@ from zvisiongenerator.utils.prompts import load_prompts_file
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.video_runner import run_video_batch
 from zvisiongenerator.workflows import build_video_workflow
+
+logger = logging.getLogger(__name__)
 
 
 def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
@@ -88,6 +92,7 @@ def main(*, prog: str = "ziv-video") -> None:
     """Entry point for ziv-video CLI."""
     parser = _build_video_parser(prog=prog)
     args = parser.parse_args()
+    setup_logging("video")
 
     # Validation (matching image CLI pattern)
     if args.model is None:
@@ -249,6 +254,7 @@ def main(*, prog: str = "ziv-video") -> None:
             **load_kwargs,
         )
     except (RuntimeError, ValueError, FileNotFoundError, ImportError) as e:
+        logger.exception("Failed to load video model %s", args.model)
         parser.error(str(e))
 
     # Load prompts

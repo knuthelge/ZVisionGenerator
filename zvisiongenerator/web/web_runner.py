@@ -7,6 +7,7 @@ import asyncio
 import copy
 import io
 import json
+import logging
 import os
 import queue
 import sys
@@ -50,6 +51,8 @@ from zvisiongenerator.video_runner import run_video_batch
 from zvisiongenerator.workflows import build_video_workflow
 
 type EventPayload = dict[str, Any]
+
+logger = logging.getLogger(__name__)
 
 # Events that end the generation a live preview belongs to, so the stale preview is dropped.
 _PREVIEW_RESET_EVENT_TYPES = frozenset({"prompt_started", "workflow_stage_started", "generation_finished", *TERMINAL_EVENT_TYPES})
@@ -536,6 +539,7 @@ class WebRunner:
                 target()
         except (Exception, SystemExit) as exc:
             failure_message = str(exc).strip() or f"{type(exc).__name__} stopped the generation worker."
+            logger.exception("Job %s failed: %s", job_id, failure_message)
 
         # Released outside the except block: the active traceback pins the worker frames (and the loaded model).
         # Only generation jobs hold models; skipping the rest avoids clearing caches under a running generation.

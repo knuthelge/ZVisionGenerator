@@ -11,6 +11,8 @@ from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 
 # Starlette's TestClient sends ``Host: testserver``; allow it through the Web UI request guard.
 os.environ.setdefault("ZIV_UI_ALLOWED_HOSTS", "testserver")
+# Entry points start the error log; keep tests from writing ~/.ziv/logs or replacing exception hooks.
+os.environ.setdefault("ZIV_LOG", "off")
 
 
 def _make_args(**overrides):
