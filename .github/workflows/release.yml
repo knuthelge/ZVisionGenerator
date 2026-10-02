@@ -50,4 +50,6 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
+          # PEP 440 pre-release tags (v0.13.0a1, v0.13.0b1, v0.13.0rc1) become GitHub pre-releases, never "Latest".
+          prerelease: ${{ contains(github.ref_name, 'a') || contains(github.ref_name, 'b') || contains(github.ref_name, 'rc') }}
           files: dist/*

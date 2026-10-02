@@ -159,3 +159,12 @@ Raise `ValueError`, `FileNotFoundError`, `RuntimeError` directly with descriptiv
 ### Test Strategy
 
 Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.
+
+## Releasing
+
+Pushing a `v*` tag runs the Release workflow, which builds the package, publishes it to PyPI and creates a GitHub Release. The package version comes from the tag (`hatch-vcs`), so the tag must be a valid PEP 440 version:
+
+- **Final releases:** `vX.Y.Z`, e.g. `v0.13.0`.
+- **Betas:** `vX.Y.ZbN`, e.g. `v0.13.0b1`, then `b2`, `b3`, … before the final `vX.Y.Z`. Use `aN` and `rcN` the same way for alphas and release candidates.
+
+Pre-release tags are published as GitHub pre-releases, and `pip` installs them only with `--pre` or an exact pin (`pip install z-vision-generator==0.13.0b1`). Before tagging, move the `[Unreleased]` CHANGELOG entries under a `## [<version>] - <date>` heading in a `Release v<version>: <summary>` commit. PyPI never accepts the same version twice, so a broken release needs a new tag.
