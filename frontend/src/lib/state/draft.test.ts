@@ -429,6 +429,38 @@ describe('draft store', () => {
     });
   });
 
+  describe('resetSelections', () => {
+    it('restores model defaults while keeping model, loras, quantize, and prompt', () => {
+      const ctx = makeContext();
+      draft.update('workflow', 'txt2img');
+      draft.hydrateFromContext(ctx, null);
+      draft.update('prompt', 'a cat');
+      draft.update('promptSource', 'file');
+      draft.update('promptFilePath', '/tmp/prompts.yaml');
+      draft.update('loraString', 'style:0.8');
+      draft.update('quantize', 8);
+      draft.update('steps', 42);
+      draft.update('seed', 1234);
+      draft.update('runs', 5);
+      draft.update('ratio', '1:1');
+      draft.update('upscaleEnabled', true);
+
+      draft.resetSelections(ctx);
+
+      expect(draft.state.model).toBe('flux-dev');
+      expect(draft.state.prompt).toBe('a cat');
+      expect(draft.state.promptSource).toBe('file');
+      expect(draft.state.promptFilePath).toBe('/tmp/prompts.yaml');
+      expect(draft.state.loraString).toBe('style:0.8');
+      expect(draft.state.quantize).toBe(8);
+      expect(draft.state.steps).toBe(10);
+      expect(draft.state.seed).toBeNull();
+      expect(draft.state.runs).toBe(1);
+      expect(draft.state.ratio).toBe('2:3');
+      expect(draft.state.upscaleEnabled).toBe(false);
+    });
+  });
+
   describe('onWorkflowChange', () => {
     it('switches to video model and defaults when changing to txt2vid', () => {
       const ctx = makeContext();

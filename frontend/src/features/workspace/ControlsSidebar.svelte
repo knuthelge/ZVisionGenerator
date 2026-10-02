@@ -175,6 +175,13 @@
     }
   }
 
+  function resetSelections(): void {
+    if (!context) return;
+    draft.resetSelections(context);
+    onImageFileChange(null);
+    dimensionMode = 'ratio';
+  }
+
   function randomizeSeed(): void {
     draft.update('seed', Math.floor(Math.random() * 2 ** 32));
   }
@@ -937,18 +944,33 @@
         {context.prompt_file.help.option_required}
       </p>
     {/if}
-    <button
-      id="ws-submit"
-      type="submit"
-      disabled={submitDisabled}
-      class="surface-button surface-button-primary flex w-full items-center justify-center gap-2 rounded-full py-2.5"
-    >
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-      </svg>
-      <span>{busy ? 'Generation In Progress' : 'Generate'}</span>
-      <span class="surface-shortcut ml-2 px-1.5 py-0.5 text-xs font-mono opacity-80">⌘↵</span>
-    </button>
+    <div class="flex items-center gap-2">
+      <button
+        id="ws-reset"
+        type="button"
+        disabled={busy}
+        onclick={resetSelections}
+        title="Reset settings to model defaults (keeps model, LoRAs, quantization, and prompt)"
+        aria-label="Reset settings"
+        class="surface-icon-button flex h-10 w-10 shrink-0 items-center justify-center rounded-full disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h5M4.6 9A8 8 0 1 1 4 13"></path>
+        </svg>
+      </button>
+      <button
+        id="ws-submit"
+        type="submit"
+        disabled={submitDisabled}
+        class="surface-button surface-button-primary flex min-w-0 flex-1 items-center justify-center gap-2 rounded-full py-2.5"
+      >
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+        </svg>
+        <span>{busy ? 'Generation In Progress' : 'Generate'}</span>
+        <span class="surface-shortcut ml-2 px-1.5 py-0.5 text-xs font-mono opacity-80">⌘↵</span>
+      </button>
+    </div>
   </div>
   {/if}
 </section>
