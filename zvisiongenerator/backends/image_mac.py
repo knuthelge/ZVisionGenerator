@@ -125,7 +125,7 @@ class _SkipChecker:
     def __init__(self, skip_signal):
         self._skip_signal = skip_signal
 
-    def call_in_loop(self, t, seed, prompt, latents, config, time_steps):
+    def call_in_loop(self, t, seed, prompt, latents, config, time_steps, **_):
         if self._skip_signal.check():
             raise StopImageGenerationException("Skipped by user")
 
@@ -178,8 +178,9 @@ class _ProgressChecker:
         self._previous_latents = None
         self._preview_steps: frozenset[int] = frozenset()
 
-    def call_before_loop(self, seed, prompt, latents, config, canny_image=None, depth_image=None):
-        del seed, prompt, canny_image, depth_image
+    # ``**_``: newer mflux passes extra keywords (0.20 added ``control_images``); a strict signature fails every generation.
+    def call_before_loop(self, seed, prompt, latents, config, **_):
+        del seed, prompt
         if not self._previews_enabled:
             return
         self._previous_latents = latents
@@ -191,7 +192,7 @@ class _ProgressChecker:
             warnings.warn(f"Live previews disabled for {self._family}: {exc}", stacklevel=2)
             self._previews_enabled = False
 
-    def call_in_loop(self, t, seed, prompt, latents, config, time_steps):
+    def call_in_loop(self, t, seed, prompt, latents, config, time_steps, **_):
         del seed, prompt, time_steps
         self._current_step = min(self._current_step + 1, self._total_steps)
         payload = {
