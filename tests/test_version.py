@@ -22,8 +22,8 @@ class TestVersion:
     def test_version_matches_pep440(self) -> None:
         from zvisiongenerator import __version__
 
-        # PEP 440 loose pattern — covers release, pre, post, dev, and local segments
-        pep440 = re.compile(r"^(\d+!)?\d+(\.\d+)*(\.post\d+)?(\.dev\d+)?(\+[a-zA-Z0-9._]+)?$")
+        # PEP 440 loose pattern — covers release, pre (aN/bN/rcN), post, dev, and local segments
+        pep440 = re.compile(r"^(\d+!)?\d+(\.\d+)*((a|b|rc)\d+)?(\.post\d+)?(\.dev\d+)?(\+[a-zA-Z0-9._]+)?$")
         assert pep440.match(__version__), f"Version {__version__!r} does not look PEP 440-compliant"
 
     def test_version_accessible_from_internal_module(self) -> None:

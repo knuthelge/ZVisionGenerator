@@ -113,6 +113,19 @@ class TestProgressCheckerPreviews:
         assert [event["current_step"] for event in events if "preview" in event] == [2, 4, 6]
         assert all(event["preview"].size == (8, 8) for event in events if "preview" in event)
 
+    def test_callbacks_accept_keywords_added_by_newer_mflux(self, mx, image_mac):
+        # mflux 0.20 passes control_images to before-loop callbacks; a strict signature failed every generation.
+        events: list[dict] = []
+        checker = image_mac._ProgressChecker(4, events.append, model=None, family="zimage")
+        config = self._config(4)
+        latents = mx.zeros((16, 1, 8, 8))
+
+        checker.call_before_loop(seed=1, prompt="prompt", latents=latents, config=config, canny_image=None, depth_image=None, control_images=None)
+        checker.call_in_loop(t=0, seed=1, prompt="prompt", latents=latents, config=config, time_steps=None, future_keyword=None)
+        image_mac._SkipChecker(SimpleNamespace(check=lambda: False)).call_in_loop(0, 1, "prompt", latents, config, None, future_keyword=None)
+
+        assert events[-1]["current_step"] == 1
+
     def test_partial_runs_place_milestones_within_the_steps_actually_run(self, mx, image_mac):
         events: list[dict] = []
         checker = image_mac._ProgressChecker(8, events.append, model=None, family="zimage")
