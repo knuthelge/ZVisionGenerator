@@ -49,6 +49,7 @@ describe('JobCard', () => {
       paused: false,
       message: '',
       outputs: [],
+      previewUrl: null,
       ...overrides,
     };
   }
@@ -305,6 +306,22 @@ describe('JobCard', () => {
     expect(target.querySelector('img[alt="first.png"]')?.getAttribute('loading')).toBe('lazy');
     expect(target.querySelector('video')?.getAttribute('preload')).toBe('none');
     expect(target.querySelector('img[alt="newest.png"]')?.getAttribute('loading')).toBe('eager');
+  });
+
+  it('shows the live preview only while the job is active', () => {
+    const previewAlt = 'img[alt="Live preview of the generation in progress"]';
+    component = mount(JobCard, { target, props: { job: makeJob({ previewUrl: '/jobs/job-card/preview?v=2', supported_controls: ['next'] }), onnext: vi.fn() } });
+    flushSync();
+    const preview = target.querySelector(previewAlt);
+    expect(preview?.getAttribute('src')).toBe('/jobs/job-card/preview?v=2');
+    // The preview renders below the controls, so Next does not move when a preview appears.
+    const next = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Next');
+    expect(next!.compareDocumentPosition(preview!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    unmount(component);
+
+    component = mount(JobCard, { target, props: { job: makeJob({ status: 'completed', previewUrl: '/jobs/job-card/preview?v=2' }) } });
+    flushSync();
+    expect(target.querySelector(previewAlt)).toBeNull();
   });
 
   it('bounds and scrolls its own many-output thumbnail grid instead of relying on an outer page scroller', () => {

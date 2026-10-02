@@ -14,6 +14,7 @@ import re
 import time
 import warnings
 from pathlib import Path
+from typing import Any
 
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
@@ -37,14 +38,15 @@ def _emit_step_progress(
     if step_callback is None:
         return None
 
-    def _callback(event: dict[str, int]) -> None:
-        step_callback(
-            {
-                "phase": phase,
-                "current_step": min(event.get("current_step", 0), max(total_steps, 1)),
-                "total_steps": max(total_steps, 1),
-            }
-        )
+    def _callback(event: dict[str, Any]) -> None:
+        payload: dict[str, Any] = {
+            "phase": phase,
+            "current_step": min(event.get("current_step", 0), max(total_steps, 1)),
+            "total_steps": max(total_steps, 1),
+        }
+        if "preview" in event:
+            payload["preview"] = event["preview"]
+        step_callback(payload)
 
     return _callback
 

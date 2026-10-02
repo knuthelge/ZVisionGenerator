@@ -2,10 +2,13 @@ import type { ActiveJobState, JobContext, JobSnapshot, GalleryAsset, StepEvent, 
 import { connectJobSSE } from '$lib/api/sse';
 import type { SSESubscription } from '$lib/api/sse';
 import { ApiError } from '$lib/api/client';
-import { getJobSnapshot } from '$lib/api/workspace';
+import { getJobSnapshot, jobPreviewUrl } from '$lib/api/workspace';
 import { clearActiveJobId, readActiveJobId, writeActiveJobId } from './activeJobStorage';
 
 let _job = $state<ActiveJobState | null>(null);
+// Event id the reconnect snapshot was taken at: replayed SSE history up to it must not change the live preview,
+// which the snapshot already reflects.
+let _previewEventFloor = 0;
 let _subscription: SSESubscription | null = null;
 // Consecutive stream-loss recoveries for the current job; reset whenever an event arrives.
 let _recoveryAttempts = 0;
@@ -90,6 +93,14 @@ function statusMessageForEvent(type: string | undefined, event: Record<string, u
   return '';
 }
 
+function previewUrlFor(jobId: string, version: number | undefined): string | null {
+  return typeof version === 'number' && version > 0 ? jobPreviewUrl(jobId, version) : null;
+}
+
+function isReplayedBeforeSnapshot(event: Record<string, unknown>): boolean {
+  return _previewEventFloor > 0 && eventFieldNumber(event, 'event_id') <= _previewEventFloor;
+}
+
 function dedupeOutputs(outputs: GalleryAsset[]): GalleryAsset[] {
   const seen = new Set<string>();
   return outputs.filter((output) => {
@@ -128,7 +139,8 @@ function makeInitialJobState(ctx: JobContext): ActiveJobState {
     batchIndex: 0,
     paused: false,
     message: 'Waiting for worker allocation...',
-    outputs: []
+    outputs: [],
+    previewUrl: null
   };
 }
 
@@ -163,7 +175,8 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     paused: isPaused,
     message: isPaused ? 'Job paused. Resume to continue.' : (statusMessage || 'Reconnected to active job.'),
     ...promptProgress(lastEvent),
-    outputs: snapshot.outputs ?? []
+    outputs: snapshot.outputs ?? [],
+    previewUrl: previewUrlFor(snapshot.job_id ?? snapshot.id, snapshot.preview_version)
   };
 }
 
@@ -187,6 +200,7 @@ function closeSubscription(): void {
 
 function connectSnapshot(snapshot: JobSnapshot): true {
   _job = makeJobStateFromSnapshot(snapshot);
+  _previewEventFloor = eventFieldNumber(snapshot.last_event, 'event_id');
   writeActiveJobId(snapshot.job_id ?? snapshot.id);
   attachJobEvents(snapshot.job_id ?? snapshot.id);
   return true;
@@ -202,6 +216,7 @@ function applyStatusEvent(type: string, event: SSEEvent): void {
     ...(msg ? { message: msg } : {}),
     ...(type === 'prompt_started' ? { currentStep: 0, totalSteps: 0, stageName: '', stageIndex: 0, message: 'Preparing generation.' } : {}),
     ...(type === 'workflow_stage_started' ? { stageName: eventFieldString(data, 'stage_name') } : {}),
+    ...((type === 'prompt_started' || type === 'workflow_stage_started') && !isReplayedBeforeSnapshot(data) ? { previewUrl: null } : {}),
   };
 }
 
@@ -251,6 +266,9 @@ function attachJobEvents(jobId: string): void {
         stageName: ev.workflow_stage_name ?? _job.stageName,
         stageIndex: ev.workflow_stage_index ?? _job.stageIndex,
         batchIndex: ev.run_index ?? _job.batchIndex,
+        previewUrl: isReplayedBeforeSnapshot(event as unknown as Record<string, unknown>)
+          ? _job.previewUrl
+          : previewUrlFor(_job.job_id, ev.preview_version) ?? _job.previewUrl,
       };
     },
     onGenerationFinished(event) {
@@ -263,6 +281,7 @@ function attachJobEvents(jobId: string): void {
         ..._job,
         outputs,
         batchIndex: typeof event.run_index === 'number' ? event.run_index : _job.batchIndex,
+        previewUrl: isReplayedBeforeSnapshot(event as unknown as Record<string, unknown>) ? _job.previewUrl : null,
       };
     },
     onBatchCompleted(event) {
@@ -405,6 +424,7 @@ export const jobStore = {
   startJob(ctx: JobContext): void {
     cancelRecovery();
     _job = makeInitialJobState(ctx);
+    _previewEventFloor = 0;
     writeActiveJobId(ctx.job_id);
     attachJobEvents(ctx.job_id);
   },
@@ -440,6 +460,7 @@ export const jobStore = {
     if (_job) clearActiveJobId(_job.job_id);
     cancelRecovery();
     closeSubscription();
+    _previewEventFloor = 0;
     _job = null;
   }
 };

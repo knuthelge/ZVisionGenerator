@@ -65,6 +65,7 @@ zvisiongenerator/
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/
 │   ├── image_mac.py               macOS image backend (mflux/MLX)
+│   ├── image_mac_preview.py       Cheap latent → RGB live previews for the mflux backend
 │   ├── image_win.py               Windows/Linux image backend (diffusers/CUDA)
 │   ├── memory_mac.py              MLX memory release and recommended GPU memory budget
 │   ├── video_mac.py               macOS video backend (LTX via MLX)

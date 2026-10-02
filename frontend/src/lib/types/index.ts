@@ -350,6 +350,8 @@ export interface JobSnapshot extends JobContext {
   paused: boolean;
   result_path?: string | null;
   outputs?: GalleryAsset[];
+  /** Version of the job's current live preview; 0 when none is available. */
+  preview_version?: number;
 }
 
 export interface ActiveJobState extends JobContext {
@@ -367,6 +369,8 @@ export interface ActiveJobState extends JobContext {
   paused: boolean;
   message: string;
   outputs: GalleryAsset[];
+  /** URL of the latest live preview of the current generation; null when none is available. */
+  previewUrl: string | null;
 }
 
 // ── SSE event types ────────────────────────────────────────────────────────────
@@ -384,6 +388,7 @@ export interface StepEvent {
   total_runs?: number;
   ran_iterations?: number;
   total_iterations?: number;
+  preview_version?: number;
 }
 
 export interface GenerationFinishedEvent {

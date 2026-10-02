@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 - The workspace model picker and the Models page show whether each model is downloaded and, on macOS, whether it fits this Mac's memory (**Fits**, **Tight**, **Too large**) at the selected quantize level
+- On macOS, the Web UI job card shows a live preview of the image at 25%, 50% and 75% of the denoising steps, so you can skip a generation early with Next. Previews come from a fast latent-to-RGB approximation (no VAE decode), live only in memory and are never saved
 
 ### Fixed
 - The Web UI now returns a finished job's model memory to macOS, instead of holding it in MLX's cache until the next job, which could freeze machines with 16 GB of memory

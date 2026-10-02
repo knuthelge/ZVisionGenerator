@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import copy
+import io
 import json
 import os
 import queue
@@ -20,6 +21,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from PIL import Image
 
 from zvisiongenerator.backends import get_backend, get_video_backend, release_accelerator_memory
 from zvisiongenerator.core.image_backend import ImageBackend
@@ -47,6 +50,9 @@ from zvisiongenerator.video_runner import run_video_batch
 from zvisiongenerator.workflows import build_video_workflow
 
 type EventPayload = dict[str, Any]
+
+# Events that end the generation a live preview belongs to, so the stale preview is dropped.
+_PREVIEW_RESET_EVENT_TYPES = frozenset({"prompt_started", "workflow_stage_started", "generation_finished", *TERMINAL_EVENT_TYPES})
 
 
 class JobConflictError(RuntimeError):
@@ -184,6 +190,8 @@ class _JobRecord:
     outputs: list[dict[str, Any]] = field(default_factory=list)
     paused: bool = False
     last_eta_secs: float | None = None
+    preview_jpeg: bytes | None = None
+    preview_version: int = 0
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -391,6 +399,7 @@ class WebRunner:
                 paused=record.paused,
                 result_path=record.result_path,
                 outputs=[dict(output) for output in record.outputs],
+                preview_version=record.preview_version if record.preview_jpeg is not None else 0,
             )
 
     def update_job_context(self, job_id: str, context: dict[str, Any]) -> None:
@@ -405,29 +414,19 @@ class WebRunner:
         with record.lock:
             return record.result_path
 
+    def get_job_preview(self, job_id: str) -> bytes | None:
+        """Return the latest in-memory live preview JPEG for a job, if one is current."""
+        record = self._get_job(job_id)
+        with record.lock:
+            return record.preview_jpeg
+
     def get_active_exclusive_job_snapshot(self) -> dict[str, Any] | None:
         """Return the currently running exclusive job, if one exists."""
         with self._jobs_lock:
             for record in self._jobs.values():
                 if not record.exclusive or record.status in self._TERMINAL_STATUSES:
                     continue
-                with record.lock:
-                    last_event = dict(record.last_event) if record.last_event is not None else None
-                    workflow = str(record.context.get("workflow") or record.job_type)
-                    return public_job_snapshot(
-                        job_id=record.job_id,
-                        status=record.status,
-                        workflow=workflow,
-                        supported_controls=record.supported_controls,
-                        context=record.context,
-                        created_at=record.created_at,
-                        completed_at=record.completed_at,
-                        event_count=record.event_count,
-                        last_event=last_event,
-                        paused=record.paused,
-                        result_path=record.result_path,
-                        outputs=[dict(output) for output in record.outputs],
-                    )
+                return self._snapshot_record(record)
         return None
 
     def queue_job_control(self, job_id: str, action: str) -> dict[str, Any]:
@@ -632,9 +631,19 @@ class WebRunner:
     def _publish_event(self, job_id: str, event: EventPayload) -> None:
         """Record an event and fan it out to current subscribers."""
         record = self._get_job(job_id)
+        preview_jpeg = None
+        if "preview" in event:
+            event = dict(event)
+            preview_jpeg = _encode_preview_jpeg(event.pop("preview"))
         with record.lock:
             event = self._normalize_event(event)
             timestamp = time.time()
+            if preview_jpeg is not None:
+                record.preview_version += 1
+                record.preview_jpeg = preview_jpeg
+                event["preview_version"] = record.preview_version
+            elif event["type"] in _PREVIEW_RESET_EVENT_TYPES:
+                record.preview_jpeg = None
             if event["type"] == "prompt_started":
                 record.prompt_progress = {key: event[key] for key in ("prompt", "run_index", "total_runs", "ran_iterations", "total_iterations") if key in event}
             enriched_event = {
@@ -757,6 +766,21 @@ def _release_accelerator_memory() -> None:
         release_accelerator_memory()
     except Exception as exc:  # noqa: BLE001
         warnings.warn(f"Could not release accelerator memory after a web job: {exc}", stacklevel=2)
+
+
+def _encode_preview_jpeg(preview: Any) -> bytes | None:
+    """Encode a live preview image as JPEG bytes; anything else, or a failed encode, yields ``None``.
+
+    Previews are best-effort: this runs inside the denoising loop, so an encode error must not fail the job.
+    """
+    if not isinstance(preview, Image.Image):
+        return None
+    buffer = io.BytesIO()
+    try:
+        preview.convert("RGB").save(buffer, format="JPEG", quality=85)
+    except Exception:  # noqa: BLE001 - previews are best-effort
+        return None
+    return buffer.getvalue()
 
 
 def _output_asset_payload(context: dict[str, Any], output_path: Any) -> dict[str, Any] | None:

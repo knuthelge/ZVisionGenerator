@@ -40,6 +40,7 @@ def public_job_snapshot(
     paused: bool,
     result_path: str | None,
     outputs: list[dict[str, Any]] | None = None,
+    preview_version: int = 0,
 ) -> dict[str, Any]:
     """Build the public snake_case job snapshot payload."""
     snapshot = {
@@ -57,6 +58,7 @@ def public_job_snapshot(
         "paused": paused,
         "result_path": result_path,
         "outputs": outputs or [],
+        "preview_version": preview_version,
         "prompt": context.get("prompt", ""),
         "model": context.get("model", ""),
         "runs": context.get("runs", 1),
