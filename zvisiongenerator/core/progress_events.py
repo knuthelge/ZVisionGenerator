@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any
@@ -10,6 +11,17 @@ from zvisiongenerator.core.types import StageOutcome
 
 
 type ProgressCallback = Callable[[dict[str, Any]], None]
+
+# Fractions of a denoising run at which a live preview is rendered.
+PREVIEW_STEP_FRACTIONS = (0.25, 0.5, 0.75)
+
+
+def preview_milestone_steps(total_steps: int) -> frozenset[int]:
+    """Return the 1-based steps that should emit a live preview.
+
+    The final step is excluded because the finished image follows immediately.
+    """
+    return frozenset(step for fraction in PREVIEW_STEP_FRACTIONS if 1 <= (step := math.ceil(total_steps * fraction)) < total_steps)
 
 
 def emit_progress(progress_callback: ProgressCallback | None, event_type: str, **payload: Any) -> None:

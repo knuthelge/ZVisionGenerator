@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from PIL import Image, UnidentifiedImageError
@@ -273,6 +273,18 @@ async def get_job(job_id: str) -> dict[str, object]:
         return web_runner.get_job_snapshot(job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}") from exc
+
+
+@app.get("/jobs/{job_id}/preview")
+async def get_job_preview(job_id: str) -> Response:
+    """Return the latest in-memory live preview of a running generation as a JPEG."""
+    try:
+        preview = web_runner.get_job_preview(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}") from exc
+    if preview is None:
+        raise HTTPException(status_code=404, detail="No live preview is available for this job.")
+    return Response(content=preview, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/jobs/{job_id}/events")

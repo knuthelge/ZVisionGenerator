@@ -795,3 +795,89 @@ def test_non_generation_jobs_do_not_release_accelerator_memory(monkeypatch):
         runner.shutdown()
 
     assert calls == []
+
+
+class TestLivePreview:
+    @pytest.fixture()
+    def running_job(self):
+        release = threading.Event()
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        job_id = runner._submit_job(job_type="test", target_factory=lambda _progress_callback: release.wait(timeout=1.0))
+        try:
+            yield runner, job_id
+        finally:
+            release.set()
+            runner.shutdown()
+
+    def test_step_preview_is_kept_in_memory_and_replaced_by_a_version_in_events(self, running_job):
+        runner, job_id = running_job
+
+        runner._publish_event(job_id, {"type": "step_progress", "current_step": 2, "total_steps": 8, "preview": Image.new("RGB", (16, 16), "red")})
+        runner._publish_event(job_id, {"type": "step_progress", "current_step": 3, "total_steps": 8})
+
+        with runner._jobs_lock:
+            history = list(runner._jobs[job_id].history)
+        preview_event, plain_event = history[-2], history[-1]
+        assert "preview" not in preview_event
+        assert preview_event["preview_version"] == 1
+        assert "preview_version" not in plain_event
+        assert runner.get_job_preview(job_id).startswith(b"\xff\xd8")
+        json.dumps(preview_event)
+
+    def test_preview_versions_increase_and_reset_when_the_generation_finishes(self, running_job):
+        runner, job_id = running_job
+
+        for step in (2, 4):
+            runner._publish_event(job_id, {"type": "step_progress", "current_step": step, "total_steps": 8, "preview": Image.new("RGB", (8, 8))})
+        assert runner.get_job_snapshot(job_id)["last_event"]["preview_version"] == 2
+
+        assert runner.get_job_snapshot(job_id)["preview_version"] == 2
+
+        runner._publish_event(job_id, {"type": "generation_finished", "status": "skipped"})
+
+        assert runner.get_job_preview(job_id) is None
+        assert runner.get_job_snapshot(job_id)["preview_version"] == 0
+
+    def test_a_new_workflow_stage_drops_the_previous_stage_preview(self, running_job):
+        runner, job_id = running_job
+        runner._publish_event(job_id, {"type": "step_progress", "current_step": 2, "total_steps": 8, "preview": Image.new("RGB", (8, 8))})
+
+        runner._publish_event(job_id, {"type": "workflow_stage_started", "stage_name": "upscale"})
+
+        assert runner.get_job_preview(job_id) is None
+
+    def test_a_preview_that_cannot_be_encoded_is_dropped_without_failing_the_step(self, running_job, monkeypatch):
+        runner, job_id = running_job
+
+        def _broken_save(*_args, **_kwargs):
+            raise RuntimeError("unexpected encoder failure")
+
+        monkeypatch.setattr(Image.Image, "save", _broken_save)
+        runner._publish_event(job_id, {"type": "step_progress", "current_step": 2, "total_steps": 8, "preview": Image.new("RGB", (8, 8))})
+
+        last_event = runner.get_job_snapshot(job_id)["last_event"]
+        assert last_event["current_step"] == 2
+        assert "preview_version" not in last_event
+        assert runner.get_job_preview(job_id) is None
+
+    def test_preview_route_serves_jpeg_or_404(self, monkeypatch):
+        previews = {"job-1": b"\xff\xd8jpeg"}
+
+        def _get_job_preview(job_id):
+            if job_id not in previews and job_id != "job-2":
+                raise KeyError(job_id)
+            return previews.get(job_id)
+
+        monkeypatch.setattr(web_server.web_runner, "get_job_preview", _get_job_preview)
+
+        with TestClient(web_server.app) as client:
+            ok = client.get("/jobs/job-1/preview?v=1")
+            empty = client.get("/jobs/job-2/preview")
+            unknown = client.get("/jobs/nope/preview")
+
+        assert ok.status_code == 200
+        assert ok.headers["content-type"] == "image/jpeg"
+        assert ok.headers["cache-control"] == "no-store"
+        assert ok.content == b"\xff\xd8jpeg"
+        assert empty.status_code == 404
+        assert unknown.status_code == 404

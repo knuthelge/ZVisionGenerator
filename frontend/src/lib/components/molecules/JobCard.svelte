@@ -55,6 +55,10 @@
   const canRepeat = $derived(job.status === 'running' && supportedControls.has('repeat'));
   const hasInlineControls = $derived(canPause || canResume || canNext || canRepeat);
 
+  // Live previews are transient: shown only while the current generation runs, never stored.
+  let failedPreviewUrl = $state<string | null>(null);
+  const showPreview = $derived(active && !!job.previewUrl && failedPreviewUrl !== job.previewUrl);
+
   function formatElapsed(secs: number): string {
     if (!Number.isFinite(secs) || secs < 0) return '--:--';
     const m = Math.floor(secs / 60);
@@ -253,6 +257,14 @@
     {/if}
   </div>
 
+  <!-- Live preview sits below the controls so they stay put when it appears or clears. -->
+  {#if showPreview}
+    <figure class="live-preview">
+      <img src={job.previewUrl} alt="Live preview of the generation in progress" onerror={(event) => { failedPreviewUrl = event.currentTarget.getAttribute('src'); }} />
+      <figcaption>Live preview</figcaption>
+    </figure>
+  {/if}
+
   <!-- Output previews are shown as soon as each successful asset arrives. -->
   {#if uniqueOutputs.length > 0}
     <div class="mt-3 flex items-center justify-between gap-2 text-xs text-text-secondary">
@@ -350,5 +362,8 @@
     align-content: start;
     padding-right: 2px;
   }
+  .live-preview { position: relative; margin-top: 12px; overflow: hidden; border: 1px solid var(--color-border-subtle); border-radius: 6px; background: var(--color-bg-base); }
+  .live-preview img { display: block; width: 100%; max-height: min(40vh, 18rem); object-fit: contain; }
+  .live-preview figcaption { position: absolute; left: 6px; bottom: 6px; padding: 2px 6px; border-radius: 3px; font-size: 10px; color: var(--color-text-secondary); background: var(--color-bg-surface); opacity: 0.85; }
   .job-footer { display: flex; gap: 8px; padding: 7px 14px; font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-base); border-top: 1px solid var(--color-border-subtle); }
 </style>

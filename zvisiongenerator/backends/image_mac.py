@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import os
+import sys
 import tempfile
 import threading
+import warnings
 from collections.abc import Iterator
 from typing import Any
 
@@ -15,10 +17,13 @@ from mflux.models.z_image import ZImageTurbo
 from mflux.models.ideogram4 import Ideogram4
 from mflux.models.ideogram4.model.ideogram4_scheduler.scheduler import Ideogram4Scheduler
 from mflux.models.common.config.model_config import ModelConfig
+from mflux.models.common.schedulers import FlowMatchEulerDiscreteScheduler, LinearScheduler
 from mflux.utils.exceptions import StopImageGenerationException
 import mlx.core as mx
 from mlx.utils import tree_map
 
+from zvisiongenerator.backends.image_mac_preview import estimate_clean_latents, render_latent_preview
+from zvisiongenerator.core.progress_events import preview_milestone_steps
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 
 # First-step sigma override applied to every Ideogram 4 generation to reduce
@@ -35,6 +40,11 @@ IDEOGRAM4_INITIAL_SIGMA: float | None = 1.004
 # always-on default (no override set on a thread) uses the module constant.
 _INITIAL_SIGMA_UNSET = object()
 _initial_sigma_override = threading.local()
+
+
+# Last Ideogram 4 ``(t_values, s_values)`` built on this thread, so live previews can read
+# each step's noise levels (they are locals of mflux's denoising loop).
+_ideogram4_timesteps = threading.local()
 
 
 def _effective_initial_sigma() -> float | None:
@@ -68,10 +78,13 @@ def _install_ideogram4_initial_sigma() -> None:
     Ideogram 4 is the only family that uses ``make_timesteps``, so wrapping it here
     does not affect other families (zimage/flux). The wrapper reads the effective sigma
     dynamically at call time via ``_effective_initial_sigma()`` (the per-run override when
-    set, else the ``IDEOGRAM4_INITIAL_SIGMA`` default): when it is ``None`` the wrapper is a
-    no-op that returns the original ``(t_values, s_values)`` unchanged; otherwise it copies
-    ``t_values`` and sets ``t_values[-1] = 1.0 - sigma``, leaving ``s_values`` and every other
-    ``t_values`` entry untouched.
+    set, else the ``IDEOGRAM4_INITIAL_SIGMA`` default): when it is ``None`` the schedule is
+    returned unchanged; otherwise it copies ``t_values`` and sets ``t_values[-1] = 1.0 - sigma``,
+    leaving ``s_values`` and every other ``t_values`` entry untouched.
+
+    Either way the final ``(t_values, s_values)`` is recorded in ``_ideogram4_timesteps`` for the
+    current thread: live previews read each step's noise levels from it, so the recording must
+    stay even when no sigma override applies.
 
     Idempotent: re-importing this module does not double-wrap the staticmethod.
     """
@@ -82,10 +95,10 @@ def _install_ideogram4_initial_sigma() -> None:
     def make_timesteps(**kwargs):
         t_values, s_values = original(**kwargs)
         sigma = _effective_initial_sigma()
-        if sigma is None:
-            return t_values, s_values
-        t_values = t_values.copy()
-        t_values[-1] = 1.0 - sigma
+        if sigma is not None:
+            t_values = t_values.copy()
+            t_values[-1] = 1.0 - sigma
+        _ideogram4_timesteps.value = (t_values, s_values)
         return t_values, s_values
 
     make_timesteps._ziv_initial_sigma_wrapped = True
@@ -94,6 +107,16 @@ def _install_ideogram4_initial_sigma() -> None:
 
 # Ideogram4-only: activate the first-step sigma override for the whole process.
 _install_ideogram4_initial_sigma()
+
+
+def _unregister_callback(model: Any, callback: Any) -> None:
+    """Remove a callback from every mflux registry list so it never fires on later runs of a cached model."""
+    registry = model.callbacks
+    for callbacks in (registry.before_loop, registry.in_loop, registry.after_loop, registry.interrupt):
+        try:
+            callbacks.remove(callback)
+        except ValueError:
+            pass
 
 
 class _SkipChecker:
@@ -107,23 +130,94 @@ class _SkipChecker:
             raise StopImageGenerationException("Skipped by user")
 
 
-class _ProgressChecker:
-    """InLoopCallback that reports denoising progress for each step."""
+def _is_euler_scheduler(scheduler: Any) -> bool:
+    """Return whether a scheduler's steps are plain flow-matching Euler updates over ``scheduler.sigmas``.
 
-    def __init__(self, total_steps: int, step_callback):
+    Live previews can only recover the predicted clean image from those; others preview the raw latents.
+    """
+    if isinstance(scheduler, (LinearScheduler, FlowMatchEulerDiscreteScheduler)):
+        return True
+    # Never import the beta scheduler here (it pulls in SciPy mid-loop): if its module is not loaded yet,
+    # this scheduler cannot be one.
+    beta_module = sys.modules.get("zvisiongenerator.schedulers.beta_scheduler")
+    return beta_module is not None and isinstance(scheduler, beta_module.BetaScheduler)
+
+
+def _step_noise_levels(family: str, t: int, config) -> tuple[float, float] | None:
+    """Return the noise levels before and after denoising step ``t``, or ``None`` when unknown."""
+    if family == "ideogram4":
+        timesteps = getattr(_ideogram4_timesteps, "value", None)
+        if timesteps is None:
+            return None
+        # Ideogram 4 walks its schedule backwards and uses t = 1 - noise level.
+        t_values, s_values = timesteps
+        if len(t_values) != config.num_inference_steps:
+            return None  # recorded schedule belongs to another run
+        index = len(t_values) - 1 - t
+        return 1.0 - float(t_values[index]), 1.0 - float(s_values[index])
+    if not _is_euler_scheduler(config.scheduler):
+        return None
+    sigmas = config.scheduler.sigmas
+    return float(sigmas[t]), float(sigmas[t + 1])
+
+
+class _ProgressChecker:
+    """Before/in-loop callback that reports denoising progress for each step.
+
+    When ``model`` and ``family`` are given, milestone steps also carry a cheap
+    preview of the predicted final image under the ``preview`` key.
+    """
+
+    def __init__(self, total_steps: int, step_callback, *, model: Any = None, family: str | None = None):
         self._total_steps = max(total_steps, 1)
         self._step_callback = step_callback
         self._current_step = 0
+        self._model = model
+        self._family = family
+        self._previews_enabled = family is not None
+        self._previous_latents = None
+        self._preview_steps: frozenset[int] = frozenset()
+
+    def call_before_loop(self, seed, prompt, latents, config, canny_image=None, depth_image=None):
+        del seed, prompt, canny_image, depth_image
+        if not self._previews_enabled:
+            return
+        self._previous_latents = latents
+        try:
+            # img2img, refine and upscale runs start part-way through the schedule; place milestones within the steps actually run.
+            start = config.init_time_step
+            self._preview_steps = frozenset(start + step for step in preview_milestone_steps(config.num_inference_steps - start))
+        except Exception as exc:  # noqa: BLE001 - previews are best-effort
+            warnings.warn(f"Live previews disabled for {self._family}: {exc}", stacklevel=2)
+            self._previews_enabled = False
 
     def call_in_loop(self, t, seed, prompt, latents, config, time_steps):
-        del t, seed, prompt, latents, config, time_steps
+        del seed, prompt, time_steps
         self._current_step = min(self._current_step + 1, self._total_steps)
-        self._step_callback(
-            {
-                "current_step": self._current_step,
-                "total_steps": self._total_steps,
-            }
-        )
+        payload = {
+            "current_step": self._current_step,
+            "total_steps": self._total_steps,
+        }
+        preview = self._render_preview(t, latents, config)
+        if preview is not None:
+            payload["preview"] = preview
+        # Keep these latents only when the next step renders a preview from them.
+        self._previous_latents = latents if self._previews_enabled and t + 2 in self._preview_steps else None
+        self._step_callback(payload)
+
+    def _render_preview(self, t, latents, config) -> Image.Image | None:
+        """Render a preview at milestone steps; never let a preview failure stop generation."""
+        if not self._previews_enabled or t + 1 not in self._preview_steps:
+            return None
+        try:
+            levels = _step_noise_levels(self._family, t, config)
+            if levels is not None and self._previous_latents is not None:
+                latents = estimate_clean_latents(self._previous_latents, latents, *levels)
+            return render_latent_preview(self._model, self._family, latents, config.height, config.width)
+        except Exception as exc:  # noqa: BLE001 - previews are best-effort
+            warnings.warn(f"Live preview failed for {self._family}: {exc}", stacklevel=2)
+            self._previews_enabled = False
+            return None
 
 
 def _wrap_ideogram4_prompt(prompt: str) -> str | dict[str, Any]:
@@ -265,7 +359,7 @@ class MfluxBackend:
             checker = _SkipChecker(skip_signal)
             model.callbacks.register(checker)
         if step_callback is not None:
-            progress_checker = _ProgressChecker(steps, step_callback)
+            progress_checker = _ProgressChecker(steps, step_callback, model=model, family=self._model_info.family)
             model.callbacks.register(progress_checker)
 
         try:
@@ -296,16 +390,9 @@ class MfluxBackend:
         except StopImageGenerationException:
             return None
         finally:
-            if checker is not None:
-                try:
-                    model.callbacks.in_loop.remove(checker)
-                except ValueError:
-                    pass
-            if progress_checker is not None:
-                try:
-                    model.callbacks.in_loop.remove(progress_checker)
-                except ValueError:
-                    pass
+            for callback in (checker, progress_checker):
+                if callback is not None:
+                    _unregister_callback(model, callback)
             try:
                 os.unlink(temp_path)
             except OSError:
@@ -341,7 +428,7 @@ class MfluxBackend:
             checker = _SkipChecker(skip_signal)
             model.callbacks.register(checker)
         if step_callback is not None:
-            progress_checker = _ProgressChecker(steps, step_callback)
+            progress_checker = _ProgressChecker(steps, step_callback, model=model, family=self._model_info.family)
             model.callbacks.register(progress_checker)
 
         try:
@@ -375,13 +462,8 @@ class MfluxBackend:
         except StopImageGenerationException:
             return None
         finally:
-            if checker is not None:
-                try:
-                    model.callbacks.in_loop.remove(checker)
-                except ValueError:
-                    pass
-            if progress_checker is not None:
-                try:
-                    model.callbacks.in_loop.remove(progress_checker)
-                except ValueError:
-                    pass
+            # The recorded Ideogram 4 schedule belongs to this run only; never let a later run read it.
+            _ideogram4_timesteps.value = None
+            for callback in (checker, progress_checker):
+                if callback is not None:
+                    _unregister_callback(model, callback)

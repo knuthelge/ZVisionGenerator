@@ -25,6 +25,11 @@ export function getJobSnapshot(jobId: string): Promise<JobSnapshot> {
   return api.get<JobSnapshot>(`/jobs/${jobId}`);
 }
 
+/** URL of a job's latest live preview; the version busts the browser cache when a new preview lands. */
+export function jobPreviewUrl(jobId: string, version: number): string {
+  return `/jobs/${jobId}/preview?v=${version}`;
+}
+
 export function cancelJob(jobId: string): Promise<void> {
   return api.post(`/api/jobs/${jobId}/cancel`);
 }

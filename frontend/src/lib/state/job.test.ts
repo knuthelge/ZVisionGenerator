@@ -48,6 +48,50 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current).toMatchObject({ prompt: 'First again', promptNumber: 1, promptCount: 3, batchIndex: 1, currentStep: 0, totalSteps: 0 });
   });
 
+  it('tracks the live preview URL from step versions and clears it when the generation ends', () => {
+    jobStore.startJob({ job_id: 'job-preview', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
+    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    expect(jobStore.current?.previewUrl).toBeNull();
+    source.emit('step_progress', { type: 'step_progress', current_step: 2, total_steps: 8, elapsed_secs: 1, preview_version: 3 });
+    expect(jobStore.current?.previewUrl).toBe('/jobs/job-preview/preview?v=3');
+    source.emit('step_progress', { type: 'step_progress', current_step: 3, total_steps: 8, elapsed_secs: 1 });
+    expect(jobStore.current?.previewUrl).toBe('/jobs/job-preview/preview?v=3');
+    source.emit('generation_finished', { type: 'generation_finished', job_id: 'job-preview', status: 'skipped' });
+    expect(jobStore.current?.previewUrl).toBeNull();
+    source.emit('step_progress', { type: 'step_progress', current_step: 2, total_steps: 8, elapsed_secs: 1, preview_version: 4 });
+    source.emit('prompt_started', { type: 'prompt_started', prompt: 'Next' });
+    expect(jobStore.current?.previewUrl).toBeNull();
+    source.emit('step_progress', { type: 'step_progress', current_step: 2, total_steps: 8, elapsed_secs: 1, preview_version: 5 });
+    source.emit('workflow_stage_started', { type: 'workflow_stage_started', stage_name: 'upscale' });
+    expect(jobStore.current?.previewUrl).toBeNull();
+  });
+
+  it('ignores preview changes in history replayed up to the reconnect snapshot', async () => {
+    await jobStore.reconnectActiveJob({ snapshot: {
+      id: 'replay-preview', job_id: 'replay-preview', workflow: 'txt2img', job_type: 'txt2img', status: 'running',
+      prompt: 'P', model: 'zit', runs: 1, created_at: '', event_count: 12, paused: false, preview_version: 7,
+      last_event: { type: 'step_progress', event_id: 12, current_step: 5, total_steps: 8 },
+    } });
+    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const current = '/jobs/replay-preview/preview?v=7';
+    expect(jobStore.current?.previewUrl).toBe(current);
+    source.emit('step_progress', { type: 'step_progress', event_id: 3, current_step: 2, total_steps: 8, elapsed_secs: 1, preview_version: 1 });
+    source.emit('prompt_started', { type: 'prompt_started', event_id: 9, prompt: 'P' });
+    source.emit('generation_finished', { type: 'generation_finished', event_id: 10, job_id: 'replay-preview', status: 'success' });
+    expect(jobStore.current?.previewUrl).toBe(current);
+    source.emit('step_progress', { type: 'step_progress', event_id: 13, current_step: 6, total_steps: 8, elapsed_secs: 1, preview_version: 8 });
+    expect(jobStore.current?.previewUrl).toBe('/jobs/replay-preview/preview?v=8');
+  });
+
+  it('restores the current live preview from the snapshot even when the last event is not a milestone', async () => {
+    await jobStore.reconnectActiveJob({ snapshot: {
+      id: 'restore-preview', job_id: 'restore-preview', workflow: 'txt2img', job_type: 'txt2img', status: 'running',
+      prompt: 'P', model: 'zit', runs: 1, created_at: '', event_count: 10, paused: false, preview_version: 2,
+      last_event: { type: 'step_progress', current_step: 5, total_steps: 8 },
+    } });
+    expect(jobStore.current?.previewUrl).toBe('/jobs/restore-preview/preview?v=2');
+  });
+
   it('restores the current prompt and counter from a step snapshot', async () => {
     await jobStore.reconnectActiveJob({ snapshot: {
       id: 'restore-prompts', job_id: 'restore-prompts', workflow: 'txt2img', job_type: 'txt2img', status: 'running',
