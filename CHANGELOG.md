@@ -6,8 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b2] - 2026-10-02
+
 ### Added
 - A reset button next to Generate in the Web UI workspace returns all settings to the selected model's defaults, keeping the model, LoRAs, quantize level and prompt
+- Every command writes warnings and errors, with full tracebacks, to `~/.ziv/logs/<command>.log` (e.g. `ui.log`). The file is cleared when the command starts, so it always describes the latest run. If that folder is not writable, the log goes to the system temp folder instead. Set `ZIV_LOG=off` to disable it
+
+### Changed
+- mflux is now required at 0.20.x (`>=0.20.0,<0.21`), so installs use the mflux version the release was tested with
+
+### Fixed
+- Image generation failed immediately with mflux 0.20 (`unexpected keyword argument 'control_images'`), which a fresh install picks up: the progress and live-preview callbacks now accept arguments added by newer mflux versions
 
 ## [0.13.0b1] - 2026-10-02
 
