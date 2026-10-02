@@ -882,6 +882,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#releasing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Releasing
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1065,6 +1076,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#releasing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Releasing
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1199,6 +1221,7 @@ make install
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/
 │   ├── image_mac.py               macOS image backend (mflux/MLX)
+│   ├── image_mac_preview.py       Cheap latent → RGB live previews for the mflux backend
 │   ├── image_win.py               Windows/Linux image backend (diffusers/CUDA)
 │   ├── memory_mac.py              MLX memory release and recommended GPU memory budget
 │   ├── video_mac.py               macOS video backend (LTX via MLX)
@@ -1272,6 +1295,13 @@ prompts.yaml                       Default prompt definitions
 <p>Raise <code>ValueError</code>, <code>FileNotFoundError</code>, <code>RuntimeError</code> directly with descriptive f-string messages. Use <code>warnings.warn()</code> with <code>stacklevel=2</code> for non-fatal conditions. No custom exception classes except private sentinels.</p>
 <h3 id="test-strategy">Test Strategy</h3>
 <p>Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.</p>
+<h2 id="releasing">Releasing</h2>
+<p>Pushing a <code>v*</code> tag runs the Release workflow, which builds the package, publishes it to PyPI and creates a GitHub Release. The package version comes from the tag (<code>hatch-vcs</code>), so the tag must be a valid PEP 440 version:</p>
+<ul>
+<li><strong>Final releases:</strong> <code>vX.Y.Z</code>, e.g. <code>v0.13.0</code>.</li>
+<li><strong>Betas:</strong> <code>vX.Y.ZbN</code>, e.g. <code>v0.13.0b1</code>, then <code>b2</code>, <code>b3</code>, … before the final <code>vX.Y.Z</code>. Use <code>aN</code> and <code>rcN</code> the same way for alphas and release candidates.</li>
+</ul>
+<p>Pre-release tags are published as GitHub pre-releases, and <code>pip</code> installs them only with <code>--pre</code> or an exact pin (<code>pip install z-vision-generator==0.13.0b1</code>). Before tagging, move the <code>[Unreleased]</code> CHANGELOG entries under a <code>## [&lt;version&gt;] - &lt;date&gt;</code> heading in a <code>Release v&lt;version&gt;: &lt;summary&gt;</code> commit. PyPI never accepts the same version twice, so a broken release needs a new tag.</p>
 
 
 
