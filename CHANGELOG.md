@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- A reset button next to Generate in the Web UI workspace returns all settings to the selected model's defaults, keeping the model, LoRAs, quantize level and prompt
+
 ## [0.13.0b1] - 2026-10-02
 
 ### Added

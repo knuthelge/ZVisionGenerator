@@ -285,6 +285,36 @@ export const draft = {
     this.hydrateFromContext(ctx, null);
   },
 
+  /**
+   * Reset all generation selections to the model's defaults, keeping the
+   * workflow, model, LoRAs, quantization, and prompt inputs untouched.
+   */
+  resetSelections(ctx: WorkspaceContext): void {
+    const s = _draft;
+    _draft = {
+      ...DEFAULT_DRAFT,
+      workflow: s.workflow,
+      model: s.model,
+      loraString: s.loraString,
+      quantize: s.quantize,
+      historyCollapsed: s.historyCollapsed,
+      lastGeneratedAt: s.lastGeneratedAt,
+    };
+    this.hydrateFromContext(ctx, s.model);
+    // Restore prompt inputs after hydration, which re-applies the default prompt source.
+    _draft = {
+      ..._draft,
+      promptSource: s.promptSource,
+      prompt: s.prompt,
+      jsonPromptEnabled: s.jsonPromptEnabled,
+      jsonPrompt: s.jsonPrompt,
+      negativePrompt: s.negativePrompt,
+      promptFilePath: s.promptFilePath,
+      promptFileOptionIds: s.promptFileOptionIds,
+    };
+    this.saveDraft();
+  },
+
   saveDraft(): void {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(_draft));
