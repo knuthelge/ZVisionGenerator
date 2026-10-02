@@ -578,6 +578,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#error-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error Log
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1030,6 +1041,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#error-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error Log
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1168,6 +1190,8 @@ uv run ziv ui --no-browser
 <pre><code class="language-bash">export ZIV_DATA_DIR=/mnt/fast-ssd/ziv
 ziv-image -m my-model --prompt &quot;a landscape&quot;
 </code></pre>
+<h3 id="error-log">Error Log</h3>
+<p>Each command records warnings and errors, with full tracebacks, in <code>~/.ziv/logs/&lt;command&gt;.log</code> (<code>ui.log</code>, <code>image.log</code>, <code>video.log</code> or <code>model.log</code>). The file is cleared every time the command starts, so it only covers the latest run, and stays empty when nothing goes wrong. If the logs folder cannot be written, the log goes to the system temp folder instead; <code>ziv ui</code> prints the file's location at startup. Set <code>ZIV_LOG=off</code> to turn the log off.</p>
 
 
 
