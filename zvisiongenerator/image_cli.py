@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import warnings
 from pathlib import Path
 
 from zvisiongenerator.backends import get_backend
+from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.prompts import load_prompts_file
+
+logger = logging.getLogger(__name__)
 
 
 def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
@@ -75,6 +79,7 @@ def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
 def main(*, prog: str = "ziv-image") -> None:
     parser = _build_parser(prog=prog)
     args = parser.parse_args()
+    setup_logging("image")
 
     if args.runs is not None and args.runs < 1:
         parser.error("--runs must be at least 1")
@@ -173,6 +178,7 @@ def main(*, prog: str = "ziv-image") -> None:
     try:
         model_info = detect_image_model(args.model)
     except Exception as e:
+        logger.exception("Could not detect model type for %s", args.model)
         parser.error(f"Could not detect model type: {e}")
     try:
         backend = get_backend()
@@ -260,5 +266,6 @@ def main(*, prog: str = "ziv-image") -> None:
             lora_weights=lora_weights,
         )
     except (RuntimeError, ImportError, OSError, ValueError) as e:
+        logger.exception("Failed to load model %s", args.model)
         parser.error(f"Failed to load model: {e}")
     run_batch(backend, loaded_model, prompts_data, config, args, model_info=loaded_model_info)

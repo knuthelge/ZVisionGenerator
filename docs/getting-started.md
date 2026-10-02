@@ -152,3 +152,7 @@ Set the `ZIV_DATA_DIR` environment variable to use a custom location instead of 
 export ZIV_DATA_DIR=/mnt/fast-ssd/ziv
 ziv-image -m my-model --prompt "a landscape"
 ```
+
+### Error Log
+
+Each command records warnings and errors, with full tracebacks, in `~/.ziv/logs/<command>.log` (`ui.log`, `image.log`, `video.log` or `model.log`). The file is cleared every time the command starts, so it only covers the latest run, and stays empty when nothing goes wrong. If the logs folder cannot be written, the log goes to the system temp folder instead; `ziv ui` prints the file's location at startup. Set `ZIV_LOG=off` to turn the log off.

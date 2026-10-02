@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import random
 import time
 import warnings
@@ -17,6 +18,8 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
+
+logger = logging.getLogger(__name__)
 
 
 def run_video_batch(
@@ -168,6 +171,7 @@ def run_video_batch(
                         event_context=event_context,
                     )
                 except Exception as exc:
+                    logger.exception("Video generation failed")
                     warnings.warn(f"Video generation failed: {exc}", stacklevel=2)
                     outcome = StageOutcome.failed
                 completed_iterations += 1

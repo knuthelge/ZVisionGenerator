@@ -12,6 +12,8 @@ import threading
 import time
 import webbrowser
 
+from zvisiongenerator.utils.app_log import log_file_path, setup_logging, uvicorn_log_config
+
 
 _WEB_RUNTIME_MODULES = {
     "fastapi": "fastapi",
@@ -171,12 +173,15 @@ def run_server(*, host: str = "127.0.0.1", port: int = 8080, open_browser: bool 
     url = f"http://[{host}]:{selected_port}" if ":" in host else f"http://{host}:{selected_port}"
 
     print(f"Starting Z-Vision Generator Web UI at {url}")
+    log_path = log_file_path()
+    if log_path is not None:
+        print(f"Error log: {log_path}")
 
     if open_browser:
         opener = threading.Thread(target=_open_browser, args=(url, host, selected_port), daemon=True)
         opener.start()
 
-    uvicorn.run("zvisiongenerator.web.server:app", host=host, port=selected_port, log_level="info")
+    uvicorn.run("zvisiongenerator.web.server:app", host=host, port=selected_port, log_level="info", log_config=uvicorn_log_config())
 
 
 def main(argv: list[str] | None = None, *, prog: str = "ziv-ui") -> None:
@@ -187,6 +192,7 @@ def main(argv: list[str] | None = None, *, prog: str = "ziv-ui") -> None:
     if args.port < 1 or args.port > 65535:
         parser.error("--port must be between 1 and 65535")
 
+    setup_logging("ui")
     try:
         _ensure_web_runtime_dependencies(prog=prog)
     except RuntimeError as exc:
