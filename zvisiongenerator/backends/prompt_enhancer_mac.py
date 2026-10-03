@@ -58,8 +58,12 @@ class MlxPromptEnhancer:
         from mlx_lm import stream_generate
         from mlx_lm.sample_utils import make_sampler
 
+        from zvisiongenerator.backends.memory_mac import release_memory
+
         if self._model is None:
             raise RuntimeError("The prompt enhancer model has been released.")
+        # A previous image/video pass leaves its buffers in MLX's cache; return them so a tight fit has room to generate.
+        release_memory()
         prompt = self._tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True, enable_thinking=False)
         mx.random.seed(seed)
         for response in stream_generate(self._model, self._tokenizer, prompt, max_tokens=max_tokens, sampler=make_sampler(temp=temperature)):

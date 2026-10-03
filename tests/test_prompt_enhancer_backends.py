@@ -36,7 +36,9 @@ def _install_fake_mlx(monkeypatch, *, load_side_effect, chunks=("A ", "fox.")):
     monkeypatch.setitem(sys.modules, "mlx.core", mx)
     monkeypatch.setitem(sys.modules, "mlx_lm", mlx_lm)
     monkeypatch.setitem(sys.modules, "mlx_lm.sample_utils", sample_utils)
-    return types.SimpleNamespace(tokenizer=tokenizer, load=load, stream_generate=stream_generate, make_sampler=make_sampler, mx=mx)
+    release_memory = MagicMock()
+    monkeypatch.setattr("zvisiongenerator.backends.memory_mac.release_memory", release_memory)
+    return types.SimpleNamespace(tokenizer=tokenizer, load=load, stream_generate=stream_generate, make_sampler=make_sampler, mx=mx, release_memory=release_memory)
 
 
 class TestMlxAdapter:
@@ -56,6 +58,20 @@ class TestMlxAdapter:
         fake.mx.random.seed.assert_called_once_with(9)
         fake.make_sampler.assert_called_once_with(temp=0.4)
         assert fake.stream_generate.call_args.kwargs["max_tokens"] == 50
+
+    def test_generate_frees_cached_memory_first(self, monkeypatch):
+        from zvisiongenerator.backends.prompt_enhancer_mac import MlxPromptEnhancer
+
+        fake = _install_fake_mlx(monkeypatch, load_side_effect=None)
+        fake.load.side_effect = None
+        fake.load.return_value = ("model", fake.tokenizer)
+        enhancer = MlxPromptEnhancer("owner/repo", None)
+        order = MagicMock()
+        order.attach_mock(fake.release_memory, "release_memory")
+        order.attach_mock(fake.stream_generate, "stream_generate")
+
+        list(enhancer.generate([], seed=1, max_tokens=5, temperature=0.7))
+        assert [call[0] for call in order.mock_calls] == ["release_memory", "stream_generate"]
 
     def test_cancel_stops_stream(self, monkeypatch):
         from zvisiongenerator.backends.prompt_enhancer_mac import MlxPromptEnhancer
@@ -97,7 +113,6 @@ class TestMlxAdapter:
         fake = _install_fake_mlx(monkeypatch, load_side_effect=None)
         fake.load.side_effect = None
         fake.load.return_value = ("model", fake.tokenizer)
-        monkeypatch.setattr("zvisiongenerator.backends.memory_mac.release_memory", lambda: None)
         enhancer = prompt_enhancer_mac.MlxPromptEnhancer("owner/repo", None)
         enhancer.close()
         with pytest.raises(RuntimeError, match="released"):
