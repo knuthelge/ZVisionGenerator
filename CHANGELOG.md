@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 - Web UI: live previews at 25%, 50% and 75% of the steps now also work on Windows and Linux (diffusers/CUDA) for Z-Image, FLUX.2 Klein and FLUX.2
 
+### Fixed
+- Prompt enhancer (macOS): prompts after the first in a batch are enhanced again when the image or video model is a tight memory fit; the enhancer no longer runs out of memory after a generation
+
 ## [0.13.0b5] - 2026-10-03
 
 ### Added
