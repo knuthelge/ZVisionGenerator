@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Web UI: live previews at 25%, 50% and 75% of the steps now also work on Windows and Linux (diffusers/CUDA) for Z-Image, FLUX.2 Klein and FLUX.2
+
 ## [0.13.0b5] - 2026-10-03
 
 ### Added

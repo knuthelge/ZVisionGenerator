@@ -8,6 +8,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from zvisiongenerator.core.latent_preview import ZIMAGE_RGB_BIAS
+
 
 pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="mflux/MLX backend is macOS-only")
 
@@ -37,7 +39,7 @@ class TestRenderLatentPreview:
         image = preview_module.render_latent_preview(None, "zimage", latents, height=256, width=128)
 
         assert image.size == (16, 32)
-        expected = np.round(np.array(preview_module._ZIMAGE_RGB_BIAS) * 255)
+        expected = np.round(np.array(ZIMAGE_RGB_BIAS) * 255)
         assert np.allclose(np.asarray(image)[0, 0], expected, atol=1)
 
     def test_flux2_klein_unpacks_like_the_mflux_vae(self, mx, preview_module):

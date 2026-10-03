@@ -23,7 +23,7 @@ Z-Vision Generator gives you a unified CLI for both image and video generation, 
 - **Model variants** — image quantization across supported image backends, plus macOS MLX video Q4/Q8 aliases
 - **Post-processing** — contrast, saturation, and CAS sharpening (image only)
 - **Interactive controls** — skip, quit, pause, and repeat during batch runs (image only)
-- **Live preview** — on macOS, the Web UI shows the image taking shape at 25/50/75% of the steps so you can skip early (preview only, never saved)
+- **Live preview** — the Web UI shows the image taking shape at 25/50/75% of the steps so you can skip early (preview only, never saved). Supported for Z-Image and FLUX.2 Klein on every platform, and Ideogram 4 on macOS
 
 ## Platform Support
 

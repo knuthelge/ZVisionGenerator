@@ -68,6 +68,7 @@ zvisiongenerator/
 │   ├── image_mac.py               macOS image backend (mflux/MLX)
 │   ├── image_mac_preview.py       Cheap latent → RGB live previews for the mflux backend
 │   ├── image_win.py               Windows/Linux image backend (diffusers/CUDA)
+│   ├── image_win_preview.py       Cheap latent → RGB live previews for the diffusers backend
 │   ├── memory_mac.py              MLX memory release and recommended GPU memory budget
 │   ├── prompt_enhancer_mac.py     macOS prompt-enhancer LLM (mlx-lm)
 │   ├── prompt_enhancer_win.py     Windows/Linux prompt-enhancer LLM (transformers)
@@ -81,6 +82,7 @@ zvisiongenerator/
 ├── core/
 │   ├── types.py                   Shared types (StageOutcome)
 │   ├── progress_events.py         Shared image/video workflow progress event helpers
+│   ├── latent_preview.py          Latent → RGB projection factors shared by live previews
 │   ├── image_types.py             Image request and artifacts
 │   ├── video_types.py             Video request and artifacts
 │   ├── image_backend.py           Image backend protocol
