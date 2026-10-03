@@ -154,7 +154,7 @@ ziv-image -m my-model -q 4    # 4-bit quantization
 ziv-image -m my-model -q 8    # 8-bit quantization
 ```
 
-On macOS, memory is shared between the CPU and GPU, so an unquantized model larger than the machine's recommended GPU memory pushes the whole system into swap. On a 16 GB Mac, for example, Z-Image Turbo and FLUX.2 Klein need `-q 8` or `-q 4`. The Web UI's memory badge shows which levels fit.
+On macOS, memory is shared between the CPU and GPU, so an unquantized model larger than the machine's recommended GPU memory makes macOS compress or swap other memory, and well beyond it the whole system swaps heavily. On a 16 GB Mac, for example, Z-Image Turbo and FLUX.2 Klein need `-q 8` or `-q 4`. The Web UI's memory badge shows which levels fit.
 
 ## Post-Processing
 

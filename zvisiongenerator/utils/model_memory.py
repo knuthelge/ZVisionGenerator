@@ -19,7 +19,12 @@ from zvisiongenerator.utils.model_files import component_of, is_ltx_mlx_layout, 
 GIB = 1024**3
 _IMAGE_WORKING_BYTES = int(1.5 * GIB)
 _VIDEO_WORKING_BYTES = 3 * GIB
-_TIGHT_RATIO = 0.8
+# Apple's recommended working set is conservative: a modest overshoot is absorbed by memory compression
+# without a noticeable slowdown.
+_FITS_RATIO = 1.1
+# MLX's own default memory limit is 1.5x Apple's recommended working set: up to there it keeps allocating and
+# lets macOS compress and swap, so models in that range run, at the cost of slowing the rest of the Mac.
+_TIGHT_LIMIT_RATIO = 1.5
 _MAX_HEADER_BYTES = 100 * 1024 * 1024
 
 _DTYPE_BYTES = {
@@ -42,6 +47,8 @@ _DTYPE_BYTES = {
 _FLOAT_DTYPES = frozenset({"F64", "F32", "F16", "BF16"})
 # MLX affine quantization packs weights to `bits` and stores a bf16 scale and bias per 64-weight group.
 _QUANT_GROUP_OVERHEAD_BYTES = 4 / 64
+# Diffusion pipelines read text-encoder hidden states, never logits, so mflux does not load the LM head.
+_TEXT_ENCODER_SKIPPED_PREFIXES = ("lm_head.",)
 _LTX_MLX_CONNECTOR_FILE = "connector.safetensors"
 _LTX_MLX_DECODER_FILES = ("vae_decoder.safetensors", "vae_encoder.safetensors", "audio_vae.safetensors", "vocoder.safetensors")
 
@@ -69,19 +76,23 @@ class WeightTotals:
         return (self.float_matrix_elements + self.float_other_elements) * 2 + self.packed_bytes
 
 
-def read_safetensors_totals(path: Path) -> WeightTotals:
+def read_safetensors_totals(path: Path, skipped_prefixes: tuple[str, ...] = ()) -> WeightTotals:
     """Summarise a safetensors file from its header, cached per file version.
+
+    Args:
+        path: The safetensors file.
+        skipped_prefixes: Tensor-name prefixes the loader never reads, left out of the totals.
 
     Raises:
         ValueError: If the file is not a readable safetensors file, or uses a dtype the estimate does not
             know (e.g. sub-byte formats): guessing its size could mislabel a model, so it is not estimated.
     """
     stat = path.stat()
-    return _read_totals_cached(str(path.resolve()), stat.st_size, stat.st_mtime_ns)
+    return _read_totals_cached(str(path.resolve()), stat.st_size, stat.st_mtime_ns, skipped_prefixes)
 
 
 @functools.lru_cache(maxsize=512)
-def _read_totals_cached(path: str, size: int, mtime_ns: int) -> WeightTotals:
+def _read_totals_cached(path: str, size: int, mtime_ns: int, skipped_prefixes: tuple[str, ...]) -> WeightTotals:
     del size, mtime_ns  # Cache-key only: a rewritten file gets a fresh read.
     with open(path, "rb") as handle:
         prefix = handle.read(8)
@@ -96,7 +107,7 @@ def _read_totals_cached(path: str, size: int, mtime_ns: int) -> WeightTotals:
     matrix = other = packed = 0
     prequantized = False
     for name, spec in header.items():
-        if name == "__metadata__":
+        if name == "__metadata__" or name.startswith(skipped_prefixes):
             continue
         dtype = str(spec["dtype"])
         if dtype not in _DTYPE_BYTES:
@@ -118,7 +129,8 @@ def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ..
 
     Mirrors ``MfluxBackend.load_model``: floating-point weights load as bfloat16, the VAE is upcast to
     float32, FP8 and pre-quantized weights stay as stored, and quantizing packs 2-D weights. Only the
-    files the loader reads count (see :func:`model_weight_files`), and headers are read once for all levels.
+    files the loader reads count (see :func:`model_weight_files`), minus the text encoder's unused LM head,
+    and headers are read once for all levels.
 
     Args:
         model_dir: Directory holding the model's safetensors files.
@@ -163,10 +175,14 @@ def estimate_ltx_mlx_memory(model_dir: Path, text_encoder_dir: Path, *, low_memo
 
 
 def classify_memory_fit(required_bytes: int, budget_bytes: int) -> str:
-    """Classify an estimate against the memory budget as ``fits``, ``tight``, or ``too_large``."""
-    if required_bytes <= budget_bytes * _TIGHT_RATIO:
+    """Classify an estimate against the memory budget as ``fits``, ``tight``, or ``too_large``.
+
+    ``fits`` stays within 1.1x Apple's recommended working set; ``tight`` stays within MLX's default memory
+    limit (1.5x it), where the model runs but macOS compresses and swaps other memory; beyond is ``too_large``.
+    """
+    if required_bytes <= budget_bytes * _FITS_RATIO:
         return "fits"
-    if required_bytes <= budget_bytes:
+    if required_bytes <= budget_bytes * _TIGHT_LIMIT_RATIO:
         return "tight"
     return "too_large"
 
@@ -175,8 +191,9 @@ def _image_components(model_dir: Path) -> dict[str, WeightTotals] | None:
     components: dict[str, WeightTotals] = {}
     for path in model_weight_files(model_dir):
         component = component_of(model_dir, path)
+        skipped = _TEXT_ENCODER_SKIPPED_PREFIXES if component == "text_encoder" else ()
         try:
-            components[component] = components.get(component, WeightTotals()) + read_safetensors_totals(path)
+            components[component] = components.get(component, WeightTotals()) + read_safetensors_totals(path, skipped)
         except OSError, ValueError, KeyError, TypeError:
             return None
     return components or None

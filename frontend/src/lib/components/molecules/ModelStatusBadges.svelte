@@ -10,6 +10,12 @@
   export const DOWNLOADED_TOOLTIP = 'Downloaded: the model files are on this machine.';
   export const NOT_DOWNLOADED_TOOLTIP = 'Not downloaded: it downloads the first time you generate with it.';
 
+  /** What each fit level means in practice; fits needs no explanation. */
+  const MEMORY_FIT_CONSEQUENCES: Partial<Record<MemoryFitStatus, string>> = {
+    tight: 'It runs, but macOS compresses or swaps other memory to make room, so the Mac can slow down while generating.',
+    too_large: 'More than MLX will try to fit (1.5× the recommendation): expect heavy swapping or an out-of-memory error.'
+  };
+
   /**
    * Pick the estimate for the selected settings. Returns null rather than a different setting's estimate when
    * the selected quantize level was not estimated, so the badge never describes something else.
@@ -23,6 +29,8 @@
   /** Describe the estimate, plus the quantized alternatives when they exist. */
   export function memoryFitTitle(fit: MemoryFit, estimate: MemoryFitEstimate): string {
     const lines = [`Needs ~${estimate.required_gb} GB; this Mac recommends up to ~${fit.budget_gb} GB for the GPU.`];
+    const consequence = MEMORY_FIT_CONSEQUENCES[estimate.status];
+    if (consequence) lines.push(consequence);
     const quantized = Object.entries(fit.by_quantize).filter(([key]) => key !== 'none');
     if (quantized.length > 0) {
       lines.push(quantized.map(([key, value]) => `q${key}: ~${value.required_gb} GB (${MEMORY_FIT_LABELS[value.status]})`).join(' · '));
