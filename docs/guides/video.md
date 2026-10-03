@@ -44,6 +44,10 @@ ziv-video -m MODEL -p prompts.yaml -r 3
 ziv-video -m MODEL --ratio 1:1 --size s --prompt "Abstract art"
 ```
 
+## Prompt Enhancement
+
+Video prompts can be rewritten by the local [prompt enhancer](prompts.md#enhancing-prompts), which adds visible motion and camera movement in time order. Use `--enhance style=cinematic,motion=action+camera-move`, or the Enhance options in the Web UI. Image-to-video enhancement does not look at the starting image. **Enhance each image** keeps about 3 GB extra loaded for the whole job.
+
 ## Video Upscale & Audio
 
 ```bash

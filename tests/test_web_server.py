@@ -251,6 +251,7 @@ def test_phase_a_routes_share_config_and_path_authority(monkeypatch):
 
     assert sorted(schema_fields) == [
         "generation.default_size",
+        "prompt_enhancer.user_model",
         "ui.default_models.image",
         "ui.default_models.video",
         "ui.output_dir",
@@ -881,7 +882,7 @@ def test_prompt_file_routes_reject_non_local_or_wrong_extension_paths(tmp_path):
 def test_manual_prompt_file_submission_rejects_missing_host_local_path():
     """Manual prompt-file submissions should fail visibly instead of silently falling back."""
     with pytest.raises(ValueError):
-        web_server._resolve_prompt_submission(
+        web_server._resolve_prompt_submission_with_enhance(
             {
                 "prompt_source": "file",
                 "prompts_file": "/missing/prompts.yaml",
@@ -1412,7 +1413,7 @@ def test_prompt_file_submission_batches_checked_prompts_in_file_order(tmp_path, 
     path = tmp_path / "prompts.yaml"
     path.write_text("portrait:\n  - prompt: first\n    negative: blur\n  - prompt: second\nlandscape:\n  - prompt: third\n  - prompt: unchecked\n", encoding="utf-8")
     form = FormData([("prompt_source", "file"), ("prompts_file", str(path)), *[("prompt_option_id", option_id) for option_id in selected]])
-    source, prompt, negative, batch = web_server._resolve_prompt_submission(form)
+    source, prompt, negative, batch, _enhance = web_server._resolve_prompt_submission_with_enhance(form)
     assert source == "file"
     assert prompt == "first"
     assert negative == "blur"
@@ -1431,7 +1432,7 @@ def test_prompt_file_submission_rejects_empty_inactive_or_stale_selection(tmp_pa
     path.write_text("portrait:\n  - prompt: first\n  - prompt: inactive\n    active: false\n", encoding="utf-8")
     form = FormData([("prompt_source", "file"), ("prompts_file", str(path)), *[("prompt_option_id", option_id) for option_id in selected]])
     with pytest.raises(ValueError, match="Select at least one|missing or inactive"):
-        web_server._resolve_prompt_submission(form)
+        web_server._resolve_prompt_submission_with_enhance(form)
 
 
 @pytest.mark.parametrize(("preset_upscale_steps", "expected"), [(3, 3), (None, 5)])

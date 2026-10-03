@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from zvisiongenerator.image_cli import _build_parser, main
 from zvisiongenerator.utils.lora import parse_lora_arg
+from zvisiongenerator.utils.prompts import PromptFileInspection
 
 
 # ── parse_lora_arg ──────────────────────────────────────────────────────────
@@ -81,7 +82,7 @@ class TestCLIValidation:
         "zvisiongenerator.image_cli.resolve_model_path": lambda p, **kw: p,
         "zvisiongenerator.image_cli.resolve_defaults": lambda *a, **kw: {"steps": 10, "guidance": 0.5, "scheduler": None},
         "zvisiongenerator.image_cli.validate_scheduler": lambda *a: None,
-        "zvisiongenerator.image_cli.load_prompts_file": lambda _: {"set": [("a cat", None)]},
+        "zvisiongenerator.image_cli.inspect_prompts_file": lambda _: PromptFileInspection(prompts_data={"set": [("a cat", None)]}, options=[]),
         "zvisiongenerator.image_cli.get_backend": lambda: MagicMock(name="mflux", load_model=MagicMock(return_value=(MagicMock(), MagicMock(family="zimage")))),
         "zvisiongenerator.image_cli.run_batch": lambda *a, **kw: None,
     }

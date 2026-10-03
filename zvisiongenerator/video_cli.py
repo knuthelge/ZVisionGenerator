@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import warnings
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -17,9 +18,12 @@ from zvisiongenerator.utils.config import load_config, resolve_video_defaults, s
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.paths import resolve_model_path
-from zvisiongenerator.utils.prompts import load_prompts_file
+from zvisiongenerator.utils.prompt_enhance import enhance_by_set_for_mode
+from zvisiongenerator.utils.prompts import inspect_prompts_file
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.video_runner import run_video_batch
+from zvisiongenerator.backends.prompt_enhancer_session import job_enhancer, runs_on_cpu
+from zvisiongenerator.enhance_cli import add_enhance_arguments, job_enhance_plan, parse_enhance_args, print_enhancer_phase
 from zvisiongenerator.workflows import build_video_workflow
 
 logger = logging.getLogger(__name__)
@@ -50,6 +54,7 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
     parser.add_argument("--lora", type=str, default=None, help="Comma-separated LoRAs with optional weights: name1:0.8,name2:0.5. Bare names resolve from ~/.ziv/loras/.")
     parser.add_argument("--upscale", type=int, default=None, help="Upscale factor (only 2 accepted).")
     parser.add_argument("--audio", action=argparse.BooleanOptionalAction, default=True, help="Include audio in output (default: enabled).")
+    add_enhance_arguments(parser, mode="video")
     return parser
 
 
@@ -103,6 +108,7 @@ def main(*, prog: str = "ziv-video") -> None:
         parser.error("--steps must be at least 1")
     if args.upscale is not None and args.upscale != 2:
         parser.error("--upscale only supports factor 2 (LTX spatial upscaler)")
+    parse_enhance_args(parser, args, mode="video")
 
     # Expand ~ in filesystem-only path arguments. Model/LoRA tokens are resolved by shared helpers.
     if args.image_path:
@@ -240,6 +246,18 @@ def main(*, prog: str = "ziv-video") -> None:
     if lora_paths:
         loras = list(zip(lora_paths, lora_weights, strict=False))
 
+    # Load prompts before the model so prompt-file errors and the enhancer preflight fail fast
+    enhance_by_set = None
+    if args.prompt is not None:
+        prompts_data: dict[str, list[tuple[str, str | None]]] = {"prompt": [(args.prompt, None)]}
+    else:
+        try:
+            inspection = inspect_prompts_file(args.prompts_file)
+        except (FileNotFoundError, ValueError) as e:
+            parser.error(str(e))
+        prompts_data, enhance_by_set = inspection.prompts_data, enhance_by_set_for_mode(inspection.enhance_by_set, mode="video")
+    enhancer_model = job_enhance_plan(parser, args, config, enhance_by_set)
+
     # Load model
     print(f"Loading {model_info.family.upper()} video model: {args.model}")
     load_kwargs: dict[str, Any] = {}
@@ -257,25 +275,32 @@ def main(*, prog: str = "ziv-video") -> None:
         logger.exception("Failed to load video model %s", args.model)
         parser.error(str(e))
 
-    # Load prompts
-    if args.prompt is not None:
-        prompts_data: dict[str, list[tuple[str, str | None]]] = {"prompt": [(args.prompt, None)]}
-    else:
-        prompts_data = load_prompts_file(args.prompts_file)
-
     # Build workflow
-    workflow = build_video_workflow(args)
+    workflow = build_video_workflow(args, enhance=enhancer_model is not None)
 
-    # Run batch
-    run_video_batch(
-        backend=backend,
-        model=model,
-        model_info=model_info,
-        workflow=workflow,
-        prompts_data=prompts_data,
-        config=config,
-        args=args,
-    )
+    # Run batch, holding the enhancer for the whole job when any prompt is enhanced
+    with ExitStack() as stack:
+        prompt_enhancer = None
+        if enhancer_model is not None:
+            # Only loading the enhancer is reported as an enhancer failure; generation errors propagate as before.
+            try:
+                prompt_enhancer = stack.enter_context(job_enhancer(*enhancer_model, on_phase=print_enhancer_phase))
+                if runs_on_cpu(prompt_enhancer):
+                    print_enhancer_phase("cpu")
+            except RuntimeError as e:
+                logger.exception("Prompt enhancer failed to load")
+                parser.error(str(e))
+        enhance_kwargs = {"prompt_enhancer": prompt_enhancer, "enhance_by_set": enhance_by_set} if prompt_enhancer is not None else {}
+        run_video_batch(
+            backend=backend,
+            model=model,
+            model_info=model_info,
+            workflow=workflow,
+            prompts_data=prompts_data,
+            config=config,
+            args=args,
+            **enhance_kwargs,
+        )
 
 
 if __name__ == "__main__":

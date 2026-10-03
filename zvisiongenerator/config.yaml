@@ -134,6 +134,7 @@ model_presets:
 
   flux1:
     supports_negative_prompt: false
+    enhance_max_words: 180  # FLUX.1-schnell reads only 256 T5 tokens
     default_steps: 20
     default_guidance: 3.5
     default_scheduler:
@@ -197,6 +198,31 @@ video_model_presets:
       default_repo: "dg845/LTX-2.3-Diffusers"
     upscale:
       default_upscale_steps: 8
+
+# --- Prompt enhancer (local LLM) ---
+
+prompt_enhancer:
+  # Public Hugging Face repos, pinned. Override with prompt_enhancer.user_model (REPO[@REVISION] or a folder)
+  # (Config page) or --enhance-model REPO[@REVISION].
+  model:
+    darwin: McG-221/Qwen3.5-4B-heretic-mlx-4Bit
+    win32: coder3101/Qwen3.5-4B-heretic
+    linux: coder3101/Qwen3.5-4B-heretic
+  revision:
+    darwin: 7a6b22e4cd458ba20a8c2737634a932f2b572ef2
+    win32: dc69b95668662490d2f84db1cf0bb61f8743f806
+    linux: dc69b95668662490d2f84db1cf0bb61f8743f806
+  download_size_label:
+    darwin: 2.4 GB
+    win32: 9 GB
+    linux: 9 GB
+  temperature: 0.7
+  max_new_tokens: 700
+  idle_release_seconds: 120
+  length:
+    percent: {shorter: 50, same: 100, longer: 200, extra: 300}
+    floor_words: {shorter: 12, longer: 40, extra: 80}  # shorter never aims below 12 words
+    max_words: 300
 
 ui:
   startup_view: workspace

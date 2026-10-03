@@ -12,11 +12,13 @@ from typing import Any
 from zvisiongenerator.core.progress_events import ProgressCallback
 from zvisiongenerator.core.progress_events import emit_generation_finished as _emit_generation_finished
 from zvisiongenerator.core.progress_events import emit_progress as _emit_progress
+from zvisiongenerator.core.progress_events import make_prompt_enhanced_callback as _make_prompt_enhanced_callback
 from zvisiongenerator.core.progress_events import make_step_progress_callback as _make_step_progress_callback
 from zvisiongenerator.core.progress_events import run_workflow_with_progress as _run_workflow_with_progress
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.core.workflow import GenerationWorkflow
+from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhance_options, entry_enhance, resolve_enhance_ceiling, resolve_item_enhance
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 
 logger = logging.getLogger(__name__)
@@ -31,6 +33,8 @@ def run_video_batch(
     config: dict[str, Any],
     args: argparse.Namespace,
     progress_callback: ProgressCallback | None = None,
+    prompt_enhancer: Any | None = None,
+    enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
 ) -> None:
     """Run the video batch generation loop.
 
@@ -41,11 +45,19 @@ def run_video_batch(
         workflow: Built GenerationWorkflow from build_video_workflow().
         prompts_data: Dict of set_name -> list of (prompt, negative_prompt) tuples.
         config: Loaded config.yaml dict.
-        args: Parsed video CLI arguments.
+        args: Parsed video CLI arguments. ``args.enhance`` / ``args.no_enhance`` control auto prompt enhancement.
+        prompt_enhancer: Loaded ``PromptEnhancer`` when any prompt is auto-enhanced (build the
+            workflow with ``enhance=True``).
+        enhance_by_set: Per-entry YAML ``enhance:`` settings aligned with *prompts_data*.
     """
     # Seed range from config
     seed_min = config.get("generation", {}).get("seed_min", 4)
     seed_max = config.get("generation", {}).get("seed_max", 2**32 - 1)
+
+    enhance_disabled = bool(getattr(args, "no_enhance", False))
+    enhance_override = getattr(args, "enhance", None)
+    enhance_ceiling = resolve_enhance_ceiling(config, family=model_info.family, mode="video")
+    enhance_opts = enhance_options(config)
 
     total_prompts = sum(len(p) for p in prompts_data.values())
     total_iterations = args.runs * total_prompts
@@ -72,6 +84,7 @@ def run_video_batch(
                 eta = avg * remaining if avg is not None else None
 
                 seed = args.seed if args.seed is not None else random.randint(seed_min, seed_max)
+                item_enhance = resolve_item_enhance(disabled=enhance_disabled, override=enhance_override, entry=entry_enhance(enhance_by_set, set_name, prompt_idx))
                 _emit_progress(
                     progress_callback,
                     "prompt_started",
@@ -148,6 +161,20 @@ def run_video_batch(
                     no_audio=getattr(args, "no_audio", False),
                     output_dir=args.output,
                     output_format=getattr(args, "format", "mp4"),
+                    prompt_enhancer=prompt_enhancer if item_enhance is not None else None,
+                    enhance=item_enhance,
+                    enhance_ceiling=enhance_ceiling,
+                    enhance_options=enhance_opts,
+                    on_prompt_enhanced=_make_prompt_enhanced_callback(
+                        progress_callback,
+                        mode="video",
+                        run_index=run_idx,
+                        ran_iterations=ran_iterations,
+                        total_iterations=total_iterations,
+                        set_name=set_name,
+                        prompt_index=prompt_idx,
+                        seed=seed,
+                    ),
                 )
                 artifacts = VideoWorkingArtifacts()
                 try:

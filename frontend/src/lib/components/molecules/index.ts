@@ -1,3 +1,4 @@
+export { default as EnhanceOptions } from './EnhanceOptions.svelte';
 export { default as FormField } from './FormField.svelte';
 export { default as Lightbox } from './Lightbox.svelte';
 export { default as Toast } from './Toast.svelte';

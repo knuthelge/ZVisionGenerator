@@ -26,6 +26,7 @@ def build_image_config_payload(request: ImageGenerationRequest, artifacts: Image
     Contains only fields that are meaningful for re-generation: schema, workflow,
     prompt, model, seed, steps, guidance, dimensions, ratio, size, image_path, lora.
     Excludes output paths, runtime internals, resolved_prompt, and postprocess state.
+    An auto-enhanced prompt replaces the template prompt so the asset records what rendered.
     """
     width = artifacts.image.width if artifacts.image is not None else request.width
     height = artifacts.image.height if artifacts.image is not None else request.height
@@ -33,7 +34,7 @@ def build_image_config_payload(request: ImageGenerationRequest, artifacts: Image
         {
             "schema": IMAGE_CONFIG_SCHEMA,
             "workflow": "img2img" if request.image_path else "txt2img",
-            "prompt": request.prompt,
+            "prompt": artifacts.metadata.get("enhanced_prompt") or request.prompt,
             "model": request.model_name,
             "seed": request.seed,
             "steps": request.steps,
@@ -55,12 +56,13 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
     model, seed, steps, width, height, ratio, size, frame_count, image_path, lora.
     Excludes model_family, duplicate model_name, resolved_prompt, generation_time,
     output paths, media_type, and runtime/postprocess/audio internals.
+    An auto-enhanced prompt replaces the template prompt so the asset records what rendered.
     """
     return _drop_unserializable(
         {
             "schema": VIDEO_CONFIG_SCHEMA,
             "workflow": "img2vid" if request.image_path else "txt2vid",
-            "prompt": request.prompt,
+            "prompt": artifacts.metadata.get("enhanced_prompt") or request.prompt,
             "model": request.model_name,
             "seed": request.seed,
             "steps": request.steps,

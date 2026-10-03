@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import importlib.resources
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -64,6 +65,7 @@ def load_config() -> dict[str, Any]:
         "video_sizes",
         "video_generation",
         "video_model_presets",
+        "prompt_enhancer",
     )
     for section in _EXPECTED_DICTS:
         if section in config and not isinstance(config[section], dict):
@@ -371,3 +373,49 @@ def resolve_upscale_steps(defaults: dict[str, Any], steps: int) -> int:
     """Return the upscale refinement steps when not set explicitly: the preset default, else ``max(1, steps // 2)``."""
     preset_steps = defaults.get("upscale_steps")
     return preset_steps if preset_steps is not None else max(1, steps // 2)
+
+
+def model_reference(repo: str, revision: str | None) -> str:
+    """Return ``repo`` or ``repo@revision`` (the inverse of :func:`split_model_revision`)."""
+    return f"{repo}@{revision}" if revision else repo
+
+
+def split_model_revision(value: str) -> tuple[str, str | None]:
+    """Split ``REPO[@REVISION]`` into the repo (or local path) and an optional revision.
+
+    An existing local path is never split, even when it contains ``@``.
+    """
+    if Path(value.strip()).expanduser().exists():
+        return value.strip(), None
+    repo, sep, revision = value.strip().rpartition("@")
+    if not sep:
+        return value.strip(), None
+    if not repo.strip() or not revision.strip():
+        raise ValueError(f"Invalid enhancer model '{value}'. Use REPO or REPO@REVISION.")
+    return repo.strip(), revision.strip()
+
+
+def resolve_enhancer_model(config: dict[str, Any], *, platform_key: str, cli_model: str | None = None) -> tuple[str, str | None]:
+    """Return the prompt-enhancer ``(repo, revision)``: CLI > user override (``REPO[@REVISION]``) > platform default.
+
+    Args:
+        config: Loaded config mapping.
+        platform_key: Platform key such as ``darwin`` or ``win32``.
+        cli_model: Optional ``REPO[@REVISION]`` from ``--enhance-model``.
+
+    Raises:
+        ValueError: If no model is configured for the platform or *cli_model* is malformed.
+    """
+    if cli_model and cli_model.strip():
+        return split_model_revision(cli_model)
+    section = config.get("prompt_enhancer") or {}
+    user_model = section.get("user_model")
+    if isinstance(user_model, str) and user_model.strip():
+        return split_model_revision(user_model)
+    models = section.get("model") or {}
+    repo = models.get(platform_key) if isinstance(models, dict) else models
+    if not isinstance(repo, str) or not repo.strip():
+        raise ValueError(f"No prompt enhancer model is configured for platform '{platform_key}'. Set prompt_enhancer.user_model.")
+    revisions = section.get("revision") or {}
+    revision = revisions.get(platform_key) if isinstance(revisions, dict) else revisions
+    return repo.strip(), revision.strip() if isinstance(revision, str) and revision.strip() else None

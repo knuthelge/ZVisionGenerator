@@ -8,16 +8,20 @@ import logging
 import os
 import sys
 import warnings
+from contextlib import ExitStack
 from pathlib import Path
 
 from zvisiongenerator.backends import get_backend
+from zvisiongenerator.backends.prompt_enhancer_session import job_enhancer, runs_on_cpu
+from zvisiongenerator.enhance_cli import add_enhance_arguments, job_enhance_plan, parse_enhance_args, print_enhancer_phase
 from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.paths import resolve_model_path
-from zvisiongenerator.utils.prompts import load_prompts_file
+from zvisiongenerator.utils.prompt_enhance import enhance_by_set_for_mode
+from zvisiongenerator.utils.prompts import inspect_prompts_file
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +77,7 @@ def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
     parser.add_argument("--image", dest="image_path", type=str, default=None, help="Path to a reference image for img2img steering.")
     parser.add_argument("--image-strength", dest="image_strength", type=float, default=0.5, help="Denoising strength for reference image steering (0.0–1.0). Default: 0.5.")
     parser.add_argument("--seed", type=int, default=None, help="Seed for reproducible image generation. If not set, a random seed is used each run.")
+    add_enhance_arguments(parser, mode="image")
     return parser
 
 
@@ -113,6 +118,7 @@ def main(*, prog: str = "ziv-image") -> None:
         parser.error("--contrast amount must be non-negative")
     if isinstance(args.saturation, float) and args.saturation < 0:
         parser.error("--saturation amount must be non-negative")
+    parse_enhance_args(parser, args, mode="image")
 
     # Validate that explicit dimensions survive the upscale round-trip
     if args.upscale is not None:
@@ -214,6 +220,7 @@ def main(*, prog: str = "ziv-image") -> None:
         parser.error(f"--image-strength must be between 0.0 and 1.0, got {args.image_strength}")
 
     args.json_prompt_enabled = args.json_prompt is not None
+    enhance_by_set = None
     if args.json_prompt_enabled:
         if not args.json_prompt.strip():
             parser.error("--json-prompt must not be empty")
@@ -230,9 +237,10 @@ def main(*, prog: str = "ziv-image") -> None:
         prompts_data = {"prompt": [(args.prompt, None)]}
     else:
         try:
-            prompts_data = load_prompts_file(args.prompts_file)
+            inspection = inspect_prompts_file(args.prompts_file)
         except (FileNotFoundError, ValueError) as e:
             parser.error(str(e))
+        prompts_data, enhance_by_set = inspection.prompts_data, enhance_by_set_for_mode(inspection.enhance_by_set, mode="image")
     model_suffix = f" ({model_info.size or 'unknown size'})" if model_info.family == "flux2_klein" else ""
     print(f"Model type: {model_info.family}{model_suffix}")
 
@@ -256,6 +264,11 @@ def main(*, prog: str = "ziv-image") -> None:
                 stacklevel=2,
             )
 
+    if args.json_prompt_enabled and args.enhance is not None:
+        warnings.warn("--enhance does not apply to --json-prompt structured captions; ignoring.", stacklevel=2)
+        args.enhance = None
+    enhancer_model = job_enhance_plan(parser, args, config, enhance_by_set)
+
     args.lora_paths, args.lora_weights = lora_paths, lora_weights
     try:
         loaded_model, loaded_model_info = backend.load_model(
@@ -268,4 +281,18 @@ def main(*, prog: str = "ziv-image") -> None:
     except (RuntimeError, ImportError, OSError, ValueError) as e:
         logger.exception("Failed to load model %s", args.model)
         parser.error(f"Failed to load model: {e}")
-    run_batch(backend, loaded_model, prompts_data, config, args, model_info=loaded_model_info)
+    with ExitStack() as stack:
+        prompt_enhancer = None
+        if enhancer_model is not None:
+            # Only loading the enhancer is reported as an enhancer failure; generation errors propagate as before.
+            try:
+                prompt_enhancer = stack.enter_context(job_enhancer(*enhancer_model, on_phase=print_enhancer_phase))
+                if runs_on_cpu(prompt_enhancer):
+                    print_enhancer_phase("cpu")
+            except RuntimeError as e:
+                logger.exception("Prompt enhancer failed to load")
+                parser.error(str(e))
+        if prompt_enhancer is None:
+            run_batch(backend, loaded_model, prompts_data, config, args, model_info=loaded_model_info)
+        else:
+            run_batch(backend, loaded_model, prompts_data, config, args, model_info=loaded_model_info, prompt_enhancer=prompt_enhancer, enhance_by_set=enhance_by_set)

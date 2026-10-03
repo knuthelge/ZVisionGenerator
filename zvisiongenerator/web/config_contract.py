@@ -10,7 +10,8 @@ from typing import Any
 import yaml
 
 from zvisiongenerator.utils.atomic_write import write_text_atomic
-from zvisiongenerator.utils.paths import get_ziv_data_dir
+from zvisiongenerator.utils.config import model_reference
+from zvisiongenerator.utils.paths import get_ziv_data_dir, is_huggingface_repo_id
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults
 
 
@@ -95,6 +96,17 @@ WRITABLE_CONFIG_FIELDS: tuple[WritableConfigField, ...] = (
         effective_value_shape="absolute host directory string",
         default_source="ui.output_dir from layered config, then ZIV data directory outputs folder",
         owning_consumer="Config page, workspace submissions, media serving, gallery, and history",
+    ),
+    WritableConfigField(
+        key="prompt_enhancer.user_model",
+        value_type="string",
+        clearable=True,
+        empty_string="clear",
+        validation_rules=("When set, value must be a Hugging Face repo id (owner/name, optionally @revision) or an existing local directory.",),
+        persisted_value_shape="string repo id (optionally @revision) or absolute directory, or null when the platform default is used",
+        effective_value_shape="string repo id or directory, or null when no enhancer is configured",
+        default_source="prompt_enhancer.model for this platform",
+        owning_consumer="Workspace prompt enhancement, auto-enhance jobs, and CLI --enhance",
     ),
 )
 
@@ -238,6 +250,13 @@ def _validate_config_value(field: WritableConfigField, value: ConfigValue, curre
         return value
     if field.key == "ui.output_dir":
         return normalize_user_directory(value)
+    if field.key == "prompt_enhancer.user_model":
+        local = Path(value).expanduser()
+        if local.is_dir():
+            return str(local.resolve())
+        if not is_huggingface_repo_id(value):
+            raise ValueError("Enhancer model must be a Hugging Face repo id (owner/name, optionally @revision) or an existing local directory.")
+        return value
     raise ValueError(f"Unknown writable config field: {field.key}")
 
 
@@ -251,6 +270,9 @@ def _effective_field_value(web_config: Any, key: str) -> ConfigValue:
         return default_size
     if key == "ui.output_dir":
         return web_config.output_dir
+    if key == "prompt_enhancer.user_model":
+        model = getattr(web_config, "enhancer_model", None)
+        return model_reference(model, getattr(web_config, "enhancer_revision", None)) if model else None
     raise ValueError(f"Unknown writable config field: {key}")
 
 

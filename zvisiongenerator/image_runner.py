@@ -18,6 +18,7 @@ from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorki
 from zvisiongenerator.core.progress_events import ProgressCallback
 from zvisiongenerator.core.progress_events import emit_generation_finished as _emit_generation_finished
 from zvisiongenerator.core.progress_events import emit_progress as _emit_progress
+from zvisiongenerator.core.progress_events import make_prompt_enhanced_callback as _make_prompt_enhanced_callback
 from zvisiongenerator.core.progress_events import make_step_progress_callback as _make_step_progress_callback
 from zvisiongenerator.core.progress_events import run_workflow_with_progress as _run_workflow_with_progress
 from zvisiongenerator.core.types import StageOutcome
@@ -25,6 +26,7 @@ from zvisiongenerator.utils import generate_filename, format_generation_info
 from zvisiongenerator.utils.alignment import round_to_alignment
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
+from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhance_options, enhancement_requested, entry_enhance, resolve_enhance_ceiling, resolve_item_enhance
 from zvisiongenerator.workflows import build_workflow
 
 
@@ -57,6 +59,8 @@ def run_batch(
     progress_callback: ProgressCallback | None = None,
     enable_interactive_controls: bool = True,
     skip_signal: SkipSignal | None = None,
+    prompt_enhancer: Any | None = None,
+    enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
 ) -> None:
     """Run the batch generation loop.
 
@@ -65,8 +69,11 @@ def run_batch(
         model: Loaded model handle from ``backend.load_model()``.
         prompts_data: Dict of set_name → list of (prompt, negative_prompt) tuples.
         config: Loaded config.yaml dict.
-        args: Parsed CLI arguments (argparse Namespace).
+        args: Parsed CLI arguments (argparse Namespace). ``args.enhance`` (job-wide
+            ``EnhanceSettings``) and ``args.no_enhance`` control auto prompt enhancement.
         model_info: ImageModelInfo from ``backend.load_model()``.
+        prompt_enhancer: Loaded ``PromptEnhancer`` when any prompt is auto-enhanced.
+        enhance_by_set: Per-entry YAML ``enhance:`` settings aligned with *prompts_data*.
     """
 
     # Resolve supports_negative_prompt from config
@@ -151,7 +158,11 @@ def run_batch(
     else:
         saturation_amount = saturation_cfg.get("default_amount", 1.0)
 
-    workflow = build_workflow(args)
+    enhance_disabled = bool(getattr(args, "no_enhance", False))
+    enhance_override = getattr(args, "enhance", None)
+    enhance_ceiling = resolve_enhance_ceiling(config, family=_family, mode="image")
+    enhance_opts = enhance_options(config)
+    workflow = build_workflow(args, enhance=enhancement_requested(disabled=enhance_disabled, override=enhance_override, enhance_by_set=enhance_by_set))
 
     try:
         if enable_interactive_controls:
@@ -167,6 +178,8 @@ def run_batch(
                     _avg = sum(image_times) / _completed if _completed > 0 else None
                     _remaining = total_iterations - _completed
                     _eta = _avg * _remaining if _avg is not None else None
+
+                    item_enhance = resolve_item_enhance(disabled=enhance_disabled, override=enhance_override, entry=entry_enhance(enhance_by_set, set_name, prompt_idx))
 
                     # Suppress negative prompt if model doesn't support it
                     effective_negative = negative_prompt
@@ -348,6 +361,20 @@ def run_batch(
                             saturation_amount=saturation_amount,
                             output_dir=args.output,
                             filename_base=gen_filename,
+                            prompt_enhancer=prompt_enhancer if item_enhance is not None else None,
+                            enhance=item_enhance,
+                            enhance_ceiling=enhance_ceiling,
+                            enhance_options=enhance_opts,
+                            on_prompt_enhanced=_make_prompt_enhanced_callback(
+                                progress_callback,
+                                mode="image",
+                                run_index=run_idx,
+                                ran_iterations=ran_iterations,
+                                total_iterations=total_iterations,
+                                set_name=set_name,
+                                prompt_index=prompt_idx,
+                                seed=seed,
+                            ),
                         )
                         artifacts = ImageWorkingArtifacts(filename=gen_filename)
 

@@ -69,8 +69,24 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `--image` | disabled | Path to reference image for img2img steering |
 | `--image-strength` | `0.5` | Denoising strength for reference (0.0–1.0) |
 | `-o`, `--output` | `.` | Output directory for generated images |
+| `--enhance [SPEC]` | disabled | Rewrite each prompt with a local LLM before generating. `SPEC` is optional, e.g. `style=photo,details=lighting+camera,length=longer`. Overrides prompt-file `enhance:` entries. Ignored with `--json-prompt` |
+| `--no-enhance` | — | Disable enhancement, including prompt-file `enhance:` entries |
+| `--enhance-model` | config | Enhancer LLM as `REPO[@REVISION]` or a local folder |
 
 Run `ziv-image --help` for the full list.
+
+### `--enhance` spec
+
+Comma-separated `key=value` pairs; join several values with `+`. Omitted keys use their defaults.
+
+| Key | Values | Default |
+|---|---|---|
+| `style` | `keep`, `photo`, `cinematic`, `illustration`, `anime`, `3d`, `painterly` | `keep` |
+| `details` | `lighting`, `composition`, `camera`, `materials`, `color`, `environment`, `subject` | `lighting+composition` |
+| `length` | `shorter`, `same`, `longer`, `extra` | `same` |
+| `motion` (`ziv-video` only) | `action`, `camera-move`, `pacing` | `action` |
+
+See [Enhancing Prompts](../guides/prompts.md#enhancing-prompts).
 
 The `ideo` alias selects Ideogram 4 (`ideogram-ai/ideogram-4-fp8`), a macOS/MLX-only image model. Its width and height must be in the 256–2048 range and multiples of 16. Size presets that exceed this range — `--size xl` with `--ratio 16:9` or `--ratio 9:16` (2112 px) — are rejected before the model loads, as are `--image` and `--upscale` (both require img2img, which Ideogram 4 does not support).
 
@@ -103,6 +119,9 @@ Platform-aware aliases:
 | `-r`, `--runs` | `1` | Number of batch runs |
 | `-o`, `--output` | `.` | Output directory |
 | `--format` | `mp4` | Output format |
+| `--enhance [SPEC]` | disabled | Rewrite each prompt with a local LLM before generating (see the `--enhance` spec above; `motion` is allowed) |
+| `--no-enhance` | — | Disable enhancement, including prompt-file `enhance:` entries |
+| `--enhance-model` | config | Enhancer LLM as `REPO[@REVISION]` or a local folder |
 
 Operational notes:
 

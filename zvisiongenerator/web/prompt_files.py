@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from zvisiongenerator.utils.atomic_write import write_text_atomic
+from zvisiongenerator.utils.prompt_enhance import format_enhance_spec
 from zvisiongenerator.utils.prompts import PromptFileInspection, PromptFileOption, inspect_prompts_file, inspect_prompts_text
 
 
@@ -98,6 +99,7 @@ def _serialize_options(options: list[PromptFileOption]) -> list[dict[str, str | 
             "label": _build_option_label(option),
             "prompt_preview": option.prompt,
             "negative_preview": option.negative_prompt,
+            "enhance": format_enhance_spec(option.enhance) if option.enhance is not None else None,
         }
         for option in options
     ]

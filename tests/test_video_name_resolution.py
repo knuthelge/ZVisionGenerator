@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from zvisiongenerator.utils.paths import resolve_model_path
+from zvisiongenerator.utils.prompts import PromptFileInspection
 
 
 # ── Friendly name resolution for video models ────────────────────────────────
@@ -66,7 +67,7 @@ class TestVideoCLIResolvesModelPath:
     @patch("zvisiongenerator.video_cli.ensure_ffmpeg")
     @patch("zvisiongenerator.video_cli.run_video_batch")
     @patch("zvisiongenerator.video_cli.build_video_workflow")
-    @patch("zvisiongenerator.video_cli.load_prompts_file", return_value={"test": [("a dog", None)]})
+    @patch("zvisiongenerator.video_cli.inspect_prompts_file", return_value=PromptFileInspection(prompts_data={"test": [("a dog", None)]}, options=[]))
     @patch(
         "zvisiongenerator.video_cli.load_config",
         return_value={

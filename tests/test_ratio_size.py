@@ -22,6 +22,7 @@ import pytest
 from zvisiongenerator.image_cli import _build_parser, main
 from zvisiongenerator.utils.filename import generate_filename
 from zvisiongenerator.utils.config import load_config
+from zvisiongenerator.utils.prompts import PromptFileInspection
 
 
 # ── PRD dimension lookup table ──────────────────────────────────────────────
@@ -200,7 +201,7 @@ class TestDefaultResolution:
         "resolve_model_path": staticmethod(lambda p, **kw: p),
         "resolve_defaults": staticmethod(lambda *a, **kw: {"steps": 10, "guidance": 0.5, "scheduler": None}),
         "validate_scheduler": staticmethod(lambda *a: None),
-        "load_prompts_file": staticmethod(lambda _: {"set": [("a cat", None)]}),
+        "inspect_prompts_file": staticmethod(lambda _: PromptFileInspection(prompts_data={"set": [("a cat", None)]}, options=[])),
         "get_backend": staticmethod(lambda: MagicMock(name="mflux", load_model=MagicMock(return_value=(MagicMock(), MagicMock(family="zimage"))))),
     }
 

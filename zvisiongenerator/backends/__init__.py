@@ -7,9 +7,19 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
     from zvisiongenerator.core.image_backend import ImageBackend
+    from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
 
-__all__ = ["get_accelerator_memory_budget", "get_backend", "get_backend_name", "get_video_backend", "release_accelerator_memory"]
+__all__ = [
+    "create_prompt_enhancer",
+    "get_accelerator_memory_budget",
+    "get_backend",
+    "get_backend_name",
+    "get_prompt_enhancer_session",
+    "get_video_backend",
+    "release_accelerator_memory",
+]
 
 BACKENDS: dict[str, "ImageBackend"] = {}
 
@@ -141,3 +151,26 @@ def get_accelerator_memory_budget() -> int | None:
     from zvisiongenerator.backends.memory_mac import memory_budget_bytes
 
     return memory_budget_bytes()
+
+
+# --- Prompt enhancer ---
+
+
+def create_prompt_enhancer(repo: str, revision: str | None) -> "PromptEnhancer":
+    """Load the platform prompt-enhancer LLM (mlx-lm on macOS, transformers elsewhere)."""
+    if sys.platform == "darwin":
+        from zvisiongenerator.backends.prompt_enhancer_mac import MlxPromptEnhancer
+
+        return MlxPromptEnhancer(repo, revision)
+    if sys.platform in ("win32", "linux"):
+        from zvisiongenerator.backends.prompt_enhancer_win import TransformersPromptEnhancer
+
+        return TransformersPromptEnhancer(repo, revision)
+    raise RuntimeError(f"Unsupported platform: {sys.platform}. Prompt enhancement supports macOS, Windows, and Linux.")
+
+
+def get_prompt_enhancer_session() -> "PromptEnhancerSession":
+    """Return the process-wide prompt-enhancer session."""
+    from zvisiongenerator.backends.prompt_enhancer_session import get_prompt_enhancer_session as _get_session
+
+    return _get_session()

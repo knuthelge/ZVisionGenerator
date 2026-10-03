@@ -26,6 +26,7 @@ from typing import Any
 from PIL import Image
 
 from zvisiongenerator.backends import get_backend, get_video_backend, release_accelerator_memory
+from zvisiongenerator.backends import prompt_enhancer_session
 from zvisiongenerator.core.image_backend import ImageBackend
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
@@ -34,6 +35,7 @@ from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
+from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.web.config import load_web_config
 from zvisiongenerator.web.gallery import gallery_asset_for_output_path, gallery_asset_to_json
@@ -153,7 +155,7 @@ def _get_worker_streams() -> _MutedWorkerStreams:
 
 
 @contextmanager
-def _worker_runtime_context():
+def worker_runtime_context():
     """Suppress noisy worker stdio and progress bars inside worker execution only."""
     previous_env = {key: os.environ.get(key) for key in ("HF_HUB_DISABLE_PROGRESS_BARS", "TQDM_DISABLE")}
     os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
@@ -294,6 +296,8 @@ class WebRunner:
         args: argparse.Namespace,
         model_ref: str,
         quantize: int | None = None,
+        enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
+        admission_check: Callable[[], None] | None = None,
     ) -> str:
         """Load the image model and run the batch loop on a worker thread."""
         control_signal = SkipSignal()
@@ -303,6 +307,7 @@ class WebRunner:
             control_signal=control_signal,
             supported_controls=IMAGE_SUPPORTED_CONTROLS,
             context={"output_dir": getattr(args, "output", None)},
+            admission_check=admission_check,
             target_factory=lambda progress_callback: self._run_image_request(
                 request=request,
                 prompts_data=prompts_data,
@@ -312,6 +317,7 @@ class WebRunner:
                 quantize=quantize,
                 progress_callback=progress_callback,
                 control_signal=control_signal,
+                enhance_by_set=enhance_by_set,
             ),
         )
 
@@ -323,6 +329,8 @@ class WebRunner:
         config: dict[str, Any],
         args: argparse.Namespace,
         model_ref: str,
+        enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
+        admission_check: Callable[[], None] | None = None,
     ) -> str:
         """Load the video model and run the batch loop on a worker thread."""
         return self._submit_job(
@@ -330,6 +338,7 @@ class WebRunner:
             exclusive=True,
             supported_controls=VIDEO_SUPPORTED_CONTROLS,
             context={"output_dir": getattr(args, "output", None)},
+            admission_check=admission_check,
             target_factory=lambda progress_callback: self._run_video_request(
                 request=request,
                 prompts_data=prompts_data,
@@ -337,6 +346,7 @@ class WebRunner:
                 args=args,
                 model_ref=model_ref,
                 progress_callback=progress_callback,
+                enhance_by_set=enhance_by_set,
             ),
         )
 
@@ -422,6 +432,13 @@ class WebRunner:
         record = self._get_job(job_id)
         with record.lock:
             return record.preview_jpeg
+
+    def admit_exclusive(self, admit: Callable[[], None], *, busy_message: str) -> None:
+        """Run *admit* atomically with the exclusive-job check; raise JobConflictError while a job is active."""
+        with self._jobs_lock:
+            if self._find_active_exclusive_job_id() is not None:
+                raise JobConflictError(busy_message)
+            admit()
 
     def get_active_exclusive_job_snapshot(self) -> dict[str, Any] | None:
         """Return the currently running exclusive job, if one exists."""
@@ -509,8 +526,9 @@ class WebRunner:
         control_signal: SkipSignal | None = None,
         supported_controls: tuple[str, ...] = (),
         context: dict[str, Any] | None = None,
+        admission_check: Callable[[], None] | None = None,
     ) -> str:
-        """Register and dispatch a background task."""
+        """Register and dispatch a background task; *admission_check* may raise JobConflictError under the job lock."""
         record = _JobRecord(
             job_id=uuid.uuid4().hex,
             job_type=job_type,
@@ -525,6 +543,8 @@ class WebRunner:
                 active_job_id = self._find_active_exclusive_job_id()
                 if active_job_id is not None:
                     raise JobConflictError(f"Job '{active_job_id}' is already running. Wait for it to finish before starting another.")
+            if admission_check is not None:
+                admission_check()
             self._jobs[record.job_id] = record
         self._publish_event(record.job_id, {"type": "job_submitted", "mode": job_type})
         progress_callback = self._make_progress_callback(record.job_id)
@@ -535,7 +555,7 @@ class WebRunner:
         """Wrap a synchronous worker target, free accelerator memory, and publish terminal events."""
         failure_message: str | None = None
         try:
-            with _worker_runtime_context():
+            with worker_runtime_context():
                 target()
         except (Exception, SystemExit) as exc:
             failure_message = str(exc).strip() or f"{type(exc).__name__} stopped the generation worker."
@@ -566,8 +586,10 @@ class WebRunner:
         quantize: int | None,
         progress_callback: Callable[[EventPayload], None],
         control_signal: SkipSignal,
+        enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
     ) -> None:
-        """Load the image model inside the worker thread, then run the batch."""
+        """Load the image model inside the worker thread, then run the batch (holding the enhancer if needed)."""
+        enhancer_model = _plan_job_enhancer(config, args, enhance_by_set)
         progress_callback({"type": "model_loading", "mode": "image", "model": request.model_name or model_ref})
         backend = get_backend()
         model, model_info = backend.load_model(
@@ -577,17 +599,20 @@ class WebRunner:
             lora_paths=request.lora_paths,
             lora_weights=request.lora_weights,
         )
-        run_batch(
-            backend,
-            model,
-            prompts_data,
-            config,
-            args,
-            model_info=model_info,
-            progress_callback=progress_callback,
-            enable_interactive_controls=False,
-            skip_signal=control_signal,
-        )
+        with _job_enhancer_scope(enhancer_model, progress_callback, mode="image") as prompt_enhancer:
+            run_batch(
+                backend,
+                model,
+                prompts_data,
+                config,
+                args,
+                model_info=model_info,
+                progress_callback=progress_callback,
+                enable_interactive_controls=False,
+                skip_signal=control_signal,
+                prompt_enhancer=prompt_enhancer,
+                enhance_by_set=enhance_by_set,
+            )
 
     def _run_video_request(
         self,
@@ -598,12 +623,14 @@ class WebRunner:
         args: argparse.Namespace,
         model_ref: str,
         progress_callback: Callable[[EventPayload], None],
+        enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
     ) -> None:
-        """Load the video model inside the worker thread, then run the batch."""
+        """Load the video model inside the worker thread, then run the batch (holding the enhancer if needed)."""
+        enhancer_model = _plan_job_enhancer(config, args, enhance_by_set)
         progress_callback({"type": "model_loading", "mode": "video", "model": request.model_name or model_ref})
         require_ffmpeg()
         backend = get_video_backend(request.model_family)
-        workflow = build_video_workflow(args)
+        workflow = build_video_workflow(args, enhance=enhancer_model is not None)
         lora_paths = request.lora_paths or []
         lora_weights = request.lora_weights or []
         loras = list(zip(lora_paths, lora_weights, strict=False)) or None
@@ -617,16 +644,19 @@ class WebRunner:
             loras=loras,
             **load_kwargs,
         )
-        run_video_batch(
-            backend=backend,
-            model=model,
-            model_info=model_info,
-            workflow=workflow,
-            prompts_data=prompts_data,
-            config=config,
-            args=args,
-            progress_callback=progress_callback,
-        )
+        with _job_enhancer_scope(enhancer_model, progress_callback, mode="video") as prompt_enhancer:
+            run_video_batch(
+                backend=backend,
+                model=model,
+                model_info=model_info,
+                workflow=workflow,
+                prompts_data=prompts_data,
+                config=config,
+                args=args,
+                progress_callback=progress_callback,
+                prompt_enhancer=prompt_enhancer,
+                enhance_by_set=enhance_by_set,
+            )
 
     def _make_progress_callback(self, job_id: str) -> Callable[[EventPayload], None]:
         """Bind a job id to a runner progress callback."""
@@ -650,6 +680,9 @@ class WebRunner:
                 record.preview_jpeg = None
             if event["type"] == "prompt_started":
                 record.prompt_progress = {key: event[key] for key in ("prompt", "run_index", "total_runs", "ran_iterations", "total_iterations") if key in event}
+            elif event["type"] == "prompt_enhanced" and "enhanced_prompt" in event:
+                # Kept with the prompt progress so later events and reconnecting clients still see it.
+                record.prompt_progress = {**record.prompt_progress, "enhanced_prompt": event["enhanced_prompt"]}
             enriched_event = {
                 **record.prompt_progress,
                 "event_id": record.next_event_id,
@@ -762,6 +795,34 @@ class WebRunner:
         if event.get("type") == "batch_failed":
             return {**event, "type": FAILED_TERMINAL_EVENT}
         return event
+
+
+def _plan_job_enhancer(config: dict[str, Any], args: argparse.Namespace, enhance_by_set: dict[str, list[EnhanceSettings | None]] | None) -> tuple[str, str | None] | None:
+    """Preflight a job's enhancer before its model loads; free an idle resident enhancer when unused."""
+    plan = prompt_enhancer_session.plan_job_enhancer(
+        config,
+        platform_key=sys.platform,
+        disabled=bool(getattr(args, "no_enhance", False)),
+        override=getattr(args, "enhance", None),
+        enhance_by_set=enhance_by_set,
+        cli_model=getattr(args, "enhance_model", None),
+    )
+    if plan is None:
+        prompt_enhancer_session.release_resident_enhancer()
+    return plan
+
+
+@contextmanager
+def _job_enhancer_scope(plan: tuple[str, str | None] | None, progress_callback: Callable[[EventPayload], None], *, mode: str):
+    """Yield the job's loaded enhancer (or ``None``), reporting download/load phases as ``enhancer_loading``."""
+    if plan is None:
+        yield None
+        return
+    repo, revision = plan
+    with prompt_enhancer_session.job_enhancer(repo, revision, on_phase=lambda phase: progress_callback({"type": "enhancer_loading", "mode": mode, "phase": phase})) as enhancer:
+        if prompt_enhancer_session.runs_on_cpu(enhancer):
+            progress_callback({"type": "enhancer_loading", "mode": mode, "phase": "cpu"})
+        yield enhancer
 
 
 def _release_accelerator_memory() -> None:
