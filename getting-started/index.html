@@ -537,6 +537,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Web UI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#keyboard-shortcuts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keyboard shortcuts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -1000,6 +1017,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Web UI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#keyboard-shortcuts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Keyboard shortcuts
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
       </ul>
@@ -1168,6 +1202,148 @@ uv run ziv ui --no-browser
 </ul>
 <p>The workspace badge follows the selected quantize level, so you can see whether <code>q8</code> or <code>q4</code> brings a large model within reach. Hover the badge for the estimate. After each job the Web UI returns the model's memory to the system.</p>
 <p>Ideogram 4 (<code>ideo</code>) is selectable in the workspace model dropdown. When it is selected, the workspace offers a structured-JSON-caption input and a first-step-sigma control, while reference-image (img2img) and upscale are unavailable, and width and height are constrained to the 256–2048 range in multiples of 16.</p>
+<h4 id="keyboard-shortcuts">Keyboard shortcuts</h4>
+<p>Press <code>?</code> anywhere outside a text field to see every shortcut. <code>⌘</code> on macOS is <code>Ctrl</code> elsewhere.</p>
+<p>Anywhere:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>?</code></td>
+<td>Show all keyboard shortcuts</td>
+</tr>
+<tr>
+<td><code>G</code> then <code>W</code> / <code>G</code> / <code>M</code> / <code>C</code></td>
+<td>Go to Workspace / Gallery / Models / Config</td>
+</tr>
+</tbody>
+</table>
+<p>Workspace:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>⌘↵</code></td>
+<td>Generate</td>
+</tr>
+<tr>
+<td><code>⌘⇧↵</code></td>
+<td>Generate with a new seed (re-rolls a locked seed)</td>
+</tr>
+<tr>
+<td><code>⌘E</code></td>
+<td>Enhance the prompt</td>
+</tr>
+<tr>
+<td><code>Alt+1</code> / <code>Alt+2</code></td>
+<td>Focus the prompt / the settings</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>Stop the running job</td>
+</tr>
+</tbody>
+</table>
+<p>Gallery:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Arrow keys</td>
+<td>Move between assets</td>
+</tr>
+<tr>
+<td><code>↵</code></td>
+<td>Open the viewer</td>
+</tr>
+<tr>
+<td><code>Space</code> / <code>X</code></td>
+<td>Select or deselect the focused asset</td>
+</tr>
+<tr>
+<td><code>⌘A</code></td>
+<td>Select all loaded assets</td>
+</tr>
+<tr>
+<td><code>Delete</code> / <code>Backspace</code></td>
+<td>Delete the selection, or the focused asset (asks first)</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>Clear the selection</td>
+</tr>
+</tbody>
+</table>
+<p>Full-screen asset viewer:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>←</code> / <code>→</code></td>
+<td>Previous / next asset</td>
+</tr>
+<tr>
+<td><code>Home</code> / <code>End</code></td>
+<td>First / last asset</td>
+</tr>
+<tr>
+<td><code>R</code></td>
+<td>Reuse settings</td>
+</tr>
+<tr>
+<td><code>E</code></td>
+<td>Use as reference</td>
+</tr>
+<tr>
+<td><code>D</code></td>
+<td>Download</td>
+</tr>
+<tr>
+<td><code>C</code></td>
+<td>Copy the prompt</td>
+</tr>
+<tr>
+<td><code>Delete</code> / <code>Backspace</code></td>
+<td>Delete (asks for confirmation)</td>
+</tr>
+<tr>
+<td><code>Shift+Delete</code></td>
+<td>Delete without asking</td>
+</tr>
+<tr>
+<td><code>I</code></td>
+<td>Toggle the details panel</td>
+</tr>
+<tr>
+<td><code>?</code></td>
+<td>Show the viewer's shortcuts</td>
+</tr>
+<tr>
+<td><code>Esc</code></td>
+<td>Close the shortcut list, then the viewer</td>
+</tr>
+</tbody>
+</table>
 <h2 id="model-store-ziv">Model Store (<code>~/.ziv/</code>)</h2>
 <p>Z-Vision Generator uses a central data directory for models and LoRAs:</p>
 <pre><code>~/.ziv/
