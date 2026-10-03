@@ -9,6 +9,7 @@ import torch
 from PIL import Image
 from diffusers import AutoPipelineForText2Image
 
+from zvisiongenerator.backends.image_win_preview import LivePreview, create_live_preview
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 
 # CUDA allocation and kernel tuning hints for the diffusers image backend.
@@ -90,18 +91,24 @@ def _load_quantized(model_path: str, quantize: int, torch_dtype: torch.dtype):
     return pipeline
 
 
-def _make_step_callback(skip_signal, *, total_steps: int, step_callback=None):
-    """Create a callback_on_step_end that reports progress and interrupts on skip."""
+def _make_step_callback(skip_signal, *, total_steps: int, step_callback=None, live_preview: LivePreview | None = None):
+    """Create a callback_on_step_end that reports progress and interrupts on skip.
+
+    With ``live_preview``, milestone steps also carry a cheap preview of the predicted final image under the
+    ``preview`` key.
+    """
 
     def _on_step_end(pipe, step, timestep, callback_kwargs):
         del timestep
         if step_callback is not None:
-            step_callback(
-                {
-                    "current_step": min(step + 1, max(total_steps, 1)),
-                    "total_steps": max(total_steps, 1),
-                }
-            )
+            payload = {
+                "current_step": min(step + 1, max(total_steps, 1)),
+                "total_steps": max(total_steps, 1),
+            }
+            preview = live_preview.observe(pipe, step, callback_kwargs.get("latents")) if live_preview is not None else None
+            if preview is not None:
+                payload["preview"] = preview
+            step_callback(payload)
         if skip_signal is not None and skip_signal.check():
             pipe._interrupt = True
         return callback_kwargs
@@ -203,6 +210,18 @@ class DiffusersBackend:
 
         return pipeline, model_info
 
+    def _step_callback_kwargs(self, skip_signal, step_callback, steps: int, height: int, width: int) -> dict[str, Any]:
+        """Build the pipeline's step-end callback kwargs, with live previews when progress is reported."""
+        live_preview = None
+        if step_callback is not None and self._model_info is not None:
+            live_preview = create_live_preview(self._model_info.family, steps, height, width)
+        kwargs: dict[str, Any] = {
+            "callback_on_step_end": _make_step_callback(skip_signal, total_steps=steps, step_callback=step_callback, live_preview=live_preview),
+        }
+        if live_preview is not None:
+            kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
+        return kwargs
+
     @torch.inference_mode()
     def image_to_image(
         self,
@@ -248,10 +267,8 @@ class DiffusersBackend:
             )
             if not _is_flux and negative_prompt is not None:
                 pipe_kwargs["negative_prompt"] = negative_prompt
-            if skip_signal is not None:
-                pipe_kwargs["callback_on_step_end"] = _make_step_callback(skip_signal, total_steps=steps, step_callback=step_callback)
-            elif step_callback is not None:
-                pipe_kwargs["callback_on_step_end"] = _make_step_callback(None, total_steps=steps, step_callback=step_callback)
+            if skip_signal is not None or step_callback is not None:
+                pipe_kwargs.update(self._step_callback_kwargs(skip_signal, step_callback, steps, image.height, image.width))
 
             result = self._img2img_pipe(**pipe_kwargs)
 
@@ -307,10 +324,8 @@ class DiffusersBackend:
                 kwargs["guidance_scale"] = 1.0
             if not _is_flux and negative_prompt is not None:
                 kwargs["negative_prompt"] = negative_prompt
-            if skip_signal is not None:
-                kwargs["callback_on_step_end"] = _make_step_callback(skip_signal, total_steps=steps, step_callback=step_callback)
-            elif step_callback is not None:
-                kwargs["callback_on_step_end"] = _make_step_callback(None, total_steps=steps, step_callback=step_callback)
+            if skip_signal is not None or step_callback is not None:
+                kwargs.update(self._step_callback_kwargs(skip_signal, step_callback, steps, height, width))
 
             result = model(**kwargs)
 
