@@ -596,6 +596,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#prompt-enhancement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt Enhancement
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#video-upscale-audio" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -918,6 +929,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#prompt-enhancement" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt Enhancement
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#video-upscale-audio" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1100,6 +1122,8 @@ ziv-video -m MODEL -p prompts.yaml -r 3
 # Square aspect, small size
 ziv-video -m MODEL --ratio 1:1 --size s --prompt &quot;Abstract art&quot;
 </code></pre>
+<h2 id="prompt-enhancement">Prompt Enhancement</h2>
+<p>Video prompts can be rewritten by the local <a href="../prompts/#enhancing-prompts">prompt enhancer</a>, which adds visible motion and camera movement in time order. Use <code>--enhance style=cinematic,motion=action+camera-move</code>, or the Enhance options in the Web UI. Image-to-video enhancement does not look at the starting image. <strong>Enhance each image</strong> keeps about 3 GB extra loaded for the whole job.</p>
 <h2 id="video-upscale-audio">Video Upscale &amp; Audio</h2>
 <pre><code class="language-bash"># Generate upscaled video (2x resolution)
 ziv-video -m MODEL --upscale 2 --prompt &quot;...&quot;

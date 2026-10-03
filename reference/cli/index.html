@@ -747,6 +747,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="ziv-image — Image Generation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#-enhance-spec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --enhance spec
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -925,6 +942,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="ziv-image — Image Generation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#-enhance-spec" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --enhance spec
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1234,9 +1268,58 @@ ziv ui [options]       # Same as ziv-ui
 <td><code>.</code></td>
 <td>Output directory for generated images</td>
 </tr>
+<tr>
+<td><code>--enhance [SPEC]</code></td>
+<td>disabled</td>
+<td>Rewrite each prompt with a local LLM before generating. <code>SPEC</code> is optional, e.g. <code>style=photo,details=lighting+camera,length=longer</code>. Overrides prompt-file <code>enhance:</code> entries. Ignored with <code>--json-prompt</code></td>
+</tr>
+<tr>
+<td><code>--no-enhance</code></td>
+<td>—</td>
+<td>Disable enhancement, including prompt-file <code>enhance:</code> entries</td>
+</tr>
+<tr>
+<td><code>--enhance-model</code></td>
+<td>config</td>
+<td>Enhancer LLM as <code>REPO[@REVISION]</code> or a local folder</td>
+</tr>
 </tbody>
 </table>
 <p>Run <code>ziv-image --help</code> for the full list.</p>
+<h3 id="-enhance-spec"><code>--enhance</code> spec</h3>
+<p>Comma-separated <code>key=value</code> pairs; join several values with <code>+</code>. Omitted keys use their defaults.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Values</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>style</code></td>
+<td><code>keep</code>, <code>photo</code>, <code>cinematic</code>, <code>illustration</code>, <code>anime</code>, <code>3d</code>, <code>painterly</code></td>
+<td><code>keep</code></td>
+</tr>
+<tr>
+<td><code>details</code></td>
+<td><code>lighting</code>, <code>composition</code>, <code>camera</code>, <code>materials</code>, <code>color</code>, <code>environment</code>, <code>subject</code></td>
+<td><code>lighting+composition</code></td>
+</tr>
+<tr>
+<td><code>length</code></td>
+<td><code>shorter</code>, <code>same</code>, <code>longer</code>, <code>extra</code></td>
+<td><code>same</code></td>
+</tr>
+<tr>
+<td><code>motion</code> (<code>ziv-video</code> only)</td>
+<td><code>action</code>, <code>camera-move</code>, <code>pacing</code></td>
+<td><code>action</code></td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="../../guides/prompts/#enhancing-prompts">Enhancing Prompts</a>.</p>
 <p>The <code>ideo</code> alias selects Ideogram 4 (<code>ideogram-ai/ideogram-4-fp8</code>), a macOS/MLX-only image model. Its width and height must be in the 256–2048 range and multiples of 16. Size presets that exceed this range — <code>--size xl</code> with <code>--ratio 16:9</code> or <code>--ratio 9:16</code> (2112 px) — are rejected before the model loads, as are <code>--image</code> and <code>--upscale</code> (both require img2img, which Ideogram 4 does not support).</p>
 <h2 id="ziv-video-video-generation"><code>ziv-video</code> — Video Generation</h2>
 <p>Platform-aware aliases:</p>
@@ -1344,6 +1427,21 @@ ziv ui [options]       # Same as ziv-ui
 <td><code>--format</code></td>
 <td><code>mp4</code></td>
 <td>Output format</td>
+</tr>
+<tr>
+<td><code>--enhance [SPEC]</code></td>
+<td>disabled</td>
+<td>Rewrite each prompt with a local LLM before generating (see the <code>--enhance</code> spec above; <code>motion</code> is allowed)</td>
+</tr>
+<tr>
+<td><code>--no-enhance</code></td>
+<td>—</td>
+<td>Disable enhancement, including prompt-file <code>enhance:</code> entries</td>
+</tr>
+<tr>
+<td><code>--enhance-model</code></td>
+<td>config</td>
+<td>Enhancer LLM as <code>REPO[@REVISION]</code> or a local folder</td>
 </tr>
 </tbody>
 </table>

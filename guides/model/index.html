@@ -713,6 +713,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#managing-models-in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managing Models in the Web UI
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -964,6 +975,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#managing-models-in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Managing Models in the Web UI
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1041,6 +1063,7 @@ ziv-model model -i checkpoint.safetensors --name my-model --copy
 </tr>
 </tbody>
 </table>
+<p>Checkpoints can be bfloat16, float16, float32, or FP8. Scaled FP8 checkpoints (for example ComfyUI FP8 exports, which store a <code>weight_scale</code> next to each weight) are dequantized to bfloat16 during conversion. Block-wise or other quantized formats (such as NVFP4) are not supported.</p>
 <blockquote>
 <p><strong>Ideogram 4</strong> is used via the <code>ideo</code> alias or a local FP8 model directory and is distributed ready-to-use. It has no checkpoint-convert path, so it is not a <code>--model-type</code> option.</p>
 </blockquote>
@@ -1120,6 +1143,13 @@ ziv-model list --loras
 </tr>
 </tbody>
 </table>
+<h2 id="managing-models-in-the-web-ui">Managing Models in the Web UI</h2>
+<p>The Web UI's Models page lists the same models and LoRAs and can convert checkpoints and import LoRAs. Each row also has a delete button, which asks for confirmation first and is unavailable while a generation is running:</p>
+<ul>
+<li><strong>Converted models</strong> (in <code>~/.ziv/models/</code>): deletes the model folder. Base-model files it links to in the HuggingFace cache are kept.</li>
+<li><strong>HuggingFace models</strong> (aliases such as <code>klein9b</code>): deletes the model's download from the HuggingFace cache. The alias stays, and the model downloads again the next time you use it. If converted models link to files in that download, the confirmation lists them, because they stop working until it is downloaded again. The button appears once the model's files are fully downloaded.</li>
+<li><strong>LoRAs</strong> (in <code>~/.ziv/loras/</code>): deletes the <code>.safetensors</code> file.</li>
+</ul>
 
 
 

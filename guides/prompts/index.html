@@ -674,6 +674,67 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#enhancing-prompts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enhancing Prompts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Enhancing Prompts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In the Web UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#in-prompt-files-and-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In Prompt Files and the CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tips" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -980,6 +1041,67 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#enhancing-prompts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Enhancing Prompts
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Enhancing Prompts">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Options
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#in-the-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In the Web UI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#in-prompt-files-and-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In Prompt Files and the CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#tips" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1141,6 +1263,94 @@ are sharing a meal at the diner. Style: Camera: iPhone. Color: Warm
 <p><strong>Note:</strong> FLUX.2 models do not support negative prompts. If a negative prompt is provided with a FLUX.2 model, a warning is issued and the negative prompt is ignored.</p>
 </blockquote>
 <p>The <code>negative</code> field supports the same structured format as <code>prompt</code> (strings, dicts, lists).</p>
+<h2 id="enhancing-prompts">Enhancing Prompts</h2>
+<p>A small local LLM can rewrite a prompt with more visual detail before it is generated. It runs on your machine, and its default model is decensored, so it does not water down your prompt.</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Default model</th>
+<th>First-use download</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>macOS</td>
+<td><code>McG-221/Qwen3.5-4B-heretic-mlx-4Bit</code> (mlx-lm, 4-bit)</td>
+<td>≈2.4 GB</td>
+</tr>
+<tr>
+<td>Windows / Linux</td>
+<td><code>coder3101/Qwen3.5-4B-heretic</code> (transformers, 4-bit on CUDA)</td>
+<td>≈9 GB</td>
+</tr>
+</tbody>
+</table>
+<p>Without a CUDA GPU, Windows and Linux run the enhancer on the CPU: it works, but each rewrite can take a few minutes and about 10 GB of RAM. The status line says so when this happens.</p>
+<p>Both defaults are pinned to a revision. To use another chat model, set <strong>Prompt Enhancer Model</strong> on the Config page to a Hugging Face <code>owner/name</code> (optionally <code>owner/name@revision</code>) or a local folder, or pass <code>--enhance-model REPO[@REVISION]</code>. Thinking-tuned or heavily merged models are slower and follow the length and style options less reliably.</p>
+<h3 id="options">Options</h3>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Choose</th>
+<th>Values</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Style</td>
+<td>one</td>
+<td>Keep, Photographic, Cinematic, Illustration, Anime, 3D render, Painterly</td>
+</tr>
+<tr>
+<td>Details</td>
+<td>any</td>
+<td>Lighting, Composition, Camera &amp; lens, Materials &amp; textures, Color &amp; mood, Environment, Subject</td>
+</tr>
+<tr>
+<td>Length</td>
+<td>one</td>
+<td>Shorter (≈50 %), Same, Longer (≈200 %), Extra long (≈300 %)</td>
+</tr>
+<tr>
+<td>Motion (video only)</td>
+<td>any</td>
+<td>Action / sequence, Camera movement, Pacing</td>
+</tr>
+</tbody>
+</table>
+<p>Length is a target, not a guarantee. Longer aims for at least 40 words and Extra long for at least 80, so short prompts still grow; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length. On short prompts, Same is approximate.</p>
+<p>The enhancer keeps your subject and adds only things that can be seen: no sounds, smells, or story. It never adds new people, animals, or major objects.</p>
+<h3 id="in-the-web-ui">In the Web UI</h3>
+<ul>
+<li><strong>Enhance</strong>: click ✨ <strong>Enhance</strong> under the prompt, pick options, and click <strong>Enhance prompt</strong>. The rewrite appears in <strong>Enhanced prompt</strong>. When that box has text, it is what gets generated. Edit it, enhance again, or <strong>Clear</strong> it to go back to your prompt.</li>
+<li>If you change the prompt or switch between image and video afterwards, the Enhanced prompt is marked <strong>Out of date</strong>. It is still used until you <strong>Re-enhance</strong> or <strong>Clear</strong> it.</li>
+<li><code>{a|b}</code> choices are kept in the rewrite, so each image still picks its own choice.</li>
+<li><strong>Enhance each image when generating</strong> rewrites every image's prompt on the server, after its <code>{a|b}</code> choices are picked, using that image's seed. It works with inline prompts and prompt files.</li>
+<li>Enhance is unavailable while a job runs.</li>
+</ul>
+<h3 id="in-prompt-files-and-the-cli">In Prompt Files and the CLI</h3>
+<p>Add <code>enhance:</code> to an entry to enhance it on every run:</p>
+<pre><code class="language-yaml">woman:
+  - prompt: 30yo woman in red dress walking down a city street, evening
+    enhance:
+      style: cinematic
+      details: [lighting, camera]
+      length: longer
+  - prompt: a quiet street at dawn
+    enhance: true        # default options
+</code></pre>
+<p>From the command line, <code>--enhance</code> enhances every prompt and overrides entries' <code>enhance:</code> settings; <code>--no-enhance</code> turns all enhancement off:</p>
+<pre><code class="language-bash">ziv-image -m klein9b --prompt &quot;a fox in snow&quot; --enhance
+ziv-image -m klein9b -p prompts.yaml --enhance style=photo,details=lighting+camera,length=longer
+ziv-video -m ltx-8 --prompt &quot;a fox runs&quot; --enhance style=cinematic,motion=action+camera-move
+ziv-image -m klein9b -p prompts.yaml --no-enhance
+</code></pre>
+<p><code>motion</code> only applies to video. Prompt files shared between image and video may include it; images ignore it.</p>
+<p>The enhanced prompt is printed before each generation and stored in the image or video metadata, so Gallery shows and reuses the prompt that actually rendered.</p>
+<h3 id="memory">Memory</h3>
+<p>On macOS the enhancer shares memory with the image or video model. Clicking Enhance loads it (about 3 GB) and frees it after two idle minutes, or when a job without enhancement starts. <strong>Enhance each image</strong> keeps it loaded for the whole job, in addition to the model; the memory badge does not include it, so on a 16 GB Mac with a large model, leave it off.</p>
 <h2 id="tips">Tips</h2>
 <h3 id="combining-variables-with-structured-prompts">Combining Variables with Structured Prompts</h3>
 <p>Variables work inside structured prompt values, so you can create prompts with controlled randomness:</p>
