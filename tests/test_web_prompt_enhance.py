@@ -26,8 +26,10 @@ class _FakeEnhancer:
 
     def __init__(self, outputs: list[str]):
         self.outputs = list(outputs)
+        self.messages: list[list[dict[str, str]]] = []
 
     def generate(self, messages, *, seed, max_tokens, temperature, cancelled=None):
+        self.messages.append(messages)
         text = self.outputs.pop(0)
         for index in range(0, len(text), 5):
             if cancelled is not None and cancelled():
@@ -79,7 +81,8 @@ def no_active_job(monkeypatch):
 
 class TestEnhanceEndpoint:
     def test_streams_status_text_done(self, monkeypatch, no_active_job):
-        session = _FakeSession(_FakeEnhancer(["A [[1]] fox in deep snow, golden light."]))
+        enhancer = _FakeEnhancer(["A grey fox in deep snow, golden light."])
+        session = _FakeSession(enhancer)
         monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: session)
         with TestClient(web_server.app) as client:
             response = client.post("/api/prompt/enhance", json={"prompt": "a {red|grey} fox", "mode": "image", "settings": {"style": "photo"}})
@@ -88,8 +91,9 @@ class TestEnhanceEndpoint:
         frames = _frames(response)
         assert frames[0] == {"type": "status", "phase": "loading"}
         assert frames[1] == {"type": "status", "phase": "generating"}
-        assert any(frame["type"] == "text" and "{red|grey}" in frame["text"] for frame in frames)
-        assert frames[-1] == {"type": "done", "prompt": "A {red|grey} fox in deep snow, golden light.", "clamped": False}
+        assert any(frame["type"] == "text" and "grey fox" in frame["text"] for frame in frames)
+        assert frames[-1] == {"type": "done", "prompt": "A grey fox in deep snow, golden light.", "clamped": False}
+        assert enhancer.messages[0][1]["content"] in ("a red fox", "a grey fox")  # choices are picked before the model sees the prompt
         assert session.acquired[0][2] == 120
 
     def test_cpu_fallback_is_reported(self, monkeypatch, no_active_job):

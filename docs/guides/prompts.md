@@ -164,13 +164,13 @@ Both defaults are pinned to a revision. To use another chat model, set **Prompt 
 
 Length is a target, not a guarantee. Longer aims for at least 40 words and Extra long for at least 80, so short prompts still grow; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length. On short prompts, Same is approximate.
 
-The enhancer keeps your subject and adds only things that can be seen: no sounds, smells, or story. It never adds new people, animals, or major objects.
+The enhancer keeps your subject and every detail you describe. It adds only things that can be seen: no sounds, smells, or story. It never adds new people, animals, or major objects.
 
 ### In the Web UI
 
 - **Enhance**: click ✨ **Enhance** under the prompt, pick options, and click **Enhance prompt**. The rewrite appears in **Enhanced prompt**. When that box has text, it is what gets generated. Edit it, enhance again, or **Clear** it to go back to your prompt.
 - If you change the prompt or switch between image and video afterwards, the Enhanced prompt is marked **Out of date**. It is still used until you **Re-enhance** or **Clear** it.
-- `{a|b}` choices are kept in the rewrite, so each image still picks its own choice.
+- `{a|b}` choices are picked before the rewrite, so the enhancer sees one plain prompt and the Enhanced prompt has no choices left. Enhance again for a different pick, or use **Enhance each image when generating** to keep a fresh pick per image.
 - **Enhance each image when generating** rewrites every image's prompt on the server, after its `{a|b}` choices are picked, using that image's seed. It works with inline prompts and prompt files.
 - Enhance is unavailable while a job runs.
 

@@ -32,7 +32,6 @@ def apply_prompt_enhancement(request: Any, artifacts: Any, *, mode: str) -> None
             mode=mode,
             seed=request.seed,
             ceiling=request.enhance_ceiling,
-            protect=False,
             length_cfg=options.get("length"),
             temperature=options.get("temperature", DEFAULT_TEMPERATURE),
             max_tokens=options.get("max_new_tokens", DEFAULT_MAX_NEW_TOKENS),

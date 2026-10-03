@@ -23,7 +23,6 @@ DEFAULT_MAX_NEW_TOKENS = 700
 DEFAULT_IDLE_RELEASE_SECONDS = 120.0
 TEXT_UPDATE_INTERVAL_SECONDS = 0.1
 
-_PLACEHOLDER_RE = re.compile(r"\[\[\s*(\d+)\s*\]\]")
 _THINK_RE = re.compile(r"<think>.*?(?:</think>|$)", re.S)
 _SPECIAL_TOKEN_RE = re.compile(r"<\|[^|>]*\|>")
 _LABEL_RE = re.compile(r"^\s*(?:rewritten prompt|enhanced prompt|prompt)\s*:\s*", re.I)
@@ -72,7 +71,7 @@ STYLE_AXIS = EnhanceAxis(
     options=(
         EnhanceOption("keep", "Keep", "Style: keep the user's existing style; do not impose a new one."),
         EnhanceOption("photo", "Photographic", "Style: photographic. Describe it as a photograph."),
-        EnhanceOption("cinematic", "Cinematic", "Style: cinematic. Describe it as a frame from a film."),
+        EnhanceOption("cinematic", "Cinematic", "Style: cinematic. Describe it as a shot from a film."),
         EnhanceOption("illustration", "Illustration", "Style: digital illustration. Name the style explicitly."),
         EnhanceOption("anime", "Anime", "Style: anime illustration. Name the style explicitly."),
         EnhanceOption("3d", "3D render", "Style: 3D render. Name the style explicitly."),
@@ -389,107 +388,15 @@ def plan_length(in_words: int, length: str, *, ceiling: int, length_cfg: dict[st
 
 def _length_instruction(plan: LengthPlan) -> str:
     if plan.length == "shorter" and not plan.clamped:
-        return f"Length: at most {plan.hi} words (aim for {plan.target}). Cut redundancy and filler first."
+        return f"Length: at most {plan.hi} words (aim for {plan.target}). Cut only redundancy and filler, never an element the user named."
     if plan.length == "same" or plan.clamped:
         return f"Length: {plan.lo}-{plan.hi} words. Do not exceed {plan.hi} words."
     return f"Length: {plan.lo}-{plan.hi} words."
 
 
-def find_choice_groups(text: str) -> list[tuple[int, int]]:
-    """Return ``(start, end)`` spans of outermost balanced ``{...}`` groups, matching ``expand_random_choices``."""
-    spans: list[tuple[int, int]] = []
-    depth = 0
-    start = 0
-    for index, char in enumerate(text):
-        if char == "{":
-            if depth == 0:
-                start = index
-            depth += 1
-        elif char == "}" and depth > 0:
-            depth -= 1
-            if depth == 0:
-                spans.append((start, index + 1))
-    return spans
-
-
-def protect_groups(prompt: str) -> tuple[str, tuple[str, ...]]:
-    """Replace each outermost ``{...}`` group with ``[[n]]`` (1-based, in order)."""
-    spans = find_choice_groups(prompt)
-    if not spans:
-        return prompt, ()
-    groups = tuple(prompt[start:end] for start, end in spans)
-    parts: list[str] = []
-    cursor = 0
-    for number, (start, end) in enumerate(spans, 1):
-        parts.append(prompt[cursor:start])
-        parts.append(f"[[{number}]]")
-        cursor = end
-    parts.append(prompt[cursor:])
-    return "".join(parts), groups
-
-
-def _collapse_punctuation(text: str) -> str:
-    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
-    text = re.sub(r"([,;:])\s*([,.;:])", r"\2", text)
-    text = re.sub(r"[ \t]{2,}", " ", text)
-    return text.strip()
-
-
-def restore_groups(text: str, groups: tuple[str, ...]) -> str:
-    """Put protected groups back so each appears exactly once (deterministic; see REQ-3)."""
-    count = len(groups)
-    # Normalise "[[ 1 ]]" to "[[1]]" and drop invented numbers before matching exact placeholders.
-    text = _PLACEHOLDER_RE.sub(lambda m: f"[[{int(m.group(1))}]]" if 1 <= int(m.group(1)) <= count else "", text)
-    text = text.replace("{", "").replace("}", "")
-    missing: list[str] = []
-    for number, group in enumerate(groups, 1):
-        placeholder = f"[[{number}]]"
-        first = text.find(placeholder)
-        if first < 0:
-            missing.append(group)
-            continue
-        head = text[: first + len(placeholder)]
-        text = head + text[len(head) :].replace(placeholder, "")
-    text = _collapse_punctuation(text)
-    for number, group in enumerate(groups, 1):
-        text = text.replace(f"[[{number}]]", group)
-    if missing:
-        text = (text.rstrip(" .") + ", " if text.strip() else "") + ", ".join(missing)
-    return text
-
-
-def _choice_options(group: str) -> list[str]:
-    """Split a ``{a|b}`` group into its top-level options (nested groups stay inside their option)."""
-    options, depth, current = [], 0, []
-    for char in group[1:-1]:
-        if char == "|" and depth == 0:
-            options.append("".join(current))
-            current = []
-            continue
-        depth += char == "{"
-        depth -= char == "}" and depth > 0
-        current.append(char)
-    options.append("".join(current))
-    return options
-
-
 def _word_count(text: str) -> int:
     """Count whitespace-separated tokens that contain a letter or digit (stray punctuation is not a word)."""
     return sum(1 for token in text.split() if any(char.isalnum() for char in token))
-
-
-def prompt_word_count(protected: str, groups: tuple[str, ...]) -> int:
-    """Count words in a protected prompt, counting each ``[[n]]`` group at its average option length."""
-    words = _word_count(_PLACEHOLDER_RE.sub(" ", protected))
-    for group in groups:
-        lengths = [_word_count(option.replace("{", " ").replace("}", " ").replace("|", " ")) for option in _choice_options(group)]
-        words += max(1, round(sum(lengths) / len(lengths))) if lengths else 1
-    return words
-
-
-def display_text(text: str, groups: tuple[str, ...]) -> str:
-    """Render in-progress model output with placeholders shown as their original groups."""
-    return _PLACEHOLDER_RE.sub(lambda m: groups[int(m.group(1)) - 1] if 1 <= int(m.group(1)) <= len(groups) else "", text)
 
 
 def clean_output(text: str) -> str:
@@ -522,7 +429,7 @@ def is_unusable(output: str, original: str) -> bool:
     return bool(_REFUSAL_RE.match(output))
 
 
-def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: LengthPlan, protected: bool) -> list[dict[str, str]]:
+def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: LengthPlan) -> list[dict[str, str]]:
     """Build the system + user chat messages for one enhancement."""
     _check_mode(mode)
     kind = "text-to-video" if mode == "video" else "text-to-image"
@@ -530,12 +437,10 @@ def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: L
     if mode == "video":
         visible += " (and for video: visible motion and camera movement, in time order)"
     rules = [
-        "Keep the user's subject, intent and every element they mention.",
+        "EVERY DETAIL IS IMPORTANT: keep the user's subject, intent and every element they mention.",
         "Never add new people, animals, characters or major objects.",
         f"{visible}: no sounds, smells, temperatures felt, thoughts, backstory or narrative commentary.",
     ]
-    if protected:
-        rules.append("Placeholders like [[1]] stand for user content. Copy each placeholder exactly once, unchanged, where it fits.")
     rules.append(STYLE_AXIS.option(settings.style).instruction)
     if settings.details:
         aspects = ", ".join(DETAILS_AXIS.option(slug).instruction for slug in settings.details)
@@ -543,7 +448,8 @@ def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: L
     if mode == "video" and settings.motion:
         rules.append(f"Motion: describe {', '.join(MOTION_AXIS.option(slug).instruction for slug in settings.motion)}.")
     rules.append(_length_instruction(plan))
-    rules.append("Even if the length stays the same, rewrite the prompt to apply the style and details. Never return the input unchanged.")
+    if plan.length == "same" or plan.clamped:
+        rules.append("Apply the style and details; don't return the input unchanged.")
     system = f"You rewrite prompts for a {kind} model.\nRules:\n" + "\n".join(f"- {rule}" for rule in rules)
     system += "\nOutput only the rewritten prompt as plain prose: no preamble, no headings, no quotes."
     return [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
@@ -557,17 +463,18 @@ def enhance_prompt(
     mode: str,
     seed: int,
     ceiling: int,
-    protect: bool,
     length_cfg: dict[str, Any] | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
     max_tokens: int = DEFAULT_MAX_NEW_TOKENS,
     on_text: Callable[[str], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> EnhanceResult:
-    """Rewrite *prompt* with *enhancer*: protect, generate, clean, restore, and retry once if unusable.
+    """Rewrite *prompt* with *enhancer*: generate, clean, and retry once if unusable.
+
+    Expand ``{a|b}`` choices before calling: the model rewrites one concrete prompt.
 
     Args:
-        on_text: Receives the full in-progress text (placeholders shown as groups) at most every
+        on_text: Receives the full in-progress text at most every
             ``TEXT_UPDATE_INTERVAL_SECONDS``, then the final text; a retry starts over from an empty string.
         cancelled: Polled per token; when it returns True generation stops and ``RuntimeError`` is raised.
 
@@ -578,9 +485,8 @@ def enhance_prompt(
     if not prompt.strip():
         raise ValueError("Enter a prompt to enhance.")
     validate_settings(settings, mode=mode)
-    text, groups = protect_groups(prompt) if protect else (prompt, ())
-    plan = plan_length(prompt_word_count(text, groups), settings.length, ceiling=ceiling, length_cfg=length_cfg)
-    messages = build_messages(text, settings, mode=mode, plan=plan, protected=bool(groups))
+    plan = plan_length(_word_count(prompt), settings.length, ceiling=ceiling, length_cfg=length_cfg)
+    messages = build_messages(prompt, settings, mode=mode, plan=plan)
     for attempt in range(2):
         raw = ""
         last_update = float("-inf")
@@ -591,12 +497,10 @@ def enhance_prompt(
             now = time.monotonic()
             if on_text is not None and now - last_update >= TEXT_UPDATE_INTERVAL_SECONDS:
                 last_update = now
-                on_text(display_text(clean_output(raw), groups))
+                on_text(clean_output(raw))
         if cancelled is not None and cancelled():
             raise RuntimeError("Prompt enhancement was cancelled.")
         output = clean_output(raw)
-        if groups:
-            output = restore_groups(output, groups)
         if not is_unusable(output, prompt):
             if on_text is not None:
                 on_text(output)
