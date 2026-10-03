@@ -98,7 +98,7 @@ class TestSpec:
     @pytest.mark.parametrize(
         ("spec", "message"),
         [
-            ("style=watercolor", "keep, photo, cinematic, illustration, anime, 3d, painterly"),
+            ("style=watercolor", "keep, photo, candid, street, film, bw, portrait, product, cinematic, illustration, anime, comic, 3d, painterly"),
             ("details=lighting+smell", "lighting, composition, camera, materials, color, environment, subject"),
             ("length=huge", "shorter, same, longer, extra"),
             ("colour=red", "Valid keys: style, details, length, motion"),

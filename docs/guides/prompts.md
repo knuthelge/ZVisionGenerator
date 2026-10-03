@@ -157,7 +157,7 @@ Both defaults are pinned to a revision. To use another chat model, set **Prompt 
 
 | Option | Choose | Values |
 |---|---|---|
-| Style | one | Keep, Photographic, Cinematic, Illustration, Anime, 3D render, Painterly |
+| Style | one | Keep, Photographic, Candid, Street photography, Analog film, Black & white, Studio portrait, Product shot, Cinematic, Illustration, Anime, Comic, 3D render, Painterly |
 | Details | any | Lighting, Composition, Camera & lens, Materials & textures, Color & mood, Environment, Subject |
 | Length | one | Shorter (≈50 %), Same, Longer (≈200 %), Extra long (≈300 %) |
 | Motion (video only) | any | Action / sequence, Camera movement, Pacing |
