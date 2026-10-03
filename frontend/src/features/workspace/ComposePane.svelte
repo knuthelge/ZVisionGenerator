@@ -3,6 +3,7 @@
   import { draft } from '$lib/state/draft.svelte';
   import { enhancedOverrideActive, isEnhancedStale } from '$lib/state/promptEnhance';
   import { autogrow } from '$lib/actions/autogrow';
+  import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { PromptFileField } from '$lib/components/molecules';
   import type { PromptSource, WorkspaceContext } from '$lib/types';
   import PromptEnhancer from './PromptEnhancer.svelte';
@@ -64,6 +65,20 @@
       queueMicrotask(() => document.getElementById(tab === 'prompt' ? 'ws-tab-prompt' : 'ws-tab-enhanced')?.focus());
     }
   }
+
+  // ⌘E / Ctrl+E enhances the prompt, even while typing in it.
+  $effect(() => {
+    if (!enhancer) return;
+    const target = enhancer;
+    function handleKeydown(event: KeyboardEvent): void {
+      if (event.defaultPrevented || !isCommandKey(event) || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'e') return;
+      if (hasOpenModal()) return;
+      event.preventDefault();
+      if (!enhancing) void target.runEnhance();
+    }
+    document.addEventListener('keydown', handleKeydown);
+    return () => document.removeEventListener('keydown', handleKeydown);
+  });
 
   function onTabKeydown(event: KeyboardEvent): void {
     if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {

@@ -46,6 +46,15 @@ vi.mock('$lib/api/gallery', async (importOriginal) => {
   return { ...actual, deleteAsset: galleryApiMocks.deleteAsset };
 });
 
+const enhanceApiMocks = vi.hoisted(() => ({
+  enhancePrompt: vi.fn<(body: unknown) => Promise<void>>(),
+}));
+
+vi.mock('$lib/api/promptEnhance', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('$lib/api/promptEnhance')>();
+  return { ...actual, enhancePrompt: enhanceApiMocks.enhancePrompt };
+});
+
 vi.mock('$lib/api/promptFiles', () => ({
   openPathPicker: promptFileApiMocks.openPathPicker,
   inspectPromptFile: promptFileApiMocks.inspectPromptFile,
@@ -523,6 +532,55 @@ describe('WorkspacePage', () => {
     const [submitted] = workspaceApiMocks.submitGenerate.mock.calls.at(-1) ?? [];
     return submitted as FormData;
   }
+
+  function pressKey(key: string, init: KeyboardEventInit = {}, from: EventTarget = document): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+    from.dispatchEvent(event);
+    return event;
+  }
+
+  it('generates with Ctrl+Enter and re-rolls a locked seed with Ctrl+Shift+Enter', async () => {
+    draft.update('prompt', 'a fox');
+    await mountWorkspace(makeContext());
+    draft.update('seed', 42);
+    await settle();
+
+    pressKey('Enter', { ctrlKey: true });
+    await settle();
+    expect(workspaceApiMocks.submitGenerate.mock.calls.at(-1)?.[0].get('seed')).toBe('42');
+
+    jobStore.clearJob();
+    workspaceApiMocks.submitGenerate.mockClear();
+    const unmountApp = app!;
+    await unmount(unmountApp);
+    await mountWorkspace(makeContext());
+    draft.update('seed', 42);
+    await settle();
+    pressKey('Enter', { ctrlKey: true, shiftKey: true });
+    await settle();
+    const seed = workspaceApiMocks.submitGenerate.mock.calls.at(-1)?.[0].get('seed');
+    expect(seed).not.toBe('42');
+    expect(Number(seed)).toBeGreaterThanOrEqual(0);
+  });
+
+  it('focuses the prompt with Alt+1 and the settings with Alt+2', async () => {
+    await mountWorkspace(makeContext());
+    expect(pressKey('1', { altKey: true, code: 'Digit1' }).defaultPrevented).toBe(true);
+    expect(document.activeElement?.id).toBe('ws-prompt');
+    pressKey('2', { altKey: true, code: 'Digit2' });
+    expect(document.activeElement?.closest('.settings-pane')).not.toBeNull();
+  });
+
+  it('enhances the prompt with Ctrl+E, even from inside the prompt field', async () => {
+    enhanceApiMocks.enhancePrompt.mockResolvedValue();
+    draft.update('prompt', 'a fox');
+    await mountWorkspace(withEnhancer(makeContext()));
+    const prompt = target.querySelector('#ws-prompt') as HTMLTextAreaElement;
+    expect(pressKey('e', { ctrlKey: true }, prompt).defaultPrevented).toBe(true);
+    await settle();
+    expect(enhanceApiMocks.enhancePrompt).toHaveBeenCalledTimes(1);
+    expect((enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0] as { prompt: string }).prompt).toBe('a fox');
+  });
 
   it('submits the Enhanced prompt instead of the prompt when it has text', async () => {
     draft.update('prompt', 'a fox');

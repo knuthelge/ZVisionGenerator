@@ -8,7 +8,12 @@ export interface AssetActionHandlers {
   onpreview?: (asset: GalleryAsset, trigger: HTMLElement) => void;
   onreuse?: (asset: GalleryAsset) => void;
   onreference?: (asset: GalleryAsset, target: ReferenceTarget) => void;
-  ondelete?: (asset: GalleryAsset) => void;
+  ondelete?: (asset: GalleryAsset, options?: DeleteOptions) => void;
+}
+
+export interface DeleteOptions {
+  /** Ask before deleting; false skips the prompt (Shift+Delete in the viewer). */
+  confirm?: boolean;
 }
 
 const REFERENCE_WORKFLOWS: Record<ReferenceTarget, Workflow> = {

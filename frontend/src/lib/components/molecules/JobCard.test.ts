@@ -343,4 +343,43 @@ describe('JobCard', () => {
     expect(grid?.querySelectorAll('button[aria-label^="View "]')).toHaveLength(outputs.length);
     expect(grid?.querySelector(`img[alt="${outputs.at(-1)!.filename}"]`)).not.toBeNull();
   });
+
+  describe('Escape', () => {
+    function escape(from: EventTarget = document): KeyboardEvent {
+      const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      from.dispatchEvent(event);
+      return event;
+    }
+
+    function mountCard(job: Partial<ActiveJobState>): ReturnType<typeof vi.fn> {
+      const oncancel = vi.fn();
+      component = mount(JobCard, { target, props: { job: makeJob({ supported_controls: ['quit'], ...job }), oncancel } });
+      flushSync();
+      return oncancel;
+    }
+
+    afterEach(() => { document.querySelectorAll('textarea, [aria-modal]').forEach((el) => el.remove()); });
+
+    it('cancels a running job', () => {
+      const oncancel = mountCard({});
+      expect(escape().defaultPrevented).toBe(true);
+      expect(oncancel).toHaveBeenCalledWith('job-card');
+    });
+
+    it('does nothing when the job cannot be cancelled', () => {
+      const oncancel = mountCard({ supported_controls: [] });
+      escape();
+      expect(oncancel).not.toHaveBeenCalled();
+    });
+
+    it('leaves Escape to a focused field or an open dialog', () => {
+      const oncancel = mountCard({});
+      const field = document.createElement('textarea');
+      document.body.appendChild(field);
+      escape(field);
+      document.body.insertAdjacentHTML('beforeend', '<div role="dialog" aria-modal="true"></div>');
+      escape();
+      expect(oncancel).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -116,6 +116,53 @@ The workspace badge follows the selected quantize level, so you can see whether 
 
 Ideogram 4 (`ideo`) is selectable in the workspace model dropdown. When it is selected, the workspace offers a structured-JSON-caption input and a first-step-sigma control, while reference-image (img2img) and upscale are unavailable, and width and height are constrained to the 256–2048 range in multiples of 16.
 
+#### Keyboard shortcuts
+
+Press `?` anywhere outside a text field to see every shortcut. `⌘` on macOS is `Ctrl` elsewhere.
+
+Anywhere:
+
+| Key | Action |
+|-----|--------|
+| `?` | Show all keyboard shortcuts |
+| `G` then `W` / `G` / `M` / `C` | Go to Workspace / Gallery / Models / Config |
+
+Workspace:
+
+| Key | Action |
+|-----|--------|
+| `⌘↵` | Generate |
+| `⌘⇧↵` | Generate with a new seed (re-rolls a locked seed) |
+| `⌘E` | Enhance the prompt |
+| `Alt+1` / `Alt+2` | Focus the prompt / the settings |
+| `Esc` | Stop the running job |
+
+Gallery:
+
+| Key | Action |
+|-----|--------|
+| Arrow keys | Move between assets |
+| `↵` | Open the viewer |
+| `Space` / `X` | Select or deselect the focused asset |
+| `⌘A` | Select all loaded assets |
+| `Delete` / `Backspace` | Delete the selection, or the focused asset (asks first) |
+| `Esc` | Clear the selection |
+
+Full-screen asset viewer:
+
+| Key | Action |
+|-----|--------|
+| `←` / `→` | Previous / next asset |
+| `Home` / `End` | First / last asset |
+| `R` | Reuse settings |
+| `E` | Use as reference |
+| `D` | Download |
+| `C` | Copy the prompt |
+| `Delete` / `Backspace` | Delete (asks for confirmation) |
+| `Shift+Delete` | Delete without asking |
+| `I` | Toggle the details panel |
+| `?` | Show the viewer's shortcuts |
+| `Esc` | Close the shortcut list, then the viewer |
 
 ## Model Store (`~/.ziv/`)
 

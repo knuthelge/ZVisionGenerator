@@ -1317,3 +1317,81 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     );
   });
 });
+
+describe('GalleryPage keyboard shortcuts', () => {
+  const assets = [
+    makeAsset({ id: 'a.png', filename: 'a.png' }),
+    makeAsset({ id: 'b.png', filename: 'b.png' }),
+    makeAsset({ id: 'c.png', filename: 'c.png' }),
+  ];
+
+  async function mountGallery(): Promise<void> {
+    galleryApiMocks.getGallery.mockResolvedValue({ assets, page: 1, total_pages: 1, total_count: assets.length });
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+  }
+
+  function press(key: string, init: KeyboardEventInit = {}): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+    (document.activeElement ?? document.body).dispatchEvent(event);
+    flushSync();
+    return event;
+  }
+
+  function tileButton(filename: string): HTMLButtonElement {
+    return target.querySelector(`button[aria-label="View ${filename}"]`) as HTMLButtonElement;
+  }
+
+  function checked(filename: string): boolean {
+    return (target.querySelector(`input[aria-label="Select ${filename}"]`) as HTMLInputElement).checked;
+  }
+
+  it('moves focus between tiles with the arrow keys', async () => {
+    await mountGallery();
+    tileButton('a.png').focus();
+    press('ArrowRight');
+    expect(document.activeElement).toBe(tileButton('b.png'));
+    press('ArrowLeft');
+    expect(document.activeElement).toBe(tileButton('a.png'));
+  });
+
+  it('toggles the focused tile with Space and X and clears the selection with Escape', async () => {
+    await mountGallery();
+    tileButton('b.png').focus();
+    expect(press(' ').defaultPrevented).toBe(true);
+    expect(checked('b.png')).toBe(true);
+    press('x');
+    expect(checked('b.png')).toBe(false);
+
+    press(' ');
+    expect(checked('b.png')).toBe(true);
+    press('Escape');
+    expect(checked('b.png')).toBe(false);
+  });
+
+  it('selects every loaded asset with Ctrl+A', async () => {
+    await mountGallery();
+    expect(press('a', { ctrlKey: true }).defaultPrevented).toBe(true);
+    expect(assets.every((asset) => checked(asset.filename))).toBe(true);
+  });
+
+  it('deletes the selection with Delete, else the focused tile', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    galleryApiMocks.deleteAsset.mockResolvedValue();
+    await mountGallery();
+
+    tileButton('c.png').focus();
+    press('Backspace');
+    await settle();
+    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith('c.png');
+
+    galleryApiMocks.deleteAsset.mockClear();
+    selectAssetForBatch(target, assets[0]);
+    flushSync();
+    press('Delete');
+    await settle();
+    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith('a.png');
+    expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalledWith('b.png');
+    confirmSpy.mockRestore();
+  });
+});

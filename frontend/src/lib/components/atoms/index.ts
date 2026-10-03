@@ -14,3 +14,4 @@ export { default as MascotSpot } from './MascotSpot.svelte';
 export { default as Tooltip } from './Tooltip.svelte';
 export { default as Icon } from './Icon.svelte';
 export { default as InspectorNumber } from './InspectorNumber.svelte';
+export { default as ShortcutList } from './ShortcutList.svelte';

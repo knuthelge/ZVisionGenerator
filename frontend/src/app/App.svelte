@@ -6,6 +6,7 @@
   import type { PageId } from '$lib/types';
   import TopNav from '$lib/components/organisms/TopNav.svelte';
   import ToastContainer from '$lib/components/molecules/ToastContainer.svelte';
+  import ShortcutsDialog from '$lib/components/organisms/ShortcutsDialog.svelte';
   import WorkspacePage from '$features/workspace/WorkspacePage.svelte';
   import GalleryPage from '$features/gallery/GalleryPage.svelte';
   import ConfigPage from '$features/config/ConfigPage.svelte';
@@ -47,6 +48,7 @@
       {/if}
     </div>
     <ToastContainer />
+    <ShortcutsDialog currentPage={router.page} onnavigate={(page) => router.navigate(page)} />
   </div>
 {:else}
   <div class="flex items-center justify-center min-h-screen bg-zinc-950">

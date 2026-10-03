@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Web UI: keyboard shortcuts across the app; press `?` for the full list
+  - Viewer: `Delete`/`Backspace` deletes (`Shift+Delete` without asking), `R` reuses settings, `E` uses as reference, `D` downloads, `C` copies the prompt, `Home`/`End` jump to the first/last asset
+  - Gallery: arrow keys move between assets, `Space`/`X` selects, `⌘A`/`Ctrl+A` selects all, `Delete` deletes, `Esc` clears the selection
+  - Workspace: `⌘⇧↵`/`Ctrl+Shift+↵` generates with a new seed, `⌘E`/`Ctrl+E` enhances the prompt, `Alt+1`/`Alt+2` focus the prompt/settings, `Esc` stops the running job
+  - Anywhere: `G` then `W`/`G`/`M`/`C` opens Workspace, Gallery, Models or Config
+
 ## [0.13.0b6] - 2026-10-04
 
 ### Added

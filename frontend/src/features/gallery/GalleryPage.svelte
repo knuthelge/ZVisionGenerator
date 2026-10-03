@@ -6,9 +6,11 @@
   import { historyStore } from '$lib/state/history.svelte';
   import { jobStore } from '$lib/state/job.svelte';
   import { draft } from '$lib/state/draft.svelte';
-  import { referenceParams, reuseParams, type ReferenceTarget } from '$lib/state/assetActions';
+  import { referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import type { GalleryAsset } from '$lib/types';
   import { AssetTile, AssetViewer } from '$lib/components/molecules';
+  import { hasOpenModal, isCommandKey, isPlainKey, isTyping } from '$lib/keyboard';
+  import { gridColumns, moveInGrid } from './gridNav';
 
   let assets = $state<GalleryAsset[]>([]);
   let page = $state(1);
@@ -63,8 +65,10 @@
 
     _viewGeneration += 1;
     void loadPageOne(mediaFilter, sortOrder, _viewGeneration, _mutationRevision, true);
+    document.addEventListener('keydown', handleGridKeydown);
 
     return () => {
+      document.removeEventListener('keydown', handleGridKeydown);
       // Invalidate every request still awaiting a response after unmount.
       _viewGeneration += 1;
       _mutationRevision += 1;
@@ -290,9 +294,9 @@
     }
   }
 
-  async function deleteSingle(asset: GalleryAsset): Promise<void> {
+  async function deleteSingle(asset: GalleryAsset, options: DeleteOptions = {}): Promise<void> {
     if (deletingIds.has(asset.id) || _successfullyDeletedIds.has(asset.id)) return;
-    if (!confirm(`Delete "${asset.filename}"?`)) return;
+    if (options.confirm !== false && !confirm(`Delete "${asset.filename}"?`)) return;
     markDeleting([asset.id], true);
     try {
       await deleteAsset(asset.id);
@@ -400,6 +404,52 @@
   function useAsReference(asset: GalleryAsset, target: ReferenceTarget): void {
     router.navigate('workspace', referenceParams(asset, target));
   }
+
+  // --- Keyboard -------------------------------------------------------------
+  let gridEl = $state<HTMLDivElement | null>(null);
+
+  function gridTiles(): HTMLElement[] {
+    return Array.from(gridEl?.querySelectorAll<HTMLElement>('.asset-tile') ?? []);
+  }
+
+  function focusTile(tile: HTMLElement | undefined): void {
+    tile?.querySelector<HTMLElement>('.asset-tile-media')?.focus();
+  }
+
+  function handleGridKeydown(e: KeyboardEvent): void {
+    if (e.defaultPrevented || lightboxOpen || isTyping(e.target) || hasOpenModal()) return;
+    if (isCommandKey(e) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
+      if (assets.length === 0) return;
+      e.preventDefault();
+      selected = new Set(assets.map((asset) => asset.id));
+      return;
+    }
+    if (!isPlainKey(e)) return;
+
+    const tiles = gridTiles();
+    const index = tiles.findIndex((tile) => tile.contains(document.activeElement));
+    const focused = index >= 0 ? assets[index] : undefined;
+    if (e.key === 'Escape') {
+      if (selected.size === 0) return;
+      e.preventDefault();
+      selected = new Set();
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (selected.size > 0) void deleteSelected();
+      else if (focused) void deleteSingle(focused);
+      else return;
+      e.preventDefault();
+    } else if (!focused) {
+      return;
+    } else if (e.key === ' ' || e.key.toLowerCase() === 'x') {
+      e.preventDefault();
+      toggleSelect(focused, !selected.has(focused.id));
+    } else {
+      const next = moveInGrid(index, e.key, gridColumns(tiles.map((tile) => tile.offsetTop)), tiles.length);
+      if (next === null) return;
+      e.preventDefault();
+      focusTile(tiles[next]);
+    }
+  }
 </script>
 
 <div id="gallery-view" class="flex-1 flex overflow-hidden">
@@ -483,7 +533,7 @@
         </div>
       {:else}
         <!-- Grid -->
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+        <div bind:this={gridEl} class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
           {#each assets as asset (asset.id)}
             <AssetTile
               {asset}
