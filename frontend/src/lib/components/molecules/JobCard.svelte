@@ -165,6 +165,9 @@
     </div>
   {/if}
   <p class="text-sm text-text-primary line-clamp-2 break-words" title={job.prompt}>{job.prompt || 'No prompt supplied'}</p>
+  {#if job.enhancedPrompt}
+    <p class="job-enhanced line-clamp-3 break-words" title={job.enhancedPrompt}><span class="job-enhanced-label">✨ Enhanced</span> {job.enhancedPrompt}</p>
+  {/if}
   <p class="mt-1 text-xs text-text-muted truncate" title={job.model}>{job.model}</p>
 
   <!-- Progress -->
@@ -347,6 +350,8 @@
   .job-timing div { display: flex; align-items: baseline; gap: 8px; }
   dt { color: var(--color-text-muted); }
   dd { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--color-text-primary); }
+  .job-enhanced { margin-top: 6px; font-size: 12px; color: var(--color-text-secondary); }
+  .job-enhanced-label { color: var(--color-primary-main); font-weight: 500; }
   .job-message { margin-top: 12px; padding: 8px 10px; background: var(--color-bg-base); border-radius: 4px; font-size: 12px; color: var(--color-text-secondary); overflow-wrap: anywhere; }
   .job-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border-subtle); }
   .job-actions button { padding: 5px 9px; font-size: 11px; border: 1px solid var(--color-border-strong); border-radius: 4px; color: var(--color-text-secondary); }

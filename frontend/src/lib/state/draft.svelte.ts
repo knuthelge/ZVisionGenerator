@@ -53,6 +53,10 @@ const DEFAULT_DRAFT: DraftState = {
   upscaleSharpen: true,
   videoUpscaleEnabled: false,
   videoUpscaleFactor: 2,
+  enhancedPrompt: '',
+  enhancedFrom: null,
+  enhanceSettings: null,
+  enhanceAuto: false,
 };
 
 const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
@@ -214,6 +218,11 @@ export const draft = {
     if (params.frames && canApply('frames')) prefill.frameCount = Number(params.frames);
     if (params.lora && canApply('lora')) prefill.loraString = params.lora;
     if (params.image_path && canApply('image_path')) prefill.referenceImagePath = params.image_path;
+    // A reused prompt replaces whatever was enhanced before; a stale Enhanced box would silently win.
+    if (prefill.prompt !== undefined) {
+      prefill.enhancedPrompt = '';
+      prefill.enhancedFrom = null;
+    }
     _draft = { ..._draft, ...prefill };
   },
 
@@ -287,7 +296,8 @@ export const draft = {
 
   /**
    * Reset all generation selections to the model's defaults, keeping the
-   * workflow, model, LoRAs, quantization, and prompt inputs untouched.
+   * workflow, model, LoRAs, quantization, and prompt inputs (including the
+   * Enhanced prompt) untouched. Enhancement options and auto-enhance reset.
    */
   resetSelections(ctx: WorkspaceContext): void {
     const s = _draft;
@@ -311,6 +321,8 @@ export const draft = {
       negativePrompt: s.negativePrompt,
       promptFilePath: s.promptFilePath,
       promptFileOptionIds: s.promptFileOptionIds,
+      enhancedPrompt: s.enhancedPrompt,
+      enhancedFrom: s.enhancedFrom,
     };
     this.saveDraft();
   },

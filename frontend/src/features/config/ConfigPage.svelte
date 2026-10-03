@@ -14,6 +14,7 @@
     'ui.default_models.video': 'Default Video Model',
     'generation.default_size': 'Base Resolution',
     'ui.output_dir': 'Output Directory',
+    'prompt_enhancer.user_model': 'Prompt Enhancer Model',
   };
 
   let config = $state<AppConfig | null>(null);
@@ -63,6 +64,9 @@
     }
     if (field.key === 'ui.output_dir') {
       return `Leave empty to use the default output folder. Current folder: ${effective}.`;
+    }
+    if (field.key === 'prompt_enhancer.user_model') {
+      return `Hugging Face repo (owner/name, optionally @revision) or local folder of a chat LLM. Leave empty for the built-in default. Current model: ${effective}.`;
     }
     if (field.clearable) {
       return `Leave empty to use the default. Current value: ${effective}.`;

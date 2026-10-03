@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
+import logging
+import queue
+import random
 import subprocess
+import threading
 import sys
 import uuid
 from contextlib import asynccontextmanager
@@ -18,16 +23,19 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from PIL import Image, UnidentifiedImageError
 
-from zvisiongenerator.backends import get_backend_name
+from zvisiongenerator.backends import get_backend_name, get_prompt_enhancer_session
+from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu
 from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_local
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
-from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_upscale_steps, resolve_video_defaults, validate_scheduler
+from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_enhancer_model, resolve_upscale_steps, resolve_video_defaults, validate_scheduler
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
+from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhance_by_set_for_mode, enhance_options, enhance_prompt, settings_from_mapping, validate_settings
+from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response, huggingface_token_env_var
@@ -47,7 +55,7 @@ from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, read_prompt_file, resolve_prompt_file_options, write_prompt_file
 from zvisiongenerator.web.model_delete import delete_lora, delete_model, model_delete_target
 from zvisiongenerator.web.job_contract import IMAGE_SUPPORTED_CONTROLS, VIDEO_SUPPORTED_CONTROLS
-from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner
+from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner, worker_runtime_context
 from zvisiongenerator.web.workspace_api import build_models_response, build_workspace_bootstrap_view, build_workspace_response
 from zvisiongenerator.web.workspace_contract import (
     CANONICAL_WORKFLOW_VALUES,
@@ -69,6 +77,8 @@ _WORKFLOW_DEFINITIONS = WORKFLOW_DEFINITIONS
 _PROMPT_FILE_EXTENSIONS = tuple(PROMPT_FILE_CONTRACT["accepted_extensions"])
 
 web_runner = WebRunner()
+logger = logging.getLogger(__name__)
+_ENHANCE_TERMINAL_FRAMES = frozenset({"done", "error"})
 
 
 @asynccontextmanager
@@ -197,6 +207,121 @@ async def api_prompt_file_write(request: Request) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"path": document.path, "options": document.options}
+
+
+@app.post("/api/prompt/enhance")
+async def enhance_prompt_endpoint(request: Request) -> StreamingResponse:
+    """Stream an on-demand prompt enhancement as NDJSON frames: ``status`` → ``text``* → ``done`` | ``error``."""
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
+    try:
+        job = await run_in_threadpool(_validate_enhance_body, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    session = get_prompt_enhancer_session()
+    reservation: list[object] = []
+
+    def _reserve() -> None:
+        token = session.reserve()
+        if token is None:
+            raise JobConflictError("Another prompt enhancement is in progress.")
+        reservation.append(token)
+
+    try:
+        # Atomic with job admission: no job can start between this check and the enhancer claiming the slot.
+        web_runner.admit_exclusive(_reserve, busy_message="Prompt enhancement is available when the current job finishes.")
+    except JobConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    frames: queue.Queue[dict[str, Any]] = queue.Queue()
+    cancelled = threading.Event()
+    # One dedicated thread owns the whole enhancement (load + generate): MLX streams are thread-local.
+    threading.Thread(target=_run_enhancement, args=(job, frames, cancelled, reservation[0]), name="ziv-prompt-enhance", daemon=True).start()
+
+    async def _stream():
+        try:
+            while True:
+                frame = await asyncio.to_thread(frames.get)
+                yield json.dumps(frame) + "\n"
+                if frame["type"] in _ENHANCE_TERMINAL_FRAMES:
+                    return
+        finally:
+            cancelled.set()
+
+    return StreamingResponse(_stream(), media_type="application/x-ndjson", headers={"Cache-Control": "no-store"})
+
+
+def _reject_while_enhancing() -> None:
+    """Job admission check: refuse to start a job while an on-demand enhancement runs or is reserved."""
+    if get_prompt_enhancer_session().busy():
+        raise JobConflictError("Prompt enhancement in progress. Wait for it to finish before starting a job.")
+
+
+def _validate_enhance_body(body: Any) -> dict[str, Any]:
+    """Validate an enhance request body into the job parameters for :func:`_run_enhancement`."""
+    if not isinstance(body, dict):
+        raise ValueError("Request body must be a JSON object.")
+    prompt = body.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("Enter a prompt to enhance.")
+    mode = body.get("mode", "image")
+    if mode not in ("image", "video"):
+        raise ValueError("mode must be 'image' or 'video'.")
+    settings = settings_from_mapping(body.get("settings") or {}, mode=mode, motion_in_image="warn")
+    validate_settings(settings, mode=mode)
+    app_config = load_config()
+    options = enhance_options(app_config)
+    max_words = body.get("max_words")
+    if max_words is None:
+        max_words = int(options["length"]["max_words"])
+    if isinstance(max_words, bool) or not isinstance(max_words, int) or not 1 <= max_words <= 1000:
+        raise ValueError("max_words must be an integer between 1 and 1000.")
+    repo, revision = resolve_enhancer_model(app_config, platform_key=sys.platform)
+    return {
+        "prompt": prompt,
+        "mode": mode,
+        "settings": settings,
+        "ceiling": max_words,
+        "repo": repo,
+        "revision": revision,
+        "options": options,
+        "idle_seconds": options["idle_release_seconds"],
+    }
+
+
+def _run_enhancement(job: dict[str, Any], frames: queue.Queue[dict[str, Any]], cancelled: threading.Event, reservation: object | None = None) -> None:
+    """Load (if needed) and run the enhancer on this thread, pushing NDJSON frames to *frames*."""
+    options = job["options"]
+    try:
+        with worker_runtime_context():
+            session = get_prompt_enhancer_session()
+            with session.acquire(job["repo"], job["revision"], idle_seconds=job["idle_seconds"], on_phase=lambda phase: frames.put({"type": "status", "phase": phase})) as enhancer:
+                frames.put({"type": "status", "phase": "generating_cpu" if runs_on_cpu(enhancer) else "generating"})
+                result = enhance_prompt(
+                    enhancer,
+                    job["prompt"],
+                    job["settings"],
+                    mode=job["mode"],
+                    seed=random.randint(0, 2**31 - 1),
+                    ceiling=job["ceiling"],
+                    protect=True,
+                    length_cfg=options["length"],
+                    temperature=options["temperature"],
+                    max_tokens=options["max_new_tokens"],
+                    on_text=lambda text: frames.put({"type": "text", "text": text}),
+                    cancelled=cancelled.is_set,
+                )
+        frames.put({"type": "done", "prompt": result.prompt, "clamped": result.clamped})
+    except (RuntimeError, ValueError) as exc:
+        frames.put({"type": "error", "detail": str(exc)})
+    except Exception as exc:  # noqa: BLE001 - any loader/runtime failure must still end the stream
+        logger.exception("Prompt enhancement failed")
+        frames.put({"type": "error", "detail": f"Prompt enhancement failed: {exc}"})
+    finally:
+        if reservation is not None:
+            get_prompt_enhancer_session().cancel_reservation(reservation)
 
 
 @app.post("/api/generate")
@@ -448,8 +573,11 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         negative_prompt = None
         prompts_data = {"prompt": [(json_prompt_text, None)]}
         args.json_prompt_enabled = True
+        enhance_by_set = None
     else:
-        _prompt_source, prompt, negative_prompt, prompts_data = _resolve_prompt_submission(form)
+        _prompt_source, prompt, negative_prompt, prompts_data, enhance_by_set = _resolve_prompt_submission_with_enhance(form)
+        enhance_by_set = enhance_by_set_for_mode(enhance_by_set, mode="image")
+    _apply_enhance_submission(args, form, mode="image", json_caption=args.json_prompt_enabled)
     first_sigma = _optional_float(form, "first_sigma")
     if first_sigma is not None and not (0.0 < first_sigma <= 2.0):
         raise ValueError(f"first_sigma must be in (0.0, 2.0], got {first_sigma}.")
@@ -525,6 +653,8 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         args=args,
         model_ref=resolved_model,
         quantize=args.quantize,
+        enhance_by_set=enhance_by_set,
+        admission_check=_reject_while_enhancing,
     )
     return {
         "job_id": job_id,
@@ -552,7 +682,8 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     output_dir = _resolve_output_dir(web_config.output_dir)
     image_path = _resolve_reference_image(form, output_dir)
     audio_enabled = _checkbox(form, "audio", default=True)
-    _prompt_source, prompt, _negative_prompt, prompts_data = _resolve_prompt_submission(form)
+    _prompt_source, prompt, _negative_prompt, prompts_data, enhance_by_set = _resolve_prompt_submission_with_enhance(form)
+    enhance_by_set = enhance_by_set_for_mode(enhance_by_set, mode="video")
     args = argparse.Namespace(
         model=model_name,
         prompt=prompt,
@@ -578,6 +709,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         no_audio=not audio_enabled,
         audio=audio_enabled,
     )
+    _apply_enhance_submission(args, form, mode="video", json_caption=False)
     if _WORKFLOW_DEFINITIONS[workflow]["requires_reference_image"] and image_path is None:
         raise ValueError("Image-to-video requires a reference image.")
     _validate_video_args(args)
@@ -647,6 +779,8 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         config=app_config,
         args=args,
         model_ref=resolved_model,
+        enhance_by_set=enhance_by_set,
+        admission_check=_reject_while_enhancing,
     )
     mode_label = "Image to Video" if image_path else "Text to Video"
     return {
@@ -663,8 +797,10 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     }
 
 
-def _resolve_prompt_submission(form: Any) -> tuple[str, str, str | None, dict[str, list[tuple[str, str | None]]]]:
-    """Resolve inline or prompt-file submission into a batch prompt payload."""
+def _resolve_prompt_submission_with_enhance(
+    form: Any,
+) -> tuple[str, str, str | None, dict[str, list[tuple[str, str | None]]], dict[str, list[EnhanceSettings | None]] | None]:
+    """Resolve a prompt submission plus prompt-file ``enhance:`` settings (``None`` for inline prompts)."""
     prompt_source = _text_or_default(form, "prompt_source", DEFAULT_PROMPT_SOURCE)
     if prompt_source not in PROMPT_SOURCE_VALUES:
         raise ValueError(f"Unknown prompt source '{prompt_source}'.")
@@ -679,11 +815,28 @@ def _resolve_prompt_submission(form: Any) -> tuple[str, str, str | None, dict[st
         for option in options:
             prompts_data.setdefault(option.set_name, []).append((option.prompt, option.negative_prompt))
         first = options[0]
-        return prompt_source, first.prompt, first.negative_prompt, prompts_data
+        return prompt_source, first.prompt, first.negative_prompt, prompts_data, group_enhance_by_set(options)
 
     prompt = _required_text(form, "prompt")
     negative_prompt = _optional_text(form, "negative_prompt")
-    return prompt_source, prompt, negative_prompt, {"web": [(prompt, negative_prompt)]}
+    return prompt_source, prompt, negative_prompt, {"web": [(prompt, negative_prompt)]}, None
+
+
+def _apply_enhance_submission(args: argparse.Namespace, form: Any, *, mode: str, json_caption: bool) -> None:
+    """Set ``args.enhance`` from the auto-enhance toggle (job-wide settings) or ``None``; never for JSON captions."""
+    args.no_enhance = False
+    args.enhance_model = None
+    args.enhance = None
+    if json_caption or not _checkbox(form, "enhance_auto"):
+        return
+    raw = _optional_text(form, "enhance_settings")
+    try:
+        data = json.loads(raw) if raw else {}
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"enhance_settings must be a JSON object: {exc}") from exc
+    settings = settings_from_mapping(data, mode=mode, motion_in_image="warn")
+    validate_settings(settings, mode=mode)
+    args.enhance = settings
 
 
 def _replace_prompt_negatives(

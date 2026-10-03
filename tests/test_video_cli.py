@@ -297,7 +297,7 @@ class TestVideoCliExecution:
             },
         )
         monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
-        monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args: object())
+        monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args, **_kwargs: object())
 
         def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args):
             captured["steps"] = args.steps

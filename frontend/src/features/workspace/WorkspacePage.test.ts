@@ -472,6 +472,95 @@ describe('WorkspacePage', () => {
     expect(submittedFormData.has('output')).toBe(false);
   });
 
+  function withEnhancer(context: WorkspaceContext): WorkspaceContext {
+    context.workflow_contract.definitions.txt2img.visible_controls.push('prompt_enhance', 'prompt_enhance_auto');
+    context.prompt_enhancer = {
+      matrix: {
+        axes: [
+          { key: 'style', label: 'Style', multi: false, video_only: false, options: [{ slug: 'keep', label: 'Keep' }, { slug: 'photo', label: 'Photographic' }], default: ['keep'] },
+          { key: 'details', label: 'Details', multi: true, video_only: false, options: [{ slug: 'lighting', label: 'Lighting' }], default: ['lighting'] },
+          { key: 'length', label: 'Length', multi: false, video_only: false, options: [{ slug: 'same', label: 'Same' }, { slug: 'longer', label: 'Longer' }], default: ['same'] },
+          { key: 'motion', label: 'Motion', multi: true, video_only: true, options: [{ slug: 'action', label: 'Action' }], default: ['action'] },
+        ],
+        defaults: { style: 'keep', details: ['lighting'], length: 'same', motion: ['action'] },
+      },
+      model: 'owner/llm',
+      revision: null,
+      downloaded: true,
+      download_size_label: null,
+      default_max_words: 300,
+      error: null,
+    };
+    return context;
+  }
+
+  async function submitForm(): Promise<FormData> {
+    const form = target.querySelector('form');
+    form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    const [submitted] = workspaceApiMocks.submitGenerate.mock.calls.at(-1) ?? [];
+    return submitted as FormData;
+  }
+
+  it('submits the Enhanced prompt instead of the prompt when it has text', async () => {
+    draft.update('prompt', 'a fox');
+    draft.update('enhancedPrompt', 'A red fox in deep snow, golden light.');
+    draft.update('enhancedFrom', { prompt: 'a fox', mode: 'image' });
+    await mountWorkspace(withEnhancer(makeContext()));
+
+    const enhanced = target.querySelector('#ws-enhanced-prompt') as HTMLTextAreaElement | null;
+    expect(enhanced?.value).toBe('A red fox in deep snow, golden light.');
+    expect(enhanced?.getAttribute('name')).toBeNull();
+
+    const submitted = await submitForm();
+    expect(submitted.get('prompt')).toBe('A red fox in deep snow, golden light.');
+    expect(submitted.has('enhance_auto')).toBe(false);
+  });
+
+  it('marks the Enhanced prompt out of date after the prompt changes', async () => {
+    draft.update('prompt', 'a fox');
+    draft.update('enhancedPrompt', 'A red fox.');
+    draft.update('enhancedFrom', { prompt: 'a fox', mode: 'image' });
+    await mountWorkspace(withEnhancer(makeContext()));
+    expect(target.textContent).not.toContain('Out of date');
+
+    const prompt = target.querySelector('#ws-prompt') as HTMLTextAreaElement;
+    prompt.value = 'a cat';
+    prompt.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(target.textContent).toContain('Out of date');
+  });
+
+  it('submits the original prompt plus auto-enhance fields when enhancing each image', async () => {
+    draft.update('prompt', 'a fox');
+    draft.update('enhancedPrompt', 'Ignored while auto-enhancing.');
+    draft.update('enhanceAuto', true);
+    draft.update('enhanceSettings', { style: 'photo', details: [], length: 'longer', motion: ['action'] });
+    await mountWorkspace(withEnhancer(makeContext()));
+
+    expect((target.querySelector('#ws-enhanced-prompt') as HTMLTextAreaElement).disabled).toBe(true);
+    const submitted = await submitForm();
+    expect(submitted.get('prompt')).toBe('a fox');
+    expect(submitted.get('enhance_auto')).toBe('true');
+    expect(JSON.parse(String(submitted.get('enhance_settings')))).toEqual({ style: 'photo', details: [], length: 'longer' });
+  });
+
+  it('warns inline when auto-enhance would change nothing', async () => {
+    draft.update('prompt', 'a fox');
+    draft.update('enhanceAuto', true);
+    draft.update('enhanceSettings', { style: 'keep', details: [], length: 'same', motion: [] });
+    await mountWorkspace(withEnhancer(makeContext()));
+    (target.querySelector('#ws-enhance-toggle') as HTMLButtonElement).click();
+    await settle();
+    expect(target.querySelector('[role="alert"]')?.textContent).toContain('Pick a style, a detail, or a length.');
+  });
+
+  it('hides the enhancer when the backend does not advertise it', async () => {
+    await mountWorkspace(makeContext());
+    expect(target.querySelector('#ws-enhanced-prompt')).toBeNull();
+    expect(target.querySelector('#ws-enhance-toggle')).toBeNull();
+  });
+
   it('uses backend visible_controls instead of workflow-name literals for sidebar visibility', async () => {
     const context = makeContext({
       workflow_contract: {

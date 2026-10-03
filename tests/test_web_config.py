@@ -315,6 +315,7 @@ def test_build_writable_config_schema_exposes_frozen_phase_a_fields(monkeypatch,
     _assert_non_empty_string(schema["semantics"]["null"])
     assert sorted(fields) == [
         "generation.default_size",
+        "prompt_enhancer.user_model",
         "ui.default_models.image",
         "ui.default_models.video",
         "ui.output_dir",

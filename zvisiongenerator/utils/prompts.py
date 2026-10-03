@@ -10,6 +10,7 @@ import warnings
 import yaml
 
 from zvisiongenerator.utils.prompt_compose import flatten_value, resolve_snippets
+from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, parse_enhance_entry, validate_settings
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class PromptFileOption:
     source_index: int
     prompt: str
     negative_prompt: str | None
+    enhance: EnhanceSettings | None = None
 
     @property
     def id(self) -> str:
@@ -33,6 +35,19 @@ class PromptFileInspection:
 
     prompts_data: dict[str, list[tuple[str, str | None]]]
     options: list[PromptFileOption]
+
+    @property
+    def enhance_by_set(self) -> dict[str, list[EnhanceSettings | None]]:
+        """Return each active entry's ``enhance:`` settings, aligned with :attr:`prompts_data`."""
+        return enhance_by_set(self.options)
+
+
+def enhance_by_set(options: list[PromptFileOption]) -> dict[str, list[EnhanceSettings | None]]:
+    """Group option ``enhance:`` settings by set, in option order (aligned with the prompt pairs)."""
+    grouped: dict[str, list[EnhanceSettings | None]] = {}
+    for option in options:
+        grouped.setdefault(option.set_name, []).append(option.enhance)
+    return grouped
 
 
 def load_prompts_file(path: str) -> dict[str, list[tuple[str, str | None]]]:
@@ -99,6 +114,7 @@ def inspect_prompts_text(raw_text: str, *, source_name: str) -> PromptFileInspec
                     source_index=source_index,
                     prompt=prompt_text,
                     negative_prompt=negative_prompt,
+                    enhance=_parse_entry_enhance(entry, source_name=source_name, set_name=set_name, index=source_index),
                 )
             )
         if pairs:
@@ -150,3 +166,23 @@ def _resolve_prompt_entry(
         raise ValueError(f"Entry in prompt set '{set_name}' in {source_name} has an empty prompt after snippet resolution.")
     negative_prompt = flatten_value(resolve_snippets(raw_negative, snippets)) or None
     return prompt_text, negative_prompt
+
+
+def _parse_entry_enhance(entry: dict[str, Any], *, source_name: str, set_name: str, index: int) -> EnhanceSettings | None:
+    """Parse an entry's optional ``enhance:`` key; ``motion`` is kept (image runs ignore it).
+
+    An invalid value warns and leaves the entry unenhanced, so the rest of the file (and runs with
+    enhancement off) still work.
+    """
+    if "enhance" not in entry:
+        return None
+    where = f"entry {index} of prompt set '{set_name}' in {source_name}"
+    try:
+        settings = parse_enhance_entry(entry["enhance"], mode="video", where=where)
+        if settings is not None:
+            validate_settings(settings, mode="video")
+    except ValueError as exc:
+        message = str(exc) if str(exc).startswith("Invalid 'enhance'") else f"Invalid 'enhance' in {where}: {exc}"
+        warnings.warn(f"{message} This entry is not enhanced.", stacklevel=2)
+        return None
+    return settings

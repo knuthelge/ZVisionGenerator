@@ -24,6 +24,7 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.utils.alignment import round_to_alignment
 from zvisiongenerator.utils.provenance import build_image_config_payload, embed_png_config
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
+from zvisiongenerator.workflows.enhance_stage import apply_prompt_enhancement
 
 _EXIF_IMAGE_DESCRIPTION = 0x010E
 
@@ -61,6 +62,12 @@ def resolve_prompt_stage(request: ImageGenerationRequest, artifacts: ImageWorkin
         artifacts.resolved_prompt = request.prompt
     else:
         artifacts.resolved_prompt = expand_random_choices(request.prompt)
+    return StageOutcome.success
+
+
+def enhance_prompt_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
+    """Rewrite the resolved prompt with the local prompt enhancer (auto mode); never fails the generation."""
+    apply_prompt_enhancement(request, artifacts, mode="image")
     return StageOutcome.success
 
 

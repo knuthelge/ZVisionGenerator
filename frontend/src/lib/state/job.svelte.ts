@@ -57,6 +57,7 @@ function promptProgress(event: Record<string, unknown> | null | undefined): Part
     progress.promptNumber = ((iteration - 1) % count) + 1;
   }
   if (typeof event?.prompt === 'string') progress.prompt = event.prompt;
+  if (typeof event?.enhanced_prompt === 'string') progress.enhancedPrompt = event.enhanced_prompt;
   if (typeof event?.run_index === 'number') progress.batchIndex = event.run_index;
   return progress;
 }
@@ -68,6 +69,15 @@ function statusMessageForEvent(type: string | undefined, event: Record<string, u
   }
   if (type === 'batch_started') {
     return 'Starting generation...';
+  }
+  if (type === 'enhancer_loading') {
+    const phase = eventFieldString(event, 'phase');
+    if (phase === 'downloading') return 'Downloading prompt enhancer (first use only)...';
+    if (phase === 'cpu') return 'Prompt enhancer runs on the CPU (no GPU found); each prompt may take a few minutes.';
+    return 'Loading prompt enhancer...';
+  }
+  if (type === 'prompt_enhanced') {
+    return 'Prompt enhanced.';
   }
   if (type === 'workflow_stage_started') {
     const name = eventFieldString(event, 'stage_name');
@@ -214,7 +224,7 @@ function applyStatusEvent(type: string, event: SSEEvent): void {
     ..._job,
     ...promptProgress(data),
     ...(msg ? { message: msg } : {}),
-    ...(type === 'prompt_started' ? { currentStep: 0, totalSteps: 0, stageName: '', stageIndex: 0, message: 'Preparing generation.' } : {}),
+    ...(type === 'prompt_started' ? { currentStep: 0, totalSteps: 0, stageName: '', stageIndex: 0, message: 'Preparing generation.', enhancedPrompt: undefined } : {}),
     ...(type === 'workflow_stage_started' ? { stageName: eventFieldString(data, 'stage_name') } : {}),
     ...((type === 'prompt_started' || type === 'workflow_stage_started') && !isReplayedBeforeSnapshot(data) ? { previewUrl: null } : {}),
   };

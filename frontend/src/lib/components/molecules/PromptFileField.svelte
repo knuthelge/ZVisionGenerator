@@ -194,7 +194,7 @@
                   onchange={(event) => handleOptionChange(option.id, event.currentTarget.checked)}
                 >
                 <span class="min-w-0 flex-1 space-y-1.5">
-                  <span class="block text-xs font-medium text-zinc-400">{option.set_name} · #{option.source_index + 1}</span>
+                  <span class="block text-xs font-medium text-zinc-400">{option.set_name} · #{option.source_index + 1}{#if option.enhance}<span class="ml-1.5 text-teal-400" title={`Enhanced each image: ${workflowMode === 'image' ? option.enhance.replace(/,motion=[^,]*/, '') : option.enhance}`}>✨ enhanced</span>{/if}</span>
                   <span id={`prompt-detail-${option.id}`} class="whitespace-pre-wrap break-words" class:block={expanded} class:line-clamp-2={!expanded}>{option.prompt_preview}</span>
                   {#if expanded && option.negative_preview}
                     <span class="block border-t border-zinc-700/50 pt-2 text-xs text-zinc-400">

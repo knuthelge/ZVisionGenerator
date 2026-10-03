@@ -6,6 +6,7 @@ import argparse
 
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.workflows.image_stages import (
+    enhance_prompt_stage,
     resolve_prompt_stage,
     suppress_negative_stage,
     load_reference_stage,
@@ -20,9 +21,12 @@ from zvisiongenerator.workflows.image_stages import (
 __all__ = ["build_workflow", "build_video_workflow"]
 
 
-def build_workflow(args: argparse.Namespace) -> GenerationWorkflow:
-    """Build a dynamic workflow from CLI flags."""
-    stages = [resolve_prompt_stage, suppress_negative_stage, load_reference_stage, text_to_image_stage]
+def build_workflow(args: argparse.Namespace, *, enhance: bool = False) -> GenerationWorkflow:
+    """Build a dynamic workflow from CLI flags; *enhance* adds the auto prompt-enhancement stage."""
+    stages = [resolve_prompt_stage]
+    if enhance:
+        stages.append(enhance_prompt_stage)
+    stages += [suppress_negative_stage, load_reference_stage, text_to_image_stage]
     if args.upscale:
         stages.append(upscale_stage)
     if args.contrast is not False:
@@ -35,16 +39,18 @@ def build_workflow(args: argparse.Namespace) -> GenerationWorkflow:
     return GenerationWorkflow(name="dynamic", stages=stages)
 
 
-def build_video_workflow(args: argparse.Namespace) -> GenerationWorkflow:
+def build_video_workflow(args: argparse.Namespace, *, enhance: bool = False) -> GenerationWorkflow:
     """Build video generation workflow based on CLI args.
 
     Args:
         args: Parsed video CLI arguments. Must have ``image_path`` attribute.
+        enhance: Add the auto prompt-enhancement stage after prompt resolution.
 
     Returns:
         GenerationWorkflow with stages for T2V or I2V.
     """
     from zvisiongenerator.workflows.video_stages import (
+        enhance_prompt_stage as video_enhance_prompt,
         resolve_prompt_stage as video_resolve_prompt,
         generate_filename_stage,
         text_to_video_stage,
@@ -53,7 +59,10 @@ def build_video_workflow(args: argparse.Namespace) -> GenerationWorkflow:
         log_video_stage,
     )
 
-    stages = [video_resolve_prompt, generate_filename_stage]
+    stages = [video_resolve_prompt]
+    if enhance:
+        stages.append(video_enhance_prompt)
+    stages.append(generate_filename_stage)
     if args.image_path:
         stages.append(image_to_video_stage)
     else:

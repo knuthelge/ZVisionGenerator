@@ -37,6 +37,7 @@ from .provenance import (
     read_png_config,
 )
 from .prompt_compose import expand_random_choices
+from .prompt_enhance import EnhanceResult, EnhanceSettings, enhance_prompt, matrix_contract, parse_enhance_entry, parse_enhance_spec
 from .prompts import load_prompts_file
 from .video_model_detect import VideoModelInfo, detect_video_model
 
@@ -45,6 +46,8 @@ __all__ = [
     "AliasMap",
     "AliasValue",
     "HuggingFaceRepoReference",
+    "EnhanceResult",
+    "EnhanceSettings",
     "IMAGE_CONFIG_SCHEMA",
     "PlatformInfo",
     "PROVENANCE_SCHEMA",
@@ -61,6 +64,7 @@ __all__ = [
     "display_stem",
     "embed_mp4_config",
     "embed_png_config",
+    "enhance_prompt",
     "ensure_ffmpeg",
     "expand_random_choices",
     "format_generation_info",
@@ -72,7 +76,10 @@ __all__ = [
     "is_remote_lora_reference",
     "load_config",
     "load_prompts_file",
+    "matrix_contract",
     "parse_huggingface_repo_reference",
+    "parse_enhance_entry",
+    "parse_enhance_spec",
     "parse_lora_arg",
     "read_mp4_config",
     "read_png_config",

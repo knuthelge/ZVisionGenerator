@@ -11,10 +11,12 @@ from typing import Any
 
 from zvisiongenerator.backends import get_backend_name
 from zvisiongenerator.converters.list_assets import list_loras
-from zvisiongenerator.utils.config import resolve_defaults, resolve_video_defaults
+from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
+from zvisiongenerator.utils.config import resolve_defaults, resolve_enhancer_model, resolve_video_defaults
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.model_files import find_local_model_dir
 from zvisiongenerator.utils.paths import resolve_model_path
+from zvisiongenerator.utils.prompt_enhance import matrix_contract, resolve_enhance_ceiling
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
@@ -111,6 +113,7 @@ def build_workspace_response(
         "default_prompt_source": default_prompt_source,
         "prompt_file": prompt_file_contract,
         "workflow_contract": workflow_contract,
+        "prompt_enhancer": build_prompt_enhancer_contract(web_config),
         "config": {
             "gallery_page_size": web_config.gallery_page_size,
             "startup_view": web_config.startup_view,
@@ -121,6 +124,34 @@ def build_workspace_response(
             },
         },
     }
+
+
+def build_prompt_enhancer_contract(web_config: WebUiConfig, *, downloaded: Callable[[str, str | None], bool] = is_model_downloaded) -> dict[str, Any]:
+    """Describe the prompt enhancer for the SPA: option matrix, effective model, and download state."""
+    app_config = web_config.app_config
+    section = app_config.get("prompt_enhancer") or {}
+    sizes = section.get("download_size_label") or {}
+    size_label = sizes.get(sys.platform) if isinstance(sizes, dict) else None
+    contract: dict[str, Any] = {
+        "matrix": matrix_contract(),
+        "model": None,
+        "revision": None,
+        "downloaded": False,
+        "download_size_label": size_label if isinstance(size_label, str) else None,
+        "default_max_words": resolve_enhance_ceiling(app_config, family=None, mode="image"),
+        "error": None,
+    }
+    try:
+        repo, revision = resolve_enhancer_model(app_config, platform_key=sys.platform)
+    except ValueError as exc:
+        contract["error"] = str(exc)
+        return contract
+    contract["model"], contract["revision"] = repo, revision
+    contract["downloaded"] = downloaded(repo, revision)
+    # The size label describes the built-in default; a custom model's size is unknown.
+    if contract["downloaded"] or section.get("user_model"):
+        contract["download_size_label"] = None
+    return contract
 
 
 def build_models_response(
@@ -305,7 +336,9 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         else:
             model_info = detect_image_model(resolved_model)
         defaults = resolve_defaults(model_info, app_config, {}, get_backend_name())
+        enhance_max_words = resolve_enhance_ceiling(app_config, family=model_info.family, mode="image")
     except Exception:
+        enhance_max_words = resolve_enhance_ceiling(app_config, family=None, mode="image")
         defaults = {
             "steps": app_config.get("generation", {}).get("default_steps", 10),
             "guidance": app_config.get("generation", {}).get("default_guidance", 3.5),
@@ -342,6 +375,7 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         "dimension_min": int(defaults.get("dimension_min", 16)),
         "dimension_max": defaults.get("dimension_max", None),
         "dimension_step": int(defaults.get("dimension_step", 16)),
+        "enhance_max_words": enhance_max_words,
     }
 
 
@@ -375,4 +409,5 @@ def _build_video_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         "max_steps": _default_video_max_steps(app_config, family),
         "fps": fps,
         "upscale": _video_bootstrap_upscale(),
+        "enhance_max_words": resolve_enhance_ceiling(app_config, family=family, mode="video"),
     }

@@ -31,6 +31,17 @@ def emit_progress(progress_callback: ProgressCallback | None, event_type: str, *
     progress_callback({"type": event_type, **payload})
 
 
+def make_prompt_enhanced_callback(progress_callback: ProgressCallback | None, **context: Any) -> Callable[[str], None] | None:
+    """Return a callback that emits ``prompt_enhanced`` with the enhanced text and *context*."""
+    if progress_callback is None:
+        return None
+
+    def _callback(enhanced_prompt: str) -> None:
+        emit_progress(progress_callback, "prompt_enhanced", **context, enhanced_prompt=enhanced_prompt)
+
+    return _callback
+
+
 def emit_generation_finished(
     progress_callback: ProgressCallback | None,
     *,

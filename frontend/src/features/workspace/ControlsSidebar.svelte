@@ -2,7 +2,8 @@
   import { draft } from '$lib/state/draft.svelte';
   import { PromptFileField } from '$lib/components/molecules';
   import { Select, Toggle, RangeSlider } from '$lib/components/atoms';
-  import type { WorkspaceContext, ImageModelDefaults } from '$lib/types';
+  import PromptEnhancer from './PromptEnhancer.svelte';
+  import type { WorkspaceContext, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
   interface Props {
     context: WorkspaceContext | null;
@@ -82,6 +83,16 @@
   const showVideoUpscale = $derived(visibleControls.has('video_upscale_enabled'));
 
   const showNegativePrompt = $derived(visibleControls.has('negative_prompt') && supportsNegativePrompt);
+  const enhancerContract = $derived(context?.prompt_enhancer ?? null);
+  const showEnhance = $derived(enhancerContract !== null && visibleControls.has('prompt_enhance'));
+  const showEnhanceAuto = $derived(enhancerContract !== null && visibleControls.has('prompt_enhance_auto'));
+  const enhanceMaxWords = $derived(
+    (isImageMode
+      ? currentImageDefaults?.enhance_max_words
+      : (context?.video_model_defaults?.[draft.state.model] as VideoModelDefaults | undefined)?.enhance_max_words)
+      ?? enhancerContract?.default_max_words
+      ?? 300
+  );
   const promptFileMode = $derived(draft.state.promptSource === 'file');
   const submitDisabled = $derived(
     busy || (promptFileMode && (!draft.state.promptFilePath || draft.state.promptFileOptionIds.length === 0))
@@ -277,6 +288,9 @@
             value={draft.state.prompt}
             oninput={(e) => draft.update('prompt', (e.currentTarget as HTMLTextAreaElement).value)}
           ></textarea>
+          {#if showEnhance && enhancerContract}
+            <PromptEnhancer contract={enhancerContract} variant="inline" {busy} maxWords={enhanceMaxWords} />
+          {/if}
         {/if}
       {/if}
 
@@ -312,6 +326,9 @@
         onPathChange={(path) => draft.update('promptFilePath', path)}
         onOptionChange={(optionIds) => draft.update('promptFileOptionIds', optionIds)}
       />
+      {#if showEnhanceAuto && enhancerContract}
+        <PromptEnhancer contract={enhancerContract} variant="file" {busy} maxWords={enhanceMaxWords} />
+      {/if}
     {/if}
 
     <!-- Reference Image (i2i, i2v only) -->

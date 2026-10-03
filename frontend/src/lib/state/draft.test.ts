@@ -486,3 +486,51 @@ describe('draft store', () => {
     });
   });
 });
+
+describe('draft store – prompt enhancer fields', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  it('persists enhancer fields', () => {
+    draft.update('enhancedPrompt', 'A fox in snow.');
+    draft.update('enhancedFrom', { prompt: 'a fox', mode: 'image' });
+    draft.update('enhanceAuto', true);
+    draft.update('enhanceSettings', { style: 'photo', details: [], length: 'longer', motion: [] });
+    draft.loadDraft();
+    expect(draft.state.enhancedPrompt).toBe('A fox in snow.');
+    expect(draft.state.enhancedFrom).toEqual({ prompt: 'a fox', mode: 'image' });
+    expect(draft.state.enhanceAuto).toBe(true);
+    expect(draft.state.enhanceSettings?.style).toBe('photo');
+  });
+
+  it('clears the Enhanced box when a prompt is reused from the URL', () => {
+    draft.update('enhancedPrompt', 'Old enhanced text');
+    draft.update('enhancedFrom', { prompt: 'old', mode: 'image' });
+    draft.loadFromUrl({ prompt: 'reused prompt' }, makeContext());
+    expect(draft.state.prompt).toBe('reused prompt');
+    expect(draft.state.enhancedPrompt).toBe('');
+    expect(draft.state.enhancedFrom).toBeNull();
+  });
+
+  it('keeps the Enhanced box when the URL has no prompt', () => {
+    draft.update('enhancedPrompt', 'Kept');
+    draft.loadFromUrl({ steps: '12' }, makeContext());
+    expect(draft.state.enhancedPrompt).toBe('Kept');
+  });
+
+  it('resetSelections keeps the Enhanced prompt but resets enhancement options', () => {
+    const ctx = makeContext();
+    draft.hydrateFromContext(ctx, null);
+    draft.update('enhancedPrompt', 'A fox in snow.');
+    draft.update('enhancedFrom', { prompt: 'a fox', mode: 'image' });
+    draft.update('enhanceAuto', true);
+    draft.update('enhanceSettings', { style: 'photo', details: [], length: 'longer', motion: [] });
+    draft.resetSelections(ctx);
+    expect(draft.state.enhancedPrompt).toBe('A fox in snow.');
+    expect(draft.state.enhancedFrom).toEqual({ prompt: 'a fox', mode: 'image' });
+    expect(draft.state.enhanceAuto).toBe(false);
+    expect(draft.state.enhanceSettings).toBeNull();
+  });
+});

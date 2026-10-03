@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from typing import Any
 
 from zvisiongenerator.converters.list_assets import list_loras, list_models, list_video_models
-from zvisiongenerator.utils.config import load_config
+from zvisiongenerator.utils.config import load_config, resolve_enhancer_model
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.video_model_detect import detect_video_model
@@ -57,6 +58,8 @@ class WebUiConfig:
     quantize_options: tuple[int, ...] = _DEFAULT_QUANTIZE_OPTIONS
     image_inventory: tuple[ImageInventoryEntry, ...] = ()
     video_inventory: tuple[VideoInventoryEntry, ...] = ()
+    enhancer_model: str | None = None
+    enhancer_revision: str | None = None
 
 
 def load_web_config() -> WebUiConfig:
@@ -112,7 +115,17 @@ def load_web_config() -> WebUiConfig:
         quantize_options=_resolve_quantize_options(ui_config),
         image_inventory=image_inventory,
         video_inventory=video_inventory,
+        **_resolve_enhancer(app_config),
     )
+
+
+def _resolve_enhancer(app_config: dict[str, Any]) -> dict[str, str | None]:
+    """Return the effective prompt-enhancer model and revision (``None`` when none is configured)."""
+    try:
+        repo, revision = resolve_enhancer_model(app_config, platform_key=sys.platform)
+    except ValueError:
+        return {"enhancer_model": None, "enhancer_revision": None}
+    return {"enhancer_model": repo, "enhancer_revision": revision}
 
 
 def _resolve_quantize_options(ui_config: dict[str, Any]) -> tuple[int, ...]:

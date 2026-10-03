@@ -48,6 +48,24 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current).toMatchObject({ prompt: 'First again', promptNumber: 1, promptCount: 3, batchIndex: 1, currentStep: 0, totalSteps: 0 });
   });
 
+  it('shows enhancer phases and the per-image enhanced prompt, resetting it for the next prompt', () => {
+    jobStore.startJob({ job_id: 'enh', workflow: 'txt2img', prompt: 'a fox', model: 'zit', runs: 1, created_at: '' });
+    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    source.emit('enhancer_loading', { type: 'enhancer_loading', phase: 'downloading' });
+    expect(jobStore.current?.message).toBe('Downloading prompt enhancer (first use only)...');
+    source.emit('enhancer_loading', { type: 'enhancer_loading', phase: 'loading' });
+    expect(jobStore.current?.message).toBe('Loading prompt enhancer...');
+    source.emit('enhancer_loading', { type: 'enhancer_loading', phase: 'cpu' });
+    expect(jobStore.current?.message).toContain('runs on the CPU');
+    source.emit('prompt_started', { type: 'prompt_started', prompt: 'a fox' });
+    source.emit('prompt_enhanced', { type: 'prompt_enhanced', enhanced_prompt: 'A red fox in snow.' });
+    expect(jobStore.current).toMatchObject({ enhancedPrompt: 'A red fox in snow.', message: 'Prompt enhanced.' });
+    source.emit('step_progress', { type: 'step_progress', current_step: 1, total_steps: 4, elapsed_secs: 1, enhanced_prompt: 'A red fox in snow.' });
+    expect(jobStore.current?.enhancedPrompt).toBe('A red fox in snow.');
+    source.emit('prompt_started', { type: 'prompt_started', prompt: 'a cat' });
+    expect(jobStore.current?.enhancedPrompt).toBeUndefined();
+  });
+
   it('tracks the live preview URL from step versions and clears it when the generation ends', () => {
     jobStore.startJob({ job_id: 'job-preview', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
     const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;

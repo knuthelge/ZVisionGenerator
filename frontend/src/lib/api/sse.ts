@@ -43,6 +43,8 @@ export function connectJobSSE(
       case 'batch_started':
       case 'workflow_stage_started':
       case 'workflow_stage_completed':
+      case 'enhancer_loading':
+      case 'prompt_enhanced':
         handlers.onStatus?.(type, data);
         break;
       case 'generation_finished': {
@@ -68,7 +70,7 @@ export function connectJobSSE(
 
   }
 
-  const eventTypes = ['prompt_started', 'step_progress', 'batch_completed', 'job_completed', 'job_failed', 'job_cancelled', 'progress_text', 'job_paused', 'job_resumed', 'model_loading', 'batch_started', 'workflow_stage_started', 'workflow_stage_completed', 'generation_finished'];
+  const eventTypes = ['prompt_started', 'step_progress', 'batch_completed', 'job_completed', 'job_failed', 'job_cancelled', 'progress_text', 'job_paused', 'job_resumed', 'model_loading', 'batch_started', 'workflow_stage_started', 'workflow_stage_completed', 'generation_finished', 'enhancer_loading', 'prompt_enhanced'];
   eventTypes.forEach(type => {
     es.addEventListener(type, (event: Event) => {
       try {

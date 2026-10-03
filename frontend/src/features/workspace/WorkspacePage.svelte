@@ -2,6 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import { api } from '$lib/api/client';
   import { draft } from '$lib/state/draft.svelte';
+  import { enhancedOverrideActive, submittedPrompt } from '$lib/state/promptEnhance';
   import { jobStore } from '$lib/state/job.svelte';
   import { historyStore } from '$lib/state/history.svelte';
   import { router } from '$lib/state/router.svelte';
@@ -392,6 +393,10 @@
       }
       // Sync lora string
       formData.set('lora', draft.state.loraString);
+      // A non-blank Enhanced prompt replaces the inline prompt (never in JSON-caption, file, or auto-enhance mode).
+      if (enhancedOverrideActive(draft.state) && formData.has('prompt')) {
+        formData.set('prompt', submittedPrompt(draft.state));
+      }
 
       const jobCtx = await submitGenerate(formData);
       jobStore.startJob(jobCtx);

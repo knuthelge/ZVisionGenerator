@@ -8,9 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 - The Web UI Models page can delete models and LoRAs. Deleting a converted model removes its folder in `~/.ziv/models/` and keeps the HuggingFace base-model files it links to. Deleting a HuggingFace model removes its download from the HuggingFace cache; the alias stays and downloads again on next use, and the confirmation lists converted models that rely on that download. Deletes are refused while a generation is running
+- Prompt enhancement with a small local LLM (decensored Qwen3.5-4B by default; ≈2.4 GB download on macOS, ≈9 GB on Windows/Linux). Choose a style, details, a length (Shorter, Same, Longer ≈200 %, Extra long ≈300 %) and, for video, motion
+- Web UI: ✨ Enhance writes a rewrite to a new **Enhanced prompt** box, which is generated instead of the prompt while it has text; it is marked out of date when the prompt changes. **Enhance each image when generating** rewrites every image's prompt at generation time, for inline prompts and prompt files
+- `--enhance [SPEC]`, `--no-enhance` and `--enhance-model` for `ziv-image` and `ziv-video`, and a per-entry `enhance:` key in prompt files
+- Config page: **Prompt Enhancer Model** to use a different Hugging Face model (`owner/name[@revision]`) or a local folder
 
 ### Changed
 - The macOS memory badge uses wider limits: **Fits** up to 1.1 times Apple's recommended GPU memory and **Tight** up to 1.5 times, MLX's default memory limit. Models that run with some swapping, such as FLUX.2 Klein 9B unquantized on a 32 GB Mac, now show **Tight** instead of **Too large**. FLUX.2 Klein estimates no longer count the text encoder's LM head, which is never loaded
+- Auto-enhanced images and videos store the enhanced prompt in their metadata, so Gallery shows and reuses the prompt that rendered
+- `ziv-video` reads the prompt file before loading the model, so prompt-file errors are reported immediately
+- Minimum versions raised to `mlx-lm>=0.31.2` and `transformers>=5.8.0` (first versions with Qwen3.5 support)
 
 ### Fixed
 - Converted models showed as not downloaded and had no memory badge in the Web UI, because the base-model folders they link to were not followed when looking for weight files

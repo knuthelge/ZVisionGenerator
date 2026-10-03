@@ -97,7 +97,52 @@ export interface WorkspaceContext {
   default_prompt_source: PromptSource;
   prompt_file: PromptFileContract;
   workflow_contract: WorkflowContract;
+  prompt_enhancer?: PromptEnhancerContract;
 }
+
+// ── Prompt enhancer ────────────────────────────────────────────────────────────
+
+export type EnhanceAxisKey = 'style' | 'details' | 'length' | 'motion';
+
+export interface EnhanceSettings {
+  style: string;
+  details: string[];
+  length: string;
+  motion: string[];
+}
+
+export interface EnhanceAxis {
+  key: EnhanceAxisKey;
+  label: string;
+  multi: boolean;
+  video_only: boolean;
+  options: { slug: string; label: string }[];
+  default: string[];
+}
+
+export interface PromptEnhancerContract {
+  matrix: { axes: EnhanceAxis[]; defaults: EnhanceSettings };
+  /** Effective model repo/path; null when none is configured (see `error`). */
+  model: string | null;
+  revision: string | null;
+  downloaded: boolean;
+  /** Approximate first-use download size, null once downloaded. */
+  download_size_label: string | null;
+  default_max_words: number;
+  error: string | null;
+}
+
+/** What an Enhanced prompt was produced from; null for hand-typed text (never out of date). */
+export interface EnhancedSource {
+  prompt: string;
+  mode: WorkflowMode;
+}
+
+export type EnhanceFrame =
+  | { type: 'status'; phase: 'downloading' | 'loading' | 'generating' | 'generating_cpu' }
+  | { type: 'text'; text: string }
+  | { type: 'done'; prompt: string; clamped: boolean }
+  | { type: 'error'; detail: string };
 
 export interface PromptFileContract {
   accepted_extensions: string[];
@@ -130,6 +175,8 @@ export interface PromptFileOption {
   label: string;
   prompt_preview: string;
   negative_preview: string | null;
+  /** Prompt-file `enhance:` settings as an `--enhance` spec, or null. */
+  enhance?: string | null;
 }
 
 export interface PromptFileInspection {
@@ -189,6 +236,7 @@ export interface ImageModelDefaults {
   dimension_min: number;
   dimension_max: number | null;
   dimension_step: number;
+  enhance_max_words?: number;
 }
 
 export interface VideoModelDefaults {
@@ -206,6 +254,7 @@ export interface VideoModelDefaults {
   max_steps: number | null;
   fps: number;
   upscale: UpscaleDefaults;
+  enhance_max_words?: number;
 }
 
 export interface WorkflowContractEntry {
@@ -319,6 +368,13 @@ export interface DraftState {
   upscaleSharpen: boolean;
   videoUpscaleEnabled: boolean;
   videoUpscaleFactor: number;
+  /** Text from the Enhance button (or typed); when non-blank it is the inline prompt that gets generated. */
+  enhancedPrompt: string;
+  enhancedFrom: EnhancedSource | null;
+  /** Last-used enhancement options; null until the user picks any (backend defaults apply). */
+  enhanceSettings: EnhanceSettings | null;
+  /** Enhance each image's prompt on the server at generation time. */
+  enhanceAuto: boolean;
 }
 
 export type WorkspacePrefill = Partial<Omit<DraftState, 'historyCollapsed' | 'lastGeneratedAt' | 'version'>>;
@@ -371,6 +427,8 @@ export interface ActiveJobState extends JobContext {
   outputs: GalleryAsset[];
   /** URL of the latest live preview of the current generation; null when none is available. */
   previewUrl: string | null;
+  /** Auto-enhanced prompt of the current generation, when the job enhances prompts. */
+  enhancedPrompt?: string;
 }
 
 // ── SSE event types ────────────────────────────────────────────────────────────
