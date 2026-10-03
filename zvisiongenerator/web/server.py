@@ -45,6 +45,7 @@ from zvisiongenerator.web.gallery import (
 from zvisiongenerator.web.path_picker import pick_path
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, read_prompt_file, resolve_prompt_file_options, write_prompt_file
+from zvisiongenerator.web.model_delete import delete_lora, delete_model, model_delete_target
 from zvisiongenerator.web.job_contract import IMAGE_SUPPORTED_CONTROLS, VIDEO_SUPPORTED_CONTROLS
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner
 from zvisiongenerator.web.workspace_api import build_models_response, build_workspace_bootstrap_view, build_workspace_response
@@ -1139,6 +1140,44 @@ async def api_models_import_lora_hf(request: Request) -> dict[str, Any]:
     except (ValueError, FileNotFoundError, FileExistsError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": "ok", "tone": notice["tone"], "message": notice["message"]}
+
+
+@app.delete("/api/models/{name}")
+def api_delete_model(name: str) -> dict[str, Any]:
+    """Delete an installed model folder, or an alias model's HuggingFace download (the alias itself stays)."""
+    _ensure_no_active_job()
+    web_config = load_web_config()
+    entry = next((entry for entry in (*web_config.image_inventory, *web_config.video_inventory) if entry.name == name), None)
+    target = model_delete_target(entry, Path(web_config.data_dir) / "models") if entry is not None else None
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"No deletable model named '{name}'.")
+    try:
+        delete_model(target)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"Model '{name}' has nothing on disk to delete.") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not delete model '{name}': {exc}") from exc
+    message = f"Deleted model '{name}'." if target.kind == "installed" else f"Deleted the HuggingFace download of '{target.repo_id}'."
+    return {"status": "ok", "tone": "success", "message": message}
+
+
+@app.delete("/api/loras/{name}")
+def api_delete_lora(name: str) -> dict[str, Any]:
+    """Delete a LoRA file from the data directory."""
+    _ensure_no_active_job()
+    try:
+        delete_lora(Path(load_web_config().data_dir) / "loras", name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not delete LoRA '{name}': {exc}") from exc
+    return {"status": "ok", "tone": "success", "message": f"Deleted LoRA '{name}'."}
+
+
+def _ensure_no_active_job() -> None:
+    """Refuse model and LoRA deletes while a generation job may be reading their files."""
+    if web_runner.get_active_exclusive_job_snapshot() is not None:
+        raise HTTPException(status_code=409, detail="Wait for the running job to finish before deleting models or LoRAs.")
 
 
 @app.post("/api/jobs/{job_id}/cancel")

@@ -509,10 +509,19 @@ export interface RouterState {
 
 // ── Model inventory types ──────────────────────────────────────────────────────
 
+/** What deleting a model removes: its installed folder, or its HuggingFace download (the alias stays). */
+export interface ModelDeleteInfo {
+  kind: 'installed' | 'huggingface';
+  repo_id: string | null;
+  /** Installed models linking into this HuggingFace download, which deleting it would break. */
+  linked_by: string[];
+}
+
 export interface ModelEntry extends ModelStatusFields {
   name: string;
   family: string;
   size_label?: string;
+  delete?: ModelDeleteInfo | null;
 }
 
 export interface VideoModelEntry extends ModelStatusFields {
@@ -520,6 +529,7 @@ export interface VideoModelEntry extends ModelStatusFields {
   family: string;
   supports_i2v: boolean;
   size_label?: string;
+  delete?: ModelDeleteInfo | null;
 }
 
 export interface LoraEntry {

@@ -1,10 +1,10 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getModelInventory, convertCheckpoint, importLoraLocal, importLoraHF } from '$lib/api/models';
+  import { getModelInventory, convertCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteLora } from '$lib/api/models';
   import { addToast } from '$lib/state/toasts.svelte';
-  import type { ModelInventory, ModelStatusFields } from '$lib/types';
+  import type { ModelDeleteInfo, ModelInventory, ModelStatusFields } from '$lib/types';
   import { Button, Input, Select, Tooltip } from '$lib/components/atoms';
-  import { FormField, ModelStatusBadges, PathField } from '$lib/components/molecules';
+  import { FormField, Modal, ModelStatusBadges, PathField } from '$lib/components/molecules';
   import { DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
 
@@ -17,6 +17,9 @@
   let localLoraPath = $state('');
   let checkpointPathReset = $state(0);
   let localLoraPathReset = $state(0);
+  let pendingDelete = $state<{ type: 'model'; name: string; info: ModelDeleteInfo } | { type: 'lora'; name: string } | null>(null);
+  let deleteOpen = $state(false);
+  let deleting = $state(false);
 
   onMount(async () => {
     await loadInventory();
@@ -103,6 +106,31 @@
     }
   }
 
+  function requestDelete(target: NonNullable<typeof pendingDelete>): void {
+    pendingDelete = target;
+    deleteOpen = true;
+  }
+
+  async function confirmDelete(): Promise<void> {
+    if (!pendingDelete) return;
+    const target = pendingDelete;
+    deleting = true;
+    notice = null;
+    try {
+      const result = target.type === 'model' ? await deleteModel(target.name) : await deleteLora(target.name);
+      notice = { tone: 'success', message: result.message };
+      addToast(result.message, 'success');
+      await loadInventory();
+    } catch (err) {
+      notice = { tone: 'error', message: err instanceof Error ? err.message : 'Delete failed.' };
+      addToast('Delete failed', 'error');
+    } finally {
+      deleting = false;
+      deleteOpen = false;
+      pendingDelete = null;
+    }
+  }
+
   async function handleImportLoraHF(e: Event): Promise<void> {
     e.preventDefault();
     const form = e.currentTarget as HTMLFormElement;
@@ -150,6 +178,28 @@
     </Tooltip>
   {:else}
     <span class="block truncate text-zinc-200" title={m.name} data-testid="model-name" data-downloaded="unknown">{m.name}</span>
+  {/if}
+{/snippet}
+
+{#snippet deleteButton(label: string, onclick: () => void)}
+  <button
+    type="button"
+    class="rounded p-1 text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-400 focus-visible:focus-ring"
+    aria-label={label}
+    title={label}
+    data-testid="delete-button"
+    {onclick}
+  >
+    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+    </svg>
+  </button>
+{/snippet}
+
+{#snippet modelDeleteCell(m: { name: string; delete?: ModelDeleteInfo | null })}
+  {#if m.delete}
+    {@const info = m.delete}
+    {@render deleteButton(info.kind === 'installed' ? `Delete ${m.name}` : `Delete the Hugging Face download of ${m.name}`, () => requestDelete({ type: 'model', name: m.name, info }))}
   {/if}
 {/snippet}
 
@@ -229,6 +279,7 @@
                 <th class="px-2 py-2 text-left">Family</th>
                 <th class="px-2 py-2 text-left">Size</th>
                 <th class="w-24 px-2 py-2 text-left">Memory</th>
+                <th class="w-8 px-1 py-2"><span class="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -238,6 +289,7 @@
                   <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.family}>{m.family}</td>
                   <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.size_label ?? '—'}>{m.size_label ?? '—'}</td>
                   <td class="px-2 py-2">{@render memoryFitCell(m)}</td>
+                  <td class="px-1 py-2 text-right">{@render modelDeleteCell(m)}</td>
                 </tr>
               {/each}
             </tbody>
@@ -261,6 +313,7 @@
                 <th class="px-2 py-2 text-left">Family</th>
                 <th class="px-2 py-2 text-left">I2V</th>
                 <th class="w-24 px-2 py-2 text-left">Memory</th>
+                <th class="w-8 px-1 py-2"><span class="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -270,6 +323,7 @@
                   <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.family}>{m.family}</td>
                   <td class="px-2 py-2 text-zinc-400">{m.supports_i2v ? '✓' : '—'}</td>
                   <td class="px-2 py-2">{@render memoryFitCell(m)}</td>
+                  <td class="px-1 py-2 text-right">{@render modelDeleteCell(m)}</td>
                 </tr>
               {/each}
             </tbody>
@@ -291,6 +345,7 @@
               <tr class="text-zinc-500 uppercase text-[10px] tracking-wider border-b border-zinc-900">
                 <th class="px-2 py-2 text-left">Name</th>
                 <th class="px-2 py-2 text-left">Size</th>
+                <th class="w-8 px-1 py-2"><span class="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
@@ -298,6 +353,7 @@
                 <tr class="border-b border-zinc-900 hover:bg-zinc-900/50 transition">
                   <td class="px-2 py-2 text-zinc-200 truncate max-w-25" title={l.name}>{l.name}</td>
                   <td class="truncate px-2 py-2 font-mono text-zinc-400" title={l.size_label ?? '—'}>{l.size_label ?? '—'}</td>
+                  <td class="px-1 py-2 text-right">{@render deleteButton(`Delete ${l.name}`, () => requestDelete({ type: 'lora', name: l.name }))}</td>
                 </tr>
               {/each}
             </tbody>
@@ -457,3 +513,30 @@
     </div>
   {/if}
 </AdminPageShell>
+
+<Modal bind:open={deleteOpen} title={pendingDelete?.type === 'lora' ? 'Delete LoRA' : 'Delete Model'} onclose={() => (pendingDelete = null)}>
+  {#if pendingDelete}
+    <div class="space-y-3 text-sm text-zinc-300" data-testid="delete-dialog">
+      {#if pendingDelete.type === 'lora'}
+        <p>Delete <span class="font-mono text-zinc-100">{pendingDelete.name}.safetensors</span> from the LoRAs folder?</p>
+      {:else if pendingDelete.info.kind === 'installed'}
+        <p>Delete the model folder <span class="font-mono text-zinc-100">{pendingDelete.name}</span> from the models folder?</p>
+        <p class="text-zinc-400">Hugging Face files it links to are kept.</p>
+      {:else}
+        <p>Delete the Hugging Face download of <span class="font-mono text-zinc-100">{pendingDelete.info.repo_id}</span>?</p>
+        <p class="text-zinc-400">The <span class="font-mono">{pendingDelete.name}</span> alias stays in your config and downloads the model again the next time you use it.</p>
+        {#if pendingDelete.info.linked_by.length > 0}
+          <div class="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300" data-testid="delete-linked-warning">
+            These converted models use files from this download and will stop working until it is downloaded again:
+            <span class="font-mono">{pendingDelete.info.linked_by.join(', ')}</span>
+          </div>
+        {/if}
+      {/if}
+      <p class="text-zinc-400">This cannot be undone.</p>
+    </div>
+  {/if}
+  {#snippet footer()}
+    <Button variant="ghost" onclick={() => (deleteOpen = false)} disabled={deleting}>Cancel</Button>
+    <Button variant="danger" onclick={confirmDelete} disabled={deleting} loading={deleting}>Delete</Button>
+  {/snippet}
+</Modal>

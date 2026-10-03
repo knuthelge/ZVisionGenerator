@@ -18,6 +18,7 @@ from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
+from zvisiongenerator.web.model_delete import installed_models_linking_to, model_delete_target
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family
 from zvisiongenerator.web.model_status import describe_model_status, memory_budget_bytes
 
@@ -139,27 +140,39 @@ def build_models_response(
     image_defaults_for = image_defaults_for or _build_image_bootstrap_defaults
     # Quantize levels only shape memory estimates, so skip resolving them where there is no budget (off macOS).
     image_defaults = {entry.name: image_defaults_for(entry.name, web_config) for entry in web_config.image_inventory} if memory_budget_bytes() else {}
-    status = _status_resolver(web_config, image_defaults)
+    find_local_dir = functools.cache(find_local_model_dir)
+    status = _status_resolver(web_config, image_defaults, find_local_dir)
+    delete_info = _delete_info_resolver(data_dir / "models", find_local_dir)
     loras = [{"name": lora.name, "file_size_mb": lora.file_size_mb, "size_label": f"{lora.file_size_mb} MB"} for lora in list_loras(data_dir)]
     return {
         "models_dir": web_config.models_dir,
         "loras_dir": web_config.loras_dir,
-        "image_models": [{"name": entry.name, "family": entry.family, "size_label": entry.size or "Unknown", "source": entry.source, **status(entry, "image")} for entry in web_config.image_inventory],
-        "video_models": [{"name": entry.name, "family": entry.family, "supports_i2v": entry.supports_i2v, "source": entry.source, **status(entry, "video")} for entry in web_config.video_inventory],
+        "image_models": [
+            {"name": entry.name, "family": entry.family, "size_label": entry.size or "Unknown", "source": entry.source, **status(entry, "image"), "delete": delete_info(entry)}
+            for entry in web_config.image_inventory
+        ],
+        "video_models": [
+            {"name": entry.name, "family": entry.family, "supports_i2v": entry.supports_i2v, "source": entry.source, **status(entry, "video"), "delete": delete_info(entry)}
+            for entry in web_config.video_inventory
+        ],
         "loras": loras,
         "huggingface_configured": token_var is not None,
         "huggingface_token_env_var": token_var,
     }
 
 
-def _status_resolver(web_config: WebUiConfig, image_model_defaults: dict[str, dict[str, Any]]) -> Callable[[ImageInventoryEntry | VideoInventoryEntry | None, str], dict[str, Any]]:
+def _status_resolver(
+    web_config: WebUiConfig,
+    image_model_defaults: dict[str, dict[str, Any]],
+    find_local_dir: Callable[[str], Path | None] | None = None,
+) -> Callable[[ImageInventoryEntry | VideoInventoryEntry | None, str], dict[str, Any]]:
     """Return a per-request resolver for each model's ``downloaded``/``memory_fit`` fields.
 
     Image quantize levels come from the same bootstrap defaults that drive the workspace quantize picker, and
     download lookups are memoised for the request (LTX MLX models share one Gemma text-encoder lookup).
     """
     budget = memory_budget_bytes()
-    find_local_dir = functools.cache(find_local_model_dir)
+    find_local_dir = find_local_dir or functools.cache(find_local_model_dir)
 
     def _status(entry: ImageInventoryEntry | VideoInventoryEntry | None, kind: str) -> dict[str, Any]:
         if entry is None:
@@ -172,6 +185,23 @@ def _status_resolver(web_config: WebUiConfig, image_model_defaults: dict[str, di
             return dict(_UNKNOWN_STATUS)
 
     return _status
+
+
+def _delete_info_resolver(models_dir: Path, find_local_dir: Callable[[str], Path | None] = find_local_model_dir) -> Callable[[ImageInventoryEntry | VideoInventoryEntry], dict[str, Any] | None]:
+    """Return a resolver for each model's ``delete`` field: what deleting it removes, or ``None`` when it cannot be deleted.
+
+    HuggingFace downloads list the installed models linking into them (``linked_by``), since deleting the download
+    breaks those models.
+    """
+
+    def _delete_info(entry: ImageInventoryEntry | VideoInventoryEntry) -> dict[str, Any] | None:
+        target = model_delete_target(entry, models_dir, find_local_dir=find_local_dir)
+        if target is None or not (target.path.exists() or target.path.is_symlink()):
+            return None
+        linked_by = list(installed_models_linking_to(target.path, models_dir)) if target.kind == "huggingface" else []
+        return {"kind": target.kind, "repo_id": target.repo_id, "linked_by": linked_by}
+
+    return _delete_info
 
 
 def _image_quantize_levels(web_config: WebUiConfig, capabilities: dict[str, Any]) -> tuple[int, ...]:
