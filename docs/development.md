@@ -180,6 +180,10 @@ Raise `ValueError`, `FileNotFoundError`, `RuntimeError` directly with descriptiv
 
 Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.
 
+## Proposals
+
+Planned and possible future work is written up in [`proposals/`](https://github.com/knuthelge/ZVisionGenerator/tree/main/proposals) at the repository root, one Markdown file per proposal with a status line, indexed in `proposals/README.md`. Check it before starting larger work, and update a proposal's status when it ships.
+
 ## Releasing
 
 Pushing a `v*` tag runs the Release workflow, which builds the package, publishes it to PyPI and creates a GitHub Release. The package version comes from the tag (`hatch-vcs`), so the tag must be a valid PEP 440 version:
