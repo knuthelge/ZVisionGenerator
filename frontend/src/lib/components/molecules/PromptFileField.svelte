@@ -1,10 +1,11 @@
 <script lang="ts">
   import { inspectPromptFile } from '$lib/api/promptFiles';
-  import { Button } from '$lib/components/atoms';
+  import type { Snippet } from 'svelte';
+  import { Icon } from '$lib/components/atoms';
   import PromptFileEditorDialog from '$lib/components/organisms/PromptFileEditorDialog.svelte';
   import type { PromptFileContract, PromptFileInspection, PromptFileOption, PromptSource, WorkflowMode } from '$lib/types';
-  import FormField from './FormField.svelte';
   import PathField from './PathField.svelte';
+  import PromptChooserDialog from './PromptChooserDialog.svelte';
 
   interface Props {
     contract: PromptFileContract;
@@ -16,6 +17,8 @@
     disabled?: boolean;
     onPathChange: (path: string | null) => void;
     onOptionChange: (optionIds: string[]) => void;
+    /** Extra tools rendered first in the box's tool row (e.g. the Enhance popover trigger). */
+    tools?: Snippet;
   }
 
   let {
@@ -28,6 +31,7 @@
     disabled = false,
     onPathChange,
     onOptionChange,
+    tools,
   }: Props = $props();
 
   let options = $state<PromptFileOption[]>([]);
@@ -39,11 +43,17 @@
   let manualPath = $state<string | null>(null);
   let editorOpen = $state(false);
   let editorRevision = $state(0);
-  let expandedOptionIds = $state<string[]>([]);
+  let chooserOpen = $state(false);
+  const SUMMARY_LIMIT = 3;
 
   const selectedOptions = $derived(
     options.filter((option) => selectedOptionIds.includes(option.id))
   );
+  const selfEnhancingCount = $derived(selectedOptions.filter((option) => option.enhance).length);
+  const summaryCount = $derived(
+    `${selectedOptions.length} of ${options.length} prompts${selfEnhancingCount > 0 ? ` · ✨ ${selfEnhancingCount} enhance themselves` : ''}`
+  );
+  const fileLabel = $derived(path ? (path.split('/').pop() ?? path) : '');
 
   $effect(() => {
     if (!path) {
@@ -63,7 +73,6 @@
     const activeSelection = previousSelection.filter((id) => inspection.options.some((option) => option.id === id));
 
     options = inspection.options;
-    expandedOptionIds = [];
     loadedPath = inspection.path;
     manualPath = null;
     optionsError = null;
@@ -133,103 +142,91 @@
     void applyInspection(inspection, contract.help.saved);
   }
 
-  function handleOptionChange(optionId: string, checked: boolean): void {
-    const selected = new Set(selectedOptionIds);
-    if (checked) selected.add(optionId);
-    else selected.delete(optionId);
-    onOptionChange(options.filter((option) => selected.has(option.id)).map((option) => option.id));
-  }
 </script>
 
-<div class="space-y-4 border-t border-border-subtle pt-4">
-  <div class="flex items-center justify-between gap-3">
-    <span class="field-label block">Prompt File</span>
-    <Button type="button" size="sm" variant="ghost" disabled={disabled || !path} onclick={() => (editorOpen = true)}>
-      Edit YAML
-    </Button>
+<div class="prompt-file">
+  <div class="prompt-box">
+    <div class="prompt-file-path">
+      <PathField
+        id="ws-prompts-file"
+        name="prompts_file"
+        label="Prompt file"
+        value={path}
+        placeholder="/absolute/path/to/prompts.yaml"
+        helper={path ? undefined : contract.help.path}
+        pickerKind={contract.browse_kind}
+        pickerPurpose="prompt_file"
+        {disabled}
+        onresolve={(candidate) => refreshPath(candidate, contract.help.loaded)}
+        onvaluechange={handleManualPathChange}
+        onclear={clear}
+      />
+    </div>
+
+    {#if loadingOptions}
+      <p class="prompt-file-note">Loading prompts…</p>
+    {:else if options.length > 0}
+      <button
+        type="button"
+        class="prompt-file-summary"
+        aria-label="Choose prompts, {selectedOptions.length} of {options.length} selected"
+        {disabled}
+        onclick={() => { chooserOpen = true; }}
+      >
+        <span class="prompt-file-count">{summaryCount}</span>
+        {#if selectedOptions.length === 0}
+          <span class="prompt-file-line text-amber-400">No prompts selected. Choose the prompts to run.</span>
+        {/if}
+        {#each selectedOptions.slice(0, SUMMARY_LIMIT) as option (option.id)}
+          <span class="prompt-file-line"><b>{option.set_name} #{option.source_index + 1}</b> {option.prompt_preview}</span>
+        {/each}
+        {#if selectedOptions.length > SUMMARY_LIMIT}
+          <span class="prompt-file-more">+{selectedOptions.length - SUMMARY_LIMIT} more</span>
+        {/if}
+      </button>
+    {/if}
+
+    <div class="prompt-tools">
+      {@render tools?.()}
+      <button
+        type="button"
+        class="prompt-tool"
+        data-action="choose-prompts"
+        title="Choose prompts"
+        aria-label="Choose prompts"
+        disabled={disabled || options.length === 0}
+        onclick={() => { chooserOpen = true; }}
+      ><Icon name="list" size={13} />Prompts…</button>
+      <button type="button" class="prompt-tool" data-action="edit-yaml" disabled={disabled || !path} onclick={() => (editorOpen = true)}>
+        Edit YAML
+      </button>
+    </div>
   </div>
 
-  <PathField
-    id="ws-prompts-file"
-    name="prompts_file"
-    label="Prompt File Path"
-    value={path}
-    placeholder="/absolute/path/to/prompts.yaml"
-    helper={contract.help.path}
-    pickerKind={contract.browse_kind}
-    pickerPurpose="prompt_file"
-    {disabled}
-    onresolve={(candidate) => refreshPath(candidate, contract.help.loaded)}
-    onvaluechange={handleManualPathChange}
-    onclear={clear}
-  />
+  {#each selectedOptions as option (option.id)}
+    <input type="hidden" name="prompt_option_id" value={option.id}>
+  {/each}
 
-  <FormField
-    helper={contract.selection_required ? contract.help.option_required : contract.help.option_optional}
-    error={optionsError}
-    status={optionsStatus}
-    statusTone={optionsStatusTone}
-  >
-    <fieldset disabled={disabled || loadingOptions || options.length === 0} class="space-y-2">
-      <legend class="field-label mb-2">Prompts to Run</legend>
-      {#if loadingOptions}
-        <p class="text-xs text-zinc-400">Loading prompts…</p>
-      {:else if options.length > 0}
-        <div class="flex items-center gap-3 text-xs">
-          <button type="button" class="surface-link-muted" onclick={() => onOptionChange(options.map((option) => option.id))}>Select all</button>
-          <button type="button" class="surface-link-muted" onclick={() => onOptionChange([])}>Clear selection</button>
-          <span class="text-zinc-400">{selectedOptions.length} of {options.length} selected</span>
-        </div>
-        <div class="max-h-[60vh] space-y-2 overflow-y-auto" aria-label="Prompt choices">
-          {#each options as option (option.id)}
-            {@const expanded = expandedOptionIds.includes(option.id)}
-            <div class="rounded-md border p-3 text-sm text-zinc-200 transition-colors {selectedOptionIds.includes(option.id) ? 'border-teal-500/30 bg-teal-500/5' : 'border-transparent hover:bg-zinc-800'}">
-              <label class="flex cursor-pointer items-start gap-2">
-                <input
-                  type="checkbox"
-                  name="prompt_option_id"
-                  value={option.id}
-                  checked={selectedOptionIds.includes(option.id)}
-                  class="surface-checkbox mt-0.5 shrink-0"
-                  onchange={(event) => handleOptionChange(option.id, event.currentTarget.checked)}
-                >
-                <span class="min-w-0 flex-1 space-y-1.5">
-                  <span class="block text-xs font-medium text-zinc-400">{option.set_name} · #{option.source_index + 1}{#if option.enhance}<span class="ml-1.5 text-teal-400" title={`Enhanced each image: ${workflowMode === 'image' ? option.enhance.replace(/,motion=[^,]*/, '') : option.enhance}`}>✨ enhanced</span>{/if}</span>
-                  <span id={`prompt-detail-${option.id}`} class="whitespace-pre-wrap break-words" class:block={expanded} class:line-clamp-2={!expanded}>{option.prompt_preview}</span>
-                  {#if expanded && option.negative_preview}
-                    <span class="block border-t border-zinc-700/50 pt-2 text-xs text-zinc-400">
-                      <span class="font-medium">Negative:</span> {option.negative_preview}
-                    </span>
-                  {/if}
-                </span>
-              </label>
-              <button
-                type="button"
-                class="surface-link-muted ml-5 mt-2 text-xs"
-                aria-expanded={expanded}
-                aria-controls={`prompt-detail-${option.id}`}
-                aria-label={`${expanded ? 'Show less' : 'Show more'} for ${option.set_name} #${option.source_index + 1}`}
-                onclick={() => {
-                  expandedOptionIds = expanded
-                    ? expandedOptionIds.filter((id) => id !== option.id)
-                    : [...expandedOptionIds, option.id];
-                }}
-              >{expanded ? 'Show less' : 'Show more'}</button>
-            </div>
-          {/each}
-        </div>
-      {/if}
-    </fieldset>
-  </FormField>
-
+  {#if optionsError}
+    <p class="prompt-file-status text-error" role="alert">{optionsError}</p>
+  {:else if optionsStatus}
+    <p class="prompt-file-status" data-tone={optionsStatusTone} role="status">{optionsStatus}</p>
+  {/if}
   {#if selectedOptions.some((option) => option.negative_preview) && (workflowMode === 'video' || !negativePromptSupported)}
-    <p class="text-xs text-amber-400">
-      {workflowMode === 'video'
-        ? contract.help.ignored_negative_video
-        : contract.help.ignored_negative_unsupported}
+    <p class="prompt-file-status text-amber-400">
+      {workflowMode === 'video' ? contract.help.ignored_negative_video : contract.help.ignored_negative_unsupported}
     </p>
   {/if}
 
+  <PromptChooserDialog
+    bind:open={chooserOpen}
+    {fileLabel}
+    {options}
+    {workflowMode}
+    {selectedOptionIds}
+    onconfirm={onOptionChange}
+    onedit={path && !disabled ? () => { editorOpen = true; } : undefined}
+  />
   <PromptFileEditorDialog
     bind:open={editorOpen}
     path={path}
@@ -239,3 +236,20 @@
     onsaved={handleSaved}
   />
 </div>
+
+<style>
+  .prompt-file { display: flex; flex-direction: column; gap: 6px; }
+  .prompt-file-path { padding: 8px 10px; }
+  .prompt-file-note { padding: 4px 10px 8px; font-size: 12px; color: var(--color-text-muted); }
+  .prompt-file-summary { display: flex; width: 100%; flex-direction: column; gap: 4px; padding: 8px 10px; border-top: 1px solid var(--color-border-subtle); text-align: left; }
+  .prompt-file-summary:hover:not(:disabled) { background: color-mix(in srgb, var(--color-bg-surface) 60%, transparent); }
+  .prompt-file-summary:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: -2px; }
+  .prompt-file-count { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); }
+  .prompt-file-line { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; font-size: 12px; line-height: 1.45; color: var(--color-zinc-300); }
+  .prompt-file-line b { margin-right: 4px; font-weight: 600; color: var(--color-text-muted); }
+  .prompt-file-more { font-size: 11px; color: var(--color-text-muted); }
+  .prompt-file-status { font-size: 12px; color: var(--color-text-muted); }
+  .prompt-file-status[data-tone='success'] { color: var(--color-success); }
+  .prompt-file-status[data-tone='warning'] { color: var(--color-warning); }
+  .prompt-file-status[data-tone='error'] { color: var(--color-error); }
+</style>

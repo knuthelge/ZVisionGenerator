@@ -53,6 +53,7 @@ def _make_web_config() -> SimpleNamespace:
         image_ratios=("2:3",),
         image_size_options={"2:3": ("m", "l")},
         image_size_dimensions={"2:3": {"m": (832, 1216), "l": (1152, 1728)}},
+        video_size_dimensions={"16:9": {"m": (704, 448)}},
         video_ratios=("16:9",),
         video_size_options={"16:9": ("m",)},
         scheduler_options=("beta",),
@@ -248,6 +249,7 @@ def test_phase_a_routes_share_config_and_path_authority(monkeypatch):
     assert models_payload["loras_dir"] == "/tmp/loras"
     assert workspace_payload["loras"][0]["path"] == "/tmp/loras/style.safetensors"
     assert workspace_payload["image_size_dimensions"]["2:3"]["m"] == [832, 1216]
+    assert workspace_payload["video_size_dimensions"]["16:9"]["m"] == [704, 448]
 
     assert sorted(schema_fields) == [
         "generation.default_size",
@@ -1324,6 +1326,11 @@ def test_gallery_reuse_reads_embedded_png_config(monkeypatch, tmp_path):
     assert asset["ratio"] == "4:3"
     assert asset["size"] == "custom"
     assert asset["image_path"] == "/input/reference.png"
+    assert asset["file_path"] == str(asset_path.resolve())
+    assert asset["seed"] == 1234
+    assert asset["steps"] == 9
+    assert asset["guidance"] == 2.5
+    assert asset["lora"] == "style.safetensors:0.8"
     assert asset["reuse_state"]["resolved_model"] == "zit"
     assert "workflow=img2img" in asset["reuse_workspace_url"]
     assert "prompt=original+prompt" in asset["reuse_workspace_url"]

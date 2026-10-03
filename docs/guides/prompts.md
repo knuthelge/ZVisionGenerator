@@ -42,7 +42,7 @@ woman:
 - Multiple prompts per set are supported.
 - The set name becomes the output filename prefix.
 
-In the Web UI, choose **Prompt file** as the prompt source, type or browse to a YAML file on the machine running the server, then select one of the active prompt options loaded from that file. The YAML editor reloads the file from disk each time you open it, so reopening the same path reflects changes made outside the browser. If you edit the path manually, the visible value is the value submitted; use Enter or Browse when you want the UI to inspect the file and refresh the option list before generating.
+In the Web UI, choose **Prompt file** as the prompt source and type or browse to a YAML file on the machine running the server. Compose then summarizes the selected prompts; click **Prompts…** (or the summary) to open the chooser, where you can filter prompts, select whole sets with **All**/**None**, expand a prompt to see its negative prompt, and confirm with **Use N prompts**. **✨ Enhance** sets the options for **Enhance each image when generating**, and **Edit YAML** opens the file editor. The YAML editor reloads the file from disk each time you open it, so reopening the same path reflects changes made outside the browser. If you edit the path manually, the visible value is the value submitted; use Enter or Browse when you want the UI to inspect the file and refresh the option list before generating.
 
 ## Prompt Variables
 
@@ -168,7 +168,7 @@ The enhancer keeps your subject and every detail you describe. It adds only thin
 
 ### In the Web UI
 
-- **Enhance**: click ✨ **Enhance** under the prompt, pick options, and click **Enhance prompt**. The rewrite appears in **Enhanced prompt**. When that box has text, it is what gets generated. Edit it, enhance again, or **Clear** it to go back to your prompt.
+- **Enhance**: click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. When that tab has text, it is what gets generated; the **used** badge shows which tab that is. Edit it, enhance again, or **Clear** it to go back to your prompt.
 - If you change the prompt or switch between image and video afterwards, the Enhanced prompt is marked **Out of date**. It is still used until you **Re-enhance** or **Clear** it.
 - `{a|b}` choices are picked before the rewrite, so the enhancer sees one plain prompt and the Enhanced prompt has no choices left. Enhance again for a different pick, or use **Enhance each image when generating** to keep a fresh pick per image.
 - **Enhance each image when generating** rewrites every image's prompt on the server, after its `{a|b}` choices are picked, using that image's seed. It works with inline prompts and prompt files.

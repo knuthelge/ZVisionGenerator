@@ -19,6 +19,12 @@ export const historyStore = {
     _history = [...newestFirst, ..._history.filter((asset) => !incomingIds.has(asset.id))];
   },
 
+  removeAssets(ids: Iterable<string>): void {
+    const removed = new Set(ids);
+    if (removed.size === 0) return;
+    _history = _history.filter((asset) => !removed.has(asset.id));
+  },
+
   async refreshHistory(): Promise<void> {
     _loading = true;
     try {

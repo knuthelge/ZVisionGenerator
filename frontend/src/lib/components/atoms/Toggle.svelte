@@ -7,6 +7,8 @@
     checked?: boolean;
     disabled?: boolean;
     label?: string;
+    /** Accessible name when there is no visible label. */
+    ariaLabel?: string;
     labelSnippet?: Snippet;
     class?: string;
     onchange?: (event: Event) => void;
@@ -18,6 +20,7 @@
     checked = $bindable(false),
     disabled = false,
     label,
+    ariaLabel,
     labelSnippet,
     class: extraClass = '',
     onchange
@@ -32,6 +35,7 @@
       type="checkbox"
       bind:checked
       {disabled}
+      aria-label={ariaLabel}
       class="sr-only peer"
       {onchange}
     />

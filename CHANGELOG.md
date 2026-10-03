@@ -6,7 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Web UI: one asset tile and viewer everywhere (History, preview, run results, Gallery) with **Preview**, **Reuse settings**, **Use as reference**, **Download** and **Delete**
+- Web UI: **Use as reference** sends an image to Image to Image or Image to Video
+- Web UI: the viewer's **Details** panel (`I`) shows prompt, model, size, seed, steps, guidance and LoRAs
+- Web UI: settings changed from the model default are marked and can be reset one by one
+- Web UI: drag a setting's label to change its value; ↑/↓ nudge it, Shift ×10
+- Web UI: seed lock
+- Web UI: prompt-file chooser with filter and per-set All/None
+- Web UI: All/None toggle for the enhancer's Details and Motion options
+- Gallery API: assets include `file_path`, `seed`, `steps`, `guidance` and `lora`; the workspace context includes `video_size_dimensions`
+
 ### Changed
+- Web UI: redesigned workspace with Compose and Settings on the left and History as a filmstrip under the preview
+- Web UI: the prompt box has **Prompt** and **Enhanced** tabs; Enhance options open in a popover
+- Web UI: Gallery uses a full-width grid; asset details moved into the viewer
+- Web UI: settings are kept between visits and restarts
+- Web UI: batch size up to 100
+- Web UI: small images are no longer enlarged in the preview
 - Web UI ✨ Enhance picks the prompt's `{a|b}` choices before rewriting, so the enhancer works on one plain prompt instead of placeholders. The Enhanced prompt no longer contains choices; use **Enhance each image when generating** for a fresh pick per image
 
 ### Fixed

@@ -1,3 +1,4 @@
+import { workflowMode } from './promptEnhance';
 import type { DraftState, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
@@ -20,6 +21,7 @@ const DEFAULT_DRAFT: DraftState = {
   promptFileOptionIds: [],
   model: '',
   ratio: '',
+  dimensionMode: 'ratio',
   size: '',
   steps: 0,
   guidance: 0,
@@ -103,6 +105,7 @@ function _applyImageDefaults(state: DraftState, defaults: ImageModelDefaults): D
   return {
     ...state,
     ratio: defaults.ratio,
+    dimensionMode: 'ratio',
     size: defaults.size,
     steps: defaults.steps,
     guidance: defaults.guidance,
@@ -129,6 +132,7 @@ function _applyVideoDefaults(state: DraftState, defaults: VideoModelDefaults): D
   return {
     ...state,
     ratio: defaults.ratio,
+    dimensionMode: 'ratio',
     size: defaults.size,
     steps: defaults.steps,
     width: defaults.width,
@@ -154,6 +158,73 @@ function _applyClearFields(state: DraftState, clearFields: string[]): DraftState
     }
   }
   return nextState;
+}
+
+/** Draft keys the Settings pane edits; each can be compared with and reset to its model default. */
+export const SETTING_KEYS = [
+  'ratio', 'dimensionMode', 'size', 'width', 'height', 'runs', 'frameCount', 'steps', 'guidance', 'referenceImageStrength',
+  'seed', 'scheduler', 'firstSigma',
+  'postprocessSharpenEnabled', 'postprocessSharpenAmount', 'postprocessContrastEnabled', 'postprocessContrastAmount',
+  'postprocessSaturationEnabled', 'postprocessSaturationAmount',
+  'upscaleEnabled', 'upscaleFactor', 'upscaleDenoise', 'upscaleSteps', 'upscaleGuidance', 'upscaleSharpen',
+  'audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleFactor',
+] as const satisfies readonly (keyof DraftState)[];
+
+export type SettingKey = (typeof SETTING_KEYS)[number];
+export type SettingDefaults = Pick<DraftState, SettingKey>;
+
+function _pickSettings(state: DraftState): SettingDefaults {
+  return Object.fromEntries(SETTING_KEYS.map((key) => [key, state[key]])) as SettingDefaults;
+}
+
+function _isVideoWorkflow(workflow: Workflow): boolean {
+  return workflowMode(workflow) === 'video';
+}
+
+/** Return the backend defaults for a model in a workflow's mode, or null when none are known. */
+function _modelDefaultsFor(ctx: WorkspaceContext, workflow: Workflow, model: string): ImageModelDefaults | VideoModelDefaults | null {
+  const isVideoMode = _isVideoWorkflow(workflow);
+  const defaultsMap = isVideoMode ? ctx.video_model_defaults : ctx.image_model_defaults;
+  const fallback = isVideoMode ? ctx.video_defaults : ctx.defaults;
+  const currentModel = isVideoMode ? ctx.current_video_model : ctx.current_image_model;
+  return (defaultsMap?.[model] ?? (model === currentModel ? fallback : null)) as ImageModelDefaults | VideoModelDefaults | null;
+}
+
+/** Apply a workflow's cleared fields and then the model's defaults to a state. */
+function _withModelDefaults(ctx: WorkspaceContext, state: DraftState): DraftState {
+  const clearFields = ctx.workflow_contract.definitions[state.workflow]?.clear_fields ?? [];
+  const cleared = _applyClearFields(state, clearFields);
+  const modelDefaults = _modelDefaultsFor(ctx, state.workflow, state.model);
+  if (!modelDefaults) return cleared;
+  return _isVideoWorkflow(state.workflow)
+    ? _applyVideoDefaults(cleared, modelDefaults as VideoModelDefaults)
+    : _applyImageDefaults(cleared, modelDefaults as ImageModelDefaults);
+}
+
+/**
+ * Return the default value of every setting for the state's workflow and model.
+ *
+ * Uses the same resolution as `resetSelections`, without touching the draft.
+ */
+export function settingDefaultsFor(ctx: WorkspaceContext, state: Pick<DraftState, 'workflow' | 'model'>): SettingDefaults {
+  return _pickSettings(_withModelDefaults(ctx, { ...DEFAULT_DRAFT, workflow: state.workflow, model: state.model }));
+}
+
+/** Return the size presets offered for a ratio; image presets beyond the model's dimension limit are left out. */
+export function offeredSizes(ctx: WorkspaceContext, workflow: Workflow, model: string, ratio: string): string[] {
+  if (_isVideoWorkflow(workflow)) return ctx.video_size_options[ratio] ?? [];
+  const options = ctx.image_size_options[ratio] ?? [];
+  const max = (_modelDefaultsFor(ctx, workflow, model) as ImageModelDefaults | null)?.dimension_max ?? null;
+  if (max === null) return options;
+  const dims = ctx.image_size_dimensions[ratio] ?? {};
+  return options.filter((size) => !dims[size] || (dims[size][0] <= max && dims[size][1] <= max));
+}
+
+/** Whether a stored size can still be submitted: a custom size, or a preset the model offers. */
+function _presetIsValid(ctx: WorkspaceContext, state: DraftState): boolean {
+  // A custom size stands on its own width and height; its ratio/size labels are not submitted.
+  if (state.dimensionMode === 'custom') return state.width > 0 && state.height > 0;
+  return offeredSizes(ctx, state.workflow, state.model, state.ratio).includes(state.size);
 }
 
 function loadFromStorage(): DraftState {
@@ -218,6 +289,15 @@ export const draft = {
     if (params.frames && canApply('frames')) prefill.frameCount = Number(params.frames);
     if (params.lora && canApply('lora')) prefill.loraString = params.lora;
     if (params.image_path && canApply('image_path')) prefill.referenceImagePath = params.image_path;
+    // A reused preset the current model does not offer keeps the current preset size instead.
+    if (ctx && prefill.size !== undefined && prefill.size !== 'custom'
+      && !offeredSizes(ctx, workflow, prefill.model ?? _draft.model, prefill.ratio ?? _draft.ratio).includes(prefill.size)) {
+      delete prefill.size;
+      delete prefill.ratio;
+    }
+    // Reused assets carry both their preset and their pixel size; a "custom" size means width/height rule.
+    if (prefill.ratio !== undefined || prefill.size !== undefined) prefill.dimensionMode = prefill.size === 'custom' ? 'custom' : 'ratio';
+    else if (prefill.width !== undefined || prefill.height !== undefined) prefill.dimensionMode = 'custom';
     // A reused prompt replaces whatever was enhanced before; a stale Enhanced box would silently win.
     if (prefill.prompt !== undefined) {
       prefill.enhancedPrompt = '';
@@ -234,10 +314,12 @@ export const draft = {
    *
    * If preferredModel is provided, it is used when it exists in the valid model
    * list for the current workflow; otherwise the context default is used.
+   * With `keepSettings`, the settings and prompt source chosen for the same model are kept;
+   * otherwise the model's defaults apply.
    */
-  hydrateFromContext(ctx: WorkspaceContext, preferredModel: string | null = null): void {
+  hydrateFromContext(ctx: WorkspaceContext, preferredModel: string | null = null, options: { keepSettings?: boolean } = {}): void {
     const workflow = _draft.workflow;
-    const isVideoMode = workflow === 'txt2vid' || workflow === 'img2vid';
+    const isVideoMode = _isVideoWorkflow(workflow);
     const validModels = isVideoMode ? ctx.video_models : ctx.image_models;
 
     // Determine model: preferredModel > current draft model (if still valid) > context default
@@ -247,23 +329,18 @@ export const draft = {
       ? candidate
       : ((isVideoMode ? ctx.current_video_model : ctx.current_image_model) ?? validModels[0]?.id ?? '');
 
-    const defaultsMap = isVideoMode ? ctx.video_model_defaults : ctx.image_model_defaults;
-    const fallback = isVideoMode ? ctx.video_defaults : ctx.defaults;
-    const currentModel = isVideoMode ? ctx.current_video_model : ctx.current_image_model;
-    const modelDefaults = (defaultsMap?.[model] ?? (model === currentModel ? fallback : null)) as (ImageModelDefaults | VideoModelDefaults | null);
-    const clearFields = ctx.workflow_contract.definitions[workflow]?.clear_fields ?? [];
-    let nextState = _applyClearFields({
-      ..._draft,
-      workflow,
-      model,
-      promptSource: ctx.default_prompt_source,
-    }, clearFields);
-
-    if (modelDefaults) {
-      nextState = isVideoMode
-        ? _applyVideoDefaults(nextState, modelDefaults as VideoModelDefaults)
-        : _applyImageDefaults(nextState, modelDefaults as ImageModelDefaults);
+    const keepSettings = options.keepSettings === true && model === _draft.model;
+    const promptSource = keepSettings && ctx.prompt_sources.includes(_draft.promptSource) ? _draft.promptSource : ctx.default_prompt_source;
+    let nextState = _withModelDefaults(ctx, { ..._draft, workflow, model, promptSource });
+    if (keepSettings) {
+      // Same model: the user's settings win over its defaults. A preset that no longer exists falls back to the default size.
+      const saved: Partial<DraftState> = _pickSettings(_draft);
+      if (!_presetIsValid(ctx, _draft)) {
+        for (const key of ['ratio', 'size', 'dimensionMode', 'width', 'height'] as const) delete saved[key];
+      }
+      nextState = { ...nextState, ...saved };
     }
+    const modelDefaults = _modelDefaultsFor(ctx, workflow, model);
 
     if (isVideoMode) {
       nextState = { ...nextState, negativePrompt: '', quantize: null, jsonPromptEnabled: false, jsonPrompt: '', firstSigma: null };
@@ -291,7 +368,8 @@ export const draft = {
   onWorkflowChange(workflow: Workflow, ctx: WorkspaceContext): void {
     _draft = { ..._draft, workflow };
     _authorityReady = false;
-    this.hydrateFromContext(ctx, null);
+    // Switching between workflows of the same mode keeps the model, so it keeps the user's settings too.
+    this.hydrateFromContext(ctx, null, { keepSettings: true });
   },
 
   /**
@@ -333,6 +411,12 @@ export const draft = {
     } catch {
       // storage full or unavailable — ignore
     }
+  },
+
+  /** Apply several field updates at once. */
+  patch(updates: Partial<DraftState>): void {
+    _draft = { ..._draft, ...updates };
+    this.saveDraft();
   },
 
   update<K extends keyof DraftState>(key: K, value: DraftState[K]): void {

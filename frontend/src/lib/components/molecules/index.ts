@@ -1,12 +1,15 @@
 export { default as EnhanceOptions } from './EnhanceOptions.svelte';
 export { default as FormField } from './FormField.svelte';
-export { default as Lightbox } from './Lightbox.svelte';
+export { default as ActionMenu } from './ActionMenu.svelte';
+export { default as AssetTile } from './AssetTile.svelte';
+export { default as AssetViewer } from './AssetViewer.svelte';
 export { default as Toast } from './Toast.svelte';
 export { default as ToastContainer } from './ToastContainer.svelte';
 export { default as Modal } from './Modal.svelte';
-export { default as ImageCard } from './ImageCard.svelte';
 export { default as JobCard } from './JobCard.svelte';
 export { default as ModelStatusBadges } from './ModelStatusBadges.svelte';
 export { default as NavItem } from './NavItem.svelte';
 export { default as PathField } from './PathField.svelte';
 export { default as PromptFileField } from './PromptFileField.svelte';
+export { default as InspectorRow } from './InspectorRow.svelte';
+export { default as InspectorSection } from './InspectorSection.svelte';

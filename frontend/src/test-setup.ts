@@ -91,3 +91,13 @@ const sessionStorageMock: Storage = {
   key(index: number): string | null { return Object.keys(_sessionStorageStore)[index] ?? null; }
 };
 Object.defineProperty(globalThis, 'sessionStorage', { value: sessionStorageMock, writable: true });
+
+// jsdom does not implement ResizeObserver, which Svelte's bind:clientWidth/clientHeight use.
+if (!('ResizeObserver' in globalThis)) {
+  class MockResizeObserver {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+  (globalThis as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver = MockResizeObserver;
+}

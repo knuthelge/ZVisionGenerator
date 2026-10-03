@@ -13,6 +13,18 @@ describe('jobStore reconnect contract', () => {
     vi.unstubAllGlobals();
   });
 
+  it('keeps deleted outputs out when the job later reports its outputs', () => {
+    jobStore.startJob({ job_id: 'job-removed', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 2, created_at: '' });
+    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    const keep = { id: 'out/keep.png', url: '/media/out/keep.png', thumbnail_url: '', filename: 'keep.png', created_at: '', workflow: 'txt2img', prompt: 'P', model: 'zit', media_type: 'image', reuse_workspace_url: '' };
+    const gone = { ...keep, id: 'out/gone.png', url: '/media/out/gone.png', filename: 'gone.png' };
+
+    jobStore.removeOutputs([gone.id]);
+    source.emit('job_completed', { type: 'job_completed', job_id: 'job-removed', total_runs: 2, outputs: [keep, gone] });
+
+    expect(jobStore.current?.outputs.map((output) => output.id)).toEqual([keep.id]);
+  });
+
   it('updates paused state from pause and resume SSE events', () => {
     jobStore.startJob({
       job_id: 'job-1',
