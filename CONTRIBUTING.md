@@ -18,7 +18,7 @@ Open a [feature request](https://github.com/knuthelge/ZVisionGenerator/issues/ne
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b my-feature`)
-3. Make your changes
+3. Make your changes, committing with [Conventional Commits](https://www.conventionalcommits.org/) messages: `type(scope): imperative summary`, plus a short list of high-level changes in the body
 4. Run `make check` (lint + format-check + pytest + frontend checks + docs build + packaged SPA static/drift verification must all pass)
 5. Open a Pull Request against `main`
 
