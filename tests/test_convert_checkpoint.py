@@ -8,6 +8,7 @@ torch = pytest.importorskip("torch")
 
 from zvisiongenerator.converters.convert_checkpoint import (  # noqa: E402
     TRANSFORMER_PREFIX,
+    _dequantize_scaled_fp8,
     convert_transformer_keys,
     convert_flux2_transformer_keys,
 )
@@ -181,3 +182,71 @@ class TestConvertFlux2TransformerKeys:
         }
         result = convert_flux2_transformer_keys(state_dict)
         assert "transformer_blocks.0.attn.norm_q.weight" in result
+
+
+# ── Scaled FP8 dequantization ────────────────────────────────────────────────
+
+
+def _comfy_quant(fmt: str) -> torch.Tensor:
+    return torch.tensor(list(f'{{"format": "{fmt}"}}'.encode()), dtype=torch.uint8)
+
+
+class TestDequantizeScaledFp8:
+    """Tests for dequantizing scaled-FP8 checkpoints before key conversion."""
+
+    QKV = f"{TRANSFORMER_PREFIX}double_blocks.0.img_attn.qkv"
+
+    def _comfy_state_dict(self, weight: torch.Tensor, scale: float, fmt: str = "float8_e4m3fn") -> dict:
+        return {
+            f"{self.QKV}.weight": weight.to(torch.float8_e4m3fn),
+            f"{self.QKV}.weight_scale": torch.tensor(scale),
+            f"{self.QKV}.input_scale": torch.tensor(0.25),
+            f"{self.QKV}.comfy_quant": _comfy_quant(fmt),
+            f"{TRANSFORMER_PREFIX}double_blocks.0.img_attn.norm.query_norm.weight": torch.ones(4, dtype=torch.bfloat16),
+        }
+
+    def test_weights_multiplied_by_scale(self):
+        weight = torch.tensor([[1.0, 2.0], [-4.0, 0.5], [8.0, -1.0]])
+        result = _dequantize_scaled_fp8(self._comfy_state_dict(weight, 0.5))
+        assert result[f"{self.QKV}.weight"].dtype == torch.bfloat16
+        assert torch.equal(result[f"{self.QKV}.weight"], (weight * 0.5).to(torch.bfloat16))
+
+    def test_quantization_metadata_dropped(self):
+        result = _dequantize_scaled_fp8(self._comfy_state_dict(torch.ones(3, 2), 1.0))
+        assert sorted(result) == sorted(
+            [
+                f"{self.QKV}.weight",
+                f"{TRANSFORMER_PREFIX}double_blocks.0.img_attn.norm.query_norm.weight",
+            ]
+        )
+
+    def test_legacy_scale_weight_format(self):
+        state_dict = {
+            f"{self.QKV}.weight": torch.full((3, 2), 2.0).to(torch.float8_e4m3fn),
+            f"{self.QKV}.scale_weight": torch.tensor(0.25),
+            "scaled_fp8": torch.zeros(2, dtype=torch.float8_e4m3fn),
+        }
+        result = _dequantize_scaled_fp8(state_dict)
+        assert list(result) == [f"{self.QKV}.weight"]
+        assert torch.equal(result[f"{self.QKV}.weight"], torch.full((3, 2), 0.5, dtype=torch.bfloat16))
+
+    def test_unquantized_state_dict_unchanged(self):
+        state_dict = {f"{self.QKV}.weight": torch.ones(3, 2)}
+        assert _dequantize_scaled_fp8(state_dict) is state_dict
+
+    def test_unsupported_quant_format_rejected(self):
+        with pytest.raises(ValueError, match="nvfp4"):
+            _dequantize_scaled_fp8(self._comfy_state_dict(torch.ones(3, 2), 1.0, fmt="nvfp4"))
+
+    def test_block_wise_scale_rejected(self):
+        state_dict = self._comfy_state_dict(torch.ones(3, 2), 1.0)
+        state_dict[f"{self.QKV}.weight_scale"] = torch.ones(3)
+        with pytest.raises(ValueError, match="block-wise"):
+            _dequantize_scaled_fp8(state_dict)
+
+    def test_flux2_conversion_after_dequantize(self):
+        """Regression: scalar scale keys under img_attn.qkv used to crash the QKV split."""
+        weight = torch.arange(6, dtype=torch.float32).reshape(6, 1)
+        result = convert_flux2_transformer_keys(_dequantize_scaled_fp8(self._comfy_state_dict(weight, 2.0)))
+        assert torch.equal(result["transformer_blocks.0.attn.to_q.weight"], (weight[:2] * 2).to(torch.bfloat16))
+        assert torch.equal(result["transformer_blocks.0.attn.to_v.weight"], (weight[4:] * 2).to(torch.bfloat16))

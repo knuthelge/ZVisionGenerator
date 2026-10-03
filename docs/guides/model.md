@@ -35,6 +35,8 @@ ziv-model model -i checkpoint.safetensors --name my-model --copy
 | `--base-model` | `Tongyi-MAI/Z-Image-Turbo` | Base HF repo (only for zimage type) |
 | `--copy` | off | Copy files instead of symlinking |
 
+Checkpoints can be bfloat16, float16, float32, or FP8. Scaled FP8 checkpoints (for example ComfyUI FP8 exports, which store a `weight_scale` next to each weight) are dequantized to bfloat16 during conversion. Block-wise or other quantized formats (such as NVFP4) are not supported.
+
 > **Ideogram 4** is used via the `ideo` alias or a local FP8 model directory and is distributed ready-to-use. It has no checkpoint-convert path, so it is not a `--model-type` option.
 
 ## Importing LoRAs (`lora` subcommand)
