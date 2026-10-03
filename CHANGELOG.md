@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+- Web UI ✨ Enhance picks the prompt's `{a|b}` choices before rewriting, so the enhancer works on one plain prompt instead of placeholders. The Enhanced prompt no longer contains choices; use **Enhance each image when generating** for a fresh pick per image
+
+### Fixed
+- The prompt enhancer keeps every detail the prompt describes instead of dropping some of them; Shorter cuts only filler
+
 ## [0.13.0b3] - 2026-10-04
 
 ### Added

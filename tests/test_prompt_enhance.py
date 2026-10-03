@@ -1,10 +1,9 @@
-"""Tests for zvisiongenerator.utils.prompt_enhance — matrix, length math, protection, hygiene, retry."""
+"""Tests for zvisiongenerator.utils.prompt_enhance — matrix, length math, messages, hygiene, retry."""
 
 from __future__ import annotations
 
 import pytest
 
-from zvisiongenerator.utils.prompt_compose import expand_random_choices
 from zvisiongenerator.utils.prompt_enhance import (
     EnhanceSettings,
     build_messages,
@@ -16,9 +15,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     parse_enhance_entry,
     parse_enhance_spec,
     plan_length,
-    protect_groups,
     resolve_enhance_ceiling,
-    restore_groups,
     settings_from_mapping,
     validate_settings,
 )
@@ -203,15 +200,15 @@ class TestLength:
 # ── Messages ────────────────────────────────────────────────────────────────
 
 
-def _system(settings: EnhanceSettings, *, mode: str = "image", in_words: int = 10, protected: bool = False) -> str:
+def _system(settings: EnhanceSettings, *, mode: str = "image", in_words: int = 10) -> str:
     plan = plan_length(in_words, settings.length, ceiling=300)
-    return build_messages("p", settings, mode=mode, plan=plan, protected=protected)[0]["content"]
+    return build_messages("p", settings, mode=mode, plan=plan)[0]["content"]
 
 
 class TestMessages:
     def test_user_message_is_prompt(self):
         plan = plan_length(3, "same", ceiling=300)
-        messages = build_messages("a red fox", EnhanceSettings(), mode="image", plan=plan, protected=False)
+        messages = build_messages("a red fox", EnhanceSettings(), mode="image", plan=plan)
         assert messages[1] == {"role": "user", "content": "a red fox"}
 
     def test_details_line(self):
@@ -225,9 +222,12 @@ class TestMessages:
         system = _system(EnhanceSettings(style="anime", details=()))
         assert "Add detail" not in system and "Keep these aspects" not in system
 
-    def test_placeholder_rule_only_when_protected(self):
-        assert "Placeholders like [[1]]" not in _system(EnhanceSettings())
-        assert "Placeholders like [[1]]" in _system(EnhanceSettings(), protected=True)
+    @pytest.mark.parametrize("settings", [EnhanceSettings(), EnhanceSettings(style="anime", details=(), length="shorter")])
+    def test_fidelity_rule_always_present(self, settings):
+        assert "EVERY DETAIL IS IMPORTANT" in _system(settings, in_words=40)
+
+    def test_shorter_never_cuts_named_elements(self):
+        assert "never an element the user named" in _system(EnhanceSettings(length="shorter"), in_words=40)
 
     def test_video_mode_lines(self):
         system = _system(EnhanceSettings(motion=("action", "camera-move")), mode="video")
@@ -238,72 +238,13 @@ class TestMessages:
     def test_image_mode_has_no_motion(self):
         assert "Motion:" not in _system(EnhanceSettings(motion=("action",)))
 
+    @pytest.mark.parametrize(("length", "in_words", "expected"), [("same", 10, True), ("longer", 400, True), ("longer", 10, False), ("shorter", 40, False)])
+    def test_no_echo_rule_only_when_length_stays_the_same(self, length, in_words, expected):
+        assert ("don't return the input unchanged" in _system(EnhanceSettings(length=length), in_words=in_words)) is expected
+
     def test_clamped_uses_same_wording(self):
         system = _system(EnhanceSettings(length="longer"), in_words=400)
         assert "Do not exceed" in system
-
-
-# ── Protection ──────────────────────────────────────────────────────────────
-
-
-def _groups_once(text: str, groups: tuple[str, ...]) -> bool:
-    stripped = text
-    for group in groups:
-        if stripped.count(group) != 1:
-            return False
-        stripped = stripped.replace(group, "")
-    return "{" not in stripped and "}" not in stripped
-
-
-class TestProtect:
-    @pytest.mark.parametrize(
-        ("prompt", "protected", "groups"),
-        [
-            ("a fox", "a fox", ()),
-            ("a {red|blue} fox", "a [[1]] fox", ("{red|blue}",)),
-            ("{a|b} and {c|d}", "[[1]] and [[2]]", ("{a|b}", "{c|d}")),
-            ("a {red|{dark|light} blue} roof", "a [[1]] roof", ("{red|{dark|light} blue}",)),
-            ("a {single} word", "a [[1]] word", ("{single}",)),
-            ("unbalanced { brace", "unbalanced { brace", ()),
-        ],
-    )
-    def test_protect(self, prompt, protected, groups):
-        assert protect_groups(prompt) == (protected, groups)
-
-    def test_protect_matches_expand_grammar(self):
-        prompt = "x {a|{b|c}} y {z}"
-        _protected, groups = protect_groups(prompt)
-        for group in groups:
-            assert "{" not in expand_random_choices(group)
-
-
-class TestRestore:
-    GROUPS = ("{red|blue}", "{day|night}")
-
-    @pytest.mark.parametrize(
-        ("output", "expected"),
-        [
-            ("A [[1]] roof at [[2]].", "A {red|blue} roof at {day|night}."),
-            ("A [[1]] roof.", "A {red|blue} roof, {day|night}"),
-            ("A roof at [[2]].", "A roof at {day|night}, {red|blue}"),
-            ("A roof.", "A roof, {red|blue}, {day|night}"),
-            ("A [[1]] roof, [[1]] tiles at [[2]].", "A {red|blue} roof, tiles at {day|night}."),
-            ("A [[1]] roof at [[2]] [[9]].", "A {red|blue} roof at {day|night}."),
-            ("A [[1]] roof at [[2]], {sunny|rainy}.", "A {red|blue} roof at {day|night}, sunny|rainy."),
-            ("", "{red|blue}, {day|night}"),
-        ],
-    )
-    def test_restore(self, output, expected):
-        restored = restore_groups(output, self.GROUPS)
-        assert restored == expected
-        assert _groups_once(restored, self.GROUPS)
-
-    def test_nested_group_restored_verbatim(self):
-        groups = ("{red|{dark|light} blue}",)
-        assert restore_groups("a [[1]] roof", groups) == "a {red|{dark|light} blue} roof"
-
-    def test_no_groups_still_strips_invented_braces(self):
-        assert restore_groups("a {x|y} fox", ()) == "a x|y fox"
 
 
 # ── Hygiene ─────────────────────────────────────────────────────────────────
@@ -347,47 +288,41 @@ class TestHygiene:
 
 class TestEnhancePrompt:
     def test_success_streams_and_returns(self):
-        enhancer = _FakeEnhancer(["A [[1]] fox in deep snow, soft light."])
+        enhancer = _FakeEnhancer(["A grey fox in deep snow, soft light."])
         seen: list[str] = []
-        result = enhance_prompt(enhancer, "a {red|grey} fox", EnhanceSettings(), mode="image", seed=7, ceiling=300, protect=True, on_text=seen.append)
-        assert result.prompt == "A {red|grey} fox in deep snow, soft light."
+        result = enhance_prompt(enhancer, "a grey fox", EnhanceSettings(), mode="image", seed=7, ceiling=300, on_text=seen.append)
+        assert result.prompt == "A grey fox in deep snow, soft light."
         assert result.clamped is False
         assert seen[0] == "" and seen[-1] == result.prompt
         assert len(seen) >= 3  # first delta is shown immediately; later ones are throttled
         assert enhancer.calls[0]["seed"] == 7
         assert enhancer.calls[0]["temperature"] == pytest.approx(0.7)
 
-    def test_auto_mode_does_not_protect(self):
-        enhancer = _FakeEnhancer(["A red fox, golden light."])
-        enhance_prompt(enhancer, "a red fox", EnhanceSettings(), mode="image", seed=1, ceiling=300, protect=False)
-        system = enhancer.calls[0]["messages"][0]["content"]
-        assert "Placeholders" not in system
-
     @pytest.mark.parametrize("bad", ["", "a red fox", "I cannot do that."])
     def test_retry_once_with_next_seed(self, bad):
         enhancer = _FakeEnhancer([bad, "A red fox, golden light."])
-        result = enhance_prompt(enhancer, "a red fox", EnhanceSettings(), mode="image", seed=5, ceiling=300, protect=True)
+        result = enhance_prompt(enhancer, "a red fox", EnhanceSettings(), mode="image", seed=5, ceiling=300)
         assert result.prompt == "A red fox, golden light."
         assert [call["seed"] for call in enhancer.calls] == [5, 6]
 
     def test_two_failures_raise(self):
         enhancer = _FakeEnhancer(["", "a red fox"])
         with pytest.raises(RuntimeError, match="no usable rewrite"):
-            enhance_prompt(enhancer, "a red fox", EnhanceSettings(), mode="image", seed=1, ceiling=300, protect=True)
+            enhance_prompt(enhancer, "a red fox", EnhanceSettings(), mode="image", seed=1, ceiling=300)
         assert len(enhancer.calls) == 2
 
     def test_cancel_raises(self):
         enhancer = _FakeEnhancer(["A long rewrite that will be cancelled."])
         with pytest.raises(RuntimeError, match="cancelled"):
-            enhance_prompt(enhancer, "a red fox", EnhanceSettings(), mode="image", seed=1, ceiling=300, protect=True, cancelled=lambda: True)
+            enhance_prompt(enhancer, "a red fox", EnhanceSettings(), mode="image", seed=1, ceiling=300, cancelled=lambda: True)
 
     def test_empty_prompt(self):
         with pytest.raises(ValueError, match="Enter a prompt"):
-            enhance_prompt(_FakeEnhancer([]), "  ", EnhanceSettings(), mode="image", seed=1, ceiling=300, protect=True)
+            enhance_prompt(_FakeEnhancer([]), "  ", EnhanceSettings(), mode="image", seed=1, ceiling=300)
 
     def test_clamped_reported(self):
         enhancer = _FakeEnhancer(["word " * 300])
-        result = enhance_prompt(enhancer, "word " * 400, EnhanceSettings(length="longer"), mode="image", seed=1, ceiling=300, protect=False)
+        result = enhance_prompt(enhancer, "word " * 400, EnhanceSettings(length="longer"), mode="image", seed=1, ceiling=300)
         assert result.clamped is True
 
 
@@ -434,7 +369,7 @@ class TestReviewFixes:
             def close(self):
                 pass
 
-        enhance_prompt(_Chunks(), "a fox", EnhanceSettings(), mode="image", seed=1, ceiling=300, protect=False, on_text=seen.append)
+        enhance_prompt(_Chunks(), "a fox", EnhanceSettings(), mode="image", seed=1, ceiling=300, on_text=seen.append)
         assert seen == ["", "A", "A red fox in", "A red fox in snow."]
 
     def test_valid_user_config_is_used(self):
@@ -443,21 +378,3 @@ class TestReviewFixes:
         options = enhance_options({"prompt_enhancer": {"temperature": 0, "length": {"max_words": 250, "percent": {"longer": 150}}}})
         assert options["temperature"] == 0
         assert options["length"]["max_words"] == 250 and options["length"]["percent"]["longer"] == 150
-
-    def test_groups_count_at_average_option_length(self):
-        from zvisiongenerator.utils.prompt_enhance import prompt_word_count
-
-        prompt = "{a majestic red fox in fresh snow at golden hour|a snowy owl on a frosted branch at dawn}, photorealistic"
-        protected, groups = protect_groups(prompt)
-        assert prompt_word_count(protected, groups) == 11  # options of 10 and 9 words → 10, plus "photorealistic" (comma is not a word)
-        assert prompt_word_count(*protect_groups("a {red|{dark|light} blue} roof")) == 4
-        assert prompt_word_count("plain words here", ()) == 3
-
-    def test_enhance_button_plans_length_from_real_prompt_size(self):
-        enhancer = _FakeEnhancer(["A [[1]] scene, photorealistic, soft golden light."])
-        prompt = "{a majestic red fox in fresh snow at golden hour|a snowy owl on a frosted branch at dawn}, photorealistic"
-        enhance_prompt(enhancer, prompt, EnhanceSettings(), mode="image", seed=1, ceiling=300, protect=True)
-        assert "Length: 8-14 words" in enhancer.calls[0]["messages"][0]["content"]  # was "1-5 words" before the fix
-
-    def test_placeholders_with_spaces_are_restored(self):
-        assert restore_groups("a [[ 1 ]] car under a [[2]] sky", ("{red|blue}", "{grey|clear}")) == "a {red|blue} car under a {grey|clear} sky"

@@ -34,6 +34,7 @@ from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
+from zvisiongenerator.utils.prompt_compose import expand_random_choices
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhance_by_set_for_mode, enhance_options, enhance_prompt, settings_from_mapping, validate_settings
 from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
 from zvisiongenerator.utils.video_model_detect import detect_video_model
@@ -301,12 +302,11 @@ def _run_enhancement(job: dict[str, Any], frames: queue.Queue[dict[str, Any]], c
                 frames.put({"type": "status", "phase": "generating_cpu" if runs_on_cpu(enhancer) else "generating"})
                 result = enhance_prompt(
                     enhancer,
-                    job["prompt"],
+                    expand_random_choices(job["prompt"]),
                     job["settings"],
                     mode=job["mode"],
                     seed=random.randint(0, 2**31 - 1),
                     ceiling=job["ceiling"],
-                    protect=True,
                     length_cfg=options["length"],
                     temperature=options["temperature"],
                     max_tokens=options["max_new_tokens"],
