@@ -62,6 +62,19 @@ class TestHasCompleteWeights:
         _touch(tmp_path / "vae_decoder.safetensors")
         assert has_complete_weights(tmp_path) is True
 
+    def test_converted_layout_with_symlinked_base_components(self, tmp_path):
+        base = tmp_path / "base"
+        model = tmp_path / "converted"
+        _write_model_index(model)
+        _touch(model / "transformer" / "model.safetensors")
+        for component in ("text_encoder", "vae"):
+            _touch(base / component / "model.safetensors")
+            (model / component).symlink_to(base / component, target_is_directory=True)
+
+        assert has_complete_weights(model) is True
+        (base / "vae" / "model.safetensors").unlink()
+        assert has_complete_weights(model) is False
+
     def test_config_only_directory_is_not_downloaded(self, tmp_path):
         _write_model_index(tmp_path)
 

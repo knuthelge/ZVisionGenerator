@@ -78,13 +78,14 @@ def model_weight_files(model_dir: Path, components: tuple[str, ...] | None = Non
 
     For diffusers layouts only the weight-bearing components listed in ``model_index.json`` count, so
     extra files in a full repo download (e.g. a root-level single-file checkpoint) are ignored. Precision
-    variants (``*.fp16.safetensors``) are ignored in any folder that also holds the plain weights.
+    variants (``*.fp16.safetensors``) are ignored in any folder that also holds the plain weights. Symlinked
+    component folders are followed: converted checkpoints link their text encoder and VAE from the base repo.
 
     Args:
         model_dir: The model directory.
         components: Its :func:`weighted_components`, when the caller already read them.
     """
-    files = _without_redundant_variants(sorted(path for path in model_dir.rglob("*.safetensors") if path.is_file()))
+    files = _without_redundant_variants(sorted(path for path in model_dir.rglob("*.safetensors", recurse_symlinks=True) if path.is_file()))
     components = weighted_components(model_dir) if components is None else components
     if components is None:
         return tuple(files)
@@ -124,6 +125,13 @@ def has_complete_weights(model_dir: Path) -> bool:
     return all(name in present for name in components or ()) and _shards_complete(files)
 
 
+def huggingface_cache_repo_dir(repo_id: str) -> Path:
+    """Return the HuggingFace cache folder that holds every downloaded revision of *repo_id*."""
+    from huggingface_hub.constants import HF_HUB_CACHE
+
+    return Path(HF_HUB_CACHE) / f"models--{repo_id.replace('/', '--')}"
+
+
 def _cached_snapshots(repo_id: str, revision: str | None) -> list[Path]:
     """Return candidate cache snapshots, newest first, as mflux's offline resolution considers them."""
     if revision is not None:
@@ -133,9 +141,7 @@ def _cached_snapshots(repo_id: str, revision: str | None) -> list[Path]:
             return [Path(snapshot_download(repo_id, revision=revision, local_files_only=True))]
         except Exception:  # noqa: BLE001 - any cache miss or malformed cache simply means "not downloaded"
             return []
-    from huggingface_hub.constants import HF_HUB_CACHE
-
-    snapshots_dir = Path(HF_HUB_CACHE) / f"models--{repo_id.replace('/', '--')}" / "snapshots"
+    snapshots_dir = huggingface_cache_repo_dir(repo_id) / "snapshots"
     try:
         snapshots = [path for path in snapshots_dir.iterdir() if path.is_dir()]
     except OSError:
