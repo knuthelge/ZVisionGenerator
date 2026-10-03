@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b4] - 2026-10-03
+
 ### Added
 - Web UI: one asset tile and viewer everywhere (History, preview, run results, Gallery) with **Preview**, **Reuse settings**, **Use as reference**, **Download** and **Delete**
 - Web UI: **Use as reference** sends an image to Image to Image or Image to Video
