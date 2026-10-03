@@ -2,12 +2,12 @@
   import { draft } from '$lib/state/draft.svelte';
   import { enhancePrompt } from '$lib/api/promptEnhance';
   import { EnhanceOptions } from '$lib/components/molecules';
-  import { Toggle } from '$lib/components/atoms';
+  import { Icon, Toggle } from '$lib/components/atoms';
+  import { popover } from '$lib/actions/popover';
   import {
     clampedNote,
     effectiveEnhanceSettings,
     enhancePhaseMessage,
-    isEnhancedStale,
     isNoOpSettings,
     settingsPayload,
     workflowMode,
@@ -16,28 +16,42 @@
 
   interface Props {
     contract: PromptEnhancerContract;
-    /** `inline`: Enhance button, options, Enhanced box, and auto toggle. `file`: auto toggle and options only. */
+    /** `inline`: options popover with an Enhance prompt button. `file`: options and the each-image toggle only. */
     variant: 'inline' | 'file';
     /** A job is running or being submitted. */
     busy: boolean;
     /** Word ceiling for the current model (FLUX.1 reads fewer tokens). */
     maxWords: number;
+    /** Live state the prompt box shows in its Enhanced tab. */
+    enhancing?: boolean;
+    streamingText?: string;
+    errorText?: string | null;
+    noteText?: string | null;
+    statusText?: string | null;
+    /** Called when an enhancement starts, so the Enhanced tab can come forward. */
+    onstart?: () => void;
   }
 
-  let { contract, variant, busy, maxWords }: Props = $props();
+  let {
+    contract,
+    variant,
+    busy,
+    maxWords,
+    enhancing = $bindable(false),
+    streamingText = $bindable(''),
+    errorText = $bindable(null),
+    noteText = $bindable(null),
+    statusText = $bindable(null),
+    onstart,
+  }: Props = $props();
 
   const mode = $derived(workflowMode(draft.state.workflow));
   const settings = $derived(effectiveEnhanceSettings(draft.state, contract));
   const noOp = $derived(isNoOpSettings(settings, mode));
-  const stale = $derived(isEnhancedStale(draft.state));
   const available = $derived(contract.model !== null);
 
   let panelOpen = $state(false);
-  let enhancing = $state(false);
-  let streamingText = $state('');
-  let statusText = $state<string | null>(null);
-  let errorText = $state<string | null>(null);
-  let noteText = $state<string | null>(null);
+  let toggleEl = $state<HTMLButtonElement | null>(null);
   let downloadedThisSession = $state(false);
   let phase: 'downloading' | 'loading' | 'generating' | 'generating_cpu' | null = null;
   let abort: AbortController | null = null;
@@ -56,8 +70,10 @@
     draft.update('enhanceSettings', next);
   }
 
-  async function runEnhance(): Promise<void> {
+  /** Run the enhancer on the current prompt; also used by the prompt box's Re-enhance link. */
+  export async function runEnhance(): Promise<void> {
     if (enhanceDisabled) return;
+    onstart?.();
     const source = { prompt: draft.state.prompt, mode };
     const requested = settings;
     enhancing = true;
@@ -107,58 +123,50 @@
     abort?.abort();
   }
 
-  function clearEnhanced(): void {
-    draft.update('enhancedPrompt', '');
-    draft.update('enhancedFrom', null);
-    noteText = null;
-  }
-
-  function onEnhancedInput(value: string): void {
-    draft.update('enhancedPrompt', value);
-    // Hand-typed text (no source) is never "out of date"; edits to a generated rewrite keep its source.
-    if (value.trim() === '') draft.update('enhancedFrom', null);
-  }
+  // The live state is bound into the prompt box, which outlives this component (JSON toggle,
+  // prompt source switch); stop the request and hand back idle state so nothing stays stuck.
+  $effect(() => () => {
+    abort?.abort();
+    enhancing = false;
+    streamingText = '';
+    statusText = null;
+  });
 </script>
 
-{#if variant === 'inline'}
-  <div class="mb-3 flex items-center justify-between gap-2">
-    <button
-      type="button"
-      id="ws-enhance-toggle"
-      class="surface-link-muted inline-flex items-center gap-1 text-xs font-medium transition"
-      aria-expanded={panelOpen}
-      aria-controls="ws-enhance-panel"
-      onclick={() => { panelOpen = !panelOpen; }}
-    >
-      <span aria-hidden="true">✨</span> Enhance{draft.state.enhanceAuto ? ' · each image' : ''}
-      <svg class="h-3 w-3 transition-transform" class:rotate-180={panelOpen} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-      </svg>
-    </button>
-    {#if enhancing}
-      <span class="text-xs text-text-muted" role="status">{statusText}</span>
-    {/if}
-  </div>
-{/if}
+{#snippet options()}
+  <EnhanceOptions axes={contract.matrix.axes} {settings} {mode} disabled={enhancing} idPrefix={`ws-enhance-${variant}`} onchange={updateSettings} />
 
-{#if variant === 'file' || panelOpen}
-  <div id="ws-enhance-panel" class="surface-card-muted mb-3 space-y-3 rounded-md p-3">
-    {#if variant === 'file'}
-      <p class="field-label">Prompt enhancer</p>
-    {/if}
-    <EnhanceOptions axes={contract.matrix.axes} {settings} {mode} disabled={enhancing} idPrefix={`ws-enhance-${variant}`} onchange={updateSettings} />
+  <Toggle
+    id={`ws-enhance-auto-${variant}`}
+    checked={draft.state.enhanceAuto}
+    disabled={busy || !available}
+    label="Enhance each image when generating"
+    onchange={(e) => draft.update('enhanceAuto', (e.currentTarget as HTMLInputElement).checked)}
+  />
+{/snippet}
 
-    <Toggle
-      id={`ws-enhance-auto-${variant}`}
-      checked={draft.state.enhanceAuto}
-      disabled={busy || !available}
-      label="Enhance each image when generating"
-      onchange={(e) => draft.update('enhanceAuto', (e.currentTarget as HTMLInputElement).checked)}
-    />
-    {#if variant === 'file'}
-      <p class="field-hint-label">Off: entries with their own <span class="font-mono">enhance:</span> setting (✨) are still enhanced.</p>
-    {/if}
+<button
+  type="button"
+  id={variant === 'inline' ? 'ws-enhance-toggle' : 'ws-enhance-toggle-file'}
+  bind:this={toggleEl}
+  class="prompt-tool"
+  aria-haspopup="dialog"
+  aria-expanded={panelOpen}
+  aria-controls="ws-enhance-panel"
+  onclick={() => { panelOpen = !panelOpen; }}
+>
+  <Icon name="sparkle" size={13} />Enhance{draft.state.enhanceAuto ? ' · each image' : ''}<Icon name="chevdown" size={12} />
+</button>
 
+{#if panelOpen}
+  <div
+    use:popover={{ anchor: toggleEl, align: 'start', onclose: () => { panelOpen = false; } }}
+    id="ws-enhance-panel"
+    class="enhance-popover surface-popover space-y-3"
+    role="dialog"
+    aria-label="Prompt enhancer"
+  >
+    {@render options()}
     {#if variant === 'inline' && !draft.state.enhanceAuto}
       <div class="flex flex-wrap items-center gap-2">
         {#if enhancing}
@@ -185,41 +193,8 @@
     {:else if draft.state.enhanceAuto && noOp}
       <p class="text-xs text-warning" role="alert">Pick a style, a detail, or a length.</p>
     {/if}
-  </div>
-{/if}
-
-{#if variant === 'inline'}
-  {#if errorText}
-    <p class="mb-2 text-xs text-error" role="alert">{errorText}</p>
-  {/if}
-  <div class="mb-3">
-    <div class="mb-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-      <label class="field-label block whitespace-nowrap" for="ws-enhanced-prompt">Enhanced prompt</label>
-      <div class="flex flex-wrap items-center gap-x-2 gap-y-1 whitespace-nowrap">
-        {#if stale && !draft.state.enhanceAuto}
-          <span class="enhance-stale-badge" title="The prompt or workflow changed after this was enhanced. It is still used until you clear it.">Out of date</span>
-          <button type="button" class="surface-link-muted text-[11px] font-medium transition" disabled={enhanceDisabled} onclick={runEnhance}>Re-enhance</button>
-        {/if}
-        {#if draft.state.enhancedPrompt && !draft.state.enhanceAuto}
-          <button type="button" class="surface-link-muted text-[11px] font-medium transition" onclick={clearEnhanced}>Clear</button>
-        {/if}
-      </div>
-    </div>
-    <textarea
-      id="ws-enhanced-prompt"
-      rows="4"
-      class="surface-textarea w-full rounded-md shadow-sm transition placeholder-zinc-600 focus:border-primary-main focus:ring-4 focus:ring-primary-main"
-      placeholder={draft.state.enhanceAuto ? 'Generated per image when the job runs.' : draft.state.prompt || 'Enhance the prompt, or type a variant here. When this has text, it is what gets generated.'}
-      disabled={draft.state.enhanceAuto}
-      readonly={enhancing}
-      aria-busy={enhancing}
-      value={enhancing ? streamingText : (draft.state.enhanceAuto ? '' : draft.state.enhancedPrompt)}
-      oninput={(e) => onEnhancedInput((e.currentTarget as HTMLTextAreaElement).value)}
-    ></textarea>
-    {#if noteText}
-      <p class="field-hint-label mt-1">{noteText}</p>
-    {:else if draft.state.enhancedPrompt.trim() && !draft.state.enhanceAuto}
-      <p class="field-hint-label mt-1">This text is generated instead of the prompt above.</p>
+    {#if variant === 'file'}
+      <p class="field-hint-label">Off: entries with their own <span class="font-mono">enhance:</span> setting (✨) are still enhanced.</p>
     {/if}
   </div>
 {/if}
@@ -230,13 +205,5 @@
 {/if}
 
 <style>
-  .enhance-stale-badge {
-    border: 1px solid var(--color-warning-border);
-    background: var(--color-warning-surface);
-    color: var(--color-warning);
-    border-radius: 9999px;
-    padding: 0 8px;
-    font-size: 11px;
-    line-height: 18px;
-  }
+  .enhance-popover { z-index: 70; width: 320px; padding: 12px; border-radius: var(--radius-md); }
 </style>

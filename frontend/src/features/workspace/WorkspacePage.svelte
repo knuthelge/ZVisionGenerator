@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import { api } from '$lib/api/client';
   import { draft } from '$lib/state/draft.svelte';
   import { enhancedOverrideActive, submittedPrompt } from '$lib/state/promptEnhance';
@@ -8,6 +8,8 @@
   import { router } from '$lib/state/router.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
   import { getWorkspaceCoreContext, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
+  import { deleteAsset } from '$lib/api/gallery';
+  import { referenceParams, reuseParams, type ReferenceTarget } from '$lib/state/assetActions';
   import { MascotSpot, ToolbarSelectShell } from '$lib/components/atoms';
   import { rememberMascotSpots } from '$lib/components/atoms/MascotSpot.svelte';
   import {
@@ -18,9 +20,10 @@
     mascotMood as pickMascotMood,
     type MascotReaction,
   } from '$lib/state/mascot';
-  import { JobCard, Lightbox, ModelStatusBadges } from '$lib/components/molecules';
+  import { AssetTile, AssetViewer, JobCard, ModelStatusBadges } from '$lib/components/molecules';
   import ControlsSidebar from './ControlsSidebar.svelte';
-  import HistoryPane from './HistoryPane.svelte';
+  import HistoryStrip from './HistoryStrip.svelte';
+  import { fitOutputGrid } from './outputGrid';
   import type { GalleryAsset, WorkspaceContext, Workflow } from '$lib/types';
 
   let context = $state<WorkspaceContext | null>(null);
@@ -41,10 +44,22 @@
   let loadedLatestUrl = $state<string | null>(null);
   // False until the first history fetch settles, so a returning user never sees "no assets" first.
   let historyChecked = $state(false);
+  let deletingIds = $state<Set<string>>(new Set());
   let reactionTimer: ReturnType<typeof setTimeout> | undefined;
   let typingTimer: ReturnType<typeof setTimeout> | undefined;
 
+  const OUTPUT_GAP_PX = 12;
+  const MIN_OUTPUT_CELL_PX = 160;
+  let outputAreaWidth = $state(0);
+  let outputAreaHeight = $state(0);
   const jobOutputs = $derived<GalleryAsset[]>(jobStore.current?.outputs ?? []);
+  const outputGrid = $derived(fitOutputGrid(
+    jobOutputs.length,
+    outputAreaWidth,
+    outputAreaHeight,
+    OUTPUT_GAP_PX,
+    MIN_OUTPUT_CELL_PX
+  ));
   const hasCompletedOutputs = $derived(jobStore.current?.status === 'completed' && jobOutputs.length > 0);
   const previewView = $derived<'error' | 'outputs' | 'job' | 'latest' | 'empty'>(
     loadError ? 'error'
@@ -54,6 +69,12 @@
       : 'empty'
   );
   const latestAsset = $derived<GalleryAsset | null>(historyStore.assets[0] ?? null);
+  // A reference path that points at a known asset can show that asset as its thumbnail.
+  const referencePreviewUrl = $derived(
+    draft.state.referenceImagePath
+      ? (historyStore.assets.find((asset) => asset.file_path === draft.state.referenceImagePath)?.url ?? null)
+      : null
+  );
   // Keep the preview occupied until the latest image has painted. Videos show at once:
   // some browsers load nothing until play is pressed, so no load event is guaranteed.
   const latestLoading = $derived(
@@ -216,10 +237,73 @@
     addToast('Generation stopped', 'info');
   }
 
-  function openHistoryViewer(index: number): void {
+  function openHistoryViewer(asset: GalleryAsset, trigger: HTMLElement): void {
+    const index = historyStore.assets.findIndex((item) => item.id === asset.id);
+    if (index < 0) return;
     lightboxMode = 'history';
     lightboxIndex = index;
+    completedOutputTrigger = trigger;
     lightboxOpen = true;
+  }
+
+  function openOutputViewer(asset: GalleryAsset, trigger: HTMLElement): void {
+    openCompletedOutputViewer(jobOutputs.findIndex((output) => output.id === asset.id), trigger);
+  }
+
+  /** Apply workspace prefill params (workflow first, then model defaults, then the params on top). */
+  function applyPrefill(params: Record<string, string>, options: { keepSettings?: boolean } = {}): void {
+    if (!context) return;
+    if (params.workflow) draft.loadFromUrl({ workflow: params.workflow }, context);
+    draft.hydrateFromContext(context, params.model ?? null, options);
+    draft.loadFromUrl(params, context);
+    // The prefill already re-hydrated for its workflow; the workflow-change effect must not redo it.
+    _prevWorkflow = draft.state.workflow;
+    draft.saveDraft();
+  }
+
+  function reuseAsset(asset: GalleryAsset): void {
+    applyPrefill(reuseParams(asset));
+    imageFile = null;
+    closeLightbox();
+    addToast(`Loaded settings from ${asset.filename}`, 'success');
+  }
+
+  // Reference targets the model that would run them can't use, with the reason shown in the menu.
+  const referenceUnavailable = $derived.by<Partial<Record<ReferenceTarget, string>>>(() => {
+    if (!context) return {};
+    const imageModel = isImageMode ? draft.state.model : (context.current_image_model ?? '');
+    const videoModel = isImageMode ? (context.current_video_model ?? '') : draft.state.model;
+    const reasons: Partial<Record<ReferenceTarget, string>> = {};
+    if (context.image_model_defaults?.[imageModel]?.supports_img2img === false) reasons.image = `${imageModel} can't use a reference image`;
+    if (context.video_model_defaults?.[videoModel]?.supports_i2v === false) reasons.video = `${videoModel} can't start from an image`;
+    return reasons;
+  });
+
+  function useAsReference(asset: GalleryAsset, target: ReferenceTarget): void {
+    if (!asset.file_path || referenceUnavailable[target]) return;
+    const params = referenceParams(asset, target);
+    if (draft.state.workflow === params.workflow) draft.update('referenceImagePath', params.image_path);
+    else applyPrefill(params, { keepSettings: true });
+    imageFile = null;
+    closeLightbox();
+    addToast(`${asset.filename} is now the reference image`, 'success');
+  }
+
+  async function deleteWorkspaceAsset(asset: GalleryAsset): Promise<void> {
+    if (deletingIds.has(asset.id) || !confirm(`Delete "${asset.filename}"?`)) return;
+    deletingIds = new Set([...deletingIds, asset.id]);
+    try {
+      await deleteAsset(asset.id);
+      jobStore.removeOutputs([asset.id]);
+      historyStore.removeAssets([asset.id]);
+      // A reference pointing at the deleted file would fail the next run.
+      if (asset.file_path && draft.state.referenceImagePath === asset.file_path) draft.update('referenceImagePath', null);
+      addToast('Deleted', 'success');
+    } catch {
+      addToast('Delete failed', 'error');
+    } finally {
+      deletingIds = new Set([...deletingIds].filter((id) => id !== asset.id));
+    }
   }
 
   function openCompletedOutputViewer(index: number, trigger: HTMLElement): void {
@@ -230,14 +314,12 @@
     completedOutputAssetId = jobOutputs[index].id;
     completedOutputJobId = jobStore.current?.job_id ?? null;
     lightboxOpen = true;
-    queueMicrotask(() => {
-      document.querySelector<HTMLElement>('[data-testid="lightbox"] [role="dialog"] button')?.focus();
-    });
   }
 
   function closeLightbox(): void {
+    if (!lightboxOpen) return;
     lightboxOpen = false;
-    const trigger = lightboxMode === 'completed-output' ? completedOutputTrigger : null;
+    const trigger = completedOutputTrigger?.isConnected ? completedOutputTrigger : null;
     lightboxMode = 'history';
     completedOutputTrigger = null;
     completedOutputAssetId = null;
@@ -265,8 +347,10 @@
     if (selectedIndex >= 0) {
       if (lightboxIndex !== selectedIndex) lightboxIndex = selectedIndex;
     } else {
-      lightboxIndex = 0;
-      completedOutputAssetId = jobOutputs[0].id;
+      // The shown output was deleted: stay on its neighbour, like the history and gallery viewers.
+      const nextIndex = Math.min(lightboxIndex, jobOutputs.length - 1);
+      lightboxIndex = nextIndex;
+      completedOutputAssetId = jobOutputs[nextIndex].id;
     }
   });
 
@@ -310,7 +394,8 @@
         }
         // Hydrate model + defaults from backend for the current workflow.
         // preferredModel = URL-specified model (may be null).
-        draft.hydrateFromContext(ctx, urlParams.model ?? null);
+        // A saved draft keeps its settings across visits and restarts unless a URL names a model to reuse.
+        draft.hydrateFromContext(ctx, urlParams.model ?? null, { keepSettings: !urlParams.model });
 
         // Re-apply remaining URL params on top of the backend defaults so that
         // explicit URL values (prompt, steps, ratio, etc.) take precedence.
@@ -340,8 +425,12 @@
     // Keyboard shortcut ⌘↵ / Ctrl↵
     function handleKeydown(e: KeyboardEvent): void {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        // The full-screen viewer covers the form; generating behind it would be a surprise.
+        if (lightboxOpen) return;
         e.preventDefault();
-        formEl?.requestSubmit();
+        // Commit the focused field first, so a typed number settles on a valid step before validation.
+        (document.activeElement as HTMLElement | null)?.blur?.();
+        void tick().then(() => formEl?.requestSubmit());
       }
     }
     document.addEventListener('keydown', handleKeydown);
@@ -419,7 +508,15 @@
   }
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+{#snippet assetMeta(asset: GalleryAsset)}
+  <p class="latest-meta">
+    <span class="truncate" title={asset.prompt}>{asset.prompt || asset.filename}</span>
+    {#if asset.model}<b>{asset.model}</b>{/if}
+    {#if asset.width && asset.height}<b>{asset.width}×{asset.height}</b>{/if}
+    {#if asset.seed != null}<b>seed {asset.seed}</b>{/if}
+  </p>
+{/snippet}
+
 <form
   bind:this={formEl}
   class="flex min-h-0 flex-1 flex-col"
@@ -566,26 +663,23 @@
     </div>
   </div>
 
-  <!-- Main 3-column layout -->
-  <main class="workspace-layout min-h-0 flex-1 flex overflow-hidden">
-
-    <!-- Left: Controls Sidebar -->
+  <!-- Left column (Compose + Settings) and the stage with its history filmstrip -->
+  <main class="workspace-layout min-h-0 flex-1 overflow-hidden">
     <ControlsSidebar
       {context}
       {busy}
       {imageFile}
+      {referencePreviewUrl}
+      lastSeed={historyStore.assets[0]?.seed ?? null}
       onImageFileChange={(f) => { imageFile = f; }}
     />
 
-    <!-- Center: Canvas -->
-    <section class="workspace-preview relative z-0 flex min-w-0 flex-1 flex-col bg-bg-base">
+    <section class="workspace-preview relative z-0 flex min-h-0 min-w-0 flex-col bg-bg-base">
       <div class="panel-header flex h-10 shrink-0 items-center justify-between px-3">
         <h2 class="field-label">Preview</h2>
         <span class="text-xs text-text-muted">{jobStore.isRunning ? 'Generating…' : hasCompletedOutputs || historyStore.assets.length ? 'Latest output' : 'Ready'}</span>
       </div>
-      <div
-        class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden"
-      >
+      <div class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
         {#if loadError}
           <div class="flex flex-col items-center gap-3 text-center p-8">
             <MascotSpot mood={mascotMood} size={112} />
@@ -593,50 +687,59 @@
             <p class="text-zinc-500 text-xs mt-1">{loadError}</p>
           </div>
         {:else if hasCompletedOutputs}
-          <div class="completed-output-region h-full w-full min-w-0 overflow-y-auto p-4">
-            <div class="mb-3 flex items-center justify-between gap-3">
+          <div class="completed-output-region flex h-full w-full min-w-0 flex-col p-4">
+            <div class="mb-3 flex shrink-0 items-center justify-between gap-3">
               <div class="flex items-center gap-2">
                 <MascotSpot mood={mascotMood} size={48} />
                 <h3 class="text-xs font-medium text-text-secondary">Completed outputs</h3>
               </div>
               <span class="text-xs text-text-muted">{jobOutputs.length}</span>
             </div>
-            <div class="completed-output-grid grid min-w-0 gap-3">
-              {#each jobOutputs as output, index (output.id)}
-                <article class="surface-card min-w-0 overflow-hidden rounded-md">
-                  <button
-                    type="button"
-                    class="block w-full focus-visible:focus-ring"
-                    aria-label="View {output.filename} fullscreen"
-                    onclick={(event) => openCompletedOutputViewer(index, event.currentTarget)}
-                  >
-                    <span class="sr-only">Open fullscreen</span>
-                    {#if output.media_type === 'video'}
-                      <video
-                        src={output.thumbnail_url || output.url}
-                        muted
-                        preload="metadata"
-                        class="aspect-square w-full object-contain"
-                      ></video>
-                    {:else}
-                      <img
-                        src={output.thumbnail_url || output.url}
-                        alt={output.filename}
-                        loading={index === 0 ? 'eager' : 'lazy'}
-                        class="aspect-square w-full object-contain"
-                      >
-                    {/if}
-                  </button>
-                  <a
-                    href={output.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="surface-link-muted block truncate px-3 py-2 text-xs"
-                    title={output.filename}
-                  >Open {output.filename}</a>
-                </article>
-              {/each}
-            </div>
+            {#if jobOutputs.length === 1}
+              {@const output = jobOutputs[0]}
+              <div class="latest-region flex min-h-0 flex-1 flex-col px-16">
+                <AssetTile
+                  asset={output}
+                  density="stage"
+                  eager
+                  deleting={deletingIds.has(output.id)}
+                  class="completed-output min-h-0 flex-1"
+                  onpreview={openOutputViewer}
+                  onreuse={reuseAsset}
+                  onreference={useAsReference}
+                  {referenceUnavailable}
+                  ondelete={deleteWorkspaceAsset}
+                />
+                {@render assetMeta(output)}
+              </div>
+            {:else}
+              <!-- Centred while the outputs fit; once they overflow, the auto margins collapse and the grid scrolls from the top. -->
+              <div
+                class="completed-output-scroll min-h-0 flex-1 overflow-y-auto"
+                bind:clientWidth={outputAreaWidth}
+                bind:clientHeight={outputAreaHeight}
+              >
+                <div
+                  class="completed-output-grid"
+                  style="grid-template-columns: repeat({outputGrid.columns}, {outputGrid.cellSize}px); grid-auto-rows: {outputGrid.cellSize}px; gap: {OUTPUT_GAP_PX}px"
+                >
+                  {#each jobOutputs as output, index (output.id)}
+                    <AssetTile
+                      asset={output}
+                      density="stage"
+                      eager={index === 0}
+                      deleting={deletingIds.has(output.id)}
+                      class="completed-output"
+                      onpreview={openOutputViewer}
+                      onreuse={reuseAsset}
+                      onreference={useAsReference}
+                  {referenceUnavailable}
+                      ondelete={deleteWorkspaceAsset}
+                    />
+                  {/each}
+                </div>
+              </div>
+            {/if}
           </div>
         {:else if jobStore.current && (jobStore.isRunning || jobOutputs.length > 0)}
           <div class="h-full w-full overflow-y-auto p-6">
@@ -655,27 +758,22 @@
           </div>
         {:else if latestAsset}
           {@const latest = latestAsset}
-          {@const markLoaded = () => { loadedLatestUrl = latest.url; }}
           <!-- Side padding keeps wide media clear of the docked mascot. -->
-          <div class="w-full h-full flex items-center justify-center px-20 py-4">
-            {#if latest.media_type === 'video'}
-              <video
-                src={latest.url}
-                controls
-                muted
-                preload="metadata"
-                class="max-w-full max-h-full object-contain rounded"
-              ></video>
-            {:else}
-              <img
-                src={latest.url}
-                alt={latest.prompt}
-                class="latest-media max-w-full max-h-full object-contain rounded"
-                class:loaded={!latestLoading}
-                onload={markLoaded}
-                onerror={markLoaded}
-              >
-            {/if}
+          <div class="latest-region flex h-full w-full flex-col px-20 py-4">
+            <AssetTile
+              asset={latest}
+              density="stage"
+              eager
+              deleting={deletingIds.has(latest.id)}
+              class="latest-media min-h-0 flex-1 {latestLoading ? '' : 'loaded'}"
+              onmediaload={() => { loadedLatestUrl = latest.url; }}
+              onpreview={openHistoryViewer}
+              onreuse={reuseAsset}
+              onreference={useAsReference}
+              {referenceUnavailable}
+              ondelete={deleteWorkspaceAsset}
+            />
+            {@render assetMeta(latest)}
           </div>
           {#if latestLoading}
             <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-4" data-testid="latest-loading">
@@ -702,35 +800,47 @@
           </div>
         {/if}
       </div>
-    </section>
 
-    <!-- Right: History pane -->
-    <HistoryPane assets={historyStore.assets} loading={historyStore.loading} onopen={openHistoryViewer} />
+      <HistoryStrip
+        assets={historyStore.assets}
+        loading={historyStore.loading}
+        {deletingIds}
+        onpreview={openHistoryViewer}
+        onreuse={reuseAsset}
+        onreference={useAsReference}
+        {referenceUnavailable}
+        ondelete={deleteWorkspaceAsset}
+      />
+    </section>
   </main>
 </form>
 
-<!-- Workspace viewer lightbox (history and completed-output navigation) -->
-<Lightbox
+<!-- One viewer for history and completed outputs -->
+<AssetViewer
   assets={lightboxAssets}
   currentIndex={lightboxIndex}
   open={lightboxOpen}
+  setLabel={lightboxMode === 'completed-output' ? 'This run' : 'History'}
+  {deletingIds}
   onclose={closeLightbox}
   onnavigate={navigateLightbox}
+  onreuse={reuseAsset}
+  onreference={useAsReference}
+  {referenceUnavailable}
+  ondelete={deleteWorkspaceAsset}
 />
 
 <style>
+  .workspace-layout { display: grid; grid-template-columns: 360px minmax(0, 1fr); }
   @media (max-width: 639px) {
-    .workspace-layout { flex-direction: column; overflow-y: auto; }
-    .workspace-preview { flex: none; min-height: 320px; }
+    .workspace-layout { display: flex; flex-direction: column; overflow-y: auto; }
+    .workspace-preview { flex: none; min-height: 420px; }
   }
-  .completed-output-region { container-type: inline-size; }
-  .latest-media { opacity: 0; transition: opacity 250ms ease; }
-  .latest-media.loaded { opacity: 1; }
-  .completed-output-grid { grid-template-columns: minmax(0, 1fr); }
-  @container (min-width: 640px) {
-    .completed-output-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
-  @container (min-width: 1024px) {
-    .completed-output-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  }
+  .latest-region :global(.latest-media) { opacity: 0; transition: opacity 250ms ease; }
+  .latest-region :global(.latest-media.loaded) { opacity: 1; }
+  .latest-meta { display: flex; flex: none; align-items: center; justify-content: center; gap: 14px; min-width: 0; padding-top: 8px; font-size: 12px; color: var(--color-text-muted); }
+  .latest-meta span { max-width: 520px; color: var(--color-text-secondary); }
+  .latest-meta b { flex: none; font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--color-text-secondary); }
+  .completed-output-scroll { display: flex; flex-direction: column; }
+  .completed-output-grid { display: grid; justify-content: center; margin-block: auto; }
 </style>

@@ -104,6 +104,8 @@ By default, the Web UI listens on `http://127.0.0.1:8080/` and opens your browse
 
 While a generation is running, the Web UI keeps the active job attached to the current browser tab. Refreshing the tab reconnects to the running job when the server still has it, and stale completed or missing jobs are cleared automatically. Job controls are shown only when the running job supports them.
 
+Workspace settings are remembered in the browser between visits and restarts, as long as the Web UI starts on the same port. Choosing a different model applies that model's defaults.
+
 The workspace model picker and the Models page show whether each model is already downloaded; models that are not yet downloaded download on first use. On macOS they also show whether a downloaded model fits this Mac's memory, compared with the GPU memory Apple recommends for the machine:
 
 - **Fits**: the estimate is at most 1.1 times the recommendation.

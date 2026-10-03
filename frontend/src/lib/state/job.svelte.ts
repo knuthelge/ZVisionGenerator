@@ -111,10 +111,14 @@ function isReplayedBeforeSnapshot(event: Record<string, unknown>): boolean {
   return _previewEventFloor > 0 && eventFieldNumber(event, 'event_id') <= _previewEventFloor;
 }
 
+// Outputs the user deleted during this job; later events (e.g. the terminal output list) must not bring them back.
+const _removedOutputIds = new Set<string>();
+
+/** Drop duplicate outputs and outputs the user deleted. */
 function dedupeOutputs(outputs: GalleryAsset[]): GalleryAsset[] {
   const seen = new Set<string>();
   return outputs.filter((output) => {
-    if (seen.has(output.id)) return false;
+    if (seen.has(output.id) || _removedOutputIds.has(output.id)) return false;
     seen.add(output.id);
     return true;
   });
@@ -185,7 +189,7 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     paused: isPaused,
     message: isPaused ? 'Job paused. Resume to continue.' : (statusMessage || 'Reconnected to active job.'),
     ...promptProgress(lastEvent),
-    outputs: snapshot.outputs ?? [],
+    outputs: dedupeOutputs(snapshot.outputs ?? []),
     previewUrl: previewUrlFor(snapshot.job_id ?? snapshot.id, snapshot.preview_version)
   };
 }
@@ -337,7 +341,7 @@ function attachJobEvents(jobId: string): void {
 function finishCompleted(outputs: unknown): void {
   if (!_job) return;
   const terminalOutputs = validTerminalOutputs(outputs);
-  _job = { ..._job, status: 'completed', paused: false, outputs: terminalOutputs ?? dedupeOutputs(_job.outputs), message: 'Job completed.' };
+  _job = { ..._job, status: 'completed', paused: false, outputs: dedupeOutputs(terminalOutputs ?? _job.outputs), message: 'Job completed.' };
   clearActiveJobId(_job.job_id);
   notifyLifecycle('onComplete', _job.outputs);
 }
@@ -431,8 +435,15 @@ export const jobStore = {
     };
   },
 
+  /** Remove deleted assets from the current job's outputs. */
+  removeOutputs(ids: Iterable<string>): void {
+    for (const id of ids) _removedOutputIds.add(id);
+    if (_job) _job = { ..._job, outputs: dedupeOutputs(_job.outputs) };
+  },
+
   startJob(ctx: JobContext): void {
     cancelRecovery();
+    _removedOutputIds.clear();
     _job = makeInitialJobState(ctx);
     _previewEventFloor = 0;
     writeActiveJobId(ctx.job_id);

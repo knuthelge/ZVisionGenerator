@@ -191,6 +191,11 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "size": asset.size,
         "frame_count": asset.frame_count,
         "image_path": asset.reference_image_path,
+        "file_path": asset.filesystem_path,
+        "seed": asset.seed,
+        "steps": asset.steps,
+        "guidance": asset.guidance,
+        "lora": asset.lora,
         "media_type": asset.kind,
         "has_reusable_config": asset.has_reusable_config,
         "reuse_state": {

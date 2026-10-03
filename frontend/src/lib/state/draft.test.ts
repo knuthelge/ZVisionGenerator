@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { draft } from './draft.svelte';
+import { draft, offeredSizes, settingDefaultsFor } from './draft.svelte';
 import type { WorkspaceContext, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -532,5 +532,123 @@ describe('draft store – prompt enhancer fields', () => {
     expect(draft.state.enhancedFrom).toEqual({ prompt: 'a fox', mode: 'image' });
     expect(draft.state.enhanceAuto).toBe(false);
     expect(draft.state.enhanceSettings).toBeNull();
+  });
+});
+
+describe('settingDefaultsFor', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  it('returns the model defaults that resetSelections would apply, without touching the draft', () => {
+    const ctx = makeContext();
+    draft.hydrateFromContext(ctx);
+    draft.patch({ steps: 42, seed: 7, guidance: 9 });
+
+    const defaults = settingDefaultsFor(ctx, draft.state);
+
+    expect(defaults).toMatchObject({ steps: 10, guidance: 3.5, seed: null, runs: 1, ratio: '2:3', size: 'm' });
+    expect(draft.state.steps).toBe(42);
+    draft.resetSelections(ctx);
+    expect(draft.state).toMatchObject({ steps: defaults.steps, guidance: defaults.guidance, seed: defaults.seed });
+  });
+
+  it('uses the video defaults for video workflows', () => {
+    const ctx = makeContext();
+    draft.update('workflow', 'txt2vid');
+    draft.hydrateFromContext(ctx);
+
+    expect(settingDefaultsFor(ctx, draft.state)).toMatchObject({ steps: 8, frameCount: 97, audio: true, lowMemory: true });
+  });
+});
+
+describe('draft settings persistence', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  it('keeps saved settings when the workspace reloads for the same model', () => {
+    const ctx = makeContext();
+    draft.hydrateFromContext(ctx);
+    draft.patch({ steps: 2, guidance: 1.2, runs: 40, ratio: '16:9', size: 'l', promptSource: 'file' });
+
+    draft.loadDraft();
+    draft.hydrateFromContext(ctx, null, { keepSettings: true });
+
+    expect(draft.state).toMatchObject({ steps: 2, guidance: 1.2, runs: 40, ratio: '16:9', size: 'l', promptSource: 'file' });
+  });
+
+  it('applies the new model defaults when the model changes', () => {
+    const ctx = makeContext({
+      image_models: [{ id: 'flux-dev', label: 'FLUX Dev', type: 'image' }, { id: 'other', label: 'Other', type: 'image' }],
+      image_model_defaults: { 'flux-dev': makeImageDefaults(), other: makeImageDefaults({ steps: 30 }) },
+    });
+    draft.hydrateFromContext(ctx);
+    draft.update('steps', 2);
+
+    draft.hydrateFromContext(ctx, 'other', { keepSettings: true });
+
+    expect(draft.state.steps).toBe(30);
+  });
+
+  it('falls back to the default size when a saved preset no longer exists', () => {
+    const ctx = makeContext();
+    draft.hydrateFromContext(ctx);
+    draft.patch({ steps: 2, ratio: '21:9', size: 'xl' });
+
+    draft.hydrateFromContext(ctx, null, { keepSettings: true });
+
+    expect(draft.state).toMatchObject({ steps: 2, ratio: '2:3', size: 'm' });
+  });
+
+  it('keeps settings when switching between workflows of the same mode', () => {
+    const ctx = makeContext();
+    draft.hydrateFromContext(ctx);
+    draft.patch({ steps: 3, guidance: 2 });
+
+    draft.onWorkflowChange('img2img', ctx);
+
+    expect(draft.state).toMatchObject({ workflow: 'img2img', steps: 3, guidance: 2 });
+  });
+
+  it('switches reused assets back to their preset unless their size was custom', () => {
+    const ctx = makeContext();
+    draft.hydrateFromContext(ctx);
+    draft.patch({ dimensionMode: 'custom', width: 1000, height: 1000 });
+
+    draft.loadFromUrl({ ratio: '1:1', size: 'm', width: '1024', height: '1024' }, ctx);
+    expect(draft.state.dimensionMode).toBe('ratio');
+
+    draft.loadFromUrl({ ratio: '1:1', size: 'custom', width: '640', height: '480' }, ctx);
+    expect(draft.state.dimensionMode).toBe('custom');
+  });
+
+  it('keeps a custom size across reloads', () => {
+    const ctx = makeContext();
+    draft.hydrateFromContext(ctx);
+    draft.loadFromUrl({ ratio: '1:1', size: 'custom', width: '640', height: '480' }, ctx);
+
+    draft.hydrateFromContext(ctx, null, { keepSettings: true });
+
+    expect(draft.state).toMatchObject({ dimensionMode: 'custom', width: 640, height: 480 });
+  });
+});
+
+describe('offeredSizes', () => {
+  it('leaves out image presets beyond the model dimension limit', () => {
+    const constrained = makeImageDefaults({ dimension_max: 1024 });
+    const ctx = makeContext({
+      defaults: constrained,
+      image_model_defaults: { 'flux-dev': constrained },
+      image_size_options: { '16:9': ['m', 'l'] },
+      image_size_dimensions: { '16:9': { m: [1024, 576], l: [1344, 768] } },
+    });
+    expect(offeredSizes(ctx, 'txt2img', 'flux-dev', '16:9')).toEqual(['m']);
+  });
+
+  it('offers every video preset for the ratio', () => {
+    expect(offeredSizes(makeContext(), 'txt2vid', 'ltx-v-0.9', '16:9')).toEqual(['s', 'm']);
   });
 });

@@ -31,6 +31,12 @@ export interface GalleryAsset {
   size?: string | null;
   frame_count?: number | null;
   image_path?: string | null;
+  /** Absolute path of the asset file on the host; lets the asset become a reference image. */
+  file_path?: string;
+  seed?: number | null;
+  steps?: number | null;
+  guidance?: number | null;
+  lora?: string | null;
   duration?: number;
   reuse_workspace_url: string; // hash URL: '#/workspace?workflow=...&prompt=...'
   has_reusable_config?: boolean;
@@ -92,6 +98,8 @@ export interface WorkspaceContext {
   image_size_options: Record<string, string[]>;
   video_size_options: Record<string, string[]>;
   image_size_dimensions: Record<string, Record<string, [number, number]>>;
+  /** Resolved [width, height] per video ratio/size preset. */
+  video_size_dimensions?: Record<string, Record<string, [number, number]>>;
   scheduler_options: string[];
   prompt_sources: PromptSource[];
   default_prompt_source: PromptSource;
@@ -335,6 +343,8 @@ export interface DraftState {
   promptFileOptionIds: string[];
   model: string;
   ratio: string;
+  /** `ratio`: submit the ratio/size preset. `custom`: submit width/height. */
+  dimensionMode: 'ratio' | 'custom';
   size: string;
   steps: number;
   guidance: number;

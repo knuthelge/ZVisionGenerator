@@ -120,6 +120,65 @@
 }
 
 @layer components {
+  /* Prompt box shared by the inline prompt and the prompt-file box in Compose. */
+  .prompt-box {
+    border: 1px solid var(--color-zinc-700);
+    border-radius: var(--radius-md);
+    background: var(--color-zinc-900);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .prompt-box:focus-within {
+    border-color: var(--color-primary-main);
+    box-shadow: 0 0 0 2px var(--color-bg-base), 0 0 0 4px var(--color-primary-main);
+  }
+
+  .prompt-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 6px;
+    border-top: 1px solid var(--color-border-subtle);
+  }
+
+  .prompt-tool {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 26px;
+    padding: 0 9px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 9999px;
+    background: var(--color-bg-surface);
+    font-family: var(--font-display);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+  }
+
+  .prompt-tool:hover:not(:disabled) {
+    border-color: color-mix(in srgb, var(--color-primary-main) 45%, var(--color-border-strong));
+    color: var(--color-text-primary);
+  }
+
+  .prompt-tool[aria-pressed='true'],
+  .prompt-tool[aria-expanded='true'] {
+    border-color: color-mix(in srgb, var(--color-primary-main) 45%, var(--color-border-strong));
+    background: color-mix(in srgb, var(--color-primary-main) 10%, var(--color-bg-surface));
+    color: var(--color-primary-main);
+  }
+
+  .prompt-tool:focus-visible {
+    outline: 2px solid var(--color-primary-main);
+    outline-offset: 1px;
+  }
+
+  .prompt-tool:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   .focus-ring {
     outline: 2px solid transparent !important;
     box-shadow: 0 0 0 2px var(--color-bg-base), 0 0 0 4px var(--color-primary-main) !important;
@@ -174,9 +233,6 @@
     color: var(--color-text-primary);
   }
 
-  .surface-warning-icon {
-    color: var(--color-warning);
-  }
 
   .panel-shell {
     background-color: var(--color-bg-base);
@@ -509,13 +565,14 @@
     color: #fff;
   }
 
+  /* Dark ink on teal: white on teal fails contrast (3:1). */
   .surface-overlay-action-primary {
-    background-color: color-mix(in srgb, var(--color-primary-main) 76%, black 12%);
-    color: #fff;
+    background-color: var(--color-primary-main);
+    color: var(--color-primary-ink);
   }
 
   .surface-overlay-action-primary:hover {
-    background-color: var(--color-primary-main);
+    background-color: var(--color-primary-hover);
   }
 
   .surface-overlay-action-danger {

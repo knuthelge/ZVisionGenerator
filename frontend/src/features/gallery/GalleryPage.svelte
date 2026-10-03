@@ -3,9 +3,12 @@
   import { router } from '$lib/state/router.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
   import { getGallery, deleteAsset } from '$lib/api/gallery';
+  import { historyStore } from '$lib/state/history.svelte';
+  import { jobStore } from '$lib/state/job.svelte';
+  import { draft } from '$lib/state/draft.svelte';
+  import { referenceParams, reuseParams, type ReferenceTarget } from '$lib/state/assetActions';
   import type { GalleryAsset } from '$lib/types';
-  import ImageCard from '$lib/components/molecules/ImageCard.svelte';
-  import Lightbox from '$lib/components/molecules/Lightbox.svelte';
+  import { AssetTile, AssetViewer } from '$lib/components/molecules';
 
   let assets = $state<GalleryAsset[]>([]);
   let page = $state(1);
@@ -24,6 +27,7 @@
 
   let selectedAsset = $state<GalleryAsset | null>(null);
   let lightboxOpen = $state(false);
+  let viewerTrigger: HTMLElement | null = null;
 
   const selectedCount = $derived(selected.size);
   const deletableSelectedCount = $derived(
@@ -42,6 +46,10 @@
   let _mutationRevision = 0;
   let _pageOneRequestRevision = 0;
   const _successfullyDeletedIds = new Set<string>();
+  let _refillAfterViewer = false;
+  // Deletes since the last page load shift later server pages forward; the next load re-reads
+  // the last loaded page so the assets that moved onto it are not skipped.
+  let _pagesShifted = false;
 
   // Sentinel element for infinite scroll
   let sentinelEl = $state<HTMLDivElement | undefined>(undefined);
@@ -109,6 +117,8 @@
     preserveLocalOnError = false
   ): Promise<void> {
     const pageOneRequestRevision = ++_pageOneRequestRevision;
+    _refillAfterViewer = false;
+    _pagesShifted = false;
     pageOnePending = true;
     if (!preserveLocalOnError) loading = true;
     loadingMore = false;
@@ -133,6 +143,7 @@
         const found = assets.find((a) => a.id === _pendingSelected) ?? null;
         if (found) {
           selectedAsset = found;
+          lightboxOpen = true;
         } else {
           clearActiveAsset();
         }
@@ -166,7 +177,9 @@
     if (loading || loadingMore || pageOnePending || !hasMore) return;
     const viewGeneration = _viewGeneration;
     const mutationRevision = _mutationRevision;
-    const requestedPage = page + 1;
+    const rereadLastPage = _pagesShifted;
+    const expectedPage = page + 1;
+    const requestedPage = rereadLastPage ? page : expectedPage;
     const requestedFilter = mediaFilter;
     const requestedSort = sortOrder;
     loadingMore = true;
@@ -175,12 +188,14 @@
       if (!requestIsCurrent(viewGeneration, mutationRevision, requestedFilter, requestedSort)) return;
       // Page one can reset pagination depth without changing the query. Do not
       // append a response that would leave a gap in the current page sequence.
-      if (requestedPage !== page + 1) return;
+      if (expectedPage !== page + 1) return;
       const returnedDeletedAssets = result.assets.filter((asset) => _successfullyDeletedIds.has(asset.id));
+      const loadedIds = new Set(assets.map((asset) => asset.id));
       assets = [
         ...assets,
-        ...result.assets.filter((asset) => !_successfullyDeletedIds.has(asset.id))
+        ...result.assets.filter((asset) => !_successfullyDeletedIds.has(asset.id) && !loadedIds.has(asset.id))
       ];
+      if (rereadLastPage) _pagesShifted = false;
       page = result.page;
       totalPages = result.total_pages;
       const staleDeletedCount = returnedDeletedAssets.filter(
@@ -302,9 +317,16 @@
   function reconcileSuccessfulDeletes(targets: GalleryAsset[]): void {
     const newlyDeleted = targets.filter((asset) => !_successfullyDeletedIds.has(asset.id));
     if (newlyDeleted.length === 0) return;
+    const deletedIndex = selectedAsset ? Math.max(0, assets.findIndex((asset) => asset.id === selectedAsset!.id)) : 0;
     for (const asset of newlyDeleted) _successfullyDeletedIds.add(asset.id);
 
     const deletedIds = new Set(newlyDeleted.map((asset) => asset.id));
+    historyStore.removeAssets(deletedIds);
+    jobStore.removeOutputs(deletedIds);
+    // A workspace reference pointing at a deleted file would fail the next run.
+    if (newlyDeleted.some((asset) => asset.file_path && asset.file_path === draft.state.referenceImagePath)) {
+      draft.update('referenceImagePath', null);
+    }
     assets = assets.filter((asset) => !deletedIds.has(asset.id));
     const visibleIds = new Set(assets.map((asset) => asset.id));
     selected = new Set(
@@ -316,17 +338,30 @@
     ).length;
     totalCount = Math.max(0, totalCount - matchingCount);
 
+    // The viewer moves on to the neighbouring asset; with nothing left it closes.
     if (selectedAsset && deletedIds.has(selectedAsset.id)) {
-      clearActiveAsset();
+      const next = assets[Math.min(deletedIndex, assets.length - 1)] ?? null;
+      if (lightboxOpen && next) selectAsset(next);
+      else clearActiveAsset();
     }
 
     // A mutation invalidates every earlier replacement/pagination/refill. The
     // new refill deliberately captures the latest query, not the query at click time.
     _mutationRevision += 1;
     _viewGeneration += 1;
-    const filter = mediaFilter;
-    const sort = sortOrder;
-    void loadPageOne(filter, sort, _viewGeneration, _mutationRevision, false, true);
+    // Refilling replaces the list with page one, which would pull the viewer back off later pages.
+    // While the viewer is open the local removal stands, and the refill runs once it closes.
+    if (lightboxOpen) {
+      _refillAfterViewer = true;
+      _pagesShifted = true;
+      return;
+    }
+    refillAfterMutation();
+  }
+
+  function refillAfterMutation(): void {
+    _refillAfterViewer = false;
+    void loadPageOne(mediaFilter, sortOrder, _viewGeneration, _mutationRevision, false, true);
   }
 
   function selectAsset(asset: GalleryAsset): void {
@@ -334,39 +369,36 @@
     router.replace('gallery', { selected: asset.id });
   }
 
-  function openLightbox(): void {
+  function openViewer(asset: GalleryAsset, trigger: HTMLElement): void {
+    viewerTrigger = trigger;
+    selectAsset(asset);
     lightboxOpen = true;
   }
 
-  function closeLightbox(): void {
-    lightboxOpen = false;
+  function closeViewer(): void {
+    const trigger = viewerTrigger;
+    viewerTrigger = null;
+    clearActiveAsset();
+    if (_refillAfterViewer) {
+      _viewGeneration += 1;
+      refillAfterMutation();
+    }
+    queueMicrotask(() => { if (trigger?.isConnected) trigger.focus(); });
   }
 
-  function handleOpenLightbox(asset: GalleryAsset): void {
-    selectAsset(asset);
-    openLightbox();
-  }
-
-  function handleLightboxNavigate(index: number): void {
+  function handleViewerNavigate(index: number): void {
     const target = assets[index];
     if (target) selectAsset(target);
   }
 
+  // Navigate through the router so the WorkspacePage receives the params on mount.
+  // Setting window.location.hash directly bypasses the router and drops the params.
   function reuseInWorkspace(asset: GalleryAsset): void {
-    // Extract query params from the reuse URL and navigate via the router so
-    // the WorkspacePage receives them on mount. Setting window.location.hash
-    // directly bypasses the router and drops the params when the workspace tab
-    // is subsequently activated.
-    if (asset.reuse_workspace_url) {
-      const queryStr = asset.reuse_workspace_url.replace(/^#\/[^?]*\??/, '');
-      const params: Record<string, string> = {};
-      if (queryStr) {
-        new URLSearchParams(queryStr).forEach((v, k) => { params[k] = v; });
-      }
-      router.navigate('workspace', params);
-    } else {
-      router.navigate('workspace');
-    }
+    router.navigate('workspace', reuseParams(asset));
+  }
+
+  function useAsReference(asset: GalleryAsset, target: ReferenceTarget): void {
+    router.navigate('workspace', referenceParams(asset, target));
   }
 </script>
 
@@ -374,7 +406,7 @@
 
   <!-- Left: scrollable grid -->
   <section id="gallery-scroll-region" class="panel-scroll-surface custom-scrollbar min-w-0 flex-1 overflow-y-auto p-4">
-    <div class="max-w-7xl mx-auto">
+    <div class="mx-auto max-w-[120rem]">
       <!-- Header -->
       <div class="flex flex-wrap items-center justify-between mb-4 gap-3 border-b border-border-subtle pb-3">
         <div>
@@ -451,18 +483,17 @@
         </div>
       {:else}
         <!-- Grid -->
-        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
           {#each assets as asset (asset.id)}
-            {@const isSelected = selected.has(asset.id)}
-            {@const isActive = selectedAsset?.id === asset.id}
-            <ImageCard
+            <AssetTile
               {asset}
-              selected={isSelected}
-              active={isActive}
+              density="card"
+              selected={selected.has(asset.id)}
+              deleting={deletingIds.has(asset.id)}
               onselect={toggleSelect}
-              onactivate={selectAsset}
-              onopenlightbox={handleOpenLightbox}
+              onpreview={openViewer}
               onreuse={reuseInWorkspace}
+              onreference={useAsReference}
               ondelete={deleteSingle}
             />
           {/each}
@@ -492,155 +523,18 @@
     </div>
   </section>
 
-  <!-- Right: detail panel -->
-  <section id="gallery-details" class="panel-shell panel-shell-right custom-scrollbar relative hidden h-full w-80 flex-col overflow-y-auto sm:flex">
-    <div class="panel-header sticky top-0 z-10 flex items-center justify-between p-4 backdrop-blur">
-      <h3 class="text-sm font-semibold text-zinc-100">Asset Details</h3>
-      {#if selectedAsset}
-        <a
-          href={selectedAsset.url}
-          download={selectedAsset.filename}
-          class="surface-link-muted"
-          aria-label="Download selected asset"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-          </svg>
-        </a>
-      {/if}
-    </div>
-
-    <div class="p-4 space-y-6">
-      {#if selectedAsset}
-        <!-- Preview -->
-        <div class="surface-card aspect-square flex items-center justify-center overflow-hidden">
-          {#if selectedAsset.media_type === 'video'}
-            <video
-              src={selectedAsset.url}
-              controls
-              muted
-              preload="metadata"
-              class="w-full h-full object-contain"
-            ></video>
-          {:else}
-            <img
-              src={selectedAsset.url}
-              alt={selectedAsset.filename}
-              class="w-full h-full object-contain"
-            >
-          {/if}
-        </div>
-
-        <button
-          type="button"
-          class="surface-button-secondary w-full rounded-md px-3 py-2 text-sm"
-          onclick={openLightbox}
-        >Open Fullscreen Viewer</button>
-
-        <!-- Prompt -->
-        <div>
-          <h4 class="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Prompt</h4>
-          <div class="surface-card p-3 text-sm text-zinc-300 leading-relaxed font-mono">
-            {selectedAsset.prompt || '—'}
-          </div>
-        </div>
-
-        <!-- Info grid -->
-        <div>
-          <h4 class="block text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">Generation Info</h4>
-          <div class="grid grid-cols-2 gap-3 text-sm">
-            <div class="surface-card px-3 py-2">
-              <p class="text-[10px] text-zinc-500 uppercase font-semibold mb-1">Model</p>
-              <p class="text-zinc-200 truncate">{selectedAsset.model || '—'}</p>
-            </div>
-            <div class="surface-card px-3 py-2">
-              <p class="text-[10px] text-zinc-500 uppercase font-semibold mb-1">Type</p>
-              <p class="text-zinc-200 font-mono">{selectedAsset.media_type}</p>
-            </div>
-            {#if selectedAsset.width}
-              <div class="surface-card px-3 py-2">
-                <p class="text-[10px] text-zinc-500 uppercase font-semibold mb-1">Dimensions</p>
-                <p class="text-zinc-200 font-mono">{selectedAsset.width}×{selectedAsset.height}</p>
-              </div>
-            {/if}
-          </div>
-        </div>
-
-        <!-- Actions -->
-        <div class="space-y-2 border-t border-border-subtle pb-4 pt-4">
-          <!-- Reuse notice: shown when backend metadata reports reuse availability reasons. -->
-          {#if selectedAsset.reuse_state?.fallback_reasons && selectedAsset.reuse_state.fallback_reasons.length > 0}
-            <div
-              class="surface-warning rounded-md border px-3 py-2 text-sm mb-3"
-              role="alert"
-            >
-              <p class="font-semibold text-zinc-100 flex items-center gap-2 mb-1">
-                <svg class="surface-warning-icon w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"></path>
-                </svg>
-                Reuse notice
-              </p>
-              <ul class="text-xs text-zinc-300 space-y-0.5 list-disc list-inside">
-                {#each selectedAsset.reuse_state.fallback_reasons as reason}
-                  <li>{reason}</li>
-                {/each}
-              </ul>
-            </div>
-          {/if}
-          {#if selectedAsset.has_reusable_config === true}
-            <button
-              type="button"
-              class="surface-button-primary w-full rounded-md py-2 font-medium shadow-sm transition flex items-center justify-center gap-2"
-              onclick={() => reuseInWorkspace(selectedAsset!)}
-            >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path>
-              </svg>
-              Reuse in Workspace
-            </button>
-          {:else}
-            <button
-              type="button"
-              class="surface-button-secondary w-full rounded-md py-2 font-medium opacity-70"
-              disabled
-            >Reusable settings unavailable</button>
-          {/if}
-          <a
-            href={selectedAsset.url}
-            download={selectedAsset.filename}
-            class="surface-button-secondary flex w-full items-center justify-center gap-2 rounded-md py-2 font-medium shadow-sm"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
-            </svg>
-            Download Full Asset
-          </a>
-          <button
-            type="button"
-            class="surface-button-danger flex w-full items-center justify-center gap-2 rounded-md py-2 font-medium"
-            disabled={deletingIds.has(selectedAsset.id)}
-            onclick={() => deleteSingle(selectedAsset!)}
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-            </svg>
-            {deletingIds.has(selectedAsset.id) ? 'Deleting…' : 'Delete'}
-          </button>
-        </div>
-      {:else}
-        <div class="surface-empty-state aspect-square flex items-center justify-center text-sm">
-          No asset selected
-        </div>
-      {/if}
-    </div>
-  </section>
 </div>
 
-<!-- Lightbox -->
-<Lightbox
+<AssetViewer
   {assets}
   currentIndex={viewerIndex}
-  open={lightboxOpen}
-  onclose={closeLightbox}
-  onnavigate={handleLightboxNavigate}
+  open={lightboxOpen && selectedAsset !== null}
+  setLabel="Gallery"
+  {deletingIds}
+  onclose={closeViewer}
+  onnavigate={handleViewerNavigate}
+  onnearend={() => { if (hasMore) void loadMorePages(); }}
+  onreuse={reuseInWorkspace}
+  onreference={useAsReference}
+  ondelete={deleteSingle}
 />

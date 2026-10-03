@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/inde
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { historyStore } from '$lib/state/history.svelte';
 import type { GalleryAsset, GalleryPage as GalleryPageResponse } from '$lib/types';
 
 const galleryApiMocks = vi.hoisted(() => ({
@@ -84,8 +85,9 @@ async function settle(): Promise<void> {
   flushSync();
 }
 
-function getSelectedAssetViewerButton(container: ParentNode): HTMLButtonElement | null {
-  return container.querySelector('#gallery-details button[type="button"]') as HTMLButtonElement | null;
+/** The open asset viewer, which is where the active asset's details now live. */
+function getViewer(): HTMLElement | null {
+  return document.querySelector('[data-testid="asset-viewer"]');
 }
 
 function queryButtonByName(container: ParentNode, name: string): HTMLButtonElement | null {
@@ -111,11 +113,11 @@ function selectAssetForBatch(container: ParentNode, asset: GalleryAsset): HTMLIn
 }
 
 function deleteAssetFromCard(container: ParentNode, asset: GalleryAsset): void {
-  const card = container.querySelector(`[aria-label="Asset: ${asset.filename}"]`) as HTMLElement | null;
-  expect(card).not.toBeNull();
-  card!.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+  const more = container.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement | null;
+  expect(more).not.toBeNull();
+  more!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   flushSync();
-  const button = container.querySelector(`button[aria-label="Delete ${asset.filename}"]`) as HTMLButtonElement | null;
+  const button = document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement | null;
   expect(button).not.toBeNull();
   button!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 }
@@ -132,6 +134,8 @@ beforeEach(() => {
   routerMocks.params = {};
   routerMocks.replace.mockReset();
   routerMocks.navigate.mockReset();
+  // Show the viewer's details panel, where the active asset's prompt and facts appear.
+  localStorage.setItem('ziv-viewer-details-v1', 'true');
   MockIntersectionObserver.instances = [];
   globalThis.IntersectionObserver = MockIntersectionObserver as unknown as typeof IntersectionObserver;
 });
@@ -158,7 +162,7 @@ describe('GalleryPage active detail selection behavior', () => {
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
 
-    const card = target.querySelector(`[aria-label="Asset: ${asset.filename}"]`) as HTMLElement | null;
+    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
     const checkbox = target.querySelector(`input[aria-label="Select ${asset.filename}"]`) as HTMLInputElement | null;
 
     expect(card).not.toBeNull();
@@ -185,7 +189,7 @@ describe('GalleryPage active detail selection behavior', () => {
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
 
-    const card = target.querySelector(`[aria-label="Asset: ${asset.filename}"]`) as HTMLElement | null;
+    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
     const checkbox = target.querySelector(`input[aria-label="Select ${asset.filename}"]`) as HTMLInputElement | null;
 
     expect(card).not.toBeNull();
@@ -253,11 +257,11 @@ describe('GalleryPage regressions', () => {
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
 
-    const card = target.querySelector(`[aria-label="Asset: ${asset.filename}"]`) as HTMLElement | null;
+    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
     card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    const reuseButton = queryButtonByName(target, 'Reuse in Workspace');
+    const reuseButton = (getViewer()?.querySelector('[data-action="reuse"]') as HTMLButtonElement | null);
     expect(reuseButton).not.toBeNull();
 
     reuseButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -268,6 +272,97 @@ describe('GalleryPage regressions', () => {
       model: 'zit',
       seed: '9876',
     });
+  });
+
+  it('sends an image to the workspace as a reference through router params', async () => {
+    const asset = makeAsset({ file_path: '/outputs/nested/asset.png' });
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+
+    (target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
+    flushSync();
+    (document.querySelector('[role="menu"] [data-action="reference-video"]') as HTMLButtonElement).click();
+
+    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', { workflow: 'img2vid', image_path: '/outputs/nested/asset.png' });
+  });
+
+  it('removes a deleted asset from the workspace history too', async () => {
+    const asset = makeAsset();
+    historyStore.seedHistory([asset]);
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
+    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    deleteAssetFromCard(target, asset);
+    await settle();
+
+    expect(historyStore.assets).toEqual([]);
+    vi.restoreAllMocks();
+  });
+
+  it('keeps the viewer on later pages after a delete and refills once it closes', async () => {
+    const pageOne = [makeAsset({ id: 'p1.png', filename: 'p1.png' })];
+    const pageTwo = [makeAsset({ id: 'p2a.png', filename: 'p2a.png' }), makeAsset({ id: 'p2b.png', filename: 'p2b.png' })];
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce({ assets: pageOne, page: 1, total_pages: 2, total_count: 3 })
+      .mockResolvedValueOnce({ assets: pageTwo, page: 2, total_pages: 2, total_count: 3 })
+      .mockResolvedValue({ assets: pageOne, page: 1, total_pages: 2, total_count: 2 });
+    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    MockIntersectionObserver.instances.at(-1)?.trigger(true);
+    await settle();
+    (target.querySelector('button[aria-label="View p2a.png"]') as HTMLButtonElement).click();
+    await settle();
+
+    (getViewer()!.querySelector('[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+
+    expect(getViewer()?.textContent).toContain('p2b.png');
+    expect(galleryApiMocks.getGallery).toHaveBeenCalledTimes(2);
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(getViewer()).toBeNull();
+    expect(galleryApiMocks.getGallery).toHaveBeenCalledTimes(3);
+    expect(galleryApiMocks.getGallery).toHaveBeenLastCalledWith(1, 'all', 'newest');
+    vi.restoreAllMocks();
+  });
+
+  it('keeps paging in the viewer after a delete without skipping shifted assets', async () => {
+    const [a, b, c, d, e, f, g] = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((name) => makeAsset({ id: `${name}.png`, filename: `${name}.png` }));
+    galleryApiMocks.getGallery
+      .mockResolvedValueOnce({ assets: [a, b, c, d, e], page: 1, total_pages: 2, total_count: 7 })
+      // After deleting a, the server's page one starts at b and pulls f forward from page two.
+      .mockResolvedValueOnce({ assets: [b, c, d, e, f], page: 1, total_pages: 2, total_count: 6 })
+      .mockResolvedValueOnce({ assets: [g], page: 2, total_pages: 2, total_count: 6 });
+    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const press = async (key: string): Promise<void> => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+      await settle();
+    };
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    (target.querySelector('button[aria-label="View a.png"]') as HTMLButtonElement).click();
+    await settle();
+    (getViewer()!.querySelector('[data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    for (let step = 0; step < 4; step += 1) await press('ArrowRight');
+
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'all', 'newest');
+    expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 2, 'all', 'newest');
+    expect(Array.from(document.querySelectorAll('[data-film-index]')).map((el) => el.getAttribute('aria-label'))).toEqual(
+      ['b', 'c', 'd', 'e', 'f', 'g'].map((name) => `Show ${name}.png`)
+    );
+    vi.restoreAllMocks();
   });
 
   it('shows a recovery action when the current filter has no results', async () => {
@@ -339,7 +434,7 @@ describe('GalleryPage regressions', () => {
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
 
-    const card = target.querySelector(`[aria-label="Asset: ${asset.filename}"]`) as HTMLElement | null;
+    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
     card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
@@ -399,14 +494,13 @@ describe('GalleryPage regressions', () => {
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
 
-    const card = target.querySelector(`[aria-label="Asset: ${asset.filename}"]`) as HTMLElement | null;
+    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
     card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    const alert = target.querySelector('[role="alert"]');
-    expect(alert).not.toBeNull();
-    expect(alert?.textContent).toContain('workflow_media_mismatch');
-    expect(alert?.textContent).toContain('model_not_configured');
+    const notice = getViewer()?.querySelector('[role="note"]');
+    expect(notice).not.toBeNull();
+    expect(notice?.querySelectorAll('li')).toHaveLength(2);
   });
 
   it('shows a display prompt without offering reuse when embedded config is missing', async () => {
@@ -435,16 +529,14 @@ describe('GalleryPage regressions', () => {
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
 
-    const card = target.querySelector(`[aria-label="Asset: ${asset.filename}"]`) as HTMLElement | null;
+    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
     card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    expect(target.querySelector('[role="alert"]')).toBeNull();
-    expect(target.textContent).toContain('Unavailable');
-    expect(target.textContent).toContain('Display-only prompt');
-    expect(target.textContent).toContain('Reusable settings unavailable');
-
-    expect(queryButtonByName(target, 'Reuse in Workspace')).toBeNull();
+    expect(getViewer()?.querySelector('[role="note"]')).toBeNull();
+    expect(getViewer()?.textContent).toContain('Unavailable');
+    expect(getViewer()?.textContent).toContain('Display-only prompt');
+    expect((getViewer()?.querySelector('[data-action="reuse"]') as HTMLButtonElement | null)?.disabled).toBe(true);
     expect(routerMocks.navigate).not.toHaveBeenCalled();
   });
 
@@ -460,13 +552,12 @@ describe('GalleryPage regressions', () => {
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
 
-    const card = target.querySelector(`[aria-label="Asset: ${asset.filename}"]`) as HTMLElement | null;
+    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
     card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    const openButton = getSelectedAssetViewerButton(target);
+    const openButton = getViewer();
     expect(openButton).not.toBeNull();
-    openButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
@@ -493,13 +584,12 @@ describe('GalleryPage lightbox navigation (REC-UX-003)', () => {
     await settle();
 
     // Select first asset and open lightbox
-    const cardA = target.querySelector(`[aria-label="Asset: ${assetA.filename}"]`) as HTMLElement | null;
+    const cardA = target.querySelector(`button[aria-label="View ${assetA.filename}"]`) as HTMLElement | null;
     cardA!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    const openBtn = getSelectedAssetViewerButton(target);
+    const openBtn = getViewer();
     expect(openBtn).not.toBeNull();
-    openBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     // First asset: Prev rendered but disabled, Next rendered and enabled
@@ -524,15 +614,14 @@ describe('GalleryPage lightbox navigation (REC-UX-003)', () => {
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
 
-    const cardA = target.querySelector(`[aria-label="Asset: ${assetA.filename}"]`) as HTMLElement | null;
+    const cardA = target.querySelector(`button[aria-label="View ${assetA.filename}"]`) as HTMLElement | null;
     cardA!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     routerMocks.replace.mockReset();
 
-    const openBtn = getSelectedAssetViewerButton(target);
+    const openBtn = getViewer();
     expect(openBtn).not.toBeNull();
-    openBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     const nextBtn = document.querySelector('button[aria-label="Next asset"]') as HTMLButtonElement | null;
@@ -557,15 +646,14 @@ describe('GalleryPage lightbox navigation (REC-UX-003)', () => {
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
 
-    const cardA = target.querySelector(`[aria-label="Asset: ${assetA.filename}"]`) as HTMLElement | null;
+    const cardA = target.querySelector(`button[aria-label="View ${assetA.filename}"]`) as HTMLElement | null;
     cardA!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     routerMocks.replace.mockReset();
 
-    const openBtn = getSelectedAssetViewerButton(target);
+    const openBtn = getViewer();
     expect(openBtn).not.toBeNull();
-    openBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
@@ -588,15 +676,14 @@ describe('GalleryPage lightbox navigation (REC-UX-003)', () => {
     await settle();
 
     // Select second asset first
-    const cardB = target.querySelector(`[aria-label="Asset: ${assetB.filename}"]`) as HTMLElement | null;
+    const cardB = target.querySelector(`button[aria-label="View ${assetB.filename}"]`) as HTMLElement | null;
     cardB!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     routerMocks.replace.mockReset();
 
-    const openBtn = getSelectedAssetViewerButton(target);
+    const openBtn = getViewer();
     expect(openBtn).not.toBeNull();
-    openBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
@@ -620,13 +707,12 @@ describe('GalleryPage lightbox navigation (REC-UX-003)', () => {
     await settle();
 
     // Open lightbox on asset B (middle)
-    const cardB = target.querySelector(`[aria-label="Asset: ${assetB.filename}"]`) as HTMLElement | null;
+    const cardB = target.querySelector(`button[aria-label="View ${assetB.filename}"]`) as HTMLElement | null;
     cardB!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    const openBtn = getSelectedAssetViewerButton(target);
+    const openBtn = getViewer();
     expect(openBtn).not.toBeNull();
-    openBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     expect(document.querySelector('button[aria-label="Previous asset"]')).not.toBeNull();
@@ -647,13 +733,12 @@ describe('GalleryPage lightbox navigation (REC-UX-003)', () => {
     await settle();
 
     // Open lightbox on last asset
-    const cardB = target.querySelector(`[aria-label="Asset: ${assetB.filename}"]`) as HTMLElement | null;
+    const cardB = target.querySelector(`button[aria-label="View ${assetB.filename}"]`) as HTMLElement | null;
     cardB!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    const openBtn = getSelectedAssetViewerButton(target);
+    const openBtn = getViewer();
     expect(openBtn).not.toBeNull();
-    openBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     const prevBtnLast = document.querySelector('button[aria-label="Previous asset"]') as HTMLButtonElement | null;
@@ -757,7 +842,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
 
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
-    const cardA = target.querySelector(`[aria-label="Asset: ${assetA.filename}"]`) as HTMLElement;
+    const cardA = target.querySelector(`button[aria-label="View ${assetA.filename}"]`) as HTMLElement;
     cardA.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     selectAssetForBatch(target, assetA);
@@ -781,12 +866,13 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     expect(target.textContent).toContain('c.png');
     expect(target.textContent).toContain('Browsing 2 loaded assets of 2');
     expect(target.textContent).toContain('2 selected');
-    expect(target.querySelector('#gallery-details')?.textContent).toContain('No asset selected');
+    // The viewer moves on to the neighbouring asset instead of closing.
+    expect(getViewer()?.textContent).toContain('b.png');
     expect(queryButtonByName(target, 'Delete Selected')?.disabled).toBe(false);
     expect(toastMocks.addToast).toHaveBeenCalledWith('Deleted 1; 1 failed and remain selected for retry.', 'warning');
   });
 
-  it('removes only successful originals, clears active detail on success, and reports a full success', async () => {
+  it('removes only successful originals, moves the viewer past them, and reports a full success', async () => {
     const assetA = makeAsset({ id: 'a.png', filename: 'a.png' });
     const assetB = makeAsset({ id: 'b.png', filename: 'b.png' });
     const assetC = makeAsset({ id: 'c.png', filename: 'c.png' });
@@ -797,7 +883,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
 
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
-    (target.querySelector(`[aria-label="Asset: ${assetA.filename}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    (target.querySelector(`button[aria-label="View ${assetA.filename}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     selectAssetForBatch(target, assetA);
     selectAssetForBatch(target, assetB);
@@ -813,7 +899,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     expect(target.textContent).toContain('c.png');
     expect(target.textContent).toContain('Browsing 1 loaded asset of 1');
     expect(target.textContent).toContain('1 selected');
-    expect(target.querySelector('#gallery-details')?.textContent).toContain('No asset selected');
+    expect(getViewer()?.textContent).toContain('c.png');
     expect(toastMocks.addToast).toHaveBeenCalledWith('Deleted 2 selected assets.', 'success');
   });
 
@@ -825,7 +911,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
 
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
-    (target.querySelector(`[aria-label="Asset: ${assetB.filename}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    (target.querySelector(`button[aria-label="View ${assetB.filename}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     selectAssetForBatch(target, assetA);
     selectAssetForBatch(target, assetB);
@@ -836,7 +922,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     expect(target.textContent).toContain('b.png');
     expect(target.textContent).toContain('Browsing 2 loaded assets of 2');
     expect(target.textContent).toContain('2 selected');
-    expect(target.querySelector('#gallery-details')?.textContent).toContain('active failed asset');
+    expect(getViewer()?.textContent).toContain('active failed asset');
     expect(queryButtonByName(target, 'Delete Selected')?.disabled).toBe(false);
     expect(toastMocks.addToast).toHaveBeenCalledWith('Delete failed for 2 selected assets; they remain selected for retry.', 'error');
   });
@@ -860,11 +946,10 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
     selectAssetForBatch(target, image);
-    (target.querySelector(`[aria-label="Asset: ${image.filename}"]`) as HTMLElement).dispatchEvent(
+    (target.querySelector(`button[aria-label="View ${image.filename}"]`) as HTMLElement).dispatchEvent(
       new MouseEvent('click', { bubbles: true })
     );
     await settle();
-    getSelectedAssetViewerButton(target)!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
 
@@ -878,7 +963,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'video', 'newest');
     expect(routerMocks.replace).toHaveBeenCalledWith('gallery', {});
     expect(target.textContent).toContain('0 selected');
-    expect(target.querySelector('#gallery-details')?.textContent).toContain('No asset selected');
+    expect(getViewer()).toBeNull();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
 
     sort.value = 'oldest';
@@ -916,7 +1001,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     expect(routerMocks.replace).toHaveBeenCalledWith('gallery', {});
     expect(target.textContent).toContain('video.mp4');
     expect(target.textContent).not.toContain('pending.png');
-    expect(target.querySelector('#gallery-details')?.textContent).toContain('No asset selected');
+    expect(getViewer()).toBeNull();
   });
 
   it('prevents a stale sort response from resurrecting a successful deletion and refills page one', async () => {
@@ -1020,7 +1105,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     );
   });
 
-  it('clears the active detail, lightbox, and selected route only when that active asset succeeds', async () => {
+  it('moves the viewer and selected route on only when the viewed asset is deleted', async () => {
     const active = makeAsset({ id: 'active.png', filename: 'active.png', prompt: 'active prompt' });
     const other = makeAsset({ id: 'other.png', filename: 'other.png', prompt: 'other prompt' });
     const nonActiveVictim = makeAsset({ id: 'victim.png', filename: 'victim.png' });
@@ -1034,24 +1119,23 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
 
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
-    (target.querySelector(`[aria-label="Asset: ${active.filename}"]`) as HTMLElement).dispatchEvent(
+    (target.querySelector(`button[aria-label="View ${active.filename}"]`) as HTMLElement).dispatchEvent(
       new MouseEvent('click', { bubbles: true })
     );
     await settle();
-    getSelectedAssetViewerButton(target)!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     routerMocks.replace.mockReset();
 
     deleteAssetFromCard(target, active);
     await settle();
 
-    expect(routerMocks.replace).toHaveBeenCalledWith('gallery', {});
-    expect(target.querySelector('#gallery-details')?.textContent).toContain('No asset selected');
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    // The viewer moves on to the next asset, and the selected route follows it.
+    expect(routerMocks.replace).toHaveBeenCalledWith('gallery', { selected: other.id });
+    expect(getViewer()?.textContent).toContain('other prompt');
     expect(target.textContent).not.toContain('active.png');
 
     // A non-active deletion leaves a still-present detail and its selected route alone.
-    (target.querySelector(`[aria-label="Asset: ${other.filename}"]`) as HTMLElement).dispatchEvent(
+    (target.querySelector(`button[aria-label="View ${other.filename}"]`) as HTMLElement).dispatchEvent(
       new MouseEvent('click', { bubbles: true })
     );
     await settle();
@@ -1059,7 +1143,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     deleteAssetFromCard(target, nonActiveVictim);
     await settle();
     expect(routerMocks.replace).not.toHaveBeenCalledWith('gallery', {});
-    expect(target.querySelector('#gallery-details')?.textContent).toContain('other prompt');
+    expect(getViewer()?.textContent).toContain('other prompt');
   });
 
   it('guards repeated IDs and single/bulk overlap while allowing distinct deletes to settle independently', async () => {
@@ -1102,7 +1186,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
 
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
-    (target.querySelector(`[aria-label="Asset: ${asset.filename}"]`) as HTMLElement).dispatchEvent(
+    (target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement).dispatchEvent(
       new MouseEvent('click', { bubbles: true })
     );
     await settle();
@@ -1112,7 +1196,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
 
     expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalled();
     expect(target.textContent).toContain('cancelled.png');
-    expect(target.querySelector('#gallery-details')?.textContent).toContain('keep me');
+    expect(getViewer()?.textContent).toContain('keep me');
     expect(routerMocks.replace).not.toHaveBeenCalled();
   });
 

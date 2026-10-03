@@ -108,6 +108,7 @@ def build_workspace_response(
         "image_size_options": {ratio: list(options) for ratio, options in web_config.image_size_options.items()},
         "video_size_options": {ratio: list(options) for ratio, options in web_config.video_size_options.items()},
         "image_size_dimensions": {ratio: {size: list(wh) for size, wh in sizes.items()} for ratio, sizes in web_config.image_size_dimensions.items()},
+        "video_size_dimensions": {ratio: {size: list(wh) for size, wh in sizes.items()} for ratio, sizes in web_config.video_size_dimensions.items()},
         "scheduler_options": list(web_config.scheduler_options),
         "prompt_sources": prompt_sources,
         "default_prompt_source": default_prompt_source,

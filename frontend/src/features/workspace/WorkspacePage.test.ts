@@ -37,6 +37,15 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
   };
 });
 
+const galleryApiMocks = vi.hoisted(() => ({
+  deleteAsset: vi.fn<(assetId: string) => Promise<void>>(),
+}));
+
+vi.mock('$lib/api/gallery', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('$lib/api/gallery')>();
+  return { ...actual, deleteAsset: galleryApiMocks.deleteAsset };
+});
+
 vi.mock('$lib/api/promptFiles', () => ({
   openPathPicker: promptFileApiMocks.openPathPicker,
   inspectPromptFile: promptFileApiMocks.inspectPromptFile,
@@ -273,6 +282,19 @@ async function settle(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
   flushSync();
+}
+
+/** Pick prompt-file prompts through the Choose prompts dialog and confirm. */
+async function choosePrompts(container: ParentNode, ids: string[]): Promise<void> {
+  (container.querySelector('[data-action="choose-prompts"]') as HTMLButtonElement).click();
+  await settle();
+  const chooser = document.querySelector('[data-testid="prompt-chooser"]') as HTMLElement;
+  for (const box of Array.from(chooser.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))) {
+    if (box.checked !== ids.includes(box.value)) box.click();
+  }
+  await settle();
+  (document.querySelector('[data-action="confirm-prompts"]') as HTMLButtonElement).click();
+  await settle();
 }
 
 function expectRenderedLabelsToResolveControls(container: ParentNode): void {
@@ -552,7 +574,8 @@ describe('WorkspacePage', () => {
     await mountWorkspace(withEnhancer(makeContext()));
     (target.querySelector('#ws-enhance-toggle') as HTMLButtonElement).click();
     await settle();
-    expect(target.querySelector('[role="alert"]')?.textContent).toContain('Pick a style, a detail, or a length.');
+    // The enhancer popover is moved to <body>.
+    expect(document.querySelector('#ws-enhance-panel [role="alert"]')?.textContent).toContain('Pick a style, a detail, or a length.');
   });
 
   it('hides the enhancer when the backend does not advertise it', async () => {
@@ -682,7 +705,7 @@ describe('WorkspacePage', () => {
 
     expect(target.querySelector('#ws-image-file')).toBeNull();
     expect(target.querySelector('input[name="image_path"]')).toBeNull();
-    expect(target.querySelector('label[aria-label="Enable upscale"]')).toBeNull();
+    expect(target.querySelector('#ws-upscale-enabled')).toBeNull();
 
     const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement | null;
     expect(modelSelect).not.toBeNull();
@@ -692,7 +715,7 @@ describe('WorkspacePage', () => {
 
     expect(target.querySelector('#ws-image-file')).not.toBeNull();
     expect(target.querySelector('input[name="image_path"]')).not.toBeNull();
-    expect(target.querySelector('label[aria-label="Enable upscale"]')).not.toBeNull();
+    expect(target.querySelector('#ws-upscale-enabled')).not.toBeNull();
   });
 
   it('shows download and memory-fit status for the selected model and quantize level', async () => {
@@ -769,25 +792,26 @@ describe('WorkspacePage', () => {
 
     await mountWorkspace(context);
 
-    const sizeSelect = target.querySelector('#ws-size') as HTMLSelectElement | null;
-    expect(sizeSelect).not.toBeNull();
-    expect(Array.from(sizeSelect!.options).map((option) => option.value)).toEqual(['m', 'l']);
+    const resolutionOptions = (): string[] => Array.from(
+      target.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Resolution"] button')
+    ).map((button) => button.getAttribute('aria-label')?.replace('Resolution ', '') ?? '');
+    expect(resolutionOptions()).toEqual(['m', 'l']);
 
-    const customDimensionsButton = Array.from(target.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === 'Custom W/H'
-    ) as HTMLButtonElement | undefined;
-    expect(customDimensionsButton).not.toBeUndefined();
-    customDimensionsButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
+    // Typing a width switches to custom dimensions, bounded by the model's limits.
     const widthInput = target.querySelector('#ws-width') as HTMLInputElement | null;
     const heightInput = target.querySelector('#ws-height') as HTMLInputElement | null;
-    expect(widthInput?.min).toBe('256');
-    expect(widthInput?.max).toBe('2048');
-    expect(widthInput?.step).toBe('16');
-    expect(heightInput?.min).toBe('256');
-    expect(heightInput?.max).toBe('2048');
-    expect(heightInput?.step).toBe('16');
+    expect(widthInput?.name).toBe('');
+    widthInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    await settle();
+    expect(widthInput?.value).toBe('1680');
+    expect(widthInput?.name).toBe('width');
+    expect(heightInput?.name).toBe('height');
+    // Bounds are applied when a typed value is committed, not by the browser.
+    heightInput!.value = '4000';
+    heightInput!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(heightInput?.value).toBe('2048');
+    expect(heightInput?.min).toBe('');
 
     const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement | null;
     expect(modelSelect).not.toBeNull();
@@ -795,16 +819,12 @@ describe('WorkspacePage', () => {
     modelSelect!.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
 
-    const ratioModeButton = Array.from(target.querySelectorAll('button')).find(
-      (button) => button.textContent?.trim() === 'Ratio'
-    ) as HTMLButtonElement | undefined;
-    expect(ratioModeButton).not.toBeUndefined();
-    ratioModeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    const ratioButton = target.querySelector('[role="group"][aria-label="Aspect ratio"] button') as HTMLButtonElement | null;
+    expect(ratioButton).not.toBeNull();
+    ratioButton!.click();
     await settle();
 
-    const permissiveSizeSelect = target.querySelector('#ws-size') as HTMLSelectElement | null;
-    expect(permissiveSizeSelect).not.toBeNull();
-    expect(Array.from(permissiveSizeSelect!.options).map((option) => option.value)).toEqual(['m', 'l', 'xl']);
+    expect(resolutionOptions()).toEqual(['m', 'l', 'xl']);
   });
 
   it('submits either prompt or json_prompt based on the structured caption toggle', async () => {
@@ -833,7 +853,7 @@ describe('WorkspacePage', () => {
 
     await mountWorkspace(context);
 
-    const jsonToggle = target.querySelector('#ws-json-prompt-toggle') as HTMLInputElement | null;
+    const jsonToggle = target.querySelector('#ws-json-prompt-toggle') as HTMLButtonElement | null;
     expect(jsonToggle).not.toBeNull();
     expect(target.querySelector('#ws-prompt')).not.toBeNull();
     expect(target.querySelector('textarea[name="json_prompt"]')).toBeNull();
@@ -851,8 +871,7 @@ describe('WorkspacePage', () => {
     expect(submittedFormData.get('prompt')).toBe('plain caption');
     expect(submittedFormData.has('json_prompt')).toBe(false);
 
-    jsonToggle!.checked = true;
-    jsonToggle!.dispatchEvent(new Event('change', { bubbles: true }));
+    jsonToggle!.click();
     await settle();
 
     expect(target.querySelector('#ws-prompt')).toBeNull();
@@ -1435,10 +1454,9 @@ describe('WorkspacePage', () => {
     draft.update('negativePrompt', 'stale negative');
     await settle();
 
-    const promptSource = target.querySelector('#ws-prompt-source') as HTMLSelectElement | null;
+    const promptSource = target.querySelector('[data-prompt-source="file"]') as HTMLButtonElement | null;
     expect(promptSource).not.toBeNull();
-    promptSource!.value = 'file';
-    promptSource!.dispatchEvent(new Event('change', { bubbles: true }));
+    promptSource!.click();
     await settle();
 
     const submitButton = target.querySelector('#ws-submit') as HTMLButtonElement | null;
@@ -1455,35 +1473,28 @@ describe('WorkspacePage', () => {
     const hiddenPath = target.querySelector('input[name="prompts_file"]') as HTMLInputElement | null;
     expect(hiddenPath?.value).toBe('/server/prompts.yaml');
 
-    const optionSelect = target.querySelector('input[name="prompt_option_id"]') as HTMLInputElement | null;
-    expect(optionSelect).not.toBeNull();
-    optionSelect!.checked = true;
-    const secondOption = target.querySelector('input[value="portrait:1"]') as HTMLInputElement;
-    secondOption.checked = true;
-    secondOption.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
-    optionSelect!.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
-
+    await choosePrompts(target, ['portrait:0', 'portrait:1']);
     expect(submitButton?.disabled).toBe(false);
-    const detail = target.querySelector('[id="prompt-detail-portrait:1"]') as HTMLElement;
+    expect(draft.state.promptFileOptionIds).toEqual(['portrait:0', 'portrait:1']);
+
+    // The dialog clamps long prompts until expanded, and shows the negative prompt only when expanded.
+    (target.querySelector('[data-action="choose-prompts"]') as HTMLButtonElement).click();
+    await settle();
+    const detail = document.querySelector('[id="prompt-detail-portrait:1"]') as HTMLElement;
     expect(detail.classList.contains('line-clamp-2')).toBe(true);
-    expect(detail.classList.contains('block')).toBe(false);
-    expect(target.textContent).not.toContain('muddy');
-    const showMore = target.querySelector('[aria-label="Show more for portrait #2"]') as HTMLButtonElement;
+    expect(document.body.textContent).not.toContain('muddy');
+    const showMore = document.querySelector('[aria-label="Show more for portrait #2"]') as HTMLButtonElement;
     showMore.click();
     await settle();
     expect(detail.classList.contains('line-clamp-2')).toBe(false);
     expect(detail.classList.contains('block')).toBe(true);
     expect(showMore.getAttribute('aria-expanded')).toBe('true');
+    expect(document.body.textContent).toContain('muddy');
+    // Cancel keeps the confirmed selection.
+    (document.querySelector('[data-testid="prompt-chooser"] input[value="portrait:0"]') as HTMLInputElement).click();
+    (document.querySelector('[data-action="cancel-prompts"]') as HTMLButtonElement).click();
+    await settle();
     expect(draft.state.promptFileOptionIds).toEqual(['portrait:0', 'portrait:1']);
-    showMore.click();
-    await settle();
-    expect(detail.classList.contains('line-clamp-2')).toBe(true);
-    expect(detail.classList.contains('block')).toBe(false);
-    expect(target.textContent).not.toContain('muddy');
-    showMore.click();
-    await settle();
 
     const form = target.querySelector('form');
     expect(form).not.toBeNull();
@@ -1496,9 +1507,10 @@ describe('WorkspacePage', () => {
     expect(submittedFormData.get('prompt_source')).toBe('file');
     expect(submittedFormData.get('prompts_file')).toBe('/server/prompts.yaml');
     expect(submittedFormData.getAll('prompt_option_id')).toEqual(['portrait:0', 'portrait:1']);
+    // The compose summary lists the selected prompts once each.
     expect(target.textContent?.match(/first option/g)).toHaveLength(1);
     expect(target.textContent?.match(/second option/g)).toHaveLength(1);
-    expect(target.textContent?.match(/muddy/g)).toHaveLength(1);
+    expect(target.textContent).not.toContain('muddy');
     expect(target.textContent).not.toContain('Prompt Preview');
     expect(submittedFormData.has('prompt')).toBe(false);
     expect(submittedFormData.has('negative_prompt')).toBe(false);
@@ -1516,21 +1528,65 @@ describe('WorkspacePage', () => {
     draft.update('promptSource', 'file');
     draft.update('promptFilePath', '/server/prompts.yaml');
     await settle();
-    const button = (label: string) => Array.from(target.querySelectorAll('button')).find((item) => item.textContent?.trim() === label)!;
-    button('Select all').click();
+    const chooser = (): HTMLElement => document.querySelector('[data-testid="prompt-chooser"]') as HTMLElement;
+    const chooserButton = (action: string) => chooser().querySelector(`[data-action="${action}"]`) as HTMLButtonElement;
+    const confirm = async (): Promise<void> => {
+      (document.querySelector('[data-action="confirm-prompts"]') as HTMLButtonElement).click();
+      await settle();
+    };
+    const open = async (): Promise<void> => {
+      (target.querySelector('[data-action="choose-prompts"]') as HTMLButtonElement).click();
+      await settle();
+    };
+
+    await open();
+    chooserButton('select-all').click();
     await settle();
+    expect((document.querySelector('[data-action="confirm-prompts"]') as HTMLElement).dataset.count).toBe('3');
+    await confirm();
     expect(draft.state.promptFileOptionIds).toEqual(['portrait:0', 'portrait:1', 'portrait:2']);
-    expect(target.querySelectorAll('input[name="prompt_option_id"]:checked')).toHaveLength(3);
-    const checkbox = target.querySelector('input[value="portrait:1"]') as HTMLInputElement;
-    checkbox.click();
-    await settle();
+    expect(target.querySelectorAll('input[name="prompt_option_id"]')).toHaveLength(3);
+
+    await open();
+    (chooser().querySelector('input[value="portrait:1"]') as HTMLInputElement).click();
+    await confirm();
     expect(draft.state.promptFileOptionIds).toEqual(['portrait:0', 'portrait:2']);
     expect(new FormData(target.querySelector('form')!).getAll('prompt_option_id')).toEqual(['portrait:0', 'portrait:2']);
-    button('Clear selection').click();
-    await settle();
+
+    await open();
+    chooserButton('select-none').click();
+    await confirm();
     expect(draft.state.promptFileOptionIds).toEqual([]);
-    expect(target.querySelectorAll('input[name="prompt_option_id"]:checked')).toHaveLength(0);
+    expect(target.querySelectorAll('input[name="prompt_option_id"]')).toHaveLength(0);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('filters the prompt chooser by prompt text', async () => {
+    promptFileApiMocks.inspectPromptFile.mockResolvedValue({
+      path: '/server/prompts.yaml',
+      options: ['a red fox', 'a blue whale', 'a red barn'].map((text, index) => ({
+        id: `scene:${index}`, set_name: 'scene', source_index: index, label: text, prompt_preview: text, negative_preview: null,
+      })),
+    });
+    await mountWorkspace(makeContext());
+    draft.update('promptSource', 'file');
+    draft.update('promptFilePath', '/server/prompts.yaml');
+    await settle();
+
+    (target.querySelector('[data-action="choose-prompts"]') as HTMLButtonElement).click();
+    await settle();
+    const filter = document.querySelector('[data-testid="prompt-chooser"] input[type="search"]') as HTMLInputElement;
+    filter.value = 'red';
+    filter.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(Array.from(document.querySelectorAll<HTMLInputElement>('[data-testid="prompt-chooser"] input[type="checkbox"]')).map((box) => box.value)).toEqual(['scene:0', 'scene:2']);
+
+    // All selects only the matching prompts.
+    (document.querySelector('[data-testid="prompt-chooser"] [data-action="select-all"]') as HTMLButtonElement).click();
+    await settle();
+    (document.querySelector('[data-action="confirm-prompts"]') as HTMLButtonElement).click();
+    await settle();
+    expect(draft.state.promptFileOptionIds).toEqual(['scene:0', 'scene:2']);
   });
 
   it('keeps the rejected prompt-file path visible when a manual reload fails', async () => {
@@ -1551,9 +1607,8 @@ describe('WorkspacePage', () => {
     const context = makeContext();
     await mountWorkspace(context);
 
-    const promptSource = target.querySelector('#ws-prompt-source') as HTMLSelectElement | null;
-    promptSource!.value = 'file';
-    promptSource!.dispatchEvent(new Event('change', { bubbles: true }));
+    const promptSource = target.querySelector('[data-prompt-source="file"]') as HTMLButtonElement | null;
+    promptSource!.click();
     await settle();
 
     const pathInput = target.querySelector('#ws-prompts-file') as HTMLInputElement | null;
@@ -1562,10 +1617,7 @@ describe('WorkspacePage', () => {
     pathInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await settle();
 
-    const optionSelect = target.querySelector('input[name="prompt_option_id"]') as HTMLInputElement | null;
-    optionSelect!.checked = true;
-    optionSelect!.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
+    await choosePrompts(target, ['portrait:0']);
 
     promptFileApiMocks.inspectPromptFile.mockRejectedValueOnce(new Error('POST /api/prompt-files/inspect → 422: missing file'));
     pathInput!.value = '/missing/prompts.yaml';
@@ -1576,7 +1628,7 @@ describe('WorkspacePage', () => {
     const hiddenPath = target.querySelector('input[name="prompts_file"]') as HTMLInputElement | null;
     expect(pathInput!.value).toBe('/missing/prompts.yaml');
     expect(hiddenPath?.value).toBe('/missing/prompts.yaml');
-    expect(target.querySelectorAll('input[name="prompt_option_id"]:checked')).toHaveLength(0);
+    expect(target.querySelectorAll('input[name="prompt_option_id"]')).toHaveLength(0);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
   });
 
@@ -1618,9 +1670,8 @@ describe('WorkspacePage', () => {
 
     await mountWorkspace(context);
 
-    const promptSource = target.querySelector('#ws-prompt-source') as HTMLSelectElement | null;
-    promptSource!.value = 'file';
-    promptSource!.dispatchEvent(new Event('change', { bubbles: true }));
+    const promptSource = target.querySelector('[data-prompt-source="file"]') as HTMLButtonElement | null;
+    promptSource!.click();
     await settle();
 
     expect(target.querySelector('#ws-prompts-file')).not.toBeNull();
@@ -1656,9 +1707,8 @@ describe('WorkspacePage', () => {
     const context = makeContext();
     await mountWorkspace(context);
 
-    const promptSource = target.querySelector('#ws-prompt-source') as HTMLSelectElement | null;
-    promptSource!.value = 'file';
-    promptSource!.dispatchEvent(new Event('change', { bubbles: true }));
+    const promptSource = target.querySelector('[data-prompt-source="file"]') as HTMLButtonElement | null;
+    promptSource!.click();
     await settle();
 
     const pathInput = target.querySelector('#ws-prompts-file') as HTMLInputElement | null;
@@ -1667,10 +1717,7 @@ describe('WorkspacePage', () => {
     pathInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await settle();
 
-    const optionSelect = target.querySelector('input[name="prompt_option_id"]') as HTMLInputElement | null;
-    optionSelect!.checked = true;
-    optionSelect!.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
+    await choosePrompts(target, ['portrait:0']);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
 
     pathInput!.value = '/server/other-prompts.yaml';
@@ -1679,7 +1726,7 @@ describe('WorkspacePage', () => {
 
     const hiddenPath = target.querySelector('input[name="prompts_file"]') as HTMLInputElement | null;
     expect(hiddenPath?.value).toBe('/server/other-prompts.yaml');
-    expect(target.querySelectorAll('input[name="prompt_option_id"]:checked')).toHaveLength(0);
+    expect(target.querySelectorAll('input[name="prompt_option_id"]')).toHaveLength(0);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
   });
 
@@ -1712,9 +1759,8 @@ describe('WorkspacePage', () => {
     const context = makeContext();
     await mountWorkspace(context);
 
-    const promptSource = target.querySelector('#ws-prompt-source') as HTMLSelectElement | null;
-    promptSource!.value = 'file';
-    promptSource!.dispatchEvent(new Event('change', { bubbles: true }));
+    const promptSource = target.querySelector('[data-prompt-source="file"]') as HTMLButtonElement | null;
+    promptSource!.click();
     await settle();
 
     const pathInput = target.querySelector('#ws-prompts-file') as HTMLInputElement | null;
@@ -1786,9 +1832,8 @@ describe('WorkspacePage', () => {
     const context = makeContext();
     await mountWorkspace(context);
 
-    const promptSource = target.querySelector('#ws-prompt-source') as HTMLSelectElement | null;
-    promptSource!.value = 'file';
-    promptSource!.dispatchEvent(new Event('change', { bubbles: true }));
+    const promptSource = target.querySelector('[data-prompt-source="file"]') as HTMLButtonElement | null;
+    promptSource!.click();
     await settle();
 
     const pathInput = target.querySelector('#ws-prompts-file') as HTMLInputElement | null;
@@ -1797,10 +1842,7 @@ describe('WorkspacePage', () => {
     pathInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await settle();
 
-    const optionSelect = target.querySelector('input[name="prompt_option_id"]') as HTMLInputElement | null;
-    optionSelect!.checked = true;
-    optionSelect!.dispatchEvent(new Event('change', { bubbles: true }));
-    await settle();
+    await choosePrompts(target, ['portrait:0']);
 
     const editButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Edit YAML');
     expect(editButton).not.toBeUndefined();
@@ -1817,7 +1859,7 @@ describe('WorkspacePage', () => {
     await settle();
 
     expect(promptFileApiMocks.writePromptFile).toHaveBeenCalledWith('/server/prompts.yaml', 'portrait:\n  - prompt: replacement option\n');
-    expect(target.querySelectorAll('input[name="prompt_option_id"]:checked')).toHaveLength(0);
+    expect(target.querySelectorAll('input[name="prompt_option_id"]')).toHaveLength(0);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
     expect(target.textContent).toContain('no longer active');
   });
@@ -1966,9 +2008,9 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
     await settle();
 
     expect(target.textContent).toContain('Completed outputs');
-    expect(target.querySelectorAll('.completed-output-grid article')).toHaveLength(2);
-    expect(target.querySelector(`img[src="${completedAsset.url}"]`)).not.toBeNull();
-    expect(target.querySelector(`img[alt="${secondAsset.filename}"]`)).not.toBeNull();
+    expect(target.querySelectorAll('.completed-output-grid .asset-tile')).toHaveLength(2);
+    expect(target.querySelector(`.completed-output-grid img[src="${completedAsset.url}"]`)).not.toBeNull();
+    expect(target.querySelector(`.completed-output-grid img[src="${secondAsset.url}"]`)).not.toBeNull();
     expect(target.textContent).not.toContain('Waiting for worker allocation...');
   });
 
@@ -2035,21 +2077,21 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
     const trigger = target.querySelector('.job-card button[aria-label="View first.png fullscreen"]') as HTMLButtonElement;
     trigger.click();
     await settle();
-    expect(target.querySelector('[data-testid="lightbox"] img')?.getAttribute('src')).toBe(first.url);
+    expect(target.querySelector('[data-testid="asset-viewer"] img')?.getAttribute('src')).toBe(first.url);
     source.emit('generation_finished', { type: 'generation_finished', status: 'success', asset: second });
     await settle();
     (target.querySelector('[aria-label="Next asset"]') as HTMLButtonElement).click();
     await settle();
-    expect(target.querySelector('[data-testid="lightbox"] img')?.getAttribute('src')).toBe(second.url);
+    expect(target.querySelector('[data-testid="asset-viewer"] img')?.getAttribute('src')).toBe(second.url);
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     await settle();
-    expect(target.querySelector('[data-testid="lightbox"]')).toBeNull();
+    expect(target.querySelector('[data-testid="asset-viewer"]')).toBeNull();
     expect(document.activeElement).toBe(trigger);
     trigger.click();
     await settle();
     source.emit('job_completed', { type: 'job_completed', outputs: [first, second] });
     await settle();
-    expect(target.querySelector('[data-testid="lightbox"] img')?.getAttribute('src')).toBe(first.url);
+    expect(target.querySelector('[data-testid="asset-viewer"] img')?.getAttribute('src')).toBe(first.url);
   });
 
   it('opens indexed completed outputs in the workspace lightbox and navigates the full list', async () => {
@@ -2094,17 +2136,16 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
     secondButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    expect(target.querySelector('[data-testid="lightbox"]')).not.toBeNull();
-    const lightboxImage = target.querySelector('[data-testid="lightbox"] img') as HTMLImageElement | null;
+    expect(target.querySelector('[data-testid="asset-viewer"]')).not.toBeNull();
+    const lightboxImage = target.querySelector('[data-testid="asset-viewer"] img') as HTMLImageElement | null;
     expect(lightboxImage?.getAttribute('src')).toBe(secondAsset.url);
-    expect(lightboxImage?.getAttribute('alt')).toBe(secondAsset.filename);
-    expect(document.activeElement?.textContent?.trim()).toBe('Close');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe('Close viewer');
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     await settle();
-    expect((target.querySelector('[data-testid="lightbox"] img') as HTMLImageElement | null)?.getAttribute('src')).toBe(completedAsset.url);
+    expect((target.querySelector('[data-testid="asset-viewer"] img') as HTMLImageElement | null)?.getAttribute('src')).toBe(completedAsset.url);
 
-    const closeButton = Array.from(target.querySelectorAll('[data-testid="lightbox"] button')).find((button) => button.textContent?.trim() === 'Close');
+    const closeButton = target.querySelector('[data-testid="asset-viewer"] button[aria-label="Close viewer"]');
     closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     expect(document.activeElement).toBe(secondButton);
@@ -2154,6 +2195,352 @@ describe('WorkspacePage history viewer (REC-UX-002)', () => {
     historyRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    expect(target.querySelector('[data-testid="lightbox"]')).not.toBeNull();
+    expect(target.querySelector('[data-testid="asset-viewer"]')).not.toBeNull();
   });
 });
+
+describe('WorkspacePage asset actions and settings', () => {
+  let target: HTMLDivElement;
+  let app: Record<string, unknown> | null = null;
+
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    draft.reset();
+    historyStore.seedHistory([]);
+    jobStore.clearJob();
+    workspaceApiMocks.getWorkspaceCoreContext.mockReset();
+    workspaceApiMocks.getHistory.mockReset();
+    workspaceApiMocks.parseUrlPrefill.mockReturnValue({});
+    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage());
+    galleryApiMocks.deleteAsset.mockReset();
+    target = document.createElement('div');
+    document.body.appendChild(target);
+  });
+
+  afterEach(async () => {
+    if (app) { await unmount(app); app = null; }
+    target.remove();
+    document.body.innerHTML = '';
+    vi.restoreAllMocks();
+  });
+
+  async function mountWithHistory(assets: GalleryAsset[]): Promise<void> {
+    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage(assets));
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext({ history_assets: assets }));
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+  }
+
+  function historyTile(asset: GalleryAsset): HTMLElement {
+    return target.querySelector(`#ws-history-shell article[aria-label="${asset.filename}"]`) as HTMLElement;
+  }
+
+  function openTileMenu(asset: GalleryAsset): void {
+    (historyTile(asset).querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
+    flushSync();
+  }
+
+  it('shows history as a filmstrip under the preview that collapses and remembers it', async () => {
+    const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png' });
+    await mountWithHistory([asset]);
+
+    expect(target.querySelector('.workspace-preview #ws-history-shell')).not.toBeNull();
+    expect(historyTile(asset)).not.toBeNull();
+
+    (target.querySelector('#ws-history-toggle') as HTMLButtonElement).click();
+    await settle();
+    expect(historyTile(asset)).toBeNull();
+    expect(draft.state.historyCollapsed).toBe(true);
+  });
+
+  it('reuses the settings of an asset in place without leaving the workspace', async () => {
+    const asset = makeAsset({
+      id: 'out/first.png',
+      filename: 'first.png',
+      has_reusable_config: true,
+      reuse_workspace_url: '#/workspace?workflow=txt2img&prompt=reused+prompt&steps=17&seed=99',
+    });
+    await mountWithHistory([asset]);
+
+    (historyTile(asset).querySelector(`button[aria-label="Reuse settings from ${asset.filename}"]`) as HTMLButtonElement).click();
+    await settle();
+
+    expect(draft.state).toMatchObject({ workflow: 'txt2img', prompt: 'reused prompt', steps: 17, seed: 99 });
+    expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('reused prompt');
+    expect((target.querySelector('#ws-steps') as HTMLInputElement).value).toBe('17');
+  });
+
+  it('makes an image the img2img reference and submits its host path', async () => {
+    const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
+    await mountWithHistory([asset]);
+
+    openTileMenu(asset);
+    (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
+    await settle();
+
+    expect(draft.state.workflow).toBe('img2img');
+    expect((target.querySelector('input[name="image_path"]') as HTMLInputElement).value).toBe('/outputs/out/first.png');
+    // The reference row previews the known asset.
+    expect(target.querySelector(`[data-section="reference"] img[src="${asset.url}"]`)).not.toBeNull();
+    expect(new FormData(target.querySelector('form')!).get('image_path')).toBe('/outputs/out/first.png');
+  });
+
+  it('deletes an asset from history after confirmation', async () => {
+    const first = makeAsset({ id: 'out/first.png', filename: 'first.png' });
+    const second = makeAsset({ id: 'out/second.png', filename: 'second.png' });
+    await mountWithHistory([first, second]);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
+    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+
+    openTileMenu(second);
+    (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+    expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalled();
+
+    openTileMenu(second);
+    (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+
+    expect(confirmSpy).toHaveBeenCalledTimes(2);
+    expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith(second.id);
+    expect(historyStore.assets.map((asset) => asset.id)).toEqual([first.id]);
+    expect(historyTile(second)).toBeNull();
+  });
+
+  it('marks settings that differ from the model default and resets one row at a time', async () => {
+    await mountWithHistory([]);
+    const stepsRow = () => (target.querySelector('#ws-steps') as HTMLInputElement).closest('.inspector-row') as HTMLElement;
+    const changedCount = () => target.querySelector('[data-testid="changed-count"]')?.textContent ?? '0';
+
+    expect(stepsRow().dataset.changed).toBe('false');
+    expect(changedCount()).toBe('0');
+
+    const steps = target.querySelector('#ws-steps') as HTMLInputElement;
+    steps.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', shiftKey: true, bubbles: true }));
+    await settle();
+
+    expect(draft.state.steps).toBe(38);
+    expect(stepsRow().dataset.changed).toBe('true');
+    expect(changedCount()).toBe('1');
+
+    (stepsRow().querySelector('button[aria-label="Reset Steps to default"]') as HTMLButtonElement).click();
+    await settle();
+    expect(draft.state.steps).toBe(28);
+    expect(stepsRow().dataset.changed).toBe('false');
+  });
+
+  it('changes a number by dragging its label', async () => {
+    await mountWithHistory([]);
+    const label = target.querySelector('label[for="ws-steps"]') as HTMLElement;
+
+    label.dispatchEvent(new MouseEvent('pointerdown', { clientX: 100, button: 0, bubbles: true }));
+    label.dispatchEvent(new MouseEvent('pointermove', { clientX: 120, bubbles: true }));
+    label.dispatchEvent(new MouseEvent('pointerup', { clientX: 120, bubbles: true }));
+    await settle();
+
+    expect(draft.state.steps).toBe(33);
+    expect((target.querySelector('#ws-steps') as HTMLInputElement).value).toBe('33');
+  });
+
+  it('keeps changed settings when the workspace is opened again', async () => {
+    await mountWithHistory([]);
+    const steps = target.querySelector('#ws-steps') as HTMLInputElement;
+    steps.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    await settle();
+    expect(draft.state.steps).toBe(27);
+
+    await unmount(app!);
+    app = null;
+    await mountWithHistory([]);
+
+    expect((target.querySelector('#ws-steps') as HTMLInputElement).value).toBe('27');
+  });
+
+  it('allows batches of up to 100', async () => {
+    await mountWithHistory([]);
+    const runs = target.querySelector('#ws-runs') as HTMLInputElement;
+    runs.value = '250';
+    runs.dispatchEvent(new Event('input', { bubbles: true }));
+    runs.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(draft.state.runs).toBe(100);
+  });
+
+  it('settles a typed width on a valid step when the field is committed', async () => {
+    await mountWithHistory([]);
+    const width = target.querySelector('#ws-width') as HTMLInputElement;
+    width.value = '1000';
+    width.dispatchEvent(new Event('input', { bubbles: true }));
+    width.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(width.value).toBe('1008');
+    expect(draft.state).toMatchObject({ width: 1008, dimensionMode: 'custom' });
+    expect(new FormData(target.querySelector('form')!).get('width')).toBe('1008');
+  });
+
+  it('returns to the preset size when reusing an asset after a custom size', async () => {
+    const asset = makeAsset({
+      id: 'out/first.png',
+      filename: 'first.png',
+      has_reusable_config: true,
+      reuse_workspace_url: '#/workspace?workflow=txt2img&prompt=p&ratio=2%3A3&size=m&width=832&height=1216',
+    });
+    await mountWithHistory([asset]);
+    draft.patch({ dimensionMode: 'custom', width: 1000, height: 1000 });
+    await settle();
+
+    (historyTile(asset).querySelector(`button[aria-label="Reuse settings from ${asset.filename}"]`) as HTMLButtonElement).click();
+    await settle();
+
+    const submitted = new FormData(target.querySelector('form')!);
+    expect(submitted.get('ratio')).toBe('2:3');
+    expect(submitted.get('size')).toBe('m');
+    expect(submitted.has('width')).toBe(false);
+  });
+
+  it('shows video preset dimensions for the chosen ratio and size', async () => {
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext({
+      video_ratios: ['16:9', '9:16'],
+      video_size_options: { '16:9': ['m'], '9:16': ['m'] },
+      video_size_dimensions: { '16:9': { m: [704, 448] }, '9:16': { m: [448, 704] } },
+    }));
+    draft.update('workflow', 'txt2vid');
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+
+    const ratio916 = Array.from(target.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Aspect ratio"] button')).find((b) => b.textContent === '9:16')!;
+    ratio916.click();
+    await settle();
+
+    expect((target.querySelector('#ws-width') as HTMLInputElement).value).toBe('448');
+    expect((target.querySelector('#ws-height') as HTMLInputElement).value).toBe('704');
+  });
+
+  it('disables a reference target the current model cannot use', async () => {
+    const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
+    const context = makeContext({ history_assets: [asset] });
+    context.image_model_defaults = { ...context.image_model_defaults, zit: { ...context.image_model_defaults!.zit, supports_img2img: false } };
+    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage([asset]));
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+
+    openTileMenu(asset);
+    const forImage = document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement;
+    expect(forImage.getAttribute('aria-disabled')).toBe('true');
+    expect(forImage.title).toContain("can't use a reference image");
+    forImage.click();
+    await settle();
+    expect(draft.state.workflow).toBe('txt2img');
+  });
+
+  it('submits the chosen asset, not an earlier browsed file, after Use as reference', async () => {
+    const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
+    draft.update('workflow', 'img2img');
+    await mountWithHistory([asset]);
+    const submitSpy = workspaceApiMocks.submitGenerate.mockResolvedValue({ job_id: 'job-ref' } as JobContext);
+
+    const fileInput = target.querySelector('#ws-image-file') as HTMLInputElement;
+    const browsed = new File(['img'], 'browsed.png', { type: 'image/png' });
+    Object.defineProperty(fileInput, 'files', { configurable: true, value: [browsed] });
+    fileInput.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    openTileMenu(asset);
+    (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
+    await settle();
+    (target.querySelector('#ws-prompt') as HTMLTextAreaElement).value = 'a prompt';
+    (target.querySelector('#ws-prompt') as HTMLTextAreaElement).dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+
+    const submitted = submitSpy.mock.calls.at(-1)![0];
+    expect(submitted.has('image_file')).toBe(false);
+    expect(submitted.get('image_path')).toBe('/outputs/out/first.png');
+  });
+
+  it('keeps settings when Use as reference switches the workflow', async () => {
+    const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
+    await mountWithHistory([asset]);
+    draft.patch({ steps: 9, runs: 40 });
+    await settle();
+
+    openTileMenu(asset);
+    (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
+    await settle();
+
+    expect(draft.state).toMatchObject({ workflow: 'img2img', steps: 9, runs: 40, referenceImagePath: '/outputs/out/first.png' });
+  });
+
+  it('resets W × H after a reused custom size back to a submittable preset', async () => {
+    await mountWithHistory([]);
+    draft.loadFromUrl({ ratio: '2:3', size: 'custom', width: '640', height: '480' }, makeContext());
+    await settle();
+
+    const row = (target.querySelector('#ws-width') as HTMLInputElement).closest('.inspector-row') as HTMLElement;
+    (row.querySelector('button[aria-label="Reset W × H to default"]') as HTMLButtonElement).click();
+    await settle();
+
+    const submitted = new FormData(target.querySelector('form')!);
+    expect(submitted.get('size')).toBe('m');
+    expect(submitted.has('width')).toBe(false);
+  });
+
+  it('never submits a preset the model is too small for after a ratio change', async () => {
+    const constrained = makeIdeogramDefaults({ ratio: '1:1', size: 'l', dimension_max: 1024 });
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext({
+      image_models: [{ id: 'ideo', label: 'ideo', type: 'image' }],
+      defaults: constrained,
+      current_image_model: 'ideo',
+      image_model_defaults: { ideo: constrained },
+      image_ratios: ['1:1', '16:9'],
+      image_size_options: { '1:1': ['m', 'l'], '16:9': ['m', 'l'] },
+      image_size_dimensions: { '1:1': { m: [768, 768], l: [1024, 1024] }, '16:9': { m: [1024, 576], l: [1344, 768] } },
+    }));
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+    expect(new FormData(target.querySelector('form')!).get('size')).toBe('l');
+
+    const ratio169 = Array.from(target.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Aspect ratio"] button')).find((b) => b.textContent === '16:9')!;
+    ratio169.click();
+    await settle();
+
+    expect(new FormData(target.querySelector('form')!).get('size')).toBe('m');
+  });
+
+  it('clears the reference when its asset is deleted', async () => {
+    const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
+    await mountWithHistory([asset]);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
+    openTileMenu(asset);
+    (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
+    await settle();
+    expect(draft.state.referenceImagePath).toBe('/outputs/out/first.png');
+
+    openTileMenu(asset);
+    (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
+    await settle();
+
+    expect(draft.state.referenceImagePath).toBeNull();
+  });
+
+  it('locks the seed to the latest output and unlocks it back to random', async () => {
+    const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', seed: 4242 });
+    await mountWithHistory([asset]);
+    const lock = () => target.querySelector('#ws-seed')!.parentElement!.querySelector('button[aria-pressed]') as HTMLButtonElement;
+
+    lock().click();
+    await settle();
+    expect(draft.state.seed).toBe(4242);
+    expect(lock().getAttribute('aria-pressed')).toBe('true');
+
+    lock().click();
+    await settle();
+    expect(draft.state.seed).toBeNull();
+  });
+});
+

@@ -4,6 +4,8 @@
   interface Props {
     open?: boolean;
     title?: string;
+    /** `lg` widens the dialog for lists and editors. */
+    size?: 'md' | 'lg';
     onclose?: () => void;
     children?: Snippet;
     footer?: Snippet;
@@ -12,6 +14,7 @@
   let {
     open = $bindable(false),
     title,
+    size = 'md',
     onclose,
     children,
     footer
@@ -121,7 +124,7 @@
         aria-modal="true"
         aria-label={title}
         tabindex="-1"
-        class="relative w-full max-w-lg rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl focus:outline-none pointer-events-auto"
+        class="relative flex max-h-full w-full {size === 'lg' ? 'max-w-3xl' : 'max-w-lg'} flex-col rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl focus:outline-none pointer-events-auto"
       >
       {#if title}
         <div class="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
@@ -138,7 +141,7 @@
           </button>
         </div>
       {/if}
-      <div class="px-6 py-4">
+      <div class="min-h-0 overflow-y-auto px-6 py-4">
         {@render children?.()}
       </div>
       {#if footer}

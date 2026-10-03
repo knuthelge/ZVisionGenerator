@@ -55,6 +55,7 @@ class WebUiConfig:
     video_size_options: dict[str, tuple[str, ...]]
     scheduler_options: tuple[str, ...]
     image_size_dimensions: dict[str, dict[str, tuple[int, int]]] = field(default_factory=dict)
+    video_size_dimensions: dict[str, dict[str, tuple[int, int]]] = field(default_factory=dict)
     quantize_options: tuple[int, ...] = _DEFAULT_QUANTIZE_OPTIONS
     image_inventory: tuple[ImageInventoryEntry, ...] = ()
     video_inventory: tuple[VideoInventoryEntry, ...] = ()
@@ -112,6 +113,7 @@ def load_web_config() -> WebUiConfig:
         video_size_options={ratio: tuple(size_map.keys()) for ratio, size_map in video_sizes.items()},
         scheduler_options=tuple(app_config.get("schedulers", {}).keys()),
         image_size_dimensions={ratio: {size: (dims["width"], dims["height"]) for size, dims in size_map.items()} for ratio, size_map in image_sizes.items()},
+        video_size_dimensions={ratio: {size: (dims["width"], dims["height"]) for size, dims in size_map.items()} for ratio, size_map in video_sizes.items()},
         quantize_options=_resolve_quantize_options(ui_config),
         image_inventory=image_inventory,
         video_inventory=video_inventory,
