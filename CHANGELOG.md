@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Prompt enhancer: new styles Candid, Street photography, Analog film, Black & white, Studio portrait, Product shot and Comic (`candid`, `street`, `film`, `bw`, `portrait`, `product`, `comic`)
+
 ## [0.13.0b4] - 2026-10-03
 
 ### Added

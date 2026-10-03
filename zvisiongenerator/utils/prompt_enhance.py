@@ -71,9 +71,36 @@ STYLE_AXIS = EnhanceAxis(
     options=(
         EnhanceOption("keep", "Keep", "Style: keep the user's existing style; do not impose a new one."),
         EnhanceOption("photo", "Photographic", "Style: photographic. Describe it as a photograph."),
+        EnhanceOption(
+            "candid",
+            "Candid",
+            "Style: candid snapshot. Describe it as an unposed, casual phone photo in an everyday setting with natural available light; no studio lighting, retouching or cinematic color grading.",
+        ),
+        EnhanceOption(
+            "street",
+            "Street photography",
+            "Style: street photography. Describe it as a documentary 35mm photograph of everyday public life, with passersby and available light.",
+        ),
+        EnhanceOption("film", "Analog film", "Style: analog film photograph. Name the film stock and its grain and color rendering."),
+        EnhanceOption(
+            "bw",
+            "Black & white",
+            "Style: black-and-white photograph. Describe the tonal range, contrast and light instead of colors.",
+        ),
+        EnhanceOption(
+            "portrait",
+            "Studio portrait",
+            "Style: studio portrait or fashion editorial photograph. Describe the lighting setup and backdrop.",
+        ),
+        EnhanceOption(
+            "product",
+            "Product shot",
+            "Style: commercial product photograph. Describe the studio lighting, surface and backdrop.",
+        ),
         EnhanceOption("cinematic", "Cinematic", "Style: cinematic. Describe it as a shot from a film."),
         EnhanceOption("illustration", "Illustration", "Style: digital illustration. Name the style explicitly."),
         EnhanceOption("anime", "Anime", "Style: anime illustration. Name the style explicitly."),
+        EnhanceOption("comic", "Comic", "Style: comic book art with inked line work. Name the style explicitly."),
         EnhanceOption("3d", "3D render", "Style: 3D render. Name the style explicitly."),
         EnhanceOption("painterly", "Painterly", "Style: classical oil painting. Name the medium explicitly."),
     ),
