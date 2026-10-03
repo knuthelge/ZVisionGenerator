@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b3] - 2026-10-04
+
 ### Added
 - The Web UI Models page can delete models and LoRAs. Deleting a converted model removes its folder in `~/.ziv/models/` and keeps the HuggingFace base-model files it links to. Deleting a HuggingFace model removes its download from the HuggingFace cache; the alias stays and downloads again on next use, and the confirmation lists converted models that rely on that download. Deletes are refused while a generation is running
 - Prompt enhancement with a small local LLM (decensored Qwen3.5-4B by default; ≈2.4 GB download on macOS, ≈9 GB on Windows/Linux). Choose a style, details, a length (Shorter, Same, Longer ≈200 %, Extra long ≈300 %) and, for video, motion
