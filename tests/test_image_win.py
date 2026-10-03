@@ -657,6 +657,70 @@ class TestMakeSkipCallback:
 
 
 # ---------------------------------------------------------------------------
+# Live previews in the step callback
+# ---------------------------------------------------------------------------
+
+
+class TestStepCallbackLivePreview:
+    """Step callbacks carry live previews from the backend's LivePreview tracker."""
+
+    def test_milestone_preview_is_added_to_the_progress_payload(self, win_backend):
+        mod, _, _ = win_backend
+        preview_image = Image.new("RGB", (8, 8))
+        live_preview = MagicMock()
+        live_preview.observe.return_value = preview_image
+        events = []
+        cb = mod._make_step_callback(None, total_steps=4, step_callback=events.append, live_preview=live_preview)
+
+        fake_pipe = MagicMock()
+        latents = object()
+        cb(fake_pipe, step=1, timestep=0.0, callback_kwargs={"latents": latents})
+
+        live_preview.observe.assert_called_once_with(fake_pipe, 1, latents)
+        assert events == [{"current_step": 2, "total_steps": 4, "preview": preview_image}]
+
+    def test_non_milestone_steps_report_progress_only(self, win_backend):
+        mod, _, _ = win_backend
+        live_preview = MagicMock()
+        live_preview.observe.return_value = None
+        events = []
+        cb = mod._make_step_callback(None, total_steps=4, step_callback=events.append, live_preview=live_preview)
+
+        cb(MagicMock(), step=0, timestep=0.0, callback_kwargs={"latents": object()})
+
+        assert events == [{"current_step": 1, "total_steps": 4}]
+
+    @pytest.mark.parametrize(("family", "expects_preview"), [("zimage", True), ("flux2_klein", True), ("flux1", False)])
+    def test_text_to_image_requests_latents_only_for_previewable_families(self, win_backend, family, expects_preview):
+        mod, _, _ = win_backend
+        backend = mod.DiffusersBackend()
+        backend._model_info = _make_model_info(family=family)
+        model = MagicMock()
+        model.return_value.images = [Image.new("RGB", (64, 64))]
+        model._interrupt = False
+
+        backend.text_to_image(model=model, prompt="p", width=64, height=64, seed=1, steps=4, guidance=1.0, step_callback=lambda _: None)
+
+        kwargs = model.call_args.kwargs
+        assert callable(kwargs["callback_on_step_end"])
+        assert (kwargs.get("callback_on_step_end_tensor_inputs") == ["latents"]) is expects_preview
+
+    def test_no_preview_without_a_progress_callback(self, win_backend):
+        mod, _, _ = win_backend
+        backend = mod.DiffusersBackend()
+        backend._model_info = _make_model_info(family="zimage")
+        model = MagicMock()
+        model.return_value.images = [Image.new("RGB", (64, 64))]
+        model._interrupt = False
+        skip = MagicMock()
+        skip.check.return_value = False
+
+        backend.text_to_image(model=model, prompt="p", width=64, height=64, seed=1, steps=4, guidance=1.0, skip_signal=skip)
+
+        assert "callback_on_step_end_tensor_inputs" not in model.call_args.kwargs
+
+
+# ---------------------------------------------------------------------------
 # get_backend() returns diffusers on Windows and Linux
 # ---------------------------------------------------------------------------
 
