@@ -28,6 +28,7 @@ Every module, function, and class should be **atomic**: a single, self-contained
 
 - `packages/ltx_*` is vendored. Never edit it by hand; update it with `make update-ltx`.
 - The Web UI is built from `frontend/` (Svelte 5, TypeScript, pnpm) into `zvisiongenerator/web/static/app/`, which is committed. After any frontend change, run `make frontend-build` and commit the rebuilt files.
+- Future work is written up as proposals in `proposals/` (see its README). Check there before larger work, and update the status when a proposal ships.
 - User-facing changes get an entry under `[Unreleased]` in `CHANGELOG.md` and updated docs in `docs/`.
 - Commits follow Conventional Commits: `type(scope): imperative summary` (types: feat, fix, perf, refactor, docs, test, build, ci, chore; scope is the product area, e.g. web, image, video, enhance). Add a body with a short list of high-level changes, not file-by-file detail. Mark breaking changes with `!` and a `BREAKING CHANGE:` line. Release commits are `chore(release): v<version>`.
 - Never create or push `v*` tags or cut a release unless the user explicitly asks; a tag push publishes to PyPI and cannot be undone (see [Releasing](docs/development.md#releasing)).
