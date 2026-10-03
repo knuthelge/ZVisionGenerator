@@ -93,6 +93,51 @@ def _ensure_bfloat16(state_dict: dict) -> dict:
     return result
 
 
+# Per-tensor scale keys stored next to the weight in scaled-FP8 checkpoints
+# (ComfyUI "weight_scale"/"comfy_quant" format and the older "scale_weight" format)
+FP8_WEIGHT_SCALE_SUFFIXES = (".weight_scale", ".scale_weight")
+FP8_AUX_SUFFIXES = (".input_scale", ".comfy_quant")
+
+
+def _dequantize_scaled_fp8(state_dict: dict) -> dict:
+    """Dequantize scaled-FP8 weights to bfloat16 and drop the quantization metadata keys.
+
+    Scaled-FP8 checkpoints store ``weight`` as float8 plus a scalar ``weight_scale``;
+    the real weight is ``weight * weight_scale``. A plain dtype cast would leave the
+    weights off by that scale, so they must be multiplied out before conversion.
+    """
+    import json
+
+    import torch
+
+    scale_keys = [k for k in state_dict if k.endswith(FP8_WEIGHT_SCALE_SUFFIXES)]
+    if not scale_keys:
+        return state_dict
+
+    result = dict(state_dict)
+    for key in [k for k in result if k.endswith(".comfy_quant")]:
+        quant_format = json.loads(bytes(result[key].tolist()).decode()).get("format")
+        if quant_format not in ("float8_e4m3fn", "float8_e5m2"):
+            raise ValueError(f"Unsupported quantization format {quant_format!r} for {key}. Only scaled FP8 checkpoints are supported.")
+        del result[key]
+
+    for scale_key in scale_keys:
+        scale = result.pop(scale_key)
+        weight_key = scale_key.rsplit(".", 1)[0] + ".weight"
+        if weight_key not in result:
+            continue
+        if scale.numel() != 1:
+            raise ValueError(f"Unsupported block-wise quantization scale for {weight_key} (shape {list(scale.shape)}). Only per-tensor scaled FP8 is supported.")
+        result[weight_key] = (result[weight_key].to(torch.float32) * scale.to(torch.float32)).to(torch.bfloat16)
+
+    for key in [k for k in result if k.endswith(FP8_AUX_SUFFIXES)]:
+        del result[key]
+    result.pop("scaled_fp8", None)
+
+    print(f"  Dequantized {len(scale_keys)} scaled FP8 tensors to bfloat16")
+    return result
+
+
 def convert_transformer_keys(state_dict: dict) -> dict:
     """Convert safetensors transformer keys to HF diffusers format."""
     converted = {}
@@ -377,6 +422,7 @@ def convert_flux2_klein(input_path: Path, output_dir: Path, model_type: str, use
     print(f"Loading checkpoint: {input_path}")
     state_dict = load_file(str(input_path))
     print(f"  Loaded {len(state_dict)} keys")
+    state_dict = _dequantize_scaled_fp8(state_dict)
 
     transformer_keys = [k for k in state_dict if k.startswith(TRANSFORMER_PREFIX)]
     print(f"  Transformer: {len(transformer_keys)} keys")
@@ -444,6 +490,7 @@ def _cmd_model(args):
         print(f"Loading checkpoint: {input_path}")
         state_dict = load_file(str(input_path))
         print(f"  Loaded {len(state_dict)} keys")
+        state_dict = _dequantize_scaled_fp8(state_dict)
 
         # Count keys by component
         transformer_keys = [k for k in state_dict if k.startswith(TRANSFORMER_PREFIX)]

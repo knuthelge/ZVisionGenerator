@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Fixed
+- Converting a scaled FP8 checkpoint, such as an FP8 FLUX.2 Klein checkpoint saved by ComfyUI, failed with `chunk expects at least a 1-dimensional tensor`. The converter now multiplies FP8 weights by their stored scale and saves them as bfloat16. Before, a plain cast would have left them off by that scale. Block-wise and non-FP8 quantized checkpoints are rejected with a clear error
+
 ## [0.13.0b2] - 2026-10-02
 
 ### Added
