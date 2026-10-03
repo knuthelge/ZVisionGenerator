@@ -5,6 +5,7 @@
   import type { NumberSpec, ScrubOptions } from '$lib/actions/scrub';
   import type { WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
+  import { randomSeed } from './seed';
 
   interface Props {
     context: WorkspaceContext;
@@ -126,10 +127,6 @@
   );
 
   // --- Seed -----------------------------------------------------------------
-  function randomSeed(): number {
-    return Math.floor(Math.random() * 2 ** 32);
-  }
-
   // A locked seed repeats every run; unlocked (empty) picks a new random seed each run.
   function toggleSeedLock(): void {
     draft.update('seed', s.seed !== null ? null : (lastSeed ?? randomSeed()));

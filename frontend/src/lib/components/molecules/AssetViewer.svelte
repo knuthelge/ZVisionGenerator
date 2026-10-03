@@ -19,11 +19,14 @@
 </script>
 
 <script lang="ts">
-  import { Icon } from '$lib/components/atoms';
+  import { Icon, ShortcutList } from '$lib/components/atoms';
+  import { isTyping } from '$lib/keyboard';
   import { canUseAsReference, describeFallbackReason, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
+  import { addToast } from '$lib/state/toasts.svelte';
   import type { GalleryAsset } from '$lib/types';
   import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
   import { referenceEntries } from './assetMenu';
+  import { VIEWER_SHORTCUTS, viewerActionFor, type ViewerAction } from './viewerShortcuts';
 
   interface Props extends Omit<AssetActionHandlers, 'onpreview'> {
     assets: GalleryAsset[];
@@ -83,6 +86,8 @@
   let referenceOpen = $state(false);
   let referenceButton = $state<HTMLButtonElement | null>(null);
   let closeButton = $state<HTMLButtonElement | null>(null);
+  let downloadLink = $state<HTMLAnchorElement | null>(null);
+  let helpOpen = $state(false);
 
   const referenceItems = $derived<ActionMenuEntry[]>(
     asset && onreference ? referenceEntries(asset, onreference, referenceUnavailable) : []
@@ -109,23 +114,77 @@
     saveDetailsOpen(detailsOpen);
   }
 
-  function isTyping(target: EventTarget | null): boolean {
-    return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+  async function copyPrompt(prompt: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      addToast('Prompt copied', 'success');
+    } catch {
+      addToast('Could not copy the prompt', 'error');
+    }
   }
 
   $effect(() => {
     if (open && assets.length === 0) onclose();
   });
 
+  /** Run a keyboard action on the shown asset; return whether it applied. */
+  function runAction(action: ViewerAction): boolean {
+    if (!asset) return false;
+    switch (action) {
+      case 'close':
+        if (helpOpen) helpOpen = false;
+        else onclose();
+        return true;
+      case 'prev':
+        if (hasPrev) onnavigate(index - 1);
+        return hasPrev;
+      case 'next':
+        if (hasNext) onnavigate(index + 1);
+        return hasNext;
+      case 'first':
+        if (hasPrev) onnavigate(0);
+        return hasPrev;
+      case 'last':
+        if (hasNext) onnavigate(assets.length - 1);
+        return hasNext;
+      case 'reference':
+        if (referenceItems.length === 0) return false;
+        referenceOpen = true;
+        return true;
+      case 'copy':
+        if (!asset.prompt) return false;
+        void copyPrompt(asset.prompt);
+        return true;
+      case 'details':
+        toggleDetails();
+        return true;
+      case 'help':
+        helpOpen = !helpOpen;
+        return true;
+      case 'reuse':
+        if (!onreuse || !canReuse) return false;
+        onreuse(asset);
+        return true;
+      case 'download':
+        downloadLink?.click();
+        return downloadLink !== null;
+      case 'delete':
+      case 'delete-now':
+        // Ignore key repeat while the first delete is still in flight.
+        if (!ondelete || deleting) return false;
+        ondelete(asset, { confirm: action === 'delete' });
+        return true;
+    }
+  }
+
   $effect(() => {
     if (!open) return;
     queueMicrotask(() => closeButton?.focus());
     function handleKeydown(e: KeyboardEvent): void {
-      if (e.defaultPrevented || isTyping(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === 'Escape') { e.preventDefault(); onclose(); }
-      else if (e.key === 'ArrowLeft' && hasPrev) { e.preventDefault(); onnavigate(index - 1); }
-      else if (e.key === 'ArrowRight' && hasNext) { e.preventDefault(); onnavigate(index + 1); }
-      else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); toggleDetails(); }
+      // While the reference menu is open, keys belong to it.
+      if (e.defaultPrevented || referenceOpen || isTyping(e.target)) return;
+      const action = viewerActionFor(e);
+      if (action && runAction(action)) e.preventDefault();
     }
     document.addEventListener('keydown', handleKeydown);
     return () => document.removeEventListener('keydown', handleKeydown);
@@ -152,7 +211,7 @@
           class="viewer-btn surface-button-primary"
           data-action="reuse"
           disabled={!canReuse}
-          title={canReuse ? 'Load these settings into the workspace' : 'Reusable settings unavailable'}
+          title={canReuse ? 'Load these settings into the workspace (R)' : 'Reusable settings unavailable'}
           onclick={() => onreuse(asset)}
         ><Icon name="reuse" size={14} />Reuse settings</button>
       {/if}
@@ -164,10 +223,18 @@
           data-action="reference"
           aria-haspopup="menu"
           aria-expanded={referenceOpen}
+          title="Use as reference (E)"
           onclick={() => { referenceOpen = !referenceOpen; }}
         ><Icon name="reference" size={14} />Use as reference<Icon name="chevdown" size={12} class="opacity-70" /></button>
       {/if}
-      <a class="viewer-btn surface-overlay-action" data-action="download" href={asset.url} download={asset.filename}>
+      <a
+        bind:this={downloadLink}
+        class="viewer-btn surface-overlay-action"
+        data-action="download"
+        href={asset.url}
+        download={asset.filename}
+        title="Download (D)"
+      >
         <Icon name="download" size={14} />Download
       </a>
       {#if ondelete}
@@ -176,6 +243,7 @@
           class="viewer-btn surface-overlay-action-danger"
           data-action="delete"
           disabled={deleting}
+          title="Delete (Del)"
           onclick={() => ondelete(asset)}
         ><Icon name="trash" size={14} />{deleting ? 'Deleting…' : 'Delete'}</button>
       {/if}
@@ -189,6 +257,16 @@
         title="Details (I)"
         onclick={toggleDetails}
       ><Icon name="info" size={14} />Details <kbd class="viewer-kbd">I</kbd></button>
+      <button
+        type="button"
+        class="viewer-btn viewer-icon surface-overlay-action"
+        data-action="shortcuts"
+        aria-label="Keyboard shortcuts"
+        aria-expanded={helpOpen}
+        aria-controls="asset-viewer-shortcuts"
+        title="Keyboard shortcuts (?)"
+        onclick={() => { helpOpen = !helpOpen; }}
+      ><kbd class="viewer-kbd">?</kbd></button>
       <button
         type="button"
         bind:this={closeButton}
@@ -276,6 +354,13 @@
       </div>
     {/if}
 
+    {#if helpOpen}
+      <div id="asset-viewer-shortcuts" class="viewer-shortcuts surface-card" role="note" aria-label="Keyboard shortcuts">
+        <h4 class="viewer-h">Keyboard shortcuts</h4>
+        <ShortcutList entries={VIEWER_SHORTCUTS} />
+      </div>
+    {/if}
+
     <ActionMenu
       open={referenceOpen}
       anchor={referenceButton}
@@ -298,6 +383,7 @@
   .viewer-icon { width: 32px; justify-content: center; padding: 0; }
   .viewer-sep { width: 1px; height: 22px; margin: 0 2px; background: var(--color-border-subtle); }
   .viewer-kbd { padding: 0 5px; border: 1px solid var(--color-border-strong); border-radius: 4px; font-family: var(--font-mono); font-size: 10.5px; line-height: 16px; color: var(--color-text-muted); }
+  .viewer-shortcuts { position: absolute; top: 60px; right: 12px; z-index: 3; width: 280px; padding: 12px 14px; box-shadow: 0 12px 40px rgb(0 0 0 / 0.5); }
   .viewer-main { display: flex; flex: 1; min-height: 0; }
   .viewer-stage { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; padding: 20px 72px; }
   .viewer-media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; box-shadow: 0 20px 60px rgb(0 0 0 / 0.5); }

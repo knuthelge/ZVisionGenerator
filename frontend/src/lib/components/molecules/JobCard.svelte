@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { acceptsPageShortcut } from '$lib/keyboard';
   import type { ActiveJobState, GalleryAsset } from '$lib/types';
 
   interface Props {
@@ -54,6 +55,19 @@
   const canNext = $derived(job.status === 'running' && supportedControls.has('next'));
   const canRepeat = $derived(job.status === 'running' && supportedControls.has('repeat'));
   const hasInlineControls = $derived(canPause || canResume || canNext || canRepeat);
+
+  // Escape stops a cancellable job, unless a field, popover or dialog has the key.
+  $effect(() => {
+    if (!canCancel || !oncancel) return;
+    const callback = oncancel;
+    function handleKeydown(event: KeyboardEvent): void {
+      if (event.key !== 'Escape' || !acceptsPageShortcut(event)) return;
+      event.preventDefault();
+      void sendControl('Cancel', callback);
+    }
+    document.addEventListener('keydown', handleKeydown);
+    return () => document.removeEventListener('keydown', handleKeydown);
+  });
 
   // Live previews are transient: shown only while the current generation runs, never stored.
   let failedPreviewUrl = $state<string | null>(null);
@@ -249,7 +263,7 @@
         </button>
       {/if}
       {#if canCancel}
-        <button type="button" onclick={() => sendControl('Cancel', oncancel)} disabled={pending || !oncancel} class="cancel-button" aria-label="Cancel job">{pending && currentFeedback?.action === 'Cancel' ? 'Sending…' : 'Cancel'}</button>
+        <button type="button" onclick={() => sendControl('Cancel', oncancel)} disabled={pending || !oncancel} class="cancel-button" aria-label="Cancel job" title="Cancel (Esc)">{pending && currentFeedback?.action === 'Cancel' ? 'Sending…' : 'Cancel'}</button>
       {/if}
     </div>
   {/if}

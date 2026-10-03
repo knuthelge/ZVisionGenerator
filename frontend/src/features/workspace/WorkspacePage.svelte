@@ -9,7 +9,7 @@
   import { addToast } from '$lib/state/toasts.svelte';
   import { getWorkspaceCoreContext, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
   import { deleteAsset } from '$lib/api/gallery';
-  import { referenceParams, reuseParams, type ReferenceTarget } from '$lib/state/assetActions';
+  import { referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { MascotSpot, ToolbarSelectShell } from '$lib/components/atoms';
   import { rememberMascotSpots } from '$lib/components/atoms/MascotSpot.svelte';
   import {
@@ -24,6 +24,8 @@
   import ControlsSidebar from './ControlsSidebar.svelte';
   import HistoryStrip from './HistoryStrip.svelte';
   import { fitOutputGrid } from './outputGrid';
+  import { randomSeed } from './seed';
+  import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import type { GalleryAsset, WorkspaceContext, Workflow } from '$lib/types';
 
   let context = $state<WorkspaceContext | null>(null);
@@ -289,8 +291,20 @@
     addToast(`${asset.filename} is now the reference image`, 'success');
   }
 
-  async function deleteWorkspaceAsset(asset: GalleryAsset): Promise<void> {
-    if (deletingIds.has(asset.id) || !confirm(`Delete "${asset.filename}"?`)) return;
+  // Tried in order: the visible prompt field first, else any control in the pane.
+  const COMPOSE_FOCUS = ['.compose-pane textarea:not([hidden]):not([disabled])', '.compose-pane button:not([disabled])'];
+  const SETTINGS_FOCUS = ['.settings-pane :is(input, select, textarea, button):not([disabled]):not([type="hidden"])'];
+
+  function focusFirst(selectors: readonly string[]): void {
+    for (const selector of selectors) {
+      const el = document.querySelector<HTMLElement>(selector);
+      if (el) { el.focus(); return; }
+    }
+  }
+
+  async function deleteWorkspaceAsset(asset: GalleryAsset, options: DeleteOptions = {}): Promise<void> {
+    if (deletingIds.has(asset.id)) return;
+    if (options.confirm !== false && !confirm(`Delete "${asset.filename}"?`)) return;
     deletingIds = new Set([...deletingIds, asset.id]);
     try {
       await deleteAsset(asset.id);
@@ -422,15 +436,20 @@
         loadError = e instanceof Error ? e.message : 'Failed to load workspace context';
       });
 
-    // Keyboard shortcut ⌘↵ / Ctrl↵
+    // ⌘↵ / Ctrl↵ generates; with ⇧ a locked seed is re-rolled first. Alt+1 / Alt+2 jump to Compose / Settings.
     function handleKeydown(e: KeyboardEvent): void {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-        // The full-screen viewer covers the form; generating behind it would be a surprise.
-        if (lightboxOpen) return;
+      // The full-screen viewer covers the form; generating behind it would be a surprise.
+      if (e.defaultPrevented || lightboxOpen || hasOpenModal()) return;
+      if (isCommandKey(e) && !e.altKey && e.key === 'Enter') {
         e.preventDefault();
         // Commit the focused field first, so a typed number settles on a valid step before validation.
         (document.activeElement as HTMLElement | null)?.blur?.();
+        if (e.shiftKey && draft.state.seed !== null) draft.update('seed', randomSeed());
         void tick().then(() => formEl?.requestSubmit());
+      } else if (e.altKey && !isCommandKey(e) && !e.shiftKey && (e.code === 'Digit1' || e.code === 'Digit2')) {
+        // `code`, not `key`: Alt+1 types "¡" on a Mac keyboard.
+        e.preventDefault();
+        focusFirst(e.code === 'Digit1' ? COMPOSE_FOCUS : SETTINGS_FOCUS);
       }
     }
     document.addEventListener('keydown', handleKeydown);
