@@ -133,6 +133,106 @@ describe('AssetViewer', () => {
     expect(onnearend).toHaveBeenCalled();
   });
 
+  function press(key: string, init: KeyboardEventInit = {}): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+    document.dispatchEvent(event);
+    flushSync();
+    return event;
+  }
+
+  it.each(['Delete', 'Backspace'])('deletes the shown asset with %s', (key) => {
+    const ondelete = vi.fn();
+    mountViewer({ currentIndex: 1, ondelete });
+    expect(press(key).defaultPrevented).toBe(true);
+    expect(ondelete).toHaveBeenCalledWith(assetB, { confirm: true });
+  });
+
+  it('deletes without asking on Shift+Delete', () => {
+    const ondelete = vi.fn();
+    mountViewer({ ondelete });
+    press('Delete', { shiftKey: true });
+    expect(ondelete).toHaveBeenCalledWith(makeAsset(), { confirm: false });
+  });
+
+  it('jumps to the first and last asset with Home and End', () => {
+    const many = Array.from({ length: 5 }, (_, i) => makeAsset({ id: `out/${i}.png`, filename: `${i}.png` }));
+    const onnavigate = vi.fn();
+    mountViewer({ assets: many, currentIndex: 2, onnavigate });
+    press('End');
+    expect(onnavigate).toHaveBeenLastCalledWith(4);
+    press('Home');
+    expect(onnavigate).toHaveBeenLastCalledWith(0);
+  });
+
+  it('opens the reference menu with E and leaves other keys to it while open', () => {
+    const onreference = vi.fn();
+    const ondelete = vi.fn();
+    mountViewer({ onreference, ondelete });
+    press('e');
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    press('Delete');
+    expect(ondelete).not.toHaveBeenCalled();
+  });
+
+  it('copies the prompt with C', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    mountViewer({});
+    press('c');
+    expect(writeText).toHaveBeenCalledWith('Test asset');
+  });
+
+  it('ignores the delete key while that asset is already being deleted', () => {
+    const ondelete = vi.fn();
+    mountViewer({ ondelete, deletingIds: new Set([makeAsset().id]) });
+    expect(press('Delete').defaultPrevented).toBe(false);
+    expect(ondelete).not.toHaveBeenCalled();
+  });
+
+  it('reuses settings with R only when the asset has reusable settings', async () => {
+    const onreuse = vi.fn();
+    mountViewer({ onreuse });
+    press('r');
+    expect(onreuse).toHaveBeenCalledWith(makeAsset());
+
+    await unmount(app!);
+    onreuse.mockClear();
+    mountViewer({ onreuse, assets: [makeAsset({ has_reusable_config: false })] });
+    expect(press('R').defaultPrevented).toBe(false);
+    expect(onreuse).not.toHaveBeenCalled();
+  });
+
+  it('downloads the shown asset with D', () => {
+    mountViewer({});
+    const link = document.querySelector<HTMLAnchorElement>('[data-action="download"]')!;
+    const click = vi.spyOn(link, 'click').mockImplementation(() => {});
+    press('d');
+    expect(click).toHaveBeenCalled();
+  });
+
+  it('toggles the shortcut list with ? and closes it with Escape before the viewer', () => {
+    const onclose = vi.fn();
+    mountViewer({ onclose });
+    press('?', { shiftKey: true });
+    expect(document.querySelector('#asset-viewer-shortcuts')).not.toBeNull();
+
+    press('Escape');
+    expect(document.querySelector('#asset-viewer-shortcuts')).toBeNull();
+    expect(onclose).not.toHaveBeenCalled();
+
+    press('Escape');
+    expect(onclose).toHaveBeenCalled();
+  });
+
+  it('leaves the delete key alone while typing in a field', () => {
+    const ondelete = vi.fn();
+    mountViewer({ ondelete });
+    const input = document.createElement('input');
+    document.body.appendChild(input);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true }));
+    expect(ondelete).not.toHaveBeenCalled();
+  });
+
   it('leaves modified shortcuts such as Ctrl+I to the browser', () => {
     mountViewer({});
     const event = new KeyboardEvent('keydown', { key: 'i', ctrlKey: true, bubbles: true, cancelable: true });
