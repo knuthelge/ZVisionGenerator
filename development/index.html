@@ -1193,7 +1193,7 @@ make install
 <li>Tests live in <code>tests/</code>. Name files <code>test_&lt;module&gt;.py</code>, functions <code>test_&lt;behavior&gt;</code>.</li>
 <li>Group related tests in <code>Test</code>-prefixed classes.</li>
 <li>Never import or instantiate real backends/models. Use <code>unittest.mock.MagicMock</code> with controlled return values.</li>
-<li>Helper pattern: <code>_make_mock_backend()</code> returning a MagicMock with <code>.text_to_image.return_value = Image.new("RGB", (64, 64))</code>.</li>
+<li>Mock backend pattern: a MagicMock with <code>.text_to_image.return_value = Image.new("RGB", (64, 64))</code> (see <code>_make_mock_backend()</code> in <code>tests/test_workflow.py</code>).</li>
 <li>Use <code>conftest.py::_make_args(**overrides)</code> to build minimal <code>argparse.Namespace</code> objects.</li>
 <li>Use <code>tmp_path</code> fixture for filesystem operations.</li>
 <li>Use <code>@pytest.mark.parametrize</code> for data-driven tests with many input/output pairs.</li>
@@ -1216,6 +1216,7 @@ make install
 ├── image_cli.py                   Image CLI entry point (ziv-image)
 ├── video_cli.py                   Video CLI entry point (ziv-video)
 ├── cli.py                         Unified CLI entry point (ziv)
+├── enhance_cli.py                 Shared --enhance / --no-enhance / --enhance-model CLI handling
 ├── image_runner.py                Image generation run orchestration
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
@@ -1224,6 +1225,9 @@ make install
 │   ├── image_mac_preview.py       Cheap latent → RGB live previews for the mflux backend
 │   ├── image_win.py               Windows/Linux image backend (diffusers/CUDA)
 │   ├── memory_mac.py              MLX memory release and recommended GPU memory budget
+│   ├── prompt_enhancer_mac.py     macOS prompt-enhancer LLM (mlx-lm)
+│   ├── prompt_enhancer_win.py     Windows/Linux prompt-enhancer LLM (transformers)
+│   ├── prompt_enhancer_session.py Single resident prompt-enhancer model: exclusive use and idle release
 │   ├── video_mac.py               macOS video backend (LTX via MLX)
 │   └── video_diffusers.py         Windows/Linux video backend (LTX via diffusers/CUDA)
 ├── converters/
@@ -1237,6 +1241,7 @@ make install
 │   ├── video_types.py             Video request and artifacts
 │   ├── image_backend.py           Image backend protocol
 │   ├── video_backend.py           Video backend protocol
+│   ├── prompt_enhancer.py         Prompt-enhancer protocol
 │   └── workflow.py                Unified workflow engine (image + video)
 ├── processing/
 │   ├── contrast.py                Contrast adjustment
@@ -1246,6 +1251,8 @@ make install
 │   └── beta_scheduler.py          Beta-distribution sigma scheduler
 ├── utils/
 │   ├── alignment.py               Pixel-alignment helpers for resolution
+│   ├── app_log.py                 Error log file, cleared on every start
+│   ├── atomic_write.py            Atomic file replacement for config and prompt-file writers
 │   ├── config.py                  Config loading (image + video)
 │   ├── console.py                 Console formatting
 │   ├── ffmpeg.py                  ffmpeg availability check and install
@@ -1256,7 +1263,9 @@ make install
 │   ├── model_files.py             Offline check for fully downloaded model weights
 │   ├── model_memory.py            Header-only memory estimates for MLX models
 │   ├── paths.py                   ~/.ziv/ model store resolution
+│   ├── platform.py                Platform metadata and platform-aware alias values
 │   ├── prompt_compose.py          Structured prompt flattening &amp; snippets
+│   ├── prompt_enhance.py          Prompt-enhancement build, run, and post-processing (no model I/O)
 │   ├── prompts.py                 Prompt file loading
 │   ├── provenance.py              Embedded asset config (PNG/MP4) and full provenance payload builders
 │   └── video_model_detect.py      Video model type detection
@@ -1264,12 +1273,21 @@ make install
 │   ├── config.py                  Web UI config loading and model inventory discovery
 │   ├── config_api.py              JSON config response assembly
 │   ├── config_contract.py         Writable config semantics and path readback helpers
+│   ├── defaults.py                Ratio and size defaults for Web UI contracts
 │   ├── gallery.py                 Gallery inventory and response serialization
 │   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
+│   ├── model_delete.py            Delete installed models, LoRAs, and HF downloads
+│   ├── model_inventory.py         Backend model inventory for Web UI contracts
 │   ├── model_status.py            Per-model downloaded / memory-fit status for the SPA
+│   ├── path_picker.py             Host-local directory and file picker
+│   ├── prompt_files.py            Read and atomically update host-local prompt files
+│   ├── request_guard.py           DNS-rebinding and cross-site request protection
+│   ├── web_runner.py              Background workers for generation batches
+│   ├── workspace_api.py           Shared SPA payloads for workspace and models routes
 │   ├── workspace_contract.py      Workflow aliases and static workspace capabilities
 │   └── server.py                  FastAPI route wiring and request parsing
 └── workflows/
+    ├── enhance_stage.py           Shared auto-enhance step for image and video workflows
     ├── image_stages.py            Image pipeline stage definitions
     └── video_stages.py            Video pipeline stage definitions
 
@@ -1277,7 +1295,7 @@ prompts.yaml                       Default prompt definitions
 </code></pre>
 <h2 id="architecture-overview">Architecture Overview</h2>
 <h3 id="backend-protocol">Backend Protocol</h3>
-<p>Platform backends live in <code>backends/image_mac.py</code> (mflux/MLX), <code>backends/image_win.py</code> (Windows/Linux diffusers image), <code>backends/video_mac.py</code> (MLX video), and <code>backends/video_diffusers.py</code> (Windows/Linux diffusers video). Image backends implement the <code>ImageBackend</code> Protocol from <code>core/image_backend.py</code>; video backends implement the <code>VideoBackend</code> Protocol from <code>core/video_backend.py</code>. Platform selection stays centralized in <code>backends/__init__.py</code> — never branch on <code>sys.platform</code> elsewhere.</p>
+<p>Platform backends live in <code>backends/image_mac.py</code> (mflux/MLX), <code>backends/image_win.py</code> (Windows/Linux diffusers image), <code>backends/video_mac.py</code> (MLX video), and <code>backends/video_diffusers.py</code> (Windows/Linux diffusers video). Image backends implement the <code>ImageBackend</code> Protocol from <code>core/image_backend.py</code>; video backends implement the <code>VideoBackend</code> Protocol from <code>core/video_backend.py</code>. The prompt-enhancer LLM follows the same split: <code>backends/prompt_enhancer_mac.py</code> (mlx-lm) and <code>backends/prompt_enhancer_win.py</code> (transformers) implement the <code>PromptEnhancer</code> Protocol from <code>core/prompt_enhancer.py</code>. Backend and accelerator selection stays centralized in <code>backends/__init__.py</code> — never branch on <code>sys.platform</code> elsewhere to pick a backend. OS-level checks unrelated to backends (file pickers, ffmpeg install hints, terminal handling) are fine where they are needed.</p>
 <p>The <code>image_win.py</code> module is the shared diffusers/CUDA image backend for both Windows and Linux. The filename is historical; platform selection still happens only in <code>backends/__init__.py</code>.</p>
 <p>Windows and Linux video resolution is config-driven through <code>video_model_presets.ltx.diffusers.default_repo</code> and the <code>ltx-2.3</code> alias. The backend assumes a diffusers-compatible repository layout and keeps the configured default overrideable from user config. macOS keeps the MLX-only <code>ltx-4</code> and <code>ltx-8</code> aliases.</p>
 <p>The Windows/Linux video backend is CUDA-only. Validation happens lazily during backend load so importing the package or running non-video code paths does not require torch, diffusers, or a GPU.</p>
@@ -1292,7 +1310,7 @@ prompts.yaml                       Default prompt definitions
 <p>A repo-id alias can declare its image family in config via <code>model_alias_families</code> (for example <code>ideo: ideogram4</code>). The Web UI inventory and workspace bootstrap consult this declared family as an offline fast-path, so a known alias is surfaced without the network <code>detect_image_model</code> round-trip that a bare Hugging Face repo id would otherwise require. Content-based detection for arbitrary local model directories is unaffected; only aliases with a declared family skip detection.</p>
 <p>Per-model Web UI capability flags — <code>supports_img2img</code>, <code>supports_upscale</code>, <code>supports_json_prompt</code>, <code>supports_first_sigma</code>, <code>dimension_min</code>, <code>dimension_max</code>, and <code>dimension_step</code> — are data-driven: they originate in the <code>model_presets</code> family entries, flow through <code>resolve_defaults</code>, and are emitted into the SPA's <code>ImageModelDefaults</code>. Families that do not set them inherit permissive defaults (img2img and upscale enabled, JSON caption and first-sigma disabled, <code>16</code>/<code>null</code>/<code>16</code> dimension bounds), so gating is centralized in config rather than branching on family in the web layer.</p>
 <h3 id="error-conventions">Error Conventions</h3>
-<p>Raise <code>ValueError</code>, <code>FileNotFoundError</code>, <code>RuntimeError</code> directly with descriptive f-string messages. Use <code>warnings.warn()</code> with <code>stacklevel=2</code> for non-fatal conditions. No custom exception classes except private sentinels.</p>
+<p>Raise <code>ValueError</code>, <code>FileNotFoundError</code>, <code>RuntimeError</code> directly with descriptive f-string messages. Use <code>warnings.warn()</code> with <code>stacklevel=2</code> for non-fatal conditions. Add a custom exception class only when callers must catch it distinctly (for example <code>JobConflictError</code> in <code>web/web_runner.py</code>) or as a private sentinel.</p>
 <h3 id="test-strategy">Test Strategy</h3>
 <p>Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.</p>
 <h2 id="releasing">Releasing</h2>
@@ -1301,7 +1319,7 @@ prompts.yaml                       Default prompt definitions
 <li><strong>Final releases:</strong> <code>vX.Y.Z</code>, e.g. <code>v0.13.0</code>.</li>
 <li><strong>Betas:</strong> <code>vX.Y.ZbN</code>, e.g. <code>v0.13.0b1</code>, then <code>b2</code>, <code>b3</code>, … before the final <code>vX.Y.Z</code>. Use <code>aN</code> and <code>rcN</code> the same way for alphas and release candidates.</li>
 </ul>
-<p>Pre-release tags are published as GitHub pre-releases, and <code>pip</code> installs them only with <code>--pre</code> or an exact pin (<code>pip install z-vision-generator==0.13.0b1</code>). Before tagging, move the <code>[Unreleased]</code> CHANGELOG entries under a <code>## [&lt;version&gt;] - &lt;date&gt;</code> heading in a <code>Release v&lt;version&gt;: &lt;summary&gt;</code> commit. PyPI never accepts the same version twice, so a broken release needs a new tag.</p>
+<p>Pre-release tags are published as GitHub pre-releases, and <code>pip</code> installs them only with <code>--pre</code> or an exact pin (<code>pip install z-vision-generator==0.13.0b1</code>). Before tagging, move the <code>[Unreleased]</code> CHANGELOG entries under a <code>## [&lt;version&gt;] - &lt;date&gt;</code> heading in a <code>chore(release): v&lt;version&gt;</code> commit whose body lists the release highlights. PyPI never accepts the same version twice, so a broken release needs a new tag.</p>
 
 
 
