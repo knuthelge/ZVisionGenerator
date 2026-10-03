@@ -9,6 +9,8 @@ const modelApiMocks = vi.hoisted(() => ({
   convertCheckpoint: vi.fn(),
   importLoraLocal: vi.fn(),
   importLoraHF: vi.fn(),
+  deleteModel: vi.fn(),
+  deleteLora: vi.fn(),
 }));
 
 const promptFileApiMocks = vi.hoisted(() => ({
@@ -20,6 +22,8 @@ vi.mock('$lib/api/models', () => ({
   convertCheckpoint: modelApiMocks.convertCheckpoint,
   importLoraLocal: modelApiMocks.importLoraLocal,
   importLoraHF: modelApiMocks.importLoraHF,
+  deleteModel: modelApiMocks.deleteModel,
+  deleteLora: modelApiMocks.deleteLora,
 }));
 
 vi.mock('$lib/api/promptFiles', () => ({
@@ -78,6 +82,8 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.convertCheckpoint.mockReset();
     modelApiMocks.importLoraLocal.mockReset();
     modelApiMocks.importLoraHF.mockReset();
+    modelApiMocks.deleteModel.mockReset();
+    modelApiMocks.deleteLora.mockReset();
     modelApiMocks.getModelInventory.mockResolvedValue(makeInventory());
     promptFileApiMocks.openPathPicker.mockReset();
     promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'cancelled', path: null, message: null });
@@ -390,5 +396,54 @@ describe('ModelsPage Browse buttons', () => {
     expect(klein?.parentElement?.hasAttribute('tabindex')).toBe(false);
     expect(fits[0].getAttribute('tabindex')).toBe('0');
     expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
+  });
+
+  it('offers delete only for deletable models and warns about converted models linked to a download', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({
+      ...makeInventory(),
+      image_models: [
+        { name: 'artaix', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
+        { name: 'klein9b', family: 'flux2_klein', downloaded: true, delete: { kind: 'huggingface', repo_id: 'org/klein', linked_by: ['artaix'] } },
+        { name: 'klein4b', family: 'flux2_klein', downloaded: false, delete: null },
+      ],
+      loras: [{ name: 'style', size_label: '10 MB' }],
+    });
+    modelApiMocks.deleteModel.mockResolvedValue({ tone: 'success', message: "Deleted the HuggingFace download of 'org/klein'.", detail: '' });
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    const labels = Array.from(target.querySelectorAll('[data-testid="delete-button"]')).map((el) => el.getAttribute('aria-label'));
+    expect(labels).toEqual(['Delete artaix', 'Delete the Hugging Face download of klein9b', 'Delete style']);
+
+    (target.querySelectorAll('[data-testid="delete-button"]')[1] as HTMLButtonElement).click();
+    await settle();
+    const dialog = document.querySelector('[data-testid="delete-dialog"]');
+    expect(dialog?.textContent).toContain('org/klein');
+    expect(document.querySelector('[data-testid="delete-linked-warning"]')?.textContent).toContain('artaix');
+    expect(modelApiMocks.deleteModel).not.toHaveBeenCalled();
+
+    const confirm = Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Delete') as HTMLButtonElement;
+    confirm.click();
+    await settle();
+
+    expect(modelApiMocks.deleteModel).toHaveBeenCalledWith('klein9b');
+    expect(modelApiMocks.getModelInventory).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('[data-testid="delete-dialog"]')).toBeNull();
+  });
+
+  it('deletes a LoRA after confirmation and surfaces a refused delete', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({ ...makeInventory(), loras: [{ name: 'style', size_label: '10 MB' }] });
+    modelApiMocks.deleteLora.mockRejectedValue(new Error('Wait for the running job to finish before deleting models or LoRAs.'));
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    (target.querySelector('[data-testid="delete-button"]') as HTMLButtonElement).click();
+    await settle();
+    expect(document.querySelector('[data-testid="delete-dialog"]')?.textContent).toContain('style.safetensors');
+    (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
+    await settle();
+
+    expect(modelApiMocks.deleteLora).toHaveBeenCalledWith('style');
+    expect(target.textContent).toContain('Wait for the running job to finish');
   });
 });

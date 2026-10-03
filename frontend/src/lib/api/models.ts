@@ -29,3 +29,11 @@ export function importLoraHF(data: {
 }): Promise<ModelOperationResult> {
   return api.post<ModelOperationResult>('/api/models/import-lora/hf', data);
 }
+
+export function deleteModel(name: string): Promise<ModelOperationResult> {
+  return api.delete<ModelOperationResult>(`/api/models/${encodeURIComponent(name)}`);
+}
+
+export function deleteLora(name: string): Promise<ModelOperationResult> {
+  return api.delete<ModelOperationResult>(`/api/loras/${encodeURIComponent(name)}`);
+}
