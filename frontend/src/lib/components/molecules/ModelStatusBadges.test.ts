@@ -74,6 +74,7 @@ describe('ModelStatusBadges', () => {
     expect(fit?.querySelector('[data-status]')?.getAttribute('data-status')).toBe('tight');
     expect(fit?.querySelector('[data-status]')?.textContent?.trim()).toBe('Tight');
     expect(fit?.querySelector('[role="tooltip"]')?.textContent).toContain('9.5 GB');
+    expect(fit?.querySelector('[role="tooltip"]')?.textContent).toContain('can slow down while generating');
     expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
   });
 

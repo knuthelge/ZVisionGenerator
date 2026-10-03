@@ -21,7 +21,7 @@ class TestDescribeModelStatus:
         assert status == {"downloaded": False, "memory_fit": None}
 
     def test_image_model_reports_every_quantize_level(self, tmp_path, monkeypatch):
-        estimates = {None: 12 * _GIB, 8: 9 * _GIB, 4: 5 * _GIB}
+        estimates = {None: 16 * _GIB, 8: 13 * _GIB, 4: 5 * _GIB}
         monkeypatch.setattr(model_status, "estimate_image_memory", lambda model_dir, levels: {level: estimates[level] for level in levels})
 
         status = describe_model_status("owner/repo", kind="image", quantize_options=(4, 8), budget_bytes=10 * _GIB, find_local_dir=_finder({"owner/repo": tmp_path}))
@@ -30,9 +30,9 @@ class TestDescribeModelStatus:
         assert status["memory_fit"] == {
             "budget_gb": 10.0,
             "by_quantize": {
-                "none": {"status": "too_large", "required_gb": 12.0},
+                "none": {"status": "too_large", "required_gb": 16.0},
                 "4": {"status": "fits", "required_gb": 5.0},
-                "8": {"status": "tight", "required_gb": 9.0},
+                "8": {"status": "tight", "required_gb": 13.0},
             },
         }
 

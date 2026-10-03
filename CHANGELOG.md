@@ -6,7 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- The Web UI Models page can delete models and LoRAs. Deleting a converted model removes its folder in `~/.ziv/models/` and keeps the HuggingFace base-model files it links to. Deleting a HuggingFace model removes its download from the HuggingFace cache; the alias stays and downloads again on next use, and the confirmation lists converted models that rely on that download. Deletes are refused while a generation is running
+
+### Changed
+- The macOS memory badge uses wider limits: **Fits** up to 1.1 times Apple's recommended GPU memory and **Tight** up to 1.5 times, MLX's default memory limit. Models that run with some swapping, such as FLUX.2 Klein 9B unquantized on a 32 GB Mac, now show **Tight** instead of **Too large**. FLUX.2 Klein estimates no longer count the text encoder's LM head, which is never loaded
+
 ### Fixed
+- Converted models showed as not downloaded and had no memory badge in the Web UI, because the base-model folders they link to were not followed when looking for weight files
 - Converting a scaled FP8 checkpoint, such as an FP8 FLUX.2 Klein checkpoint saved by ComfyUI, failed with `chunk expects at least a 1-dimensional tensor`. The converter now multiplies FP8 weights by their stored scale and saves them as bfloat16. Before, a plain cast would have left them off by that scale. Block-wise and non-FP8 quantized checkpoints are rejected with a clear error
 
 ## [0.13.0b2] - 2026-10-02

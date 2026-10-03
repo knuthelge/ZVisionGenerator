@@ -72,6 +72,13 @@ class TestEstimateImageMemory:
         expected = 1_000_000 * 2 + 500_000 * 2 + 10_000 * 4 + _IMAGE_MARGIN
         assert estimate_image_memory(tmp_path) == {None: expected}
 
+    def test_text_encoder_lm_head_is_not_counted(self, tmp_path):
+        _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"lm_head.weight": ("BF16", [10, 10])})
+        _write_safetensors(tmp_path / "text_encoder" / "model.safetensors", {"w": ("BF16", [10, 10]), "lm_head.weight": ("BF16", [1000, 1000])})
+
+        # Only the text encoder's LM head is skipped: mflux never loads it; other components keep every tensor.
+        assert estimate_image_memory(tmp_path) == {None: 100 * 2 + 100 * 2 + _IMAGE_MARGIN}
+
     @pytest.mark.parametrize("bits", [4, 8])
     def test_quantize_packs_two_dimensional_weights_only(self, tmp_path, bits):
         _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"linear": ("BF16", [1024, 1024]), "norm": ("BF16", [1024])})
@@ -137,7 +144,7 @@ class TestEstimateLtxMlxMemory:
 
 @pytest.mark.parametrize(
     ("required", "expected"),
-    [(8 * _GIB, "fits"), (int(9.5 * _GIB), "tight"), (10 * _GIB, "tight"), (10 * _GIB + 1, "too_large")],
+    [(11 * _GIB, "fits"), (11 * _GIB + 1, "tight"), (15 * _GIB, "tight"), (15 * _GIB + 1, "too_large")],
 )
 def test_classify_memory_fit(required, expected):
     assert classify_memory_fit(required, 10 * _GIB) == expected
