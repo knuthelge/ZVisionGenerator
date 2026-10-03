@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b7] - 2026-10-04
+
 ### Added
 - Web UI: keyboard shortcuts across the app; press `?` for the full list
   - Viewer: `Delete`/`Backspace` deletes (`Shift+Delete` without asking), `R` reuses settings, `E` uses as reference, `D` downloads, `C` copies the prompt, `Home`/`End` jump to the first/last asset
