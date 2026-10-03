@@ -1191,7 +1191,7 @@ woman:
 <li>Multiple prompts per set are supported.</li>
 <li>The set name becomes the output filename prefix.</li>
 </ul>
-<p>In the Web UI, choose <strong>Prompt file</strong> as the prompt source, type or browse to a YAML file on the machine running the server, then select one of the active prompt options loaded from that file. The YAML editor reloads the file from disk each time you open it, so reopening the same path reflects changes made outside the browser. If you edit the path manually, the visible value is the value submitted; use Enter or Browse when you want the UI to inspect the file and refresh the option list before generating.</p>
+<p>In the Web UI, choose <strong>Prompt file</strong> as the prompt source and type or browse to a YAML file on the machine running the server. Compose then summarizes the selected prompts; click <strong>Prompts…</strong> (or the summary) to open the chooser, where you can filter prompts, select whole sets with <strong>All</strong>/<strong>None</strong>, expand a prompt to see its negative prompt, and confirm with <strong>Use N prompts</strong>. <strong>✨ Enhance</strong> sets the options for <strong>Enhance each image when generating</strong>, and <strong>Edit YAML</strong> opens the file editor. The YAML editor reloads the file from disk each time you open it, so reopening the same path reflects changes made outside the browser. If you edit the path manually, the visible value is the value submitted; use Enter or Browse when you want the UI to inspect the file and refresh the option list before generating.</p>
 <h2 id="prompt-variables">Prompt Variables</h2>
 <p>Use <code>{option1|option2|option3}</code> syntax for random selection each run:</p>
 <pre><code>&quot;A {red|blue} car&quot;                         → &quot;A red car&quot; or &quot;A blue car&quot;
@@ -1321,12 +1321,12 @@ are sharing a meal at the diner. Style: Camera: iPhone. Color: Warm
 </tbody>
 </table>
 <p>Length is a target, not a guarantee. Longer aims for at least 40 words and Extra long for at least 80, so short prompts still grow; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length. On short prompts, Same is approximate.</p>
-<p>The enhancer keeps your subject and adds only things that can be seen: no sounds, smells, or story. It never adds new people, animals, or major objects.</p>
+<p>The enhancer keeps your subject and every detail you describe. It adds only things that can be seen: no sounds, smells, or story. It never adds new people, animals, or major objects.</p>
 <h3 id="in-the-web-ui">In the Web UI</h3>
 <ul>
-<li><strong>Enhance</strong>: click ✨ <strong>Enhance</strong> under the prompt, pick options, and click <strong>Enhance prompt</strong>. The rewrite appears in <strong>Enhanced prompt</strong>. When that box has text, it is what gets generated. Edit it, enhance again, or <strong>Clear</strong> it to go back to your prompt.</li>
+<li><strong>Enhance</strong>: click ✨ <strong>Enhance</strong> in the prompt box, pick options, and click <strong>Enhance prompt</strong>. The rewrite appears in the <strong>Enhanced</strong> tab. When that tab has text, it is what gets generated; the <strong>used</strong> badge shows which tab that is. Edit it, enhance again, or <strong>Clear</strong> it to go back to your prompt.</li>
 <li>If you change the prompt or switch between image and video afterwards, the Enhanced prompt is marked <strong>Out of date</strong>. It is still used until you <strong>Re-enhance</strong> or <strong>Clear</strong> it.</li>
-<li><code>{a|b}</code> choices are kept in the rewrite, so each image still picks its own choice.</li>
+<li><code>{a|b}</code> choices are picked before the rewrite, so the enhancer sees one plain prompt and the Enhanced prompt has no choices left. Enhance again for a different pick, or use <strong>Enhance each image when generating</strong> to keep a fresh pick per image.</li>
 <li><strong>Enhance each image when generating</strong> rewrites every image's prompt on the server, after its <code>{a|b}</code> choices are picked, using that image's seed. It works with inline prompts and prompt files.</li>
 <li>Enhance is unavailable while a job runs.</li>
 </ul>
