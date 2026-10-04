@@ -229,7 +229,7 @@ class TestGenerateFields:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
         try:
             with pytest.raises(web_runner_module.JobConflictError, match="Prompt enhancement in progress"):
-                runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: None, admission_check=web_server._reject_while_enhancing)
+                runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: None, admission_check=web_server._reject_while_busy)
             assert runner.get_active_exclusive_job_snapshot() is None
         finally:
             runner.shutdown()
@@ -242,7 +242,7 @@ class TestGenerateFields:
         try:
             runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: release.wait(5))
             with pytest.raises(web_runner_module.JobConflictError, match="already running"):
-                runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: None, admission_check=web_server._reject_while_enhancing)
+                runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: None, admission_check=web_server._reject_while_busy)
         finally:
             release.set()
             runner.shutdown()
