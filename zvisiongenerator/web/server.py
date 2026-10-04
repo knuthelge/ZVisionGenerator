@@ -233,7 +233,7 @@ async def enhance_prompt_endpoint(request: Request) -> StreamingResponse:
 
     try:
         # Atomic with job admission: no job can start between this check and the enhancer claiming the slot.
-        web_runner.admit_exclusive(_reserve, busy_message="Prompt enhancement is available when the current job finishes.")
+        web_runner.admit_exclusive(_reserve, busy_message="Prompt enhancement is available when all jobs have finished.")
     except JobConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -256,7 +256,13 @@ async def enhance_prompt_endpoint(request: Request) -> StreamingResponse:
 
 
 def _reject_while_busy() -> None:
-    """Job admission check: refuse to start a job while an on-demand enhancement or a model quantization holds memory."""
+    """Job admission check: refuse a job while an on-demand enhancement or a model quantization holds memory.
+
+    Both can only start while no job is active, so with jobs active a busy enhancer belongs to a job's own
+    preflight and the new job simply queues behind it.
+    """
+    if web_runner.has_active_jobs():
+        return
     if get_prompt_enhancer_session().busy():
         raise JobConflictError("Prompt enhancement in progress. Wait for it to finish before starting a job.")
     if _quantize_slot["busy"]:
@@ -277,7 +283,7 @@ def _claim_quantize_slot() -> Iterator[None]:
             raise JobConflictError("Another model is being quantized. Wait for it to finish.")
         _quantize_slot["busy"] = True
 
-    web_runner.admit_exclusive(_claim, busy_message="Wait for the running job to finish before saving a quantized copy; both would need a full model in memory.")
+    web_runner.admit_exclusive(_claim, busy_message="Wait for all jobs to finish before saving a quantized copy; both would need a full model in memory.")
     try:
         yield
     finally:
@@ -370,39 +376,78 @@ def _generate_from_form(form: Any) -> JSONResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    requested_workflow = _canonicalize_workflow(_optional_text(form, "workflow"), fallback=_default_workflow_for_mode(mode))
-    workflow = _canonicalize_workflow(job_context.get("job_type"), fallback=requested_workflow)
-    created_at = datetime.now(tz=timezone.utc).isoformat()
+    job_id = str(job_context["job_id"])
+    public = job_context["context"]
     try:
-        web_runner.update_job_context(
-            str(job_context["job_id"]),
-            {
-                "workflow": workflow,
-                "job_type": job_context.get("job_type", workflow),
-                "prompt": job_context.get("prompt", ""),
-                "model": job_context.get("title", ""),
-                "runs": job_context["runs"],
-                "created_at": created_at,
-                "output_dir": job_context.get("output_dir", web_config.output_dir),
-            },
-        )
+        queue_position = web_runner.get_job_snapshot(job_id)["queue_position"]
     except KeyError:
-        pass
-
+        queue_position = None
     return JSONResponse(
         {
-            "job_id": job_context["job_id"],
-            "workflow": workflow,
-            "prompt": job_context.get("prompt", ""),
-            "model": job_context.get("title", ""),
-            "runs": job_context["runs"],
-            "created_at": created_at,
+            "job_id": job_id,
+            "workflow": public["workflow"],
+            "prompt": public["prompt"],
+            "model": public["model"],
+            "runs": public["runs"],
+            "created_at": public["created_at"],
             "events_url": job_context.get("events_url", ""),
             "status_url": job_context.get("status_url", ""),
             "supported_controls": list(job_context.get("supported_controls", ())),
-            "meta": job_context.get("meta", ""),
+            "meta": public["meta"],
+            "queue_position": queue_position,
         }
     )
+
+
+def _public_job_context(
+    form: Any,
+    *,
+    mode: str,
+    job_type: str,
+    model: str,
+    prompt: str,
+    runs: int,
+    meta: str,
+    output_dir: str,
+    image_path: str | None,
+) -> dict[str, Any]:
+    """Build the public context a job carries from submission on (shown in snapshots and the queue)."""
+    requested_workflow = _canonicalize_workflow(_optional_text(form, "workflow"), fallback=_default_workflow_for_mode(mode))
+    workflow = _canonicalize_workflow(job_type, fallback=requested_workflow)
+    return {
+        "workflow": workflow,
+        "job_type": job_type,
+        "prompt": prompt,
+        "model": model,
+        "runs": runs,
+        "meta": meta,
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+        "output_dir": output_dir,
+        "settings": _submitted_settings(form, image_path=image_path),
+    }
+
+
+def _submitted_settings(form: Any, *, image_path: str | None) -> dict[str, str | list[str]]:
+    """Return the submitted text fields verbatim (repeated fields as lists); an upload becomes its saved path."""
+    settings: dict[str, str | list[str]] = {}
+    uploaded = False
+    # Starlette's FormData repeats a key per value; plain mappings (tests, internal callers) have one item per key.
+    items = form.multi_items() if hasattr(form, "multi_items") else form.items()
+    for key, value in items:
+        if isinstance(value, list):
+            settings[key] = [str(item) for item in value]
+            continue
+        if not isinstance(value, str):
+            uploaded = uploaded or _is_uploaded_file(value)
+            continue
+        if key not in settings:
+            settings[key] = value
+            continue
+        existing = settings[key]
+        settings[key] = [*existing, value] if isinstance(existing, list) else [existing, value]
+    if uploaded and image_path:
+        settings["image_path"] = image_path
+    return settings
 
 
 @app.post("/jobs/{job_id}/controls/{action}")
@@ -466,10 +511,12 @@ def _build_workspace_bootstrap_view(web_config: WebUiConfig) -> dict[str, Any]:
 
 def _build_workspace_response(web_config: WebUiConfig, history_assets: list[dict[str, Any]]) -> dict[str, Any]:
     """Build the workspace payload from backend-owned contract helpers."""
+    jobs = web_runner.list_jobs()
     return build_workspace_response(
         web_config,
         history_assets,
-        active_job=web_runner.get_active_exclusive_job_snapshot(),
+        active_job=jobs["active_job"],
+        queued_jobs=jobs["queued_jobs"],
         prompt_sources=list(PROMPT_SOURCE_VALUES),
         default_prompt_source=DEFAULT_PROMPT_SOURCE,
         prompt_file_contract=dict(PROMPT_FILE_CONTRACT),
@@ -670,6 +717,17 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         saturation_amount=args.saturation if isinstance(args.saturation, float) else app_config.get("saturation", {}).get("default_amount", 1.0),
         output_dir=args.output,
     )
+    context = _public_job_context(
+        form,
+        mode="image",
+        job_type="Image to Image" if args.image_path else "Text to Image",
+        model=model_name,
+        prompt=prompt,
+        runs=args.runs,
+        meta=f"{args.ratio} · {args.size} · {args.steps} steps",
+        output_dir=args.output,
+        image_path=args.image_path,
+    )
     job_id = web_runner.submit_image_request_job(
         request=request,
         prompts_data=prompts_data,
@@ -679,18 +737,14 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         quantize=args.quantize,
         enhance_by_set=enhance_by_set,
         admission_check=_reject_while_busy,
+        context=context,
     )
     return {
         "job_id": job_id,
-        "job_type": "Image to Image" if args.image_path else "Text to Image",
-        "title": model_name,
-        "prompt": prompt,
+        "context": context,
         "events_url": f"/jobs/{job_id}/events",
         "status_url": f"/jobs/{job_id}",
         "supported_controls": IMAGE_SUPPORTED_CONTROLS,
-        "runs": args.runs,
-        "output_dir": args.output,
-        "meta": f"{args.ratio} · {args.size} · {args.steps} steps",
     }
 
 
@@ -797,6 +851,17 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     except RuntimeError as exc:
         raise ValueError(str(exc)) from exc
 
+    context = _public_job_context(
+        form,
+        mode="video",
+        job_type="Image to Video" if image_path else "Text to Video",
+        model=model_name,
+        prompt=prompt,
+        runs=args.runs,
+        meta=f"{args.width}x{args.height} · {args.num_frames} frames · {args.steps} steps",
+        output_dir=args.output,
+        image_path=image_path,
+    )
     job_id = web_runner.submit_video_request_job(
         request=request,
         prompts_data=prompts_data,
@@ -805,19 +870,14 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         model_ref=resolved_model,
         enhance_by_set=enhance_by_set,
         admission_check=_reject_while_busy,
+        context=context,
     )
-    mode_label = "Image to Video" if image_path else "Text to Video"
     return {
         "job_id": job_id,
-        "job_type": mode_label,
-        "title": model_name,
-        "prompt": prompt,
+        "context": context,
         "events_url": f"/jobs/{job_id}/events",
         "status_url": f"/jobs/{job_id}",
         "supported_controls": VIDEO_SUPPORTED_CONTROLS,
-        "runs": args.runs,
-        "output_dir": args.output,
-        "meta": f"{args.width}x{args.height} · {args.num_frames} frames · {args.steps} steps",
     }
 
 
@@ -1369,7 +1429,20 @@ def api_delete_lora(name: str) -> dict[str, Any]:
 def _ensure_no_active_job() -> None:
     """Refuse model and LoRA deletes while a generation job may be reading their files."""
     if web_runner.get_active_exclusive_job_snapshot() is not None:
-        raise HTTPException(status_code=409, detail="Wait for the running job to finish before deleting models or LoRAs.")
+        raise HTTPException(status_code=409, detail="Wait for all jobs to finish before deleting models or LoRAs.")
+
+
+# Declared before the parameterised /api/jobs/{job_id} routes.
+@app.get("/api/jobs")
+def api_list_jobs() -> dict[str, Any]:
+    """Return the active generation job and the queued ones, oldest first."""
+    return web_runner.list_jobs()
+
+
+@app.delete("/api/jobs/queue")
+def api_clear_queue() -> dict[str, list[str]]:
+    """Remove every queued job; the active job keeps running."""
+    return {"cancelled": web_runner.clear_queue()}
 
 
 @app.post("/api/jobs/{job_id}/cancel")
@@ -1381,6 +1454,9 @@ async def api_cancel_job(job_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}") from exc
     if snapshot["status"] in {"completed", "failed", "cancelled"}:
         return {"job_id": job_id, "status": snapshot["status"]}
+    # A job that has not started is removed from the queue, whatever controls it supports once running.
+    if web_runner.cancel_queued(job_id):
+        return {"job_id": job_id, "status": "cancelled"}
     supported_controls = set(snapshot.get("supported_controls") or [])
     if "quit" not in supported_controls and "cancel" not in supported_controls:
         raise HTTPException(status_code=409, detail="This job does not support cancellation.")

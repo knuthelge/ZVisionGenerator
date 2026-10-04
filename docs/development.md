@@ -191,6 +191,12 @@ Tests must never run the real memory cleanup: patch `zvisiongenerator.preflight.
 
 To add pre-load work (for example LoRA validation or a memory-fit check), add a field to `JobPlan` or `IterationPlan` and a private step in `run_preflight`. There is no stage pipeline or registry; promote `preflight.py` to a package only once it holds several concerns.
 
+### Web Job Queue
+
+`WebRunner` (`web/web_runner.py`) runs every Web UI job on a single worker thread. Generation jobs are never refused for being second: `_submit_job` registers the job, publishes `job_submitted`, appends it to the FIFO queue and dispatches it, all under `_jobs_lock`, so the worker receives jobs in queue order. When the worker reaches a job, `_claim` takes it off the queue and publishes `job_started` (status `running`, `started_at`; `elapsed_secs` counts from here). A job removed with `cancel_queued`, `clear_queue` or `shutdown` is no longer queued, so the claim skips it even if its work item was already picked up; it ends with `job_cancelled` and `reason: "removed"`.
+
+The *active* job is the claimed one or, between jobs, the head of the queue; every other unfinished generation job is *queued*, with a 1-based `queue_position`. `GET /api/jobs` and `/api/workspace` return them as `active_job` and `queued_jobs`, and a job is never in both. `DELETE /api/jobs/queue` removes the queued jobs and keeps the active one. Actions that need the model memory to themselves (manual prompt enhancement, saving a quantized copy, deleting models or LoRAs) still wait until no generation job is running or queued.
+
 ### Data Types
 
 Use `@dataclass(frozen=True)` for immutable value objects (inputs, detection results). Use mutable `@dataclass` only for working state. No pydantic or attrs.
