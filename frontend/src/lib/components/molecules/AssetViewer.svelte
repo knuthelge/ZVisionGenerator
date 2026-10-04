@@ -184,6 +184,11 @@
       // While the reference menu is open, keys belong to it.
       if (e.defaultPrevented || referenceOpen || isTyping(e.target)) return;
       const action = viewerActionFor(e);
+      // A held Del must not open a second confirmation.
+      if ((action === 'delete' || action === 'delete-now') && e.repeat) {
+        e.preventDefault();
+        return;
+      }
       if (action && runAction(action)) e.preventDefault();
     }
     document.addEventListener('keydown', handleKeydown);

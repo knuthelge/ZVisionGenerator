@@ -4,8 +4,16 @@
   interface Props {
     open?: boolean;
     title?: string;
-    /** `lg` widens the dialog for lists and editors. */
-    size?: 'md' | 'lg';
+    /** `lg` widens the dialog for lists and editors; `sm` fits a short question. */
+    size?: 'sm' | 'md' | 'lg';
+    /** `alertdialog` for a dialog that asks the user to approve an action. */
+    role?: 'dialog' | 'alertdialog';
+    /** Id of the element that names the dialog, used instead of `title`. */
+    labelledby?: string;
+    /** Id of the element that describes the dialog. */
+    describedby?: string;
+    /** Stack above full-screen overlays such as the asset viewer. */
+    elevated?: boolean;
     onclose?: () => void;
     children?: Snippet;
     footer?: Snippet;
@@ -15,10 +23,16 @@
     open = $bindable(false),
     title,
     size = 'md',
+    role = 'dialog',
+    labelledby,
+    describedby,
+    elevated = false,
     onclose,
     children,
     footer
   }: Props = $props();
+
+  const SIZE_CLASSES = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-3xl' } as const;
 
   let dialogEl = $state<HTMLDivElement | null>(null);
   let previouslyFocused: Element | null = null;
@@ -106,7 +120,7 @@
 
 {#if open}
   <!-- Outer container: stacking context -->
-  <div class="fixed inset-0 z-50">
+  <div class="fixed inset-0 {elevated ? 'z-[200]' : 'z-50'}">
     <!-- Backdrop (native button so click-to-dismiss requires no role suppression) -->
     <button
       type="button"
@@ -120,11 +134,13 @@
       <!-- Dialog -->
       <div
         bind:this={dialogEl}
-        role="dialog"
+        {role}
         aria-modal="true"
-        aria-label={title}
+        aria-label={labelledby ? undefined : title}
+        aria-labelledby={labelledby}
+        aria-describedby={describedby}
         tabindex="-1"
-        class="relative flex max-h-full w-full {size === 'lg' ? 'max-w-3xl' : 'max-w-lg'} flex-col rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl focus:outline-none pointer-events-auto"
+        class="relative flex max-h-full w-full {SIZE_CLASSES[size]} flex-col rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl focus:outline-none pointer-events-auto"
       >
       {#if title}
         <div class="flex items-center justify-between px-6 py-4 border-b border-zinc-800">

@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 - Web UI: more workspace shortcuts. `Alt+3` focuses the newest history tile, expanding the strip if needed. `P` pauses or resumes the running job, `N` skips to the next image and `R` repeats the current one
 
+### Changed
+- Web UI: deleting assets, models and LoRAs asks in the app's own confirmation dialog instead of the browser's. `Enter` confirms and `Esc` cancels
+
 ## [0.13.0b10] - 2026-10-04
 
 ### Added

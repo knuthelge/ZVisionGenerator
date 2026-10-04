@@ -1,3 +1,4 @@
+import { requestConfirm } from '$lib/components/molecules/confirm.svelte';
 import type { GalleryAsset, Workflow } from '$lib/types';
 
 /** Which generation a reference image feeds. */
@@ -43,6 +44,11 @@ export function canUseAsReference(asset: GalleryAsset): boolean {
 /** Return the workspace prefill params that make an asset the reference image. */
 export function referenceParams(asset: GalleryAsset, target: ReferenceTarget): Record<string, string> {
   return { workflow: REFERENCE_WORKFLOWS[target], image_path: asset.file_path ?? '' };
+}
+
+/** Ask the user to approve deleting one asset; resolves true when they confirm. */
+export function confirmDeleteAsset(asset: GalleryAsset): Promise<boolean> {
+  return requestConfirm({ question: `Delete "${asset.filename}"?`, info: 'This cannot be undone.', confirmLabel: 'Delete' });
 }
 
 /** Describe a backend reuse fallback reason in words. */

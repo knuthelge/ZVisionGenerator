@@ -21,6 +21,7 @@
     type MascotReaction,
   } from '$lib/state/mascot';
   import { AssetTile, AssetViewer, JobCard, ModelStatusBadges } from '$lib/components/molecules';
+  import { confirmDeleteAsset } from '$lib/state/assetActions';
   import ControlsSidebar from './ControlsSidebar.svelte';
   import HistoryStrip from './HistoryStrip.svelte';
   import { fitOutputGrid } from './outputGrid';
@@ -315,7 +316,8 @@
 
   async function deleteWorkspaceAsset(asset: GalleryAsset, options: DeleteOptions = {}): Promise<void> {
     if (deletingIds.has(asset.id)) return;
-    if (options.confirm !== false && !confirm(`Delete "${asset.filename}"?`)) return;
+    if (options.confirm !== false && !(await confirmDeleteAsset(asset))) return;
+    if (deletingIds.has(asset.id)) return;
     deletingIds = new Set([...deletingIds, asset.id]);
     try {
       await deleteAsset(asset.id);

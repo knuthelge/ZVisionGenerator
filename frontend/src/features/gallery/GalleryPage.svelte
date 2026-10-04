@@ -8,7 +8,8 @@
   import { draft } from '$lib/state/draft.svelte';
   import { referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import type { GalleryAsset } from '$lib/types';
-  import { AssetTile, AssetViewer } from '$lib/components/molecules';
+  import { AssetTile, AssetViewer, requestConfirm } from '$lib/components/molecules';
+  import { confirmDeleteAsset } from '$lib/state/assetActions';
   import { hasOpenModal, isCommandKey, isPlainKey, isTyping } from '$lib/keyboard';
   import { gridColumns, moveInGrid } from './gridNav';
 
@@ -253,14 +254,26 @@
     selected = next;
   }
 
-  async function deleteSelected(): Promise<void> {
-    const targets = assets.filter(
+  function deletableSelection(): GalleryAsset[] {
+    return assets.filter(
       (asset) => selected.has(asset.id)
         && !deletingIds.has(asset.id)
         && !_successfullyDeletedIds.has(asset.id)
     );
+  }
+
+  async function deleteSelected(): Promise<void> {
+    const count = deletableSelection().length;
+    if (count === 0) return;
+    const approved = await requestConfirm({
+      question: `Delete ${count} selected asset${count !== 1 ? 's' : ''}?`,
+      info: 'This cannot be undone.',
+      confirmLabel: 'Delete',
+    });
+    if (!approved) return;
+    // The selection may have changed while the dialog was open.
+    const targets = deletableSelection();
     if (targets.length === 0) return;
-    if (!confirm(`Delete ${targets.length} selected asset${targets.length !== 1 ? 's' : ''}?`)) return;
 
     markDeleting(targets.map((asset) => asset.id), true);
     bulkDeleteRuns += 1;
@@ -296,7 +309,8 @@
 
   async function deleteSingle(asset: GalleryAsset, options: DeleteOptions = {}): Promise<void> {
     if (deletingIds.has(asset.id) || _successfullyDeletedIds.has(asset.id)) return;
-    if (options.confirm !== false && !confirm(`Delete "${asset.filename}"?`)) return;
+    if (options.confirm !== false && !(await confirmDeleteAsset(asset))) return;
+    if (deletingIds.has(asset.id) || _successfullyDeletedIds.has(asset.id)) return;
     markDeleting([asset.id], true);
     try {
       await deleteAsset(asset.id);
@@ -434,6 +448,11 @@
       e.preventDefault();
       selected = new Set();
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      // A held key must not open a second confirmation.
+      if (e.repeat) {
+        e.preventDefault();
+        return;
+      }
       if (selected.size > 0) void deleteSelected();
       else if (focused) void deleteSingle(focused);
       else return;

@@ -483,7 +483,7 @@ describe('ModelsPage Browse buttons', () => {
 
     (target.querySelectorAll('[data-testid="delete-button"]')[1] as HTMLButtonElement).click();
     await settle();
-    const dialog = document.querySelector('[data-testid="delete-dialog"]');
+    const dialog = document.querySelector('[role="alertdialog"]');
     expect(dialog?.textContent).toContain('org/klein');
     expect(document.querySelector('[data-testid="delete-linked-warning"]')?.textContent).toContain('artaix');
     expect(modelApiMocks.deleteModel).not.toHaveBeenCalled();
@@ -505,7 +505,7 @@ describe('ModelsPage Browse buttons', () => {
 
     (target.querySelector('[data-testid="delete-button"]') as HTMLButtonElement).click();
     await settle();
-    expect(document.querySelector('[data-testid="delete-dialog"]')?.textContent).toContain('style.safetensors');
+    expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('style.safetensors');
     (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
     await settle();
 

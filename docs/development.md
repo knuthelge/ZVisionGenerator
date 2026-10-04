@@ -209,6 +209,10 @@ Per-model Web UI capability flags — `supports_img2img`, `supports_upscale`, `s
 
 Raise `ValueError`, `FileNotFoundError`, `RuntimeError` directly with descriptive f-string messages. Use `warnings.warn()` with `stacklevel=2` for non-fatal conditions. Add a custom exception class only when callers must catch it distinctly (for example `JobConflictError` in `web/web_runner.py`) or as a private sentinel.
 
+### Web UI Confirmations
+
+Ask the user to approve an action with `ConfirmDialog` (`frontend/src/lib/components/molecules/`), never `window.confirm`. It has no title: it shows the question, an optional line of information, and a cancel button plus a confirm button named after the action (danger-styled for destructive actions). Enter confirms (except on the focused cancel button), Esc cancels, and a held key never confirms; while it is open, no other key reaches the page or a viewer underneath. Call `requestConfirm({ question, info, confirmLabel })`, which resolves `true` on confirm, or render `<ConfirmDialog>` directly when the dialog needs a body or stays open while the action runs (`pending`).
+
 ### Test Strategy
 
 Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.

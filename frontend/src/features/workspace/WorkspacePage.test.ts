@@ -293,6 +293,13 @@ async function settle(): Promise<void> {
   flushSync();
 }
 
+/** Answer the open confirmation dialog. */
+async function answerConfirm(confirmed: boolean): Promise<void> {
+  const action = confirmed ? 'confirm' : 'cancel';
+  (document.querySelector(`[role="alertdialog"] [data-action="${action}"]`) as HTMLButtonElement).click();
+  await settle();
+}
+
 /** Pick prompt-file prompts through the Choose prompts dialog and confirm. */
 async function choosePrompts(container: ParentNode, ids: string[]): Promise<void> {
   (container.querySelector('[data-action="choose-prompts"]') as HTMLButtonElement).click();
@@ -2370,19 +2377,20 @@ describe('WorkspacePage asset actions and settings', () => {
     const first = makeAsset({ id: 'out/first.png', filename: 'first.png' });
     const second = makeAsset({ id: 'out/second.png', filename: 'second.png' });
     await mountWithHistory([first, second]);
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true);
     galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
 
     openTileMenu(second);
     (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
     await settle();
+    expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('Delete "second.png"?');
+    await answerConfirm(false);
     expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalled();
 
     openTileMenu(second);
     (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
     await settle();
+    await answerConfirm(true);
 
-    expect(confirmSpy).toHaveBeenCalledTimes(2);
     expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith(second.id);
     expect(historyStore.assets.map((asset) => asset.id)).toEqual([first.id]);
     expect(historyTile(second)).toBeNull();
@@ -2594,7 +2602,6 @@ describe('WorkspacePage asset actions and settings', () => {
   it('clears the reference when its asset is deleted', async () => {
     const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
     await mountWithHistory([asset]);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
     openTileMenu(asset);
     (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
@@ -2604,6 +2611,7 @@ describe('WorkspacePage asset actions and settings', () => {
     openTileMenu(asset);
     (document.querySelector('[role="menu"] [data-action="delete"]') as HTMLButtonElement).click();
     await settle();
+    await answerConfirm(true);
 
     expect(draft.state.referenceImagePath).toBeNull();
   });
