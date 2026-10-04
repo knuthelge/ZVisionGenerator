@@ -12,6 +12,8 @@
     chevleft: 'M15 19l-7-7 7-7',
     chevright: 'M9 5l7 7-7 7',
     chevdown: 'M19 9l-7 7-7-7',
+    collapse: 'M11 17l-5-5 5-5M18 17l-5-5 5-5',
+    uncollapse: 'M13 17l5-5-5-5M6 17l5-5-5-5',
     reset: 'M4 4v5h5M4.6 9A8 8 0 1 1 4 13',
     lock: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z',
     unlock: 'M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z',

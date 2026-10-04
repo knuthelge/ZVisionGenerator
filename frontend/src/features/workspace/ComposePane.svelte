@@ -4,6 +4,7 @@
   import { enhancedOverrideActive, isEnhancedStale } from '$lib/state/promptEnhance';
   import { autogrow } from '$lib/actions/autogrow';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
+  import { Icon } from '$lib/components/atoms';
   import { PromptFileField } from '$lib/components/molecules';
   import type { PromptSource, WorkspaceContext } from '$lib/types';
   import PromptEnhancer from './PromptEnhancer.svelte';
@@ -12,9 +13,11 @@
   interface Props {
     context: WorkspaceContext;
     busy: boolean;
+    /** Fold the sidebar into its strip; no button is shown when absent. */
+    oncollapse?: () => void;
   }
 
-  let { context, busy }: Props = $props();
+  let { context, busy, oncollapse }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -90,7 +93,14 @@
 
 <section class="compose-pane custom-scrollbar" aria-labelledby="ws-compose-title">
   <div class="compose-head">
-    <h2 id="ws-compose-title" class="field-label">Compose</h2>
+    <div class="compose-title">
+      {#if oncollapse}
+        <button type="button" class="collapse-toggle" aria-label="Collapse sidebar" title="Collapse sidebar" aria-controls="ws-controls-sidebar" aria-expanded="true" onclick={oncollapse}>
+          <Icon name="collapse" size={14} />
+        </button>
+      {/if}
+      <h2 id="ws-compose-title" class="field-label">Compose</h2>
+    </div>
     {#if caps.showPromptSource}
       <div class="surface-toggle-group flex items-center p-0.5" role="group" aria-label="Prompt source">
         {#each context.prompt_sources as source (source)}
@@ -276,6 +286,13 @@
 <style>
   .compose-pane { display: flex; flex: none; flex-direction: column; gap: 8px; max-height: 44%; overflow-y: auto; padding: 12px; border-bottom: 1px solid var(--color-border-subtle); }
   .compose-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .compose-title { display: flex; align-items: center; gap: 6px; }
+  .collapse-toggle { display: grid; place-items: center; width: 24px; height: 24px; margin-left: -4px; border-radius: 4px; color: var(--color-text-muted); }
+  .collapse-toggle:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
+  /* Below the phone breakpoint the sidebar stacks above the preview and always shows. */
+  @media (max-width: 639px) {
+    .collapse-toggle { display: none; }
+  }
   .prompt-tabs { display: flex; align-items: center; gap: 2px; padding: 4px 4px 0; border-bottom: 1px solid var(--color-border-subtle); }
   .prompt-tab { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 6px; border-radius: 6px 6px 0 0; font-family: var(--font-display); font-size: 12px; font-weight: 600; color: var(--color-text-muted); }
   .prompt-tab:hover { color: var(--color-text-primary); }

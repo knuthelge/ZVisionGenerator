@@ -494,6 +494,22 @@
     };
   });
 
+  let revealingInvalid = false;
+
+  // The browser cannot report an invalid field inside the collapsed sidebar, so expand it and report once shown.
+  function revealInvalidField(event: Event): void {
+    const field = event.target as HTMLInputElement;
+    if (!draft.state.sidebarCollapsed || !field.closest?.('#ws-controls-sidebar')) return;
+    event.preventDefault();
+    if (revealingInvalid) return;
+    revealingInvalid = true;
+    draft.update('sidebarCollapsed', false);
+    void tick().then(() => {
+      revealingInvalid = false;
+      field.reportValidity();
+    });
+  }
+
   async function handleSubmit(e: Event): Promise<void> {
     e.preventDefault();
     if (!formEl || busy || !authorityReady) return;
@@ -555,6 +571,7 @@
   class="flex min-h-0 flex-1 flex-col"
   onsubmit={handleSubmit}
   oninput={markTyping}
+  oninvalidcapture={revealInvalidField}
 >
   <!-- Hidden fields -->
   <input type="hidden" name="mode" value={isImageMode ? 'image' : 'video'}>
@@ -697,7 +714,7 @@
   </div>
 
   <!-- Left column (Compose + Settings) and the stage with its history filmstrip -->
-  <main class="workspace-layout min-h-0 flex-1 overflow-hidden">
+  <main class="workspace-layout min-h-0 flex-1 overflow-hidden" class:sidebar-collapsed={draft.state.sidebarCollapsed}>
     <ControlsSidebar
       {context}
       {busy}
@@ -776,7 +793,7 @@
           </div>
         {:else if jobStore.current && (jobStore.isRunning || jobOutputs.length > 0)}
           <div class="h-full w-full overflow-y-auto p-6">
-            <div class="mx-auto w-full max-w-md">
+            <div class="mx-auto w-full max-w-4xl">
               <MascotSpot mood={mascotMood} size={112} class="mx-auto mb-2 w-fit" />
               <JobCard
                 job={jobStore.current!}
@@ -865,6 +882,7 @@
 
 <style>
   .workspace-layout { display: grid; grid-template-columns: 360px minmax(0, 1fr); }
+  .workspace-layout.sidebar-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
   @media (max-width: 639px) {
     .workspace-layout { display: flex; flex-direction: column; overflow-y: auto; }
     .workspace-preview { flex: none; min-height: 420px; }
