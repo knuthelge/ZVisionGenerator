@@ -156,7 +156,7 @@ ziv-image -m my-model -q 8    # 8-bit quantization
 
 On macOS, memory is shared between the CPU and GPU, so an unquantized model larger than the machine's recommended GPU memory makes macOS compress or swap other memory, and well beyond it the whole system swaps heavily. On a 16 GB Mac, for example, Z-Image Turbo and FLUX.2 Klein need `-q 8` or `-q 4`. The Web UI's memory badge shows which levels fit.
 
-The [prompt enhancer](prompts.md#enhancing-prompts) uses about 3 GB more while **Enhance each image** is on; the badge does not include it.
+The [prompt enhancer](prompts.md#enhancing-prompts) is unloaded before the model loads, so **Enhance each image** does not add to the model's memory.
 
 ## Post-Processing
 
@@ -191,7 +191,9 @@ During batch generation:
 | `n` | **Skip** | Stop current image, move to next prompt |
 | `q` | **Quit** | Stop current image, exit batch |
 | `p` | **Pause** | Finish current image, pause until keypress |
-| `r` | **Repeat** | Finish current image, re-run same prompt with new seed |
+| `r` | **Repeat** | Finish current image, re-run the same prompt (same random choices and enhanced prompt) with a new random seed |
+
+The keys also work while prompts are enhanced and while the model loads. During enhancement, `n` skips the current rewrite, `q` stops before the model loads, `p` pauses, and `r` has no effect. See [While Prompts Are Enhanced](prompts.md#while-prompts-are-enhanced).
 
 In the Web UI, image job controls appear only while the backend reports that the running job supports them.
 

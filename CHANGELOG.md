@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Web UI: prompts that could not be enhanced, or were skipped, are marked in the progress panel
+- **Next**, **Pause** and **Quit** work while prompts are enhanced (Web UI image jobs, `ziv-image` keys); `ziv-image` keys also work while the model loads
+
+### Changed
+- Jobs with auto enhancement rewrite all prompts first, so the first image starts after every rewrite. The progress panel shows *Enhancing prompt N of M*
+- **Repeat** and automatic retries keep the image's `{a|b}` choices and enhanced prompt and only change the seed, in every job. The new seed is always random, even when a seed is set
+- A prompt-enhancer error (e.g. the model cannot load) stops the job before the generation model loads
+
+### Fixed
+- Auto prompt enhancement: every prompt in a batch gets its rewrite, even when the image or video model is a tight memory fit. Prompts are rewritten before the model loads, and the enhancer is unloaded before generation starts
+
 ## [0.13.0b7] - 2026-10-04
 
 ### Added

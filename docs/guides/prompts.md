@@ -171,7 +171,7 @@ The enhancer keeps your subject and every detail you describe. It adds only thin
 - **Enhance**: click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. When that tab has text, it is what gets generated; the **used** badge shows which tab that is. Edit it, enhance again, or **Clear** it to go back to your prompt.
 - If you change the prompt or switch between image and video afterwards, the Enhanced prompt is marked **Out of date**. It is still used until you **Re-enhance** or **Clear** it.
 - `{a|b}` choices are picked before the rewrite, so the enhancer sees one plain prompt and the Enhanced prompt has no choices left. Enhance again for a different pick, or use **Enhance each image when generating** to keep a fresh pick per image.
-- **Enhance each image when generating** rewrites every image's prompt on the server, after its `{a|b}` choices are picked, using that image's seed. It works with inline prompts and prompt files.
+- **Enhance each image when generating** rewrites every image's prompt on the server, after its `{a|b}` choices are picked, using that image's seed. It works with inline prompts and prompt files. All rewrites run before the model loads, so the first image starts once every prompt is rewritten; the progress panel shows *Enhancing prompt N of M*. A prompt that could not be enhanced, or was skipped, is marked in the panel and generated from the original prompt.
 - Enhance is unavailable while a job runs.
 
 ### In Prompt Files and the CLI
@@ -200,11 +200,24 @@ ziv-image -m klein9b -p prompts.yaml --no-enhance
 
 `motion` only applies to video. Prompt files shared between image and video may include it; images ignore it.
 
-The enhanced prompt is printed before each generation and stored in the image or video metadata, so Gallery shows and reuses the prompt that actually rendered.
+The enhanced prompt is printed while prompts are enhanced and again before each generation, and stored in the image or video metadata, so Gallery shows and reuses the prompt that actually rendered.
+
+### While Prompts Are Enhanced
+
+Jobs with auto enhancement rewrite every prompt before the model loads. In image jobs (Web UI controls or `ziv-image` keys):
+
+- **Next** (`n`) skips the current rewrite; that image uses the original prompt.
+- **Quit** (`q`) stops the job before the model loads.
+- **Pause** (`p`) waits until you resume.
+- **Repeat** (`r`) has no effect.
+
+Video jobs have no Web UI controls; `ziv-video` can be stopped with Ctrl+C.
+
+**Repeat** and automatic retries keep the image's `{a|b}` choices and enhanced prompt and only change the seed. The new seed is always random, even when a seed is set.
 
 ### Memory
 
-On macOS the enhancer shares memory with the image or video model. Clicking Enhance loads it (about 3 GB) and frees it after two idle minutes, or when a job without enhancement starts. **Enhance each image** keeps it loaded for the whole job, in addition to the model; the memory badge does not include it, so on a 16 GB Mac with a large model, leave it off.
+The enhancer and the image or video model are never loaded together: the enhancer is unloaded, and its memory freed, before the model loads. Peak memory is the larger of the two, not their sum. Clicking Enhance loads the enhancer (about 3 GB on macOS) and frees it after two idle minutes, or when a job starts.
 
 ## Tips
 
