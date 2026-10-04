@@ -28,10 +28,12 @@ from PIL import Image
 from zvisiongenerator.backends import get_backend, get_video_backend, release_accelerator_memory
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
+from zvisiongenerator.image_model_loader import load_image_model
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal
+from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.web.config import load_web_config
 from zvisiongenerator.web.gallery import gallery_asset_for_output_path, gallery_asset_to_json
@@ -538,14 +540,19 @@ class WebRunner:
         )
         if plan.cancelled:
             return
-        progress_callback({"type": "model_loading", "mode": "image", "model": request.model_name or model_ref})
+        model_label = request.model_name or model_ref
+        progress_callback({"type": "model_loading", "mode": "image", "model": model_label})
         backend = get_backend()
-        model, model_info = backend.load_model(
+        model, model_info = load_image_model(
+            backend,
             model_ref,
             quantize=quantize,
-            precision="bfloat16",
+            models_dir=get_ziv_data_dir() / "models",
             lora_paths=request.lora_paths,
             lora_weights=request.lora_weights,
+            on_phase=lambda phase: progress_callback({"type": "model_loading", "mode": "image", "model": model_label, "phase": phase, "quantize": quantize}),
+            cancelled=lambda: control_signal.pending() == "quit",
+            release_memory=_release_accelerator_memory,
         )
         run_batch(
             backend,

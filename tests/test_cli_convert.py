@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -73,6 +75,67 @@ class TestModelSubcommand:
             )
             with pytest.raises(SystemExit):
                 _cmd_model(args)
+
+
+class TestModelQuantize:
+    def test_quantize_defaults_to_none(self):
+        args = _build_parser().parse_args(["model", "-i", "x.safetensors"])
+        assert args.quantize is None
+
+    def test_quantize_accepts_supported_levels(self):
+        assert _build_parser().parse_args(["model", "-i", "x.safetensors", "--quantize", "8"]).quantize == 8
+        assert _build_parser().parse_args(["model", "-i", "x.safetensors", "--quantize", "4"]).quantize == 4
+
+    def test_quantize_rejects_other_levels(self):
+        with pytest.raises(SystemExit):
+            _build_parser().parse_args(["model", "-i", "x.safetensors", "--quantize", "6"])
+
+    def test_stored_quant_names_are_reserved(self, tmp_path, monkeypatch):
+        from zvisiongenerator.converters.convert_checkpoint import _cmd_model
+
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / "data"))
+        dummy = tmp_path / "dummy.safetensors"
+        dummy.write_bytes(b"fake")
+        args = SimpleNamespace(input=str(dummy), name="mine@q8", model_type="zimage", base_model="Tongyi-MAI/Z-Image-Turbo", copy=False, quantize=None)
+
+        with pytest.raises(SystemExit):
+            _cmd_model(args)
+        assert not (tmp_path / "data" / "models" / "mine@q8").exists()
+
+    def test_store_quantized_copy_saves_next_to_the_model(self, tmp_path, monkeypatch):
+        import json
+
+        import zvisiongenerator.backends as backends_module
+        from zvisiongenerator.converters.convert_checkpoint import _store_quantized_copy
+        from zvisiongenerator.utils.stored_quant import is_current
+
+        model_dir = tmp_path / "models" / "mine"
+        (model_dir / "transformer").mkdir(parents=True)
+        (model_dir / "model_index.json").write_text(json.dumps({"transformer": ["diffusers", "ZImageTransformer2DModel"]}))
+        (model_dir / "transformer" / "w.safetensors").write_bytes(b"x")
+        backend = MagicMock()
+        backend.stored_quant_format.return_value = "fmt"
+        backend.load_model.return_value = (MagicMock(), MagicMock())
+        backend.save_quantized.side_effect = lambda _model, path: (Path(path) / "transformer").mkdir(parents=True)
+        monkeypatch.setattr(backends_module, "get_backend", lambda: backend)
+
+        target = _store_quantized_copy(model_dir, 8)
+
+        assert target == tmp_path / "models" / "mine@q8"
+        assert backend.load_model.call_args.kwargs["quantize"] == 8
+        assert is_current(target, model_dir, 8, "fmt")
+
+    def test_store_quantized_copy_fails_where_unsupported(self, tmp_path, monkeypatch):
+        import zvisiongenerator.backends as backends_module
+        from zvisiongenerator.converters.convert_checkpoint import _store_quantized_copy
+
+        backend = MagicMock()
+        backend.stored_quant_format.return_value = None
+        monkeypatch.setattr(backends_module, "get_backend", lambda: backend)
+
+        with pytest.raises(RuntimeError):
+            _store_quantized_copy(tmp_path / "mine", 8)
+        backend.load_model.assert_not_called()
 
 
 # ── lora subcommand ──────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import get_backend_name
+from zvisiongenerator.backends import get_backend_name, supports_stored_quants
 from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
 from zvisiongenerator.utils.config import resolve_defaults, resolve_enhancer_model, resolve_video_defaults
@@ -21,7 +21,7 @@ from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
 from zvisiongenerator.web.model_delete import installed_models_linking_to, model_delete_target
-from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family
+from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
 from zvisiongenerator.web.model_status import describe_model_status, memory_budget_bytes
 
 
@@ -180,7 +180,15 @@ def build_models_response(
         "models_dir": web_config.models_dir,
         "loras_dir": web_config.loras_dir,
         "image_models": [
-            {"name": entry.name, "family": entry.family, "size_label": entry.size or "Unknown", "source": entry.source, **status(entry, "image"), "delete": delete_info(entry)}
+            {
+                "name": entry.name,
+                "family": entry.family,
+                "size_label": entry.size or "Unknown",
+                "source": entry.source,
+                "stored_quant": _stored_quant_payload(entry),
+                **status(entry, "image"),
+                "delete": delete_info(entry),
+            }
             for entry in web_config.image_inventory
         ],
         "video_models": [
@@ -188,9 +196,16 @@ def build_models_response(
             for entry in web_config.video_inventory
         ],
         "loras": loras,
+        "stored_quants_supported": supports_stored_quants(),
         "huggingface_configured": token_var is not None,
         "huggingface_token_env_var": token_var,
     }
+
+
+def _stored_quant_payload(entry: ImageInventoryEntry) -> dict[str, Any] | None:
+    """Describe an installed stored quant (its base model and bits), or ``None`` for other models."""
+    stored = stored_quant_of(entry)
+    return None if stored is None else {"base_model": stored[0], "bits": stored[1]}
 
 
 def _status_resolver(
