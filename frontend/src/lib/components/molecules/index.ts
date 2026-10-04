@@ -13,3 +13,5 @@ export { default as PathField } from './PathField.svelte';
 export { default as PromptFileField } from './PromptFileField.svelte';
 export { default as InspectorRow } from './InspectorRow.svelte';
 export { default as InspectorSection } from './InspectorSection.svelte';
+export { default as ConfirmDialog } from './ConfirmDialog.svelte';
+export { requestConfirm, type ConfirmRequest } from './confirm.svelte';
