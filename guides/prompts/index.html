@@ -719,6 +719,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#while-prompts-are-enhanced" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        While Prompts Are Enhanced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#memory" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1086,6 +1097,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#while-prompts-are-enhanced" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        While Prompts Are Enhanced
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#memory" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1327,7 +1349,7 @@ are sharing a meal at the diner. Style: Camera: iPhone. Color: Warm
 <li><strong>Enhance</strong>: click ✨ <strong>Enhance</strong> in the prompt box, pick options, and click <strong>Enhance prompt</strong>. The rewrite appears in the <strong>Enhanced</strong> tab. When that tab has text, it is what gets generated; the <strong>used</strong> badge shows which tab that is. Edit it, enhance again, or <strong>Clear</strong> it to go back to your prompt.</li>
 <li>If you change the prompt or switch between image and video afterwards, the Enhanced prompt is marked <strong>Out of date</strong>. It is still used until you <strong>Re-enhance</strong> or <strong>Clear</strong> it.</li>
 <li><code>{a|b}</code> choices are picked before the rewrite, so the enhancer sees one plain prompt and the Enhanced prompt has no choices left. Enhance again for a different pick, or use <strong>Enhance each image when generating</strong> to keep a fresh pick per image.</li>
-<li><strong>Enhance each image when generating</strong> rewrites every image's prompt on the server, after its <code>{a|b}</code> choices are picked, using that image's seed. It works with inline prompts and prompt files.</li>
+<li><strong>Enhance each image when generating</strong> rewrites every image's prompt on the server, after its <code>{a|b}</code> choices are picked, using that image's seed. It works with inline prompts and prompt files. All rewrites run before the model loads, so the first image starts once every prompt is rewritten; the progress panel shows <em>Enhancing prompt N of M</em>. A prompt that could not be enhanced, or was skipped, is marked in the panel and generated from the original prompt.</li>
 <li>Enhance is unavailable while a job runs.</li>
 </ul>
 <h3 id="in-prompt-files-and-the-cli">In Prompt Files and the CLI</h3>
@@ -1348,9 +1370,19 @@ ziv-video -m ltx-8 --prompt &quot;a fox runs&quot; --enhance style=cinematic,mot
 ziv-image -m klein9b -p prompts.yaml --no-enhance
 </code></pre>
 <p><code>motion</code> only applies to video. Prompt files shared between image and video may include it; images ignore it.</p>
-<p>The enhanced prompt is printed before each generation and stored in the image or video metadata, so Gallery shows and reuses the prompt that actually rendered.</p>
+<p>The enhanced prompt is printed while prompts are enhanced and again before each generation, and stored in the image or video metadata, so Gallery shows and reuses the prompt that actually rendered.</p>
+<h3 id="while-prompts-are-enhanced">While Prompts Are Enhanced</h3>
+<p>Jobs with auto enhancement rewrite every prompt before the model loads. In image jobs (Web UI controls or <code>ziv-image</code> keys):</p>
+<ul>
+<li><strong>Next</strong> (<code>n</code>) skips the current rewrite; that image uses the original prompt.</li>
+<li><strong>Quit</strong> (<code>q</code>) stops the job before the model loads.</li>
+<li><strong>Pause</strong> (<code>p</code>) waits until you resume.</li>
+<li><strong>Repeat</strong> (<code>r</code>) has no effect.</li>
+</ul>
+<p>Video jobs have no Web UI controls; <code>ziv-video</code> can be stopped with Ctrl+C.</p>
+<p><strong>Repeat</strong> and automatic retries keep the image's <code>{a|b}</code> choices and enhanced prompt and only change the seed. The new seed is always random, even when a seed is set.</p>
 <h3 id="memory">Memory</h3>
-<p>On macOS the enhancer shares memory with the image or video model. Clicking Enhance loads it (about 3 GB) and frees it after two idle minutes, or when a job without enhancement starts. <strong>Enhance each image</strong> keeps it loaded for the whole job, in addition to the model; the memory badge does not include it, so on a 16 GB Mac with a large model, leave it off.</p>
+<p>The enhancer and the image or video model are never loaded together: the enhancer is unloaded, and its memory freed, before the model loads. Peak memory is the larger of the two, not their sum. Clicking Enhance loads the enhancer (about 3 GB on macOS) and frees it after two idle minutes, or when a job starts.</p>
 <h2 id="tips">Tips</h2>
 <h3 id="combining-variables-with-structured-prompts">Combining Variables with Structured Prompts</h3>
 <p>Variables work inside structured prompt values, so you can create prompts with controlled randomness:</p>

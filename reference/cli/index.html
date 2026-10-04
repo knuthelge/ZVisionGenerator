@@ -1271,7 +1271,7 @@ ziv ui [options]       # Same as ziv-ui
 <tr>
 <td><code>--enhance [SPEC]</code></td>
 <td>disabled</td>
-<td>Rewrite each prompt with a local LLM before generating. <code>SPEC</code> is optional, e.g. <code>style=photo,details=lighting+camera,length=longer</code>. Overrides prompt-file <code>enhance:</code> entries. Ignored with <code>--json-prompt</code></td>
+<td>Rewrite each prompt with a local LLM before the model loads. <code>SPEC</code> is optional, e.g. <code>style=photo,details=lighting+camera,length=longer</code>. Overrides prompt-file <code>enhance:</code> entries. Ignored with <code>--json-prompt</code></td>
 </tr>
 <tr>
 <td><code>--no-enhance</code></td>
@@ -1431,7 +1431,7 @@ ziv ui [options]       # Same as ziv-ui
 <tr>
 <td><code>--enhance [SPEC]</code></td>
 <td>disabled</td>
-<td>Rewrite each prompt with a local LLM before generating (see the <code>--enhance</code> spec above; <code>motion</code> is allowed)</td>
+<td>Rewrite each prompt with a local LLM before the model loads (see the <code>--enhance</code> spec above; <code>motion</code> is allowed)</td>
 </tr>
 <tr>
 <td><code>--no-enhance</code></td>

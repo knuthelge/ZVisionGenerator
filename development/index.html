@@ -823,6 +823,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#job-phases-preflight-and-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Job Phases: Preflight and Generation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#data-types" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1021,6 +1032,17 @@
     <span class="md-ellipsis">
       
         Workflow Stages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#job-phases-preflight-and-generation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Job Phases: Preflight and Generation
       
     </span>
   </a>
@@ -1239,6 +1261,7 @@ make install
 ├── video_cli.py                   Video CLI entry point (ziv-video)
 ├── cli.py                         Unified CLI entry point (ziv)
 ├── enhance_cli.py                 Shared --enhance / --no-enhance / --enhance-model CLI handling
+├── preflight.py                   Preflight phase: plan seeds and prompts, rewrite them before the model loads
 ├── image_runner.py                Image generation run orchestration
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
@@ -1259,6 +1282,7 @@ make install
 │   └── lora_import.py             LoRA import — local copy and HF download (ziv-model lora)
 ├── core/
 │   ├── types.py                   Shared types (StageOutcome)
+│   ├── job_plan.py                Job plan value types (JobPlan, IterationPlan, EnhanceStatus)
 │   ├── progress_events.py         Shared image/video workflow progress event helpers
 │   ├── latent_preview.py          Latent → RGB projection factors shared by live previews
 │   ├── image_types.py             Image request and artifacts
@@ -1311,7 +1335,7 @@ make install
 │   ├── workspace_contract.py      Workflow aliases and static workspace capabilities
 │   └── server.py                  FastAPI route wiring and request parsing
 └── workflows/
-    ├── enhance_stage.py           Shared auto-enhance step for image and video workflows
+    ├── enhance_stage.py           Applies the planned rewrite in image and video workflows
     ├── image_stages.py            Image pipeline stage definitions
     └── video_stages.py            Video pipeline stage definitions
 
@@ -1326,6 +1350,64 @@ prompts.yaml                       Default prompt definitions
 <p>The Windows/Linux diffusers image backend is also CUDA-only. Validation happens lazily during image backend load so importing the package or running non-image code paths does not require torch, diffusers, or a GPU.</p>
 <h3 id="workflow-stages">Workflow Stages</h3>
 <p>Image stage functions in <code>workflows/image_stages.py</code> have the uniform signature <code>(ImageGenerationRequest, ImageWorkingArtifacts) -&gt; StageOutcome</code>. Video stage functions in <code>workflows/video_stages.py</code> have the signature <code>(VideoGenerationRequest, VideoWorkingArtifacts) -&gt; StageOutcome</code>. Stages are composed dynamically by <code>build_workflow()</code> and <code>build_video_workflow()</code>.</p>
+<h3 id="job-phases-preflight-and-generation">Job Phases: Preflight and Generation</h3>
+<p>Every image and video job (CLI and Web UI) runs in two phases, and only one model is resident at a time:</p>
+<ol>
+<li><strong>Preflight</strong> (<code>preflight.run_preflight</code>) runs before the generation model loads. It plans every iteration with <code>plan_iterations</code> (seed, <code>{a|b}</code> expansion, enhancement settings) and, when any iteration asks for auto enhancement, loads the prompt enhancer, rewrites those prompts, closes the enhancer and frees accelerator memory. It returns a frozen <code>JobPlan</code> (<code>core/job_plan.py</code>).</li>
+<li><strong>Generation</strong>: the entry point loads the model and passes the plan to <code>run_batch</code> / <code>run_video_batch</code> as the required <code>plan=</code> argument. Runners raise <code>ValueError</code> for a cancelled plan or one whose length differs from the batch, and <code>RuntimeError</code> when an iteration is out of order. Retry and repeat keep the planned text and draw a new random seed.</li>
+</ol>
+<p><code>JobPlan.iterations</code> holds one <code>IterationPlan</code> per iteration in run → set → prompt order, the order the runners loop in. Each carries <code>seed</code>, <code>resolved_prompt</code>, <code>enhanced_prompt</code> and <code>enhance_status</code> (<code>off</code>, <code>enhanced</code>, <code>failed</code>, <code>skipped</code>). The workflow's <code>enhance_prompt_stage</code> only applies the planned rewrite; no workflow stage calls the LLM.</p>
+<p>Entry points own the control signal. <code>image_cli.main</code> creates the <code>SkipSignal</code> and its key listener before preflight and stops it after <code>run_batch</code>; Web UI image jobs pass their control signal to both phases; video jobs pass none. During preflight there is a control boundary before each rewrite and a final one after the enhancer is released: <code>skip</code> skips the next rewrite, <code>pause</code> waits, <code>quit</code> cancels, and <code>repeat</code> is dropped. A rewrite stopped by the user (the <code>cancelled</code> callback saw Next or Quit) is <code>skipped</code>, never <code>failed</code>. On Quit, preflight releases the enhancer and memory before emitting <code>batch_cancelled</code>.</p>
+<p>Preflight events (none carry <code>eta_secs</code>, <code>avg_secs</code> or <code>elapsed_secs</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>When</th>
+<th>Payload</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>preflight_started</code></td>
+<td>first event of every preflight</td>
+<td><code>mode</code>, <code>total_iterations</code>, <code>total_rewrites</code></td>
+</tr>
+<tr>
+<td><code>enhancer_loading</code></td>
+<td>0..n, only when the enhancer loads; <code>cpu</code> when it runs on the CPU</td>
+<td><code>mode</code>, <code>phase</code></td>
+</tr>
+<tr>
+<td><code>prompts_enhancing</code></td>
+<td>once per rewrite, after its boundary</td>
+<td><code>mode</code>, <code>index</code>, <code>total</code></td>
+</tr>
+<tr>
+<td><code>prompt_enhance_failed</code></td>
+<td>a rewrite failed without a user stop</td>
+<td><code>mode</code>, <code>index</code>, <code>total</code>, <code>message</code></td>
+</tr>
+<tr>
+<td><code>job_paused</code> / <code>job_resumed</code></td>
+<td>pause at a boundary</td>
+<td><code>mode</code>, <code>completed_iterations</code>, <code>total_iterations</code></td>
+</tr>
+<tr>
+<td><code>batch_cancelled</code></td>
+<td>Quit (web: <code>job_cancelled</code>)</td>
+<td><code>mode</code>, <code>completed_iterations</code>, <code>total_iterations</code></td>
+</tr>
+<tr>
+<td><code>preflight_finished</code></td>
+<td>last event unless cancelled</td>
+<td><code>mode</code>, <code>total_iterations</code>, <code>enhanced</code>, <code>failed</code>, <code>skipped</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>prompt_started</code> also carries the iteration's <code>enhance_status</code>.</p>
+<p>Tests must never run the real memory cleanup: patch <code>zvisiongenerator.preflight.release_accelerator_memory</code> (and <code>zvisiongenerator.web.web_runner.release_accelerator_memory</code> for web jobs), or pass <code>release_memory=</code> to <code>run_preflight</code>.</p>
+<p>To add pre-load work (for example LoRA validation or a memory-fit check), add a field to <code>JobPlan</code> or <code>IterationPlan</code> and a private step in <code>run_preflight</code>. There is no stage pipeline or registry; promote <code>preflight.py</code> to a package only once it holds several concerns.</p>
 <h3 id="data-types">Data Types</h3>
 <p>Use <code>@dataclass(frozen=True)</code> for immutable value objects (inputs, detection results). Use mutable <code>@dataclass</code> only for working state. No pydantic or attrs.</p>
 <h3 id="config-layering">Config Layering</h3>

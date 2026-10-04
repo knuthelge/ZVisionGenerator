@@ -1415,7 +1415,7 @@ ziv-image -m my-model --prompt &quot;a landscape&quot; --upscale 2 --no-upscale-
 ziv-image -m my-model -q 8    # 8-bit quantization
 </code></pre>
 <p>On macOS, memory is shared between the CPU and GPU, so an unquantized model larger than the machine's recommended GPU memory makes macOS compress or swap other memory, and well beyond it the whole system swaps heavily. On a 16 GB Mac, for example, Z-Image Turbo and FLUX.2 Klein need <code>-q 8</code> or <code>-q 4</code>. The Web UI's memory badge shows which levels fit.</p>
-<p>The <a href="../prompts/#enhancing-prompts">prompt enhancer</a> uses about 3 GB more while <strong>Enhance each image</strong> is on; the badge does not include it.</p>
+<p>The <a href="../prompts/#enhancing-prompts">prompt enhancer</a> is unloaded before the model loads, so <strong>Enhance each image</strong> does not add to the model's memory.</p>
 <h2 id="post-processing">Post-Processing</h2>
 <h3 id="contrast">Contrast</h3>
 <pre><code class="language-bash">ziv-image -m my-model --prompt &quot;a sunset&quot; --contrast 1.2        # boost contrast (1.0 = no change)
@@ -1459,10 +1459,11 @@ ziv-image -m my-model --prompt &quot;a sunset&quot; --no-sharpen           # dis
 <tr>
 <td><code>r</code></td>
 <td><strong>Repeat</strong></td>
-<td>Finish current image, re-run same prompt with new seed</td>
+<td>Finish current image, re-run the same prompt (same random choices and enhanced prompt) with a new random seed</td>
 </tr>
 </tbody>
 </table>
+<p>The keys also work while prompts are enhanced and while the model loads. During enhancement, <code>n</code> skips the current rewrite, <code>q</code> stops before the model loads, <code>p</code> pauses, and <code>r</code> has no effect. See <a href="../prompts/#while-prompts-are-enhanced">While Prompts Are Enhanced</a>.</p>
 <p>In the Web UI, image job controls appear only while the backend reports that the running job supports them.</p>
 <h2 id="related-guides">Related Guides</h2>
 <ul>
