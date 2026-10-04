@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b9] - 2026-10-04
+
 ### Added
 - Prompt enhancer: **Mood** option (Serene, Joyful, Romantic, Melancholic, Mysterious, Eerie, Dramatic, Epic, Whimsical, Nostalgic) in the Web UI, `--enhance mood=…` and prompt-file `enhance:` entries. Defaults to Keep
 
