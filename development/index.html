@@ -834,6 +834,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#web-job-queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web Job Queue
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#data-types" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -871,6 +882,17 @@
     <span class="md-ellipsis">
       
         Error Conventions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#web-ui-confirmations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web UI Confirmations
       
     </span>
   </a>
@@ -1050,6 +1072,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#web-job-queue" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web Job Queue
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#data-types" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1087,6 +1120,17 @@
     <span class="md-ellipsis">
       
         Error Conventions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#web-ui-confirmations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web UI Confirmations
       
     </span>
   </a>
@@ -1410,6 +1454,9 @@ prompts.yaml                       Default prompt definitions
 <p><code>prompt_started</code> also carries the iteration's <code>enhance_status</code>.</p>
 <p>Tests must never run the real memory cleanup: patch <code>zvisiongenerator.preflight.release_accelerator_memory</code> (and <code>zvisiongenerator.web.web_runner.release_accelerator_memory</code> for web jobs), or pass <code>release_memory=</code> to <code>run_preflight</code>.</p>
 <p>To add pre-load work (for example LoRA validation or a memory-fit check), add a field to <code>JobPlan</code> or <code>IterationPlan</code> and a private step in <code>run_preflight</code>. There is no stage pipeline or registry; promote <code>preflight.py</code> to a package only once it holds several concerns.</p>
+<h3 id="web-job-queue">Web Job Queue</h3>
+<p><code>WebRunner</code> (<code>web/web_runner.py</code>) runs every Web UI job on a single worker thread. Generation jobs are never refused for being second: <code>_submit_job</code> registers the job, publishes <code>job_submitted</code>, appends it to the FIFO queue and dispatches it, all under <code>_jobs_lock</code>, so the worker receives jobs in queue order. When the worker reaches a job, <code>_claim</code> takes it off the queue and publishes <code>job_started</code> (status <code>running</code>, <code>started_at</code>; <code>elapsed_secs</code> counts from here). A job removed with <code>cancel_queued</code>, <code>clear_queue</code> or <code>shutdown</code> is no longer queued, so the claim skips it even if its work item was already picked up; it ends with <code>job_cancelled</code> and <code>reason: "removed"</code>.</p>
+<p>The <em>active</em> job is the claimed one or, between jobs, the head of the queue; every other unfinished generation job is <em>queued</em>, with a 1-based <code>queue_position</code>. <code>GET /api/jobs</code> and <code>/api/workspace</code> return them as <code>active_job</code> and <code>queued_jobs</code>, and a job is never in both. <code>DELETE /api/jobs/queue</code> removes the queued jobs and keeps the active one. Actions that need the model memory to themselves (manual prompt enhancement, saving a quantized copy, deleting models or LoRAs) still wait until no generation job is running or queued.</p>
 <h3 id="data-types">Data Types</h3>
 <p>Use <code>@dataclass(frozen=True)</code> for immutable value objects (inputs, detection results). Use mutable <code>@dataclass</code> only for working state. No pydantic or attrs.</p>
 <h3 id="config-layering">Config Layering</h3>
@@ -1419,6 +1466,8 @@ prompts.yaml                       Default prompt definitions
 <p>Per-model Web UI capability flags — <code>supports_img2img</code>, <code>supports_upscale</code>, <code>supports_json_prompt</code>, <code>supports_first_sigma</code>, <code>dimension_min</code>, <code>dimension_max</code>, and <code>dimension_step</code> — are data-driven: they originate in the <code>model_presets</code> family entries, flow through <code>resolve_defaults</code>, and are emitted into the SPA's <code>ImageModelDefaults</code>. Families that do not set them inherit permissive defaults (img2img and upscale enabled, JSON caption and first-sigma disabled, <code>16</code>/<code>null</code>/<code>16</code> dimension bounds), so gating is centralized in config rather than branching on family in the web layer.</p>
 <h3 id="error-conventions">Error Conventions</h3>
 <p>Raise <code>ValueError</code>, <code>FileNotFoundError</code>, <code>RuntimeError</code> directly with descriptive f-string messages. Use <code>warnings.warn()</code> with <code>stacklevel=2</code> for non-fatal conditions. Add a custom exception class only when callers must catch it distinctly (for example <code>JobConflictError</code> in <code>web/web_runner.py</code>) or as a private sentinel.</p>
+<h3 id="web-ui-confirmations">Web UI Confirmations</h3>
+<p>Ask the user to approve an action with <code>ConfirmDialog</code> (<code>frontend/src/lib/components/molecules/</code>), never <code>window.confirm</code>. It has no title: it shows the question, an optional line of information, and a cancel button plus a confirm button named after the action (danger-styled for destructive actions). Enter confirms (except on the focused cancel button), Esc cancels, and a held key never confirms; while it is open, no other key reaches the page or a viewer underneath. Call <code>requestConfirm({ question, info, confirmLabel })</code>, which resolves <code>true</code> on confirm, or render <code>&lt;ConfirmDialog&gt;</code> directly when the dialog needs a body or stays open while the action runs (<code>pending</code>).</p>
 <h3 id="test-strategy">Test Strategy</h3>
 <p>Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.</p>
 <h2 id="proposals">Proposals</h2>
