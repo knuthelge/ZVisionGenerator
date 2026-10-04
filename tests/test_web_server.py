@@ -1766,10 +1766,50 @@ def test_convert_route_refuses_a_quantized_copy_while_a_job_runs(monkeypatch, tm
     checkpoint.write_bytes(b"x")
     ran: list[list[str]] = []
     monkeypatch.setattr(web_server, "_run_model_management_command", lambda args: ran.append(args) or "done")
-    monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: {"job_id": "busy"})
+    monkeypatch.setattr(web_server.web_runner, "_find_active_exclusive_job_id", lambda: "busy")
 
     with TestClient(web_server.app) as client:
         response = client.post("/api/models/convert", json={"input_path": str(checkpoint), "model_type": "flux2-klein-9b", "quantize": quantize})
 
     assert response.status_code == expected_status
     assert len(ran) == (1 if expected_status == 200 else 0)
+
+
+def test_jobs_are_refused_while_a_model_is_being_quantized(monkeypatch, tmp_path):
+    """While a quantized-copy conversion runs, job admission is refused; afterwards it is allowed again."""
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"x")
+    admission: list[str] = []
+
+    def _convert(args):
+        try:
+            web_server._reject_while_busy()
+            admission.append("admitted")
+        except web_server.JobConflictError:
+            admission.append("refused")
+        return "done"
+
+    monkeypatch.setattr(web_server, "_run_model_management_command", _convert)
+
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/models/convert", json={"input_path": str(checkpoint), "model_type": "flux2-klein-9b", "quantize": "8"})
+
+    assert response.status_code == 200
+    assert admission == ["refused"]
+    web_server._reject_while_busy()  # released after the conversion
+
+
+def test_quantize_slot_is_released_when_the_conversion_fails(monkeypatch, tmp_path):
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"x")
+
+    def _fail(args):
+        raise RuntimeError("conversion failed")
+
+    monkeypatch.setattr(web_server, "_run_model_management_command", _fail)
+
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/models/convert", json={"input_path": str(checkpoint), "model_type": "flux2-klein-9b", "quantize": "8"})
+
+    assert response.status_code == 400
+    web_server._reject_while_busy()
