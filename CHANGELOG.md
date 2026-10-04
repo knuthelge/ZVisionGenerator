@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b10] - 2026-10-04
+
 ### Added
 - macOS: **stored quants**. The first job that runs a model at q8 or q4 saves the quantized weights in the models folder (`<name>@q8`, `<name>@q4`, named after the installed model or alias, e.g. `zit@q8`); later jobs load that copy instead of quantizing again. LoRAs apply on top. Copies are listed on the Models page and are deleted with their model
 - `ziv-model model --quantize 4|8` and **Quantized Copy** on the Models page save a quantized copy while converting a checkpoint
