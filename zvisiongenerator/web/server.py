@@ -12,7 +12,8 @@ import subprocess
 import threading
 import sys
 import uuid
-from contextlib import asynccontextmanager
+from collections.abc import Iterator
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -254,10 +255,33 @@ async def enhance_prompt_endpoint(request: Request) -> StreamingResponse:
     return StreamingResponse(_stream(), media_type="application/x-ndjson", headers={"Cache-Control": "no-store"})
 
 
-def _reject_while_enhancing() -> None:
-    """Job admission check: refuse to start a job while an on-demand enhancement runs or is reserved."""
+def _reject_while_busy() -> None:
+    """Job admission check: refuse to start a job while an on-demand enhancement or a model quantization holds memory."""
     if get_prompt_enhancer_session().busy():
         raise JobConflictError("Prompt enhancement in progress. Wait for it to finish before starting a job.")
+    if _quantize_slot["busy"]:
+        raise JobConflictError("A model is being quantized on the Models page. Wait for it to finish before starting a job.")
+
+
+# A converter run that saves a quantized copy loads a full model, so it excludes generation jobs (and vice versa).
+# Claimed and checked under the web runner's job lock (``admit_exclusive`` / ``admission_check``).
+_quantize_slot = {"busy": False}
+
+
+@contextmanager
+def _claim_quantize_slot() -> Iterator[None]:
+    """Hold the quantize slot for one converter run; raise JobConflictError while a job runs or another holds it."""
+
+    def _claim() -> None:
+        if _quantize_slot["busy"]:
+            raise JobConflictError("Another model is being quantized. Wait for it to finish.")
+        _quantize_slot["busy"] = True
+
+    web_runner.admit_exclusive(_claim, busy_message="Wait for the running job to finish before saving a quantized copy; both would need a full model in memory.")
+    try:
+        yield
+    finally:
+        _quantize_slot["busy"] = False
 
 
 def _validate_enhance_body(body: Any) -> dict[str, Any]:
@@ -654,7 +678,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         model_ref=resolved_model,
         quantize=args.quantize,
         enhance_by_set=enhance_by_set,
-        admission_check=_reject_while_enhancing,
+        admission_check=_reject_while_busy,
     )
     return {
         "job_id": job_id,
@@ -780,7 +804,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         args=args,
         model_ref=resolved_model,
         enhance_by_set=enhance_by_set,
-        admission_check=_reject_while_enhancing,
+        admission_check=_reject_while_busy,
     )
     mode_label = "Image to Video" if image_path else "Text to Video"
     return {
@@ -1108,8 +1132,8 @@ def _convert_model_from_form(form: Any) -> dict[str, str]:
     """Validate and run checkpoint conversion from the Web models page.
 
     Raises:
-        HTTPException: 409 when a quantized copy is requested while a generation job runs (both would hold a
-            full model in memory).
+        HTTPException: 409 when a quantized copy is requested while a generation job runs or another model is
+            being quantized (each holds a full model in memory). Jobs are refused while it runs.
     """
     input_path = _required_path(form, "input_path")
     model_type = _optional_text(form, "model_type") or "zimage"
@@ -1128,11 +1152,14 @@ def _convert_model_from_form(form: Any) -> dict[str, str]:
     if quantize is not None:
         if quantize not in (4, 8):
             raise ValueError("Quantize must be 4 or 8.")
-        if web_runner.get_active_exclusive_job_snapshot() is not None:
-            raise HTTPException(status_code=409, detail="Wait for the running job to finish before saving a quantized copy; both would need a full model in memory.")
         args.extend(["--quantize", str(quantize)])
-
-    detail = _run_model_management_command(args)
+        try:
+            with _claim_quantize_slot():
+                detail = _run_model_management_command(args)
+        except JobConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    else:
+        detail = _run_model_management_command(args)
     return {
         "tone": "success",
         "message": "Converted the checkpoint into an installed model directory." if quantize is None else f"Converted the checkpoint and saved a q{quantize} copy.",
