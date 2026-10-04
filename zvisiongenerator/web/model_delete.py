@@ -2,7 +2,8 @@
 
 Deletes act only on what the user picked. A converted model's folder is removed with its links, never the
 HuggingFace files those links point to; a HuggingFace download is removed from the cache while its alias
-stays in config, so the model can be downloaded again.
+stays in config, so the model can be downloaded again. Either way the model's stored quants
+(``<name>@q4`` / ``<name>@q8``) go too, since nothing else uses them.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from pathlib import Path
 
 from zvisiongenerator.utils.model_files import find_local_model_dir, huggingface_cache_repo_dir
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
+from zvisiongenerator.utils.stored_quant import stored_quant_dirs_for
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 
 
@@ -25,6 +27,7 @@ class DeleteTarget:
     kind: str  # "installed" or "huggingface"
     path: Path
     repo_id: str | None = None
+    stored_quants: tuple[Path, ...] = ()
 
 
 def model_delete_target(
@@ -39,13 +42,14 @@ def model_delete_target(
     the repo's own weights are fully downloaded (an LTX MLX repo counts even while its separate text encoder is
     missing); aliases pointing at a local directory are not deletable from the UI.
     """
+    stored_quants = stored_quant_dirs_for(models_dir, entry.name)
     if entry.source == "installed":
         path = models_dir / entry.name
-        return DeleteTarget("installed", path) if _is_direct_child(path, models_dir) else None
+        return DeleteTarget("installed", path, stored_quants=stored_quants) if _is_direct_child(path, models_dir) else None
     repo = parse_huggingface_repo_reference(entry.resolved_path)
     if repo is None or find_local_dir(entry.resolved_path) is None:
         return None
-    return DeleteTarget("huggingface", huggingface_cache_repo_dir(repo.repo_id), repo_id=repo.repo_id)
+    return DeleteTarget("huggingface", huggingface_cache_repo_dir(repo.repo_id), repo_id=repo.repo_id, stored_quants=stored_quants)
 
 
 def installed_models_linking_to(target: Path, models_dir: Path) -> tuple[str, ...]:
@@ -59,7 +63,7 @@ def installed_models_linking_to(target: Path, models_dir: Path) -> tuple[str, ..
 
 
 def delete_model(target: DeleteTarget) -> None:
-    """Remove *target* from disk; a symlinked folder is unlinked rather than emptied.
+    """Remove *target* and its stored quants from disk; a symlinked folder is unlinked rather than emptied.
 
     Raises:
         FileNotFoundError: If nothing is on disk to delete.
@@ -72,6 +76,8 @@ def delete_model(target: DeleteTarget) -> None:
         shutil.rmtree(path)
     else:
         raise FileNotFoundError(f"Nothing to delete at {path}")
+    for stored in target.stored_quants:
+        shutil.rmtree(stored, ignore_errors=True)
 
 
 def delete_lora(loras_dir: Path, name: str) -> Path:

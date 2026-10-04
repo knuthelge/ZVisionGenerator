@@ -552,6 +552,11 @@
           </div>
         {/if}
       {/if}
+      {#if pendingDelete.type === 'model' && (pendingDelete.info.stored_quants?.length ?? 0) > 0}
+        <p class="text-zinc-400" data-testid="delete-stored-quants">
+          Its quantized copies are deleted too: <span class="font-mono">{pendingDelete.info.stored_quants?.join(', ')}</span>
+        </p>
+      {/if}
       <p class="text-zinc-400">This cannot be undone.</p>
     </div>
   {/if}

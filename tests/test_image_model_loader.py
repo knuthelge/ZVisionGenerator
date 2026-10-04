@@ -100,7 +100,50 @@ class TestPlan:
 
     def test_missing_stored_quant_is_created(self, models_dir):
         source = _make_source(models_dir)
-        assert plan_image_model_load(str(source), 4, models_dir=models_dir, backend_format=FORMAT) == LoadPlan(str(source), 4, create=models_dir / "snofs@q4")
+        assert plan_image_model_load(str(source), 4, models_dir=models_dir, backend_format=FORMAT) == LoadPlan(str(source), 4, create=models_dir / "snofs@q4", source=source)
+
+
+class TestAliasPlan:
+    """Hugging Face models picked through an alias store their quant under the alias name."""
+
+    def test_downloaded_alias_creates_a_copy_named_after_the_alias(self, tmp_path, models_dir):
+        snapshot = _make_source(tmp_path / "hf-cache", "snapshot")
+        plan = plan_image_model_load("org/repo", 8, models_dir=models_dir, backend_format=FORMAT, model_name="zit", find_local_dir=lambda _ref: snapshot)
+
+        assert plan == LoadPlan("org/repo", 8, create=models_dir / "zit@q8", source=snapshot)
+
+    def test_current_alias_copy_is_used(self, tmp_path, models_dir):
+        snapshot = _make_source(tmp_path / "hf-cache", "snapshot")
+        stored = models_dir / "zit@q8"
+        stored.mkdir()
+        write_manifest(stored, build_manifest(snapshot, 8, FORMAT))
+
+        plan = plan_image_model_load("org/repo", 8, models_dir=models_dir, backend_format=FORMAT, model_name="zit", find_local_dir=lambda _ref: snapshot)
+
+        assert plan == LoadPlan(str(stored), None)
+
+    def test_new_revision_makes_the_alias_copy_stale(self, tmp_path, models_dir):
+        old_snapshot = _make_source(tmp_path / "hf-cache", "old")
+        new_snapshot = _make_source(tmp_path / "hf-cache", "new")
+        (new_snapshot / "transformer" / "weights.safetensors").write_bytes(b"y" * 64)
+        stored = models_dir / "zit@q8"
+        stored.mkdir()
+        write_manifest(stored, build_manifest(old_snapshot, 8, FORMAT))
+
+        plan = plan_image_model_load("org/repo", 8, models_dir=models_dir, backend_format=FORMAT, model_name="zit", find_local_dir=lambda _ref: new_snapshot)
+
+        assert plan.create == stored
+
+    def test_alias_not_downloaded_yet_plans_a_copy_without_a_source(self, models_dir):
+        plan = plan_image_model_load("org/repo", 4, models_dir=models_dir, backend_format=FORMAT, model_name="zit", find_local_dir=lambda _ref: None)
+
+        assert plan == LoadPlan("org/repo", 4, create=models_dir / "zit@q4", source=None)
+
+    @pytest.mark.parametrize("picked", [None, "org/repo", "~/models/x", "C:model", "..", "zit@q8"])
+    def test_raw_repo_ids_and_paths_are_quantized_at_load(self, models_dir, picked):
+        plan = plan_image_model_load("org/repo", 8, models_dir=models_dir, backend_format=FORMAT, model_name=picked, find_local_dir=lambda _ref: pytest.fail("not resolved"))
+
+        assert plan == LoadPlan("org/repo", 8)
 
 
 class TestLoad:
@@ -177,6 +220,36 @@ class TestLoad:
             gate.set()
 
         assert backend.loads == [{"path": str(source), "quantize": 8, "lora_paths": None}]
+
+
+class TestAliasLoad:
+    def test_first_use_downloads_then_saves_under_the_alias(self, tmp_path, models_dir):
+        snapshot = _make_source(tmp_path / "hf-cache", "snapshot")
+        downloaded: dict[str, Path | None] = {"dir": None}
+        backend = _FakeBackend()
+        original_load = backend.load_model
+
+        def _load_and_download(*args, **kwargs):
+            downloaded["dir"] = snapshot
+            return original_load(*args, **kwargs)
+
+        backend.load_model = _load_and_download
+        phases: list[str] = []
+
+        load_image_model(backend, "org/repo", quantize=8, models_dir=models_dir, model_name="zit", on_phase=phases.append, find_local_dir=lambda _ref: downloaded["dir"])
+
+        assert phases == [SAVING_QUANT_PHASE]
+        assert is_current(models_dir / "zit@q8", snapshot, 8, FORMAT)
+
+    def test_no_local_files_after_load_skips_the_save(self, models_dir):
+        backend = _FakeBackend()
+        phases: list[str] = []
+
+        load_image_model(backend, "org/repo", quantize=8, models_dir=models_dir, model_name="zit", on_phase=phases.append, find_local_dir=lambda _ref: None)
+
+        assert backend.saved == []
+        assert phases == []
+        assert not (models_dir / "zit@q8").exists()
 
 
 class TestSaveCancellation:

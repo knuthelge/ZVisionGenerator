@@ -246,7 +246,8 @@ def _delete_info_resolver(models_dir: Path, find_local_dir: Callable[[str], Path
         if target is None or not (target.path.exists() or target.path.is_symlink()):
             return None
         linked_by = list(installed_models_linking_to(target.path, models_dir)) if target.kind == "huggingface" else []
-        return {"kind": target.kind, "repo_id": target.repo_id, "linked_by": linked_by}
+        stored_quants = [path.name for path in target.stored_quants]
+        return {"kind": target.kind, "repo_id": target.repo_id, "linked_by": linked_by, "stored_quants": stored_quants}
 
     return _delete_info
 

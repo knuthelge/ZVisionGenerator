@@ -441,6 +441,29 @@ describe('ModelsPage Browse buttons', () => {
     expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
   });
 
+  it('lists the stored quants a model delete removes', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({
+      ...makeInventory(),
+      image_models: [
+        { name: 'zit', family: 'zimage', downloaded: true, delete: { kind: 'huggingface', repo_id: 'org/zit', linked_by: [], stored_quants: ['zit@q8'] } },
+        { name: 'snofs', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
+      ],
+    });
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+    const buttons = target.querySelectorAll('[data-testid="delete-button"]');
+
+    (buttons[0] as HTMLButtonElement).click();
+    await settle();
+    expect(document.querySelector('[data-testid="delete-stored-quants"]')?.textContent).toContain('zit@q8');
+
+    (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Cancel') as HTMLButtonElement).click();
+    await settle();
+    (buttons[1] as HTMLButtonElement).click();
+    await settle();
+    expect(document.querySelector('[data-testid="delete-stored-quants"]')).toBeNull();
+  });
+
   it('offers delete only for deletable models and warns about converted models linked to a download', async () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
