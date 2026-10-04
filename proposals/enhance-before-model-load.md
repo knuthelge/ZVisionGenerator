@@ -4,7 +4,7 @@
 
 ## Problem
 
-In a batch with auto prompt enhancement, the first prompt is enhanced but every later prompt silently falls back to the original text. It happens when the image or video model is a tight memory fit. Observed on macOS (MLX) in the Web UI with a prompt file; the server log shows:
+In a batch with auto prompt enhancement, the first prompt is enhanced but every later prompt silently falls back to the original text. It happens when the image model is a tight memory fit. Video on macOS is likely unaffected: LTX in low-memory mode (the default) drops its text encoder and transformer after each generation (`backends/video_mac.py`). Video still uses the same plan path, so there is one code path. Observed on macOS (MLX) in the Web UI with a prompt file; the server log shows:
 
 ```
 Prompt enhancement failed (... Insufficient Memory ...); using the original prompt.
@@ -22,7 +22,7 @@ The failure is invisible in the UI: `apply_prompt_enhancement` (`zvisiongenerato
 - **Tried and failed:** v0.13.0b6 clears MLX's buffer cache (`gc.collect()` + `mx.clear_cache()`) before every rewrite. The error persists, so the memory is held by live arrays, not the cache.
 - **mlx-lm loads the enhancer eagerly** (`load(lazy=False)` evaluates all parameters), so its weights are resident from the start.
 - **mlx-lm wires memory during generation:** `stream_generate` runs inside `wired_limit()`, which raises the wired limit to the GPU's recommended working set (~75% of RAM). Metal's `kIOGPUCommandBufferCallbackErrorOutOfMemory` is reported against that working set, not total RAM.
-- **Unconfirmed hypothesis:** mflux defers materialising (or quantising) its weights until the first generation. That would explain why prompt 1 fits and prompt 2 does not: only after the first image are both models fully resident.
+- **Confirmed (Step 0):** mflux defers materialising (or quantising) its weights until the first generation. That is why prompt 1 fits and prompt 2 does not: only after the first image are both models fully resident.
 
 ## Step 0: confirm the cause
 
@@ -35,6 +35,16 @@ Before building, measure on the Mac with the failing prompt file. Log, temporari
 |---|---|---|
 | Active memory jumps by roughly the image model's size between prompt 1 and prompt 2 | Both models do not fit together | Build this proposal |
 | No such jump; memory grows gradually | Something accumulates per generation (likely inside mflux) | Find and release it; this proposal may be unnecessary |
+
+**Result (2026-10-04): both models do not fit together; build this proposal.** Measured on the Mac (working set 24.96 GB) with the failing prompt file:
+
+| Point | Active memory |
+|---|---|
+| Before rewrite 1 | 19.12 GB |
+| After image 1 | 30.16 GB (+11.0 GB, one jump) |
+| After images 2 and 3 | 30.16 GB (flat, no accumulation) |
+
+Every rewrite after the first failed. A failed rewrite still took about 64 s, against 35 s for the successful one, so the bug also adds about a minute to each iteration.
 
 ## Goals
 
@@ -53,7 +63,7 @@ Before building, measure on the Mac with the failing prompt file. Log, temporari
 Split an auto-enhanced job into two phases, each with one model loaded:
 
 1. **Plan.** Before the generation model loads, build one plan entry per iteration: seed, expanded prompt (random choices resolved) and, when that entry is enhanced, the rewritten prompt. Load the enhancer for this phase only.
-2. **Release.** Unload the enhancer and free accelerator memory.
+2. **Release.** Unload the enhancer and free accelerator memory. This must happen before the first generation, not only before `load_model`: mflux (Flux2 Klein, Z-Image) materialises its weights on the first generation, not at load.
 3. **Generate.** Load the generation model and run the batch from the plan. The existing stages use the planned values instead of recomputing them.
 
 ### Design
