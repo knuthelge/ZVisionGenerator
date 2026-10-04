@@ -27,7 +27,7 @@ function state(overrides: Partial<DraftState> = {}): DraftState {
   } as DraftState;
 }
 
-const SETTINGS: EnhanceSettings = { style: 'keep', details: [], length: 'same', motion: [] };
+const SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [] };
 
 describe('submission rule', () => {
   it.each([
@@ -74,16 +74,26 @@ describe('settings helpers', () => {
   });
 
   it('strips motion for images', () => {
-    expect(settingsPayload({ ...SETTINGS, motion: ['pacing'] }, 'image')).toEqual({ style: 'keep', details: [], length: 'same' });
+    expect(settingsPayload({ ...SETTINGS, motion: ['pacing'] }, 'image')).toEqual({ style: 'keep', mood: 'keep', details: [], length: 'same' });
     expect(settingsPayload({ ...SETTINGS, motion: ['pacing'] }, 'video').motion).toEqual(['pacing']);
   });
 
   it('falls back to contract defaults without sharing arrays', () => {
-    const contract = { matrix: { axes: [], defaults: { style: 'keep', details: ['lighting'], length: 'same', motion: ['action'] } } } as unknown as PromptEnhancerContract;
+    const contract = { matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'] } } } as unknown as PromptEnhancerContract;
     const settings = effectiveEnhanceSettings(state(), contract);
     expect(settings.details).toEqual(['lighting']);
     expect(settings.details).not.toBe(contract.matrix.defaults.details);
-    expect(effectiveEnhanceSettings(state({ enhanceSettings: SETTINGS }), contract)).toBe(SETTINGS);
+    expect(effectiveEnhanceSettings(state({ enhanceSettings: SETTINGS }), contract)).toEqual(SETTINGS);
+  });
+
+  it('fills axes missing from saved settings with contract defaults', () => {
+    const contract = { matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'] } } } as unknown as PromptEnhancerContract;
+    const saved = { style: 'photo', details: [], length: 'longer', motion: [] } as unknown as EnhanceSettings;
+    expect(effectiveEnhanceSettings(state({ enhanceSettings: saved }), contract)).toEqual({ ...saved, mood: 'keep' });
+  });
+
+  it('treats a non-keep mood as a change', () => {
+    expect(isNoOpSettings({ ...SETTINGS, mood: 'eerie' }, 'image')).toBe(false);
   });
 
   it('maps workflows to modes', () => {

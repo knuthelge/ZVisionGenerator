@@ -110,10 +110,11 @@ export interface WorkspaceContext {
 
 // ── Prompt enhancer ────────────────────────────────────────────────────────────
 
-export type EnhanceAxisKey = 'style' | 'details' | 'length' | 'motion';
+export type EnhanceAxisKey = 'style' | 'mood' | 'details' | 'length' | 'motion';
 
 export interface EnhanceSettings {
   style: string;
+  mood: string;
   details: string[];
   length: string;
   motion: string[];

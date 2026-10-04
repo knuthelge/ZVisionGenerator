@@ -5,16 +5,16 @@ export function workflowMode(workflow: Workflow): WorkflowMode {
   return workflow === 'txt2vid' || workflow === 'img2vid' ? 'video' : 'image';
 }
 
-/** The user's last-used options, falling back to the backend matrix defaults. */
+/** The user's last-used options, with axes they never set (e.g. saved before an axis existed) taken from the backend matrix defaults. */
 export function effectiveEnhanceSettings(state: DraftState, contract: PromptEnhancerContract | undefined): EnhanceSettings {
-  const defaults = contract?.matrix.defaults ?? { style: 'keep', details: ['lighting', 'composition'], length: 'same', motion: ['action'] };
-  return state.enhanceSettings ?? { ...defaults, details: [...defaults.details], motion: [...defaults.motion] };
+  const defaults = contract?.matrix.defaults ?? { style: 'keep', mood: 'keep', details: ['lighting', 'composition'], length: 'same', motion: ['action'] };
+  return { ...defaults, details: [...defaults.details], motion: [...defaults.motion], ...state.enhanceSettings };
 }
 
-/** Whether *settings* would ask for no change at all (keep style, no details, same length, no motion). */
+/** Whether *settings* would ask for no change at all (keep style and mood, no details, same length, no motion). */
 export function isNoOpSettings(settings: EnhanceSettings, mode: WorkflowMode): boolean {
   const hasMotion = mode === 'video' && settings.motion.length > 0;
-  return settings.style === 'keep' && settings.details.length === 0 && settings.length === 'same' && !hasMotion;
+  return settings.style === 'keep' && settings.mood === 'keep' && settings.details.length === 0 && settings.length === 'same' && !hasMotion;
 }
 
 /** Settings as sent to the backend; `motion` only applies to video. */

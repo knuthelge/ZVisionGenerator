@@ -82,6 +82,7 @@ Comma-separated `key=value` pairs; join several values with `+`. Omitted keys us
 | Key | Values | Default |
 |---|---|---|
 | `style` | `keep`, `photo`, `candid`, `street`, `film`, `bw`, `portrait`, `product`, `cinematic`, `illustration`, `anime`, `comic`, `3d`, `painterly` | `keep` |
+| `mood` | `keep`, `serene`, `joyful`, `romantic`, `melancholic`, `mysterious`, `eerie`, `dramatic`, `epic`, `whimsical`, `nostalgic` | `keep` |
 | `details` | `lighting`, `composition`, `camera`, `materials`, `color`, `environment`, `subject` | `lighting+composition` |
 | `length` | `shorter`, `same`, `longer`, `extra` | `same` |
 | `motion` (`ziv-video` only) | `action`, `camera-move`, `pacing` | `action` |

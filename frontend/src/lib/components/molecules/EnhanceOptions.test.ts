@@ -27,7 +27,7 @@ describe('EnhanceOptions', () => {
   }
 
   it('offers select-all only on multi-pick axes and selects every option', () => {
-    const onchange = mountOptions({ style: 'keep', details: ['lighting'], length: 'same', motion: [] });
+    const onchange = mountOptions({ style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: [] });
     expect(target.querySelector('[data-toggle-all="style"]')).toBeNull();
     const toggle = target.querySelector('[data-toggle-all="details"]') as HTMLButtonElement;
     expect(toggle.dataset.allSelected).toBe('false');
@@ -36,7 +36,7 @@ describe('EnhanceOptions', () => {
   });
 
   it('clears every option once all are selected', () => {
-    const onchange = mountOptions({ style: 'keep', details: ['lighting', 'composition'], length: 'same', motion: [] });
+    const onchange = mountOptions({ style: 'keep', mood: 'keep', details: ['lighting', 'composition'], length: 'same', motion: [] });
     const toggle = target.querySelector('[data-toggle-all="details"]') as HTMLButtonElement;
     expect(toggle.dataset.allSelected).toBe('true');
     toggle.click();

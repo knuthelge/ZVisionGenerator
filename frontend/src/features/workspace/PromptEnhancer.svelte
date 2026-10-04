@@ -61,7 +61,7 @@
   const disabledHint = $derived(
     !available ? (contract.error ?? 'No prompt enhancer model is configured.')
       : busy ? 'Available when the current job finishes.'
-      : noOp ? 'Pick a style, a detail, or a length.'
+      : noOp ? 'Pick a style, a mood, a detail, or a length.'
       : draft.state.prompt.trim() === '' ? 'Write a prompt first.'
       : null
   );
@@ -191,7 +191,7 @@
         {/if}
       </div>
     {:else if draft.state.enhanceAuto && noOp}
-      <p class="text-xs text-warning" role="alert">Pick a style, a detail, or a length.</p>
+      <p class="text-xs text-warning" role="alert">Pick a style, a mood, a detail, or a length.</p>
     {/if}
     {#if variant === 'file'}
       <p class="field-hint-label">Off: entries with their own <span class="font-mono">enhance:</span> setting (✨) are still enhanced.</p>

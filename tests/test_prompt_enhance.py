@@ -49,15 +49,18 @@ class _FakeEnhancer:
 class TestMatrix:
     def test_contract_lists_axes_and_defaults(self):
         contract = matrix_contract()
-        assert [axis["key"] for axis in contract["axes"]] == ["style", "details", "length", "motion"]
-        assert contract["defaults"] == {"style": "keep", "details": ["lighting", "composition"], "length": "same", "motion": ["action"]}
-        motion = contract["axes"][3]
+        assert [axis["key"] for axis in contract["axes"]] == ["style", "mood", "details", "length", "motion"]
+        assert contract["defaults"] == {"style": "keep", "mood": "keep", "details": ["lighting", "composition"], "length": "same", "motion": ["action"]}
+        motion = contract["axes"][4]
         assert motion["video_only"] is True
-        assert [option["slug"] for option in contract["axes"][2]["options"]] == ["shorter", "same", "longer", "extra"]
+        assert [option["slug"] for option in contract["axes"][3]["options"]] == ["shorter", "same", "longer", "extra"]
 
     def test_no_op_combination_rejected(self):
         with pytest.raises(ValueError, match="Nothing to enhance"):
             validate_settings(EnhanceSettings(style="keep", details=(), length="same", motion=()), mode="image")
+
+    def test_mood_alone_is_not_no_op(self):
+        validate_settings(EnhanceSettings(style="keep", mood="eerie", details=(), length="same", motion=()), mode="image")
 
     def test_motion_alone_is_not_no_op_for_video(self):
         validate_settings(EnhanceSettings(style="keep", details=(), length="same", motion=("action",)), mode="video")
@@ -77,8 +80,8 @@ class TestSpec:
         assert parse_enhance_spec("  ", mode="image") == EnhanceSettings()
 
     def test_full_spec(self):
-        settings = parse_enhance_spec("style=cinematic,details=lighting+camera,length=longer,motion=action+camera-move", mode="video")
-        assert settings == EnhanceSettings(style="cinematic", details=("lighting", "camera"), length="longer", motion=("action", "camera-move"))
+        settings = parse_enhance_spec("style=cinematic,mood=dramatic,details=lighting+camera,length=longer,motion=action+camera-move", mode="video")
+        assert settings == EnhanceSettings(style="cinematic", mood="dramatic", details=("lighting", "camera"), length="longer", motion=("action", "camera-move"))
 
     def test_partial_spec_keeps_defaults(self):
         settings = parse_enhance_spec("length=extra", mode="image")
@@ -88,7 +91,7 @@ class TestSpec:
     def test_empty_multi_value(self):
         assert parse_enhance_spec("details=,style=anime", mode="image").details == ()
 
-    @pytest.mark.parametrize("settings", [EnhanceSettings(), EnhanceSettings(style="3d", details=(), length="shorter", motion=("pacing",))])
+    @pytest.mark.parametrize("settings", [EnhanceSettings(), EnhanceSettings(style="3d", mood="nostalgic", details=(), length="shorter", motion=("pacing",))])
     def test_round_trip(self, settings):
         assert parse_enhance_spec(format_enhance_spec(settings), mode="video") == settings
 
@@ -99,9 +102,10 @@ class TestSpec:
         ("spec", "message"),
         [
             ("style=watercolor", "keep, photo, candid, street, film, bw, portrait, product, cinematic, illustration, anime, comic, 3d, painterly"),
+            ("mood=angry", "keep, serene, joyful, romantic, melancholic, mysterious, eerie, dramatic, epic, whimsical, nostalgic"),
             ("details=lighting+smell", "lighting, composition, camera, materials, color, environment, subject"),
             ("length=huge", "shorter, same, longer, extra"),
-            ("colour=red", "Valid keys: style, details, length, motion"),
+            ("colour=red", "Valid keys: style, mood, details, length, motion"),
             ("cinematic", "Use key=value"),
         ],
     )
@@ -217,6 +221,10 @@ class TestMessages:
     def test_shorter_keeps_details(self):
         assert "Keep these aspects while cutting: lighting" in _system(EnhanceSettings(length="shorter"), in_words=40)
         assert "Length: at most" in _system(EnhanceSettings(length="shorter"), in_words=40)
+
+    def test_mood_line(self):
+        assert "Mood: keep the user's existing mood" in _system(EnhanceSettings())
+        assert "Mood: eerie and unsettling." in _system(EnhanceSettings(mood="eerie"))
 
     def test_empty_details_omitted(self):
         system = _system(EnhanceSettings(style="anime", details=()))

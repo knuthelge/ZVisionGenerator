@@ -106,6 +106,26 @@ STYLE_AXIS = EnhanceAxis(
     ),
     default=("keep",),
 )
+MOOD_AXIS = EnhanceAxis(
+    key="mood",
+    label="Mood",
+    multi=False,
+    video_only=False,
+    options=(
+        EnhanceOption("keep", "Keep", "Mood: keep the user's existing mood; do not impose a new one."),
+        EnhanceOption("serene", "Serene", "Mood: calm and serene. Convey stillness and peace through soft light, gentle color and quiet surroundings."),
+        EnhanceOption("joyful", "Joyful", "Mood: joyful and upbeat. Convey warmth and energy through bright light, lively color and open expressions."),
+        EnhanceOption("romantic", "Romantic", "Mood: romantic and intimate. Convey tenderness through warm, soft light and close, gentle framing."),
+        EnhanceOption("melancholic", "Melancholic", "Mood: melancholic and wistful. Convey solitude through muted color, subdued light and empty space."),
+        EnhanceOption("mysterious", "Mysterious", "Mood: mysterious. Convey intrigue through shadow, haze and partly hidden detail."),
+        EnhanceOption("eerie", "Eerie", "Mood: eerie and unsettling. Convey unease through cold tones, odd stillness and ominous shadow."),
+        EnhanceOption("dramatic", "Dramatic", "Mood: dramatic and tense. Convey intensity through hard contrast, charged light and a decisive moment."),
+        EnhanceOption("epic", "Epic", "Mood: epic and awe-inspiring. Convey grandeur through vast scale, sweeping depth and majestic light."),
+        EnhanceOption("whimsical", "Whimsical", "Mood: whimsical and playful. Convey a dreamlike lightness through gentle color and charming detail."),
+        EnhanceOption("nostalgic", "Nostalgic", "Mood: nostalgic. Convey a fond memory through warm, faded color and soft, golden light."),
+    ),
+    default=("keep",),
+)
 DETAILS_AXIS = EnhanceAxis(
     key="details",
     label="Details",
@@ -147,7 +167,7 @@ MOTION_AXIS = EnhanceAxis(
     ),
     default=("action",),
 )
-ENHANCE_AXES: tuple[EnhanceAxis, ...] = (STYLE_AXIS, DETAILS_AXIS, LENGTH_AXIS, MOTION_AXIS)
+ENHANCE_AXES: tuple[EnhanceAxis, ...] = (STYLE_AXIS, MOOD_AXIS, DETAILS_AXIS, LENGTH_AXIS, MOTION_AXIS)
 _AXES_BY_KEY = {axis.key: axis for axis in ENHANCE_AXES}
 
 
@@ -156,6 +176,7 @@ class EnhanceSettings:
     """A choice on every axis of the option matrix."""
 
     style: str = STYLE_AXIS.default[0]
+    mood: str = MOOD_AXIS.default[0]
     details: tuple[str, ...] = DETAILS_AXIS.default
     length: str = LENGTH_AXIS.default[0]
     motion: tuple[str, ...] = MOTION_AXIS.default
@@ -200,7 +221,13 @@ def matrix_contract() -> dict[str, Any]:
 
 def settings_to_mapping(settings: EnhanceSettings) -> dict[str, Any]:
     """Return *settings* as a JSON-friendly mapping."""
-    return {"style": settings.style, "details": list(settings.details), "length": settings.length, "motion": list(settings.motion)}
+    return {
+        "style": settings.style,
+        "mood": settings.mood,
+        "details": list(settings.details),
+        "length": settings.length,
+        "motion": list(settings.motion),
+    }
 
 
 def _check_mode(mode: str) -> None:
@@ -230,7 +257,7 @@ def settings_from_mapping(data: dict[str, Any], *, mode: str, motion_in_image: s
     """Build settings from a mapping; omitted axes keep their defaults.
 
     Args:
-        data: Mapping with any of ``style``, ``details``, ``length``, ``motion``.
+        data: Mapping with any of ``style``, ``mood``, ``details``, ``length``, ``motion``.
         mode: ``"image"`` or ``"video"``.
         motion_in_image: ``"error"`` to reject ``motion`` in image mode, ``"warn"`` to warn and ignore it.
 
@@ -277,7 +304,7 @@ def parse_enhance_spec(spec: str | None, *, mode: str) -> EnhanceSettings:
 
 def format_enhance_spec(settings: EnhanceSettings, *, mode: str = "video") -> str:
     """Serialize *settings* to the CLI spec grammar (``motion`` only for video)."""
-    parts = [f"style={settings.style}", f"details={'+'.join(settings.details)}", f"length={settings.length}"]
+    parts = [f"style={settings.style}", f"mood={settings.mood}", f"details={'+'.join(settings.details)}", f"length={settings.length}"]
     if mode == "video":
         parts.append(f"motion={'+'.join(settings.motion)}")
     return ",".join(parts)
@@ -302,16 +329,17 @@ def parse_enhance_entry(value: Any, *, mode: str, where: str) -> EnhanceSettings
 
 
 def validate_settings(settings: EnhanceSettings, *, mode: str) -> None:
-    """Reject unknown slugs and the no-op combination (keep style, no details, same length, no motion)."""
+    """Reject unknown slugs and the no-op combination (keep style and mood, no details, same length, no motion)."""
     _check_mode(mode)
     STYLE_AXIS.option(settings.style)
+    MOOD_AXIS.option(settings.mood)
     LENGTH_AXIS.option(settings.length)
     for slug in settings.details:
         DETAILS_AXIS.option(slug)
     for slug in settings.motion:
         MOTION_AXIS.option(slug)
     if is_noop(settings, mode=mode):
-        raise ValueError("Nothing to enhance: pick a style, a detail, or a length.")
+        raise ValueError("Nothing to enhance: pick a style, a mood, a detail, or a length.")
 
 
 def resolve_enhance_ceiling(config: dict[str, Any], *, family: str | None, mode: str) -> int:
@@ -361,9 +389,9 @@ def entry_enhance(enhance_by_set: dict[str, list[EnhanceSettings | None]] | None
 
 
 def is_noop(settings: EnhanceSettings, *, mode: str) -> bool:
-    """Return whether *settings* ask for no change in *mode* (keep style, no details, same length, no video motion)."""
+    """Return whether *settings* ask for no change in *mode* (keep style and mood, no details, same length, no video motion)."""
     has_motion = mode == "video" and bool(settings.motion)
-    return settings.style == "keep" and not settings.details and settings.length == "same" and not has_motion
+    return settings.style == "keep" and settings.mood == "keep" and not settings.details and settings.length == "same" and not has_motion
 
 
 def enhance_by_set_for_mode(enhance_by_set: dict[str, list[EnhanceSettings | None]] | None, *, mode: str) -> dict[str, list[EnhanceSettings | None]] | None:
@@ -382,7 +410,7 @@ def enhance_by_set_for_mode(enhance_by_set: dict[str, list[EnhanceSettings | Non
         result[set_name] = kept
     if dropped:
         noun = "entry asks" if dropped == 1 else "entries ask"
-        warnings.warn(f"{dropped} prompt-file 'enhance:' {noun} for no change in images (keep style, no details, same length); not enhanced.", stacklevel=2)
+        warnings.warn(f"{dropped} prompt-file 'enhance:' {noun} for no change in images (keep style and mood, no details, same length); not enhanced.", stacklevel=2)
     return result
 
 
@@ -469,6 +497,7 @@ def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: L
         f"{visible}: no sounds, smells, temperatures felt, thoughts, backstory or narrative commentary.",
     ]
     rules.append(STYLE_AXIS.option(settings.style).instruction)
+    rules.append(MOOD_AXIS.option(settings.mood).instruction)
     if settings.details:
         aspects = ", ".join(DETAILS_AXIS.option(slug).instruction for slug in settings.details)
         rules.append(f"Keep these aspects while cutting: {aspects}." if plan.length == "shorter" and not plan.clamped else f"Add detail on: {aspects}.")
@@ -476,7 +505,7 @@ def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: L
         rules.append(f"Motion: describe {', '.join(MOTION_AXIS.option(slug).instruction for slug in settings.motion)}.")
     rules.append(_length_instruction(plan))
     if plan.length == "same" or plan.clamped:
-        rules.append("Apply the style and details; don't return the input unchanged.")
+        rules.append("Apply the style, mood and details; don't return the input unchanged.")
     system = f"You rewrite prompts for a {kind} model.\nRules:\n" + "\n".join(f"- {rule}" for rule in rules)
     system += "\nOutput only the rewritten prompt as plain prose: no preamble, no headings, no quotes."
     return [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
