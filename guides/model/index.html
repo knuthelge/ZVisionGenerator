@@ -1025,6 +1025,9 @@ ziv-model model -i klein4b.safetensors --name klein4b --model-type flux2-klein-4
 
 # Copy base model files instead of symlinking
 ziv-model model -i checkpoint.safetensors --name my-model --copy
+
+# Also save a q8 copy (~/.ziv/models/my-model@q8/), used whenever my-model runs at -q 8 (macOS)
+ziv-model model -i checkpoint.safetensors --name my-model --quantize 8
 </code></pre>
 <h3 id="model-flags"><code>model</code> Flags</h3>
 <table>
@@ -1060,6 +1063,11 @@ ziv-model model -i checkpoint.safetensors --name my-model --copy
 <td><code>--copy</code></td>
 <td>off</td>
 <td>Copy files instead of symlinking</td>
+</tr>
+<tr>
+<td><code>--quantize</code></td>
+<td>off</td>
+<td>Also save a quantized copy as <code>&lt;name&gt;@q4</code> or <code>&lt;name&gt;@q8</code> (<code>4</code> or <code>8</code>, macOS); see <a href="../image/#stored-quants-macos">Stored quants</a></td>
 </tr>
 </tbody>
 </table>

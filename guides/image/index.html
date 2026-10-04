@@ -660,6 +660,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Quantization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#stored-quants-macos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stored quants (macOS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1100,6 +1117,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Quantization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#stored-quants-macos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stored quants (macOS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1231,7 +1265,7 @@ ziv-image -m klein4b --prompt &quot;a portrait&quot;
 ziv-image -m ideo --prompt &quot;a portrait&quot;
 </code></pre>
 <h3 id="ideogram-4">Ideogram 4</h3>
-<p>Ideogram 4 runs on macOS (Apple Silicon via mflux/MLX) only; it is unavailable on Windows and Linux. It ships as a single FP8 model, so quantization tiers (<code>-q 4</code> / <code>-q 8</code>) do not apply. Width and height must be in the 256–2048 range and multiples of 16; size presets that exceed this range (for example <code>--size xl</code> with <code>--ratio 16:9</code>) are rejected before the model loads.</p>
+<p>Ideogram 4 runs on macOS (Apple Silicon via mflux/MLX) only; it is unavailable on Windows and Linux. It ships as a single FP8 model, so quantization tiers do not apply: <code>ziv-image</code> rejects <code>-q 4</code> / <code>-q 8</code> for it, as the Web UI does. Width and height must be in the 256–2048 range and multiples of 16; size presets that exceed this range (for example <code>--size xl</code> with <code>--ratio 16:9</code>) are rejected before the model loads.</p>
 <pre><code class="language-bash">ziv-image -m ideo --prompt &quot;a portrait&quot;
 </code></pre>
 <p>Ideogram 4 does not support negative prompts or reference-image (img2img) steering; a negative prompt is dropped with a warning, and both <code>--image</code> and <code>--upscale</code> are rejected (each requires img2img, which Ideogram 4 does not support). LoRA weights work at parity with other mflux models via <code>--lora</code>.</p>
@@ -1416,6 +1450,18 @@ ziv-image -m my-model -q 8    # 8-bit quantization
 </code></pre>
 <p>On macOS, memory is shared between the CPU and GPU, so an unquantized model larger than the machine's recommended GPU memory makes macOS compress or swap other memory, and well beyond it the whole system swaps heavily. On a 16 GB Mac, for example, Z-Image Turbo and FLUX.2 Klein need <code>-q 8</code> or <code>-q 4</code>. The Web UI's memory badge shows which levels fit.</p>
 <p>The <a href="../prompts/#enhancing-prompts">prompt enhancer</a> is unloaded before the model loads, so <strong>Enhance each image</strong> does not add to the model's memory.</p>
+<h3 id="stored-quants-macos">Stored quants (macOS)</h3>
+<p>The first time a model runs at <code>-q 8</code> or <code>-q 4</code> (or <strong>Quant: q8/q4</strong> in the Web UI), its quantized weights are saved in <code>~/.ziv/models/</code> as <code>&lt;name&gt;@q8</code> or <code>&lt;name&gt;@q4</code>, where <code>&lt;name&gt;</code> is the installed model or the alias you picked (for example <code>zit@q8</code>). Later jobs load that copy instead of quantizing again, so they start faster and do not briefly need the unquantized model's memory. The first job shows <em>Saving a q8 copy…</em> and takes about 20–30 seconds longer; the copy needs roughly half (q8) or a quarter (q4) of the model's disk space.</p>
+<ul>
+<li>The copy holds the base model only. LoRAs are applied on top of it when a job loads, with the same result as quantizing at load.</li>
+<li>It is replaced automatically when the source model's weights change (including a new download of an alias's Hugging Face repo) or mflux is updated.</li>
+<li>It is listed on the Models page as <em>q8 copy of &lt;name&gt;</em>, where you can delete it to free disk space. It does not appear in the model picker: choose the base model and a quantize level.</li>
+<li>Deleting a model on the Models page, or an alias's Hugging Face download, also deletes its copies.</li>
+<li>Stopping a job while the copy is being saved takes effect once the current write finishes (up to about 30 seconds); the copy is then discarded and the next job tries again.</li>
+<li>An alias whose model is not downloaded yet is downloaded first; the copy is saved once the download is complete.</li>
+<li>A model given as a raw Hugging Face repo id or a folder outside <code>~/.ziv/models/</code> (<code>-m org/repo</code>, <code>-m /path/to/model</code>) is quantized at load each time. Use an alias, or install the model, to get a copy.</li>
+</ul>
+<p>You can also save a quantized copy when converting a checkpoint (<code>ziv-model model … --quantize 8</code>, or <strong>Quantized Copy</strong> on the Models page).</p>
 <h2 id="post-processing">Post-Processing</h2>
 <h3 id="contrast">Contrast</h3>
 <pre><code class="language-bash">ziv-image -m my-model --prompt &quot;a sunset&quot; --contrast 1.2        # boost contrast (1.0 = no change)
