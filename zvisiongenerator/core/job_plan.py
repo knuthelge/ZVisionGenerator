@@ -69,3 +69,24 @@ class JobPlan:
     def has_rewrites(self) -> bool:
         """Return whether any iteration carries an enhanced prompt."""
         return any(iteration.enhance_status is EnhanceStatus.ENHANCED for iteration in self.iterations)
+
+    def require_runnable(self, total_iterations: int) -> None:
+        """Raise ``ValueError`` unless generation may run *total_iterations* iterations from this plan."""
+        if self.cancelled:
+            raise ValueError("The job plan was cancelled during preflight; generation must not run.")
+        if len(self.iterations) != total_iterations:
+            raise ValueError(f"The job plan has {len(self.iterations)} iterations, but the batch has {total_iterations}.")
+
+    def iteration_for(self, ran_iterations: int, *, run_index: int, set_name: str, prompt_index: int) -> IterationPlan:
+        """Return the plan of the *ran_iterations*-th (1-based) iteration, checking it is the one being run.
+
+        Raises:
+            RuntimeError: When the plan's iteration order differs from the batch loop.
+        """
+        iteration = self.iterations[ran_iterations - 1]
+        if (iteration.run_index, iteration.set_name, iteration.prompt_index) != (run_index, set_name, prompt_index):
+            raise RuntimeError(
+                f"Job plan out of order at iteration {ran_iterations}: planned run {iteration.run_index}, set '{iteration.set_name}', "
+                f"prompt {iteration.prompt_index}; running run {run_index}, set '{set_name}', prompt {prompt_index}."
+            )
+        return iteration

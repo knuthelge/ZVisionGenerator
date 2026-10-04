@@ -18,7 +18,10 @@ from PIL import Image
 import pytest
 
 from tests.conftest import _make_args
+from tests.conftest import _make_plan
 from tests.conftest import _make_video_args
+from zvisiongenerator.core.image_types import ImageGenerationRequest
+from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import web_runner as web_runner_module
 
@@ -70,6 +73,33 @@ def _sse_payload(frame: str) -> dict[str, object]:
     raise AssertionError(f"SSE frame did not contain a data field: {frame!r}")
 
 
+def _stub_request_job(monkeypatch, *, run_preflight=None) -> MagicMock:
+    """Stub preflight, model loading and memory release so a request job runs only the faked batch runner."""
+    backend = MagicMock(name="backend")
+    backend.load_model.return_value = (MagicMock(name="model"), MagicMock(name="model_info"))
+    monkeypatch.setattr(web_runner_module, "run_preflight", run_preflight or (lambda prompts_data, config, args, **_kw: _make_plan(prompts_data, args, config=config)))
+    monkeypatch.setattr(web_runner_module, "get_backend", lambda: backend)
+    monkeypatch.setattr(web_runner_module, "get_video_backend", lambda _family: backend)
+    monkeypatch.setattr(web_runner_module, "require_ffmpeg", lambda: None)
+    monkeypatch.setattr(web_runner_module, "build_video_workflow", lambda _args, **_kw: MagicMock(name="workflow"))
+    monkeypatch.setattr(web_runner_module, "release_accelerator_memory", lambda: None)
+    return backend
+
+
+def _submit_image(monkeypatch, runner, *, prompts_data, config, args) -> str:
+    """Submit an image request job with preflight and model loading stubbed."""
+    _stub_request_job(monkeypatch)
+    request = ImageGenerationRequest(backend=None, model=None, prompt="prompt", model_family="zimage")
+    return runner.submit_image_request_job(request=request, prompts_data=prompts_data, config=config, args=args, model_ref="model")
+
+
+def _submit_video(monkeypatch, runner, *, prompts_data, config, args) -> str:
+    """Submit a video request job with preflight and model loading stubbed."""
+    _stub_request_job(monkeypatch)
+    request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx")
+    return runner.submit_video_request_job(request=request, prompts_data=prompts_data, config=config, args=args, model_ref="model")
+
+
 def test_importing_web_runner_does_not_install_stdio_wrappers():
     """Importing the runner module should not mutate process-global stdout or stderr."""
     original_stdout = sys.stdout
@@ -98,10 +128,9 @@ class TestWebRunner:
         worker_thread_ids: list[int] = []
         captured_control_signal = {}
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, progress_callback, enable_interactive_controls, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
             worker_thread_ids.append(threading.get_ident())
             captured_control_signal["signal"] = skip_signal
-            assert enable_interactive_controls is False
             assert sys.stdout.isatty() is False
             assert sys.stderr.isatty() is False
             assert os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] == "1"
@@ -117,14 +146,7 @@ class TestWebRunner:
 
         try:
             started_at = time.monotonic()
-            job_id = runner.submit_image_job(
-                backend=MagicMock(),
-                model=MagicMock(),
-                prompts_data={"default": [("prompt", None)]},
-                config={},
-                args=_make_args(),
-                model_info=MagicMock(),
-            )
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
             elapsed = time.monotonic() - started_at
 
             assert elapsed < 0.2
@@ -149,7 +171,7 @@ class TestWebRunner:
     def test_submit_video_job_tracks_video_runner_progress(self, monkeypatch):
         """Video jobs should publish progress and terminal state from the wrapped runner."""
 
-        def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, progress_callback):
+        def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, plan, progress_callback):
             progress_callback({"type": "batch_started", "mode": "video", "total_iterations": 1, "total_runs": 1})
             progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
 
@@ -157,19 +179,11 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
-            job_id = runner.submit_video_job(
-                backend=MagicMock(),
-                model=MagicMock(),
-                model_info=MagicMock(),
-                workflow=MagicMock(),
-                prompts_data={"default": [("prompt", None)]},
-                config={},
-                args=_make_video_args(),
-            )
+            job_id = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args())
 
             snapshot = _wait_for_status(runner, job_id, "completed")
             assert snapshot["status"] == "completed"
-            assert snapshot["event_count"] == 4
+            assert snapshot["event_count"] == 5  # job_submitted, model_loading, batch_started, batch_completed, job_completed
             assert snapshot["last_event"]["type"] == "job_completed"
         finally:
             runner.shutdown()
@@ -178,7 +192,7 @@ class TestWebRunner:
         """Successful generated output paths should become gallery-shaped job outputs."""
         output_path = tmp_path / "result.png"
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, progress_callback, enable_interactive_controls, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
             Image.new("RGB", (16, 12), color="teal").save(output_path)
             progress_callback({"type": "generation_finished", "mode": "image", "status": "success", "filename": output_path.name, "output_path": str(output_path)})
             progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
@@ -192,14 +206,7 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
-            job_id = runner.submit_image_job(
-                backend=MagicMock(),
-                model=MagicMock(),
-                prompts_data={"default": [("prompt", None)]},
-                config={},
-                args=_make_args(output=str(tmp_path)),
-                model_info=MagicMock(),
-            )
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(output=str(tmp_path)))
 
             snapshot = _wait_for_status(runner, job_id, "completed")
 
@@ -232,7 +239,7 @@ class TestWebRunner:
     def test_submit_image_job_all_failed_batch_ends_failed(self, monkeypatch):
         """Image jobs with only failed generations should publish a failed terminal state."""
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, progress_callback, enable_interactive_controls, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
             progress_callback({"type": "generation_finished", "mode": "image", "status": "failed", "filename": "failed.png"})
             progress_callback({"type": "batch_failed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
@@ -241,14 +248,7 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
-            job_id = runner.submit_image_job(
-                backend=MagicMock(),
-                model=MagicMock(),
-                prompts_data={"default": [("prompt", None)]},
-                config={},
-                args=_make_args(),
-                model_info=MagicMock(),
-            )
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
 
             snapshot = _wait_for_status(runner, job_id, "failed")
             assert snapshot["status"] == "failed"
@@ -260,7 +260,7 @@ class TestWebRunner:
     def test_submit_video_job_all_failed_batch_ends_failed(self, monkeypatch):
         """Video jobs with only failed generations should publish a failed terminal state."""
 
-        def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, progress_callback):
+        def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, plan, progress_callback):
             progress_callback({"type": "batch_started", "mode": "video", "total_iterations": 1, "total_runs": 1})
             progress_callback({"type": "generation_finished", "mode": "video", "status": "failed"})
             progress_callback({"type": "batch_failed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
@@ -269,15 +269,7 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
-            job_id = runner.submit_video_job(
-                backend=MagicMock(),
-                model=MagicMock(),
-                model_info=MagicMock(),
-                workflow=MagicMock(),
-                prompts_data={"default": [("prompt", None)]},
-                config={},
-                args=_make_video_args(),
-            )
+            job_id = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args())
 
             snapshot = _wait_for_status(runner, job_id, "failed")
             assert snapshot["status"] == "failed"
@@ -397,7 +389,7 @@ class TestWebRunner:
         started = threading.Event()
         release = threading.Event()
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, progress_callback, enable_interactive_controls, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
             started.set()
             release.wait(timeout=1.0)
@@ -407,25 +399,11 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
-            runner.submit_image_job(
-                backend=MagicMock(),
-                model=MagicMock(),
-                prompts_data={"default": [("prompt", None)]},
-                config={},
-                args=_make_args(),
-                model_info=MagicMock(),
-            )
+            _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
             assert started.wait(timeout=1.0)
 
             try:
-                runner.submit_image_job(
-                    backend=MagicMock(),
-                    model=MagicMock(),
-                    prompts_data={"default": [("prompt", None)]},
-                    config={},
-                    args=_make_args(),
-                    model_info=MagicMock(),
-                )
+                _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
             except web_runner_module.JobConflictError as exc:
                 assert "already running" in str(exc)
             else:
@@ -514,7 +492,7 @@ class TestWebRunner:
         started = threading.Event()
         release = threading.Event()
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, progress_callback, enable_interactive_controls, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
             started.set()
             release.wait(timeout=1.0)
@@ -524,14 +502,7 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
-            job_id = runner.submit_image_job(
-                backend=MagicMock(),
-                model=MagicMock(),
-                prompts_data={"default": [("prompt", None)]},
-                config={},
-                args=_make_args(),
-                model_info=MagicMock(),
-            )
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
             assert started.wait(timeout=1.0)
 
             response = runner.queue_job_control(job_id, "pause")
@@ -548,7 +519,7 @@ class TestWebRunner:
         """A paused job should wake and publish cancellation when quit is queued."""
         paused = threading.Event()
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, progress_callback, enable_interactive_controls, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
             progress_callback({"type": "job_paused", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
             paused.set()
@@ -560,14 +531,7 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
-            job_id = runner.submit_image_job(
-                backend=MagicMock(),
-                model=MagicMock(),
-                prompts_data={"default": [("prompt", None)]},
-                config={},
-                args=_make_args(),
-                model_info=MagicMock(),
-            )
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
             assert paused.wait(timeout=1.0)
             assert runner.get_job_snapshot(job_id)["status"] == "paused"
 
@@ -585,7 +549,7 @@ class TestWebRunner:
         started = threading.Event()
         release = threading.Event()
 
-        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, progress_callback, enable_interactive_controls, skip_signal):
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
             progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
             progress_callback(
                 {
@@ -609,14 +573,7 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
-            job_id = runner.submit_image_job(
-                backend=MagicMock(),
-                model=MagicMock(),
-                prompts_data={"default": [("prompt", None)]},
-                config={},
-                args=_make_args(),
-                model_info=MagicMock(),
-            )
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
             assert started.wait(timeout=1.0)
 
             snapshot = runner.get_active_exclusive_job_snapshot()
@@ -628,7 +585,7 @@ class TestWebRunner:
             assert snapshot["supported_controls"] == ["next", "pause", "resume", "repeat", "quit"]
             assert snapshot["last_event"]["type"] == "step_progress"
             assert snapshot["last_event"]["current_step"] == 2
-            assert snapshot["event_count"] == 3
+            assert snapshot["event_count"] == 4  # job_submitted, model_loading, batch_started, step_progress
         finally:
             release.set()
             runner.shutdown()

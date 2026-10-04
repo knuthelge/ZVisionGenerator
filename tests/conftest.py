@@ -7,6 +7,8 @@ from argparse import Namespace
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from zvisiongenerator.core.job_plan import JobPlan
+from zvisiongenerator.preflight import plan_iterations
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 
 # Starlette's TestClient sends ``Host: testserver``; allow it through the Web UI request guard.
@@ -45,6 +47,24 @@ def _make_args(**overrides):
     )
     defaults.update(overrides)
     return Namespace(**defaults)
+
+
+def _make_plan(prompts_data, args, *, config=None, enhance_by_set=None) -> JobPlan:
+    """Return the preflight plan of a job without enhancement rewrites (statuses stay ``off``)."""
+    generation = (config or {}).get("generation", {})
+    return JobPlan(
+        plan_iterations(
+            prompts_data,
+            runs=args.runs,
+            seed=args.seed,
+            seed_min=generation.get("seed_min", 4),
+            seed_max=generation.get("seed_max", 2**32 - 1),
+            json_prompt=bool(getattr(args, "json_prompt_enabled", False)),
+            disabled=bool(getattr(args, "no_enhance", False)),
+            override=getattr(args, "enhance", None),
+            enhance_by_set=enhance_by_set,
+        )
+    )
 
 
 def _make_video_args(**overrides):

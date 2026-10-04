@@ -74,11 +74,9 @@ class ImageGenerationRequest:
     output_dir: str = "."
     filename_base: str | None = None
 
-    # Prompt enhancement (local LLM); ``enhance`` is an ``EnhanceSettings`` or None when off
-    prompt_enhancer: Any | None = None
-    enhance: Any | None = None
-    enhance_ceiling: int = 300
-    enhance_options: dict[str, Any] = field(default_factory=dict)
+    # Planned prompt text from preflight: ``{a|b}`` choices already made and the auto-enhanced rewrite, if any
+    resolved_prompt: str | None = None
+    enhanced_prompt: str | None = None
     on_prompt_enhanced: Callable[[str], None] | None = None
 
 

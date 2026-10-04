@@ -15,6 +15,7 @@ from typing import Any
 
 from zvisiongenerator.core.image_backend import ImageBackend
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
+from zvisiongenerator.core.job_plan import JobPlan
 from zvisiongenerator.core.progress_events import ProgressCallback
 from zvisiongenerator.core.progress_events import emit_generation_finished as _emit_generation_finished
 from zvisiongenerator.core.progress_events import emit_progress as _emit_progress
@@ -26,7 +27,6 @@ from zvisiongenerator.utils import generate_filename, format_generation_info
 from zvisiongenerator.utils.alignment import round_to_alignment
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
-from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhance_options, enhancement_requested, entry_enhance, resolve_enhance_ceiling, resolve_item_enhance
 from zvisiongenerator.workflows import build_workflow
 
 
@@ -56,11 +56,10 @@ def run_batch(
     config: dict[str, Any],
     args: argparse.Namespace,
     model_info: ImageModelInfo,
+    *,
+    plan: JobPlan,
     progress_callback: ProgressCallback | None = None,
-    enable_interactive_controls: bool = True,
     skip_signal: SkipSignal | None = None,
-    prompt_enhancer: Any | None = None,
-    enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
 ) -> None:
     """Run the batch generation loop.
 
@@ -69,11 +68,15 @@ def run_batch(
         model: Loaded model handle from ``backend.load_model()``.
         prompts_data: Dict of set_name → list of (prompt, negative_prompt) tuples.
         config: Loaded config.yaml dict.
-        args: Parsed CLI arguments (argparse Namespace). ``args.enhance`` (job-wide
-            ``EnhanceSettings``) and ``args.no_enhance`` control auto prompt enhancement.
+        args: Parsed CLI arguments (argparse Namespace).
         model_info: ImageModelInfo from ``backend.load_model()``.
-        prompt_enhancer: Loaded ``PromptEnhancer`` when any prompt is auto-enhanced.
-        enhance_by_set: Per-entry YAML ``enhance:`` settings aligned with *prompts_data*.
+        plan: Preflight plan with one iteration per run × prompt (seeds, resolved and enhanced prompts).
+        progress_callback: Receives structured progress events.
+        skip_signal: The job's control signal; the caller owns its key listener (``start``/``stop``).
+
+    Raises:
+        ValueError: When *plan* was cancelled or does not match the batch size.
+        RuntimeError: When *plan*'s iteration order differs from the batch loop.
     """
 
     # Resolve supports_negative_prompt from config
@@ -127,6 +130,7 @@ def run_batch(
 
     # Calculate total iterations for progress tracking
     total_iterations = args.runs * sum(len(prompts) for prompts in prompts_data.values())
+    plan.require_runnable(total_iterations)
     if total_iterations == 0:
         print("No active prompt sets found. Exiting.")
         _emit_progress(progress_callback, "batch_completed", mode="image", total_iterations=0, completed_iterations=0)
@@ -158,15 +162,9 @@ def run_batch(
     else:
         saturation_amount = saturation_cfg.get("default_amount", 1.0)
 
-    enhance_disabled = bool(getattr(args, "no_enhance", False))
-    enhance_override = getattr(args, "enhance", None)
-    enhance_ceiling = resolve_enhance_ceiling(config, family=_family, mode="image")
-    enhance_opts = enhance_options(config)
-    workflow = build_workflow(args, enhance=enhancement_requested(disabled=enhance_disabled, override=enhance_override, enhance_by_set=enhance_by_set))
+    workflow = build_workflow(args, enhance=plan.has_rewrites)
 
     try:
-        if enable_interactive_controls:
-            skip.start()
         for run_idx in range(args.runs):
             for set_name, prompts in prompts_data.items():
                 for prompt_idx, (prompt, negative_prompt) in enumerate(prompts):
@@ -179,15 +177,14 @@ def run_batch(
                     _remaining = total_iterations - _completed
                     _eta = _avg * _remaining if _avg is not None else None
 
-                    item_enhance = resolve_item_enhance(disabled=enhance_disabled, override=enhance_override, entry=entry_enhance(enhance_by_set, set_name, prompt_idx))
+                    planned = plan.iteration_for(ran_iterations, run_index=run_idx, set_name=set_name, prompt_index=prompt_idx)
 
                     # Suppress negative prompt if model doesn't support it
                     effective_negative = negative_prompt
                     if not supports_neg:
                         effective_negative = None
 
-                    # Generate seed before display so the header shows the real value
-                    seed = args.seed if args.seed is not None else random.randint(seed_min, seed_max)
+                    seed = planned.seed
                     _emit_progress(
                         progress_callback,
                         "prompt_started",
@@ -201,6 +198,7 @@ def run_batch(
                         total_prompts=len(prompts),
                         prompt=prompt,
                         seed=seed,
+                        enhance_status=planned.enhance_status.value,
                         elapsed_secs=_elapsed,
                         avg_secs=_avg,
                         eta_secs=_eta,
@@ -250,7 +248,8 @@ def run_batch(
                     max_retries = 3
                     while True:
                         if retries > 0:
-                            seed = args.seed if args.seed is not None else random.randint(seed_min, seed_max)
+                            # Retries keep the planned text and always draw a new seed, even when the job's seed is fixed.
+                            seed = random.randint(seed_min, seed_max)
                         gen_filename = generate_filename(
                             set_name,
                             width=width,
@@ -361,10 +360,8 @@ def run_batch(
                             saturation_amount=saturation_amount,
                             output_dir=args.output,
                             filename_base=gen_filename,
-                            prompt_enhancer=prompt_enhancer if item_enhance is not None else None,
-                            enhance=item_enhance,
-                            enhance_ceiling=enhance_ceiling,
-                            enhance_options=enhance_opts,
+                            resolved_prompt=planned.resolved_prompt,
+                            enhanced_prompt=planned.enhanced_prompt,
                             on_prompt_enhanced=_make_prompt_enhanced_callback(
                                 progress_callback,
                                 mode="image",
@@ -491,7 +488,7 @@ def run_batch(
                             break
                         elif action == "repeat":
                             image_times.append(time.time() - _img_start)
-                            seed = args.seed if args.seed is not None else random.randint(seed_min, seed_max)
+                            seed = random.randint(seed_min, seed_max)
                             _emit_progress(progress_callback, "generation_repeat", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
                             print("\n🔁 Repeating prompt with new seed...\n")
                             continue
@@ -507,6 +504,3 @@ def run_batch(
         _emit_progress(progress_callback, terminal_event, mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
     except _QuitBatch:
         pass
-    finally:
-        if enable_interactive_controls:
-            skip.stop()

@@ -15,6 +15,8 @@ Covers:
 
 from __future__ import annotations
 
+from conftest import _make_plan
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -295,7 +297,7 @@ class TestRunnerSizeLookup:
         model_info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
 
         with patch("zvisiongenerator.image_runner.build_workflow", return_value=wf):
-            run_batch(MagicMock(), MagicMock(spec=[]), {"s": [("cat", None)]}, config, args, model_info=model_info)
+            run_batch(MagicMock(), MagicMock(spec=[]), {"s": [("cat", None)]}, config, args, model_info=model_info, plan=_make_plan({"s": [("cat", None)]}, args, config=config))
 
         return captured["request"]
 
@@ -485,7 +487,7 @@ class TestRunnerFilenameIntegration:
         model_info = ImageModelInfo(family="zimage", is_distilled=False, size=None)
 
         with patch("zvisiongenerator.image_runner.build_workflow", return_value=wf):
-            run_batch(MagicMock(), MagicMock(spec=[]), {"s": [("cat", None)]}, config, args, model_info=model_info)
+            run_batch(MagicMock(), MagicMock(spec=[]), {"s": [("cat", None)]}, config, args, model_info=model_info, plan=_make_plan({"s": [("cat", None)]}, args, config=config))
 
         return captured["filename"]
 

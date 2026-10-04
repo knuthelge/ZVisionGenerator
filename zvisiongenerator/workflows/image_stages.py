@@ -24,7 +24,7 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.utils.alignment import round_to_alignment
 from zvisiongenerator.utils.provenance import build_image_config_payload, embed_png_config
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
-from zvisiongenerator.workflows.enhance_stage import apply_prompt_enhancement
+from zvisiongenerator.workflows.enhance_stage import apply_planned_enhancement
 
 _EXIF_IMAGE_DESCRIPTION = 0x010E
 
@@ -55,10 +55,13 @@ def _emit_step_progress(
 def resolve_prompt_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
     """Replace {a|b|c} random choice blocks in prompt, supporting nesting.
 
-    When ``request.json_prompt`` is set, the prompt is a literal structured JSON
-    caption and is passed through verbatim without random-choice expansion.
+    A ``request.resolved_prompt`` planned during preflight is used as is, so a retry or
+    repeat keeps the same choices. When ``request.json_prompt`` is set, the prompt is a
+    literal structured JSON caption and is passed through verbatim without random-choice expansion.
     """
-    if request.json_prompt:
+    if request.resolved_prompt is not None:
+        artifacts.resolved_prompt = request.resolved_prompt
+    elif request.json_prompt:
         artifacts.resolved_prompt = request.prompt
     else:
         artifacts.resolved_prompt = expand_random_choices(request.prompt)
@@ -66,8 +69,8 @@ def resolve_prompt_stage(request: ImageGenerationRequest, artifacts: ImageWorkin
 
 
 def enhance_prompt_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
-    """Rewrite the resolved prompt with the local prompt enhancer (auto mode); never fails the generation."""
-    apply_prompt_enhancement(request, artifacts, mode="image")
+    """Apply the prompt rewrite planned during preflight; never fails the generation."""
+    apply_planned_enhancement(request, artifacts)
     return StageOutcome.success
 
 

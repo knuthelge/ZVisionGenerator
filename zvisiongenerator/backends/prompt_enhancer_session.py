@@ -188,7 +188,7 @@ def plan_job_enhancer(
     enhance_by_set: dict[str, list[EnhanceSettings | None]] | None,
     cli_model: str | None = None,
 ) -> tuple[str, str | None] | None:
-    """Return the enhancer ``(repo, revision)`` when any prompt in the job is enhanced, after a preflight.
+    """Return the enhancer ``(repo, revision)`` when any prompt in the job is enhanced, after checking that it is available.
 
     Raises:
         ValueError: When no enhancer model is configured or *cli_model* is malformed.

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import argparse
 import logging
-import random
 import time
 import warnings
 from typing import Any
 
+from zvisiongenerator.core.job_plan import JobPlan
 from zvisiongenerator.core.progress_events import ProgressCallback
 from zvisiongenerator.core.progress_events import emit_generation_finished as _emit_generation_finished
 from zvisiongenerator.core.progress_events import emit_progress as _emit_progress
@@ -18,7 +18,6 @@ from zvisiongenerator.core.progress_events import run_workflow_with_progress as 
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.core.workflow import GenerationWorkflow
-from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhance_options, entry_enhance, resolve_enhance_ceiling, resolve_item_enhance
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 
 logger = logging.getLogger(__name__)
@@ -32,9 +31,9 @@ def run_video_batch(
     prompts_data: dict[str, list[tuple[str, str | None]]],
     config: dict[str, Any],
     args: argparse.Namespace,
+    *,
+    plan: JobPlan,
     progress_callback: ProgressCallback | None = None,
-    prompt_enhancer: Any | None = None,
-    enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
 ) -> None:
     """Run the video batch generation loop.
 
@@ -42,25 +41,20 @@ def run_video_batch(
         backend: Video backend instance (satisfies VideoBackend Protocol).
         model: Loaded model handle from backend.load_model().
         model_info: VideoModelInfo from detect_video_model().
-        workflow: Built GenerationWorkflow from build_video_workflow().
+        workflow: Built GenerationWorkflow from build_video_workflow() (``enhance=plan.has_rewrites``).
         prompts_data: Dict of set_name -> list of (prompt, negative_prompt) tuples.
         config: Loaded config.yaml dict.
-        args: Parsed video CLI arguments. ``args.enhance`` / ``args.no_enhance`` control auto prompt enhancement.
-        prompt_enhancer: Loaded ``PromptEnhancer`` when any prompt is auto-enhanced (build the
-            workflow with ``enhance=True``).
-        enhance_by_set: Per-entry YAML ``enhance:`` settings aligned with *prompts_data*.
+        args: Parsed video CLI arguments.
+        plan: Preflight plan with one iteration per run × prompt (seeds, resolved and enhanced prompts).
+        progress_callback: Receives structured progress events.
+
+    Raises:
+        ValueError: When *plan* was cancelled or does not match the batch size.
+        RuntimeError: When *plan*'s iteration order differs from the batch loop.
     """
-    # Seed range from config
-    seed_min = config.get("generation", {}).get("seed_min", 4)
-    seed_max = config.get("generation", {}).get("seed_max", 2**32 - 1)
-
-    enhance_disabled = bool(getattr(args, "no_enhance", False))
-    enhance_override = getattr(args, "enhance", None)
-    enhance_ceiling = resolve_enhance_ceiling(config, family=model_info.family, mode="video")
-    enhance_opts = enhance_options(config)
-
     total_prompts = sum(len(p) for p in prompts_data.values())
     total_iterations = args.runs * total_prompts
+    plan.require_runnable(total_iterations)
     if total_iterations == 0:
         print("No active prompt sets found. Exiting.")
         _emit_progress(progress_callback, "batch_completed", mode="video", total_iterations=0, completed_iterations=0)
@@ -83,8 +77,8 @@ def run_video_batch(
                 remaining = total_iterations - completed_iterations
                 eta = avg * remaining if avg is not None else None
 
-                seed = args.seed if args.seed is not None else random.randint(seed_min, seed_max)
-                item_enhance = resolve_item_enhance(disabled=enhance_disabled, override=enhance_override, entry=entry_enhance(enhance_by_set, set_name, prompt_idx))
+                planned = plan.iteration_for(ran_iterations, run_index=run_idx, set_name=set_name, prompt_index=prompt_idx)
+                seed = planned.seed
                 _emit_progress(
                     progress_callback,
                     "prompt_started",
@@ -98,6 +92,7 @@ def run_video_batch(
                     total_prompts=len(prompts),
                     prompt=prompt,
                     seed=seed,
+                    enhance_status=planned.enhance_status.value,
                     elapsed_secs=time.time() - batch_start,
                     avg_secs=avg,
                     eta_secs=eta,
@@ -161,10 +156,8 @@ def run_video_batch(
                     no_audio=getattr(args, "no_audio", False),
                     output_dir=args.output,
                     output_format=getattr(args, "format", "mp4"),
-                    prompt_enhancer=prompt_enhancer if item_enhance is not None else None,
-                    enhance=item_enhance,
-                    enhance_ceiling=enhance_ceiling,
-                    enhance_options=enhance_opts,
+                    resolved_prompt=planned.resolved_prompt,
+                    enhanced_prompt=planned.enhanced_prompt,
                     on_prompt_enhanced=_make_prompt_enhanced_callback(
                         progress_callback,
                         mode="video",

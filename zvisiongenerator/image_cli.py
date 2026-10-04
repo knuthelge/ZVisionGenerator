@@ -8,16 +8,16 @@ import logging
 import os
 import sys
 import warnings
-from contextlib import ExitStack
 from pathlib import Path
 
 from zvisiongenerator.backends import get_backend
-from zvisiongenerator.backends.prompt_enhancer_session import job_enhancer, runs_on_cpu
-from zvisiongenerator.enhance_cli import add_enhance_arguments, job_enhance_plan, parse_enhance_args, print_enhancer_phase
+from zvisiongenerator.enhance_cli import add_enhance_arguments, parse_enhance_args
+from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
+from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import enhance_by_set_for_mode
@@ -267,32 +267,31 @@ def main(*, prog: str = "ziv-image") -> None:
     if args.json_prompt_enabled and args.enhance is not None:
         warnings.warn("--enhance does not apply to --json-prompt structured captions; ignoring.", stacklevel=2)
         args.enhance = None
-    enhancer_model = job_enhance_plan(parser, args, config, enhance_by_set)
 
     args.lora_paths, args.lora_weights = lora_paths, lora_weights
+    # The key listener covers preflight and model load too, so [n]/[p]/[q] work while prompts are enhanced.
+    skip = SkipSignal()
+    skip.start()
     try:
-        loaded_model, loaded_model_info = backend.load_model(
-            args.model,
-            quantize=args.quantize,
-            precision="bfloat16",
-            lora_paths=lora_paths,
-            lora_weights=lora_weights,
-        )
-    except (RuntimeError, ImportError, OSError, ValueError) as e:
-        logger.exception("Failed to load model %s", args.model)
-        parser.error(f"Failed to load model: {e}")
-    with ExitStack() as stack:
-        prompt_enhancer = None
-        if enhancer_model is not None:
-            # Only loading the enhancer is reported as an enhancer failure; generation errors propagate as before.
-            try:
-                prompt_enhancer = stack.enter_context(job_enhancer(*enhancer_model, on_phase=print_enhancer_phase))
-                if runs_on_cpu(prompt_enhancer):
-                    print_enhancer_phase("cpu")
-            except RuntimeError as e:
-                logger.exception("Prompt enhancer failed to load")
-                parser.error(str(e))
-        if prompt_enhancer is None:
-            run_batch(backend, loaded_model, prompts_data, config, args, model_info=loaded_model_info)
-        else:
-            run_batch(backend, loaded_model, prompts_data, config, args, model_info=loaded_model_info, prompt_enhancer=prompt_enhancer, enhance_by_set=enhance_by_set)
+        # Preflight rewrites prompts and unloads the enhancer before the image model loads.
+        try:
+            plan = run_preflight(prompts_data, config, args, mode="image", model_family=model_info.family, enhance_by_set=enhance_by_set, control=skip)
+        except (ValueError, RuntimeError) as e:
+            logger.exception("Prompt preflight failed")
+            parser.error(str(e))
+        if plan.cancelled:
+            return
+        try:
+            loaded_model, loaded_model_info = backend.load_model(
+                args.model,
+                quantize=args.quantize,
+                precision="bfloat16",
+                lora_paths=lora_paths,
+                lora_weights=lora_weights,
+            )
+        except (RuntimeError, ImportError, OSError, ValueError) as e:
+            logger.exception("Failed to load model %s", args.model)
+            parser.error(f"Failed to load model: {e}")
+        run_batch(backend, loaded_model, prompts_data, config, args, model_info=loaded_model_info, plan=plan, skip_signal=skip)
+    finally:
+        skip.stop()

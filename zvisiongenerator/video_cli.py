@@ -7,11 +7,11 @@ import logging
 import os
 import sys
 import warnings
-from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.backends import get_video_backend
+from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
 from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.utils.config import load_config, resolve_video_defaults, select_ratio_size_defaults
@@ -22,8 +22,7 @@ from zvisiongenerator.utils.prompt_enhance import enhance_by_set_for_mode
 from zvisiongenerator.utils.prompts import inspect_prompts_file
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.video_runner import run_video_batch
-from zvisiongenerator.backends.prompt_enhancer_session import job_enhancer, runs_on_cpu
-from zvisiongenerator.enhance_cli import add_enhance_arguments, job_enhance_plan, parse_enhance_args, print_enhancer_phase
+from zvisiongenerator.enhance_cli import add_enhance_arguments, parse_enhance_args
 from zvisiongenerator.workflows import build_video_workflow
 
 logger = logging.getLogger(__name__)
@@ -246,7 +245,7 @@ def main(*, prog: str = "ziv-video") -> None:
     if lora_paths:
         loras = list(zip(lora_paths, lora_weights, strict=False))
 
-    # Load prompts before the model so prompt-file errors and the enhancer preflight fail fast
+    # Load prompts and run preflight before the model: prompt-file and enhancer errors fail fast, and the enhancer is unloaded first
     enhance_by_set = None
     if args.prompt is not None:
         prompts_data: dict[str, list[tuple[str, str | None]]] = {"prompt": [(args.prompt, None)]}
@@ -256,7 +255,13 @@ def main(*, prog: str = "ziv-video") -> None:
         except (FileNotFoundError, ValueError) as e:
             parser.error(str(e))
         prompts_data, enhance_by_set = inspection.prompts_data, enhance_by_set_for_mode(inspection.enhance_by_set, mode="video")
-    enhancer_model = job_enhance_plan(parser, args, config, enhance_by_set)
+    try:
+        plan = run_preflight(prompts_data, config, args, mode="video", model_family=model_info.family, enhance_by_set=enhance_by_set)
+    except (ValueError, RuntimeError) as e:
+        logger.exception("Prompt preflight failed")
+        parser.error(str(e))
+    if plan.cancelled:
+        return
 
     # Load model
     print(f"Loading {model_info.family.upper()} video model: {args.model}")
@@ -276,31 +281,18 @@ def main(*, prog: str = "ziv-video") -> None:
         parser.error(str(e))
 
     # Build workflow
-    workflow = build_video_workflow(args, enhance=enhancer_model is not None)
+    workflow = build_video_workflow(args, enhance=plan.has_rewrites)
 
-    # Run batch, holding the enhancer for the whole job when any prompt is enhanced
-    with ExitStack() as stack:
-        prompt_enhancer = None
-        if enhancer_model is not None:
-            # Only loading the enhancer is reported as an enhancer failure; generation errors propagate as before.
-            try:
-                prompt_enhancer = stack.enter_context(job_enhancer(*enhancer_model, on_phase=print_enhancer_phase))
-                if runs_on_cpu(prompt_enhancer):
-                    print_enhancer_phase("cpu")
-            except RuntimeError as e:
-                logger.exception("Prompt enhancer failed to load")
-                parser.error(str(e))
-        enhance_kwargs = {"prompt_enhancer": prompt_enhancer, "enhance_by_set": enhance_by_set} if prompt_enhancer is not None else {}
-        run_video_batch(
-            backend=backend,
-            model=model,
-            model_info=model_info,
-            workflow=workflow,
-            prompts_data=prompts_data,
-            config=config,
-            args=args,
-            **enhance_kwargs,
-        )
+    run_video_batch(
+        backend=backend,
+        model=model,
+        model_info=model_info,
+        workflow=workflow,
+        prompts_data=prompts_data,
+        config=config,
+        args=args,
+        plan=plan,
+    )
 
 
 if __name__ == "__main__":

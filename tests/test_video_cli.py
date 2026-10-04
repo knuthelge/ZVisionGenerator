@@ -299,7 +299,7 @@ class TestVideoCliExecution:
         monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
         monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args, **_kwargs: object())
 
-        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args):
+        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan):
             captured["steps"] = args.steps
             captured["upscale_steps"] = args.upscale_steps
 
@@ -313,6 +313,83 @@ class TestVideoCliExecution:
         assert captured["steps"] == 8
         assert captured["upscale_steps"] == 8
         assert any("max 8 denoising steps" in str(item.message) for item in seen)
+
+
+class _VideoCliEnhancer:
+    def __init__(self, order: list[str]):
+        self.order = order
+
+    def generate(self, messages, *, seed, max_tokens, temperature, cancelled=None):
+        yield "A dog sprints across a sunlit beach, camera tracking low."
+
+    def close(self) -> None:
+        self.order.append("close")
+
+
+class TestVideoCliPreflight:
+    """ziv-video runs preflight (rewrites, enhancer unload, memory release) before loading the video model."""
+
+    def _patch(self, monkeypatch, order: list[str], *, load_error=None):
+        import zvisiongenerator.video_cli as video_cli
+        from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
+
+        model_info = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
+        backend = MagicMock()
+        backend.load_model.side_effect = lambda *a, **k: (order.append("load_model"), (MagicMock(), model_info))[1]
+
+        def _factory(repo, revision):
+            if load_error is not None:
+                raise load_error
+            return _VideoCliEnhancer(order)
+
+        session = PromptEnhancerSession(_factory, scheduler=lambda delay, callback: None, downloaded=lambda repo, revision: True)
+        monkeypatch.setattr(
+            video_cli,
+            "load_config",
+            lambda: {
+                "video_generation": {"default_ratio": "16:9", "default_size": "m"},
+                "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
+                "prompt_enhancer": {"model": {"darwin": "a/b", "win32": "a/b", "linux": "a/b"}},
+            },
+        )
+        monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
+        monkeypatch.setattr(video_cli, "detect_video_model", lambda _model: model_info)
+        monkeypatch.setattr(video_cli, "resolve_video_defaults", lambda _family, _config, cli_overrides: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
+        monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
+        workflows: list[bool] = []
+        monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args, *, enhance: workflows.append(enhance) or object())
+        monkeypatch.setattr("zvisiongenerator.backends.prompt_enhancer_session.ensure_available", lambda repo, rev: True)
+        monkeypatch.setattr("zvisiongenerator.backends.prompt_enhancer_session.get_prompt_enhancer_session", lambda: session)
+        monkeypatch.setattr("zvisiongenerator.preflight.release_accelerator_memory", lambda: order.append("release_memory"))
+        captured: dict = {}
+
+        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan):
+            order.append("run_video_batch")
+            captured["plan"] = plan
+
+        monkeypatch.setattr(video_cli, "run_video_batch", _fake_run_video_batch)
+        return video_cli, captured, workflows
+
+    def test_preflight_before_model_load(self, monkeypatch, tmp_path):
+        order: list[str] = []
+        video_cli, captured, workflows = self._patch(monkeypatch, order)
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog runs", "--enhance", "-o", str(tmp_path)]):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                video_cli.main()
+        assert order == ["close", "release_memory", "load_model", "run_video_batch"]
+        assert captured["plan"].has_rewrites and workflows == [True]
+
+    def test_enhancer_load_error_exits_before_model_load(self, monkeypatch, tmp_path):
+        order: list[str] = []
+        video_cli, _captured, _workflows = self._patch(monkeypatch, order, load_error=RuntimeError("Could not load prompt enhancer model a/b"))
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog runs", "--enhance", "-o", str(tmp_path)]):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                with pytest.raises(SystemExit, match="2"):
+                    video_cli.main()
+        assert order == []
 
 
 # ---------------------------------------------------------------------------
