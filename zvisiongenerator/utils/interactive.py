@@ -41,6 +41,11 @@ class SkipSignal:
         with self._lock:
             return self._action in self._INTERRUPT_ACTIONS
 
+    def pending(self) -> str | None:
+        """Return the queued action without consuming it."""
+        with self._lock:
+            return self._action
+
     def consume(self) -> str | None:
         with self._lock:
             action = self._action

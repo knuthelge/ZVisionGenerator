@@ -10,6 +10,7 @@ from typing import Any
 from zvisiongenerator.converters.list_assets import list_models, list_video_models
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.paths import resolve_model_path
+from zvisiongenerator.utils.stored_quant import parse_stored_quant_name
 from zvisiongenerator.utils.video_model_detect import detect_video_model, is_known_video_repo
 
 
@@ -151,6 +152,16 @@ def discover_video_inventory(
             resolved_path=resolved_path,
         )
     return tuple(entries[name] for name in sorted(entries))
+
+
+def stored_quant_of(entry: ImageInventoryEntry) -> tuple[str, int] | None:
+    """Return ``(base model, bits)`` when *entry* is an installed stored quant, else ``None``."""
+    return parse_stored_quant_name(entry.name) if entry.source == "installed" else None
+
+
+def selectable_image_inventory(entries: tuple[ImageInventoryEntry, ...]) -> tuple[ImageInventoryEntry, ...]:
+    """Return the entries offered in model pickers: stored quants are picked through their base model and quantize level."""
+    return tuple(entry for entry in entries if stored_quant_of(entry) is None)
 
 
 def inventory_names(entries: tuple[ImageInventoryEntry, ...] | tuple[VideoInventoryEntry, ...]) -> tuple[str, ...]:

@@ -65,6 +65,29 @@ def test_declared_image_family_returns_configured_family():
     assert model_inventory_module.declared_image_family(app_config, "zit") is None
 
 
+def test_load_web_config_hides_stored_quants_from_model_options(monkeypatch, tmp_path):
+    """Stored quants are picked through their base model and quantize level, never listed or defaulted to."""
+    monkeypatch.chdir(tmp_path)
+
+    def _app_config():
+        config = _make_app_config()
+        config["model_aliases"] = {}
+        config["ui"]["default_models"] = {"image": "local-image@q8"}
+        return config
+
+    monkeypatch.setattr(web_config_module, "load_config", _app_config)
+    monkeypatch.setattr(web_config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+    monkeypatch.setattr(web_config_module, "list_models", lambda _: [SimpleNamespace(name="local-image"), SimpleNamespace(name="local-image@q8")])
+    monkeypatch.setattr(web_config_module, "list_video_models", lambda _: [])
+    monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
+
+    web_config = web_config_module.load_web_config()
+
+    assert web_config.image_model_options == ("local-image",)
+    assert web_config.default_models.image == "local-image"
+    assert [entry.name for entry in web_config.image_inventory] == ["local-image", "local-image@q8"]
+
+
 def test_load_web_config_loads_declarative_ui_settings(monkeypatch, tmp_path):
     """The Web UI config loader should expose typed settings and discovered options."""
     monkeypatch.chdir(tmp_path)

@@ -62,6 +62,7 @@ zvisiongenerator/
 ├── cli.py                         Unified CLI entry point (ziv)
 ├── enhance_cli.py                 Shared --enhance / --no-enhance / --enhance-model CLI handling
 ├── preflight.py                   Preflight phase: plan seeds and prompts, rewrite them before the model loads
+├── image_model_loader.py          Image model loading through stored quants (reuse, or save on first use)
 ├── image_runner.py                Image generation run orchestration
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
@@ -116,6 +117,7 @@ zvisiongenerator/
 │   ├── prompt_enhance.py          Prompt-enhancement build, run, and post-processing (no model I/O)
 │   ├── prompts.py                 Prompt file loading
 │   ├── provenance.py              Embedded asset config (PNG/MP4) and full provenance payload builders
+│   ├── stored_quant.py            Stored-quant naming, manifests and folder handling
 │   └── video_model_detect.py      Video model type detection
 ├── web/
 │   ├── config.py                  Web UI config loading and model inventory discovery

@@ -25,6 +25,7 @@ from pathlib import Path
 
 from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.utils.paths import get_ziv_data_dir
+from zvisiongenerator.utils.stored_quant import parse_stored_quant_name
 
 
 # ── FLUX.2 Klein HuggingFace repos ──────────────────────────────────────────
@@ -474,6 +475,9 @@ def _cmd_model(args):
             sys.exit(1)
     else:
         model_name = input_path.stem.removesuffix(".safetensors")
+    if parse_stored_quant_name(model_name) is not None:
+        print(f"Error: Model name '{model_name}' is reserved for stored quants (<name>@q4 / <name>@q8). Choose another name.", file=sys.stderr)
+        sys.exit(1)
     output_dir = output_dir / model_name
 
     # Create output directory
@@ -535,6 +539,36 @@ def _cmd_model(args):
             rel = item.relative_to(output_dir)
             suffix = " → " + str(os.readlink(item)) if item.is_symlink() else ""
             print(f"  {rel}{suffix}")
+
+    if args.quantize is not None:
+        try:
+            _store_quantized_copy(output_dir, args.quantize)
+        except RuntimeError as e:
+            print(f"Error: Converted the model, but could not save the q{args.quantize} copy: {e}", file=sys.stderr)
+            sys.exit(1)
+
+
+def _store_quantized_copy(model_dir: Path, bits: int) -> Path:
+    """Quantize the converted model at *bits* and save it as its stored quant; return the stored folder.
+
+    Raises:
+        RuntimeError: When this platform's backend cannot store quantized weights, or the save fails.
+    """
+    from zvisiongenerator.backends import get_backend
+    from zvisiongenerator.image_model_loader import save_stored_quant
+    from zvisiongenerator.utils.stored_quant import stored_quant_dir
+
+    backend = get_backend()
+    backend_format = backend.stored_quant_format()
+    if backend_format is None:
+        raise RuntimeError("Saving quantized models is only supported on macOS (mflux).")
+    target = stored_quant_dir(model_dir, bits)
+    print(f"\nQuantizing to q{bits} and saving {target.name}...")
+    model, _info = backend.load_model(str(model_dir), quantize=bits)
+    if not save_stored_quant(backend, model, source=model_dir, target=target, bits=bits, backend_format=backend_format):
+        raise RuntimeError("the save failed (see the warning above)")
+    print(f"Saved quantized model: {target}")
+    return target
 
 
 def _cmd_lora(args):
@@ -605,6 +639,13 @@ def _build_model_parser(*, prog: str = "ziv-model") -> argparse.ArgumentParser:
         help="HuggingFace repo ID for the base model (default: Tongyi-MAI/Z-Image-Turbo, only used for zimage)",
     )
     model_parser.add_argument("--copy", action="store_true", help="Copy base model files instead of symlinking")
+    model_parser.add_argument(
+        "--quantize",
+        type=int,
+        choices=[4, 8],
+        default=None,
+        help="Also save a quantized copy as <name>@q4 or <name>@q8, used when that quantize level is selected (macOS)",
+    )
 
     # lora subcommand
     lora_parser = subparsers.add_parser("lora", help="Import a LoRA file")

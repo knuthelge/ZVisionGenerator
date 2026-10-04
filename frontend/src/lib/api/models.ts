@@ -11,6 +11,8 @@ export function convertCheckpoint(data: {
   model_type: string;
   base_model?: string;
   copy?: boolean;
+  /** '4' or '8' also saves a quantized copy; empty for none. */
+  quantize?: string;
 }): Promise<ModelOperationResult> {
   return api.post<ModelOperationResult>('/api/models/convert', data);
 }

@@ -1119,11 +1119,16 @@ def _convert_model_from_form(form: Any) -> dict[str, str]:
         args.extend(["--base-model", _optional_text(form, "base_model") or "Tongyi-MAI/Z-Image-Turbo"])
     if _checkbox(form, "copy"):
         args.append("--copy")
+    quantize = _optional_int(form, "quantize")
+    if quantize is not None:
+        if quantize not in (4, 8):
+            raise ValueError("Quantize must be 4 or 8.")
+        args.extend(["--quantize", str(quantize)])
 
     detail = _run_model_management_command(args)
     return {
         "tone": "success",
-        "message": "Converted the checkpoint into an installed model directory.",
+        "message": "Converted the checkpoint into an installed model directory." if quantize is None else f"Converted the checkpoint and saved a q{quantize} copy.",
         "detail": detail,
     }
 

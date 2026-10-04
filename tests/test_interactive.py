@@ -70,3 +70,16 @@ class TestSkipSignalIsattyGuard:
         with patch.object(sys, "stdin", mock_stdin):
             # Should not raise
             sig._listen_unix()
+
+
+class TestSkipSignalPending:
+    def test_pending_reads_without_consuming(self):
+        from zvisiongenerator.utils.interactive import SkipSignal
+
+        signal = SkipSignal()
+        assert signal.pending() is None
+        signal.queue_action("quit")
+        assert signal.pending() == "quit"
+        assert signal.pending() == "quit"
+        assert signal.consume() == "quit"
+        assert signal.pending() is None

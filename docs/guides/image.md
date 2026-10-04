@@ -158,6 +158,18 @@ On macOS, memory is shared between the CPU and GPU, so an unquantized model larg
 
 The [prompt enhancer](prompts.md#enhancing-prompts) is unloaded before the model loads, so **Enhance each image** does not add to the model's memory.
 
+### Stored quants (macOS)
+
+The first time a model installed in `~/.ziv/models/` runs at `-q 8` or `-q 4` (or **Quant: q8/q4** in the Web UI), its quantized weights are saved next to it as `<name>@q8` or `<name>@q4`. Later jobs load that copy instead of quantizing again, so they start faster and do not briefly need the unquantized model's memory. The first job shows *Saving a q8 copy…* and takes about 20–30 seconds longer; the copy needs roughly half (q8) or a quarter (q4) of the model's disk space.
+
+- The copy holds the base model only. LoRAs are applied on top of it when a job loads, with the same result as quantizing at load.
+- It is replaced automatically when the source model's weights change or mflux is updated.
+- It is listed on the Models page as *q8 copy of &lt;name&gt;*, where you can delete it to free disk space. It does not appear in the model picker: choose the base model and a quantize level.
+- Stopping a job while the copy is being saved discards the partial copy; the next job tries again.
+- Models used through an alias or a Hugging Face repo id are quantized at load each time.
+
+You can also save a quantized copy when converting a checkpoint (`ziv-model model … --quantize 8`, or **Quantized Copy** on the Models page).
+
 ## Post-Processing
 
 ### Contrast

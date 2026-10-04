@@ -60,6 +60,16 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current).toMatchObject({ prompt: 'First again', promptNumber: 1, promptCount: 3, batchIndex: 1, currentStep: 0, totalSteps: 0 });
   });
 
+  it('distinguishes saving a stored quant from a plain model load', () => {
+    jobStore.startJob({ job_id: 'quant', workflow: 'txt2img', prompt: 'a fox', model: 'snofs', runs: 1, created_at: '' });
+    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    source.emit('model_loading', { type: 'model_loading', mode: 'image', model: 'snofs' });
+    const loadingMessage = jobStore.current?.message;
+    source.emit('model_loading', { type: 'model_loading', mode: 'image', model: 'snofs', phase: 'saving_quant', quantize: 8 });
+    expect(jobStore.current?.message).not.toBe(loadingMessage);
+    expect(jobStore.current?.message).toContain('q8');
+  });
+
   it('shows enhancer phases and the per-image enhanced prompt, resetting it for the next prompt', () => {
     jobStore.startJob({ job_id: 'enh', workflow: 'txt2img', prompt: 'a fox', model: 'zit', runs: 1, created_at: '' });
     const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;

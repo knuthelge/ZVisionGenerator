@@ -310,6 +310,49 @@ describe('ModelsPage Browse buttons', () => {
     expect(localLora.form.checkValidity()).toBe(true);
   });
 
+  it('marks stored quants with their base model', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({
+      ...makeInventory(),
+      image_models: [
+        { name: 'snofs', family: 'flux2_klein', size_label: '9b', stored_quant: null },
+        { name: 'snofs@q8', family: 'flux2_klein', size_label: '9b', stored_quant: { base_model: 'snofs', bits: 8 } },
+      ],
+    });
+
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    const markers = target.querySelectorAll('[data-testid="stored-quant"]');
+    expect(markers).toHaveLength(1);
+    expect(markers[0].closest('tr')?.querySelector('[data-testid="model-name"]')?.textContent).toBe('snofs@q8');
+  });
+
+  it('offers a quantized copy on conversion only where stored quants are supported', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({ ...makeInventory(), stored_quants_supported: false });
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+    expect(target.querySelector('#convert-quantize')).toBeNull();
+    await unmount(app);
+
+    modelApiMocks.getModelInventory.mockResolvedValue({ ...makeInventory(), stored_quants_supported: true });
+    modelApiMocks.convertCheckpoint.mockResolvedValue({ tone: 'error', message: 'Keep values for assertion.' });
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    const { input, form } = pathAndForm(target, 'convert-input-path');
+    typePath(input, '/models/checkpoint.safetensors');
+    const modelType = target.querySelector('#convert-model-type') as HTMLSelectElement;
+    modelType.value = 'zimage';
+    modelType.dispatchEvent(new Event('change', { bubbles: true }));
+    const quantize = target.querySelector('#convert-quantize') as HTMLSelectElement;
+    quantize.value = '8';
+    quantize.dispatchEvent(new Event('change', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+
+    expect(modelApiMocks.convertCheckpoint).toHaveBeenCalledWith(expect.objectContaining({ quantize: '8' }));
+  });
+
   it('renders image model sizes from size_label', async () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
