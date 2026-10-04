@@ -497,7 +497,7 @@ describe('draft store – prompt enhancer fields', () => {
     draft.update('enhancedPrompt', 'A fox in snow.');
     draft.update('enhancedFrom', { prompt: 'a fox', mode: 'image' });
     draft.update('enhanceAuto', true);
-    draft.update('enhanceSettings', { style: 'photo', details: [], length: 'longer', motion: [] });
+    draft.update('enhanceSettings', { style: 'photo', mood: 'keep', details: [], length: 'longer', motion: [] });
     draft.loadDraft();
     expect(draft.state.enhancedPrompt).toBe('A fox in snow.');
     expect(draft.state.enhancedFrom).toEqual({ prompt: 'a fox', mode: 'image' });
@@ -526,7 +526,7 @@ describe('draft store – prompt enhancer fields', () => {
     draft.update('enhancedPrompt', 'A fox in snow.');
     draft.update('enhancedFrom', { prompt: 'a fox', mode: 'image' });
     draft.update('enhanceAuto', true);
-    draft.update('enhanceSettings', { style: 'photo', details: [], length: 'longer', motion: [] });
+    draft.update('enhanceSettings', { style: 'photo', mood: 'keep', details: [], length: 'longer', motion: [] });
     draft.resetSelections(ctx);
     expect(draft.state.enhancedPrompt).toBe('A fox in snow.');
     expect(draft.state.enhancedFrom).toEqual({ prompt: 'a fox', mode: 'image' });

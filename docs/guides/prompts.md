@@ -158,9 +158,12 @@ Both defaults are pinned to a revision. To use another chat model, set **Prompt 
 | Option | Choose | Values |
 |---|---|---|
 | Style | one | Keep, Photographic, Candid, Street photography, Analog film, Black & white, Studio portrait, Product shot, Cinematic, Illustration, Anime, Comic, 3D render, Painterly |
+| Mood | one | Keep, Serene, Joyful, Romantic, Melancholic, Mysterious, Eerie, Dramatic, Epic, Whimsical, Nostalgic |
 | Details | any | Lighting, Composition, Camera & lens, Materials & textures, Color & mood, Environment, Subject |
 | Length | one | Shorter (≈50 %), Same, Longer (≈200 %), Extra long (≈300 %) |
 | Motion (video only) | any | Action / sequence, Camera movement, Pacing |
+
+Mood sets the feeling of the scene. The enhancer conveys it through light, color, setting and expression instead of naming it. The **Color & mood** detail only adds more description of color and mood; it does not pick one.
 
 Length is a target, not a guarantee. Longer aims for at least 40 words and Extra long for at least 80, so short prompts still grow; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length. On short prompts, Same is approximate.
 
@@ -183,6 +186,7 @@ woman:
   - prompt: 30yo woman in red dress walking down a city street, evening
     enhance:
       style: cinematic
+      mood: mysterious
       details: [lighting, camera]
       length: longer
   - prompt: a quiet street at dawn
@@ -193,7 +197,7 @@ From the command line, `--enhance` enhances every prompt and overrides entries' 
 
 ```bash
 ziv-image -m klein9b --prompt "a fox in snow" --enhance
-ziv-image -m klein9b -p prompts.yaml --enhance style=photo,details=lighting+camera,length=longer
+ziv-image -m klein9b -p prompts.yaml --enhance style=photo,mood=serene,details=lighting+camera,length=longer
 ziv-video -m ltx-8 --prompt "a fox runs" --enhance style=cinematic,motion=action+camera-move
 ziv-image -m klein9b -p prompts.yaml --no-enhance
 ```

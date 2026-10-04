@@ -513,7 +513,7 @@ describe('WorkspacePage', () => {
           { key: 'length', label: 'Length', multi: false, video_only: false, options: [{ slug: 'same', label: 'Same' }, { slug: 'longer', label: 'Longer' }], default: ['same'] },
           { key: 'motion', label: 'Motion', multi: true, video_only: true, options: [{ slug: 'action', label: 'Action' }], default: ['action'] },
         ],
-        defaults: { style: 'keep', details: ['lighting'], length: 'same', motion: ['action'] },
+        defaults: { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'] },
       },
       model: 'owner/llm',
       revision: null,
@@ -615,25 +615,25 @@ describe('WorkspacePage', () => {
     draft.update('prompt', 'a fox');
     draft.update('enhancedPrompt', 'Ignored while auto-enhancing.');
     draft.update('enhanceAuto', true);
-    draft.update('enhanceSettings', { style: 'photo', details: [], length: 'longer', motion: ['action'] });
+    draft.update('enhanceSettings', { style: 'photo', mood: 'keep', details: [], length: 'longer', motion: ['action'] });
     await mountWorkspace(withEnhancer(makeContext()));
 
     expect((target.querySelector('#ws-enhanced-prompt') as HTMLTextAreaElement).disabled).toBe(true);
     const submitted = await submitForm();
     expect(submitted.get('prompt')).toBe('a fox');
     expect(submitted.get('enhance_auto')).toBe('true');
-    expect(JSON.parse(String(submitted.get('enhance_settings')))).toEqual({ style: 'photo', details: [], length: 'longer' });
+    expect(JSON.parse(String(submitted.get('enhance_settings')))).toEqual({ style: 'photo', mood: 'keep', details: [], length: 'longer' });
   });
 
   it('warns inline when auto-enhance would change nothing', async () => {
     draft.update('prompt', 'a fox');
     draft.update('enhanceAuto', true);
-    draft.update('enhanceSettings', { style: 'keep', details: [], length: 'same', motion: [] });
+    draft.update('enhanceSettings', { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [] });
     await mountWorkspace(withEnhancer(makeContext()));
     (target.querySelector('#ws-enhance-toggle') as HTMLButtonElement).click();
     await settle();
     // The enhancer popover is moved to <body>.
-    expect(document.querySelector('#ws-enhance-panel [role="alert"]')?.textContent).toContain('Pick a style, a detail, or a length.');
+    expect(document.querySelector('#ws-enhance-panel [role="alert"]')?.textContent).toContain('Pick a style, a mood, a detail, or a length.');
   });
 
   it('hides the enhancer when the backend does not advertise it', async () => {

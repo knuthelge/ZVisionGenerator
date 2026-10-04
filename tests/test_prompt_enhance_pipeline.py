@@ -260,7 +260,7 @@ class TestPromptFileEnhance:
         path = tmp_path / "p.yaml"
         path.write_text("a:\n  - prompt: x\n    enhance: {length: longer}\n  - prompt: y\n", encoding="utf-8")
         options = inspect_prompt_file(str(path), accepted_extensions=(".yaml",)).options
-        assert options[0]["enhance"] == "style=keep,details=lighting+composition,length=longer,motion=action"
+        assert options[0]["enhance"] == "style=keep,mood=keep,details=lighting+composition,length=longer,motion=action"
         assert options[1]["enhance"] is None
 
 

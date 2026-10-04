@@ -18,7 +18,7 @@ def add_enhance_arguments(parser: argparse.ArgumentParser, *, mode: str) -> None
         metavar="SPEC",
         help=(
             "Rewrite each prompt with a local LLM before the model loads. Optional SPEC sets the options, e.g. "
-            f"'style=cinematic,details=lighting+camera,length=longer{motion}'. Applies to every prompt and overrides prompt-file 'enhance:' entries."
+            f"'style=cinematic,mood=dramatic,details=lighting+camera,length=longer{motion}'. Applies to every prompt and overrides prompt-file 'enhance:' entries."
         ),
     )
     parser.add_argument("--no-enhance", action="store_true", help="Disable prompt enhancement, including prompt-file 'enhance:' entries.")
