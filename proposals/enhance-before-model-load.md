@@ -1,6 +1,16 @@
 # Enhance prompts before the model loads
 
-**Status:** In progress (2026-10-04)
+**Status:** Done (2026-10-04, [v0.13.0b8](https://github.com/knuthelge/ZVisionGenerator/releases/tag/v0.13.0b8))
+
+## Outcome
+
+Shipped in v0.13.0b8 as a general **preflight** phase (`zvisiongenerator/preflight.py`) that runs before the generation model loads in every image and video job. It plans every iteration into a frozen `JobPlan`, rewrites the prompts, unloads the enhancer and frees memory; generation then consumes the plan. Verified on the Mac with the failing prompt file: every prompt was enhanced and no memory errors were logged. Deviations from this proposal:
+
+- The work is framed as a preflight phase with its own events (`preflight_started`, `prompts_enhancing`, `prompt_enhance_failed`, `preflight_finished`), so later pre-load checks can join it.
+- Each iteration reports `enhance_status` (`off`, `enhanced`, `failed`, `skipped`), and the Web UI marks prompts that were not enhanced.
+- Identical rewrites are not deduplicated.
+- Repeat and retries keep the planned text and always draw a new random seed, even when a seed is set.
+- Controls for Web UI video jobs are deferred to [video-job-controls.md](video-job-controls.md).
 
 ## Problem
 

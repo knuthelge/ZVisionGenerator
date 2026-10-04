@@ -15,5 +15,5 @@ These files are not part of the published docs site.
 
 | Proposal | Status | Summary |
 |---|---|---|
-| [Enhance prompts before the model loads](enhance-before-model-load.md) | In progress | Fix out-of-memory failures in auto-enhanced batches by rewriting every prompt before the generation model loads |
+| [Enhance prompts before the model loads](enhance-before-model-load.md) | Done (v0.13.0b8) | Fix out-of-memory failures in auto-enhanced batches by rewriting every prompt before the generation model loads |
 | [Controls for Web UI video jobs](video-job-controls.md) | Proposed | Let Web UI video jobs be stopped (and possibly skipped or paused), including while prompts are enhanced |
