@@ -55,3 +55,16 @@ class TestJobPlan:
     @pytest.mark.parametrize("status", [EnhanceStatus.OFF, EnhanceStatus.FAILED, EnhanceStatus.SKIPPED])
     def test_requested_without_rewrite_is_valid(self, status):
         assert _iteration(enhance=EnhanceSettings(), enhance_status=status).enhance_status is status
+
+    def test_require_runnable(self):
+        JobPlan(iterations=(_iteration(),)).require_runnable(1)
+        with pytest.raises(ValueError, match="cancelled"):
+            JobPlan(iterations=(_iteration(),), cancelled=True).require_runnable(1)
+        with pytest.raises(ValueError, match="1 iterations, but the batch has 2"):
+            JobPlan(iterations=(_iteration(),)).require_runnable(2)
+
+    def test_iteration_for_checks_order(self):
+        plan = JobPlan(iterations=(_iteration(), _iteration(prompt_index=1)))
+        assert plan.iteration_for(2, run_index=0, set_name="a", prompt_index=1) is plan.iterations[1]
+        with pytest.raises(RuntimeError, match="out of order"):
+            plan.iteration_for(1, run_index=0, set_name="b", prompt_index=0)

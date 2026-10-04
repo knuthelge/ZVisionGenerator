@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from conftest import _make_plan
+
 from argparse import Namespace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -323,7 +325,7 @@ class TestRunnerUpscaleFieldPropagation:
         prompts = {"default": [("a sunset", None)]}
         config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
 
-        run_video_batch(backend, model, model_info, workflow, prompts, config, args)
+        run_video_batch(backend, model, model_info, workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
 
         # The request object passed to workflow.run() should have upscale fields
         req = workflow.run.call_args[0][0]
@@ -347,7 +349,7 @@ class TestRunnerUpscaleFieldPropagation:
         prompts = {"default": [("a sunset", None)]}
         config: dict = {}
 
-        run_video_batch(backend, model, model_info, workflow, prompts, config, args)
+        run_video_batch(backend, model, model_info, workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
 
         req = workflow.run.call_args[0][0]
         assert req.upscale is None

@@ -9,7 +9,7 @@ from __future__ import annotations
 import warnings
 from unittest.mock import MagicMock, patch
 
-from conftest import _make_args
+from conftest import _make_args, _make_plan
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.image_runner import run_batch
@@ -57,7 +57,7 @@ class TestNegativePromptSupported:
         model = MagicMock(spec=[])
 
         # Should NOT raise UnboundLocalError
-        run_batch(backend, model, prompts, config, _make_args(), model_info=model_info)
+        run_batch(backend, model, prompts, config, _make_args(), model_info=model_info, plan=_make_plan(prompts, _make_args(), config=config))
         wf.stages[0].assert_called_once()
 
     @patch("zvisiongenerator.image_runner.build_workflow")
@@ -75,7 +75,7 @@ class TestNegativePromptSupported:
         backend = MagicMock()
         model = MagicMock(spec=[])
 
-        run_batch(backend, model, prompts, config, _make_args(), model_info=model_info)
+        run_batch(backend, model, prompts, config, _make_args(), model_info=model_info, plan=_make_plan(prompts, _make_args(), config=config))
 
         # The workflow stage receives a GenerationRequest — check the negative_prompt
         stage_call = wf.stages[0].call_args
@@ -104,7 +104,7 @@ class TestNegativePromptUnsupported:
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            run_batch(backend, model, prompts, config, _make_args(), model_info=model_info)
+            run_batch(backend, model, prompts, config, _make_args(), model_info=model_info, plan=_make_plan(prompts, _make_args(), config=config))
             neg_warnings = [x for x in w if "negative prompt" in str(x.message).lower()]
             assert len(neg_warnings) >= 1
 
@@ -130,7 +130,7 @@ class TestNegativePromptUnsupported:
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            run_batch(backend, model, prompts, config, _make_args(), model_info=model_info)
+            run_batch(backend, model, prompts, config, _make_args(), model_info=model_info, plan=_make_plan(prompts, _make_args(), config=config))
 
         negative_warnings = [warning for warning in caught if "negative prompt" in str(warning.message).lower()]
         assert len(negative_warnings) == 1
@@ -159,7 +159,7 @@ class TestNegativePromptUnsupported:
 
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            run_batch(backend, model, prompts, config, _make_args(), model_info=model_info)
+            run_batch(backend, model, prompts, config, _make_args(), model_info=model_info, plan=_make_plan(prompts, _make_args(), config=config))
 
         negative_warnings = [warning for warning in caught if "negative prompt" in str(warning.message).lower()]
         assert len(negative_warnings) == 1
@@ -187,6 +187,6 @@ class TestNegativePromptUnsupported:
 
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            run_batch(backend, model, prompts, config, _make_args(), model_info=model_info)
+            run_batch(backend, model, prompts, config, _make_args(), model_info=model_info, plan=_make_plan(prompts, _make_args(), config=config))
             neg_warnings = [x for x in w if "negative prompt" in str(x.message).lower()]
             assert len(neg_warnings) == 0

@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from conftest import _make_args
+from conftest import _make_args, _make_plan
 
 
 @pytest.fixture()
@@ -80,7 +80,7 @@ class TestRunnerResolvesDenoise:
         mock_workflow.run.side_effect = capture_workflow_run
 
         with patch("zvisiongenerator.image_runner.build_workflow", return_value=mock_workflow):
-            run_batch(mock_backend, "fake_model", prompts_data, config, mock_args, model_info=model_info)
+            run_batch(mock_backend, "fake_model", prompts_data, config, mock_args, model_info=model_info, plan=_make_plan(prompts_data, mock_args, config=config))
 
         assert len(captured_requests) == 1
         assert captured_requests[0].upscale_denoise == 0.25
@@ -109,7 +109,7 @@ class TestRunnerResolvesDenoise:
         mock_workflow.run.side_effect = capture_workflow_run
 
         with patch("zvisiongenerator.image_runner.build_workflow", return_value=mock_workflow):
-            run_batch(mock_backend, "fake_model", prompts_data, config, mock_args, model_info=model_info)
+            run_batch(mock_backend, "fake_model", prompts_data, config, mock_args, model_info=model_info, plan=_make_plan(prompts_data, mock_args, config=config))
 
         assert len(captured_requests) == 1
         assert captured_requests[0].upscale_denoise == 0.45
@@ -138,7 +138,7 @@ class TestRunnerResolvesDenoise:
         mock_workflow.run.side_effect = capture_workflow_run
 
         with patch("zvisiongenerator.image_runner.build_workflow", return_value=mock_workflow):
-            run_batch(mock_backend, "fake_model", prompts_data, config, mock_args, model_info=model_info)
+            run_batch(mock_backend, "fake_model", prompts_data, config, mock_args, model_info=model_info, plan=_make_plan(prompts_data, mock_args, config=config))
 
         assert len(captured_requests) == 1
         assert captured_requests[0].upscale_denoise == 0.7

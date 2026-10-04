@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import time
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -13,6 +14,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import _make_args
+from zvisiongenerator.core.image_types import ImageGenerationRequest
+from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.web import server as web_server
@@ -278,45 +281,152 @@ class TestJobLifecycle:
         finally:
             runner.shutdown()
 
-    def test_plan_releases_idle_enhancer_when_unused(self, monkeypatch):
-        released = MagicMock()
-        monkeypatch.setattr(web_runner_module.prompt_enhancer_session, "release_resident_enhancer", released)
-        assert web_runner_module._plan_job_enhancer({}, _make_args(), None) is None
-        released.assert_called_once()
 
-    def test_plan_preflights_when_enhancing(self, monkeypatch):
-        monkeypatch.setattr(web_runner_module.prompt_enhancer_session, "ensure_available", lambda repo, rev: True)
-        config = {"prompt_enhancer": {"model": {"darwin": "a/b", "win32": "a/b", "linux": "a/b"}}}
-        plan = web_runner_module._plan_job_enhancer(config, _make_args(enhance=EnhanceSettings(), no_enhance=False), None)
-        assert plan == ("a/b", None)
+# ── Preflight in web jobs ───────────────────────────────────────────────────
 
-    def test_scope_reports_phase_and_yields_enhancer(self, monkeypatch):
-        events: list[dict] = []
+_PREFLIGHT_CONFIG = {
+    "sizes": {"2:3": {"m": {"width": 512, "height": 512}}},
+    "prompt_enhancer": {"model": {"darwin": "a/b", "win32": "a/b", "linux": "a/b"}},
+}
 
-        @contextmanager
-        def _fake_job_enhancer(repo, revision, *, on_phase=None):
-            on_phase("downloading")
-            yield "ENHANCER"
 
-        monkeypatch.setattr(web_runner_module.prompt_enhancer_session, "job_enhancer", _fake_job_enhancer)
-        with web_runner_module._job_enhancer_scope(("a/b", None), events.append, mode="video") as enhancer:
-            assert enhancer == "ENHANCER"
-        assert events == [{"type": "enhancer_loading", "mode": "video", "phase": "downloading"}]
-        with web_runner_module._job_enhancer_scope(None, events.append, mode="image") as enhancer:
-            assert enhancer is None
+class _PreflightEnhancer:
+    def __init__(self, order: list[str], *, gate: threading.Event | None = None):
+        self.order = order
+        self.gate = gate
 
-    def test_scope_reports_cpu_fallback(self, monkeypatch):
-        events: list[dict] = []
-        cpu_enhancer = SimpleNamespace(on_cuda=False)
+    def generate(self, messages, *, seed, max_tokens, temperature, cancelled=None):
+        if self.gate is not None:
+            self.gate.wait(timeout=2.0)
+        for chunk in ("A red fox ", "in deep snow, ", "golden light."):
+            if cancelled is not None and cancelled():
+                return
+            yield chunk
 
-        @contextmanager
-        def _fake_job_enhancer(repo, revision, *, on_phase=None):
-            yield cpu_enhancer
+    def close(self) -> None:
+        self.order.append("close")
 
-        monkeypatch.setattr(web_runner_module.prompt_enhancer_session, "job_enhancer", _fake_job_enhancer)
-        with web_runner_module._job_enhancer_scope(("a/b", None), events.append, mode="image"):
-            pass
-        assert events == [{"type": "enhancer_loading", "mode": "image", "phase": "cpu"}]
+
+def _wait_terminal(runner, job_id: str, *, timeout: float = 2.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        snapshot = runner.get_job_snapshot(job_id)
+        if snapshot["status"] in ("completed", "failed", "cancelled"):
+            return snapshot
+        time.sleep(0.01)
+    return runner.get_job_snapshot(job_id)
+
+
+class TestWebPreflight:
+    """Web jobs run preflight before the model loads; rewrites and the enhancer never overlap the model."""
+
+    def _env(self, monkeypatch, order: list[str], *, enhancer=None, load_error: Exception | None = None):
+        from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
+
+        def _factory(repo, revision):
+            if load_error is not None:
+                raise load_error
+            return enhancer or _PreflightEnhancer(order)
+
+        session = PromptEnhancerSession(_factory, scheduler=lambda delay, callback: None, downloaded=lambda repo, revision: True)
+        monkeypatch.setattr("zvisiongenerator.backends.prompt_enhancer_session.get_prompt_enhancer_session", lambda: session)
+        monkeypatch.setattr("zvisiongenerator.backends.prompt_enhancer_session.ensure_available", lambda repo, revision: True)
+        monkeypatch.setattr("zvisiongenerator.preflight.release_accelerator_memory", lambda: order.append("release_memory"))
+        monkeypatch.setattr(web_runner_module, "release_accelerator_memory", lambda: None)
+        backend = MagicMock()
+        backend.load_model.side_effect = lambda *a, **k: (order.append("load_model"), (MagicMock(), MagicMock(family="zimage")))[1]
+        monkeypatch.setattr(web_runner_module, "get_backend", lambda: backend)
+        monkeypatch.setattr(web_runner_module, "get_video_backend", lambda _family: backend)
+        monkeypatch.setattr(web_runner_module, "build_video_workflow", lambda _args, **_kw: MagicMock())
+
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+            order.append("run_batch")
+            iteration = plan.iterations[0]
+            progress_callback({"type": "prompt_started", "mode": "image", "prompt": iteration.prompt, "enhance_status": iteration.enhance_status.value, "run_index": 0})
+            progress_callback({"type": "generation_started", "mode": "image"})
+            progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
+
+        def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, plan, progress_callback):
+            order.append("run_video_batch")
+
+        monkeypatch.setattr(web_runner_module, "run_batch", _fake_run_batch)
+        monkeypatch.setattr(web_runner_module, "run_video_batch", _fake_run_video_batch)
+
+    def _submit_image(self, runner, **args_overrides):
+        args = _make_args(enhance=EnhanceSettings(), no_enhance=False, **args_overrides)
+        request = ImageGenerationRequest(backend=None, model=None, prompt="a red fox", model_family="zimage")
+        return runner.submit_image_request_job(request=request, prompts_data={"prompt": [("a red fox", None)]}, config=_PREFLIGHT_CONFIG, args=args, model_ref="model")
+
+    @staticmethod
+    def _types(runner, job_id) -> list[str]:
+        return [event["type"] for event in runner._get_job(job_id).history]
+
+    def test_preflight_runs_before_model_loading(self, monkeypatch):
+        order: list[str] = []
+        self._env(monkeypatch, order)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = self._submit_image(runner)
+            assert _wait_terminal(runner, job_id)["status"] == "completed"
+            types = self._types(runner, job_id)
+            assert types.index("preflight_started") < types.index("prompts_enhancing") < types.index("preflight_finished") < types.index("model_loading")
+            assert order == ["close", "release_memory", "load_model", "run_batch"]
+            history = runner._get_job(job_id).history
+            started = next(e for e in history if e["type"] == "prompt_started")
+            later = next(e for e in history if e["type"] == "generation_started")
+            assert started["enhance_status"] == "enhanced" and later["enhance_status"] == "enhanced"
+        finally:
+            runner.shutdown()
+
+    def test_quit_during_preflight_cancels_before_model_load(self, monkeypatch):
+        order: list[str] = []
+        gate = threading.Event()
+        self._env(monkeypatch, order, enhancer=_PreflightEnhancer(order, gate=gate))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = self._submit_image(runner)
+            deadline = time.monotonic() + 2.0
+            while "prompts_enhancing" not in self._types(runner, job_id) and time.monotonic() < deadline:
+                time.sleep(0.01)
+            runner.queue_job_control(job_id, "quit")
+            gate.set()
+            snapshot = _wait_terminal(runner, job_id)
+            assert snapshot["status"] == "cancelled" and snapshot["terminal_event"] == "job_cancelled"
+            assert "load_model" not in order and "model_loading" not in self._types(runner, job_id)
+            assert order == ["close", "release_memory"]
+        finally:
+            gate.set()
+            runner.shutdown()
+
+    def test_enhancer_load_failure_fails_before_model_loading(self, monkeypatch):
+        order: list[str] = []
+        self._env(monkeypatch, order, load_error=RuntimeError("Could not load prompt enhancer model a/b"))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = self._submit_image(runner)
+            snapshot = _wait_terminal(runner, job_id)
+            assert snapshot["status"] == "failed" and "Could not load prompt enhancer" in snapshot["last_event"]["message"]
+            assert "model_loading" not in self._types(runner, job_id) and "load_model" not in order
+        finally:
+            runner.shutdown()
+
+    def test_video_checks_ffmpeg_before_preflight(self, monkeypatch):
+        order: list[str] = []
+        self._env(monkeypatch, order)
+        monkeypatch.setattr(web_runner_module, "require_ffmpeg", lambda: order.append("require_ffmpeg"))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            from tests.conftest import _make_video_args
+
+            request = VideoGenerationRequest(backend=None, model=None, prompt="a fox runs", model_family="ltx")
+            args = _make_video_args(enhance=EnhanceSettings(), no_enhance=False)
+            job_id = runner.submit_video_request_job(request=request, prompts_data={"prompt": [("a fox runs", None)]}, config=_PREFLIGHT_CONFIG, args=args, model_ref="model")
+            assert _wait_terminal(runner, job_id)["status"] == "completed"
+            assert order == ["require_ffmpeg", "close", "release_memory", "load_model", "run_video_batch"]
+            types = self._types(runner, job_id)
+            assert types.index("preflight_finished") < types.index("model_loading")
+        finally:
+            runner.shutdown()
 
 
 # ── Workspace contract ──────────────────────────────────────────────────────

@@ -26,17 +26,13 @@ from typing import Any
 from PIL import Image
 
 from zvisiongenerator.backends import get_backend, get_video_backend, release_accelerator_memory
-from zvisiongenerator.backends import prompt_enhancer_session
-from zvisiongenerator.core.image_backend import ImageBackend
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
-from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.image_runner import run_batch
+from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
-from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
-from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.web.config import load_web_config
 from zvisiongenerator.web.gallery import gallery_asset_for_output_path, gallery_asset_to_json
 from zvisiongenerator.web.job_contract import (
@@ -227,65 +223,6 @@ class WebRunner:
         self._pruned: OrderedDict[str, tuple[dict[str, Any], EventPayload | None]] = OrderedDict()
         self._max_pruned_jobs = 500
         self._jobs_lock = threading.RLock()
-
-    def submit_image_job(
-        self,
-        *,
-        backend: ImageBackend,
-        model: Any,
-        prompts_data: dict[str, list[tuple[str, str | None]]],
-        config: dict[str, Any],
-        args: argparse.Namespace,
-        model_info: ImageModelInfo,
-    ) -> str:
-        """Run the image batch loop on a worker thread."""
-        control_signal = SkipSignal()
-        return self._submit_job(
-            job_type="image",
-            exclusive=True,
-            control_signal=control_signal,
-            supported_controls=IMAGE_SUPPORTED_CONTROLS,
-            context={"output_dir": getattr(args, "output", None)},
-            target_factory=lambda progress_callback: run_batch(
-                backend,
-                model,
-                prompts_data,
-                config,
-                args,
-                model_info,
-                progress_callback=progress_callback,
-                enable_interactive_controls=False,
-                skip_signal=control_signal,
-            ),
-        )
-
-    def submit_video_job(
-        self,
-        *,
-        backend: Any,
-        model: Any,
-        model_info: VideoModelInfo,
-        workflow: GenerationWorkflow,
-        prompts_data: dict[str, list[tuple[str, str | None]]],
-        config: dict[str, Any],
-        args: argparse.Namespace,
-    ) -> str:
-        """Run the video batch loop on a worker thread."""
-        return self._submit_job(
-            job_type="video",
-            exclusive=True,
-            context={"output_dir": getattr(args, "output", None)},
-            target_factory=lambda progress_callback: run_video_batch(
-                backend=backend,
-                model=model,
-                model_info=model_info,
-                workflow=workflow,
-                prompts_data=prompts_data,
-                config=config,
-                args=args,
-                progress_callback=progress_callback,
-            ),
-        )
 
     def submit_image_request_job(
         self,
@@ -588,8 +525,19 @@ class WebRunner:
         control_signal: SkipSignal,
         enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
     ) -> None:
-        """Load the image model inside the worker thread, then run the batch (holding the enhancer if needed)."""
-        enhancer_model = _plan_job_enhancer(config, args, enhance_by_set)
+        """Run preflight, then load the image model inside the worker thread and run the batch."""
+        plan = run_preflight(
+            prompts_data,
+            config,
+            args,
+            mode="image",
+            model_family=request.model_family,
+            enhance_by_set=enhance_by_set,
+            control=control_signal,
+            progress_callback=progress_callback,
+        )
+        if plan.cancelled:
+            return
         progress_callback({"type": "model_loading", "mode": "image", "model": request.model_name or model_ref})
         backend = get_backend()
         model, model_info = backend.load_model(
@@ -599,20 +547,17 @@ class WebRunner:
             lora_paths=request.lora_paths,
             lora_weights=request.lora_weights,
         )
-        with _job_enhancer_scope(enhancer_model, progress_callback, mode="image") as prompt_enhancer:
-            run_batch(
-                backend,
-                model,
-                prompts_data,
-                config,
-                args,
-                model_info=model_info,
-                progress_callback=progress_callback,
-                enable_interactive_controls=False,
-                skip_signal=control_signal,
-                prompt_enhancer=prompt_enhancer,
-                enhance_by_set=enhance_by_set,
-            )
+        run_batch(
+            backend,
+            model,
+            prompts_data,
+            config,
+            args,
+            model_info=model_info,
+            plan=plan,
+            progress_callback=progress_callback,
+            skip_signal=control_signal,
+        )
 
     def _run_video_request(
         self,
@@ -625,12 +570,14 @@ class WebRunner:
         progress_callback: Callable[[EventPayload], None],
         enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
     ) -> None:
-        """Load the video model inside the worker thread, then run the batch (holding the enhancer if needed)."""
-        enhancer_model = _plan_job_enhancer(config, args, enhance_by_set)
-        progress_callback({"type": "model_loading", "mode": "video", "model": request.model_name or model_ref})
+        """Run preflight, then load the video model inside the worker thread and run the batch."""
         require_ffmpeg()
+        plan = run_preflight(prompts_data, config, args, mode="video", model_family=request.model_family, enhance_by_set=enhance_by_set, progress_callback=progress_callback)
+        if plan.cancelled:
+            return
+        progress_callback({"type": "model_loading", "mode": "video", "model": request.model_name or model_ref})
         backend = get_video_backend(request.model_family)
-        workflow = build_video_workflow(args, enhance=enhancer_model is not None)
+        workflow = build_video_workflow(args, enhance=plan.has_rewrites)
         lora_paths = request.lora_paths or []
         lora_weights = request.lora_weights or []
         loras = list(zip(lora_paths, lora_weights, strict=False)) or None
@@ -644,19 +591,17 @@ class WebRunner:
             loras=loras,
             **load_kwargs,
         )
-        with _job_enhancer_scope(enhancer_model, progress_callback, mode="video") as prompt_enhancer:
-            run_video_batch(
-                backend=backend,
-                model=model,
-                model_info=model_info,
-                workflow=workflow,
-                prompts_data=prompts_data,
-                config=config,
-                args=args,
-                progress_callback=progress_callback,
-                prompt_enhancer=prompt_enhancer,
-                enhance_by_set=enhance_by_set,
-            )
+        run_video_batch(
+            backend=backend,
+            model=model,
+            model_info=model_info,
+            workflow=workflow,
+            prompts_data=prompts_data,
+            config=config,
+            args=args,
+            plan=plan,
+            progress_callback=progress_callback,
+        )
 
     def _make_progress_callback(self, job_id: str) -> Callable[[EventPayload], None]:
         """Bind a job id to a runner progress callback."""
@@ -679,7 +624,7 @@ class WebRunner:
             elif event["type"] in _PREVIEW_RESET_EVENT_TYPES:
                 record.preview_jpeg = None
             if event["type"] == "prompt_started":
-                record.prompt_progress = {key: event[key] for key in ("prompt", "run_index", "total_runs", "ran_iterations", "total_iterations") if key in event}
+                record.prompt_progress = {key: event[key] for key in ("prompt", "run_index", "total_runs", "ran_iterations", "total_iterations", "enhance_status") if key in event}
             elif event["type"] == "prompt_enhanced" and "enhanced_prompt" in event:
                 # Kept with the prompt progress so later events and reconnecting clients still see it.
                 record.prompt_progress = {**record.prompt_progress, "enhanced_prompt": event["enhanced_prompt"]}
@@ -795,34 +740,6 @@ class WebRunner:
         if event.get("type") == "batch_failed":
             return {**event, "type": FAILED_TERMINAL_EVENT}
         return event
-
-
-def _plan_job_enhancer(config: dict[str, Any], args: argparse.Namespace, enhance_by_set: dict[str, list[EnhanceSettings | None]] | None) -> tuple[str, str | None] | None:
-    """Preflight a job's enhancer before its model loads; free an idle resident enhancer when unused."""
-    plan = prompt_enhancer_session.plan_job_enhancer(
-        config,
-        platform_key=sys.platform,
-        disabled=bool(getattr(args, "no_enhance", False)),
-        override=getattr(args, "enhance", None),
-        enhance_by_set=enhance_by_set,
-        cli_model=getattr(args, "enhance_model", None),
-    )
-    if plan is None:
-        prompt_enhancer_session.release_resident_enhancer()
-    return plan
-
-
-@contextmanager
-def _job_enhancer_scope(plan: tuple[str, str | None] | None, progress_callback: Callable[[EventPayload], None], *, mode: str):
-    """Yield the job's loaded enhancer (or ``None``), reporting download/load phases as ``enhancer_loading``."""
-    if plan is None:
-        yield None
-        return
-    repo, revision = plan
-    with prompt_enhancer_session.job_enhancer(repo, revision, on_phase=lambda phase: progress_callback({"type": "enhancer_loading", "mode": mode, "phase": phase})) as enhancer:
-        if prompt_enhancer_session.runs_on_cpu(enhancer):
-            progress_callback({"type": "enhancer_loading", "mode": mode, "phase": "cpu"})
-        yield enhancer
 
 
 def _release_accelerator_memory() -> None:

@@ -18,18 +18,18 @@ from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorki
 from zvisiongenerator.utils.ffmpeg import strip_audio
 from zvisiongenerator.utils.provenance import build_video_config_payload, embed_mp4_config
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
-from zvisiongenerator.workflows.enhance_stage import apply_prompt_enhancement
+from zvisiongenerator.workflows.enhance_stage import apply_planned_enhancement
 
 
 def resolve_prompt_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:
-    """Replace {a|b|c} random choice blocks in video prompt, supporting nesting."""
-    artifacts.resolved_prompt = expand_random_choices(request.prompt)
+    """Replace {a|b|c} random choice blocks in video prompt, supporting nesting; a planned ``request.resolved_prompt`` wins."""
+    artifacts.resolved_prompt = request.resolved_prompt if request.resolved_prompt is not None else expand_random_choices(request.prompt)
     return StageOutcome.success
 
 
 def enhance_prompt_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:
-    """Rewrite the resolved video prompt with the local prompt enhancer (auto mode); never fails the generation."""
-    apply_prompt_enhancement(request, artifacts, mode="video")
+    """Apply the video prompt rewrite planned during preflight; never fails the generation."""
+    apply_planned_enhancement(request, artifacts)
     return StageOutcome.success
 
 

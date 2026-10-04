@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from conftest import _make_plan
+
 from unittest.mock import MagicMock
 
 from tests.conftest import _make_mock_video_backend, _make_video_args
@@ -26,7 +28,7 @@ class TestRunVideoBatch:
         prompts = {"default": [("a sunset", None)]}
         config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
 
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args)
+        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
         assert workflow.run.call_count == 1
 
     def test_multiple_prompts_multiple_runs(self):
@@ -38,7 +40,7 @@ class TestRunVideoBatch:
         prompts = {"set1": [("prompt A", None), ("prompt B", None)]}
         config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
 
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args)
+        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
         # 2 runs * 2 prompts = 4 iterations
         assert workflow.run.call_count == 4
 
@@ -51,7 +53,7 @@ class TestRunVideoBatch:
         prompts = {"set_a": [("p1", None)], "set_b": [("p2", None), ("p3", None)]}
         config: dict = {}
 
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args)
+        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config))
         assert workflow.run.call_count == 3
 
     def test_zero_prompts_early_return(self):
@@ -63,7 +65,7 @@ class TestRunVideoBatch:
         prompts: dict = {}
         config: dict = {}
 
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, progress_callback=events.append)
+        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, progress_callback=events.append, plan=_make_plan(prompts, args, config=config))
         workflow.run.assert_not_called()
 
         assert events == [
@@ -85,7 +87,7 @@ class TestRunVideoBatch:
         prompts = {"default": [("fail prompt", None)]}
         config: dict = {}
 
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, progress_callback=events.append)
+        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, progress_callback=events.append, plan=_make_plan(prompts, args, config=config))
 
         request = workflow.run.call_args.args[0]
 
@@ -140,7 +142,7 @@ class TestRunVideoBatch:
         prompts = {"default": [("a sunset", None)]}
         config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
 
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, progress_callback=events.append)
+        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, progress_callback=events.append, plan=_make_plan(prompts, args, config=config))
 
         step_events = [event for event in events if event["type"] == "step_progress"]
 
@@ -182,7 +184,7 @@ class TestRunVideoBatch:
         prompts = {"default": [("a sunset", None)]}
         config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
 
-        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, progress_callback=events.append)
+        run_video_batch(backend, model, _ltx_model_info(), workflow, prompts, config, args, progress_callback=events.append, plan=_make_plan(prompts, args, config=config))
 
         finished_events = [event for event in events if event["type"] == "generation_finished"]
 
