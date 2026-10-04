@@ -15,7 +15,7 @@ import threading
 import time
 import uuid
 import warnings
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from collections.abc import AsyncIterator, Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
@@ -41,6 +41,9 @@ from zvisiongenerator.web.job_contract import (
     CANCELLED_TERMINAL_EVENT,
     FAILED_TERMINAL_EVENT,
     IMAGE_SUPPORTED_CONTROLS,
+    QUEUED_STATUS,
+    REMOVED_REASON,
+    STARTED_EVENT,
     SUCCESS_TERMINAL_EVENT,
     TERMINAL_EVENT_TYPES,
     TERMINAL_STATUSES,
@@ -59,7 +62,7 @@ _PREVIEW_RESET_EVENT_TYPES = frozenset({"prompt_started", "workflow_stage_starte
 
 
 class JobConflictError(RuntimeError):
-    """Raised when a new exclusive generation job is submitted while one is active."""
+    """Raised when a job or exclusive action is refused because other work holds the model memory."""
 
 
 class UnsupportedJobControlError(RuntimeError):
@@ -177,6 +180,7 @@ class _JobRecord:
     job_type: str
     status: str = "queued"
     created_at: float = field(default_factory=time.time)
+    started_at: float | None = None
     completed_at: float | None = None
     future: Future[None] | None = None
     history: list[EventPayload] = field(default_factory=list)
@@ -199,7 +203,11 @@ class _JobRecord:
 
 
 class WebRunner:
-    """Execute synchronous runners in a thread pool and surface SSE progress."""
+    """Execute synchronous runners on one worker thread and surface SSE progress.
+
+    Generation (exclusive) jobs wait in a FIFO queue. The worker claims each one when it starts, so a job removed
+    from the queue never runs. The *active* job is the claimed one, or, between jobs, the head of the queue.
+    """
 
     _TERMINAL_EVENT_TYPES = TERMINAL_EVENT_TYPES
     _TERMINAL_STATUSES = TERMINAL_STATUSES
@@ -207,7 +215,7 @@ class WebRunner:
     def __init__(
         self,
         *,
-        max_workers: int = 2,
+        max_workers: int = 1,
         heartbeat_seconds: float = 10.0,
         max_history_events: int = 200,
         terminal_retention_seconds: float = 300.0,
@@ -225,6 +233,9 @@ class WebRunner:
         self._pruned: OrderedDict[str, tuple[dict[str, Any], EventPayload | None]] = OrderedDict()
         self._max_pruned_jobs = 500
         self._jobs_lock = threading.RLock()
+        # Waiting generation job ids, oldest first, and the job the worker is running; both guarded by _jobs_lock.
+        self._queue: deque[str] = deque()
+        self._claimed_job_id: str | None = None
 
     def submit_image_request_job(
         self,
@@ -237,15 +248,16 @@ class WebRunner:
         quantize: int | None = None,
         enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
         admission_check: Callable[[], None] | None = None,
+        context: dict[str, Any] | None = None,
     ) -> str:
-        """Load the image model and run the batch loop on a worker thread."""
+        """Queue the image job; the worker loads the model and runs the batch loop."""
         control_signal = SkipSignal()
         return self._submit_job(
             job_type="image",
             exclusive=True,
             control_signal=control_signal,
             supported_controls=IMAGE_SUPPORTED_CONTROLS,
-            context={"output_dir": getattr(args, "output", None)},
+            context={"output_dir": getattr(args, "output", None), **(context or {})},
             admission_check=admission_check,
             target_factory=lambda progress_callback: self._run_image_request(
                 request=request,
@@ -270,13 +282,14 @@ class WebRunner:
         model_ref: str,
         enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
         admission_check: Callable[[], None] | None = None,
+        context: dict[str, Any] | None = None,
     ) -> str:
-        """Load the video model and run the batch loop on a worker thread."""
+        """Queue the video job; the worker loads the model and runs the batch loop."""
         return self._submit_job(
             job_type="video",
             exclusive=True,
             supported_controls=VIDEO_SUPPORTED_CONTROLS,
-            context={"output_dir": getattr(args, "output", None)},
+            context={"output_dir": getattr(args, "output", None), **(context or {})},
             admission_check=admission_check,
             target_factory=lambda progress_callback: self._run_video_request(
                 request=request,
@@ -325,16 +338,66 @@ class WebRunner:
 
     def get_job_snapshot(self, job_id: str) -> dict[str, Any]:
         """Return serializable state for a tracked job (or the final state of a pruned one)."""
-        try:
-            record = self._get_job(job_id)
-        except KeyError:
-            with self._jobs_lock:
+        with self._jobs_lock:
+            self._prune_terminal_jobs_locked()
+            record = self._jobs.get(job_id)
+            if record is None:
                 if job_id not in self._pruned:
-                    raise
+                    raise KeyError(job_id)
                 return copy.deepcopy(self._pruned[job_id][0])
-        return self._snapshot_record(record)
+            return self._snapshot_record(record, queue_position=self._queue_positions_locked().get(job_id))
 
-    def _snapshot_record(self, record: _JobRecord) -> dict[str, Any]:
+    def list_jobs(self) -> dict[str, Any]:
+        """Return the active generation job and the queued ones, oldest first; a job is never in both."""
+        with self._jobs_lock:
+            self._prune_terminal_jobs_locked()
+            active_id = self._active_job_id_locked()
+            positions = self._queue_positions_locked()
+            active = self._snapshot_record(self._jobs[active_id]) if active_id is not None else None
+            queued = [self._snapshot_record(self._jobs[job_id], queue_position=position) for job_id, position in positions.items()]
+        return {"active_job": active, "queued_jobs": queued}
+
+    def cancel_queued(self, job_id: str) -> bool:
+        """Remove a job that has not started from the queue; return whether it was queued."""
+        with self._jobs_lock:
+            if job_id not in self._queue:
+                return False
+            self._queue.remove(job_id)
+            future = self._jobs[job_id].future
+        self._finish_removed([(job_id, future)])
+        return True
+
+    def clear_queue(self) -> list[str]:
+        """Remove every queued job, never the active one; return the removed job ids."""
+        with self._jobs_lock:
+            removed = list(self._queue_positions_locked())
+            for job_id in removed:
+                self._queue.remove(job_id)
+            futures = [(job_id, self._jobs[job_id].future) for job_id in removed]
+        self._finish_removed(futures)
+        return removed
+
+    def _finish_removed(self, jobs: list[tuple[str, Future[None] | None]]) -> None:
+        """Publish the terminal event of jobs taken off the queue; the claim step keeps them from running."""
+        for job_id, future in jobs:
+            if future is not None:
+                future.cancel()
+            self._publish_event(job_id, {"type": CANCELLED_TERMINAL_EVENT, "reason": REMOVED_REASON})
+
+    def _active_job_id_locked(self) -> str | None:
+        """Return the claimed job, else the job waiting at the head of the queue."""
+        if self._claimed_job_id is not None:
+            return self._claimed_job_id
+        return self._queue[0] if self._queue else None
+
+    def _queue_positions_locked(self) -> dict[str, int]:
+        """Map each queued job id to its 1-based position, skipping the head while it is the active job."""
+        waiting = list(self._queue)
+        if self._claimed_job_id is None:
+            waiting = waiting[1:]
+        return {job_id: index for index, job_id in enumerate(waiting, start=1)}
+
+    def _snapshot_record(self, record: _JobRecord, *, queue_position: int | None = None) -> dict[str, Any]:
         with record.lock:
             last_event = dict(record.last_event) if record.last_event is not None else None
             workflow = str(record.context.get("workflow") or record.job_type)
@@ -352,13 +415,9 @@ class WebRunner:
                 result_path=record.result_path,
                 outputs=[dict(output) for output in record.outputs],
                 preview_version=record.preview_version if record.preview_jpeg is not None else 0,
+                started_at=record.started_at,
+                queue_position=queue_position,
             )
-
-    def update_job_context(self, job_id: str, context: dict[str, Any]) -> None:
-        """Attach public context needed for reconnect snapshots."""
-        record = self._get_job(job_id)
-        with record.lock:
-            record.context = {**record.context, **context}
 
     def get_job_result_path(self, job_id: str) -> str | None:
         """Return the latest successful output path recorded for a job."""
@@ -379,22 +438,26 @@ class WebRunner:
                 raise JobConflictError(busy_message)
             admit()
 
-    def get_active_exclusive_job_snapshot(self) -> dict[str, Any] | None:
-        """Return the currently running exclusive job, if one exists."""
+    def has_active_jobs(self) -> bool:
+        """Return whether any generation job is running or queued."""
         with self._jobs_lock:
-            for record in self._jobs.values():
-                if not record.exclusive or record.status in self._TERMINAL_STATUSES:
-                    continue
-                return self._snapshot_record(record)
-        return None
+            return self._find_active_exclusive_job_id() is not None
+
+    def get_active_exclusive_job_snapshot(self) -> dict[str, Any] | None:
+        """Return the active generation job (running, paused, or next in line), if one exists."""
+        return self.list_jobs()["active_job"]
 
     def queue_job_control(self, job_id: str, action: str) -> dict[str, Any]:
-        """Queue a supported control action for an active image job."""
-        record = self._get_job(job_id)
+        """Queue a supported control action for an active image job; quitting a queued job removes it."""
         normalized = action.strip().lower()
+        if normalized == "quit" and self.cancel_queued(job_id):
+            return {"job_id": job_id, "action": normalized, "status": "cancelled"}
+        record = self._get_job(job_id)
         with record.lock:
             if record.status in self._TERMINAL_STATUSES:
                 raise UnsupportedJobControlError("This job is no longer running.")
+            if record.status == QUEUED_STATUS:
+                raise UnsupportedJobControlError("This job has not started yet.")
             if normalized == "resume":
                 if normalized not in record.supported_controls or not record.paused or record.control_signal is None:
                     raise UnsupportedJobControlError("This job is not paused.")
@@ -453,8 +516,12 @@ class WebRunner:
                     record.subscribers.discard(subscriber)
 
     def shutdown(self) -> None:
-        """Stop accepting work and tear down worker threads."""
-        self._executor.shutdown(wait=False, cancel_futures=False)
+        """Stop accepting work, cancel queued jobs, and tear down worker threads; a running job is left alone."""
+        with self._jobs_lock:
+            removed = [(job_id, self._jobs[job_id].future) for job_id in self._queue]
+            self._queue.clear()
+        self._finish_removed(removed)
+        self._executor.shutdown(wait=False, cancel_futures=True)
 
     def _submit_job(
         self,
@@ -467,7 +534,11 @@ class WebRunner:
         context: dict[str, Any] | None = None,
         admission_check: Callable[[], None] | None = None,
     ) -> str:
-        """Register and dispatch a background task; *admission_check* may raise JobConflictError under the job lock."""
+        """Register and dispatch a background task; *admission_check* may raise JobConflictError under the job lock.
+
+        Exclusive jobs join the queue. Registering, queueing and dispatching happen under one lock, so the worker
+        receives jobs in queue order even when several requests submit at once.
+        """
         record = _JobRecord(
             job_id=uuid.uuid4().hex,
             job_type=job_type,
@@ -476,22 +547,22 @@ class WebRunner:
             supported_controls=supported_controls,
             context=context or {},
         )
+        progress_callback = self._make_progress_callback(record.job_id)
         with self._jobs_lock:
             self._prune_terminal_jobs_locked()
-            if exclusive:
-                active_job_id = self._find_active_exclusive_job_id()
-                if active_job_id is not None:
-                    raise JobConflictError(f"Job '{active_job_id}' is already running. Wait for it to finish before starting another.")
             if admission_check is not None:
                 admission_check()
             self._jobs[record.job_id] = record
-        self._publish_event(record.job_id, {"type": "job_submitted", "mode": job_type})
-        progress_callback = self._make_progress_callback(record.job_id)
-        record.future = self._executor.submit(self._run_target, record.job_id, lambda: target_factory(progress_callback), release_memory=exclusive)
+            self._publish_event(record.job_id, {"type": "job_submitted", "mode": job_type})
+            if exclusive:
+                self._queue.append(record.job_id)
+            record.future = self._executor.submit(self._run_target, record.job_id, lambda: target_factory(progress_callback), release_memory=exclusive)
         return record.job_id
 
     def _run_target(self, job_id: str, target: Callable[[], None], *, release_memory: bool = True) -> None:
-        """Wrap a synchronous worker target, free accelerator memory, and publish terminal events."""
+        """Claim the job, run its synchronous target, free accelerator memory, and publish terminal events."""
+        if not self._claim(job_id):
+            return
         failure_message: str | None = None
         try:
             with worker_runtime_context():
@@ -513,6 +584,23 @@ class WebRunner:
             status = record.status
         if status not in self._TERMINAL_STATUSES:
             self._publish_event(job_id, {"type": SUCCESS_TERMINAL_EVENT, "mode": record.job_type})
+
+    def _claim(self, job_id: str) -> bool:
+        """Take a generation job off the queue as it starts; return False when it was removed meanwhile."""
+        with self._jobs_lock:
+            record = self._jobs.get(job_id)
+            if record is None:
+                return False
+            if not record.exclusive:
+                return True
+            if job_id not in self._queue:
+                return False
+            self._queue.remove(job_id)
+            self._claimed_job_id = job_id
+            with record.lock:
+                record.started_at = time.time()
+        self._publish_event(job_id, {"type": STARTED_EVENT})
+        return True
 
     def _run_image_request(
         self,
@@ -642,7 +730,7 @@ class WebRunner:
                 "job_id": job_id,
                 "job_type": record.job_type,
                 "timestamp": timestamp,
-                "elapsed_secs": event.get("elapsed_secs", max(0.0, timestamp - record.created_at)),
+                "elapsed_secs": event.get("elapsed_secs", max(0.0, timestamp - (record.started_at or record.created_at))),
                 **event,
             }
             if enriched_event.get("eta_secs") is not None:
@@ -680,6 +768,8 @@ class WebRunner:
 
         if enriched_event["type"] in self._TERMINAL_EVENT_TYPES:
             with self._jobs_lock:
+                if self._claimed_job_id == job_id:
+                    self._claimed_job_id = None
                 self._prune_terminal_jobs_locked(exclude_job_id=job_id)
 
     def _get_job(self, job_id: str) -> _JobRecord:
@@ -730,7 +820,9 @@ class WebRunner:
         if event_type == SUCCESS_TERMINAL_EVENT:
             return "completed"
         if event_type in {"job_submitted"}:
-            return "queued"
+            return QUEUED_STATUS
+        if event_type == STARTED_EVENT:
+            return "running"
         if event_type == "job_paused":
             return "paused"
         if event_type == "job_resumed":
