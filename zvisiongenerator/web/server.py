@@ -1105,7 +1105,12 @@ def _persist_web_config(form: Any) -> None:
 
 
 def _convert_model_from_form(form: Any) -> dict[str, str]:
-    """Validate and run checkpoint conversion from the Web models page."""
+    """Validate and run checkpoint conversion from the Web models page.
+
+    Raises:
+        HTTPException: 409 when a quantized copy is requested while a generation job runs (both would hold a
+            full model in memory).
+    """
     input_path = _required_path(form, "input_path")
     model_type = _optional_text(form, "model_type") or "zimage"
     if model_type not in {"zimage", "flux2-klein-4b", "flux2-klein-9b"}:
@@ -1123,6 +1128,8 @@ def _convert_model_from_form(form: Any) -> dict[str, str]:
     if quantize is not None:
         if quantize not in (4, 8):
             raise ValueError("Quantize must be 4 or 8.")
+        if web_runner.get_active_exclusive_job_snapshot() is not None:
+            raise HTTPException(status_code=409, detail="Wait for the running job to finish before saving a quantized copy; both would need a full model in memory.")
         args.extend(["--quantize", str(quantize)])
 
     detail = _run_model_management_command(args)
