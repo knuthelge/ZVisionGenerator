@@ -1326,6 +1326,11 @@ are sharing a meal at the diner. Style: Camera: iPhone. Color: Warm
 <td>Keep, Photographic, Candid, Street photography, Analog film, Black &amp; white, Studio portrait, Product shot, Cinematic, Illustration, Anime, Comic, 3D render, Painterly</td>
 </tr>
 <tr>
+<td>Mood</td>
+<td>one</td>
+<td>Keep, Serene, Joyful, Romantic, Melancholic, Mysterious, Eerie, Dramatic, Epic, Whimsical, Nostalgic</td>
+</tr>
+<tr>
 <td>Details</td>
 <td>any</td>
 <td>Lighting, Composition, Camera &amp; lens, Materials &amp; textures, Color &amp; mood, Environment, Subject</td>
@@ -1342,6 +1347,7 @@ are sharing a meal at the diner. Style: Camera: iPhone. Color: Warm
 </tr>
 </tbody>
 </table>
+<p>Mood sets the feeling of the scene. The enhancer conveys it through light, color, setting and expression instead of naming it. The <strong>Color &amp; mood</strong> detail only adds more description of color and mood; it does not pick one.</p>
 <p>Length is a target, not a guarantee. Longer aims for at least 40 words and Extra long for at least 80, so short prompts still grow; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length. On short prompts, Same is approximate.</p>
 <p>The enhancer keeps your subject and every detail you describe. It adds only things that can be seen: no sounds, smells, or story. It never adds new people, animals, or major objects.</p>
 <h3 id="in-the-web-ui">In the Web UI</h3>
@@ -1358,6 +1364,7 @@ are sharing a meal at the diner. Style: Camera: iPhone. Color: Warm
   - prompt: 30yo woman in red dress walking down a city street, evening
     enhance:
       style: cinematic
+      mood: mysterious
       details: [lighting, camera]
       length: longer
   - prompt: a quiet street at dawn
@@ -1365,7 +1372,7 @@ are sharing a meal at the diner. Style: Camera: iPhone. Color: Warm
 </code></pre>
 <p>From the command line, <code>--enhance</code> enhances every prompt and overrides entries' <code>enhance:</code> settings; <code>--no-enhance</code> turns all enhancement off:</p>
 <pre><code class="language-bash">ziv-image -m klein9b --prompt &quot;a fox in snow&quot; --enhance
-ziv-image -m klein9b -p prompts.yaml --enhance style=photo,details=lighting+camera,length=longer
+ziv-image -m klein9b -p prompts.yaml --enhance style=photo,mood=serene,details=lighting+camera,length=longer
 ziv-video -m ltx-8 --prompt &quot;a fox runs&quot; --enhance style=cinematic,motion=action+camera-move
 ziv-image -m klein9b -p prompts.yaml --no-enhance
 </code></pre>
