@@ -90,7 +90,11 @@ export const APP_SHORTCUTS: readonly ShortcutGroup[] = [
       { keys: ['⌘/Ctrl+E'], label: 'Enhance the prompt' },
       { keys: ['Alt+1'], label: 'Focus the prompt' },
       { keys: ['Alt+2'], label: 'Focus the settings' },
+      { keys: ['Alt+3'], label: 'Focus the history' },
       { keys: ['Esc'], label: 'Stop the running job' },
+      { keys: ['P'], label: 'Pause or resume the running job' },
+      { keys: ['N'], label: 'Skip to the next image' },
+      { keys: ['R'], label: 'Repeat the current image' },
     ],
   },
   {

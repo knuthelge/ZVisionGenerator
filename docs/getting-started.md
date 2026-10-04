@@ -135,7 +135,11 @@ Workspace:
 | `⌘⇧↵` | Generate with a new seed (re-rolls a locked seed) |
 | `⌘E` | Enhance the prompt |
 | `Alt+1` / `Alt+2` | Focus the prompt / the settings |
+| `Alt+3` | Focus the newest history tile (expands the strip; `←` / `→` move between tiles) |
 | `Esc` | Stop the running job |
+| `P` | Pause or resume the running job |
+| `N` | Skip to the next image |
+| `R` | Repeat the current image |
 
 Gallery:
 

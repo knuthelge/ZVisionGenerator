@@ -364,6 +364,55 @@ describe('JobCard', () => {
     expect(grid?.querySelector(`img[alt="${outputs.at(-1)!.filename}"]`)).not.toBeNull();
   });
 
+  describe('job control keys', () => {
+    function press(key: string, from: EventTarget = document): KeyboardEvent {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+      from.dispatchEvent(event);
+      return event;
+    }
+
+    function mountCard(job: Partial<ActiveJobState>) {
+      const handlers = { onpause: vi.fn(), onresume: vi.fn(), onnext: vi.fn(), onrepeat: vi.fn() };
+      component = mount(JobCard, {
+        target,
+        props: { job: makeJob({ supported_controls: ['pause', 'resume', 'next', 'repeat'], ...job }), ...handlers },
+      });
+      flushSync();
+      return handlers;
+    }
+
+    afterEach(() => { document.querySelectorAll('textarea').forEach((el) => el.remove()); });
+
+    it('sends next with N, repeat with R and pause with P', async () => {
+      const handlers = mountCard({});
+      expect(press('n').defaultPrevented).toBe(true);
+      await Promise.resolve();
+      expect(handlers.onnext).toHaveBeenCalledWith('job-card');
+      press('R');
+      await Promise.resolve();
+      expect(handlers.onrepeat).toHaveBeenCalledWith('job-card');
+      press('p');
+      expect(handlers.onpause).toHaveBeenCalledWith('job-card');
+    });
+
+    it('resumes a paused job with P', () => {
+      const handlers = mountCard({ status: 'paused', paused: true });
+      press('p');
+      expect(handlers.onresume).toHaveBeenCalledWith('job-card');
+      expect(handlers.onpause).not.toHaveBeenCalled();
+    });
+
+    it('ignores keys for controls the job does not support, and keys typed into a field', () => {
+      const handlers = mountCard({ supported_controls: ['pause'] });
+      expect(press('n').defaultPrevented).toBe(false);
+      const field = document.createElement('textarea');
+      document.body.appendChild(field);
+      press('p', field);
+      expect(handlers.onnext).not.toHaveBeenCalled();
+      expect(handlers.onpause).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Escape', () => {
     function escape(from: EventTarget = document): KeyboardEvent {
       const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });

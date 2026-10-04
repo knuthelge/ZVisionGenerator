@@ -2312,6 +2312,28 @@ describe('WorkspacePage asset actions and settings', () => {
     expect(draft.state.historyCollapsed).toBe(true);
   });
 
+  it('focuses the newest history tile with Alt+3, expanding a collapsed strip', async () => {
+    const newest = makeAsset({ id: 'out/newest.png', url: '/media/out/newest.png', filename: 'newest.png' });
+    const older = makeAsset({ id: 'out/older.png', url: '/media/out/older.png', filename: 'older.png' });
+    draft.update('historyCollapsed', true);
+    await mountWithHistory([newest, older]);
+
+    const event = new KeyboardEvent('keydown', { key: '3', code: 'Digit3', altKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(event);
+    await settle();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(draft.state.historyCollapsed).toBe(false);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe(`View ${newest.filename}`);
+  });
+
+  it('focuses the history toggle with Alt+3 when there is no history', async () => {
+    await mountWithHistory([]);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: '3', code: 'Digit3', altKey: true, bubbles: true, cancelable: true }));
+    await settle();
+    expect(document.activeElement?.id).toBe('ws-history-toggle');
+  });
+
   it('reuses the settings of an asset in place without leaving the workspace', async () => {
     const asset = makeAsset({
       id: 'out/first.png',

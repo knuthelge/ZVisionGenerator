@@ -56,14 +56,26 @@
   const canRepeat = $derived(job.status === 'running' && supportedControls.has('repeat'));
   const hasInlineControls = $derived(canPause || canResume || canNext || canRepeat);
 
-  // Escape stops a cancellable job, unless a field, popover or dialog has the key.
+  // The control each key sends right now, or null when the job does not offer it.
+  function controlForKey(key: string): [Control, Props['oncancel']] | null {
+    switch (key.toLowerCase()) {
+      case 'escape': return canCancel ? ['Cancel', oncancel] : null;
+      case 'p': return canResume ? ['Resume', onresume] : canPause ? ['Pause', onpause] : null;
+      case 'n': return canNext ? ['Next', onnext] : null;
+      case 'r': return canRepeat ? ['Repeat', onrepeat] : null;
+      default: return null;
+    }
+  }
+
+  // Esc stops, P pauses or resumes, N skips to the next and R repeats, unless a field, popover or dialog has the key.
   $effect(() => {
-    if (!canCancel || !oncancel) return;
-    const callback = oncancel;
+    if (!active) return;
     function handleKeydown(event: KeyboardEvent): void {
-      if (event.key !== 'Escape' || !acceptsPageShortcut(event)) return;
+      if (!acceptsPageShortcut(event)) return;
+      const control = controlForKey(event.key);
+      if (!control?.[1]) return;
       event.preventDefault();
-      void sendControl('Cancel', callback);
+      void sendControl(...control);
     }
     document.addEventListener('keydown', handleKeydown);
     return () => document.removeEventListener('keydown', handleKeydown);
@@ -230,6 +242,7 @@
         <button
           type="button"
           onclick={() => sendControl('Resume', onresume)}
+          title="Resume (P)"
           disabled={pending || !onresume}
           class="rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-teal-500 hover:text-zinc-100 focus-visible:focus-ring"
         >
@@ -240,6 +253,7 @@
         <button
           type="button"
           onclick={() => sendControl('Pause', onpause)}
+          title="Pause (P)"
           disabled={pending || !onpause}
           class="rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-teal-500 hover:text-zinc-100 focus-visible:focus-ring"
         >
@@ -250,6 +264,7 @@
         <button
           type="button"
           onclick={() => sendControl('Next', onnext)}
+          title="Next (N)"
           disabled={pending || !onnext}
           class="rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-teal-500 hover:text-zinc-100 focus-visible:focus-ring"
         >
@@ -260,6 +275,7 @@
         <button
           type="button"
           onclick={() => sendControl('Repeat', onrepeat)}
+          title="Repeat (R)"
           disabled={pending || !onrepeat}
           class="rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-teal-500 hover:text-zinc-100 focus-visible:focus-ring"
         >
