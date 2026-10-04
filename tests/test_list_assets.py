@@ -134,6 +134,15 @@ class TestListModels:
 
         assert result == []
 
+    @patch("zvisiongenerator.converters.list_assets.detect_image_model")
+    def test_ignores_hidden_folders_such_as_an_in_progress_stored_quant(self, mock_detect, tmp_path: Path):
+        models_dir = tmp_path / "models"
+        (models_dir / ".snofs@q8.deadbeef.partial").mkdir(parents=True)
+        mock_detect.return_value = ImageModelInfo(family="flux2_klein", is_distilled=True, size="9b")
+
+        assert list_models(tmp_path) == []
+        mock_detect.assert_not_called()
+
     def test_ignores_files_in_models_dir(self, tmp_path: Path):
         models_dir = tmp_path / "models"
         models_dir.mkdir()

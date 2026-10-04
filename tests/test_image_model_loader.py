@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -139,6 +140,13 @@ class TestAliasPlan:
 
         assert plan == LoadPlan("org/repo", 4, create=models_dir / "zit@q4", source=None)
 
+    def test_unmapped_name_is_a_raw_path_not_an_alias(self, tmp_path, models_dir):
+        """A bare folder name in the current directory resolves to itself and gets no copy."""
+        folder = _make_source(tmp_path, "mymodel")
+        plan = plan_image_model_load("mymodel", 8, models_dir=models_dir, backend_format=FORMAT, model_name="mymodel", find_local_dir=lambda _ref: folder)
+
+        assert plan == LoadPlan("mymodel", 8)
+
     @pytest.mark.parametrize("picked", [None, "org/repo", "~/models/x", "C:model", "..", "zit@q8"])
     def test_raw_repo_ids_and_paths_are_quantized_at_load(self, models_dir, picked):
         plan = plan_image_model_load("org/repo", 8, models_dir=models_dir, backend_format=FORMAT, model_name=picked, find_local_dir=lambda _ref: pytest.fail("not resolved"))
@@ -211,13 +219,9 @@ class TestLoad:
 
     def test_stop_during_save_skips_the_lora_reload(self, models_dir):
         source = _make_source(models_dir)
-        gate = threading.Event()
-        backend = _FakeBackend(save_gate=gate)
+        backend = _FakeBackend()
 
-        try:
-            load_image_model(backend, str(source), quantize=8, models_dir=models_dir, lora_paths=["style.safetensors"], cancelled=lambda: True)
-        finally:
-            gate.set()
+        load_image_model(backend, str(source), quantize=8, models_dir=models_dir, lora_paths=["style.safetensors"], cancelled=lambda: True)
 
         assert backend.loads == [{"path": str(source), "quantize": 8, "lora_paths": None}]
 
@@ -252,23 +256,41 @@ class TestAliasLoad:
         assert not (models_dir / "zit@q8").exists()
 
 
-class TestSaveCancellation:
-    def test_cancel_abandons_save_and_removes_partial_folder(self, models_dir):
+class TestSaveStoredQuant:
+    def test_stop_during_save_discards_the_copy_after_the_write(self, models_dir):
         source = _make_source(models_dir)
-        gate = threading.Event()
-        backend = _FakeBackend(save_gate=gate)
+        backend = _FakeBackend()
         target = models_dir / "snofs@q8"
 
-        started = time.monotonic()
-        saved = save_stored_quant(backend, MagicMock(), source=source, target=target, bits=8, backend_format=FORMAT, cancelled=lambda: True, poll_seconds=0.01)
+        saved = save_stored_quant(backend, MagicMock(), source=source, target=target, bits=8, backend_format=FORMAT, cancelled=lambda: True)
+
         assert saved is False
-        assert time.monotonic() - started < 2  # returned without waiting for the write
-
-        gate.set()
-        assert backend.save_finished.wait(5)
-        deadline = time.monotonic() + 5
-        while _partials(models_dir) and time.monotonic() < deadline:
-            time.sleep(0.01)
-
+        assert backend.saved  # the write ran to completion before the stop took effect
         assert _partials(models_dir) == []
         assert not target.exists()
+
+    def test_interrupt_during_save_discards_the_partial_and_propagates(self, models_dir):
+        source = _make_source(models_dir)
+        backend = _FakeBackend(save_error=KeyboardInterrupt())
+
+        with pytest.raises(KeyboardInterrupt):
+            save_stored_quant(backend, MagicMock(), source=source, target=models_dir / "snofs@q8", bits=8, backend_format=FORMAT)
+
+        assert _partials(models_dir) == []
+
+    def test_old_partials_from_an_interrupted_save_are_swept(self, models_dir):
+        source = _make_source(models_dir)
+        stale = models_dir / ".snofs@q8.deadbeef.partial"
+        fresh = models_dir / ".snofs@q8.cafebabe.partial"
+        other = models_dir / ".other@q8.deadbeef.partial"
+        for folder in (stale, fresh, other):
+            folder.mkdir()
+        old = time.time() - 3600
+        os.utime(stale, (old, old))
+        os.utime(other, (old, old))
+
+        assert save_stored_quant(_FakeBackend(), MagicMock(), source=source, target=models_dir / "snofs@q8", bits=8, backend_format=FORMAT)
+
+        assert not stale.exists()
+        assert fresh.exists()  # may belong to a save still running in another process
+        assert other.exists()
