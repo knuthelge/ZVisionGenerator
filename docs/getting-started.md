@@ -162,7 +162,7 @@ Full-screen asset viewer:
 | `E` | Use as reference |
 | `D` | Download |
 | `C` | Copy the prompt |
-| `Delete` / `Backspace` | Delete (asks for confirmation) |
+| `Delete` / `Backspace` | Delete (asks for confirmation: `Enter` confirms, `Esc` cancels) |
 | `Shift+Delete` | Delete without asking |
 | `I` | Toggle the details panel |
 | `?` | Show the viewer's shortcuts |

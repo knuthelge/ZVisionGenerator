@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import type { HTMLButtonAttributes } from 'svelte/elements';
 
-  interface Props {
+  interface Props extends Omit<HTMLButtonAttributes, 'class' | 'type' | 'disabled' | 'onclick' | 'children'> {
     variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
     size?: 'sm' | 'md' | 'lg';
     disabled?: boolean;
@@ -20,7 +21,8 @@
     type = 'button',
     class: extraClass = '',
     onclick,
-    children
+    children,
+    ...rest
   }: Props = $props();
 
   // Font, weight, transitions, and disabled styling live per variant so they never fight surface-button-primary.
@@ -44,6 +46,7 @@
 </script>
 
 <button
+  {...rest}
   {type}
   class={cls}
   disabled={disabled || loading}

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryAsset } from '$lib/types';
 
 import AssetViewer from './AssetViewer.svelte';
+import { requestConfirm } from './confirm.svelte';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -145,6 +146,31 @@ describe('AssetViewer', () => {
     mountViewer({ currentIndex: 1, ondelete });
     expect(press(key).defaultPrevented).toBe(true);
     expect(ondelete).toHaveBeenCalledWith(assetB, { confirm: true });
+  });
+
+  it('ignores a held Delete key', () => {
+    const ondelete = vi.fn();
+    mountViewer({ ondelete });
+    expect(press('Delete', { repeat: true }).defaultPrevented).toBe(true);
+    expect(ondelete).not.toHaveBeenCalled();
+  });
+
+  it('keeps a confirmation dialog on top: Escape closes only the dialog and arrows do not page', async () => {
+    const onnavigate = vi.fn();
+    const onclose = vi.fn();
+    let answer: Promise<boolean> | null = null;
+    mountViewer({ onnavigate, onclose, ondelete: (asset: GalleryAsset) => { answer = requestConfirm({ question: `Delete "${asset.filename}"?`, confirmLabel: 'Delete' }); } });
+    press('Delete');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+
+    press('ArrowRight');
+    expect(onnavigate).not.toHaveBeenCalled();
+    press('Escape');
+    await expect(answer!).resolves.toBe(false);
+    expect(onclose).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="asset-viewer"]')).not.toBeNull();
   });
 
   it('deletes without asking on Shift+Delete', () => {

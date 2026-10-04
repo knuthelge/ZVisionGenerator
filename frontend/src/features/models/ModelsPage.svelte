@@ -4,7 +4,7 @@
   import { addToast } from '$lib/state/toasts.svelte';
   import type { ModelDeleteInfo, ModelInventory, ModelStatusFields } from '$lib/types';
   import { Button, Input, Select, Tooltip } from '$lib/components/atoms';
-  import { FormField, Modal, ModelStatusBadges, PathField } from '$lib/components/molecules';
+  import { ConfirmDialog, FormField, ModelStatusBadges, PathField } from '$lib/components/molecules';
   import { DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
 
@@ -105,6 +105,12 @@
     } finally {
       formsBusy = false;
     }
+  }
+
+  function deleteQuestion(target: NonNullable<typeof pendingDelete>): string {
+    if (target.type === 'lora') return `Delete ${target.name}.safetensors from the LoRAs folder?`;
+    if (target.info.kind === 'installed') return `Delete the model folder ${target.name} from the models folder?`;
+    return `Delete the Hugging Face download of ${target.info.repo_id}?`;
   }
 
   function requestDelete(target: NonNullable<typeof pendingDelete>): void {
@@ -534,16 +540,20 @@
   {/if}
 </AdminPageShell>
 
-<Modal bind:open={deleteOpen} title={pendingDelete?.type === 'lora' ? 'Delete LoRA' : 'Delete Model'} onclose={() => (pendingDelete = null)}>
+<ConfirmDialog
+  bind:open={deleteOpen}
+  question={pendingDelete ? deleteQuestion(pendingDelete) : ''}
+  info="This cannot be undone."
+  confirmLabel="Delete"
+  pending={deleting}
+  onconfirm={confirmDelete}
+  oncancel={() => (pendingDelete = null)}
+>
   {#if pendingDelete}
-    <div class="space-y-3 text-sm text-zinc-300" data-testid="delete-dialog">
-      {#if pendingDelete.type === 'lora'}
-        <p>Delete <span class="font-mono text-zinc-100">{pendingDelete.name}.safetensors</span> from the LoRAs folder?</p>
-      {:else if pendingDelete.info.kind === 'installed'}
-        <p>Delete the model folder <span class="font-mono text-zinc-100">{pendingDelete.name}</span> from the models folder?</p>
+    <div class="space-y-2" data-testid="delete-dialog">
+      {#if pendingDelete.type === 'model' && pendingDelete.info.kind === 'installed'}
         <p class="text-zinc-400">Hugging Face files it links to are kept.</p>
-      {:else}
-        <p>Delete the Hugging Face download of <span class="font-mono text-zinc-100">{pendingDelete.info.repo_id}</span>?</p>
+      {:else if pendingDelete.type === 'model'}
         <p class="text-zinc-400">The <span class="font-mono">{pendingDelete.name}</span> alias stays in your config and downloads the model again the next time you use it.</p>
         {#if pendingDelete.info.linked_by.length > 0}
           <div class="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300" data-testid="delete-linked-warning">
@@ -557,11 +567,6 @@
           Its quantized copies are deleted too: <span class="font-mono">{pendingDelete.info.stored_quants?.join(', ')}</span>
         </p>
       {/if}
-      <p class="text-zinc-400">This cannot be undone.</p>
     </div>
   {/if}
-  {#snippet footer()}
-    <Button variant="ghost" onclick={() => (deleteOpen = false)} disabled={deleting}>Cancel</Button>
-    <Button variant="danger" onclick={confirmDelete} disabled={deleting} loading={deleting}>Delete</Button>
-  {/snippet}
-</Modal>
+</ConfirmDialog>

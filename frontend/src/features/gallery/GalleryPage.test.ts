@@ -21,6 +21,17 @@ const toastMocks = vi.hoisted(() => ({
   addToast: vi.fn<(message: string, tone: 'success' | 'warning' | 'error') => void>(),
 }));
 
+const confirmMocks = vi.hoisted(() => ({
+  requestConfirm: vi.fn(async () => true),
+}));
+
+vi.mock('$lib/components/molecules/confirm.svelte', () => confirmMocks);
+
+beforeEach(() => {
+  confirmMocks.requestConfirm.mockReset();
+  confirmMocks.requestConfirm.mockResolvedValue(true);
+});
+
 vi.mock('$lib/api/gallery', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/gallery')>();
   return {
@@ -293,7 +304,7 @@ describe('GalleryPage regressions', () => {
     historyStore.seedHistory([asset]);
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
     galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirmMocks.requestConfirm.mockResolvedValue(true);
 
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
@@ -312,7 +323,7 @@ describe('GalleryPage regressions', () => {
       .mockResolvedValueOnce({ assets: pageTwo, page: 2, total_pages: 2, total_count: 3 })
       .mockResolvedValue({ assets: pageOne, page: 1, total_pages: 2, total_count: 2 });
     galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirmMocks.requestConfirm.mockResolvedValue(true);
 
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
@@ -343,7 +354,7 @@ describe('GalleryPage regressions', () => {
       .mockResolvedValueOnce({ assets: [b, c, d, e, f], page: 1, total_pages: 2, total_count: 6 })
       .mockResolvedValueOnce({ assets: [g], page: 2, total_pages: 2, total_count: 6 });
     galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    confirmMocks.requestConfirm.mockResolvedValue(true);
     const press = async (key: string): Promise<void> => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
       await settle();
@@ -828,7 +839,7 @@ describe('GalleryPage request ownership (F07)', () => {
 
 describe('GalleryPage bulk deletion settlement (F06)', () => {
   beforeEach(() => {
-    vi.stubGlobal('confirm', vi.fn(() => true));
+    confirmMocks.requestConfirm.mockResolvedValue(true);
   });
 
   it('keeps failed IDs selected and preserves selections added while a mixed deletion is in flight', async () => {
@@ -930,7 +941,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
 
 describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)', () => {
   beforeEach(() => {
-    vi.stubGlobal('confirm', vi.fn(() => true));
+    confirmMocks.requestConfirm.mockResolvedValue(true);
   });
 
   it('uses the same complete reset for filter, sort, and clear-filter transitions', async () => {
@@ -1181,7 +1192,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
 
   it('does not call the API or alter active state when deletion is cancelled', async () => {
     const asset = makeAsset({ id: 'cancelled.png', filename: 'cancelled.png', prompt: 'keep me' });
-    vi.stubGlobal('confirm', vi.fn(() => false));
+    confirmMocks.requestConfirm.mockResolvedValue(false);
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
 
     app = flushSync(() => mount(GalleryPage, { target }));
@@ -1375,8 +1386,21 @@ describe('GalleryPage keyboard shortcuts', () => {
     expect(assets.every((asset) => checked(asset.filename))).toBe(true);
   });
 
+  it('asks once for a held Delete key', async () => {
+    confirmMocks.requestConfirm.mockResolvedValue(false);
+    await mountGallery();
+
+    tileButton('c.png').focus();
+    press('Delete');
+    press('Delete', { repeat: true });
+    await settle();
+    expect(confirmMocks.requestConfirm).toHaveBeenCalledTimes(1);
+    expect(confirmMocks.requestConfirm).toHaveBeenCalledWith(expect.objectContaining({ question: 'Delete "c.png"?', confirmLabel: 'Delete' }));
+    expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalled();
+  });
+
   it('deletes the selection with Delete, else the focused tile', async () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = confirmMocks.requestConfirm.mockResolvedValue(true);
     galleryApiMocks.deleteAsset.mockResolvedValue();
     await mountGallery();
 
@@ -1392,6 +1416,5 @@ describe('GalleryPage keyboard shortcuts', () => {
     await settle();
     expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith('a.png');
     expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalledWith('b.png');
-    confirmSpy.mockRestore();
   });
 });
