@@ -173,6 +173,7 @@ def main(*, prog: str = "ziv-image") -> None:
 
     if args.model is None:
         parser.error("--model is required. Provide a model name, path, or HuggingFace repo ID.")
+    picked_model = args.model
     args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
 
     lora_paths, lora_weights = None, None
@@ -288,6 +289,7 @@ def main(*, prog: str = "ziv-image") -> None:
                 args.model,
                 quantize=args.quantize,
                 models_dir=get_ziv_data_dir() / "models",
+                model_name=picked_model,
                 lora_paths=lora_paths,
                 lora_weights=lora_weights,
                 on_phase=lambda _phase: print(f"Saving a q{args.quantize} copy of the model for faster loading (first use only)...", flush=True),
