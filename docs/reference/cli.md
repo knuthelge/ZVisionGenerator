@@ -69,7 +69,7 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `--image` | disabled | Path to reference image for img2img steering |
 | `--image-strength` | `0.5` | Denoising strength for reference (0.0–1.0) |
 | `-o`, `--output` | `.` | Output directory for generated images |
-| `--enhance [SPEC]` | disabled | Rewrite each prompt with a local LLM before generating. `SPEC` is optional, e.g. `style=photo,details=lighting+camera,length=longer`. Overrides prompt-file `enhance:` entries. Ignored with `--json-prompt` |
+| `--enhance [SPEC]` | disabled | Rewrite each prompt with a local LLM before the model loads. `SPEC` is optional, e.g. `style=photo,details=lighting+camera,length=longer`. Overrides prompt-file `enhance:` entries. Ignored with `--json-prompt` |
 | `--no-enhance` | — | Disable enhancement, including prompt-file `enhance:` entries |
 | `--enhance-model` | config | Enhancer LLM as `REPO[@REVISION]` or a local folder |
 
@@ -119,7 +119,7 @@ Platform-aware aliases:
 | `-r`, `--runs` | `1` | Number of batch runs |
 | `-o`, `--output` | `.` | Output directory |
 | `--format` | `mp4` | Output format |
-| `--enhance [SPEC]` | disabled | Rewrite each prompt with a local LLM before generating (see the `--enhance` spec above; `motion` is allowed) |
+| `--enhance [SPEC]` | disabled | Rewrite each prompt with a local LLM before the model loads (see the `--enhance` spec above; `motion` is allowed) |
 | `--no-enhance` | — | Disable enhancement, including prompt-file `enhance:` entries |
 | `--enhance-model` | config | Enhancer LLM as `REPO[@REVISION]` or a local folder |
 

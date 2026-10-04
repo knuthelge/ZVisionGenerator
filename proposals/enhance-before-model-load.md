@@ -1,6 +1,6 @@
 # Enhance prompts before the model loads
 
-**Status:** Proposed (2026-10-04)
+**Status:** In progress (2026-10-04)
 
 ## Problem
 
