@@ -129,7 +129,7 @@ class TestEnhanceEndpoint:
         with TestClient(web_server.app) as client:
             response = client.post("/api/prompt/enhance", json={"prompt": "a fox", "settings": {}})
         assert response.status_code == 409
-        assert "current job finishes" in response.json()["detail"]
+        assert "all jobs have finished" in response.json()["detail"]
 
     def test_conflict_while_enhancing(self, monkeypatch, no_active_job):
         monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(busy=True))
@@ -234,15 +234,16 @@ class TestGenerateFields:
         finally:
             runner.shutdown()
 
-    def test_running_job_wins_over_enhancer_message(self, monkeypatch):
-        """While an auto-enhance job holds the enhancer, a second job is told the job is running."""
+    def test_job_queues_while_an_auto_enhance_job_holds_the_enhancer(self, monkeypatch):
+        """While a job's own preflight holds the enhancer, a second job queues behind it instead of being refused."""
         monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(busy=True))
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        monkeypatch.setattr(web_server, "web_runner", runner)
         release = threading.Event()
         try:
             runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: release.wait(5))
-            with pytest.raises(web_runner_module.JobConflictError, match="already running"):
-                runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: None, admission_check=web_server._reject_while_busy)
+            queued_id = runner._submit_job(job_type="image", exclusive=True, target_factory=lambda cb: None, admission_check=web_server._reject_while_busy)
+            assert runner.get_job_snapshot(queued_id)["status"] == "queued"
         finally:
             release.set()
             runner.shutdown()

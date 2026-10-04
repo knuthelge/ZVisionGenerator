@@ -228,7 +228,7 @@ class TestWebRunner:
 
             snapshot = _wait_for_status(runner, job_id, "completed")
             assert snapshot["status"] == "completed"
-            assert snapshot["event_count"] == 5  # job_submitted, model_loading, batch_started, batch_completed, job_completed
+            assert snapshot["event_count"] == 6  # job_submitted, job_started, model_loading, batch_started, batch_completed, job_completed
             assert snapshot["last_event"]["type"] == "job_completed"
         finally:
             runner.shutdown()
@@ -429,8 +429,8 @@ class TestWebRunner:
             release.set()
             runner.shutdown()
 
-    def test_submit_image_job_rejects_overlapping_exclusive_jobs(self, monkeypatch):
-        """The runner should reject a second exclusive generation job while one is active."""
+    def test_second_image_job_waits_in_the_queue(self, monkeypatch):
+        """A second generation job is queued behind the running one, then runs after it."""
         started = threading.Event()
         release = threading.Event()
 
@@ -444,15 +444,18 @@ class TestWebRunner:
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 
         try:
-            _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
+            first = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
             assert started.wait(timeout=1.0)
+            second = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
 
-            try:
-                _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
-            except web_runner_module.JobConflictError as exc:
-                assert "already running" in str(exc)
-            else:
-                raise AssertionError("Expected JobConflictError for overlapping exclusive jobs")
+            snapshot = runner.get_job_snapshot(second)
+            assert snapshot["status"] == "queued"
+            assert snapshot["queue_position"] == 1
+            assert runner.get_job_snapshot(first)["queue_position"] is None
+
+            release.set()
+            assert _wait_for_status(runner, first, "completed")
+            assert _wait_for_status(runner, second, "completed")
         finally:
             release.set()
             runner.shutdown()
@@ -630,7 +633,7 @@ class TestWebRunner:
             assert snapshot["supported_controls"] == ["next", "pause", "resume", "repeat", "quit"]
             assert snapshot["last_event"]["type"] == "step_progress"
             assert snapshot["last_event"]["current_step"] == 2
-            assert snapshot["event_count"] == 4  # job_submitted, model_loading, batch_started, step_progress
+            assert snapshot["event_count"] == 5  # job_submitted, job_started, model_loading, batch_started, step_progress
         finally:
             release.set()
             runner.shutdown()
@@ -883,3 +886,200 @@ class TestLivePreview:
         assert ok.content == b"\xff\xd8jpeg"
         assert empty.status_code == 404
         assert unknown.status_code == 404
+
+
+class TestJobQueue:
+    """Generation jobs wait in a FIFO queue and are claimed by the single worker as they start."""
+
+    @pytest.fixture()
+    def runner(self):
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        yield runner
+        runner.shutdown()
+
+    @staticmethod
+    def _blocking_job(runner: web_runner_module.WebRunner, *, exclusive: bool = True) -> tuple[str, threading.Event, threading.Event]:
+        started = threading.Event()
+        release = threading.Event()
+
+        def _target(_progress_callback):
+            started.set()
+            release.wait(timeout=2.0)
+
+        job_id = runner._submit_job(job_type="test", exclusive=exclusive, target_factory=_target)
+        assert started.wait(timeout=1.0)
+        return job_id, started, release
+
+    @staticmethod
+    def _event_types(runner: web_runner_module.WebRunner, job_id: str) -> list[str]:
+        with runner._jobs_lock:
+            record = runner._jobs[job_id]
+        with record.lock:
+            return [event["type"] for event in record.history]
+
+    def test_concurrent_submits_run_in_queue_order(self, runner):
+        first, _started, release = self._blocking_job(runner)
+        ran: list[str] = []
+        ids: list[str] = []
+        ids_lock = threading.Lock()
+
+        def _submit(index: int) -> None:
+            label = f"job-{index}"
+            job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: ran.append(label))
+            with ids_lock:
+                ids.append(label)
+                labels[job_id] = label
+
+        labels: dict[str, str] = {}
+        threads = [threading.Thread(target=_submit, args=(index,)) for index in range(6)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        queued_order = [labels[snapshot["job_id"]] for snapshot in runner.list_jobs()["queued_jobs"]]
+        release.set()
+        for job_id in labels:
+            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+
+        assert ran == queued_order
+        assert len(ids) == 6
+        types = self._event_types(runner, first)
+        assert types.index("job_submitted") < types.index("job_started")
+
+    def test_started_job_is_running_with_a_start_time(self, runner):
+        job_id, _started, release = self._blocking_job(runner)
+        snapshot = runner.get_job_snapshot(job_id)
+        release.set()
+
+        assert snapshot["status"] == "running"
+        assert snapshot["started_at"] is not None
+        assert snapshot["queue_position"] is None
+
+    def test_removed_job_never_runs_even_when_its_work_item_is_picked_up(self, runner):
+        _first, _started, release = self._blocking_job(runner)
+        ran: list[str] = []
+        queued = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: ran.append("ran"))
+
+        assert runner.cancel_queued(queued) is True
+        # The worker reaching the job anyway (Future.cancel lost the race) must not run it.
+        runner._run_target(queued, lambda: ran.append("ran"))
+        release.set()
+
+        assert ran == []
+        assert self._event_types(runner, queued) == ["job_submitted", "job_cancelled"]
+        snapshot = runner.get_job_snapshot(queued)
+        assert snapshot["status"] == "cancelled"
+        assert snapshot["last_event"]["reason"] == "removed"
+        assert runner.cancel_queued(queued) is False
+
+    def test_elapsed_time_does_not_count_the_wait_in_the_queue(self, runner):
+        _first, _started, release = self._blocking_job(runner)
+
+        def _report(progress_callback):
+            progress_callback({"type": "step_progress", "current_step": 1, "total_steps": 2})
+
+        queued = runner._submit_job(job_type="test", exclusive=True, target_factory=_report)
+        time.sleep(0.3)
+        release.set()
+        assert _wait_for_status(runner, queued, "completed")["status"] == "completed"
+
+        with runner._jobs_lock:
+            record = runner._jobs[queued]
+        with record.lock:
+            step = next(event for event in record.history if event["type"] == "step_progress")
+        assert step["elapsed_secs"] < 0.2
+
+    def test_list_jobs_puts_each_job_in_one_place_and_positions_follow_the_queue(self, runner):
+        # A non-generation job occupies the worker, so the first generation job waits at the head unclaimed.
+        _blocker, _started, release = self._blocking_job(runner, exclusive=False)
+        head = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: None)
+        second = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: None)
+        third = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: None)
+
+        jobs = runner.list_jobs()
+        assert jobs["active_job"]["job_id"] == head
+        assert jobs["active_job"]["queue_position"] is None
+        assert [(job["job_id"], job["queue_position"]) for job in jobs["queued_jobs"]] == [(second, 1), (third, 2)]
+        assert runner.get_job_snapshot(third)["queue_position"] == 2
+        release.set()
+
+    def test_clear_queue_keeps_the_active_job(self, runner):
+        _blocker, _started, release = self._blocking_job(runner, exclusive=False)
+        head = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: None)
+        second = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: None)
+        third = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: None)
+
+        assert runner.clear_queue() == [second, third]
+        release.set()
+
+        assert _wait_for_status(runner, head, "completed")["status"] == "completed"
+        assert runner.get_job_snapshot(second)["status"] == "cancelled"
+        assert runner.get_job_snapshot(third)["status"] == "cancelled"
+
+    def test_clear_queue_leaves_a_running_job_alone(self, runner):
+        running, _started, release = self._blocking_job(runner)
+        queued = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: None)
+
+        assert runner.clear_queue() == [queued]
+        assert runner.get_job_snapshot(running)["status"] == "running"
+        release.set()
+
+    def test_controls_other_than_quit_are_refused_before_a_job_starts(self, runner):
+        _first, _started, release = self._blocking_job(runner)
+        queued = runner._submit_job(job_type="test", exclusive=True, supported_controls=("pause", "next", "repeat", "quit"), control_signal=MagicMock(), target_factory=lambda _cb: None)
+
+        for action in ("pause", "next", "repeat"):
+            with pytest.raises(web_runner_module.UnsupportedJobControlError, match="not started"):
+                runner.queue_job_control(queued, action)
+        assert runner.queue_job_control(queued, "quit")["status"] == "cancelled"
+        release.set()
+
+    def test_a_failed_job_does_not_stop_the_queue(self, runner):
+        def _fail(_cb):
+            raise RuntimeError("boom")
+
+        failed = runner._submit_job(job_type="test", exclusive=True, target_factory=_fail)
+        after = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: None)
+
+        assert _wait_for_status(runner, failed, "failed")["status"] == "failed"
+        assert _wait_for_status(runner, after, "completed")["status"] == "completed"
+
+    def test_memory_is_released_before_the_next_job_starts(self, monkeypatch, runner):
+        order: list[str] = []
+        monkeypatch.setattr(web_runner_module, "release_accelerator_memory", lambda: order.append("release"))
+        first = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: order.append("first"))
+        second = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: order.append("second"))
+
+        assert _wait_for_status(runner, second, "completed")["status"] == "completed"
+        assert runner.get_job_snapshot(first)["status"] == "completed"
+        assert order == ["first", "release", "second", "release"]
+
+    def test_dummy_jobs_still_run(self, runner):
+        job_id = runner.submit_dummy_job(total_steps=1, delay_seconds=0.001)
+        assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+
+
+def test_shutdown_cancels_queued_jobs_without_running_them():
+    runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+    started = threading.Event()
+    release = threading.Event()
+    ran: list[str] = []
+
+    def _block(_cb):
+        started.set()
+        release.wait(timeout=2.0)
+
+    runner._submit_job(job_type="test", exclusive=True, target_factory=_block)
+    assert started.wait(timeout=1.0)
+    queued = [runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: ran.append("ran")) for _ in range(2)]
+
+    runner.shutdown()
+    release.set()
+    time.sleep(0.1)
+
+    assert ran == []
+    for job_id in queued:
+        snapshot = runner.get_job_snapshot(job_id)
+        assert snapshot["status"] == "cancelled"
+        assert snapshot["last_event"]["reason"] == "removed"

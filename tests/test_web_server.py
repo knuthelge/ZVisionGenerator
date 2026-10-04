@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import io
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 from urllib.parse import quote
 
 from fastapi.testclient import TestClient
@@ -215,7 +217,7 @@ def test_phase_a_routes_share_config_and_path_authority(monkeypatch):
     monkeypatch.setattr(web_server, "list_gallery_assets", lambda _output_dir: [])
     monkeypatch.setattr(web_server, "_build_workspace_bootstrap_view", lambda _cfg: _make_workspace_bootstrap_view())
     monkeypatch.setattr(web_server, "huggingface_token_env_var", lambda: "HF_TOKEN")
-    monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: active_job_snapshot)
+    monkeypatch.setattr(web_server.web_runner, "list_jobs", lambda: {"active_job": active_job_snapshot, "queued_jobs": []})
     monkeypatch.setattr(
         config_contract_module,
         "read_user_config_override",
@@ -270,6 +272,7 @@ def test_phase_a_routes_share_config_and_path_authority(monkeypatch):
     assert "legacy_aliases" not in workspace_payload["workflow_contract"]
     assert workspace_payload["workflow_contract"]["definitions"]["txt2img"]["visible_controls"]
     assert workspace_payload["active_job"] == active_job_snapshot
+    assert workspace_payload["queued_jobs"] == []
     assert prompt_file["accepted_extensions"] == [".yaml", ".yml"]
     assert prompt_file["browse_kind"] == "existing_file"
     assert prompt_file["selection_required"] is True
@@ -295,7 +298,7 @@ def test_workspace_route_can_skip_history_asset_serialization(monkeypatch):
     web_config = _make_web_config()
     monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
     monkeypatch.setattr(web_server, "_build_workspace_bootstrap_view", lambda _cfg: _make_workspace_bootstrap_view())
-    monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
+    monkeypatch.setattr(web_server.web_runner, "list_jobs", lambda: {"active_job": None, "queued_jobs": []})
 
     def _fail_list_gallery_assets(_output_dir: str):
         raise AssertionError("workspace core hydration should not list gallery assets")
@@ -348,7 +351,7 @@ def test_submit_image_job_uses_backend_registry_name(monkeypatch, tmp_path):
     )
 
     assert response["job_id"] == "job-123"
-    assert response["output_dir"] == str(tmp_path)
+    assert response["context"]["output_dir"] == str(tmp_path)
     assert captured["backend_name"] == "registry-owned"
 
 
@@ -905,6 +908,20 @@ def test_packaged_spa_serves_packaged_logo_asset() -> None:
     assert logo_response.headers["content-type"] == "image/png"
 
 
+def _public_context(*, runs: int = 1, meta: str = "") -> dict[str, object]:
+    return {
+        "workflow": "txt2img",
+        "job_type": "Text to Image",
+        "prompt": "prompt",
+        "model": "zit",
+        "runs": runs,
+        "meta": meta,
+        "created_at": "2026-10-04T10:00:00+00:00",
+        "output_dir": "/tmp/outputs",
+        "settings": {},
+    }
+
+
 def test_generate_route_returns_requested_runs_from_job_context(monkeypatch):
     """The public generate response should return the queued job's requested runs value."""
     monkeypatch.setattr(web_server, "load_web_config", _make_web_config)
@@ -913,14 +930,10 @@ def test_generate_route_returns_requested_runs_from_job_context(monkeypatch):
         "_submit_image_job",
         lambda _form, _web_config: {
             "job_id": "job-123",
-            "job_type": "txt2img",
-            "title": "zit",
-            "prompt": "prompt",
+            "context": _public_context(runs=7, meta="2:3 · m · 10 steps"),
             "events_url": "/jobs/job-123/events",
             "status_url": "/jobs/job-123",
             "supported_controls": ("next", "pause"),
-            "runs": 7,
-            "meta": "2:3 · m · 10 steps",
         },
     )
 
@@ -932,6 +945,8 @@ def test_generate_route_returns_requested_runs_from_job_context(monkeypatch):
     assert payload["job_id"] == "job-123"
     assert payload["runs"] == 7
     assert payload["supported_controls"] == ["next", "pause"]
+    assert payload["meta"] == "2:3 · m · 10 steps"
+    assert "queue_position" in payload
 
 
 def test_video_submission_missing_ffmpeg_returns_422_before_job_registration(monkeypatch):
@@ -969,14 +984,10 @@ def test_image_submission_does_not_require_ffmpeg(monkeypatch):
         "_submit_image_job",
         lambda _form, _web_config: {
             "job_id": "job-123",
-            "job_type": "txt2img",
-            "title": "zit",
-            "prompt": "prompt",
+            "context": _public_context(),
             "events_url": "/jobs/job-123/events",
             "status_url": "/jobs/job-123",
             "supported_controls": (),
-            "runs": 1,
-            "meta": "",
         },
     )
 
@@ -1813,3 +1824,101 @@ def test_quantize_slot_is_released_when_the_conversion_fails(monkeypatch, tmp_pa
 
     assert response.status_code == 400
     web_server._reject_while_busy()
+
+
+class TestJobQueueRoutes:
+    """Queue routes on a real runner whose worker is held by a running job."""
+
+    @pytest.fixture()
+    def busy_runner(self, monkeypatch):
+        runner = web_server.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        monkeypatch.setattr(web_server, "web_runner", runner)
+        started = threading.Event()
+        release = threading.Event()
+
+        def _block(_cb):
+            started.set()
+            release.wait(timeout=2.0)
+
+        running = runner._submit_job(job_type="image", exclusive=True, supported_controls=("quit",), control_signal=MagicMock(), target_factory=_block)
+        assert started.wait(timeout=1.0)
+        yield runner, running
+        release.set()
+        runner.shutdown()
+
+    @pytest.mark.parametrize("controls", [("quit",), ()], ids=["image", "video"])
+    def test_cancel_route_removes_a_queued_job(self, busy_runner, controls):
+        runner, _running = busy_runner
+        queued = runner._submit_job(job_type="test", exclusive=True, supported_controls=controls, target_factory=lambda _cb: None)
+
+        with TestClient(web_server.app) as client:
+            response = client.post(f"/api/jobs/{queued}/cancel")
+
+        assert response.status_code == 200
+        assert response.json() == {"job_id": queued, "status": "cancelled"}
+        assert runner.get_job_snapshot(queued)["status"] == "cancelled"
+
+    def test_cancel_route_still_quits_a_running_image_job(self, busy_runner):
+        _runner, running = busy_runner
+        with TestClient(web_server.app) as client:
+            response = client.post(f"/api/jobs/{running}/cancel")
+
+        assert response.status_code == 200
+        assert response.json()["action"] == "quit"
+
+    def test_list_and_clear_routes(self, monkeypatch, busy_runner):
+        runner, running = busy_runner
+        monkeypatch.setattr(web_server, "load_web_config", _make_web_config)
+        monkeypatch.setattr(web_server, "_build_workspace_bootstrap_view", lambda _cfg: _make_workspace_bootstrap_view())
+        queued = [runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _cb: None) for _ in range(2)]
+
+        with TestClient(web_server.app) as client:
+            listed = client.get("/api/jobs").json()
+            workspace_queue = client.get("/api/workspace", params={"include_history": "false"}).json()["queued_jobs"]
+            cleared = client.delete("/api/jobs/queue").json()
+            after = client.get("/api/jobs").json()
+
+        assert listed["active_job"]["job_id"] == running
+        assert [job["job_id"] for job in listed["queued_jobs"]] == queued
+        assert [job["queue_position"] for job in listed["queued_jobs"]] == [1, 2]
+        assert [job["job_id"] for job in workspace_queue] == queued
+        assert cleared == {"cancelled": queued}
+        assert after["active_job"]["job_id"] == running
+        assert after["queued_jobs"] == []
+
+    def test_deleting_models_is_refused_while_jobs_are_queued(self, busy_runner):
+        with TestClient(web_server.app) as client:
+            response = client.delete("/api/loras/style")
+
+        assert response.status_code == 409
+        assert "all jobs" in response.json()["detail"]
+
+
+def test_submitted_settings_keep_every_text_field_and_replace_an_upload_with_its_path():
+    """Load settings restores the form from these values, including repeated fields."""
+    from starlette.datastructures import FormData, UploadFile
+
+    upload = UploadFile(file=io.BytesIO(b"png"), filename="ref.png")
+    form = FormData([("prompt", "a lake"), ("prompt_option_id", "a:0"), ("prompt_option_id", "a:1"), ("steps", "8"), ("image_file", upload)])
+
+    settings = web_server._submitted_settings(form, image_path="/out/.web_uploads/ref.png")
+
+    assert settings == {"prompt": "a lake", "prompt_option_id": ["a:0", "a:1"], "steps": "8", "image_path": "/out/.web_uploads/ref.png"}
+
+
+def test_submit_image_job_queues_with_its_public_context(monkeypatch, tmp_path):
+    """The job carries its prompt, model, size label and settings from the moment it is queued."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    _patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None), defaults=_make_resolved_image_defaults(), submitted=submitted)
+
+    response = web_server._submit_image_job({"model": "zit", "prompt": "hello", "steps": "9", "workflow": "txt2img"}, web_config)
+
+    context = submitted[0]["context"]
+    assert context == response["context"]
+    assert context["prompt"] == "hello"
+    assert context["model"] == "zit"
+    assert context["workflow"] == "txt2img"
+    assert "steps" in context["meta"]
+    assert context["settings"] == {"model": "zit", "prompt": "hello", "steps": "9", "workflow": "txt2img"}
