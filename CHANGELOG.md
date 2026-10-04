@@ -7,10 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
+- Web UI: **job queue**. While a job runs, Generate becomes **Add to queue**: change the settings and add more runs, which start one after another. The queue shows under the job card (**Up next**) with **Load settings**, remove and **Clear queue**, is shared by every tab, and keeps going when a job fails. New `GET /api/jobs` and `DELETE /api/jobs/queue` endpoints
 - Web UI: more workspace shortcuts. `Alt+3` focuses the newest history tile, expanding the strip if needed. `P` pauses or resumes the running job, `N` skips to the next image and `R` repeats the current one
 - Web UI: the Compose and Settings sidebar can be collapsed into a narrow strip with expand and Generate buttons; the choice is remembered in the browser
 
 ### Changed
+- Web UI: the form stays editable while a job runs; the manual Enhance prompt button waits until all jobs have finished
 - Web UI: the running job's card puts the live preview and outputs in a column to the right of the progress and controls
 - Web UI: deleting assets, models and LoRAs asks in the app's own confirmation dialog instead of the browser's. `Enter` confirms and `Esc` cancels
 

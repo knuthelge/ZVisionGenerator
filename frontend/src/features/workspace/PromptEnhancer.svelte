@@ -18,8 +18,10 @@
     contract: PromptEnhancerContract;
     /** `inline`: options popover with an Enhance prompt button. `file`: options and the each-image toggle only. */
     variant: 'inline' | 'file';
-    /** A job is running or being submitted. */
+    /** A job is being submitted. */
     busy: boolean;
+    /** A job is running or queued; the enhancer would need its memory. */
+    jobsActive?: boolean;
     /** Word ceiling for the current model (FLUX.1 reads fewer tokens). */
     maxWords: number;
     /** Live state the prompt box shows in its Enhanced tab. */
@@ -36,6 +38,7 @@
     contract,
     variant,
     busy,
+    jobsActive = false,
     maxWords,
     enhancing = $bindable(false),
     streamingText = $bindable(''),
@@ -57,10 +60,11 @@
   let abort: AbortController | null = null;
 
   const downloadSize = $derived(downloadedThisSession ? null : contract.download_size_label);
-  const enhanceDisabled = $derived(busy || enhancing || noOp || !available || draft.state.prompt.trim() === '');
+  const enhanceDisabled = $derived(busy || jobsActive || enhancing || noOp || !available || draft.state.prompt.trim() === '');
   const disabledHint = $derived(
     !available ? (contract.error ?? 'No prompt enhancer model is configured.')
-      : busy ? 'Available when the current job finishes.'
+      : jobsActive ? 'Available when all jobs have finished.'
+      : busy ? 'Available once the job is submitted.'
       : noOp ? 'Pick a style, a mood, a detail, or a length.'
       : draft.state.prompt.trim() === '' ? 'Write a prompt first.'
       : null

@@ -1,6 +1,6 @@
 # Queue jobs in the Web UI and collapse the sidebar
 
-**Status:** Accepted (2026-10-04)
+**Status:** Done (2026-10-04, unreleased; branch `feat/web-job-queue`)
 
 ## Problem
 
@@ -39,11 +39,11 @@ A static wireframe of the layout and states was made during design (not committe
 
 ## Backend
 
-**B1. One worker.** `WebRunner` uses a single-thread executor (`max_workers=1`) for all jobs. The only other job kind, the dummy job, is used in tests only and is not exposed by the production app; tests that need concurrency pass `max_workers`. Every job, dummy jobs included, goes through the queue order (B2) and the claim step (B5).
+**B1. One worker.** `WebRunner` uses a single-thread executor (`max_workers=1`) for all jobs. The only other job kind, the dummy job, is used in tests only and is not exposed by the production app; tests that need concurrency pass `max_workers`. Only generation jobs go through the queue order (B2) and the claim step (B5); other jobs (the test-only dummy job) run as before.
 
 **B2. Queue order.** `WebRunner` keeps an ordered `deque` of waiting job ids, guarded by `_jobs_lock`. It is the only source of queue order. `WebRunner` also records the claimed job id (the job the worker is running), under the same lock. Status constants move to `job_contract.py`: `QUEUED_STATUS = "queued"` and an `ACTIVE_STATUSES` set (`queued`, `running`, `paused`).
 
-**B3. Accept instead of refuse.** `_submit_job` no longer raises `JobConflictError` for a second generation job. Under `_jobs_lock` it runs the admission check, registers the record with status `queued` and its full public context, publishes `job_submitted`, appends the id to the deque, and calls `executor.submit`, all before releasing the lock. Holding the lock through dispatch keeps the executor's order equal to the deque order when two tabs submit at once, and `job_submitted` always comes before `job_started`. The admission check (`_reject_while_busy`) still refuses a submission while a prompt enhancement runs or a quantized copy is being saved.
+**B3. Accept instead of refuse.** `_submit_job` no longer raises `JobConflictError` for a second generation job. Under `_jobs_lock` it runs the admission check, registers the record with status `queued` and its full public context, publishes `job_submitted`, appends the id to the deque, and calls `executor.submit`, all before releasing the lock. Holding the lock through dispatch keeps the executor's order equal to the deque order when two tabs submit at once, and `job_submitted` always comes before `job_started`. The admission check (`_reject_while_busy`) still refuses a submission while a manual prompt enhancement runs or a quantized copy is being saved. Both can only start while no job is active, so while jobs are active the check lets the submission through: a busy enhancer then belongs to a job's own preflight.
 
 **B4. Full context at submit.** The public context (workflow, prompt, model, runs, size label (`meta`), created time, output dir and the stored settings from B10) is passed into `_submit_job`, so no reader ever sees a queued job without it. `_generate_from_form` no longer calls `update_job_context` after dispatch, and `WebRunner.update_job_context`, which has no other caller, is removed. The `POST /api/generate` response adds `queue_position` (`null` when the job is the active job).
 
@@ -79,7 +79,7 @@ A static wireframe of the layout and states was made during design (not committe
 - Removing or clearing queued jobs updates `queuedJobs`. It never triggers the "stopped" lifecycle callbacks, toasts or mascot reaction. A `job_cancelled` event with `reason: "removed"` for a followed job is handled the same way, also when it is read from a snapshot's `last_event` during reconnect or stream recovery.
 - The existing per-job toasts stay. A failure while jobs are queued adds "Starting the next queued job."
 
-**F3. Keeping tabs current.** The store refetches `GET /api/jobs` after a submit, remove or clear; after the followed job ends; when the tab gains focus or becomes visible; and while the tab is visible: every 4 seconds while `jobsActive`, every 15 seconds otherwise. A visible tab therefore picks up another tab's jobs within 15 seconds (4 seconds once jobs are active). Polling stops while the tab is hidden.
+**F3. Keeping tabs current.** The store refetches (the workspace page starts and stops this sync; following the next job after a terminal event works on any page) `GET /api/jobs` after a submit, remove or clear; after the followed job ends; when the tab gains focus or becomes visible; and while the tab is visible: every 4 seconds while `jobsActive`, every 15 seconds otherwise. A visible tab therefore picks up another tab's jobs within 15 seconds (4 seconds once jobs are active). Polling stops while the tab is hidden.
 
 **F4. Queue panel.** An "Up next · N" list under the job card: position, prompt, model, workflow, runs and size label, a "Starts next" tag on the first item, **Load settings** and a remove button per item, and **Clear queue** in the header (opens a `ConfirmDialog`). Hidden when nothing is queued. After the queue is cleared, focus moves to the Generate button.
 
@@ -176,3 +176,10 @@ A new shared `ConfirmDialog` molecule becomes the convention for asking the user
 - Keeping a model loaded between queued jobs that use the same model.
 - Persisting the queue across server restarts.
 - Stopping a running video job ([Controls for Web UI video jobs](video-job-controls.md)).
+
+## Implementation notes
+
+Built on `feat/web-job-queue` in four commits: the confirmation dialog, the collapsible sidebar and two-column job card, the backend queue, and the frontend queue. Differences from the plan above:
+
+- The claim step applies to generation jobs only (B1), so test-only dummy jobs keep running without the queue.
+- `_reject_while_busy` skips the enhancer and quantize checks while jobs are active (B3). Without this, a job's own auto-enhance preflight made the enhancer look busy and refused every submission behind it.
