@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b8] - 2026-10-04
+
 ### Added
 - Web UI: prompts that could not be enhanced, or were skipped, are marked in the progress panel
 - **Next**, **Pause** and **Quit** work while prompts are enhanced (Web UI image jobs, `ziv-image` keys); `ziv-image` keys also work while the model loads
