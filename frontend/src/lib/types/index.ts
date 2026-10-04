@@ -439,7 +439,12 @@ export interface ActiveJobState extends JobContext {
   previewUrl: string | null;
   /** Auto-enhanced prompt of the current generation, when the job enhances prompts. */
   enhancedPrompt?: string;
+  /** Outcome of auto enhancement for the current generation, planned before the model loaded. */
+  enhanceStatus?: EnhanceStatus;
 }
+
+/** Per-iteration auto-enhancement outcome reported on `prompt_started`. */
+export type EnhanceStatus = 'off' | 'enhanced' | 'failed' | 'skipped';
 
 // ── SSE event types ────────────────────────────────────────────────────────────
 

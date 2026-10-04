@@ -181,6 +181,10 @@
   <p class="text-sm text-text-primary line-clamp-2 break-words" title={job.prompt}>{job.prompt || 'No prompt supplied'}</p>
   {#if job.enhancedPrompt}
     <p class="job-enhanced line-clamp-3 break-words" title={job.enhancedPrompt}><span class="job-enhanced-label">✨ Enhanced</span> {job.enhancedPrompt}</p>
+  {:else if job.enhanceStatus === 'failed'}
+    <p class="job-enhanced break-words" data-enhance-status="failed"><span class="job-enhanced-label">Not enhanced:</span> the prompt enhancer failed, so the original prompt is used.</p>
+  {:else if job.enhanceStatus === 'skipped'}
+    <p class="job-enhanced break-words" data-enhance-status="skipped"><span class="job-enhanced-label">Not enhanced:</span> skipped, so the original prompt is used.</p>
   {/if}
   <p class="mt-1 text-xs text-text-muted truncate" title={job.model}>{job.model}</p>
 

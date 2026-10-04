@@ -1,4 +1,4 @@
-import type { ActiveJobState, JobContext, JobSnapshot, GalleryAsset, StepEvent, SSEEvent } from '$lib/types';
+import type { ActiveJobState, EnhanceStatus, JobContext, JobSnapshot, GalleryAsset, StepEvent, SSEEvent } from '$lib/types';
 import { connectJobSSE } from '$lib/api/sse';
 import type { SSESubscription } from '$lib/api/sse';
 import { ApiError } from '$lib/api/client';
@@ -45,6 +45,13 @@ function eventFieldString(event: Record<string, unknown> | null | undefined, key
   return typeof value === 'string' ? value : '';
 }
 
+const ENHANCE_STATUSES: ReadonlySet<string> = new Set(['off', 'enhanced', 'failed', 'skipped']);
+
+function eventEnhanceStatus(event: Record<string, unknown> | null | undefined): EnhanceStatus | undefined {
+  const value = event?.enhance_status;
+  return typeof value === 'string' && ENHANCE_STATUSES.has(value) ? (value as EnhanceStatus) : undefined;
+}
+
 function promptProgress(event: Record<string, unknown> | null | undefined): Partial<ActiveJobState> {
   const runs = eventFieldNumber(event, 'total_runs');
   const total = eventFieldNumber(event, 'total_iterations');
@@ -58,6 +65,8 @@ function promptProgress(event: Record<string, unknown> | null | undefined): Part
   }
   if (typeof event?.prompt === 'string') progress.prompt = event.prompt;
   if (typeof event?.enhanced_prompt === 'string') progress.enhancedPrompt = event.enhanced_prompt;
+  const enhanceStatus = eventEnhanceStatus(event);
+  if (enhanceStatus) progress.enhanceStatus = enhanceStatus;
   if (typeof event?.run_index === 'number') progress.batchIndex = event.run_index;
   return progress;
 }
@@ -78,6 +87,12 @@ function statusMessageForEvent(type: string | undefined, event: Record<string, u
   }
   if (type === 'prompt_enhanced') {
     return 'Prompt enhanced.';
+  }
+  if (type === 'prompts_enhancing') {
+    return `Enhancing prompt ${eventFieldNumber(event, 'index')} of ${eventFieldNumber(event, 'total')}...`;
+  }
+  if (type === 'prompt_enhance_failed') {
+    return `Could not enhance prompt ${eventFieldNumber(event, 'index')} of ${eventFieldNumber(event, 'total')}; it uses the original prompt.`;
   }
   if (type === 'workflow_stage_started') {
     const name = eventFieldString(event, 'stage_name');
@@ -228,7 +243,9 @@ function applyStatusEvent(type: string, event: SSEEvent): void {
     ..._job,
     ...promptProgress(data),
     ...(msg ? { message: msg } : {}),
-    ...(type === 'prompt_started' ? { currentStep: 0, totalSteps: 0, stageName: '', stageIndex: 0, message: 'Preparing generation.', enhancedPrompt: undefined } : {}),
+    ...(type === 'prompt_started' ? { currentStep: 0, totalSteps: 0, stageName: '', stageIndex: 0, message: 'Preparing generation.', enhancedPrompt: undefined, enhanceStatus: eventEnhanceStatus(data) } : {}),
+    ...(type === 'prompts_enhancing' ? { stageName: 'enhancing_prompts', currentStep: Math.max(0, eventFieldNumber(data, 'index') - 1), totalSteps: eventFieldNumber(data, 'total') } : {}),
+    ...(type === 'preflight_finished' ? { currentStep: 0, totalSteps: 0, stageName: '' } : {}),
     ...(type === 'workflow_stage_started' ? { stageName: eventFieldString(data, 'stage_name') } : {}),
     ...((type === 'prompt_started' || type === 'workflow_stage_started') && !isReplayedBeforeSnapshot(data) ? { previewUrl: null } : {}),
   };
