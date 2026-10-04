@@ -1025,6 +1025,21 @@ class TestJobQueue:
         assert runner.get_job_snapshot(running)["status"] == "running"
         release.set()
 
+    def test_quit_right_after_the_claim_reaches_the_job(self, monkeypatch, runner):
+        _blocker, _started, release = self._blocking_job(runner, exclusive=False)
+        control_signal = MagicMock()
+        job_id = runner._submit_job(job_type="test", exclusive=True, supported_controls=("quit",), control_signal=control_signal, target_factory=lambda _cb: None)
+        publish = runner._publish_event
+        # Hold back job_started to stand in for the moment between the claim and its event.
+        monkeypatch.setattr(runner, "_publish_event", lambda jid, event: None if event["type"] == "job_started" else publish(jid, event))
+
+        assert runner._claim(job_id) is True
+        result = runner.queue_job_control(job_id, "quit")
+
+        assert result["action"] == "quit"
+        control_signal.queue_action.assert_called_once_with("quit")
+        release.set()
+
     def test_controls_other_than_quit_are_refused_before_a_job_starts(self, runner):
         _first, _started, release = self._blocking_job(runner)
         queued = runner._submit_job(job_type="test", exclusive=True, supported_controls=("pause", "next", "repeat", "quit"), control_signal=MagicMock(), target_factory=lambda _cb: None)
