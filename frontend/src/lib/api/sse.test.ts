@@ -178,4 +178,14 @@ describe('connectJobSSE', () => {
     expect(mockES.closeCalls).toBe(1);
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it('routes the preflight events to onStatus', () => {
+    const onStatus = vi.fn();
+    const subscription = connectJobSSE('test-job', { onStatus });
+    const mockES = latestEventSource();
+    const types = ['preflight_started', 'prompts_enhancing', 'prompt_enhance_failed', 'preflight_finished'];
+    for (const type of types) mockES.emit(type, { type, mode: 'image' });
+    expect(onStatus.mock.calls.map(([type]) => type)).toEqual(types);
+    subscription.close();
+  });
 });

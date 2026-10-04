@@ -78,6 +78,55 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current?.enhancedPrompt).toBeUndefined();
   });
 
+  it('shows preflight rewrite progress as a stage bar and resets it before generation', () => {
+    jobStore.startJob({ job_id: 'pre', workflow: 'txt2img', prompt: 'a fox', model: 'zit', runs: 1, created_at: '' });
+    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    source.emit('preflight_started', { type: 'preflight_started', mode: 'image', total_iterations: 3, total_rewrites: 3 });
+    expect(jobStore.current).toMatchObject({ currentStep: 0, totalSteps: 0, stageName: '' });
+    source.emit('prompts_enhancing', { type: 'prompts_enhancing', mode: 'image', index: 2, total: 3 });
+    expect(jobStore.current).toMatchObject({ stageName: 'enhancing_prompts', currentStep: 1, totalSteps: 3, message: 'Enhancing prompt 2 of 3...' });
+    source.emit('prompt_enhance_failed', { type: 'prompt_enhance_failed', mode: 'image', index: 2, total: 3, message: 'boom' });
+    expect(jobStore.current?.message).toBe('Could not enhance prompt 2 of 3; it uses the original prompt.');
+    expect(jobStore.current).toMatchObject({ stageName: 'enhancing_prompts', currentStep: 1, totalSteps: 3 });
+    source.emit('preflight_finished', { type: 'preflight_finished', mode: 'image', total_iterations: 3, enhanced: 2, failed: 1, skipped: 0 });
+    expect(jobStore.current).toMatchObject({ currentStep: 0, totalSteps: 0, stageName: '' });
+  });
+
+  it('takes the per-generation enhance status from prompt_started and clears it when absent', () => {
+    jobStore.startJob({ job_id: 'status', workflow: 'txt2img', prompt: 'a fox', model: 'zit', runs: 1, created_at: '' });
+    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    source.emit('prompt_started', { type: 'prompt_started', prompt: 'a fox', enhance_status: 'failed' });
+    expect(jobStore.current).toMatchObject({ enhanceStatus: 'failed', enhancedPrompt: undefined });
+    source.emit('step_progress', { type: 'step_progress', current_step: 1, total_steps: 4, elapsed_secs: 1, enhance_status: 'failed' });
+    expect(jobStore.current?.enhanceStatus).toBe('failed');
+    source.emit('prompt_started', { type: 'prompt_started', prompt: 'a cat', enhance_status: 'enhanced' });
+    source.emit('prompt_enhanced', { type: 'prompt_enhanced', enhanced_prompt: 'A cat on a sill.' });
+    expect(jobStore.current).toMatchObject({ enhanceStatus: 'enhanced', enhancedPrompt: 'A cat on a sill.' });
+    source.emit('prompt_started', { type: 'prompt_started', prompt: 'a dog' });
+    expect(jobStore.current?.enhanceStatus).toBeUndefined();
+    expect(jobStore.current?.enhancedPrompt).toBeUndefined();
+  });
+
+  it('restores preflight progress and enhance status from a reconnect snapshot', async () => {
+    await jobStore.reconnectActiveJob({ snapshot: {
+      id: 'restore-pre', job_id: 'restore-pre', workflow: 'txt2img', job_type: 'txt2img', status: 'running',
+      prompt: 'P', model: 'zit', runs: 1, created_at: '', event_count: 4, paused: false,
+      last_event: { type: 'prompts_enhancing', event_id: 4, index: 2, total: 5 },
+    } });
+    expect(jobStore.current?.message).toBe('Enhancing prompt 2 of 5...');
+    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    source.emit('prompts_enhancing', { type: 'prompts_enhancing', event_id: 4, index: 2, total: 5 });
+    expect(jobStore.current).toMatchObject({ stageName: 'enhancing_prompts', currentStep: 1, totalSteps: 5 });
+    jobStore.clearJob();
+
+    await jobStore.reconnectActiveJob({ snapshot: {
+      id: 'restore-status', job_id: 'restore-status', workflow: 'txt2img', job_type: 'txt2img', status: 'running',
+      prompt: 'P', model: 'zit', runs: 1, created_at: '', event_count: 9, paused: false,
+      last_event: { type: 'step_progress', event_id: 9, current_step: 2, total_steps: 8, enhance_status: 'skipped' },
+    } });
+    expect(jobStore.current?.enhanceStatus).toBe('skipped');
+  });
+
   it('tracks the live preview URL from step versions and clears it when the generation ends', () => {
     jobStore.startJob({ job_id: 'job-preview', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
     const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;

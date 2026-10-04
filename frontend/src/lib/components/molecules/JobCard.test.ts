@@ -151,6 +151,26 @@ describe('JobCard', () => {
     expect(target.textContent).not.toContain('text_to_image');
   });
 
+  it('marks a generation whose prompt was not enhanced, and only when no rewrite is shown', () => {
+    component = mount(JobCard, { target, props: { job: makeJob({ enhanceStatus: 'failed' }) } });
+    flushSync();
+    expect(target.querySelector('[data-enhance-status="failed"]')).not.toBeNull();
+    unmount(component);
+
+    component = mount(JobCard, { target, props: { job: makeJob({ enhanceStatus: 'skipped' }) } });
+    flushSync();
+    expect(target.querySelector('[data-enhance-status="skipped"]')).not.toBeNull();
+    unmount(component);
+
+    for (const job of [makeJob({ enhanceStatus: 'off' }), makeJob({ enhanceStatus: 'enhanced', enhancedPrompt: 'A fox in snow.' }), makeJob()]) {
+      component = mount(JobCard, { target, props: { job } });
+      flushSync();
+      expect(target.querySelector('[data-enhance-status]')).toBeNull();
+      unmount(component);
+    }
+    component = null;
+  });
+
   it('immediately shows pending feedback, prevents duplicate clicks, then confirms acceptance', async () => {
     let resolve!: () => void;
     const onpause = vi.fn(() => new Promise<void>((done) => { resolve = done; }));
