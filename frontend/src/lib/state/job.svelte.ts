@@ -2,10 +2,14 @@ import type { ActiveJobState, EnhanceStatus, JobContext, JobSnapshot, GalleryAss
 import { connectJobSSE } from '$lib/api/sse';
 import type { SSESubscription } from '$lib/api/sse';
 import { ApiError } from '$lib/api/client';
-import { getJobSnapshot, jobPreviewUrl } from '$lib/api/workspace';
+import { cancelJob, clearQueue, getJobSnapshot, jobPreviewUrl, listJobs } from '$lib/api/workspace';
 import { clearActiveJobId, readActiveJobId, writeActiveJobId } from './activeJobStorage';
 
 let _job = $state<ActiveJobState | null>(null);
+// Generation jobs waiting behind the active one, oldest first (from the server; shared by every tab).
+let _queued = $state<JobSnapshot[]>([]);
+// Only the newest job-list request applies, so a slow older response cannot undo a newer one.
+let _listRequest = 0;
 // Event id the reconnect snapshot was taken at: replayed SSE history up to it must not change the live preview,
 // which the snapshot already reflects.
 let _previewEventFloor = 0;
@@ -16,6 +20,11 @@ let _recoveryTimer: ReturnType<typeof setTimeout> | null = null;
 
 const RECOVERY_BASE_DELAY_MS = 1000;
 const RECOVERY_MAX_DELAY_MS = 30000;
+/** How often a visible tab re-reads the job list while jobs are active, and while idle. */
+export const QUEUE_SYNC_ACTIVE_MS = 4000;
+export const QUEUE_SYNC_IDLE_MS = 15000;
+/** `reason` of a `job_cancelled` event for a job removed from the queue before it started. */
+const REMOVED_REASON = 'removed';
 
 export type JobLifecycleCallbacks = {
   onComplete?: (outputs: GalleryAsset[]) => void | Promise<void>;
@@ -82,6 +91,9 @@ function statusMessageForEvent(type: string | undefined, event: Record<string, u
   }
   if (type === 'batch_started') {
     return 'Starting generation...';
+  }
+  if (type === 'job_started') {
+    return 'Starting...';
   }
   if (type === 'enhancer_loading') {
     const phase = eventFieldString(event, 'phase');
@@ -161,7 +173,7 @@ function validTerminalOutputs(value: unknown): GalleryAsset[] | null {
 function makeInitialJobState(ctx: JobContext): ActiveJobState {
   return {
     ...ctx,
-    status: 'running',
+    status: ctx.queue_position ? 'queued' : 'running',
     currentStep: 0,
     totalSteps: 0,
     elapsed: 0,
@@ -252,6 +264,7 @@ function applyStatusEvent(type: string, event: SSEEvent): void {
     ...(type === 'preflight_finished' ? { currentStep: 0, totalSteps: 0, stageName: '' } : {}),
     ...(type === 'workflow_stage_started' ? { stageName: eventFieldString(data, 'stage_name') } : {}),
     ...((type === 'prompt_started' || type === 'workflow_stage_started') && !isReplayedBeforeSnapshot(data) ? { previewUrl: null } : {}),
+    ...(type === 'job_started' ? { status: 'running' as const } : {}),
   };
 }
 
@@ -335,8 +348,9 @@ function attachJobEvents(jobId: string): void {
     onJobFailed() {
       finishFailed('Job failed.');
     },
-    onJobCancelled() {
-      finishCancelled();
+    onJobCancelled(event) {
+      if ((event as { reason?: unknown }).reason === REMOVED_REASON) finishRemoved();
+      else finishCancelled();
     },
     onJobPaused() {
       if (!_job) return;
@@ -365,6 +379,7 @@ function finishCompleted(outputs: unknown): void {
   _job = { ..._job, status: 'completed', paused: false, outputs: dedupeOutputs(terminalOutputs ?? _job.outputs), message: 'Job completed.' };
   clearActiveJobId(_job.job_id);
   notifyLifecycle('onComplete', _job.outputs);
+  void refreshJobs();
 }
 
 function finishFailed(message: string): void {
@@ -372,6 +387,7 @@ function finishFailed(message: string): void {
   _job = { ..._job, status: 'failed', paused: false, message };
   clearActiveJobId(_job.job_id);
   notifyLifecycle('onFailed');
+  void refreshJobs();
 }
 
 function finishCancelled(): void {
@@ -379,6 +395,40 @@ function finishCancelled(): void {
   _job = { ..._job, status: 'cancelled', paused: false, message: 'Job stopped.' };
   clearActiveJobId(_job.job_id);
   notifyLifecycle('onCancelled');
+  void refreshJobs();
+}
+
+/** The followed job was taken off the queue before it started: not a stop, so no lifecycle callbacks. */
+function finishRemoved(): void {
+  if (!_job) return;
+  _job = { ..._job, status: 'cancelled', paused: false, message: 'Removed from the queue.' };
+  clearActiveJobId(_job.job_id);
+  void refreshJobs();
+}
+
+function wasRemoved(snapshot: JobSnapshot): boolean {
+  return snapshot.status === 'cancelled' && snapshot.last_event?.reason === REMOVED_REASON;
+}
+
+/** Follow a job the server reports as active, unless this tab already follows a live job. */
+function followActive(active: JobSnapshot | null): void {
+  if (!active || (_job && !isTerminalStatus(_job.status))) return;
+  cancelRecovery();
+  _removedOutputIds.clear();
+  connectSnapshot(active);
+}
+
+/** Re-read the job list: refresh the queue and follow the next active job once the followed one has ended. */
+async function refreshJobs(): Promise<void> {
+  const request = ++_listRequest;
+  try {
+    const jobs = await listJobs();
+    if (request !== _listRequest) return;
+    _queued = jobs.queued_jobs ?? [];
+    followActive(jobs.active_job ?? null);
+  } catch {
+    // Transient: the next sync, focus or job event tries again.
+  }
 }
 
 function isCurrentLiveJob(jobId: string): boolean {
@@ -431,6 +481,8 @@ async function recoverLostStream(jobId: string): Promise<void> {
   if (!isCurrentLiveJob(jobId)) return;
   if (snapshot.status === 'completed') {
     finishCompleted(snapshot.outputs);
+  } else if (wasRemoved(snapshot)) {
+    finishRemoved();
   } else if (snapshot.status === 'cancelled') {
     finishCancelled();
   } else if (snapshot.status === 'failed') {
@@ -444,6 +496,10 @@ async function recoverLostStream(jobId: string): Promise<void> {
 export const jobStore = {
   get current(): ActiveJobState | null { return _job; },
   get isRunning(): boolean { return _job?.status === 'queued' || _job?.status === 'running' || _job?.status === 'paused'; },
+  /** Generation jobs waiting behind the active one, oldest first. */
+  get queuedJobs(): JobSnapshot[] { return _queued; },
+  /** Whether a job is running or waiting: new submissions join the queue and on-demand enhancement is unavailable. */
+  get jobsActive(): boolean { return this.isRunning || _queued.length > 0; },
 
   subscribeLifecycle(callbacks: JobLifecycleCallbacks): () => void {
     const registration = { callbacks };
@@ -460,6 +516,68 @@ export const jobStore = {
   removeOutputs(ids: Iterable<string>): void {
     for (const id of ids) _removedOutputIds.add(id);
     if (_job) _job = { ..._job, outputs: dedupeOutputs(_job.outputs) };
+  },
+
+  /** Take the response of a submit: follow the job when it is the active one, otherwise add it to the queue. */
+  jobSubmitted(ctx: JobContext): void {
+    if (ctx.queue_position) {
+      void refreshJobs();
+      return;
+    }
+    this.startJob(ctx);
+    void refreshJobs();
+  },
+
+  /** Seed the queue from the workspace payload. */
+  seedQueue(jobs: JobSnapshot[]): void {
+    _queued = jobs;
+  },
+
+  refreshJobs,
+
+  /** Remove one queued job (it never runs). */
+  async removeQueued(jobId: string): Promise<void> {
+    _queued = _queued.filter((job) => (job.job_id ?? job.id) !== jobId);
+    try {
+      await cancelJob(jobId);
+    } finally {
+      await refreshJobs();
+    }
+  },
+
+  /** Remove every queued job; the active job keeps running. */
+  async clearQueue(): Promise<void> {
+    _queued = [];
+    try {
+      await clearQueue();
+    } finally {
+      await refreshJobs();
+    }
+  },
+
+  /** Keep the job list current while this tab is visible: on focus, and on a timer (faster while jobs are active). */
+  startSync(): () => void {
+    let lastSync = 0;
+    const sync = (): void => {
+      lastSync = Date.now();
+      void refreshJobs();
+    };
+    const onVisible = (): void => {
+      if (!document.hidden) sync();
+    };
+    const timer = setInterval(() => {
+      if (document.hidden) return;
+      const interval = this.jobsActive ? QUEUE_SYNC_ACTIVE_MS : QUEUE_SYNC_IDLE_MS;
+      if (Date.now() - lastSync >= interval - 50) sync();
+    }, QUEUE_SYNC_ACTIVE_MS);
+    window.addEventListener('focus', sync);
+    document.addEventListener('visibilitychange', onVisible);
+    sync();
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', sync);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   },
 
   startJob(ctx: JobContext): void {
@@ -504,5 +622,7 @@ export const jobStore = {
     closeSubscription();
     _previewEventFloor = 0;
     _job = null;
+    _queued = [];
+    _listRequest += 1;
   }
 };

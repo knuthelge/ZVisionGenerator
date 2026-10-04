@@ -91,7 +91,7 @@ ziv-model list --loras
 
 ## Managing Models in the Web UI
 
-The Web UI's Models page lists the same models and LoRAs and can convert checkpoints and import LoRAs. Each row also has a delete button, which asks for confirmation first and is unavailable while a generation is running:
+The Web UI's Models page lists the same models and LoRAs and can convert checkpoints and import LoRAs. Each row also has a delete button, which asks for confirmation first and is unavailable while generation jobs are running or queued:
 
 - **Converted models** (in `~/.ziv/models/`): deletes the model folder. Base-model files it links to in the HuggingFace cache are kept.
 - **HuggingFace models** (aliases such as `klein9b`): deletes the model's download from the HuggingFace cache. The alias stays, and the model downloads again the next time you use it. If converted models link to files in that download, the confirmation lists them, because they stop working until it is downloaded again. The button appears once the model's files are fully downloaded.

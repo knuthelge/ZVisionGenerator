@@ -570,7 +570,8 @@ describe('jobStore reconnect contract', () => {
         expect(jobStore.current?.status).toBe('running');
 
         await vi.advanceTimersByTimeAsync(2000);
-        expect(fetchMock).toHaveBeenCalledTimes(3);
+        // Three snapshot lookups; the finished job then re-reads the job list to follow the next one.
+        expect(fetchMock.mock.calls.filter(([url]) => url !== '/api/jobs')).toHaveLength(3);
         expect(jobStore.current?.status).toBe('completed');
         expect(onFailed).not.toHaveBeenCalled();
         detach();
@@ -639,3 +640,145 @@ function makeOutput(id: string) {
     media_type: 'image' as const, reuse_workspace_url: '#/workspace?workflow=txt2img',
   };
 }
+
+describe('jobStore queue', () => {
+  type Source = { emit: (type: string, data: unknown) => void };
+  const lastSource = (): Source => (globalThis.EventSource as unknown as { lastInstance: Source }).lastInstance;
+
+  function snap(jobId: string, status: string, extra: Record<string, unknown> = {}) {
+    return { id: jobId, job_id: jobId, workflow: 'txt2img', job_type: 'Text to Image', status, prompt: jobId, model: 'zit', runs: 1, created_at: '', event_count: 1, paused: false, supported_controls: [], ...extra };
+  }
+
+  /** Answer `/api/jobs` with the given list and record every request. */
+  function serveJobs(list: () => { active_job: unknown; queued_jobs: unknown[] }) {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/jobs') return { ok: true, json: async () => list() };
+      return { ok: true, json: async () => ({ url, method: init?.method }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    jobStore.clearJob();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('adds a submitted job to the queue when the server says it waits, keeping the running job', async () => {
+    let queued: unknown[] = [];
+    serveJobs(() => ({ active_job: snap('first', 'running'), queued_jobs: queued }));
+    jobStore.jobSubmitted({ job_id: 'first', workflow: 'txt2img', prompt: 'first', model: 'zit', runs: 1, created_at: '', queue_position: null });
+    expect(jobStore.current?.job_id).toBe('first');
+
+    queued = [snap('second', 'queued', { queue_position: 1 })];
+    jobStore.jobSubmitted({ job_id: 'second', workflow: 'txt2img', prompt: 'second', model: 'zit', runs: 1, created_at: '', queue_position: 1 });
+    await vi.waitFor(() => expect(jobStore.queuedJobs.map((job) => job.job_id)).toEqual(['second']));
+
+    expect(jobStore.current?.job_id).toBe('first');
+    expect(jobStore.jobsActive).toBe(true);
+  });
+
+  it('picks up an active job another tab started when its own submit is queued', async () => {
+    serveJobs(() => ({ active_job: snap('other-tab', 'running'), queued_jobs: [snap('mine', 'queued', { queue_position: 1 })] }));
+
+    jobStore.jobSubmitted({ job_id: 'mine', workflow: 'txt2img', prompt: 'mine', model: 'zit', runs: 1, created_at: '', queue_position: 1 });
+
+    await vi.waitFor(() => expect(jobStore.current?.job_id).toBe('other-tab'));
+    expect(jobStore.queuedJobs.map((job) => job.job_id)).toEqual(['mine']);
+  });
+
+  it('follows the next job when the followed one ends, without the workspace mounted', async () => {
+    let jobs: { active_job: unknown; queued_jobs: unknown[] } = { active_job: snap('first', 'running'), queued_jobs: [snap('second', 'queued', { queue_position: 1 })] };
+    serveJobs(() => jobs);
+    const onComplete = vi.fn();
+    const detach = jobStore.subscribeLifecycle({ onComplete });
+    jobStore.startJob({ job_id: 'first', workflow: 'txt2img', prompt: 'first', model: 'zit', runs: 1, created_at: '' });
+
+    jobs = { active_job: snap('second', 'running'), queued_jobs: [] };
+    lastSource().emit('job_completed', { type: 'job_completed', job_id: 'first', outputs: [] });
+
+    expect(onComplete).toHaveBeenCalledOnce();
+    await vi.waitFor(() => expect(jobStore.current?.job_id).toBe('second'));
+    expect(jobStore.current?.status).toBe('running');
+    expect(jobStore.queuedJobs).toEqual([]);
+    detach();
+  });
+
+  it('marks the followed job running on job_started', () => {
+    serveJobs(() => ({ active_job: null, queued_jobs: [] }));
+    jobStore.startJob({ job_id: 'head', workflow: 'txt2img', prompt: 'p', model: 'zit', runs: 1, created_at: '' });
+    lastSource().emit('job_started', { type: 'job_started', job_id: 'head' });
+    expect(jobStore.current?.status).toBe('running');
+  });
+
+  it('treats a followed job removed from the queue as removed, not stopped', async () => {
+    serveJobs(() => ({ active_job: null, queued_jobs: [] }));
+    const onCancelled = vi.fn();
+    const detach = jobStore.subscribeLifecycle({ onCancelled });
+    jobStore.startJob({ job_id: 'head', workflow: 'txt2img', prompt: 'p', model: 'zit', runs: 1, created_at: '' });
+
+    lastSource().emit('job_cancelled', { type: 'job_cancelled', job_id: 'head', reason: 'removed' });
+
+    expect(onCancelled).not.toHaveBeenCalled();
+    expect(jobStore.current?.status).toBe('cancelled');
+    expect(jobStore.current?.message).toBe('Removed from the queue.');
+    expect(readActiveJobId()).toBeNull();
+    detach();
+  });
+
+  it('removes one queued job and clears the queue through the API', async () => {
+    const fetchMock = serveJobs(() => ({ active_job: snap('first', 'running'), queued_jobs: [] }));
+    jobStore.seedQueue([snap('a', 'queued', { queue_position: 1 }), snap('b', 'queued', { queue_position: 2 })] as never);
+
+    await jobStore.removeQueued('a');
+    expect(fetchMock).toHaveBeenCalledWith('/api/jobs/a/cancel', expect.objectContaining({ method: 'POST' }));
+
+    jobStore.seedQueue([snap('b', 'queued', { queue_position: 1 })] as never);
+    await jobStore.clearQueue();
+    expect(fetchMock).toHaveBeenCalledWith('/api/jobs/queue', expect.objectContaining({ method: 'DELETE' }));
+    expect(jobStore.queuedJobs).toEqual([]);
+  });
+
+  it('re-reads the job list on focus and on a timer while visible: often with jobs active, rarely when idle', async () => {
+    vi.useFakeTimers();
+    let jobs: { active_job: unknown; queued_jobs: unknown[] } = { active_job: null, queued_jobs: [] };
+    const fetchMock = serveJobs(() => jobs);
+    const listCalls = () => fetchMock.mock.calls.filter(([url]) => url === '/api/jobs').length;
+    const stop = jobStore.startSync();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listCalls()).toBe(1);
+
+    window.dispatchEvent(new Event('focus'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listCalls()).toBe(2);
+
+    // Idle: every 15 s.
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(listCalls()).toBe(2);
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(listCalls()).toBe(3);
+
+    // Active: every 4 s.
+    jobStore.seedQueue([snap('q', 'queued', { queue_position: 1 })] as never);
+    jobs = { active_job: snap('run', 'running'), queued_jobs: [snap('q', 'queued')] };
+    await vi.advanceTimersByTimeAsync(16000);
+    expect(listCalls()).toBeGreaterThanOrEqual(6);
+
+    // Hidden: no polling.
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    const hiddenStart = listCalls();
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(listCalls()).toBe(hiddenStart);
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+
+    stop();
+    await vi.advanceTimersByTimeAsync(20000);
+    window.dispatchEvent(new Event('focus'));
+    expect(listCalls()).toBe(hiddenStart);
+  });
+});

@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { WorkspaceContext, JobContext, JobSnapshot, GalleryPage } from '$lib/types';
+import type { WorkspaceContext, JobContext, JobList, JobSnapshot, GalleryPage } from '$lib/types';
 
 export function getWorkspaceContext(params?: Record<string, string>): Promise<WorkspaceContext> {
   const query = params ? '?' + new URLSearchParams(params).toString() : '';
@@ -32,6 +32,15 @@ export function jobPreviewUrl(jobId: string, version: number): string {
 
 export function cancelJob(jobId: string): Promise<void> {
   return api.post(`/api/jobs/${jobId}/cancel`);
+}
+
+export function listJobs(): Promise<JobList> {
+  return api.get<JobList>('/api/jobs');
+}
+
+/** Remove every queued job; the active job keeps running. */
+export function clearQueue(): Promise<{ cancelled: string[] }> {
+  return api.delete<{ cancelled: string[] }>('/api/jobs/queue');
 }
 
 export function getHistory(page: number = 1): Promise<GalleryPage> {
