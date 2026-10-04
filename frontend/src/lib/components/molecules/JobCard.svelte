@@ -169,6 +169,7 @@
     <span class="job-status" data-status={statusLabel}><span class="status-dot"></span>{statusLabel}</span>
   </div>
   <div class="job-body">
+  <div class="job-main">
   {#if runCount > 1 || hasPromptProgress}
     <p class="mb-2 flex flex-wrap items-center gap-x-2 text-xs font-medium text-primary-main" role="status" aria-live="polite" aria-atomic="true">
       <span>Run {currentRun + 1} of {runCount || 1}</span>
@@ -294,44 +295,48 @@
     {/if}
   </div>
 
-  <!-- Live preview sits below the controls so they stay put when it appears or clears. -->
-  {#if showPreview}
-    <figure class="live-preview">
-      <img src={job.previewUrl} alt="Live preview of the generation in progress" onerror={(event) => { failedPreviewUrl = event.currentTarget.getAttribute('src'); }} />
-      <figcaption>Live preview</figcaption>
-    </figure>
-  {/if}
+  </div>
 
-  <!-- Output previews are shown as soon as each successful asset arrives. -->
-  {#if uniqueOutputs.length > 0}
-    <div class="mt-3 flex items-center justify-between gap-2 text-xs text-text-secondary">
-      <span>Outputs · {uniqueOutputs.length}</span>
-      <span class="sr-only" role="status" aria-live="polite" aria-atomic="true">{uniqueOutputs.length} {uniqueOutputs.length === 1 ? 'output' : 'outputs'} ready</span>
-    </div>
-    <div
-      class="output-preview-grid custom-scrollbar mt-3 grid grid-cols-3 gap-2"
-      aria-label="Generated outputs"
-    >
-      {#each uniqueOutputs as output, index (output.id)}
-        {@const newest = index === uniqueOutputs.length - 1}
-        <button type="button" class="block w-full rounded-md focus-visible:focus-ring" aria-label="View {output.filename} fullscreen" onclick={(event) => onopenoutput?.(output, event.currentTarget)}>
-          {#if output.media_type === 'video'}
-            <video
-              src={output.thumbnail_url || output.url}
-              class="w-full aspect-square object-cover rounded-md border border-zinc-800"
-              muted
-              preload={newest ? 'metadata' : 'none'}
-            ></video>
-          {:else}
-            <img
-              src={output.thumbnail_url || output.url}
-              alt={output.filename}
-              class="w-full aspect-square object-cover rounded-md border border-zinc-800"
-              loading={newest ? 'eager' : 'lazy'}
-            />
-          {/if}
-        </button>
-      {/each}
+  <!-- Right column: the live preview and the outputs, their labels on one line. -->
+  {#if showPreview || uniqueOutputs.length > 0}
+    <div class="job-media" class:both={showPreview && uniqueOutputs.length > 0}>
+      {#if showPreview}
+        <span class="media-label" id="{job.job_id}-preview-label">Live preview</span>
+        <figure class="live-preview" aria-labelledby="{job.job_id}-preview-label">
+          <img src={job.previewUrl} alt="Live preview of the generation in progress" onerror={(event) => { failedPreviewUrl = event.currentTarget.getAttribute('src'); }} />
+        </figure>
+      {/if}
+      {#if uniqueOutputs.length > 0}
+        <span class="media-label">
+          Outputs · {uniqueOutputs.length}
+          <span class="sr-only" role="status" aria-live="polite" aria-atomic="true">{uniqueOutputs.length} {uniqueOutputs.length === 1 ? 'output' : 'outputs'} ready</span>
+        </span>
+        <div
+          class="output-preview-grid custom-scrollbar grid gap-2 {showPreview ? 'grid-cols-2' : 'grid-cols-3'}"
+          aria-label="Generated outputs"
+        >
+          {#each uniqueOutputs as output, index (output.id)}
+            {@const newest = index === uniqueOutputs.length - 1}
+            <button type="button" class="block w-full rounded-md focus-visible:focus-ring" aria-label="View {output.filename} fullscreen" onclick={(event) => onopenoutput?.(output, event.currentTarget)}>
+              {#if output.media_type === 'video'}
+                <video
+                  src={output.thumbnail_url || output.url}
+                  class="w-full aspect-square object-cover rounded-md border border-zinc-800"
+                  muted
+                  preload={newest ? 'metadata' : 'none'}
+                ></video>
+              {:else}
+                <img
+                  src={output.thumbnail_url || output.url}
+                  alt={output.filename}
+                  class="w-full aspect-square object-cover rounded-md border border-zinc-800"
+                  loading={newest ? 'eager' : 'lazy'}
+                />
+              {/if}
+            </button>
+          {/each}
+        </div>
+      {/if}
     </div>
   {/if}
   </div>
@@ -379,7 +384,12 @@
   .job-status[data-status='running'], .job-status[data-status='completed'] { color: var(--color-primary-main); }
   .job-status[data-status='paused'] { color: var(--color-warning); }
   .job-status[data-status='failed'], .job-message.failed { color: var(--color-error); }
-  .job-body { padding: 12px 14px; }
+  .job-body { display: flex; flex-wrap: wrap; gap: 16px 20px; padding: 12px 14px; }
+  .job-main { flex: 1 1 280px; min-width: 0; }
+  /* Column-major grid: each label sits above its content, so the two labels share a line. */
+  .job-media { flex: 1 1 300px; min-width: 0; display: grid; grid-auto-flow: column; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); gap: 6px 12px; align-content: start; }
+  .job-media.both { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+  .media-label { font-size: 12px; color: var(--color-text-secondary); }
   .job-timing { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 14px; font-size: 11px; }
   .job-timing div { display: flex; align-items: baseline; gap: 8px; }
   dt { color: var(--color-text-muted); }
@@ -401,8 +411,7 @@
     align-content: start;
     padding-right: 2px;
   }
-  .live-preview { position: relative; margin-top: 12px; overflow: hidden; border: 1px solid var(--color-border-subtle); border-radius: 6px; background: var(--color-bg-base); }
+  .live-preview { margin: 0; overflow: hidden; border: 1px solid var(--color-border-subtle); border-radius: 6px; background: var(--color-bg-base); }
   .live-preview img { display: block; width: 100%; max-height: min(40vh, 18rem); object-fit: contain; }
-  .live-preview figcaption { position: absolute; left: 6px; bottom: 6px; padding: 2px 6px; border-radius: 3px; font-size: 10px; color: var(--color-text-secondary); background: var(--color-bg-surface); opacity: 0.85; }
   .job-footer { display: flex; gap: 8px; padding: 7px 14px; font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-base); border-top: 1px solid var(--color-border-subtle); }
 </style>

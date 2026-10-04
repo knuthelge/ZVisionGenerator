@@ -40,6 +40,7 @@ const DEFAULT_DRAFT: DraftState = {
   upscaleFactor: 2,
   quantize: null,
   historyCollapsed: false,
+  sidebarCollapsed: false,
   lastGeneratedAt: null,
   version: SCHEMA_VERSION,
   scheduler: null,
@@ -386,6 +387,7 @@ export const draft = {
       loraString: s.loraString,
       quantize: s.quantize,
       historyCollapsed: s.historyCollapsed,
+      sidebarCollapsed: s.sidebarCollapsed,
       lastGeneratedAt: s.lastGeneratedAt,
     };
     this.hydrateFromContext(ctx, s.model);
