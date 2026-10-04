@@ -39,7 +39,8 @@ def list_models(data_dir: Path) -> list[ModelEntry]:
 
     entries: list[ModelEntry] = []
     for child in models_dir.iterdir():
-        if not child.is_dir():
+        # Hidden folders are never models (e.g. an in-progress stored quant).
+        if not child.is_dir() or child.name.startswith("."):
             continue
         try:
             info: ImageModelInfo = detect_image_model(str(child))
@@ -67,7 +68,8 @@ def list_video_models(data_dir: Path) -> list[VideoModelEntry]:
 
     entries: list[VideoModelEntry] = []
     for child in models_dir.iterdir():
-        if not child.is_dir():
+        # Hidden folders are never models (e.g. an in-progress stored quant).
+        if not child.is_dir() or child.name.startswith("."):
             continue
         info = detect_video_model(str(child))
         if info.family == "unknown":

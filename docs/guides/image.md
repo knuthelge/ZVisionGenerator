@@ -166,7 +166,7 @@ The first time a model runs at `-q 8` or `-q 4` (or **Quant: q8/q4** in the Web 
 - It is replaced automatically when the source model's weights change (including a new download of an alias's Hugging Face repo) or mflux is updated.
 - It is listed on the Models page as *q8 copy of &lt;name&gt;*, where you can delete it to free disk space. It does not appear in the model picker: choose the base model and a quantize level.
 - Deleting a model on the Models page, or an alias's Hugging Face download, also deletes its copies.
-- Stopping a job while the copy is being saved discards the partial copy; the next job tries again.
+- Stopping a job while the copy is being saved takes effect once the current write finishes (up to about 30 seconds); the copy is then discarded and the next job tries again.
 - An alias whose model is not downloaded yet is downloaded first; the copy is saved once the download is complete.
 - A model given as a raw Hugging Face repo id or a folder outside `~/.ziv/models/` (`-m org/repo`, `-m /path/to/model`) is quantized at load each time. Use an alias, or install the model, to get a copy.
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ __all__ = [
     "stored_quant_dir",
     "stored_quant_dirs_for",
     "stored_quant_name",
+    "sweep_stale_partials",
     "write_manifest",
 ]
 
@@ -40,6 +42,8 @@ _NAME_PATTERN = re.compile(r"^(?P<base>.+)@q(?P<bits>4|8)$")
 # Files detect_image_model needs (family, distillation, Klein size) that backends do not save with the weights.
 _DETECTION_FILES = ("model_index.json", "transformer/config.json")
 _DETECTION_DIRS = ("scheduler",)
+# A save takes well under a minute; older partial folders are left over from an interrupted process.
+_STALE_PARTIAL_SECONDS = 15 * 60
 
 
 def stored_quant_name(name: str, bits: int) -> str:
@@ -132,3 +136,18 @@ def promote_partial(partial: Path, target: Path) -> None:
 def discard_partial(partial: Path) -> None:
     """Remove an incomplete *partial* folder, if any."""
     shutil.rmtree(partial, ignore_errors=True)
+
+
+def sweep_stale_partials(target: Path, *, older_than_seconds: float = _STALE_PARTIAL_SECONDS) -> None:
+    """Remove *target*'s partial folders older than *older_than_seconds* (left by a killed or crashed save)."""
+    cutoff = time.time() - older_than_seconds
+    try:
+        candidates = list(target.parent.glob(f".{target.name}.*.partial"))
+    except OSError:
+        return
+    for partial in candidates:
+        try:
+            if partial.stat().st_mtime < cutoff:
+                discard_partial(partial)
+        except OSError:
+            continue
