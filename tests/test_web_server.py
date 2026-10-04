@@ -1092,7 +1092,7 @@ def test_models_route_uses_shared_alias_inventory(monkeypatch, tmp_path):
     monkeypatch.setattr(
         model_inventory_module,
         "list_models",
-        lambda _data_dir: [SimpleNamespace(name="local-image", family="zimage", size="m")],
+        lambda _data_dir: [SimpleNamespace(name="local-image", family="zimage", size="m"), SimpleNamespace(name="local-image@q8", family="zimage", size="m")],
     )
     monkeypatch.setattr(
         model_inventory_module,
@@ -1138,6 +1138,10 @@ def test_models_route_uses_shared_alias_inventory(monkeypatch, tmp_path):
     assert video_models["alias-video"]["family"] == "ltx"
     assert video_models["alias-video"]["source"] == "alias"
     assert video_models["alias-video"]["supports_i2v"] is False
+    assert image_models["local-image@q8"]["stored_quant"] == {"base_model": "local-image", "bits": 8}
+    assert image_models["local-image"]["stored_quant"] is None
+    assert image_models["alias-image"]["stored_quant"] is None
+    assert isinstance(payload["stored_quants_supported"], bool)
 
 
 def test_submit_video_job_surfaces_platform_alias_mismatch(monkeypatch):
@@ -1727,3 +1731,29 @@ def test_models_page_skips_quantize_resolution_without_a_memory_budget(monkeypat
     )
 
     assert models["image_models"][0]["downloaded"] is True
+
+
+@pytest.mark.parametrize(("quantize", "expected_tail"), [("", []), ("8", ["--quantize", "8"])])
+def test_convert_route_forwards_an_optional_quantized_copy(monkeypatch, tmp_path, quantize, expected_tail):
+    """The converter route passes the quantized-copy level to ziv-model only when one is chosen."""
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"x")
+    captured: list[list[str]] = []
+    monkeypatch.setattr(web_server, "_run_model_management_command", lambda args: captured.append(args) or "done")
+
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/models/convert", json={"input_path": str(checkpoint), "model_type": "flux2-klein-9b", "quantize": quantize})
+
+    assert response.status_code == 200
+    assert captured[0] == ["model", "--input", str(checkpoint.resolve()), "--model-type", "flux2-klein-9b", *expected_tail]
+
+
+def test_convert_route_rejects_unsupported_quantize_levels(monkeypatch, tmp_path):
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"x")
+    monkeypatch.setattr(web_server, "_run_model_management_command", lambda args: pytest.fail("converter should not run"))
+
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/models/convert", json={"input_path": str(checkpoint), "model_type": "flux2-klein-9b", "quantize": "6"})
+
+    assert response.status_code in (400, 422)

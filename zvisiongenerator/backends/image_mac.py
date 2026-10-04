@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import importlib.metadata
 import os
 import sys
 import tempfile
@@ -257,6 +258,26 @@ def _upcast_model_weights(model, components):
             component.update(tree_map(to_float32, component.parameters()))
 
 
+# Freed buffers MLX may keep for reuse. Its default (the whole memory limit) let the cache grow to 16-29 GB
+# alongside the model and pushed macOS into swap; 4 GB showed no step slowdown.
+_BUFFER_CACHE_LIMIT_BYTES = 4 * 1024**3
+
+
+def _materialize_weights(model: Any) -> None:
+    """Evaluate every parameter once so the weights stay resident.
+
+    mflux loads weights lazily; unevaluated, every generation rebuilds them from the safetensors
+    files (and quantizes them again), costing tens of seconds and a near-bf16 memory peak per image.
+    """
+    mx.eval(model.parameters())
+
+
+def _apply_buffer_cache_policy() -> None:
+    """Cap MLX's free-buffer cache and drop what loading left behind."""
+    mx.set_cache_limit(_BUFFER_CACHE_LIMIT_BYTES)
+    mx.clear_cache()
+
+
 class MfluxBackend:
     """mflux/MLX backend for macOS — implements ImageBackend Protocol."""
 
@@ -328,8 +349,25 @@ class MfluxBackend:
             # Even in bfloat16 mode, upcast VAE for better color gradients
             _upcast_model_weights(model, ["vae"])
 
+        _materialize_weights(model)
+        _apply_buffer_cache_policy()
+
         self._model_info = model_info
         return model, model_info
+
+    def stored_quant_format(self) -> str | None:
+        """Return the format tag of quantized weights this backend saves (the mflux version)."""
+        return f"mflux-{importlib.metadata.version('mflux')}"
+
+    def save_quantized(self, model: Any, path: str) -> None:
+        """Write a loaded, quantized model's weights to *path* in mflux's own format.
+
+        Args:
+            model: A model returned by :meth:`load_model` with a quantize level and no LoRAs
+                (mflux bakes LoRAs into saved weights).
+            path: Destination directory.
+        """
+        model.save_model(path)
 
     def image_to_image(
         self,
@@ -398,6 +436,7 @@ class MfluxBackend:
                 os.unlink(temp_path)
             except OSError:
                 pass
+            mx.clear_cache()
 
     def text_to_image(
         self,
@@ -468,3 +507,4 @@ class MfluxBackend:
             for callback in (checker, progress_checker):
                 if callback is not None:
                     _unregister_callback(model, callback)
+            mx.clear_cache()

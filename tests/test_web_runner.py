@@ -168,6 +168,44 @@ class TestWebRunner:
             release.set()
             runner.shutdown()
 
+    def test_image_job_reports_saving_a_stored_quant_and_honours_quit_while_saving(self, monkeypatch, tmp_path):
+        """The loader's saving phase becomes a model_loading event, and a queued Quit cancels the save."""
+        loader_calls: dict = {}
+
+        def _fake_loader(backend, model_ref, *, quantize, models_dir, lora_paths, lora_weights, on_phase, cancelled, release_memory):
+            loader_calls.update(model_ref=model_ref, quantize=quantize, models_dir=models_dir, cancelled_before=cancelled())
+            on_phase("saving_quant")
+            runner.queue_job_control(job_id_holder["id"], "quit")
+            loader_calls["cancelled_after"] = cancelled()
+            return MagicMock(name="model"), MagicMock(name="model_info")
+
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+            skip_signal.consume()
+            progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
+
+        job_id_holder: dict = {}
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        _stub_request_job(monkeypatch)
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(web_runner_module, "load_image_model", _fake_loader)
+        monkeypatch.setattr(web_runner_module, "run_batch", _fake_run_batch)
+        start = threading.Event()
+        original_preflight = web_runner_module.run_preflight
+        monkeypatch.setattr(web_runner_module, "run_preflight", lambda *a, **kw: (start.wait(1.0), original_preflight(*a, **kw))[1])
+
+        try:
+            request = ImageGenerationRequest(backend=None, model=None, prompt="prompt", model_family="zimage", model_name="atlas")
+            job_id_holder["id"] = runner.submit_image_request_job(request=request, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(), model_ref="/models/atlas", quantize=8)
+            start.set()
+            _wait_for_status(runner, job_id_holder["id"], "cancelled")
+            events = [event for event in runner._get_job(job_id_holder["id"]).history if event["type"] == "model_loading"]
+        finally:
+            runner.shutdown()
+
+        assert loader_calls == {"model_ref": "/models/atlas", "quantize": 8, "models_dir": tmp_path / "models", "cancelled_before": False, "cancelled_after": True}
+        assert [event.get("phase") for event in events] == [None, "saving_quant"]
+        assert events[1]["quantize"] == 8
+
     def test_submit_video_job_tracks_video_runner_progress(self, monkeypatch):
         """Video jobs should publish progress and terminal state from the wrapped runner."""
 

@@ -46,7 +46,8 @@
       name: (fd.get('name') as string) ?? '',
       model_type: (fd.get('model_type') as string) ?? '',
       base_model: (fd.get('base_model') as string) ?? '',
-      copy: fd.get('copy') === 'on'
+      copy: fd.get('copy') === 'on',
+      quantize: (fd.get('quantize') as string) ?? ''
     };
     formsBusy = true;
     notice = null;
@@ -285,7 +286,12 @@
             <tbody>
               {#each inventory.image_models as m}
                 <tr class="border-b border-zinc-900 hover:bg-zinc-900/50 transition">
-                  <td class="px-2 py-2">{@render modelName(m)}</td>
+                  <td class="px-2 py-2">
+                    {@render modelName(m)}
+                    {#if m.stored_quant}
+                      <span class="block truncate text-[10px] text-zinc-500" data-testid="stored-quant" title="Used automatically when {m.stored_quant.base_model} runs at q{m.stored_quant.bits}">q{m.stored_quant.bits} copy of {m.stored_quant.base_model}</span>
+                    {/if}
+                  </td>
                   <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.family}>{m.family}</td>
                   <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.size_label ?? '—'}>{m.size_label ?? '—'}</td>
                   <td class="px-2 py-2">{@render memoryFitCell(m)}</td>
@@ -416,6 +422,20 @@
             placeholder="base model id or path"
           />
         </FormField>
+
+        {#if inventory?.stored_quants_supported}
+          <FormField label="Quantized Copy (optional)" for="convert-quantize" helper="Also save a q8 or q4 copy, used when that quantize level is selected">
+            <Select
+              id="convert-quantize"
+              name="quantize"
+              options={[
+                { value: '', label: 'None' },
+                { value: '8', label: 'q8' },
+                { value: '4', label: 'q4' }
+              ]}
+            />
+          </FormField>
+        {/if}
 
         <div class="flex items-center gap-2">
           <input

@@ -133,6 +133,14 @@ class DiffusersBackend:
         self._img2img_pipe = None
         self._model_info: ImageModelInfo | None = None
 
+    def stored_quant_format(self) -> str | None:
+        """Return ``None``: bitsandbytes quantization happens at load and is not stored."""
+        return None
+
+    def save_quantized(self, model: Any, path: str) -> None:
+        """Raise: this backend does not store quantized weights."""
+        raise NotImplementedError("The diffusers backend does not store quantized weights.")
+
     def load_model(
         self,
         model_path: str,

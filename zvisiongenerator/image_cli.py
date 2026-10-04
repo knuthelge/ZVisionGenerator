@@ -10,16 +10,17 @@ import sys
 import warnings
 from pathlib import Path
 
-from zvisiongenerator.backends import get_backend
+from zvisiongenerator.backends import get_backend, release_accelerator_memory
 from zvisiongenerator.enhance_cli import add_enhance_arguments, parse_enhance_args
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.app_log import setup_logging
+from zvisiongenerator.image_model_loader import load_image_model
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.lora import resolve_lora_references
-from zvisiongenerator.utils.paths import resolve_model_path
+from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import enhance_by_set_for_mode
 from zvisiongenerator.utils.prompts import inspect_prompts_file
 
@@ -282,12 +283,16 @@ def main(*, prog: str = "ziv-image") -> None:
         if plan.cancelled:
             return
         try:
-            loaded_model, loaded_model_info = backend.load_model(
+            loaded_model, loaded_model_info = load_image_model(
+                backend,
                 args.model,
                 quantize=args.quantize,
-                precision="bfloat16",
+                models_dir=get_ziv_data_dir() / "models",
                 lora_paths=lora_paths,
                 lora_weights=lora_weights,
+                on_phase=lambda _phase: print(f"Saving a q{args.quantize} copy of the model for faster loading (first use only)...", flush=True),
+                cancelled=lambda: skip.pending() == "quit",
+                release_memory=release_accelerator_memory,
             )
         except (RuntimeError, ImportError, OSError, ValueError) as e:
             logger.exception("Failed to load model %s", args.model)

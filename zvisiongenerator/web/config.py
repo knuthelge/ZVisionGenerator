@@ -19,6 +19,7 @@ from zvisiongenerator.web.model_inventory import (
     discover_video_inventory,
     inventory_names,
     resolve_default_inventory_name,
+    selectable_image_inventory,
 )
 
 
@@ -87,8 +88,9 @@ def load_web_config() -> WebUiConfig:
         detect_model=detect_video_model,
     )
 
-    default_models = _resolve_default_models(ui_config.get("default_models"), image_inventory, video_inventory)
-    image_model_options = inventory_names(image_inventory)
+    selectable_images = selectable_image_inventory(image_inventory)
+    default_models = _resolve_default_models(ui_config.get("default_models"), selectable_images, video_inventory)
+    image_model_options = inventory_names(selectable_images)
     video_model_options = inventory_names(video_inventory)
     lora_options = tuple(entry.name for entry in list_loras(data_dir))
 

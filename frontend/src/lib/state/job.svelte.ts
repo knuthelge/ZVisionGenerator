@@ -74,6 +74,10 @@ function promptProgress(event: Record<string, unknown> | null | undefined): Part
 function statusMessageForEvent(type: string | undefined, event: Record<string, unknown> | null | undefined): string {
   if (type === 'model_loading') {
     const model = eventFieldString(event, 'model');
+    if (eventFieldString(event, 'phase') === 'saving_quant') {
+      const bits = eventFieldNumber(event, 'quantize');
+      return `Saving a q${bits} copy of ${model || 'the model'} for faster loading (first use only)...`;
+    }
     return `Loading ${model || 'model'}...`;
   }
   if (type === 'batch_started') {

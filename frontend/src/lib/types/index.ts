@@ -591,10 +591,17 @@ export interface ModelDeleteInfo {
   linked_by: string[];
 }
 
+/** A quantized copy of an installed model, used automatically when that quantize level is selected. */
+export interface StoredQuantInfo {
+  base_model: string;
+  bits: number;
+}
+
 export interface ModelEntry extends ModelStatusFields {
   name: string;
   family: string;
   size_label?: string;
+  stored_quant?: StoredQuantInfo | null;
   delete?: ModelDeleteInfo | null;
 }
 
@@ -618,6 +625,8 @@ export interface ModelInventory {
   image_models: ModelEntry[];
   video_models: VideoModelEntry[];
   loras: LoraEntry[];
+  /** Whether this platform can save quantized copies of models (macOS). */
+  stored_quants_supported?: boolean;
   huggingface_configured: boolean;
   huggingface_token_env_var: string | null;
 }

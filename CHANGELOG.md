@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- macOS: **stored quants**. The first job that runs an installed model at q8 or q4 saves the quantized weights next to it (`<name>@q8`, `<name>@q4`); later jobs load that copy instead of quantizing again. LoRAs apply on top. Copies are listed on the Models page and can be deleted there
+- `ziv-model model --quantize 4|8` and **Quantized Copy** on the Models page save a quantized copy while converting a checkpoint
+
+### Changed
+- macOS: image models stay in memory for the whole job instead of re-reading (and re-quantizing) their weights for every image. On a 32 GB Mac, FLUX.2 Klein 9B q8 batches went from 60–80 s to about 28 s per image, with steady speed and no swap growth through the batch
+- macOS: MLX's free-buffer cache is capped at 4 GB and cleared after each image, which kept up to 29 GB of unused buffers resident before
+
 ## [0.13.0b9] - 2026-10-04
 
 ### Added

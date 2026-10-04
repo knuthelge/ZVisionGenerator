@@ -1,6 +1,6 @@
 # Keep image models resident and reuse quantized weights
 
-**Status:** Accepted (2026-10-04)
+**Status:** Done (2026-10-04, branch `feat/image-model-memory`; unreleased)
 
 ## Problem
 
@@ -78,7 +78,7 @@ Add `--quantize {4,8}` to `ziv-model model` (and the matching Web UI converter o
 
 ## Open questions
 
-- **LoRAs on a stored quant (check first):** verify that mflux applies LoRAs correctly and at full speed on pre-quantized weights. This decides how LoRA jobs use stored quants (section 3).
+None remaining. **LoRAs on a stored quant** was checked before implementation (Klein 9B q8, `ink-sketch` LoRA, 512×512, seed 7): the stored quant plus LoRA produced pixel-identical output to quantizing at load (mean absolute difference 0.0; the same copy without the LoRA differed by 18.6), at the same speed (11.7 s vs 11.3 s per image). LoRA jobs therefore load the stored quant and apply LoRAs at runtime, and a missing quant is saved from a LoRA-free load first.
 
 ## Decisions
 

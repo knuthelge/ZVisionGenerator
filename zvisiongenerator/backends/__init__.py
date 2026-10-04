@@ -19,6 +19,7 @@ __all__ = [
     "get_prompt_enhancer_session",
     "get_video_backend",
     "release_accelerator_memory",
+    "supports_stored_quants",
 ]
 
 BACKENDS: dict[str, "ImageBackend"] = {}
@@ -151,6 +152,11 @@ def get_accelerator_memory_budget() -> int | None:
     from zvisiongenerator.backends.memory_mac import memory_budget_bytes
 
     return memory_budget_bytes()
+
+
+def supports_stored_quants() -> bool:
+    """Return whether this platform's image backend saves quantized models for reuse (macOS/mflux only)."""
+    return sys.platform == "darwin"
 
 
 # --- Prompt enhancer ---

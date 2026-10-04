@@ -1,6 +1,6 @@
 """ImageBackend Protocol — explicit contract for platform-specific image inference engines.
 
-Protocol requires name, load_model, text_to_image, image_to_image.
+Protocol requires name, load_model, text_to_image, image_to_image, stored_quant_format, save_quantized.
 """
 
 from __future__ import annotations
@@ -21,6 +21,8 @@ class ImageBackend(Protocol):
     - load_model(): load model from path with optional quantization/LoRA
     - text_to_image(): generate image from text prompt
     - image_to_image(): refine existing image with text prompt
+    - stored_quant_format(): tag of saved quantized weights, or None when unsupported
+    - save_quantized(): write a loaded quantized model's weights for reuse
     """
 
     name: str  # "mflux" or "diffusers"
@@ -80,4 +82,15 @@ class ImageBackend(Protocol):
         step_callback: Any | None = None,
     ) -> Image.Image | None:
         """Refine image. Returns None if skipped."""
+        ...
+
+    def stored_quant_format(self) -> str | None:
+        """Return the format tag of quantized weights :meth:`save_quantized` writes, or ``None`` when unsupported.
+
+        A stored quant whose recorded tag differs is stale and is quantized again.
+        """
+        ...
+
+    def save_quantized(self, model: Any, path: str) -> None:
+        """Write a loaded, quantized, LoRA-free model's weights to directory *path*."""
         ...

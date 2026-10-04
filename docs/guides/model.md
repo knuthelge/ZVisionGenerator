@@ -23,6 +23,9 @@ ziv-model model -i klein4b.safetensors --name klein4b --model-type flux2-klein-4
 
 # Copy base model files instead of symlinking
 ziv-model model -i checkpoint.safetensors --name my-model --copy
+
+# Also save a q8 copy (~/.ziv/models/my-model@q8/), used whenever my-model runs at -q 8 (macOS)
+ziv-model model -i checkpoint.safetensors --name my-model --quantize 8
 ```
 
 ### `model` Flags
@@ -34,6 +37,7 @@ ziv-model model -i checkpoint.safetensors --name my-model --copy
 | `--model-type` | `zimage` | Model type: `zimage`, `flux2-klein-4b`, `flux2-klein-9b` |
 | `--base-model` | `Tongyi-MAI/Z-Image-Turbo` | Base HF repo (only for zimage type) |
 | `--copy` | off | Copy files instead of symlinking |
+| `--quantize` | off | Also save a quantized copy as `<name>@q4` or `<name>@q8` (`4` or `8`, macOS); see [Stored quants](image.md#stored-quants-macos) |
 
 Checkpoints can be bfloat16, float16, float32, or FP8. Scaled FP8 checkpoints (for example ComfyUI FP8 exports, which store a `weight_scale` next to each weight) are dequantized to bfloat16 during conversion. Block-wise or other quantized formats (such as NVFP4) are not supported.
 
