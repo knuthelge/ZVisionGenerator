@@ -9,7 +9,6 @@ on top of it.
 
 from __future__ import annotations
 
-import threading
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,13 +28,13 @@ from zvisiongenerator.utils.stored_quant import (
     promote_partial,
     stored_quant_dir,
     stored_quant_name,
+    sweep_stale_partials,
     write_manifest,
 )
 
 __all__ = ["SAVING_QUANT_PHASE", "LoadPlan", "load_image_model", "plan_image_model_load", "save_stored_quant"]
 
 SAVING_QUANT_PHASE = "saving_quant"
-_POLL_SECONDS = 0.2
 _PRECISION = "bfloat16"
 
 
@@ -82,7 +81,9 @@ def plan_image_model_load(
     if _is_installed(path, models_dir):
         source: Path | None = path
         target = stored_quant_dir(path, quantize)
-    elif model_name is not None and _is_plain_name(model_name):
+    elif model_name is not None and model_name != model_path and _is_plain_name(model_name):
+        # An alias: resolution mapped the picked name to a repo id or path. An unmapped name (e.g. a folder
+        # in the current directory) is a raw path and gets no copy.
         source = find_local_dir(model_path)
         target = models_dir / stored_quant_name(model_name, quantize)
     else:
@@ -101,40 +102,30 @@ def save_stored_quant(
     bits: int,
     backend_format: str,
     cancelled: Callable[[], bool] | None = None,
-    poll_seconds: float = _POLL_SECONDS,
 ) -> bool:
     """Save *model* as *source*'s stored quant at *target*; return whether the copy is now in place.
 
-    The copy is written to a hidden partial folder and renamed when complete. A failure warns and leaves no
-    folder behind; the job carries on with the in-memory model. When *cancelled* turns true the save is
-    abandoned at once: the write finishes in the background and its partial folder is removed.
+    The copy is written to a hidden partial folder and renamed when complete; leftover partial folders of
+    *target* from an interrupted earlier save are removed first. A failure warns and leaves no folder
+    behind; the job carries on with the in-memory model. The write runs on the calling thread, so a stop
+    request takes effect once it finishes: when *cancelled* is then true the copy is discarded. Interrupts
+    (Ctrl-C, exit) also discard the partial folder.
     """
+    sweep_stale_partials(target)
     partial = partial_dir(target)
-    done = threading.Event()
-    abandoned = threading.Event()
-    outcome: dict[str, BaseException] = {}
-
-    def _write() -> None:
-        try:
-            backend.save_quantized(model, str(partial))
-            copy_detection_files(source, partial)
-            write_manifest(partial, build_manifest(source, bits, backend_format))
-        except BaseException as exc:  # noqa: BLE001 - reported to the waiting thread
-            outcome["error"] = exc
-        finally:
-            done.set()
-            if abandoned.is_set() or "error" in outcome:
-                discard_partial(partial)
-
-    threading.Thread(target=_write, name="ziv-save-quant", daemon=True).start()
-    while not done.wait(poll_seconds):
-        if cancelled is not None and cancelled():
-            abandoned.set()
-            if done.is_set():
-                discard_partial(partial)
-            return False
-    if "error" in outcome:
-        warnings.warn(f"Could not save the q{bits} copy of {source.name} ({outcome['error']}); it is quantized at load instead.", stacklevel=2)
+    try:
+        backend.save_quantized(model, str(partial))
+        copy_detection_files(source, partial)
+        write_manifest(partial, build_manifest(source, bits, backend_format))
+    except Exception as exc:  # noqa: BLE001 - a failed save must never fail the job
+        discard_partial(partial)
+        warnings.warn(f"Could not save the q{bits} copy of {source.name} ({exc}); it is quantized at load instead.", stacklevel=2)
+        return False
+    except BaseException:
+        discard_partial(partial)
+        raise
+    if cancelled is not None and cancelled():
+        discard_partial(partial)
         return False
     try:
         promote_partial(partial, target)
@@ -170,7 +161,7 @@ def load_image_model(
         lora_paths: LoRAs applied at load time (never baked into the stored quant).
         lora_weights: Scale per LoRA.
         on_phase: Receives :data:`SAVING_QUANT_PHASE` when the model has loaded and its stored quant is being saved.
-        cancelled: Polled while saving; when true the save is abandoned (the job's own stop handling follows).
+        cancelled: Checked when the save finishes; when true the copy is discarded (the job's own stop handling follows).
         release_memory: Frees accelerator memory between the LoRA-free load used for saving and the LoRA load.
         find_local_dir: Resolves a model reference to its fully downloaded local folder.
     """
