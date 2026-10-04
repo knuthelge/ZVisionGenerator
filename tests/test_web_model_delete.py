@@ -82,6 +82,38 @@ def test_deleting_a_huggingface_download_leaves_other_repos(layout):
     assert (layout.hub / "models--org--other").is_dir()
 
 
+def test_deleting_a_model_removes_its_stored_quants(layout):
+    for name in ("custom@q8", "custom@q4", "other@q8"):
+        _touch(layout.models_dir / name / "transformer" / "0.safetensors")
+
+    target = model_delete_target(_image_entry("custom", "installed", ""), layout.models_dir)
+    assert {path.name for path in target.stored_quants} == {"custom@q8", "custom@q4"}
+    delete_model(target)
+
+    assert not (layout.models_dir / "custom@q8").exists()
+    assert not (layout.models_dir / "custom@q4").exists()
+    assert (layout.models_dir / "other@q8").is_dir()
+
+
+def test_deleting_a_huggingface_download_removes_the_alias_stored_quants(layout):
+    _touch(layout.models_dir / "base@q8" / "transformer" / "0.safetensors")
+
+    delete_model(model_delete_target(_image_entry("base", "alias", "org/base"), layout.models_dir))
+
+    assert not (layout.models_dir / "base@q8").exists()
+
+
+def test_a_stored_quant_deletes_only_itself(layout):
+    _touch(layout.models_dir / "custom@q8" / "transformer" / "0.safetensors")
+
+    target = model_delete_target(_image_entry("custom@q8", "installed", ""), layout.models_dir)
+
+    assert target.stored_quants == ()
+    delete_model(target)
+    assert not (layout.models_dir / "custom@q8").exists()
+    assert (layout.models_dir / "custom").is_dir()
+
+
 def test_converted_models_linking_into_a_download_are_reported(layout):
     assert installed_models_linking_to(layout.hub / "models--org--base", layout.models_dir) == ("custom",)
     assert installed_models_linking_to(layout.hub / "models--org--other", layout.models_dir) == ()
@@ -147,6 +179,6 @@ def test_models_payload_describes_what_each_delete_removes(layout):
 
     delete_info = _delete_info_resolver(layout.models_dir)
 
-    assert delete_info(_image_entry("custom", "installed", "")) == {"kind": "installed", "repo_id": None, "linked_by": []}
-    assert delete_info(_image_entry("base", "alias", "org/base")) == {"kind": "huggingface", "repo_id": "org/base", "linked_by": ["custom"]}
+    assert delete_info(_image_entry("custom", "installed", "")) == {"kind": "installed", "repo_id": None, "linked_by": [], "stored_quants": []}
+    assert delete_info(_image_entry("base", "alias", "org/base")) == {"kind": "huggingface", "repo_id": "org/base", "linked_by": ["custom"], "stored_quants": []}
     assert delete_info(_image_entry("missing", "alias", "org/missing")) is None

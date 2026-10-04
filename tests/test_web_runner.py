@@ -172,8 +172,8 @@ class TestWebRunner:
         """The loader's saving phase becomes a model_loading event, and a queued Quit cancels the save."""
         loader_calls: dict = {}
 
-        def _fake_loader(backend, model_ref, *, quantize, models_dir, lora_paths, lora_weights, on_phase, cancelled, release_memory):
-            loader_calls.update(model_ref=model_ref, quantize=quantize, models_dir=models_dir, cancelled_before=cancelled())
+        def _fake_loader(backend, model_ref, *, quantize, models_dir, model_name, lora_paths, lora_weights, on_phase, cancelled, release_memory):
+            loader_calls.update(model_ref=model_ref, quantize=quantize, models_dir=models_dir, model_name=model_name, cancelled_before=cancelled())
             on_phase("saving_quant")
             runner.queue_job_control(job_id_holder["id"], "quit")
             loader_calls["cancelled_after"] = cancelled()
@@ -202,7 +202,14 @@ class TestWebRunner:
         finally:
             runner.shutdown()
 
-        assert loader_calls == {"model_ref": "/models/atlas", "quantize": 8, "models_dir": tmp_path / "models", "cancelled_before": False, "cancelled_after": True}
+        assert loader_calls == {
+            "model_ref": "/models/atlas",
+            "quantize": 8,
+            "models_dir": tmp_path / "models",
+            "model_name": "atlas",
+            "cancelled_before": False,
+            "cancelled_after": True,
+        }
         assert [event.get("phase") for event in events] == [None, "saving_quant"]
         assert events[1]["quantize"] == 8
 

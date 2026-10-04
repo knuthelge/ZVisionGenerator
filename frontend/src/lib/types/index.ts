@@ -589,6 +589,8 @@ export interface ModelDeleteInfo {
   repo_id: string | null;
   /** Installed models linking into this HuggingFace download, which deleting it would break. */
   linked_by: string[];
+  /** The model's stored quants (e.g. `atlas@q8`), deleted along with it. */
+  stored_quants?: string[];
 }
 
 /** A quantized copy of an installed model, used automatically when that quantize level is selected. */

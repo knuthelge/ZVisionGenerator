@@ -548,6 +548,7 @@ class WebRunner:
             model_ref,
             quantize=quantize,
             models_dir=get_ziv_data_dir() / "models",
+            model_name=request.model_name,
             lora_paths=request.lora_paths,
             lora_weights=request.lora_weights,
             on_phase=lambda phase: progress_callback({"type": "model_loading", "mode": "image", "model": model_label, "phase": phase, "quantize": quantize}),

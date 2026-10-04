@@ -1,9 +1,10 @@
 """Load an image model, reusing or creating its stored quant when a quantize level is selected.
 
-Quantization stays opt-in. When a job selects a level for a model installed in the models directory, the
-first load saves the quantized base weights next to the source (``<name>@q<bits>``) and later loads read
-that copy instead of quantizing again. LoRAs are never baked into a stored quant: they are applied at load
-time on top of it.
+Quantization stays opt-in. When a job selects a level, the first load saves the quantized base weights in
+the models directory as ``<name>@q<bits>`` and later loads read that copy instead of quantizing again.
+``<name>`` is the installed model's folder, or the alias the user picked for a Hugging Face model (whose
+downloaded files are the source). LoRAs are never baked into a stored quant: they are applied at load time
+on top of it.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from typing import Any
 
 from zvisiongenerator.core.image_backend import ImageBackend
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.model_files import find_local_model_dir
 from zvisiongenerator.utils.stored_quant import (
     build_manifest,
     copy_detection_files,
@@ -26,6 +28,7 @@ from zvisiongenerator.utils.stored_quant import (
     partial_dir,
     promote_partial,
     stored_quant_dir,
+    stored_quant_name,
     write_manifest,
 )
 
@@ -38,32 +41,55 @@ _PRECISION = "bfloat16"
 
 @dataclass(frozen=True)
 class LoadPlan:
-    """How to load a model: from *path* at *quantize*, optionally first saving a stored quant at *create*."""
+    """How to load a model: from *path* at *quantize*, optionally then saving a stored quant at *create*.
+
+    *source* is the local folder the stored quant is made from, or ``None`` while a Hugging Face model is not
+    downloaded yet (it is resolved again after the load downloads it).
+    """
 
     path: str
     quantize: int | None
     create: Path | None = None
+    source: Path | None = None
 
 
-def plan_image_model_load(model_path: str, quantize: int | None, *, models_dir: Path, backend_format: str | None) -> LoadPlan:
-    """Decide whether to load the source, an existing stored quant, or create one first.
+def plan_image_model_load(
+    model_path: str,
+    quantize: int | None,
+    *,
+    models_dir: Path,
+    backend_format: str | None,
+    model_name: str | None = None,
+    find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
+) -> LoadPlan:
+    """Decide whether to load the source, an existing stored quant, or create one after loading.
 
     Args:
         model_path: Resolved model path (a local directory, alias target, or repo id).
         quantize: Selected quantize level, or ``None``.
-        models_dir: The installed-models directory; only models directly inside it get stored quants.
+        models_dir: The installed-models directory, where stored quants live.
         backend_format: The backend's :meth:`ImageBackend.stored_quant_format`, ``None`` when unsupported.
+        model_name: The name the user picked (an installed model or alias). Models outside *models_dir* get
+            a stored quant only under a plain picked name; a raw repo id or path is quantized at load.
+        find_local_dir: Resolves a model reference to its fully downloaded local folder.
     """
     path = Path(model_path).expanduser()
     if parse_stored_quant_name(path.name) is not None:
         # A stored quant selected directly is already quantized.
         return LoadPlan(model_path, None)
-    if quantize is None or backend_format is None or not _is_installed(path, models_dir):
+    if quantize is None or backend_format is None:
         return LoadPlan(model_path, quantize)
-    target = stored_quant_dir(path, quantize)
-    if is_current(target, path, quantize, backend_format):
+    if _is_installed(path, models_dir):
+        source: Path | None = path
+        target = stored_quant_dir(path, quantize)
+    elif model_name is not None and _is_plain_name(model_name):
+        source = find_local_dir(model_path)
+        target = models_dir / stored_quant_name(model_name, quantize)
+    else:
+        return LoadPlan(model_path, quantize)
+    if source is not None and is_current(target, source, quantize, backend_format):
         return LoadPlan(str(target), None)
-    return LoadPlan(model_path, quantize, create=target)
+    return LoadPlan(model_path, quantize, create=target, source=source)
 
 
 def save_stored_quant(
@@ -125,11 +151,13 @@ def load_image_model(
     *,
     quantize: int | None,
     models_dir: Path,
+    model_name: str | None = None,
     lora_paths: list[str] | None = None,
     lora_weights: list[float] | None = None,
     on_phase: Callable[[str], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
     release_memory: Callable[[], None] | None = None,
+    find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
 ) -> tuple[Any, ImageModelInfo]:
     """Load *model_path*, reusing its stored quant at *quantize* or creating it on first use.
 
@@ -137,23 +165,28 @@ def load_image_model(
         backend: The image backend.
         model_path: Resolved model path.
         quantize: Selected quantize level, or ``None`` (never creates a stored quant).
-        models_dir: The installed-models directory.
+        models_dir: The installed-models directory, where stored quants live.
+        model_name: The name the user picked; names the stored quant of a Hugging Face (alias) model.
         lora_paths: LoRAs applied at load time (never baked into the stored quant).
         lora_weights: Scale per LoRA.
-        on_phase: Receives :data:`SAVING_QUANT_PHASE` before a stored quant is created.
+        on_phase: Receives :data:`SAVING_QUANT_PHASE` when the model has loaded and its stored quant is being saved.
         cancelled: Polled while saving; when true the save is abandoned (the job's own stop handling follows).
         release_memory: Frees accelerator memory between the LoRA-free load used for saving and the LoRA load.
+        find_local_dir: Resolves a model reference to its fully downloaded local folder.
     """
-    plan = plan_image_model_load(model_path, quantize, models_dir=models_dir, backend_format=backend.stored_quant_format())
+    plan = plan_image_model_load(model_path, quantize, models_dir=models_dir, backend_format=backend.stored_quant_format(), model_name=model_name, find_local_dir=find_local_dir)
     if plan.create is None:
         return backend.load_model(plan.path, quantize=plan.quantize, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights)
 
-    if on_phase is not None:
-        on_phase(SAVING_QUANT_PHASE)
-    source = Path(plan.path).expanduser()
     # Saved weights must be LoRA-free: mflux bakes LoRAs into what it saves.
     model, info = backend.load_model(plan.path, quantize=plan.quantize, precision=_PRECISION)
-    saved = save_stored_quant(backend, model, source=source, target=plan.create, bits=plan.quantize, backend_format=backend.stored_quant_format(), cancelled=cancelled)
+    # A Hugging Face model that was not downloaded before is now, unless the load read it some other way.
+    source = plan.source or find_local_dir(plan.path)
+    saved = False
+    if source is not None:
+        if on_phase is not None:
+            on_phase(SAVING_QUANT_PHASE)
+        saved = save_stored_quant(backend, model, source=source, target=plan.create, bits=plan.quantize, backend_format=backend.stored_quant_format(), cancelled=cancelled)
     if not lora_paths or (not saved and cancelled is not None and cancelled()):
         # A stopped job quits before its first generation, so it never needs the LoRA load.
         return model, info
@@ -163,6 +196,11 @@ def load_image_model(
     if saved:
         return backend.load_model(str(plan.create), quantize=None, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights)
     return backend.load_model(plan.path, quantize=plan.quantize, precision=_PRECISION, lora_paths=lora_paths, lora_weights=lora_weights)
+
+
+def _is_plain_name(name: str) -> bool:
+    """Return whether *name* can name a folder in the models directory (an alias, not a repo id or path)."""
+    return bool(name) and name not in {".", ".."} and not any(char in name for char in "/\\:~") and parse_stored_quant_name(name) is None
 
 
 def _is_installed(path: Path, models_dir: Path) -> bool:

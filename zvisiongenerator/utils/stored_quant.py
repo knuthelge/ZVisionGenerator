@@ -18,6 +18,7 @@ from zvisiongenerator.utils.model_files import model_weight_files
 
 __all__ = [
     "MANIFEST_NAME",
+    "STORED_QUANT_BITS",
     "build_manifest",
     "copy_detection_files",
     "discard_partial",
@@ -27,11 +28,13 @@ __all__ = [
     "promote_partial",
     "source_fingerprint",
     "stored_quant_dir",
+    "stored_quant_dirs_for",
     "stored_quant_name",
     "write_manifest",
 ]
 
 MANIFEST_NAME = "ziv-quant.json"
+STORED_QUANT_BITS = (4, 8)
 _MANIFEST_VERSION = 1
 _NAME_PATTERN = re.compile(r"^(?P<base>.+)@q(?P<bits>4|8)$")
 # Files detect_image_model needs (family, distillation, Klein size) that backends do not save with the weights.
@@ -53,6 +56,13 @@ def parse_stored_quant_name(name: str) -> tuple[str, int] | None:
 def stored_quant_dir(source_dir: Path, bits: int) -> Path:
     """Return where *source_dir*'s stored quant at *bits* lives (a sibling folder)."""
     return source_dir.with_name(stored_quant_name(source_dir.name, bits))
+
+
+def stored_quant_dirs_for(models_dir: Path, name: str) -> tuple[Path, ...]:
+    """Return the existing stored quants of the model picked as *name* (installed model or alias)."""
+    if parse_stored_quant_name(name) is not None:
+        return ()
+    return tuple(path for bits in STORED_QUANT_BITS if (path := models_dir / stored_quant_name(name, bits)).is_dir())
 
 
 def source_fingerprint(source_dir: Path) -> dict[str, int]:
