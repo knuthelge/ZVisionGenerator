@@ -599,6 +599,9 @@ class WebRunner:
             self._claimed_job_id = job_id
             with record.lock:
                 record.started_at = time.time()
+                # Running from the moment it leaves the queue, so a Stop sent before job_started is published
+                # reaches the job instead of being refused as "not started".
+                record.status = "running"
         self._publish_event(job_id, {"type": STARTED_EVENT})
         return True
 
