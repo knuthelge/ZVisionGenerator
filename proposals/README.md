@@ -18,3 +18,4 @@ These files are not part of the published docs site.
 | [Enhance prompts before the model loads](enhance-before-model-load.md) | Done (v0.13.0b8) | Fix out-of-memory failures in auto-enhanced batches by rewriting every prompt before the generation model loads |
 | [Controls for Web UI video jobs](video-job-controls.md) | Proposed | Let Web UI video jobs be stopped (and possibly skipped or paused), including while prompts are enhanced |
 | [Upscale existing images](image-upscale-from-gallery.md) | Accepted | Upscale any image 2× or 4× from the asset viewer, refined with its original settings |
+| [Decode in float32 on CUDA](cuda-vae-float32.md) | Proposed | Test, then fix grainy CUDA output by keeping the image VAE in float32 like macOS |
