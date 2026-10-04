@@ -104,6 +104,27 @@ class TestCLIValidation:
     def _flag_misuse_warning_messages(caught_warnings: list[warnings.WarningMessage]) -> list[str]:
         return [str(warning.message) for warning in caught_warnings if "--first-sigma only affects Ideogram 4" in str(warning.message) or "passed as a literal prompt" in str(warning.message)]
 
+    def test_quantize_rejected_for_families_without_quantization(self):
+        backend = MagicMock(name="mflux")
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["-m", "ideo", "-q", "8"],
+                detect_image_model=lambda _: MagicMock(family="ideogram4", size=None),
+                resolve_defaults=lambda *a, **kw: {"steps": 20, "guidance": 7.0, "scheduler": None, "supports_quantize": False},
+                get_backend=lambda: backend,
+            )
+        backend.load_model.assert_not_called()
+
+    def test_quantize_accepted_for_families_with_quantization(self):
+        backend = MagicMock(name="mflux", load_model=MagicMock(return_value=(MagicMock(), MagicMock(family="zimage"))))
+        backend.stored_quant_format.return_value = None
+        self._run_main_with_overrides(
+            ["-m", "fake", "-q", "8"],
+            resolve_defaults=lambda *a, **kw: {"steps": 10, "guidance": 0.5, "scheduler": None, "supports_quantize": True},
+            get_backend=lambda: backend,
+        )
+        assert backend.load_model.call_args.kwargs["quantize"] == 8
+
     def test_runs_zero_exits(self):
         with pytest.raises(SystemExit, match="2"):
             self._run_main(["--runs", "0", "-m", "fake"])

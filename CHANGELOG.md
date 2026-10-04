@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Changed
 - macOS: image models stay in memory for the whole job instead of re-reading (and re-quantizing) their weights for every image. On a 32 GB Mac, FLUX.2 Klein 9B q8 batches went from 60–80 s to about 28 s per image, with steady speed and no swap growth through the batch
 - macOS: MLX's free-buffer cache is capped at 4 GB and cleared after each image, which kept up to 29 GB of unused buffers resident before
+- `ziv-image` rejects `-q` for models that cannot be quantized (Ideogram 4), as the Web UI does
 
 ## [0.13.0b9] - 2026-10-04
 

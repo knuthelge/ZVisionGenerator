@@ -25,7 +25,7 @@ ziv-image -m ideo --prompt "a portrait"
 
 ### Ideogram 4
 
-Ideogram 4 runs on macOS (Apple Silicon via mflux/MLX) only; it is unavailable on Windows and Linux. It ships as a single FP8 model, so quantization tiers (`-q 4` / `-q 8`) do not apply. Width and height must be in the 256–2048 range and multiples of 16; size presets that exceed this range (for example `--size xl` with `--ratio 16:9`) are rejected before the model loads.
+Ideogram 4 runs on macOS (Apple Silicon via mflux/MLX) only; it is unavailable on Windows and Linux. It ships as a single FP8 model, so quantization tiers do not apply: `ziv-image` rejects `-q 4` / `-q 8` for it, as the Web UI does. Width and height must be in the 256–2048 range and multiples of 16; size presets that exceed this range (for example `--size xl` with `--ratio 16:9`) are rejected before the model loads.
 
 ```bash
 ziv-image -m ideo --prompt "a portrait"
