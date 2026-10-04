@@ -106,6 +106,8 @@ While a generation is running, the Web UI keeps the active job attached to the c
 
 Workspace settings are remembered in the browser between visits and restarts, as long as the Web UI starts on the same port. Choosing a different model applies that model's defaults.
 
+To give the preview more room, collapse the Compose and Settings sidebar with the **«** button next to *Compose*. It folds into a narrow strip with an expand button and a Generate button, and the choice is remembered in the browser. On phone-width screens the sidebar always shows above the preview. While a job runs, its card shows the progress and controls on the left and the live preview and outputs on the right.
+
 The workspace model picker and the Models page show whether each model is already downloaded; models that are not yet downloaded download on first use. On macOS they also show whether a downloaded model fits this Mac's memory, compared with the GPU memory Apple recommends for the machine:
 
 - **Fits**: the estimate is at most 1.1 times the recommendation.

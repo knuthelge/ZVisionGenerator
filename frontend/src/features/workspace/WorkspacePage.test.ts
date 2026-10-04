@@ -510,6 +510,47 @@ describe('WorkspacePage', () => {
     expect(submittedFormData.has('output')).toBe(false);
   });
 
+  it('collapses the sidebar into a strip, remembers it, and still submits every field', async () => {
+    draft.update('prompt', 'A lighthouse at dusk');
+    await mountWorkspace(makeContext());
+    const sidebar = target.querySelector('#ws-controls-sidebar') as HTMLElement;
+
+    (target.querySelector('button[aria-label="Collapse sidebar"]') as HTMLButtonElement).click();
+    await settle();
+    expect(sidebar.classList.contains('collapsed')).toBe(true);
+    expect(target.querySelector('[data-testid="sidebar-strip"]')).not.toBeNull();
+    expect(JSON.parse(localStorage.getItem('ziv-workspace-draft-v1')!).sidebarCollapsed).toBe(true);
+    // The fields stay in the form while folded away.
+    expect(target.querySelector('#ws-prompt')).not.toBeNull();
+
+    (target.querySelector('[data-testid="sidebar-strip"] button[type="submit"]') as HTMLButtonElement).click();
+    await settle();
+    expect(workspaceApiMocks.submitGenerate).toHaveBeenCalledTimes(1);
+    const [submitted] = workspaceApiMocks.submitGenerate.mock.calls[0] ?? [];
+    expect(submitted.get('prompt')).toBe('A lighthouse at dusk');
+    expect(submitted.get('steps')).not.toBeNull();
+
+    (target.querySelector('button[aria-label="Expand sidebar"]') as HTMLButtonElement).click();
+    await settle();
+    expect(sidebar.classList.contains('collapsed')).toBe(false);
+    expect(target.querySelector('[data-testid="sidebar-strip"]')).toBeNull();
+  });
+
+  it('expands the collapsed sidebar to report an empty prompt', async () => {
+    draft.update('prompt', '');
+    draft.update('sidebarCollapsed', true);
+    await mountWorkspace(makeContext());
+    const prompt = target.querySelector('#ws-prompt') as HTMLTextAreaElement;
+    const report = vi.spyOn(prompt, 'reportValidity');
+
+    target.querySelector('form')!.requestSubmit();
+    await settle();
+
+    expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
+    expect(draft.state.sidebarCollapsed).toBe(false);
+    expect(report).toHaveBeenCalled();
+  });
+
   function withEnhancer(context: WorkspaceContext): WorkspaceContext {
     context.workflow_contract.definitions.txt2img.visible_controls.push('prompt_enhance', 'prompt_enhance_auto');
     context.prompt_enhancer = {

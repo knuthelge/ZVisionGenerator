@@ -364,6 +364,8 @@ export interface DraftState {
   upscaleFactor: number;
   quantize: number | null;
   historyCollapsed: boolean;
+  /** Compose and Settings are folded into a narrow strip. */
+  sidebarCollapsed: boolean;
   lastGeneratedAt: string | null;
   version: number;
   scheduler: string | null;
@@ -388,7 +390,7 @@ export interface DraftState {
   enhanceAuto: boolean;
 }
 
-export type WorkspacePrefill = Partial<Omit<DraftState, 'historyCollapsed' | 'lastGeneratedAt' | 'version'>>;
+export type WorkspacePrefill = Partial<Omit<DraftState, 'historyCollapsed' | 'sidebarCollapsed' | 'lastGeneratedAt' | 'version'>>;
 
 // ── Job / SSE types ────────────────────────────────────────────────────────────
 

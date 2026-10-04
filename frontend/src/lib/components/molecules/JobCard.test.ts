@@ -328,6 +328,22 @@ describe('JobCard', () => {
     expect(target.querySelector('img[alt="newest.png"]')?.getAttribute('loading')).toBe('eager');
   });
 
+  it('puts the live preview and the outputs side by side, each under its own label', () => {
+    const output = {
+      id: 'out.png', url: '/media/out.png', thumbnail_url: '/media/out.png', filename: 'out.png',
+      created_at: '', workflow: 'txt2img' as const, prompt: '', model: 'zit', reuse_workspace_url: '', media_type: 'image' as const,
+    };
+    component = mount(JobCard, { target, props: { job: makeJob({ previewUrl: '/jobs/job-card/preview?v=2', outputs: [output] }) } });
+    flushSync();
+
+    const figure = target.querySelector('figure') as HTMLElement;
+    expect(document.getElementById(figure.getAttribute('aria-labelledby')!)?.textContent).toBe('Live preview');
+    const labels = Array.from(figure.parentElement!.children).filter((el) => el.tagName === 'SPAN').map((el) => el.textContent?.trim());
+    expect(labels[0]).toBe('Live preview');
+    expect(labels[1]).toContain('Outputs · 1');
+    expect(figure.parentElement!.contains(target.querySelector('[aria-label="Generated outputs"]'))).toBe(true);
+  });
+
   it('shows the live preview only while the job is active', () => {
     const previewAlt = 'img[alt="Live preview of the generation in progress"]';
     component = mount(JobCard, { target, props: { job: makeJob({ previewUrl: '/jobs/job-card/preview?v=2', supported_controls: ['next'] }), onnext: vi.fn() } });
