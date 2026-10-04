@@ -20,14 +20,16 @@
     mascotMood as pickMascotMood,
     type MascotReaction,
   } from '$lib/state/mascot';
-  import { AssetTile, AssetViewer, JobCard, ModelStatusBadges } from '$lib/components/molecules';
+  import { AssetTile, AssetViewer, JobCard, ModelStatusBadges, requestConfirm } from '$lib/components/molecules';
+  import { jobSettingsPrefill } from '$lib/state/jobSettings';
+  import QueuePanel from './QueuePanel.svelte';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import ControlsSidebar from './ControlsSidebar.svelte';
   import HistoryStrip from './HistoryStrip.svelte';
   import { fitOutputGrid } from './outputGrid';
   import { randomSeed } from './seed';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
-  import type { GalleryAsset, WorkspaceContext, Workflow } from '$lib/types';
+  import type { GalleryAsset, JobSnapshot, WorkspaceContext, Workflow } from '$lib/types';
 
   let context = $state<WorkspaceContext | null>(null);
   let loadError = $state<string | null>(null);
@@ -215,19 +217,16 @@
     react('cheerful');
     refreshModelStatus();
     await historyStore.refreshHistory();
-    busy = false;
     addToast('Generation complete', 'success');
   }
 
   function handleJobFailed(): void {
     react('sad');
     refreshModelStatus();
-    busy = false;
-    addToast('Generation failed', 'error');
+    addToast(jobStore.queuedJobs.length > 0 ? 'Generation failed. Starting the next queued job.' : 'Generation failed', 'error');
   }
 
   async function handleJobLost(): Promise<void> {
-    busy = false;
     refreshModelStatus();
     addToast('Lost track of the job. Refreshed the gallery with any results.', 'info');
     await historyStore.refreshHistory();
@@ -236,7 +235,6 @@
   function handleJobCancelled(): void {
     react('surprised');
     refreshModelStatus();
-    busy = false;
     addToast('Generation stopped', 'info');
   }
 
@@ -262,6 +260,43 @@
     // The prefill already re-hydrated for its workflow; the workflow-change effect must not redo it.
     _prevWorkflow = draft.state.workflow;
     draft.saveDraft();
+  }
+
+  /** Refill the form from the settings a queued job was submitted with. */
+  function loadQueuedSettings(job: JobSnapshot): void {
+    const { params, patch } = jobSettingsPrefill(job.settings ?? {});
+    applyPrefill(params);
+    draft.patch(patch);
+    imageFile = null;
+    addToast('Loaded the queued job\'s settings', 'success');
+  }
+
+  async function removeQueuedJob(job: JobSnapshot): Promise<void> {
+    try {
+      await jobStore.removeQueued(job.job_id ?? job.id);
+    } catch {
+      addToast('Could not remove the job from the queue', 'error');
+    }
+  }
+
+  async function clearQueuedJobs(): Promise<void> {
+    const count = jobStore.queuedJobs.length;
+    const approved = await requestConfirm({
+      question: `Remove ${count} queued job${count === 1 ? '' : 's'}?`,
+      info: 'The running job keeps going.',
+      confirmLabel: 'Clear queue',
+      cancelLabel: 'Keep',
+    });
+    if (!approved) return;
+    try {
+      await jobStore.clearQueue();
+    } catch {
+      addToast('Could not clear the queue', 'error');
+    }
+    await tick();
+    // The panel (and its button) is gone; Generate is the next useful place.
+    const generate = document.querySelector<HTMLButtonElement>(draft.state.sidebarCollapsed ? '[data-testid="sidebar-strip"] button[type="submit"]' : '#ws-submit');
+    generate?.focus();
   }
 
   function reuseAsset(asset: GalleryAsset): void {
@@ -399,6 +434,7 @@
       onCancelled: handleJobCancelled,
       onLost: handleJobLost,
     });
+    const stopJobSync = jobStore.startSync();
     const urlParams = parseUrlPrefill();
     const hasUrlParams = Object.keys(urlParams).length > 0;
 
@@ -433,9 +469,8 @@
         // After full hydration, sync _prevWorkflow so the workflow-change $effect
         // does not fire for the initial state.
         _prevWorkflow = draft.state.workflow;
-        void jobStore.reconnectActiveJob({ snapshot: ctx.active_job }).then((reconnected) => {
-          if (!cancelled && reconnected) busy = true;
-        });
+        jobStore.seedQueue(ctx.queued_jobs ?? []);
+        void jobStore.reconnectActiveJob({ snapshot: ctx.active_job });
 
         historyTimer = setTimeout(() => {
           if (cancelled) return;
@@ -455,6 +490,8 @@
       if (e.defaultPrevented || lightboxOpen || hasOpenModal()) return;
       if (isCommandKey(e) && !e.altKey && e.key === 'Enter') {
         e.preventDefault();
+        // A held key must not queue the same run again and again.
+        if (e.repeat) return;
         // Commit the focused field first, so a typed number settles on a valid step before validation.
         (document.activeElement as HTMLElement | null)?.blur?.();
         if (e.shiftKey && draft.state.seed !== null) draft.update('seed', randomSeed());
@@ -488,6 +525,7 @@
       clearInterval(drowsyTimer);
       activityEvents.forEach((type) => document.removeEventListener(type, handleActivity));
       cancelled = true;
+      stopJobSync();
       unsubscribeLifecycle();
       if (historyTimer) clearTimeout(historyTimer);
       document.removeEventListener('keydown', handleKeydown);
@@ -537,11 +575,13 @@
       }
 
       const jobCtx = await submitGenerate(formData);
-      jobStore.startJob(jobCtx);
+      jobStore.jobSubmitted(jobCtx);
+      if (jobCtx.queue_position) addToast(`Added to the queue as #${jobCtx.queue_position}.`, 'info');
     } catch (err) {
-      busy = false;
       loadError = err instanceof Error ? err.message : 'Generate failed';
       addToast('Generation failed', 'error');
+    } finally {
+      busy = false;
     }
   }
 
@@ -718,6 +758,8 @@
     <ControlsSidebar
       {context}
       {busy}
+      jobsActive={jobStore.jobsActive}
+      queuedCount={jobStore.queuedJobs.length}
       {imageFile}
       {referencePreviewUrl}
       lastSeed={historyStore.assets[0]?.seed ?? null}
@@ -804,6 +846,7 @@
                 onnext={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/next`)}
                 onrepeat={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/repeat`)}
               />
+              <QueuePanel jobs={jobStore.queuedJobs} onremove={removeQueuedJob} onload={loadQueuedSettings} onclear={clearQueuedJobs} />
             </div>
           </div>
         {:else if latestAsset}

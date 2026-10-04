@@ -171,7 +171,7 @@ The enhancer keeps your subject and every detail you describe. It adds only thin
 
 ### In the Web UI
 
-- **Enhance**: click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. When that tab has text, it is what gets generated; the **used** badge shows which tab that is. Edit it, enhance again, or **Clear** it to go back to your prompt.
+- **Enhance**: click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. When that tab has text, it is what gets generated; the **used** badge shows which tab that is. Edit it, enhance again, or **Clear** it to go back to your prompt. The button is unavailable while generation jobs are running or queued.
 - If you change the prompt or switch between image and video afterwards, the Enhanced prompt is marked **Out of date**. It is still used until you **Re-enhance** or **Clear** it.
 - `{a|b}` choices are picked before the rewrite, so the enhancer sees one plain prompt and the Enhanced prompt has no choices left. Enhance again for a different pick, or use **Enhance each image when generating** to keep a fresh pick per image.
 - **Enhance each image when generating** rewrites every image's prompt on the server, after its `{a|b}` choices are picked, using that image's seed. It works with inline prompts and prompt files. All rewrites run before the model loads, so the first image starts once every prompt is rewritten; the progress panel shows *Enhancing prompt N of M*. A prompt that could not be enhanced, or was skipped, is marked in the panel and generated from the original prompt.

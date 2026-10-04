@@ -13,11 +13,13 @@
   interface Props {
     context: WorkspaceContext;
     busy: boolean;
+    /** A job is running or queued. */
+    jobsActive?: boolean;
     /** Fold the sidebar into its strip; no button is shown when absent. */
     oncollapse?: () => void;
   }
 
-  let { context, busy, oncollapse }: Props = $props();
+  let { context, busy, jobsActive = false, oncollapse }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -203,6 +205,7 @@
             contract={caps.enhancer}
             variant="inline"
             {busy}
+            {jobsActive}
             maxWords={caps.enhanceMaxWords}
             onstart={() => { activeTab = 'enhanced'; }}
           />
@@ -220,7 +223,7 @@
         {/if}
         {#if showingEnhanced && !s.enhanceAuto}
           {#if stale}
-            <button type="button" class="prompt-link" disabled={busy || enhancing} onclick={() => enhancer?.runEnhance()}>Re-enhance</button>
+            <button type="button" class="prompt-link" disabled={busy || jobsActive || enhancing} onclick={() => enhancer?.runEnhance()}>Re-enhance</button>
           {/if}
           {#if s.enhancedPrompt}
             <button type="button" class="prompt-link" onclick={clearEnhanced}>Clear</button>
@@ -260,7 +263,7 @@
     >
       {#snippet tools()}
         {#if caps.showEnhanceAuto && caps.enhancer}
-          <PromptEnhancer contract={caps.enhancer} variant="file" {busy} maxWords={caps.enhanceMaxWords} />
+          <PromptEnhancer contract={caps.enhancer} variant="file" {busy} {jobsActive} maxWords={caps.enhanceMaxWords} />
         {/if}
       {/snippet}
     </PromptFileField>

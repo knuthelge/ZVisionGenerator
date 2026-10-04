@@ -84,6 +84,7 @@ export interface WorkspaceContext {
   loras: LoraInfo[];
   history_assets: GalleryAsset[];
   active_job: JobSnapshot | null;
+  queued_jobs?: JobSnapshot[];
   defaults: ImageModelDefaults;
   video_defaults: VideoModelDefaults;
   image_model_defaults: Record<string, ImageModelDefaults>;
@@ -406,7 +407,14 @@ export interface JobContext {
   runs: number;
   created_at: string;
   supported_controls?: string[];
+  /** Size label, e.g. "2:3 · m · 8 steps". */
+  meta?: string;
+  /** 1-based place in the queue; null once the job is the active one. */
+  queue_position?: number | null;
 }
+
+/** Form fields a job was submitted with; a field sent more than once is a list. */
+export type JobSettings = Record<string, string | string[]>;
 
 export interface JobSnapshot extends JobContext {
   id: string;
@@ -421,6 +429,14 @@ export interface JobSnapshot extends JobContext {
   outputs?: GalleryAsset[];
   /** Version of the job's current live preview; 0 when none is available. */
   preview_version?: number;
+  started_at?: number | null;
+  settings?: JobSettings;
+}
+
+/** The active generation job and the queued ones, oldest first; a job is never in both. */
+export interface JobList {
+  active_job: JobSnapshot | null;
+  queued_jobs: JobSnapshot[];
 }
 
 export interface ActiveJobState extends JobContext {

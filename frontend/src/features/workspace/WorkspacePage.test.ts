@@ -15,6 +15,9 @@ const workspaceApiMocks = vi.hoisted(() => ({
   getJobSnapshot: vi.fn<(jobId: string) => Promise<JobSnapshot>>(),
   getHistory: vi.fn<(page?: number) => Promise<GalleryPage>>(),
   parseUrlPrefill: vi.fn<() => Record<string, string>>(),
+  listJobs: vi.fn(async () => ({ active_job: null as JobSnapshot | null, queued_jobs: [] as JobSnapshot[] })),
+  clearQueue: vi.fn(async () => ({ cancelled: [] as string[] })),
+  cancelJob: vi.fn(async () => undefined),
 }));
 
 const promptFileApiMocks = vi.hoisted(() => ({
@@ -34,7 +37,18 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
     getJobSnapshot: workspaceApiMocks.getJobSnapshot,
     getHistory: workspaceApiMocks.getHistory,
     parseUrlPrefill: workspaceApiMocks.parseUrlPrefill,
+    listJobs: workspaceApiMocks.listJobs,
+    clearQueue: workspaceApiMocks.clearQueue,
+    cancelJob: workspaceApiMocks.cancelJob,
   };
+});
+
+// Every test starts with an empty server-side queue.
+beforeEach(() => {
+  workspaceApiMocks.listJobs.mockReset();
+  workspaceApiMocks.listJobs.mockResolvedValue({ active_job: null, queued_jobs: [] });
+  workspaceApiMocks.clearQueue.mockClear();
+  workspaceApiMocks.cancelJob.mockClear();
 });
 
 const galleryApiMocks = vi.hoisted(() => ({
@@ -617,6 +631,123 @@ describe('WorkspacePage', () => {
     expect(document.activeElement?.id).toBe('ws-prompt');
     pressKey('2', { altKey: true, code: 'Digit2' });
     expect(document.activeElement?.closest('.settings-pane')).not.toBeNull();
+  });
+
+  function jobSnap(jobId: string, status: JobSnapshot['status'], extra: Partial<JobSnapshot> = {}): JobSnapshot {
+    return {
+      id: jobId, job_id: jobId, workflow: 'txt2img', job_type: 'Text to Image', status, created_at: '2026-10-04T10:00:00Z', completed_at: null,
+      event_count: 1, last_event: { type: 'job_started' }, supported_controls: ['quit'], paused: false, result_path: null,
+      prompt: `prompt of ${jobId}`, model: 'zit', runs: 1, ...extra,
+    };
+  }
+
+  function queueContext(queued: JobSnapshot[]): WorkspaceContext {
+    workspaceApiMocks.listJobs.mockResolvedValue({ active_job: jobSnap('job-live', 'running'), queued_jobs: queued });
+    return makeContext({ active_job: jobSnap('job-live', 'running'), queued_jobs: queued });
+  }
+
+  describe('job queue', () => {
+    it('keeps the form usable while a job runs and adds new runs to the queue', async () => {
+      draft.update('prompt', 'Another run');
+      await mountWorkspace(queueContext([]));
+      const submit = target.querySelector('#ws-submit') as HTMLButtonElement;
+      expect(submit.disabled).toBe(false);
+      expect(submit.textContent).toContain('Add to queue');
+      expect(target.querySelector('#ws-busy-note')?.textContent).toContain('New runs join the queue');
+      expect((target.querySelector('#ws-steps') as HTMLInputElement).disabled).toBe(false);
+
+      const queued = jobSnap('job-2', 'queued', { queue_position: 1, prompt: 'Another run', meta: '2:3 · m · 8 steps' });
+      workspaceApiMocks.submitGenerate.mockResolvedValue({ job_id: 'job-2', workflow: 'txt2img', prompt: 'Another run', model: 'zit', runs: 1, created_at: '', queue_position: 1 });
+      workspaceApiMocks.listJobs.mockResolvedValue({ active_job: jobSnap('job-live', 'running'), queued_jobs: [queued] });
+      target.querySelector('form')!.requestSubmit();
+      await settle();
+
+      expect(jobStore.current?.job_id).toBe('job-live');
+      const panel = target.querySelector('[data-testid="queue-panel"]') as HTMLElement;
+      expect(panel.textContent).toContain('Up next · 1');
+      expect(panel.textContent).toContain('Another run');
+      expect(panel.textContent).toContain('Starts next');
+      expect(panel.textContent).toContain('2:3 · m · 8 steps');
+    });
+
+    it('submits once for a held Cmd+Enter', async () => {
+      draft.update('prompt', 'Once');
+      await mountWorkspace(makeContext());
+      pressKey('Enter', { metaKey: true, repeat: true });
+      await settle();
+      expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
+      pressKey('Enter', { metaKey: true });
+      await settle();
+      expect(workspaceApiMocks.submitGenerate).toHaveBeenCalledTimes(1);
+    });
+
+    it('disables manual enhancement while jobs are active', async () => {
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(queueContext([])));
+      (target.querySelector('#ws-enhance-toggle') as HTMLButtonElement).click();
+      await settle();
+      expect((document.querySelector('#ws-enhance-run') as HTMLButtonElement).disabled).toBe(true);
+      expect(document.querySelector('#ws-enhance-panel')?.textContent).toContain('Available when all jobs have finished.');
+      pressKey('e', { ctrlKey: true }, target.querySelector('#ws-prompt') as HTMLTextAreaElement);
+      await settle();
+      expect(enhanceApiMocks.enhancePrompt).not.toHaveBeenCalled();
+    });
+
+    it('removes a queued job without stopping the running one', async () => {
+      await mountWorkspace(queueContext([jobSnap('job-2', 'queued', { queue_position: 1 })]));
+      workspaceApiMocks.listJobs.mockResolvedValue({ active_job: jobSnap('job-live', 'running'), queued_jobs: [] });
+
+      (target.querySelector('[data-job-id="job-2"] button[aria-label="Remove from queue"]') as HTMLButtonElement).click();
+      await settle();
+
+      expect(workspaceApiMocks.cancelJob).toHaveBeenCalledWith('job-2');
+      expect(target.querySelector('[data-testid="queue-panel"]')).toBeNull();
+      expect(jobStore.current?.job_id).toBe('job-live');
+      expect(jobStore.current?.status).toBe('running');
+    });
+
+    it('asks before clearing the queue and then moves focus to Generate', async () => {
+      await mountWorkspace(queueContext([jobSnap('job-2', 'queued', { queue_position: 1 }), jobSnap('job-3', 'queued', { queue_position: 2 })]));
+      const clear = () => (Array.from(target.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Clear queue') as HTMLButtonElement).click();
+
+      clear();
+      await settle();
+      expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('Remove 2 queued jobs?');
+      await answerConfirm(false);
+      expect(workspaceApiMocks.clearQueue).not.toHaveBeenCalled();
+
+      workspaceApiMocks.listJobs.mockResolvedValue({ active_job: jobSnap('job-live', 'running'), queued_jobs: [] });
+      clear();
+      await settle();
+      await answerConfirm(true);
+      await settle();
+
+      expect(workspaceApiMocks.clearQueue).toHaveBeenCalledTimes(1);
+      expect(target.querySelector('[data-testid="queue-panel"]')).toBeNull();
+      expect(document.activeElement?.id).toBe('ws-submit');
+      expect(jobStore.current?.status).toBe('running');
+    });
+
+    it('loads a queued job\'s settings into the form', async () => {
+      const settings = { mode: 'image', workflow: 'txt2img', model: 'zit', prompt_source: 'inline', prompt: 'from the queue', steps: '7', runs: '3', seed: '99' };
+      await mountWorkspace(queueContext([jobSnap('job-2', 'queued', { queue_position: 1, settings })]));
+
+      (target.querySelector('[data-job-id="job-2"] button[title="Copy this job\'s settings into the form"]') as HTMLButtonElement).click();
+      await settle();
+
+      expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('from the queue');
+      expect(draft.state).toMatchObject({ steps: 7, runs: 3, seed: 99 });
+      const submitted = new FormData(target.querySelector('form')!);
+      expect(submitted.get('prompt')).toBe('from the queue');
+      expect(submitted.get('steps')).toBe('7');
+    });
+
+    it('shows the queue count on the collapsed strip', async () => {
+      draft.update('sidebarCollapsed', true);
+      await mountWorkspace(queueContext([jobSnap('job-2', 'queued', { queue_position: 1 })]));
+      expect(target.querySelector('[data-testid="strip-queue-count"]')?.textContent).toBe('1');
+      expect(target.querySelector('[data-testid="sidebar-strip"] button[type="submit"]')?.getAttribute('aria-label')).toBe('Add to queue');
+    });
   });
 
   it('enhances the prompt with Ctrl+E, even from inside the prompt field', async () => {
@@ -1254,7 +1385,9 @@ describe('WorkspacePage', () => {
     await settle();
 
     expect(workspaceApiMocks.submitGenerate).toHaveBeenCalledTimes(1);
-    expect(submitButton?.disabled).toBe(true);
+    // A running job no longer blocks Generate; it adds to the queue.
+    expect(submitButton?.disabled).toBe(false);
+    expect(submitButton?.textContent).toContain('Add to queue');
 
     const mockEventSource = (globalThis.EventSource as unknown as {
       lastInstance: { emit: (type: string, data: unknown) => void };
@@ -1264,6 +1397,7 @@ describe('WorkspacePage', () => {
 
     expect(jobStore.current?.status).toBe('cancelled');
     expect(submitButton?.disabled).toBe(false);
+    expect(submitButton?.textContent).not.toContain('Add to queue');
   });
 
   it('refreshes model download and memory status after a job ends', async () => {
@@ -1378,7 +1512,9 @@ describe('WorkspacePage', () => {
     expect(jobStore.current?.remaining).toBe(18);
 
     const submitButton = target.querySelector('#ws-submit') as HTMLButtonElement | null;
-    expect(submitButton?.disabled).toBe(true);
+    // A running job no longer blocks Generate; it adds to the queue.
+    expect(submitButton?.disabled).toBe(false);
+    expect(submitButton?.textContent).toContain('Add to queue');
 
     const activeCardText = target.textContent ?? '';
     const activeJobCard = target.querySelector('article');
@@ -1415,7 +1551,9 @@ describe('WorkspacePage', () => {
     };
     const source = MockEventSource.lastInstance;
     const constructionCount = MockEventSource.instances.length;
-    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
+    // A running job no longer blocks Generate; it adds to the queue.
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.textContent).toContain('Add to queue');
 
     await unmount(app!);
     app = null;
@@ -1423,7 +1561,9 @@ describe('WorkspacePage', () => {
 
     await mountWorkspace(context);
     expect(MockEventSource.instances).toHaveLength(constructionCount);
-    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
+    // A running job no longer blocks Generate; it adds to the queue.
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.textContent).toContain('Add to queue');
 
     workspaceApiMocks.getHistory.mockClear();
     source.emit('job_completed', { type: 'job_completed', job_id: 'job-remount', total_runs: 1, outputs: [] });
@@ -1433,6 +1573,7 @@ describe('WorkspacePage', () => {
     expect(source.closeCalls).toBe(1);
     expect(workspaceApiMocks.getHistory).toHaveBeenCalledOnce();
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.textContent).not.toContain('Add to queue');
   });
 
   it('reconnects the active job across workspace remounts from stored continuity state', async () => {
@@ -1468,7 +1609,9 @@ describe('WorkspacePage', () => {
 
     expect(workspaceApiMocks.getJobSnapshot).toHaveBeenCalledWith('job-reconnect');
     expect(target.textContent).toContain('Resume me after remount');
-    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
+    // A running job no longer blocks Generate; it adds to the queue.
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.textContent).toContain('Add to queue');
 
     await unmount(app!);
     app = null;
@@ -1481,7 +1624,9 @@ describe('WorkspacePage', () => {
 
     expect(workspaceApiMocks.getJobSnapshot).toHaveBeenCalledWith('job-reconnect');
     expect(target.textContent).toContain('Resume me after remount');
-    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
+    // A running job no longer blocks Generate; it adds to the queue.
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.textContent).toContain('Add to queue');
   });
 
   it('hides image-only controls (negative prompt, quantize) on a txt2vid URL reuse landing', async () => {
@@ -2101,9 +2246,10 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
     form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
 
-    // While running, submit button is disabled
     const submitButton = target.querySelector('#ws-submit') as HTMLButtonElement | null;
-    expect(submitButton?.disabled).toBe(true);
+    // A running job no longer blocks Generate; it adds to the queue.
+    expect(submitButton?.disabled).toBe(false);
+    expect(submitButton?.textContent).toContain('Add to queue');
 
     const completedAsset = makeAsset({ id: 'out/first.png', filename: 'first.png' });
     const secondAsset = makeAsset({ id: 'out/second.png', url: '/media/out/second.png', filename: 'second.png' });

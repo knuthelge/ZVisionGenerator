@@ -9,7 +9,10 @@
 
   interface Props {
     context: WorkspaceContext;
+    /** A submit is in flight. */
     busy: boolean;
+    /** A job is running or queued: Generate adds to the queue. */
+    jobsActive?: boolean;
     imageFile: File | null;
     /** Preview for a reference path that points at a known asset. */
     referencePreviewUrl: string | null;
@@ -18,7 +21,7 @@
     onImageFileChange: (file: File | null) => void;
   }
 
-  let { context, busy, imageFile, referencePreviewUrl, lastSeed, onImageFileChange }: Props = $props();
+  let { context, busy, jobsActive = false, imageFile, referencePreviewUrl, lastSeed, onImageFileChange }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -458,9 +461,9 @@
   </div>
 
   <div class="panel-footer settings-footer">
-    {#if busy}
+    {#if jobsActive}
       <p id="ws-busy-note" class="surface-card-muted footer-note text-zinc-400">
-        An exclusive generation job is running. New runs are disabled until it finishes.
+        A job is running. New runs join the queue.
       </p>
     {/if}
     {#if promptFileMode && s.promptFileOptionIds.length === 0}
@@ -486,7 +489,7 @@
         class="surface-button surface-button-primary generate-button"
       >
         <Icon name="bolt" size={16} />
-        <span>{busy ? 'Generation In Progress' : 'Generate'}</span>
+        <span>{busy ? 'Submitting…' : jobsActive ? 'Add to queue' : 'Generate'}</span>
         <span class="surface-shortcut ml-2 px-1.5 py-0.5 font-mono text-xs opacity-80">⌘↵</span>
       </button>
     </div>

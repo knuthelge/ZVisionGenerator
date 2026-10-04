@@ -7,14 +7,20 @@
 
   interface Props {
     context: WorkspaceContext | null;
+    /** A submit is in flight. */
     busy: boolean;
+    /** A job is running or queued: Generate adds to the queue. */
+    jobsActive?: boolean;
+    /** Jobs waiting behind the active one, shown as a badge on the collapsed strip. */
+    queuedCount?: number;
     imageFile: File | null;
     referencePreviewUrl?: string | null;
     lastSeed?: number | null;
     onImageFileChange: (file: File | null) => void;
   }
 
-  let { context, busy, imageFile, referencePreviewUrl = null, lastSeed = null, onImageFileChange }: Props = $props();
+  let { context, busy, jobsActive = false, queuedCount = 0, imageFile, referencePreviewUrl = null, lastSeed = null, onImageFileChange }: Props = $props();
+  const generateLabel = $derived(jobsActive ? 'Add to queue' : 'Generate');
   const authorityReady = $derived(context !== null && draft.authorityReady);
   const collapsed = $derived(draft.state.sidebarCollapsed);
 
@@ -28,8 +34,8 @@
 <aside id="ws-controls-sidebar" class="workspace-left panel-shell panel-shell-left" class:collapsed aria-label="Compose and settings">
   <div class="sidebar-panes">
     {#if authorityReady && context}
-      <ComposePane {context} {busy} oncollapse={() => setCollapsed(true)} />
-      <SettingsPane {context} {busy} {imageFile} {referencePreviewUrl} {lastSeed} {onImageFileChange} />
+      <ComposePane {context} {busy} {jobsActive} oncollapse={() => setCollapsed(true)} />
+      <SettingsPane {context} {busy} {jobsActive} {imageFile} {referencePreviewUrl} {lastSeed} {onImageFileChange} />
     {:else}
       <div class="flex-1 overflow-y-auto p-3 custom-scrollbar">
         <div class="surface-card-muted space-y-3 rounded-md p-4">
@@ -64,15 +70,20 @@
       >
         <Icon name="uncollapse" size={16} />
       </button>
-      <button
-        type="submit"
-        class="strip-generate"
-        aria-label="Generate"
-        title="Generate (⌘↵)"
-        disabled={busy || !authorityReady}
-      >
-        <Icon name="bolt" size={18} />
-      </button>
+      <div class="strip-generate-wrap">
+        <button
+          type="submit"
+          class="strip-generate"
+          aria-label={generateLabel}
+          title="{generateLabel} (⌘↵)"
+          disabled={busy || !authorityReady}
+        >
+          <Icon name="bolt" size={18} />
+        </button>
+        {#if queuedCount > 0}
+          <span class="strip-badge" data-testid="strip-queue-count" aria-label="{queuedCount} queued">{queuedCount}</span>
+        {/if}
+      </div>
     </div>
   {/if}
 </aside>
@@ -90,6 +101,8 @@
   .strip-generate { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 999px; background: var(--color-primary-main); color: var(--color-primary-ink); }
   .strip-generate:hover { background: var(--color-primary-hover); }
   .strip-generate:disabled { opacity: 0.5; cursor: not-allowed; }
+  .strip-generate-wrap { position: relative; }
+  .strip-badge { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border: 2px solid var(--color-bg-surface); border-radius: 999px; background: var(--color-primary-main); color: var(--color-primary-ink); font-size: 11px; font-weight: 700; }
   @media (max-width: 639px) {
     .workspace-left { flex: none; }
   }
