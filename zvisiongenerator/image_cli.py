@@ -210,6 +210,8 @@ def main(*, prog: str = "ziv-image") -> None:
         backend.name,
     )
     args.steps, args.guidance, args.scheduler = defaults["steps"], defaults["guidance"], defaults["scheduler"]
+    if args.quantize is not None and not defaults.get("supports_quantize", True):
+        parser.error(f"The '{model_info.family}' model family does not support quantization; drop --quantize.")
     try:
         validate_scheduler(args.scheduler, config)
     except ValueError as e:

@@ -1757,3 +1757,19 @@ def test_convert_route_rejects_unsupported_quantize_levels(monkeypatch, tmp_path
         response = client.post("/api/models/convert", json={"input_path": str(checkpoint), "model_type": "flux2-klein-9b", "quantize": "6"})
 
     assert response.status_code in (400, 422)
+
+
+@pytest.mark.parametrize(("quantize", "expected_status"), [("8", 409), ("", 200)])
+def test_convert_route_refuses_a_quantized_copy_while_a_job_runs(monkeypatch, tmp_path, quantize, expected_status):
+    """Saving a quantized copy loads a full model, so it waits for a running job; a plain convert does not."""
+    checkpoint = tmp_path / "model.safetensors"
+    checkpoint.write_bytes(b"x")
+    ran: list[list[str]] = []
+    monkeypatch.setattr(web_server, "_run_model_management_command", lambda args: ran.append(args) or "done")
+    monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: {"job_id": "busy"})
+
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/models/convert", json={"input_path": str(checkpoint), "model_type": "flux2-klein-9b", "quantize": quantize})
+
+    assert response.status_code == expected_status
+    assert len(ran) == (1 if expected_status == 200 else 0)
