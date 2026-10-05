@@ -2,6 +2,11 @@
 
 export type Workflow = 'txt2img' | 'img2img' | 'txt2vid' | 'img2vid';
 
+/** Workflow of a job: a Workspace workflow, or an upscale of an existing image. */
+export type JobWorkflow = Workflow | 'upscale';
+
+export type UpscaleFactor = 2 | 4;
+
 export type WorkflowMode = 'image' | 'video';
 
 export type PromptSource = 'inline' | 'file';
@@ -42,6 +47,47 @@ export interface GalleryAsset {
   has_reusable_config?: boolean;
   reuse_state?: ReuseState;
   media_type: 'image' | 'video';
+  /** Recorded settings beyond the reuse fields, shown in the asset viewer. */
+  details?: AssetDetails;
+  /** Upscale options for an image (null for videos and images of unknown size). */
+  upscale?: AssetUpscale | null;
+}
+
+/** How a saved asset was made, as recorded in its embedded settings. */
+export interface AssetDetails {
+  /** The workflow as recorded, e.g. `upscale`; `workflow` holds the one Reuse settings uses. */
+  recorded_workflow?: string | null;
+  negative_prompt?: string | null;
+  scheduler?: string | null;
+  model_family?: string | null;
+  image_strength?: number | null;
+  generation?: AssetGeneration;
+  /** The image an upscale started from; `id` is set while it is still in the gallery. */
+  source?: { path: string; width: number | null; height: number | null; id: string | null } | null;
+}
+
+export interface AssetGeneration {
+  /** Seconds the model spent generating. */
+  time?: number;
+  quantize?: number;
+  upscale?: { factor?: number; denoise?: number; steps?: number; guidance?: number; pre_sharpen?: number };
+  sharpen?: number;
+  contrast?: number;
+  saturation?: number;
+  audio?: boolean;
+  output_format?: string;
+}
+
+export interface AssetUpscaleFactor {
+  factor: UpscaleFactor;
+  width: number;
+  height: number;
+  allowed: boolean;
+  reason: string | null;
+}
+
+export interface AssetUpscale {
+  factors: AssetUpscaleFactor[];
 }
 
 export type MemoryFitStatus = 'fits' | 'tight' | 'too_large';
@@ -371,7 +417,8 @@ export interface DraftState {
   version: number;
   scheduler: string | null;
   postprocessSharpenEnabled: boolean;
-  postprocessSharpenAmount: number;
+  /** Final sharpen amount; null follows the config (`sharpening.normal` / `upscaled`). */
+  postprocessSharpenAmount: number | null;
   postprocessContrastEnabled: boolean;
   postprocessContrastAmount: number;
   postprocessSaturationEnabled: boolean;
@@ -401,7 +448,7 @@ export type JobStatus = 'queued' | 'pending' | 'running' | 'paused' | 'completed
 export interface JobContext {
   id?: string;
   job_id: string;
-  workflow: Workflow;
+  workflow: JobWorkflow;
   prompt: string;
   model: string;
   runs: number;
@@ -411,6 +458,8 @@ export interface JobContext {
   meta?: string;
   /** 1-based place in the queue; null once the job is the active one. */
   queue_position?: number | null;
+  /** Short notes about how the job deviates from what was asked, e.g. "original settings unknown". */
+  notices?: string[];
 }
 
 /** Form fields a job was submitted with; a field sent more than once is a list. */

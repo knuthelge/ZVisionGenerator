@@ -101,9 +101,12 @@ def _make_step_callback(skip_signal, *, total_steps: int, step_callback=None, li
     def _on_step_end(pipe, step, timestep, callback_kwargs):
         del timestep
         if step_callback is not None:
+            # img2img runs only the tail of the schedule; the pipeline knows how many steps that is.
+            run_steps = getattr(pipe, "num_timesteps", None)
+            steps_total = run_steps if isinstance(run_steps, int) and run_steps > 0 else max(total_steps, 1)
             payload = {
-                "current_step": min(step + 1, max(total_steps, 1)),
-                "total_steps": max(total_steps, 1),
+                "current_step": min(step + 1, steps_total),
+                "total_steps": steps_total,
             }
             preview = live_preview.observe(pipe, step, callback_kwargs.get("latents")) if live_preview is not None else None
             if preview is not None:

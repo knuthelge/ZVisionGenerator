@@ -85,7 +85,7 @@ def _make_workspace_bootstrap_view() -> dict[str, object]:
         "dimension_step": 16,
         "quantize": None,
         "image_strength": 0.5,
-        "postprocess": {"sharpen": 0.8, "contrast": False, "saturation": False},
+        "postprocess": {"sharpen": True, "contrast": False, "saturation": False},
         "upscale": {"enabled": False, "factor": None, "denoise": None, "steps": None, "guidance": None, "sharpen": True, "save_pre": False},
     }
     video_defaults = {
@@ -931,8 +931,6 @@ def test_generate_route_returns_requested_runs_from_job_context(monkeypatch):
         lambda _form, _web_config: {
             "job_id": "job-123",
             "context": _public_context(runs=7, meta="2:3 · m · 10 steps"),
-            "events_url": "/jobs/job-123/events",
-            "status_url": "/jobs/job-123",
             "supported_controls": ("next", "pause"),
         },
     )
@@ -985,8 +983,6 @@ def test_image_submission_does_not_require_ffmpeg(monkeypatch):
         lambda _form, _web_config: {
             "job_id": "job-123",
             "context": _public_context(),
-            "events_url": "/jobs/job-123/events",
-            "status_url": "/jobs/job-123",
             "supported_controls": (),
         },
     )
@@ -1922,3 +1918,11 @@ def test_submit_image_job_queues_with_its_public_context(monkeypatch, tmp_path):
     assert context["workflow"] == "txt2img"
     assert "steps" in context["meta"]
     assert context["settings"] == {"model": "zit", "prompt": "hello", "steps": "9", "workflow": "txt2img"}
+
+
+@pytest.mark.parametrize("amount", [-0.1, 1.6])
+def test_generate_rejects_sharpen_amounts_outside_the_safe_range(amount):
+    from conftest import _make_args
+
+    with pytest.raises(ValueError, match="Sharpen amount must be between 0 and 1.5"):
+        web_server._validate_image_args(_make_args(sharpen=amount, image_strength=0.5, quantize=None, runs=1))

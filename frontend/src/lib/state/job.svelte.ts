@@ -208,6 +208,7 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     runs: snapshot.runs,
     created_at: String(snapshot.created_at),
     supported_controls: snapshot.supported_controls ?? [],
+    notices: snapshot.notices ?? [],
     status: snapshot.status,
     currentStep: eventFieldNumber(lastEvent, 'current_step'),
     totalSteps: eventFieldNumber(lastEvent, 'total_steps'),

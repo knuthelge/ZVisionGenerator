@@ -29,7 +29,8 @@
   import { fitOutputGrid } from './outputGrid';
   import { randomSeed } from './seed';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
-  import type { GalleryAsset, JobSnapshot, WorkspaceContext, Workflow } from '$lib/types';
+  import { startUpscale } from '$lib/state/upscale';
+  import type { GalleryAsset, JobSnapshot, UpscaleFactor, WorkspaceContext, Workflow } from '$lib/types';
 
   let context = $state<WorkspaceContext | null>(null);
   let loadError = $state<string | null>(null);
@@ -304,6 +305,11 @@
     imageFile = null;
     closeLightbox();
     addToast(`Loaded settings from ${asset.filename}`, 'success');
+  }
+
+  async function upscaleAsset(asset: GalleryAsset, factor: UpscaleFactor): Promise<void> {
+    // Like Generate, an upscale joins the queue while another job runs.
+    if (await startUpscale(asset, factor)) closeLightbox();
   }
 
   // Reference targets the model that would run them can't use, with the reason shown in the menu.
@@ -799,6 +805,7 @@
                   onpreview={openOutputViewer}
                   onreuse={reuseAsset}
                   onreference={useAsReference}
+                  onupscale={upscaleAsset}
                   {referenceUnavailable}
                   ondelete={deleteWorkspaceAsset}
                 />
@@ -825,6 +832,7 @@
                       onpreview={openOutputViewer}
                       onreuse={reuseAsset}
                       onreference={useAsReference}
+                      onupscale={upscaleAsset}
                   {referenceUnavailable}
                       ondelete={deleteWorkspaceAsset}
                     />
@@ -863,6 +871,7 @@
               onpreview={openHistoryViewer}
               onreuse={reuseAsset}
               onreference={useAsReference}
+              onupscale={upscaleAsset}
               {referenceUnavailable}
               ondelete={deleteWorkspaceAsset}
             />
@@ -901,6 +910,7 @@
         onpreview={openHistoryViewer}
         onreuse={reuseAsset}
         onreference={useAsReference}
+        onupscale={upscaleAsset}
         {referenceUnavailable}
         ondelete={deleteWorkspaceAsset}
       />
@@ -920,6 +930,7 @@
   onreuse={reuseAsset}
   onreference={useAsReference}
   {referenceUnavailable}
+  onupscale={upscaleAsset}
   ondelete={deleteWorkspaceAsset}
 />
 

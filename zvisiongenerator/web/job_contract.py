@@ -18,6 +18,7 @@ STARTED_EVENT = "job_started"
 REMOVED_REASON = "removed"
 IMAGE_SUPPORTED_CONTROLS = ("next", "pause", "resume", "repeat", "quit")
 VIDEO_SUPPORTED_CONTROLS: tuple[str, ...] = ()
+UPSCALE_SUPPORTED_CONTROLS = ("quit",)
 
 
 def terminal_event_for_status(status: str) -> str | None:
@@ -73,6 +74,7 @@ def public_job_snapshot(
         "runs": context.get("runs", 1),
         "meta": context.get("meta", ""),
         "settings": context.get("settings", {}),
+        "notices": list(context.get("notices", ())),
     }
     terminal_event = terminal_event_for_status(status)
     if terminal_event is not None:

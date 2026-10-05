@@ -34,24 +34,11 @@ def enhance_prompt_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
 
 
 def generate_filename_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:
-    """Populate artifacts.filename using the shared filename generator.
+    """Populate artifacts.filename as ``{set_name}_{timestamp}.{format}``, with a counter when that name is taken."""
+    from zvisiongenerator.utils.filename import generate_filename, unique_output_path
 
-    Produces: {set_name}_{timestamp}_{WxH}_{frames}f_{model}_{lora}_steps{N}_seed{S}.{format}
-    """
-    from zvisiongenerator.utils.filename import generate_filename
-
-    base = generate_filename(
-        set_name=request.filename_base,
-        width=request.width,
-        height=request.height,
-        seed=request.seed,
-        steps=request.steps,
-        model=request.model_name,
-        lora_paths=request.lora_paths or None,
-        lora_weights=request.lora_weights or None,
-        num_frames=request.num_frames,
-    )
-    artifacts.filename = f"{base}.{request.output_format}"
+    base = generate_filename(request.filename_base)
+    artifacts.filename = unique_output_path(request.output_dir, base, f".{request.output_format}").name
     return StageOutcome.success
 
 

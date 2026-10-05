@@ -140,6 +140,26 @@ ziv-image -m my-model --prompt "a landscape" --upscale 2 --no-upscale-sharpen
 | `--upscale-sharpen` | `True` | CAS sharpening step before upscale refinement (`--no-upscale-sharpen` to disable) |
 | `--upscale-save-pre` | `False` | Save pre-upscale image alongside final |
 
+### Upscaling an existing image (Web UI)
+
+To upscale an image you already have, choose **Upscale → 2×** or **4×** in the asset viewer (Gallery or Workspace) or in the **⋯** menu on its thumbnail. In the viewer you can also press **X** then **2** or **4**. Each option shows the output size, e.g. `2× → 1664×2432`. The job runs in the Workspace job panel, or joins the queue when another job is running; starting it from the Gallery takes you there.
+
+The image is resized, refined with img2img and sharpened, using the settings recorded in the file: prompt, model, seed, steps, guidance, scheduler, LoRAs, negative prompt and quantization. When the recorded model is not configured here, the default image model refines it with its own defaults. Images without recorded settings (imported or older files) are refined by the default image model with an empty prompt; the job panel notes this. The image is already sharpened, so by default the CAS pass before refinement is skipped (`sharpening.existing_pre_upscale: 0`); the final pass uses `sharpening.existing_upscaled`. Contrast and saturation are not applied again.
+
+The result is saved next to the original as `<name>_2x.png` or `<name>_4x.png`, with a counter (`_2`) if that name exists. An option is disabled, with the reason in its tooltip, when the model cannot upscale or refine images (e.g. Ideogram 4), or when the output would exceed the model's maximum dimension or the megapixel limit. These settings live in the `upscale` section of `~/.ziv/config.yaml`:
+
+```yaml
+upscale:
+  existing_denoise_small: 0.4      # Refinement denoise for outputs up to existing_large_megapixels
+  existing_denoise_large: 0.2      # Larger outputs: high denoise at large sizes invents detail and seams
+  existing_large_megapixels: 2
+  max_megapixels: 20               # Largest output a viewer upscale may produce
+```
+
+The denoise depends on the output size, not the factor, so upscaling an upscale (2× then 2×) refines as lightly as a direct 4× to the same size.
+
+`default_denoise_2x` and `default_denoise_4x` apply to `--upscale` and the Workspace upscale settings only.
+
 ## Quantization
 
 Reduces memory usage and speeds up generation at the cost of some quality.
@@ -192,9 +212,28 @@ ziv-image -m my-model --prompt "a sunset" --no-saturation        # disable entir
 
 ```bash
 ziv-image -m my-model --prompt "a sunset" --sharpen              # enabled by default
-ziv-image -m my-model --prompt "a sunset" --sharpen 0.6          # custom amount (0.0–1.0)
+ziv-image -m my-model --prompt "a sunset" --sharpen 0.6          # custom amount (0.0–1.5)
 ziv-image -m my-model --prompt "a sunset" --no-sharpen           # disable
 ```
+
+Without an amount, the final pass uses the config: `sharpening.normal` for plain images and `sharpening.upscaled` for upscaled ones (`sharpening.pre_upscale` is the pass before upscale refinement). In the Web UI, leave the **Sharpen** amount empty (**auto**) to use these, or type an amount to override them. Amounts above 1.5 are rejected: the filter breaks down beyond that.
+
+```yaml
+sharpening:
+  normal: 1.0
+  upscaled: 1.2
+  pre_upscale: 0.8
+  existing_upscaled: 1.2     # final pass when upscaling an existing image (viewer)
+  existing_pre_upscale: 0    # before refining an existing image; 0 = off
+```
+
+The asset viewer's **Details** show the amounts an image was made with, including the pre-sharpen of an upscale.
+
+## Output Files
+
+Images are saved as `<set name>_<YYYY-MM-DD_HH-MM-SS>.png` (for example `portrait_2026-10-04_14-03-22.png`), with `_2`, `_3`… added when that name is already taken, so no file is overwritten. Videos follow the same pattern with their format's extension.
+
+The settings each file was made with are embedded in it: prompt, negative prompt, model and family, seed, steps, guidance, scheduler, size, LoRAs, reference image and strength, quantization, generation time, upscale factor/denoise/steps, and the sharpen, contrast and saturation amounts. The Web UI asset viewer shows them under **Details** (**I**), and **Reuse settings** loads them into the Workspace.
 
 ## Keyboard Shortcuts
 
