@@ -18,6 +18,7 @@ import yaml
 
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.paths import get_ziv_data_dir
+from zvisiongenerator.utils.upscale import max_megapixels
 
 
 def load_config() -> dict[str, Any]:
@@ -70,6 +71,11 @@ def load_config() -> dict[str, Any]:
     for section in _EXPECTED_DICTS:
         if section in config and not isinstance(config[section], dict):
             raise ValueError(f"Config section '{section}' must be a mapping, got {type(config[section]).__name__}. Check your user config (~/.ziv/config.yaml) for overrides.")
+
+    # Reject a bad upscale.max_megapixels at load time rather than on every gallery page.
+    max_megapixels(config)
+    for key, amount in sharpening_amounts(config).items():
+        validate_sharpen_amount(amount, name=f"config 'sharpening.{key}'")
 
     platforms = config.get("platforms", {})
     for key, value in platforms.items():
@@ -202,6 +208,25 @@ def get_variant_key(model_info: ImageModelInfo) -> str | None:
     return None
 
 
+def model_capabilities(config: dict[str, Any], family: str) -> dict[str, Any]:
+    """Return a model family's capability flags and dimension limits from its preset, with permissive defaults.
+
+    These are family-level only (variants change steps and guidance), so they can be looked up by family alone.
+    """
+    preset = config.get("model_presets", {}).get(family, {})
+    return {
+        "supports_negative_prompt": preset.get("supports_negative_prompt", False),
+        "supports_img2img": preset.get("supports_img2img", True),
+        "supports_upscale": preset.get("supports_upscale", True),
+        "supports_quantize": preset.get("supports_quantize", True),
+        "supports_json_prompt": preset.get("supports_json_prompt", False),
+        "supports_first_sigma": preset.get("supports_first_sigma", False),
+        "dimension_min": preset.get("dimension_min", 16),
+        "dimension_max": preset.get("dimension_max", None),
+        "dimension_step": preset.get("dimension_step", 16),
+    }
+
+
 def resolve_defaults(
     model_info: ImageModelInfo,
     config: dict,
@@ -234,15 +259,7 @@ def resolve_defaults(
         "guidance": config["generation"]["default_guidance"],
         "scheduler": None,
         "upscale_steps": None,
-        "supports_negative_prompt": preset.get("supports_negative_prompt", False),
-        "supports_img2img": preset.get("supports_img2img", True),
-        "supports_upscale": preset.get("supports_upscale", True),
-        "supports_quantize": preset.get("supports_quantize", True),
-        "supports_json_prompt": preset.get("supports_json_prompt", False),
-        "supports_first_sigma": preset.get("supports_first_sigma", False),
-        "dimension_min": preset.get("dimension_min", 16),
-        "dimension_max": preset.get("dimension_max", None),
-        "dimension_step": preset.get("dimension_step", 16),
+        **model_capabilities(config, model_info.family),
     }
 
     # Layer family defaults
@@ -278,6 +295,34 @@ def resolve_defaults(
             effective[key] = value
 
     return effective
+
+
+def resolve_scheduler_class(scheduler: str | None, config: dict[str, Any], backend_name: str) -> str | None:
+    """Resolve a scheduler name to its backend-specific class path from config, or the name itself."""
+    if scheduler is None:
+        return None
+    sched_cfg = config.get("schedulers", {}).get(scheduler, {})
+    return sched_cfg.get(f"{backend_name}_class", scheduler)
+
+
+# Above ~1.67 the CAS filter's normaliser (1 + 4w) reaches zero in flat areas and the output breaks down.
+MAX_SHARPEN_AMOUNT = 1.5
+
+
+_DEFAULT_SHARPENING = {"normal": 1.0, "upscaled": 1.2, "pre_upscale": 0.8, "existing_pre_upscale": 0.0}
+
+
+def sharpening_amounts(config: dict[str, Any]) -> dict[str, float]:
+    """Return every ``sharpening`` amount, with defaults; ``existing_upscaled`` falls back to ``upscaled``."""
+    amounts = {**_DEFAULT_SHARPENING, **config.get("sharpening", {})}
+    amounts.setdefault("existing_upscaled", amounts["upscaled"])
+    return amounts
+
+
+def validate_sharpen_amount(amount: float, *, name: str = "Sharpen amount") -> None:
+    """Raise ValueError when *amount* is outside 0..MAX_SHARPEN_AMOUNT."""
+    if not 0 <= amount <= MAX_SHARPEN_AMOUNT:
+        raise ValueError(f"{name} must be between 0 and {MAX_SHARPEN_AMOUNT:g}, got {amount:g}.")
 
 
 def validate_scheduler(scheduler_name: str | None, config: dict[str, Any]) -> None:

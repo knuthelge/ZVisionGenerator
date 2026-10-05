@@ -23,6 +23,20 @@ describe('jobSettingsPrefill', () => {
     });
   });
 
+  it('restores auto sharpening when the job sent no sharpen amount', () => {
+    const { patch } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', prompt: 'a lake', sharpen_enabled: 'true' });
+
+    expect(patch.postprocessSharpenEnabled).toBe(true);
+    expect(patch).toHaveProperty('postprocessSharpenAmount', null);
+  });
+
+  it('leaves the sharpen amount alone when the job had sharpening off', () => {
+    const { patch } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', prompt: 'a lake', sharpen_enabled: 'false' });
+
+    expect(patch.postprocessSharpenEnabled).toBe(false);
+    expect(patch).not.toHaveProperty('postprocessSharpenAmount');
+  });
+
   it('restores a prompt-file job with several selected prompts and a custom size', () => {
     const { params, patch } = jobSettingsPrefill({
       mode: 'image', workflow: 'txt2img', model: 'zit', prompt_source: 'file', prompts_file: '/p/prompts.yaml',

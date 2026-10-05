@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from PIL import Image
 
 from zvisiongenerator.processing.sharpen import contrast_adaptive_sharpening
@@ -24,6 +25,16 @@ class TestContrastAdaptiveSharpening:
         assert result.size == img.size
         assert result.getpixel((0, 0)) == img.getpixel((0, 0))
         assert result.tobytes() == img.tobytes()
+
+    def test_amount_above_the_cap_is_rejected(self):
+        img = Image.new("RGB", (8, 8), color=(100, 100, 100))
+        with pytest.raises(ValueError, match="at most 1.5"):
+            contrast_adaptive_sharpening(img, amount=1.6)
+
+    def test_amount_at_the_cap_stays_finite(self):
+        # A flat image is the worst case for the filter's normaliser.
+        img = Image.new("RGB", (8, 8), color=(100, 100, 100))
+        assert contrast_adaptive_sharpening(img, amount=1.5).tobytes() == img.tobytes()
 
     def test_positive_amount_modifies_pixels(self):
         # Create an image with some variation for sharpening to act on

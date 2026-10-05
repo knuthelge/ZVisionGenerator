@@ -28,9 +28,11 @@ from PIL import Image
 from zvisiongenerator.backends import get_backend, get_video_backend, release_accelerator_memory
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
+from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.image_model_loader import load_image_model
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.preflight import run_preflight
+from zvisiongenerator.upscale_runner import run_upscale
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.paths import get_ziv_data_dir
@@ -47,6 +49,7 @@ from zvisiongenerator.web.job_contract import (
     SUCCESS_TERMINAL_EVENT,
     TERMINAL_EVENT_TYPES,
     TERMINAL_STATUSES,
+    UPSCALE_SUPPORTED_CONTROLS,
     VIDEO_SUPPORTED_CONTROLS,
     public_job_snapshot,
 )
@@ -299,6 +302,33 @@ class WebRunner:
                 model_ref=model_ref,
                 progress_callback=progress_callback,
                 enhance_by_set=enhance_by_set,
+            ),
+        )
+
+    def submit_upscale_job(
+        self,
+        *,
+        request: ImageGenerationRequest,
+        workflow: GenerationWorkflow,
+        model_ref: str,
+        admission_check: Callable[[], None] | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        """Queue the upscale job; the worker loads the refinement model (at ``request.quantize``) and upscales one image."""
+        control_signal = SkipSignal()
+        return self._submit_job(
+            job_type="upscale",
+            exclusive=True,
+            control_signal=control_signal,
+            supported_controls=UPSCALE_SUPPORTED_CONTROLS,
+            context=dict(context or {}),
+            admission_check=admission_check,
+            target_factory=lambda progress_callback: self._run_upscale_request(
+                request=request,
+                workflow=workflow,
+                model_ref=model_ref,
+                progress_callback=progress_callback,
+                control_signal=control_signal,
             ),
         )
 
@@ -631,21 +661,7 @@ class WebRunner:
         )
         if plan.cancelled:
             return
-        model_label = request.model_name or model_ref
-        progress_callback({"type": "model_loading", "mode": "image", "model": model_label})
-        backend = get_backend()
-        model, model_info = load_image_model(
-            backend,
-            model_ref,
-            quantize=quantize,
-            models_dir=get_ziv_data_dir() / "models",
-            model_name=request.model_name,
-            lora_paths=request.lora_paths,
-            lora_weights=request.lora_weights,
-            on_phase=lambda phase: progress_callback({"type": "model_loading", "mode": "image", "model": model_label, "phase": phase, "quantize": quantize}),
-            cancelled=lambda: control_signal.pending() == "quit",
-            release_memory=_release_accelerator_memory,
-        )
+        backend, model, model_info = _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal)
         run_batch(
             backend,
             model,
@@ -657,6 +673,22 @@ class WebRunner:
             progress_callback=progress_callback,
             skip_signal=control_signal,
         )
+
+    def _run_upscale_request(
+        self,
+        *,
+        request: ImageGenerationRequest,
+        workflow: GenerationWorkflow,
+        model_ref: str,
+        progress_callback: Callable[[EventPayload], None],
+        control_signal: SkipSignal,
+    ) -> None:
+        """Load the image model inside the worker thread and run the upscale workflow once."""
+        if control_signal.pending() == "quit":
+            progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
+            return
+        backend, model, _model_info = _load_image_model_with_progress(request, model_ref, request.quantize, progress_callback, control_signal)
+        run_upscale(backend, model, request, workflow, progress_callback=progress_callback, skip_signal=control_signal)
 
     def _run_video_request(
         self,
@@ -843,6 +875,36 @@ class WebRunner:
         if event.get("type") == "batch_failed":
             return {**event, "type": FAILED_TERMINAL_EVENT}
         return event
+
+
+def _load_image_model_with_progress(
+    request: ImageGenerationRequest,
+    model_ref: str,
+    quantize: int | None,
+    progress_callback: Callable[[EventPayload], None],
+    control_signal: SkipSignal,
+) -> tuple[Any, Any, Any]:
+    """Load the request's image model (stored quants, LoRAs) and report ``model_loading`` events.
+
+    Returns:
+        ``(backend, model, model_info)``.
+    """
+    model_label = request.model_name or model_ref
+    progress_callback({"type": "model_loading", "mode": "image", "model": model_label})
+    backend = get_backend()
+    model, model_info = load_image_model(
+        backend,
+        model_ref,
+        quantize=quantize,
+        models_dir=get_ziv_data_dir() / "models",
+        model_name=request.model_name,
+        lora_paths=request.lora_paths,
+        lora_weights=request.lora_weights,
+        on_phase=lambda phase: progress_callback({"type": "model_loading", "mode": "image", "model": model_label, "phase": phase, "quantize": quantize}),
+        cancelled=lambda: control_signal.pending() == "quit",
+        release_memory=_release_accelerator_memory,
+    )
+    return backend, model, model_info
 
 
 def _release_accelerator_memory() -> None:

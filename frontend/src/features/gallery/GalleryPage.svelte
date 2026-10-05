@@ -7,7 +7,8 @@
   import { jobStore } from '$lib/state/job.svelte';
   import { draft } from '$lib/state/draft.svelte';
   import { referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
-  import type { GalleryAsset } from '$lib/types';
+  import { startUpscale } from '$lib/state/upscale';
+  import type { GalleryAsset, UpscaleFactor } from '$lib/types';
   import { AssetTile, AssetViewer, requestConfirm } from '$lib/components/molecules';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import { hasOpenModal, isCommandKey, isPlainKey, isTyping } from '$lib/keyboard';
@@ -419,6 +420,11 @@
     router.navigate('workspace', referenceParams(asset, target));
   }
 
+  async function upscaleAsset(asset: GalleryAsset, factor: UpscaleFactor): Promise<void> {
+    // The job panel and queue live in the Workspace; follow the upscale there.
+    if (await startUpscale(asset, factor)) router.navigate('workspace');
+  }
+
   // --- Keyboard -------------------------------------------------------------
   let gridEl = $state<HTMLDivElement | null>(null);
 
@@ -563,6 +569,7 @@
               onpreview={openViewer}
               onreuse={reuseInWorkspace}
               onreference={useAsReference}
+              onupscale={upscaleAsset}
               ondelete={deleteSingle}
             />
           {/each}
@@ -605,5 +612,6 @@
   onnearend={() => { if (hasMore) void loadMorePages(); }}
   onreuse={reuseInWorkspace}
   onreference={useAsReference}
+  onupscale={upscaleAsset}
   ondelete={deleteSingle}
 />

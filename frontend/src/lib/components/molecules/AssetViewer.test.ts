@@ -267,4 +267,90 @@ describe('AssetViewer', () => {
     expect(event.defaultPrevented).toBe(false);
     expect(document.querySelector('#asset-viewer-details')).toBeNull();
   });
+  const upscale = {
+    factors: [
+      { factor: 2 as const, width: 1664, height: 2432, allowed: true, reason: null },
+      { factor: 4 as const, width: 3328, height: 4864, allowed: false, reason: 'Over the 16-megapixel upscale limit.' },
+    ],
+  };
+
+  function upscaleItems(): HTMLElement[] {
+    return Array.from(document.querySelectorAll<HTMLElement>('[role="menu"][aria-label="Upscale"] [role="menuitem"]'));
+  }
+
+  it('shows the upscale menu with each factor and size, disabling one over a limit', () => {
+    const onupscale = vi.fn();
+    mountViewer({ assets: [makeAsset({ upscale })], onupscale });
+
+    flushSync(() => document.querySelector<HTMLButtonElement>('[data-action="upscale"]')!.click());
+
+    const items = upscaleItems();
+    expect(items.map((item) => item.textContent?.trim())).toEqual(['2× → 1664×2432', '4× → 3328×4864']);
+    expect(items[1].getAttribute('aria-disabled')).toBe('true');
+    expect(items[1].getAttribute('title')).toBe('Over the 16-megapixel upscale limit.');
+    flushSync(() => items[0].click());
+    expect(onupscale).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 2);
+  });
+
+  it('hides the upscale menu without a handler', () => {
+    mountViewer({ assets: [makeAsset({ upscale })] });
+    expect(document.querySelector('[data-action="upscale"]')).toBeNull();
+  });
+
+  it('hides the upscale menu for videos', () => {
+    mountViewer({ assets: [makeAsset({ media_type: 'video', upscale })], onupscale: vi.fn() });
+    expect(document.querySelector('[data-action="upscale"]')).toBeNull();
+  });
+
+  it('upscales 2× with X then 2 and refuses a disallowed 4× with X then 4', () => {
+    const onupscale = vi.fn();
+    const ondelete = vi.fn();
+    mountViewer({ assets: [makeAsset({ upscale })], onupscale, ondelete });
+
+    press('x');
+    press('2');
+    expect(onupscale).toHaveBeenCalledTimes(1);
+    expect(onupscale).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 2);
+
+    press('x');
+    press('4');
+    expect(onupscale).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves 2 and 4 alone without a preceding X', () => {
+    const onupscale = vi.fn();
+    mountViewer({ assets: [makeAsset({ upscale })], onupscale });
+    press('2');
+    expect(onupscale).not.toHaveBeenCalled();
+  });
+
+  it('shows recorded settings, post-processing and the upscale source in the details', () => {
+    const source = makeAsset({ id: 'out/source.png', filename: 'source.png' });
+    const onnavigate = vi.fn();
+    const upscaled = makeAsset({
+      id: 'out/source_2x.png',
+      filename: 'source_2x.png',
+      details: {
+        recorded_workflow: 'upscale',
+        negative_prompt: 'blurry',
+        scheduler: 'beta',
+        generation: { time: 12.3, upscale: { factor: 2, denoise: 0.4, steps: 3, pre_sharpen: 0.6 }, sharpen: 1.2 },
+        source: { path: '/outputs/out/source.png', width: 832, height: 1216, id: 'out/source.png' },
+      },
+    });
+    mountViewer({ assets: [upscaled, source], onnavigate });
+    press('i');
+
+    const details = document.querySelector('#asset-viewer-details')!;
+    const facts = Object.fromEntries(Array.from(details.querySelectorAll('dl div')).map((row) => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]));
+    expect(facts.Workflow).toBe('Upscale');
+    expect(facts.Scheduler).toBe('beta');
+    expect(facts.Upscale).toBe('2× · denoise 0.4 · 3 steps · pre-sharpen 0.6');
+    expect(facts.Sharpen).toBe('1.2');
+    expect(facts['Generation time']).toBe('12.3 s');
+    expect(details.textContent).toContain('blurry');
+
+    flushSync(() => details.querySelector<HTMLButtonElement>('[data-testid="viewer-source"] button')!.click());
+    expect(onnavigate).toHaveBeenCalledWith(1);
+  });
 });

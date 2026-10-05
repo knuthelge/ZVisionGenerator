@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from time import time
@@ -12,8 +12,10 @@ from urllib.parse import quote, unquote, urlencode
 
 from PIL import Image, UnidentifiedImageError
 
-from zvisiongenerator.utils.provenance import read_mp4_config, read_png_config
-from zvisiongenerator.web.config import WebUiConfig
+from zvisiongenerator.utils.provenance import image_prompt_text, optional_float, optional_int, optional_text, read_mp4_config, read_png_config, recorded_settings
+from zvisiongenerator.utils.config import model_capabilities
+from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, upscale_options, upscale_output_size
+from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canonicalize_workflow, default_workflow_for_mode, workflow_mode
 
 
@@ -57,6 +59,12 @@ class GalleryAsset:
     reference_image_path: str | None
     lora: str | None
     has_reusable_config: bool
+    negative_prompt: str | None = None
+    scheduler: str | None = None
+    model_family: str | None = None
+    image_strength: float | None = None
+    generation: dict[str, Any] = field(default_factory=dict)
+    source: dict[str, Any] | None = None
 
 
 def list_gallery_assets(output_dir: str) -> list[GalleryAsset]:
@@ -122,7 +130,9 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
     """Convert one gallery asset to the current SPA JSON shape."""
     created_at = datetime.fromtimestamp(asset.modified_at, tz=timezone.utc).isoformat()
     default_workflow = default_workflow_for_mode(asset.kind)
-    requested_workflow = canonicalize_workflow(asset.workflow, fallback=default_workflow)
+    # An upscale is regenerated with the workflow that made its source.
+    recorded_workflow = asset.source.get("workflow") if asset.source and asset.source.get("workflow") else asset.workflow
+    requested_workflow = canonicalize_workflow(recorded_workflow, fallback=default_workflow)
     fallback_reasons: list[str] = []
     workflow_available = True
     if workflow_mode(requested_workflow) != asset.kind:
@@ -137,7 +147,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         fallback_reasons.append("missing_reference_image")
 
     model_options = web_config.image_model_options if workflow_mode(resolved_workflow) == "image" else web_config.video_model_options
-    default_model = _preferred_option(
+    default_model = preferred_option(
         web_config.default_models.image if workflow_mode(resolved_workflow) == "image" else web_config.default_models.video,
         model_options,
     )
@@ -176,6 +186,16 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
             reuse_params["frames"] = str(asset.frame_count)
         if WORKFLOW_DEFINITIONS[resolved_workflow]["requires_reference_image"] and asset.reference_image_path is not None:
             reuse_params["image_path"] = asset.reference_image_path
+        if asset.negative_prompt and workflow_mode(resolved_workflow) == "image":
+            reuse_params["negative_prompt"] = asset.negative_prompt
+        if asset.scheduler and workflow_mode(resolved_workflow) == "image":
+            reuse_params["scheduler"] = asset.scheduler
+        # An upscale is regenerated from its source settings, at the source's size.
+        if asset.source is not None:
+            if asset.source.get("width") is not None:
+                reuse_params["width"] = str(asset.source["width"])
+            if asset.source.get("height") is not None:
+                reuse_params["height"] = str(asset.source["height"])
     return {
         "id": asset.id,
         "url": asset.media_url,
@@ -208,6 +228,8 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
             "fallback_reasons": fallback_reasons,
         },
         "reuse_workspace_url": f"#/workspace?{urlencode(reuse_params)}",
+        "details": _asset_details_json(asset),
+        "upscale": _asset_upscale_json(asset, web_config, resolved_model) if asset.kind == "image" else None,
     }
 
 
@@ -283,51 +305,98 @@ def _build_gallery_asset(root: Path, candidate: Path) -> GalleryAsset | None:
         reference_image_path=metadata["reference_image_path"],
         lora=metadata["lora"],
         has_reusable_config=metadata["has_reusable_config"],
+        negative_prompt=metadata["negative_prompt"],
+        scheduler=metadata["scheduler"],
+        model_family=metadata["model_family"],
+        image_strength=metadata["image_strength"],
+        generation=metadata["generation"],
+        source=_source_with_asset_id(root, metadata["source"]),
     )
 
 
 def _read_asset_metadata(asset_path: Path, kind: str) -> dict[str, Any]:
     # Embedded config (PNG tEXt chunk / MP4 container tag) is the only reusable generation settings source.
-    primary = _read_embedded_config(asset_path, kind) or {}
-    has_reusable_config = bool(primary)
+    config = _read_embedded_config(asset_path, kind) or {}
+    recorded = recorded_settings(config)
     filename_metadata = _parse_generated_filename(asset_path)
     image_metadata = _read_image_metadata(asset_path) if kind == "image" else {}
 
-    prompt = _coerce_text(_metadata_value(primary, "prompt") or image_metadata.get("prompt") or asset_path.stem.replace("_", " "))
-
-    model_label = _coerce_text(_metadata_value(primary, "model"))
-    width = _coerce_int(_metadata_value(primary, "width") or image_metadata.get("width") or filename_metadata.get("width"))
-    height = _coerce_int(_metadata_value(primary, "height") or image_metadata.get("height") or filename_metadata.get("height"))
-    seed = _coerce_int(_metadata_value(primary, "seed"))
-    steps = _coerce_int(_metadata_value(primary, "steps"))
-    guidance = _coerce_float(_metadata_value(primary, "guidance"))
-    workflow = _coerce_optional_text(_metadata_value(primary, "workflow"))
-    ratio = _coerce_optional_text(_metadata_value(primary, "ratio"))
-    size = _coerce_optional_text(_metadata_value(primary, "size"))
-    frame_count = _coerce_int(_metadata_value(primary, "frame_count"))
-    reference_image_path = _coerce_optional_text(_metadata_value(primary, "image_path"))
-    lora = _coerce_lora_string(_metadata_value(primary, "lora"))
+    prompt = _coerce_text(recorded.prompt or image_metadata.get("prompt") or asset_path.stem.replace("_", " "))
+    width = recorded.width or optional_int(image_metadata.get("width") or filename_metadata.get("width"))
+    height = recorded.height or optional_int(image_metadata.get("height") or filename_metadata.get("height"))
 
     return {
         "prompt": prompt,
-        "model_label": model_label,
+        "model_label": _coerce_text(recorded.model),
         "width": width,
         "height": height,
-        "seed": seed,
-        "steps": steps,
-        "guidance": guidance,
+        "seed": recorded.seed,
+        "steps": recorded.steps,
+        "guidance": recorded.guidance,
         "dimensions_label": f"{width}x{height}" if width is not None and height is not None else "Unavailable",
-        "seed_label": str(seed) if seed is not None else "Unavailable",
-        "steps_label": str(steps) if steps is not None else "Unavailable",
-        "guidance_label": _format_guidance(guidance),
-        "workflow": workflow,
-        "ratio": ratio,
-        "size": size,
-        "frame_count": frame_count,
-        "reference_image_path": reference_image_path,
-        "lora": lora,
-        "has_reusable_config": has_reusable_config,
+        "seed_label": str(recorded.seed) if recorded.seed is not None else "Unavailable",
+        "steps_label": str(recorded.steps) if recorded.steps is not None else "Unavailable",
+        "guidance_label": _format_guidance(recorded.guidance),
+        "workflow": recorded.workflow,
+        "ratio": recorded.ratio,
+        "size": recorded.size,
+        "frame_count": recorded.frame_count,
+        "reference_image_path": recorded.image_path,
+        "lora": recorded.lora,
+        "has_reusable_config": bool(config),
+        "negative_prompt": recorded.negative_prompt,
+        "scheduler": recorded.scheduler,
+        "model_family": recorded.model_family,
+        "image_strength": recorded.image_strength,
+        "generation": recorded.generation,
+        "source": recorded.source,
     }
+
+
+def _asset_details_json(asset: GalleryAsset) -> dict[str, Any]:
+    """Return the recorded settings the asset viewer shows beyond the top-level reuse fields."""
+    return {
+        "recorded_workflow": asset.workflow,
+        "negative_prompt": asset.negative_prompt,
+        "scheduler": asset.scheduler,
+        "model_family": asset.model_family,
+        "image_strength": asset.image_strength,
+        "generation": dict(asset.generation),
+        "source": dict(asset.source) if asset.source is not None else None,
+    }
+
+
+def _asset_upscale_json(asset: GalleryAsset, web_config: WebUiConfig, resolved_model: str | None) -> dict[str, Any] | None:
+    """Return the upscale menu for an image: each factor's size and whether the refinement model allows it.
+
+    The refinement model is the one recorded in the image, or the default image model when that one is
+    missing or not configured, matching what ``POST /api/upscale`` will use.
+    """
+    if asset.width is None or asset.height is None:
+        return None
+    model = resolved_model or preferred_option(web_config.default_models.image, web_config.image_model_options)
+    if model is None:
+        options = [UpscaleOption(factor, *upscale_output_size(asset.width, asset.height, factor), allowed=False, reason="No image model is configured.") for factor in UPSCALE_FACTORS]
+    else:
+        # The inventory's family gives the same capabilities resolve_defaults uses for POST /api/upscale, without detection.
+        family = next((entry.family for entry in web_config.image_inventory if entry.name == model), "unknown")
+        options = upscale_options(asset.width, asset.height, model_capabilities(web_config.app_config, family), web_config.app_config)
+    return {"factors": [asdict(option) for option in options]}
+
+
+def _source_with_asset_id(root: Path, source: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Add the gallery ID of an upscale source that still exists under *root*, else ``id: None``."""
+    if source is None:
+        return None
+    asset_id = None
+    try:
+        resolved_root = root.expanduser().resolve()
+        candidate = Path(source["path"]).expanduser().resolve()
+        if candidate.is_relative_to(resolved_root) and candidate.is_file():
+            asset_id = candidate.relative_to(resolved_root).as_posix()
+    except OSError, ValueError:
+        asset_id = None
+    return {**source, "id": asset_id}
 
 
 def _read_embedded_config(asset_path: Path, kind: str) -> dict[str, Any] | None:
@@ -348,12 +417,7 @@ def _read_embedded_config(asset_path: Path, kind: str) -> dict[str, Any] | None:
 def _read_image_metadata(asset_path: Path) -> dict[str, Any]:
     try:
         with Image.open(asset_path) as image:
-            exif = image.getexif()
-            return {
-                "width": image.width,
-                "height": image.height,
-                "prompt": image.info.get("Description") or exif.get(0x010E),
-            }
+            return {"width": image.width, "height": image.height, "prompt": image_prompt_text(image)}
     except FileNotFoundError, OSError, UnidentifiedImageError, ValueError:
         return {}
 
@@ -367,91 +431,16 @@ def _parse_generated_filename(asset_path: Path) -> dict[str, Any]:
         return {}
     parsed = match.groupdict()
     return {
-        "width": _coerce_int(parsed.get("width")),
-        "height": _coerce_int(parsed.get("height")),
-        "steps": _coerce_int(parsed.get("steps")),
-        "guidance": _coerce_float(parsed.get("guidance")),
-        "seed": _coerce_int(parsed.get("seed")),
+        "width": optional_int(parsed.get("width")),
+        "height": optional_int(parsed.get("height")),
+        "steps": optional_int(parsed.get("steps")),
+        "guidance": optional_float(parsed.get("guidance")),
+        "seed": optional_int(parsed.get("seed")),
     }
 
 
-def _metadata_value(metadata: dict[str, Any], *keys: str) -> Any:
-    if not metadata:
-        return None
-    for mapping in _walk_mappings(metadata):
-        for key in keys:
-            if key in mapping and mapping[key] not in (None, ""):
-                return mapping[key]
-    return None
-
-
-def _walk_mappings(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    mappings = [payload]
-    for value in payload.values():
-        if isinstance(value, dict):
-            mappings.extend(_walk_mappings(value))
-    return mappings
-
-
 def _coerce_text(value: Any) -> str:
-    if value is None:
-        return "Unavailable"
-    text = str(value).strip()
-    return text or "Unavailable"
-
-
-def _coerce_optional_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def _coerce_int(value: Any) -> int | None:
-    if value in (None, ""):
-        return None
-    try:
-        return int(value)
-    except TypeError, ValueError:
-        return None
-
-
-def _coerce_float(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except TypeError, ValueError:
-        return None
-
-
-def _coerce_lora_string(value: Any) -> str | None:
-    if value in (None, "", [], {}):
-        return None
-    if isinstance(value, str):
-        text = value.strip()
-        return text or None
-    if isinstance(value, list):
-        entries: list[str] = []
-        for item in value:
-            if isinstance(item, str):
-                text = item.strip()
-                if text:
-                    entries.append(text)
-                continue
-            if isinstance(item, dict) and isinstance(item.get("name"), str):
-                weight = item.get("weight")
-                if weight in (None, ""):
-                    entries.append(item["name"].strip())
-                else:
-                    entries.append(f"{item['name'].strip()}:{weight}")
-        return ",".join(entry for entry in entries if entry) or None
-    if isinstance(value, dict) and isinstance(value.get("name"), str):
-        weight = value.get("weight")
-        if weight in (None, ""):
-            return value["name"].strip() or None
-        return f"{value['name'].strip()}:{weight}"
-    return None
+    return optional_text(value) or "Unavailable"
 
 
 def _format_guidance(value: float | None) -> str:
@@ -492,9 +481,3 @@ def _format_age(timestamp: float) -> str:
         return f"{hours}h ago"
     days = hours // 24
     return f"{days}d ago"
-
-
-def _preferred_option(preferred: str | None, options: tuple[str, ...]) -> str | None:
-    if preferred in options:
-        return preferred
-    return options[0] if options else None

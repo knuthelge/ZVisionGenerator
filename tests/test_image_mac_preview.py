@@ -137,6 +137,15 @@ class TestProgressCheckerPreviews:
 
         assert [event["current_step"] for event in events if "preview" in event] == [2, 4, 6]
 
+    def test_partial_runs_report_only_the_steps_actually_run(self, mx, image_mac):
+        events: list[dict] = []
+        # Upscale refinement: 3 steps at denoise 0.4 are scheduled as 7, of which the last 3 run.
+        checker = image_mac._ProgressChecker(7, events.append)
+
+        self._run_steps(checker, total_steps=7, latents=mx.zeros((16, 1, 8, 8)), init_time_step=4)
+
+        assert [(event["current_step"], event["total_steps"]) for event in events] == [(1, 3), (2, 3), (3, 3)]
+
     def test_previews_show_the_predicted_clean_image_not_the_noisy_latents(self, mx, image_mac, monkeypatch):
         rendered: list = []
         monkeypatch.setattr(image_mac, "render_latent_preview", lambda _model, _family, latents, *_size: rendered.append(latents))

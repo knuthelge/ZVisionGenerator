@@ -1215,6 +1215,22 @@ describe('WorkspacePage', () => {
     expect(submittedFormData.get('saturation_amount')).toBe('1.2');
   });
 
+  it('sends no sharpen amount when it is left on auto, so the backend uses the config', async () => {
+    const context = makeContext();
+    await mountWorkspace(context);
+
+    draft.update('postprocessSharpenEnabled', true);
+    draft.update('postprocessSharpenAmount', null);
+    await settle();
+
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+
+    const [submittedFormData] = workspaceApiMocks.submitGenerate.mock.calls[0] ?? [];
+    expect(submittedFormData.get('sharpen_enabled')).toBe('true');
+    expect(submittedFormData.has('sharpen_amount')).toBe(false);
+  });
+
   it('renders video upscale controls for txt2vid/img2vid and serializes upscale fields', async () => {
     const context = makeContext();
     await mountWorkspace(context);

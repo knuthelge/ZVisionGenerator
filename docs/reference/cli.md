@@ -63,7 +63,7 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `--upscale-guidance` | same as `--guidance` | Override guidance scale for the upscale refine pass only |
 | `--upscale-sharpen` | `True` | CAS sharpening step before upscale refinement (`--no-upscale-sharpen` to disable) |
 | `--upscale-save-pre` | `False` | Save pre-upscale image alongside final |
-| `--sharpen [AMOUNT]` / `--no-sharpen` | enabled | Apply CAS sharpening. Optional amount overrides config (0.0–1.0) |
+| `--sharpen [AMOUNT]` / `--no-sharpen` | enabled | Apply CAS sharpening. Optional amount overrides config (0.0–1.5) |
 | `--contrast [AMOUNT]` / `--no-contrast` | disabled | Apply contrast adjustment. Optional amount (1.0 = no change) |
 | `--saturation [AMOUNT]` / `--no-saturation` | disabled | Apply saturation adjustment. Optional amount (1.0 = no change) |
 | `--image` | disabled | Path to reference image for img2img steering |

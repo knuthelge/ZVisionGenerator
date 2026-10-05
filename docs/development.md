@@ -64,6 +64,7 @@ zvisiongenerator/
 ├── preflight.py                   Preflight phase: plan seeds and prompts, rewrite them before the model loads
 ├── image_model_loader.py          Image model loading through stored quants (reuse, or save on first use)
 ├── image_runner.py                Image generation run orchestration
+├── upscale_runner.py              Upscale one existing image: read its recorded settings, run the upscale workflow
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/
@@ -105,7 +106,7 @@ zvisiongenerator/
 │   ├── config.py                  Config loading (image + video)
 │   ├── console.py                 Console formatting
 │   ├── ffmpeg.py                  ffmpeg availability check and install
-│   ├── filename.py                Output filename generation
+│   ├── filename.py                Output filenames ({set}_{timestamp}) and collision counters
 │   ├── image_model_detect.py      Image model type detection
 │   ├── interactive.py             Keyboard interrupt handling
 │   ├── lora.py                    LoRA CLI argument parsing
@@ -116,8 +117,9 @@ zvisiongenerator/
 │   ├── prompt_compose.py          Structured prompt flattening & snippets
 │   ├── prompt_enhance.py          Prompt-enhancement build, run, and post-processing (no model I/O)
 │   ├── prompts.py                 Prompt file loading
-│   ├── provenance.py              Embedded asset config (PNG/MP4) and full provenance payload builders
+│   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
 │   ├── stored_quant.py            Stored-quant naming, manifests and folder handling
+│   ├── upscale.py                 Upscale output sizes, size limits and denoise defaults
 │   └── video_model_detect.py      Video model type detection
 ├── web/
 │   ├── config.py                  Web UI config loading and model inventory discovery
@@ -132,6 +134,7 @@ zvisiongenerator/
 │   ├── path_picker.py             Host-local directory and file picker
 │   ├── prompt_files.py            Read and atomically update host-local prompt files
 │   ├── request_guard.py           DNS-rebinding and cross-site request protection
+│   ├── upscale_api.py             Plan a viewer upscale job: refinement model, carried settings, limits
 │   ├── web_runner.py              Background workers for generation batches
 │   ├── workspace_api.py           Shared SPA payloads for workspace and models routes
 │   ├── workspace_contract.py      Workflow aliases and static workspace capabilities
@@ -160,7 +163,7 @@ The Windows/Linux diffusers image backend is also CUDA-only. Validation happens 
 
 ### Workflow Stages
 
-Image stage functions in `workflows/image_stages.py` have the uniform signature `(ImageGenerationRequest, ImageWorkingArtifacts) -> StageOutcome`. Video stage functions in `workflows/video_stages.py` have the signature `(VideoGenerationRequest, VideoWorkingArtifacts) -> StageOutcome`. Stages are composed dynamically by `build_workflow()` and `build_video_workflow()`.
+Image stage functions in `workflows/image_stages.py` have the uniform signature `(ImageGenerationRequest, ImageWorkingArtifacts) -> StageOutcome`. Video stage functions in `workflows/video_stages.py` have the signature `(VideoGenerationRequest, VideoWorkingArtifacts) -> StageOutcome`. Stages are composed dynamically by `build_workflow()` and `build_video_workflow()`. `build_upscale_workflow()` upscales an existing image (`load_source_stage` → `upscale_stage` → `sharpen_stage` → `save_image_stage`); the Web UI runs it through `WebRunner.submit_upscale_job` and `upscale_runner.run_upscale`, which emits the same events as a one-image batch, without preflight or the batch loop.
 
 ### Job Phases: Preflight and Generation
 

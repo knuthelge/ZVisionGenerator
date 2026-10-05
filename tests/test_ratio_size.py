@@ -6,14 +6,15 @@ Covers:
 - CLI rejects invalid --ratio and --size values
 - Default ratio/size resolution (no flags → 2:3/m/832×1216)
 - Specific ratio+size → correct dimensions
-- Filename includes ratio-size when using presets
-- Filename omits ratio-size when using explicit --width/--height
+- Filenames are the set name plus a timestamp
 - Console output includes ratio, size, and dimensions
 - Runner resolves nested lookup correctly
 - --width/--height overrides take priority
 """
 
 from __future__ import annotations
+
+import re
 
 from conftest import _make_plan
 
@@ -22,7 +23,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from zvisiongenerator.image_cli import _build_parser, main
-from zvisiongenerator.utils.filename import generate_filename
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.prompts import PromptFileInspection
 
@@ -356,43 +356,6 @@ class TestRunnerSizeLookup:
         assert req.size is None
 
 
-# ── Filename with ratio/size (REQ-7, SC-9) ─────────────────────────────────
-
-
-class TestFilenameRatioSize:
-    """Verify filename always uses plain WxH format."""
-
-    def test_filename_uses_plain_wxh_with_presets(self):
-        """Filename uses plain WxH even when using presets."""
-        result = generate_filename(
-            set_name="test",
-            width=1888,
-            height=1056,
-            seed=42,
-            steps=10,
-            guidance=3.5,
-            scheduler=None,
-            model="models/my-model",
-        )
-        assert "1888x1056" in result
-        assert "16-9" not in result
-
-    def test_filename_uses_plain_wxh_with_explicit_dims(self):
-        """Filename uses plain WxH with explicit dimensions."""
-        result = generate_filename(
-            set_name="test",
-            width=800,
-            height=600,
-            seed=42,
-            steps=10,
-            guidance=3.5,
-            scheduler=None,
-            model="models/my-model",
-        )
-        assert "800x600" in result
-        assert "None" not in result
-
-
 # ── Console output (REQ-8) ─────────────────────────────────────────────────
 
 
@@ -459,7 +422,7 @@ class TestConsoleRatioSize:
 
 
 class TestRunnerFilenameIntegration:
-    """Runner passes ratio/size to filename only when using presets."""
+    """Runner names each file after its prompt set and the time."""
 
     def _capture_filename(self, width_override=None, height_override=None):
         """Run batch and capture the filename base from WorkingArtifacts."""
@@ -491,17 +454,10 @@ class TestRunnerFilenameIntegration:
 
         return captured["filename"]
 
-    def test_preset_filename_contains_plain_wxh(self):
-        """When using presets, filename uses plain WxH."""
-        filename = self._capture_filename()
-        assert "832x1216" in filename
-        assert "2-3_m" not in filename
-
-    def test_explicit_dims_filename_omits_ratio_size(self):
-        """When using explicit dims, filename should NOT include ratio-size."""
+    def test_filename_is_set_name_and_timestamp(self):
+        """Dimensions and settings live in the embedded metadata, not the filename."""
         filename = self._capture_filename(width_override=800, height_override=600)
-        assert "800x600" in filename
-        assert "2-3_m" not in filename
+        assert re.fullmatch(r"s_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}", filename)
 
 
 # ── Upscale round-trip with presets (SC-8) ──────────────────────────────────

@@ -576,6 +576,24 @@ class TestPlatformConfigValidation:
             with pytest.raises(ValueError, match="Config section 'platforms' must be a mapping"):
                 load_config()
 
+    def test_sharpening_amounts_above_the_cap_are_rejected(self, tmp_path):
+        from unittest.mock import patch
+
+        packaged = _write_packaged_config(
+            tmp_path,
+            {
+                "sizes": {"1:1": {"m": {"width": 100, "height": 100}}},
+                "generation": {"default_steps": 10, "default_guidance": 3.5},
+                "sharpening": {"normal": 1.0, "upscaled": 2.0},
+            },
+        )
+
+        with patch("importlib.resources.files") as mock_files, patch("zvisiongenerator.utils.config.get_ziv_data_dir") as mock_dir:
+            mock_dir.return_value = tmp_path / "no-user-config"
+            mock_files.return_value.joinpath.return_value = packaged
+            with pytest.raises(ValueError, match="sharpening.upscaled"):
+                load_config()
+
     @pytest.mark.parametrize(
         "alias_value",
         [
@@ -658,28 +676,28 @@ class TestPlatformConfigValidation:
 
 
 class TestSchedulerResolution:
-    """_resolve_scheduler_class resolves scheduler names to backend class paths."""
+    """resolve_scheduler_class resolves scheduler names to backend class paths."""
 
     @pytest.fixture(autouse=True)
     def _load(self):
         self.config = load_config()
 
     def test_beta_scheduler_class(self):
-        from zvisiongenerator.image_runner import _resolve_scheduler_class
+        from zvisiongenerator.utils.config import resolve_scheduler_class
 
-        resolved = _resolve_scheduler_class("beta", self.config, "mflux")
+        resolved = resolve_scheduler_class("beta", self.config, "mflux")
         assert resolved == "zvisiongenerator.schedulers.beta_scheduler.BetaScheduler"
         assert resolved == self.config["schedulers"]["beta"]["mflux_class"]
 
     def test_resolve_unknown_scheduler_passthrough(self):
-        from zvisiongenerator.image_runner import _resolve_scheduler_class
+        from zvisiongenerator.utils.config import resolve_scheduler_class
 
-        assert _resolve_scheduler_class("euler", self.config, "mflux") == "euler"
+        assert resolve_scheduler_class("euler", self.config, "mflux") == "euler"
 
     def test_resolve_none_scheduler(self):
-        from zvisiongenerator.image_runner import _resolve_scheduler_class
+        from zvisiongenerator.utils.config import resolve_scheduler_class
 
-        assert _resolve_scheduler_class(None, self.config, "mflux") is None
+        assert resolve_scheduler_class(None, self.config, "mflux") is None
 
 
 # ---------------------------------------------------------------------------
@@ -865,3 +883,29 @@ class TestResolveVideoDefaults:
         assert result["width"] == 512
         assert result["height"] == 512
         assert result["num_frames"] == 33
+
+
+def test_sharpening_amounts_fill_defaults_and_follow_upscaled():
+    from zvisiongenerator.utils.config import sharpening_amounts
+
+    amounts = sharpening_amounts({"sharpening": {"upscaled": 1.3}})
+
+    assert amounts["normal"] == 1.0
+    assert amounts["existing_pre_upscale"] == 0.0
+    assert amounts["existing_upscaled"] == 1.3
+    assert sharpening_amounts({"sharpening": {"existing_upscaled": 1.1}})["existing_upscaled"] == 1.1
+
+
+def test_model_capabilities_match_resolve_defaults():
+    from zvisiongenerator.utils.config import model_capabilities
+
+    config = {
+        "generation": {"default_steps": 10, "default_guidance": 3.5},
+        "model_presets": {"ideogram4": {"supports_upscale": False, "supports_img2img": False, "dimension_max": 2048}},
+    }
+    capabilities = model_capabilities(config, "ideogram4")
+    resolved = resolve_defaults(ImageModelInfo(family="ideogram4", is_distilled=False, size=None), config, {}, "mflux")
+
+    assert capabilities == {key: resolved[key] for key in capabilities}
+    assert capabilities["dimension_max"] == 2048
+    assert model_capabilities(config, "unknown")["supports_upscale"] is True

@@ -186,6 +186,19 @@ describe('draft store', () => {
     expect(draft.state.prompt).toBe('from url');
   });
 
+  it('applies a reused negative prompt and scheduler when the workflow shows them', () => {
+    const ctx = makeContext();
+    ctx.workflow_contract.definitions.txt2img.visible_controls.push('negative_prompt', 'scheduler');
+    draft.loadFromUrl({ workflow: 'txt2img', negative_prompt: 'blurry', scheduler: 'beta' }, ctx);
+    expect(draft.state.negativePrompt).toBe('blurry');
+    expect(draft.state.scheduler).toBe('beta');
+  });
+
+  it('leaves a reused scheduler out when the workflow hides it', () => {
+    draft.loadFromUrl({ workflow: 'txt2img', scheduler: 'beta' }, makeContext());
+    expect(draft.state.scheduler).not.toBe('beta');
+  });
+
   it('ignores invalid workflow in URL prefill', () => {
     draft.loadFromUrl({ workflow: 'invalid-workflow' }, makeContext());
     expect(draft.state.workflow).toBe('txt2img'); // unchanged
@@ -484,6 +497,34 @@ describe('draft store', () => {
       expect(draft.state.model).toBe('flux-dev');
       expect(draft.state.ratio).toBe('2:3');
     });
+  });
+});
+
+describe('draft store – saved drafts from the previous version', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  function loadSavedV2(saved: Record<string, unknown>): void {
+    localStorage.setItem('ziv-workspace-draft-v1', JSON.stringify({ version: 2, prompt: 'kept prompt', ...saved }));
+    draft.loadDraft();
+  }
+
+  it('turns the old fixed sharpen default into auto and keeps the rest', () => {
+    loadSavedV2({ postprocessSharpenAmount: 0.8 });
+    expect(draft.state.postprocessSharpenAmount).toBeNull();
+    expect(draft.state.prompt).toBe('kept prompt');
+  });
+
+  it('keeps a sharpen amount the user chose', () => {
+    loadSavedV2({ postprocessSharpenAmount: 0.6 });
+    expect(draft.state.postprocessSharpenAmount).toBe(0.6);
+  });
+
+  it('lowers a saved amount above the new limit to the limit', () => {
+    loadSavedV2({ postprocessSharpenAmount: 1.8 });
+    expect(draft.state.postprocessSharpenAmount).toBe(1.5);
   });
 });
 

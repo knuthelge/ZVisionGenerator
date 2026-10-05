@@ -50,13 +50,30 @@ export interface GoChordStep {
   page: PageId | null;
 }
 
-/** Advance the `G` → page chord by one key press made at `now`. */
-export function stepGoChord(waitingSince: number | null, key: string, now: number): GoChordStep {
+export interface ChordStep<T> {
+  /** When the start key began waiting for the second key, or null when nothing is pending. */
+  waitingSince: number | null;
+  /** The value the completed chord selects. */
+  value: T | null;
+  /** Whether this key press belongs to the chord (started or completed it), so it must not run another action. */
+  consumed: boolean;
+}
+
+/** Advance a two-key chord (`startKey` then one of `values`' keys, within CHORD_TIMEOUT_MS) by one key press at `now`. */
+export function stepChord<T>(startKey: string, values: Readonly<Record<string, T>>, waitingSince: number | null, key: string, now: number): ChordStep<T> {
   const lower = key.toLowerCase();
   if (waitingSince !== null && now - waitingSince <= CHORD_TIMEOUT_MS) {
-    return { waitingSince: null, page: GO_TO_KEYS[lower] ?? null };
+    const value = values[lower] ?? null;
+    return { waitingSince: null, value, consumed: value !== null };
   }
-  return { waitingSince: lower === 'g' ? now : null, page: null };
+  const starts = lower === startKey;
+  return { waitingSince: starts ? now : null, value: null, consumed: starts };
+}
+
+/** Advance the `G` → page chord by one key press made at `now`. */
+export function stepGoChord(waitingSince: number | null, key: string, now: number): GoChordStep {
+  const step = stepChord('g', GO_TO_KEYS, waitingSince, key, now);
+  return { waitingSince: step.waitingSince, page: step.value };
 }
 
 export interface ShortcutEntry {

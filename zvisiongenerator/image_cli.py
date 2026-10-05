@@ -16,7 +16,7 @@ from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.image_model_loader import load_image_model
 from zvisiongenerator.image_runner import run_batch
-from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
+from zvisiongenerator.utils.config import MAX_SHARPEN_AMOUNT, load_config, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.lora import resolve_lora_references
@@ -113,8 +113,8 @@ def main(*, prog: str = "ziv-image") -> None:
         parser.error("--first-sigma must be a positive float in (0.0, 2.0]")
     if args.upscale_guidance is not None and args.upscale_guidance < 0:
         parser.error("--upscale-guidance must be non-negative")
-    if isinstance(args.sharpen, float) and args.sharpen < 0:
-        parser.error("--sharpen amount must be non-negative")
+    if isinstance(args.sharpen, float) and not 0 <= args.sharpen <= MAX_SHARPEN_AMOUNT:
+        parser.error(f"--sharpen amount must be between 0 and {MAX_SHARPEN_AMOUNT:g}")
     if isinstance(args.contrast, float) and args.contrast < 0:
         parser.error("--contrast amount must be non-negative")
     if isinstance(args.saturation, float) and args.saturation < 0:

@@ -18,7 +18,7 @@ from zvisiongenerator.utils.model_files import find_local_model_dir
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import matrix_contract, resolve_enhance_ceiling
 from zvisiongenerator.utils.video_model_detect import detect_video_model
-from zvisiongenerator.web.config import WebUiConfig
+from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
 from zvisiongenerator.web.model_delete import installed_models_linking_to, model_delete_target
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
@@ -28,7 +28,8 @@ from zvisiongenerator.web.model_status import describe_model_status, memory_budg
 _UNKNOWN_STATUS: dict[str, Any] = {"downloaded": None, "memory_fit": None}
 _IMAGE_BOOTSTRAP_STRENGTH = 0.5
 _IMAGE_BOOTSTRAP_POSTPROCESS = {
-    "sharpen": 0.8,
+    # On with no amount: the backend uses the config's sharpening amounts unless the user sets one.
+    "sharpen": True,
     "contrast": False,
     "saturation": False,
 }
@@ -50,8 +51,8 @@ _VIDEO_BOOTSTRAP_UPSCALE = {
 
 def build_workspace_bootstrap_view(web_config: WebUiConfig) -> dict[str, Any]:
     """Resolve per-model bootstrap defaults using shared backend config authority."""
-    image_default_model = _preferred_option(web_config.default_models.image, web_config.image_model_options)
-    video_default_model = _preferred_option(web_config.default_models.video, web_config.video_model_options)
+    image_default_model = preferred_option(web_config.default_models.image, web_config.image_model_options)
+    video_default_model = preferred_option(web_config.default_models.video, web_config.video_model_options)
     image_defaults = {model_name: _build_image_bootstrap_defaults(model_name, web_config) for model_name in web_config.image_model_options}
     video_defaults = {model_name: _build_video_bootstrap_defaults(model_name, web_config) for model_name in web_config.video_model_options}
     return {
@@ -257,12 +258,6 @@ def _delete_info_resolver(models_dir: Path, find_local_dir: Callable[[str], Path
 def _image_quantize_levels(web_config: WebUiConfig, capabilities: dict[str, Any]) -> tuple[int, ...]:
     """Return the quantize levels offered for an image model: one rule for the picker and the memory estimates."""
     return tuple(web_config.quantize_options) if capabilities.get("supports_quantize", True) else ()
-
-
-def _preferred_option(preferred: str | None, options: tuple[str, ...]) -> str | None:
-    if preferred in options:
-        return preferred
-    return options[0] if options else None
 
 
 def _resolve_image_bootstrap_dimensions(app_config: dict[str, Any], ratio: str, size: str) -> dict[str, int]:

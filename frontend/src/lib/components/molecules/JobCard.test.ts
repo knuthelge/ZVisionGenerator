@@ -54,6 +54,14 @@ describe('JobCard', () => {
     };
   }
 
+  it('labels upscale jobs and shows their notices', () => {
+    component = mount(JobCard, { target, props: { job: makeJob({ workflow: 'upscale', notices: ['original settings unknown'] }) } });
+    flushSync();
+
+    expect(target.querySelector('h3')?.textContent).toBe('Upscale');
+    expect(target.querySelector('[data-testid="job-notices"]')?.textContent).toBe('original settings unknown');
+  });
+
   it('does not re-export the removed ProgressBar placeholder', () => {
     expect('ProgressBar' in molecules).toBe(false);
   });

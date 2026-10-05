@@ -1,5 +1,5 @@
 import { requestConfirm } from '$lib/components/molecules/confirm.svelte';
-import type { GalleryAsset, Workflow } from '$lib/types';
+import type { AssetUpscaleFactor, GalleryAsset, JobWorkflow, UpscaleFactor, Workflow } from '$lib/types';
 
 /** Which generation a reference image feeds. */
 export type ReferenceTarget = 'image' | 'video';
@@ -9,7 +9,31 @@ export interface AssetActionHandlers {
   onpreview?: (asset: GalleryAsset, trigger: HTMLElement) => void;
   onreuse?: (asset: GalleryAsset) => void;
   onreference?: (asset: GalleryAsset, target: ReferenceTarget) => void;
+  onupscale?: (asset: GalleryAsset, factor: UpscaleFactor) => void;
   ondelete?: (asset: GalleryAsset, options?: DeleteOptions) => void;
+}
+
+const WORKFLOW_LABELS: Record<JobWorkflow, string> = {
+  txt2img: 'Text to image',
+  img2img: 'Image to image',
+  txt2vid: 'Text to video',
+  img2vid: 'Image to video',
+  upscale: 'Upscale',
+};
+
+/** Describe a workflow value in words; unknown values are shown as they are. */
+export function workflowLabel(workflow: string): string {
+  return WORKFLOW_LABELS[workflow as JobWorkflow] ?? workflow;
+}
+
+/** Return the upscale factors an image offers, or none for videos and images without size data. */
+export function upscaleFactors(asset: GalleryAsset): AssetUpscaleFactor[] {
+  return asset.media_type === 'image' ? (asset.upscale?.factors ?? []) : [];
+}
+
+/** Return the upscale option for one factor, or undefined when the asset does not offer it. */
+export function upscaleFactor(asset: GalleryAsset, factor: UpscaleFactor): AssetUpscaleFactor | undefined {
+  return upscaleFactors(asset).find((option) => option.factor === factor);
 }
 
 export interface DeleteOptions {

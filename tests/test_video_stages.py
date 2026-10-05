@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import warnings
 from pathlib import Path
@@ -76,46 +77,29 @@ class TestResolvePromptStage:
 
 
 class TestGenerateFilenameStage:
-    """Verify filename format and sanitization."""
+    """Verify the set-name + timestamp filename and its collision counter."""
 
-    def test_basic_filename(self):
-        req = _req(model_name="test-model", seed=42, width=704, height=480, num_frames=49, steps=30, output_format="mp4")
+    def test_set_name_and_timestamp(self, tmp_path):
+        req = _req(filename_base="sunset", output_dir=str(tmp_path), output_format="mp4")
         arts = VideoWorkingArtifacts()
         outcome = generate_filename_stage(req, arts)
         assert outcome is StageOutcome.success
-        assert arts.filename.endswith(".mp4")
-        assert "_704x480_" in arts.filename
-        assert "_49f_" in arts.filename
-        assert "_test-model_" in arts.filename
-        assert "_steps30_" in arts.filename
-        assert "_seed42" in arts.filename
+        assert re.fullmatch(r"sunset_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.mp4", arts.filename)
 
-    def test_slash_in_model_name_sanitized(self):
-        req = _req(model_name="dgrauet/ltx-2.3-mlx-q4", seed=1, width=512, height=512, num_frames=25, steps=30, output_format="mp4")
+    def test_settings_are_not_in_the_name(self, tmp_path):
+        req = _req(filename_base="sunset", model_name="dgrauet/ltx-2.3-mlx-q4", seed=42, output_dir=str(tmp_path))
         arts = VideoWorkingArtifacts()
         generate_filename_stage(req, arts)
-        assert "/" not in arts.filename
-        assert "ltx-2.3-mlx-q4" in arts.filename
+        assert "ltx" not in arts.filename
+        assert "seed" not in arts.filename
 
-    def test_spaces_sanitized(self):
-        req = _req(model_name="my cool model", seed=7, width=100, height=100, num_frames=9, steps=30, output_format="mp4")
-        arts = VideoWorkingArtifacts()
-        generate_filename_stage(req, arts)
-        assert " " not in arts.filename
-
-    def test_none_model_name(self):
-        req = _req(model_name=None, seed=0, width=704, height=480, num_frames=49, steps=30, output_format="mp4")
-        arts = VideoWorkingArtifacts()
-        generate_filename_stage(req, arts)
-        assert arts.filename.endswith(".mp4")
-        assert "_49f_" in arts.filename
-        assert "_seed0" in arts.filename
-
-    def test_set_name_included(self):
-        req = _req(filename_base="sunset", model_name="test", seed=1, width=704, height=480, num_frames=49, steps=30, output_format="mp4")
-        arts = VideoWorkingArtifacts()
-        generate_filename_stage(req, arts)
-        assert arts.filename.startswith("sunset_")
+    def test_taken_name_gets_counter(self, tmp_path):
+        req = _req(filename_base="sunset", output_dir=str(tmp_path), output_format="mp4")
+        with patch("zvisiongenerator.utils.filename.generate_filename", return_value="sunset_2026-10-04_14-03-22"):
+            (tmp_path / "sunset_2026-10-04_14-03-22.mp4").write_bytes(b"")
+            arts = VideoWorkingArtifacts()
+            generate_filename_stage(req, arts)
+        assert arts.filename == "sunset_2026-10-04_14-03-22_2.mp4"
 
 
 # ---------------------------------------------------------------------------

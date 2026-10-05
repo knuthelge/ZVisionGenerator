@@ -25,18 +25,11 @@ from zvisiongenerator.core.progress_events import run_workflow_with_progress as 
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.utils import generate_filename, format_generation_info
 from zvisiongenerator.utils.alignment import round_to_alignment
+from zvisiongenerator.utils.config import resolve_scheduler_class, sharpening_amounts
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
+from zvisiongenerator.utils.upscale import default_upscale_denoise
 from zvisiongenerator.workflows import build_workflow
-
-
-def _resolve_scheduler_class(scheduler: str | None, config: dict, backend_name: str) -> str | None:
-    """Resolve scheduler name to backend-specific class path from config."""
-    if scheduler is None:
-        return None
-    sched_cfg = config.get("schedulers", {}).get(scheduler, {})
-    class_key = f"{backend_name}_class"
-    return sched_cfg.get(class_key, scheduler)
 
 
 class _QuitBatch(Exception):
@@ -114,10 +107,10 @@ def run_batch(
     seed_max = config.get("generation", {}).get("seed_max", 2**32 - 1)
 
     # Sharpening amounts from config
-    sharpening = config.get("sharpening", {})
-    sharpen_normal = sharpening.get("normal", 0.8)
-    sharpen_upscaled = sharpening.get("upscaled", 1.2)
-    sharpen_pre_upscale = sharpening.get("pre_upscale", 0.4)
+    sharpening = sharpening_amounts(config)
+    sharpen_normal = sharpening["normal"]
+    sharpen_upscaled = sharpening["upscaled"]
+    sharpen_pre_upscale = sharpening["pre_upscale"]
 
     # Warn about negative prompts for models that don't support them (single location)
     if not supports_neg:
@@ -250,18 +243,7 @@ def run_batch(
                         if retries > 0:
                             # Retries keep the planned text and always draw a new seed, even when the job's seed is fixed.
                             seed = random.randint(seed_min, seed_max)
-                        gen_filename = generate_filename(
-                            set_name,
-                            width=width,
-                            height=height,
-                            seed=seed,
-                            steps=args.steps,
-                            guidance=args.guidance,
-                            scheduler=args.scheduler,
-                            model=args.model,
-                            lora_paths=getattr(args, "lora_paths", None),
-                            lora_weights=getattr(args, "lora_weights", None),
-                        )
+                        gen_filename = generate_filename(set_name)
                         # Honour pause/quit queued before this generation started (e.g. during model load).
                         # skip/repeat have no generation to act on yet, so they are dropped.
                         pending_action = skip.consume()
@@ -299,11 +281,7 @@ def run_batch(
 
                         # Resolve upscale_denoise from config if not explicitly set
                         if args.upscale and args.upscale_denoise is None:
-                            upscale_cfg = config.get("upscale", {})
-                            if args.upscale == 4:
-                                resolved_denoise = upscale_cfg.get("default_denoise_4x", 0.4)
-                            else:
-                                resolved_denoise = upscale_cfg.get("default_denoise_2x", 0.3)
+                            resolved_denoise = default_upscale_denoise(config, args.upscale)
                         else:
                             resolved_denoise = args.upscale_denoise if args.upscale else None
 
@@ -324,7 +302,9 @@ def run_batch(
                             seed=seed,
                             steps=args.steps,
                             guidance=args.guidance,
-                            scheduler=_resolve_scheduler_class(args.scheduler, config, backend.name),
+                            scheduler=resolve_scheduler_class(args.scheduler, config, backend.name),
+                            scheduler_name=args.scheduler,
+                            quantize=getattr(args, "quantize", None),
                             steps_explicit=getattr(args, "steps_explicit", False),
                             guidance_explicit=getattr(args, "guidance_explicit", False),
                             first_sigma=getattr(args, "first_sigma", None),

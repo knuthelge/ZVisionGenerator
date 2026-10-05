@@ -1,5 +1,6 @@
 <script lang="ts">
   import { acceptsPageShortcut } from '$lib/keyboard';
+  import { workflowLabel } from '$lib/state/assetActions';
   import type { ActiveJobState, GalleryAsset } from '$lib/types';
 
   interface Props {
@@ -149,8 +150,7 @@
     progressState === 'cancelled' ? 'bg-zinc-500' : 'bg-primary-main'
   );
 
-  const workflowLabels = { txt2img: 'Text to image', img2img: 'Image to image', txt2vid: 'Text to video', img2vid: 'Image to video' };
-  const jobTypeLabel = $derived(workflowLabels[job.workflow] ?? job.workflow);
+  const jobTypeLabel = $derived(workflowLabel(job.workflow));
   const statusLabel = $derived(active && job.paused ? 'paused' : job.status);
   const uniqueOutputs = $derived.by(() => {
     const seen = new Set<string>();
@@ -200,6 +200,9 @@
     <p class="job-enhanced break-words" data-enhance-status="skipped"><span class="job-enhanced-label">Not enhanced:</span> skipped, so the original prompt is used.</p>
   {/if}
   <p class="mt-1 text-xs text-text-muted truncate" title={job.model}>{job.model}</p>
+  {#if job.notices?.length}
+    <p class="job-notices" data-testid="job-notices">{job.notices.join(' · ')}</p>
+  {/if}
 
   <!-- Progress -->
   <div class="mt-4">
@@ -395,6 +398,7 @@
   dt { color: var(--color-text-muted); }
   dd { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--color-text-primary); }
   .job-enhanced { margin-top: 6px; font-size: 12px; color: var(--color-text-secondary); }
+  .job-notices { margin-top: 4px; font-size: 12px; color: var(--color-warning); }
   .job-enhanced-label { color: var(--color-primary-main); font-weight: 500; }
   .job-message { margin-top: 12px; padding: 8px 10px; background: var(--color-bg-base); border-radius: 4px; font-size: 12px; color: var(--color-text-secondary); overflow-wrap: anywhere; }
   .job-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border-subtle); }

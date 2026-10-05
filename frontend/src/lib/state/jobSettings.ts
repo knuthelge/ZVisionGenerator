@@ -88,6 +88,8 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
     patch[enabledKey] = first(settings, `${name}_enabled`) === 'true';
     const amount = numberOrNull(first(settings, `${name}_amount`));
     if (amount !== null) patch[amountKey] = amount;
+    // Sharpen on with no amount means it followed the config (auto); restore that instead of keeping a typed amount.
+    else if (amountKey === 'postprocessSharpenAmount' && patch[enabledKey]) patch.postprocessSharpenAmount = null;
   }
 
   if (isVideo) {

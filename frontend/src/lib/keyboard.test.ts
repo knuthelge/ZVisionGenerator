@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { CHORD_TIMEOUT_MS, hasOpenModal, isPlainKey, isTyping, stepGoChord } from './keyboard';
+import { CHORD_TIMEOUT_MS, hasOpenModal, isPlainKey, isTyping, stepChord, stepGoChord } from './keyboard';
 
 function el(html: string): HTMLElement {
   const host = document.createElement('div');
@@ -52,5 +52,20 @@ describe('keyboard', () => {
     it('ignores keys other than G when nothing is pending', () => {
       expect(stepGoChord(null, 'w', 1000)).toEqual({ waitingSince: null, page: null });
     });
+  });
+});
+
+describe('stepChord', () => {
+  const values = { '2': 2, '4': 4 } as const;
+
+  it('waits after the start key and completes with a value key', () => {
+    const started = stepChord('x', values, null, 'x', 1000);
+    expect(started).toEqual({ waitingSince: 1000, value: null, consumed: true });
+    expect(stepChord('x', values, started.waitingSince, '4', 1500)).toEqual({ waitingSince: null, value: 4, consumed: true });
+  });
+
+  it('drops a pending chord on another key or after the timeout', () => {
+    expect(stepChord('x', values, 1000, 'r', 1200)).toEqual({ waitingSince: null, value: null, consumed: false });
+    expect(stepChord('x', values, 1000, '2', 1000 + CHORD_TIMEOUT_MS + 1).value).toBeNull();
   });
 });

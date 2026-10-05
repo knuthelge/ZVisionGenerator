@@ -7,6 +7,7 @@ mocking all heavy dependencies at the module level before import.
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -689,6 +690,15 @@ class TestStepCallbackLivePreview:
         cb(MagicMock(), step=0, timestep=0.0, callback_kwargs={"latents": object()})
 
         assert events == [{"current_step": 1, "total_steps": 4}]
+
+    def test_partial_runs_report_the_pipeline_step_count(self, win_backend):
+        mod, _, _ = win_backend
+        events = []
+        cb = mod._make_step_callback(None, total_steps=7, step_callback=events.append)
+
+        cb(SimpleNamespace(num_timesteps=3, _interrupt=False), step=2, timestep=0.0, callback_kwargs={})
+
+        assert events == [{"current_step": 3, "total_steps": 3}]
 
     @pytest.mark.parametrize(("family", "expects_preview"), [("zimage", True), ("flux2_klein", True), ("flux1", False)])
     def test_text_to_image_requests_latents_only_for_previewable_families(self, win_backend, family, expects_preview):

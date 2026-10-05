@@ -6,7 +6,7 @@ from .alignment import round_to_alignment
 from .config import load_config, resolve_defaults, resolve_video_defaults, validate_scheduler
 from .console import format_generation_info
 from .ffmpeg import ensure_ffmpeg, strip_audio
-from .filename import generate_filename
+from .filename import generate_filename, unique_output_path
 from .image_model_detect import ImageModelInfo, detect_image_model
 from .interactive import SkipSignal
 from .lora import parse_lora_arg
@@ -24,17 +24,21 @@ from .paths import (
 )
 from .platform import AliasMap, AliasValue, PlatformInfo, get_platform_info, resolve_alias
 from .provenance import (
+    EXIF_IMAGE_DESCRIPTION,
     IMAGE_CONFIG_SCHEMA,
-    PROVENANCE_SCHEMA,
+    RecordedSettings,
     VIDEO_CONFIG_SCHEMA,
     build_image_config_payload,
-    build_image_provenance,
     build_video_config_payload,
-    build_video_provenance,
     embed_mp4_config,
     embed_png_config,
+    image_prompt_text,
+    optional_float,
+    optional_int,
+    optional_text,
     read_mp4_config,
     read_png_config,
+    recorded_settings,
 )
 from .prompt_compose import expand_random_choices
 from .prompt_enhance import EnhanceResult, EnhanceSettings, enhance_prompt, matrix_contract, parse_enhance_entry, parse_enhance_spec
@@ -48,16 +52,15 @@ __all__ = [
     "HuggingFaceRepoReference",
     "EnhanceResult",
     "EnhanceSettings",
+    "EXIF_IMAGE_DESCRIPTION",
     "IMAGE_CONFIG_SCHEMA",
     "PlatformInfo",
-    "PROVENANCE_SCHEMA",
+    "RecordedSettings",
     "VIDEO_CONFIG_SCHEMA",
     "SkipSignal",
     "VideoModelInfo",
     "build_image_config_payload",
-    "build_image_provenance",
     "build_video_config_payload",
-    "build_video_provenance",
     "detect_image_model",
     "detect_video_model",
     "display_basename",
@@ -71,18 +74,23 @@ __all__ = [
     "generate_filename",
     "get_platform_info",
     "get_ziv_data_dir",
+    "image_prompt_text",
     "is_explicit_local_path",
     "is_huggingface_repo_id",
     "is_remote_lora_reference",
     "load_config",
     "load_prompts_file",
     "matrix_contract",
+    "optional_float",
+    "optional_int",
+    "optional_text",
     "parse_huggingface_repo_reference",
     "parse_enhance_entry",
     "parse_enhance_spec",
     "parse_lora_arg",
     "read_mp4_config",
     "read_png_config",
+    "recorded_settings",
     "resolve_alias",
     "resolve_defaults",
     "resolve_lora_path",
@@ -90,5 +98,6 @@ __all__ = [
     "resolve_video_defaults",
     "round_to_alignment",
     "strip_audio",
+    "unique_output_path",
     "validate_scheduler",
 ]

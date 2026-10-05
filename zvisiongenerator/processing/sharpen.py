@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 from PIL import Image
 
+from zvisiongenerator.utils.config import MAX_SHARPEN_AMOUNT
+
 
 def contrast_adaptive_sharpening(image: Image.Image, amount: float = 0.8) -> Image.Image:
     """Apply AMD Contrast Adaptive Sharpening (CAS) to a PIL Image.
@@ -14,11 +16,16 @@ def contrast_adaptive_sharpening(image: Image.Image, amount: float = 0.8) -> Ima
 
     Args:
         image: Input PIL Image (RGB).
-        amount: Sharpening strength from 0.0 (off) to 1.0 (max). Default 0.8.
+        amount: Sharpening strength: 0.0 or less is off, 1.0 the reference CAS maximum, up to ``MAX_SHARPEN_AMOUNT`` (1.5). Default 0.8.
 
     Returns:
         Sharpened PIL Image.
+
+    Raises:
+        ValueError: If *amount* is above ``MAX_SHARPEN_AMOUNT``.
     """
+    if amount > MAX_SHARPEN_AMOUNT:
+        raise ValueError(f"Sharpen amount must be at most {MAX_SHARPEN_AMOUNT:g}, got {amount:g}.")
     if amount <= 0:
         return image
 

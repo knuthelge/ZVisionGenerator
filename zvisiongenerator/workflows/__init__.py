@@ -10,6 +10,7 @@ from zvisiongenerator.workflows.image_stages import (
     resolve_prompt_stage,
     suppress_negative_stage,
     load_reference_stage,
+    load_source_stage,
     text_to_image_stage,
     upscale_stage,
     contrast_stage,
@@ -18,7 +19,7 @@ from zvisiongenerator.workflows.image_stages import (
     save_image_stage,
 )
 
-__all__ = ["build_workflow", "build_video_workflow"]
+__all__ = ["build_workflow", "build_upscale_workflow", "build_video_workflow"]
 
 
 def build_workflow(args: argparse.Namespace, *, enhance: bool = False) -> GenerationWorkflow:
@@ -37,6 +38,18 @@ def build_workflow(args: argparse.Namespace, *, enhance: bool = False) -> Genera
         stages.append(sharpen_stage)
     stages.append(save_image_stage)
     return GenerationWorkflow(name="dynamic", stages=stages)
+
+
+def build_upscale_workflow(*, sharpen: bool = True) -> GenerationWorkflow:
+    """Build the workflow that upscales an existing image: load it, upscale and refine, sharpen, save.
+
+    Contrast and saturation are left out: the source already had them applied, and the refinement keeps its colours.
+    """
+    stages = [resolve_prompt_stage, suppress_negative_stage, load_source_stage, upscale_stage]
+    if sharpen:
+        stages.append(sharpen_stage)
+    stages.append(save_image_stage)
+    return GenerationWorkflow(name="upscale", stages=stages)
 
 
 def build_video_workflow(args: argparse.Namespace, *, enhance: bool = False) -> GenerationWorkflow:

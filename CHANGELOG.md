@@ -10,11 +10,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Web UI: **job queue**. While a job runs, Generate becomes **Add to queue**: change the settings and add more runs, which start one after another. The queue shows under the job card (**Up next**) with **Load settings**, remove and **Clear queue**, is shared by every tab, and keeps going when a job fails. New `GET /api/jobs` and `DELETE /api/jobs/queue` endpoints
 - Web UI: more workspace shortcuts. `Alt+3` focuses the newest history tile, expanding the strip if needed. `P` pauses or resumes the running job, `N` skips to the next image and `R` repeats the current one
 - Web UI: the Compose and Settings sidebar can be collapsed into a narrow strip with expand and Generate buttons; the choice is remembered in the browser
+- Web UI: **Upscale → 2× / 4×** in the asset viewer (or **X** then **2** / **4**) and in the **⋯** menu on thumbnails upscales an existing image, refined with the settings recorded in it. Each option shows the output size and is disabled, with the reason, when the model can't upscale or the output is too large. The result is saved next to the original as `<name>_2x.png` / `<name>_4x.png`; jobs started from the Gallery open the Workspace
+- Config: viewer upscales refine with `upscale.existing_denoise_small` (0.4) up to `upscale.existing_large_megapixels` (2) of output and `upscale.existing_denoise_large` (0.2) above it, so an upscale of an upscale refines as lightly as a direct 4×; `upscale.max_megapixels` (20) caps their output size. `sharpening.existing_upscaled` (1.2) and `sharpening.existing_pre_upscale` (0, off) set their final and pre-refinement sharpening
+- Saved files also record the negative prompt, scheduler, model family, quantization, reference strength, generation time, upscale settings and the sharpen, contrast and saturation amounts
+- Web UI: the asset viewer's **Details** panel shows everything recorded in the file, grouped into Generation, Post-processing and File, plus the original image of an upscale. **Reuse settings** also restores the negative prompt and scheduler
 
 ### Changed
 - Web UI: the form stays editable while a job runs; the manual Enhance prompt button waits until all jobs have finished
 - Web UI: the running job's card puts the live preview and outputs in a column to the right of the progress and controls
 - Web UI: deleting assets, models and LoRAs asks in the app's own confirmation dialog instead of the browser's. `Enter` confirms and `Esc` cancels
+- Output files are named `<set name>_<YYYY-MM-DD_HH-MM-SS>.png` (or the video's extension). Settings are no longer packed into the name, since they are embedded in the file; a taken name gets `_2`, `_3`… instead of being overwritten. Scripts that parse the old names need updating; the gallery still reads older names
+- Step counts for img2img refinement and upscale passes show the steps that actually run (e.g. 3 / 3 instead of 3 / 7)
+- Web UI: the **Sharpen** amount defaults to **auto**, which uses the config like `ziv-image` does (`sharpening.normal`, 1.0, for plain images and `sharpening.upscaled`, 1.2, for upscaled ones). Before, the Web UI always sent 0.8. A saved Workspace still on the old 0.8 switches to auto; type an amount to override
+
+### Fixed
+- Sharpen amounts above 1.5 are rejected (CLI, Web UI and config); higher values broke the sharpening filter. The Workspace control now stops at 1.5
 
 ## [0.13.0b10] - 2026-10-04
 

@@ -12,11 +12,14 @@
 
   let { jobs, onremove, onload, onclear }: Props = $props();
 
-  const WORKFLOW_LABELS: Record<string, string> = { txt2img: 'txt2img', img2img: 'img2img', txt2vid: 'txt2vid', img2vid: 'img2vid' };
+  /** Whether the job was submitted from the form, so its settings can be loaded back (an upscale was not). */
+  function hasSettings(job: JobSnapshot): boolean {
+    return Object.keys(job.settings ?? {}).length > 0;
+  }
 
   function details(job: JobSnapshot): string {
     const runs = `${job.runs} ${job.runs === 1 ? 'run' : 'runs'}`;
-    return [job.model, WORKFLOW_LABELS[job.workflow] ?? job.workflow, runs, job.meta].filter(Boolean).join(' · ');
+    return [job.model, job.workflow, runs, job.meta].filter(Boolean).join(' · ');
   }
 </script>
 
@@ -31,13 +34,15 @@
         <li class="queue-item" data-job-id={job.job_id ?? job.id}>
           <span class="queue-pos" class:next={index === 0} aria-label="Position {job.queue_position ?? index + 1}">{job.queue_position ?? index + 1}</span>
           <div class="queue-text">
-            <span class="queue-prompt" title={job.prompt}>{job.prompt || 'Prompt file'}</span>
+            <span class="queue-prompt" title={job.prompt}>{job.prompt || (job.workflow === 'upscale' ? 'No prompt recorded' : 'Prompt file')}</span>
             <span class="queue-meta">{details(job)}</span>
           </div>
           {#if index === 0}<span class="queue-tag">Starts next</span>{/if}
-          <button type="button" class="queue-action" title="Copy this job's settings into the form" onclick={() => onload(job)}>
-            <Icon name="reuse" size={14} />Load settings
-          </button>
+          {#if hasSettings(job)}
+            <button type="button" class="queue-action" title="Copy this job's settings into the form" onclick={() => onload(job)}>
+              <Icon name="reuse" size={14} />Load settings
+            </button>
+          {/if}
           <button type="button" class="queue-remove" aria-label="Remove from queue" title="Remove from queue" onclick={() => onremove(job)}>
             <Icon name="close" size={14} />
           </button>

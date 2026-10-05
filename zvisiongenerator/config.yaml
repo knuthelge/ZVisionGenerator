@@ -46,10 +46,18 @@ sharpening:
   normal: 1.0
   upscaled: 1.2
   pre_upscale: 0.8
+  # Upscaling an existing image from the Web UI viewer
+  existing_upscaled: 1.2     # final pass
+  existing_pre_upscale: 0    # after enlarging, before refining; 0 = off (the image is already sharpened)
 
 upscale:
   default_denoise_2x: 0.4
   default_denoise_4x: 0.4
+  # Upscaling an existing image from the Web UI viewer: denoise is picked by output size
+  existing_denoise_small: 0.4      # outputs up to existing_large_megapixels
+  existing_denoise_large: 0.2      # larger outputs
+  existing_large_megapixels: 2
+  max_megapixels: 20               # Largest output
 
 contrast:
   default_amount: 1.0
