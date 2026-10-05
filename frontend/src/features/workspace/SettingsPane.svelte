@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { draft, offeredSizes, settingDefaultsFor, type SettingKey } from '$lib/state/draft.svelte';
+  import { draft, MAX_SHARPEN_AMOUNT, offeredSizes, settingDefaultsFor, type SettingKey } from '$lib/state/draft.svelte';
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
   import { InspectorRow, InspectorSection } from '$lib/components/molecules';
   import type { NumberSpec, ScrubOptions } from '$lib/actions/scrub';
@@ -38,7 +38,7 @@
     strength: { step: 0.01, min: 0, max: 1 },
     seed: { step: 1, min: 0, max: 2 ** 32 - 1 },
     firstSigma: { step: 0.001, min: 0.001, max: 2 },
-    sharpen: { step: 0.05, min: 0, max: 2 },
+    sharpen: { step: 0.05, min: 0, max: MAX_SHARPEN_AMOUNT },
     contrast: { step: 0.05, min: 0.5, max: 2 },
     saturation: { step: 0.05, min: 0.5, max: 2 },
     upscaleDenoise: { step: 0.01, min: 0, max: 1 },
@@ -341,10 +341,10 @@
             onreset={() => reset('postprocessSharpenEnabled', 'postprocessSharpenAmount')}
           >
             <Toggle id="ws-pp-sharpen" ariaLabel="Sharpen" checked={s.postprocessSharpenEnabled} disabled={busy} onchange={(e) => draft.update('postprocessSharpenEnabled', (e.currentTarget as HTMLInputElement).checked)} />
-            <InspectorNumber id="ws-pp-sharpen-amount" ariaLabel="Sharpen amount" value={s.postprocessSharpenAmount} {...SPEC.sharpen} disabled={!s.postprocessSharpenEnabled} onchange={(v) => v !== null && draft.update('postprocessSharpenAmount', v)} />
+            <InspectorNumber id="ws-pp-sharpen-amount" ariaLabel="Sharpen amount" value={s.postprocessSharpenAmount} {...SPEC.sharpen} nullable placeholder="auto" disabled={!s.postprocessSharpenEnabled} onchange={(v) => draft.update('postprocessSharpenAmount', v)} />
           </InspectorRow>
           <input type="hidden" name="sharpen_enabled" value={s.postprocessSharpenEnabled ? 'true' : 'false'}>
-          {#if s.postprocessSharpenEnabled}
+          {#if s.postprocessSharpenEnabled && s.postprocessSharpenAmount !== null}
             <input type="hidden" name="sharpen_amount" value={String(s.postprocessSharpenAmount)}>
           {/if}
         {/if}

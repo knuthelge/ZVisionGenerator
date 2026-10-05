@@ -39,9 +39,13 @@ class ImageGenerationRequest:
     steps: int = 10
     guidance: float = 0.5
     scheduler: str | None = None
+    # The scheduler's config name (e.g. "beta"); ``scheduler`` may hold the backend class path it resolves to.
+    scheduler_name: str | None = None
     steps_explicit: bool = False
     guidance_explicit: bool = False
     first_sigma: float | None = None
+    # Quantization level the model was loaded at (4 or 8), recorded with the image.
+    quantize: int | None = None
     skip_signal: Any | None = None
     step_callback: Callable[[dict[str, Any]], None] | None = None
 
@@ -52,6 +56,8 @@ class ImageGenerationRequest:
     upscale_guidance: float | None = None
     upscale_sharpen: bool = True
     upscale_save_pre: bool = False
+    # Existing image an upscale job refines; set only by the upscale workflow.
+    upscale_source: str | None = None
 
     # Reference image params
     image_path: str | None = None

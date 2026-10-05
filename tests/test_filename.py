@@ -1,124 +1,42 @@
-"""Golden test for generate_filename()."""
+"""Tests for output file naming."""
 
 from __future__ import annotations
 
-from zvisiongenerator.utils.filename import generate_filename
+from datetime import datetime
+
+from zvisiongenerator.utils.filename import generate_filename, unique_output_path
+
+_NOW = datetime(2026, 10, 4, 14, 3, 22)
 
 
-def test_golden_basic():
-    """Known inputs produce a deterministic filename (except timestamp)."""
-    result = generate_filename(
-        set_name="cats",
-        width=1440,
-        height=768,
-        seed=12345,
-        steps=10,
-        guidance=0.5,
-        scheduler="beta",
-        model="models/my-model",
-        lora_paths=None,
-        lora_weights=None,
-    )
-    # Timestamp varies, so check the non-timestamp parts
-    assert "_1440x768_" in result
-    assert "_my-model_" in result
-    assert "_beta_" in result
-    assert "_steps10_" in result
-    assert "_cfg0.5_" in result
-    assert "_seed12345" in result
-    assert result.startswith("cats_")
+def test_set_name_and_timestamp():
+    assert generate_filename("portrait", now=_NOW) == "portrait_2026-10-04_14-03-22"
 
 
-def test_golden_with_lora():
-    """Filename includes LoRA names and weights."""
-    result = generate_filename(
-        set_name="portrait",
-        width=1920,
-        height=1024,
-        seed=99999,
-        steps=20,
-        guidance=3.5,
-        scheduler=None,
-        model="models/myModel",
-        lora_paths=["/path/to/detail.safetensors", "/path/to/style.safetensors"],
-        lora_weights=[0.8, 0.5],
-    )
-    assert "_1920x1024_" in result
-    assert "_detail_80_" in result
-    assert "_style_50_" in result
-    assert "_steps20_" in result
-    assert "_seed99999" in result
+def test_timestamp_only_without_set_name():
+    assert generate_filename(None, now=_NOW) == "2026-10-04_14-03-22"
 
 
-def test_golden_no_scheduler():
-    """When scheduler is None, no scheduler segment appears."""
-    result = generate_filename(
-        set_name="test",
-        width=640,
-        height=320,
-        seed=1,
-        steps=4,
-        guidance=1.0,
-        scheduler=None,
-        model="models/klein4b",
-        lora_paths=None,
-        lora_weights=None,
-    )
-    assert "_beta" not in result
-    assert "_steps4_" in result
+def test_set_name_is_sanitized():
+    assert generate_filename("a/b:c*d", now=_NOW) == "a_b_c_d_2026-10-04_14-03-22"
 
 
-def test_golden_no_guidance():
-    """When guidance is None, no cfg segment appears."""
-    result = generate_filename(
-        set_name="test",
-        width=640,
-        height=320,
-        seed=1,
-        steps=4,
-        guidance=None,
-        scheduler=None,
-        model="models/klein4b",
-        lora_paths=None,
-        lora_weights=None,
-    )
-    assert "_cfg" not in result
+def test_set_name_of_only_dots_is_dropped():
+    assert generate_filename(" . ", now=_NOW) == "2026-10-04_14-03-22"
 
 
-def test_golden_with_num_frames():
-    """When num_frames is set, a frames segment appears after dimensions."""
-    result = generate_filename(
-        set_name="video",
-        width=704,
-        height=480,
-        seed=42,
-        steps=30,
-        guidance=3.0,
-        model="models/ltx-video",
-        num_frames=49,
-    )
-    assert "_704x480_49f_" in result
-    assert "_steps30_" in result
-    assert "_cfg3.0_" in result
-    assert "_seed42" in result
-    assert result.startswith("video_")
+def test_unique_output_path_returns_free_name(tmp_path):
+    assert unique_output_path(tmp_path, "portrait", ".png") == tmp_path / "portrait.png"
 
 
-def test_cross_platform_model_and_lora_display_parts_are_clean():
-    result = generate_filename(
-        set_name="xplat",
-        width=640,
-        height=320,
-        seed=7,
-        steps=4,
-        guidance=None,
-        scheduler=None,
-        model=r"C:\models\model.fp16.SAFETENSORS",
-        lora_paths=["owner/style.v1.safetensors", "C:/loras/detail.ckpt", "model.safetensors.backup"],
-        lora_weights=[0.8, 0.5, 1.0],
-    )
+def test_unique_output_path_adds_counter_when_taken(tmp_path):
+    (tmp_path / "portrait.png").write_bytes(b"")
+    (tmp_path / "portrait_2.png").write_bytes(b"")
 
-    assert "_model.fp16_" in result
-    assert "_style.v1_80_" in result
-    assert "_detail_50_" in result
-    assert "_model.safetensors.backup_100_" in result
+    assert unique_output_path(tmp_path, "portrait", ".png") == tmp_path / "portrait_3.png"
+
+
+def test_unique_output_path_ignores_other_suffixes(tmp_path):
+    (tmp_path / "clip.png").write_bytes(b"")
+
+    assert unique_output_path(tmp_path, "clip", ".mp4") == tmp_path / "clip.mp4"

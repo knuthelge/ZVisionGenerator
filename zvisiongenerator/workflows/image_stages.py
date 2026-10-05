@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import math
 import os
-import re
 import time
 import warnings
 from pathlib import Path
@@ -22,11 +21,10 @@ from PIL.PngImagePlugin import PngInfo
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.utils.alignment import round_to_alignment
-from zvisiongenerator.utils.provenance import build_image_config_payload, embed_png_config
+from zvisiongenerator.utils.filename import unique_output_path
+from zvisiongenerator.utils.provenance import EXIF_IMAGE_DESCRIPTION, build_image_config_payload, embed_png_config
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
 from zvisiongenerator.workflows.enhance_stage import apply_planned_enhancement
-
-_EXIF_IMAGE_DESCRIPTION = 0x010E
 
 
 def _emit_step_progress(
@@ -40,10 +38,12 @@ def _emit_step_progress(
         return None
 
     def _callback(event: dict[str, Any]) -> None:
+        # The backend's total counts the steps that actually run (img2img skips the start of the schedule).
+        steps_total = max(event.get("total_steps") or total_steps, 1)
         payload: dict[str, Any] = {
             "phase": phase,
-            "current_step": min(event.get("current_step", 0), max(total_steps, 1)),
-            "total_steps": max(total_steps, 1),
+            "current_step": min(event.get("current_step", 0), steps_total),
+            "total_steps": steps_total,
         }
         if "preview" in event:
             payload["preview"] = event["preview"]
@@ -110,6 +110,30 @@ def load_reference_stage(request: ImageGenerationRequest, artifacts: ImageWorkin
     return StageOutcome.success
 
 
+def load_source_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
+    """Load the image an upscale job refines, at its native size, and name the output after it.
+
+    The output is ``{source stem}_{factor}x.png`` in ``request.output_dir``, with a counter when taken.
+    No-op if request.upscale_source is None.
+    """
+    if request.upscale_source is None:
+        return StageOutcome.success
+    if request.upscale_factor is None:
+        raise ValueError("upscale_factor must be set to upscale an existing image")
+    source = Path(request.upscale_source)
+    if not source.is_file():
+        raise FileNotFoundError(f"Image to upscale not found: {source}")
+
+    with Image.open(source) as source_image:
+        artifacts.image = source_image.convert("RGB")
+    artifacts.metadata["upscale_source"] = {"path": str(source), "width": artifacts.image.width, "height": artifacts.image.height}
+
+    os.makedirs(request.output_dir, exist_ok=True)
+    artifacts.filename = f"{source.stem}_{request.upscale_factor}x"
+    artifacts.filepath = str(unique_output_path(request.output_dir, artifacts.filename, ".png"))
+    return StageOutcome.success
+
+
 def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
     """Text-to-image or image-to-image generation via backend.
 
@@ -168,13 +192,9 @@ def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorking
 
     print(f"Image generated in {elapsed:.2f} seconds.")
 
-    # Build filepath with generation time
     if artifacts.filename:
         os.makedirs(request.output_dir, exist_ok=True)
-        artifacts.filepath = os.path.join(
-            request.output_dir,
-            f"{artifacts.filename}_time{int(artifacts.generation_time)}s.png",
-        )
+        artifacts.filepath = str(unique_output_path(request.output_dir, artifacts.filename, ".png"))
 
     return StageOutcome.success
 
@@ -256,22 +276,7 @@ def upscale_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifa
 
     artifacts.image = image
     artifacts.was_upscaled = True
-
-    # Update filepath with total time and upscale info
-    total_time = artifacts.generation_time
-    print(f"Upscale refinement done. Total time: {total_time:.2f} seconds.")
-
-    if artifacts.filepath:
-        p = Path(artifacts.filepath)
-        stem = p.stem
-        # Replace generation-only time with total time
-        stem = re.sub(r"_time\d+s$", f"_time{int(total_time)}s", stem)
-        # Add upscale suffix
-        stem += f"_u{request.upscale_factor}x_s{int(strength * 100)}p"
-        # Update image dimensions in filename
-        stem = re.sub(r"_(\d+)x(\d+)_", f"_{new_width}x{new_height}_", stem)
-        artifacts.filepath = str(p.with_name(stem + p.suffix))
-
+    print(f"Upscale refinement done. Total time: {artifacts.generation_time:.2f} seconds.")
     return StageOutcome.success
 
 
@@ -328,7 +333,22 @@ def save_image_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArt
 
     # EXIF ImageDescription tag
     exif = artifacts.image.getexif()
-    exif[_EXIF_IMAGE_DESCRIPTION] = prompt
+    exif[EXIF_IMAGE_DESCRIPTION] = prompt
 
-    artifacts.image.save(artifacts.filepath, pnginfo=metadata, exif=exif.tobytes())
+    # Create the file exclusively so a name taken since it was chosen (another job, same second) is never overwritten.
+    path = Path(artifacts.filepath)
+    while True:
+        try:
+            handle = open(path, "xb")
+        except FileExistsError:
+            path = unique_output_path(path.parent, artifacts.filename or path.stem, path.suffix)
+            continue
+        try:
+            with handle:
+                artifacts.image.save(handle, format="PNG", pnginfo=metadata, exif=exif.tobytes())
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+        break
+    artifacts.filepath = str(path)
     return StageOutcome.success

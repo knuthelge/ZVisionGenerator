@@ -718,6 +718,12 @@ class TestPostProcessingFlags:
                 with patch.multiple("zvisiongenerator.image_cli", **{k.split(".")[-1]: v for k, v in TestCLIValidation._MAIN_MOCKS.items()}):
                     main()
 
+    def test_sharpen_above_the_cap_rejected(self):
+        with pytest.raises(SystemExit):
+            with patch("sys.argv", ["ziv-image", "-m", "fake", "--sharpen", "1.6"]):
+                with patch.multiple("zvisiongenerator.image_cli", **{k.split(".")[-1]: v for k, v in TestCLIValidation._MAIN_MOCKS.items()}):
+                    main()
+
     def test_negative_contrast_rejected(self):
         with pytest.raises(SystemExit):
             with patch("sys.argv", ["ziv-image", "-m", "fake", "--contrast", "-0.5"]):

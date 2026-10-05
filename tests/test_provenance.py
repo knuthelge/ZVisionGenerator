@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from PIL import Image
@@ -14,122 +13,19 @@ from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorki
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.provenance import (
     IMAGE_CONFIG_SCHEMA,
-    PROVENANCE_SCHEMA,
     VIDEO_CONFIG_SCHEMA,
     build_image_config_payload,
-    build_image_provenance,
     build_video_config_payload,
-    build_video_provenance,
     embed_mp4_config,
     embed_png_config,
+    image_prompt_text,
+    optional_float,
+    optional_int,
+    optional_text,
     read_mp4_config,
     read_png_config,
+    recorded_settings,
 )
-
-
-def test_build_image_provenance_is_json_serializable_and_keeps_expected_fields(tmp_path):
-    asset_path = tmp_path / "image.png"
-    request = ImageGenerationRequest(
-        backend=None,
-        model=None,
-        prompt="A cinematic skyline",
-        model_name="zit",
-        model_family="zimage",
-        negative_prompt="low detail",
-        ratio="16:9",
-        size="m",
-        width=1344,
-        height=768,
-        seed=1234,
-        steps=12,
-        guidance=2.5,
-        scheduler="karras",
-        lora_paths=["/tmp/style.safetensors"],
-        lora_weights=[0.8],
-        upscale_factor=2,
-        upscale_denoise=0.3,
-        upscale_steps=6,
-        upscale_guidance=1.2,
-        sharpen=True,
-        contrast=True,
-        saturation=False,
-    )
-    artifacts = ImageWorkingArtifacts(
-        image=Image.new("RGB", (1344, 768), color="red"),
-        resolved_prompt="A cinematic skyline at dusk",
-        generation_time=4.2,
-        was_upscaled=True,
-    )
-
-    payload = build_image_provenance(asset_path, request, artifacts)
-
-    assert payload["schema"] == PROVENANCE_SCHEMA
-    assert payload["media_type"] == "image"
-    assert payload["workflow"] == "txt2img"
-    assert payload["prompt"] == "A cinematic skyline"
-    assert payload["resolved_prompt"] == "A cinematic skyline at dusk"
-    assert payload["model_name"] == "zit"
-    assert payload["model_family"] == "zimage"
-    assert payload["seed"] == 1234
-    assert payload["steps"] == 12
-    assert payload["guidance"] == 2.5
-    assert payload["width"] == 1344
-    assert payload["height"] == 768
-    assert payload["ratio"] == "16:9"
-    assert payload["size"] == "m"
-    assert payload["loras"] == [{"name": "style", "path": "/tmp/style.safetensors", "weight": 0.8}]
-    assert payload["generation"]["was_upscaled"] is True
-    assert payload["output"]["filename"] == "image.png"
-    json.dumps(payload)
-
-
-def test_build_video_provenance_is_json_serializable_and_keeps_expected_fields(tmp_path):
-    asset_path = tmp_path / "clip.mp4"
-    request = VideoGenerationRequest(
-        backend=None,
-        model=None,
-        prompt="Camera pushes through a neon alley",
-        model_name="ltx-8",
-        model_family="ltx",
-        width=704,
-        height=448,
-        num_frames=49,
-        seed=77,
-        steps=8,
-        image_path="/tmp/ref.png",
-        lora_paths=["/tmp/motion.safetensors"],
-        lora_weights=[0.75],
-        upscale=2,
-        upscale_steps=3,
-        no_audio=True,
-        output_format="mp4",
-    )
-    artifacts = VideoWorkingArtifacts(
-        resolved_prompt="Camera pushes through a neon alley with rain",
-        generation_time=12.5,
-        video_path=Path(asset_path),
-        filename="clip.mp4",
-    )
-
-    payload = build_video_provenance(asset_path, request, artifacts)
-
-    assert payload["schema"] == PROVENANCE_SCHEMA
-    assert payload["media_type"] == "video"
-    assert payload["workflow"] == "img2vid"
-    assert payload["prompt"] == "Camera pushes through a neon alley"
-    assert payload["resolved_prompt"] == "Camera pushes through a neon alley with rain"
-    assert payload["model_name"] == "ltx-8"
-    assert payload["model_family"] == "ltx"
-    assert payload["seed"] == 77
-    assert payload["steps"] == 8
-    assert payload["width"] == 704
-    assert payload["height"] == 448
-    assert payload["frame_count"] == 49
-    assert payload["image_path"] == "/tmp/ref.png"
-    assert payload["loras"] == [{"name": "motion", "path": "/tmp/motion.safetensors", "weight": 0.75}]
-    assert payload["generation"]["audio"] is False
-    assert payload["output"]["filename"] == "clip.mp4"
-    json.dumps(payload)
 
 
 def _make_image_request(**overrides):
@@ -176,32 +72,99 @@ class TestBuildImageConfigPayload:
         assert payload["lora"] == "/models/style.safetensors:0.7"
         json.dumps(payload)
 
-    def test_lora_display_name_is_clean_but_paths_are_preserved(self):
+    def test_lora_paths_are_preserved(self):
         request = _make_image_request(
             lora_paths=[r"C:\loras\style.SAFETENSORS", "owner/detail.v1.safetensors"],
             lora_weights=[0.8, 0.5],
         )
-        payload = build_image_provenance("asset.png", request, ImageWorkingArtifacts(image=Image.new("RGB", (32, 32))))
+        payload = build_image_config_payload(request, ImageWorkingArtifacts(image=Image.new("RGB", (32, 32))))
 
-        assert payload["loras"] == [
-            {"name": "style", "path": r"C:\loras\style.SAFETENSORS", "weight": 0.8},
-            {"name": "detail.v1", "path": "owner/detail.v1.safetensors", "weight": 0.5},
-        ]
         assert payload["lora"] == r"C:\loras\style.SAFETENSORS:0.8,owner/detail.v1.safetensors:0.5"
 
-    def test_excludes_non_reusable_fields(self):
+    def test_excludes_runtime_and_output_fields(self):
         request = _make_image_request()
         artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (512, 384)), generation_time=3.1)
 
         payload = build_image_config_payload(request, artifacts)
 
         assert "model_name" not in payload
-        assert "model_family" not in payload
         assert "resolved_prompt" not in payload
-        assert "generation_time" not in payload
         assert "media_type" not in payload
         assert "output" not in payload
-        assert "generation" not in payload
+        assert "source" not in payload
+        assert "image_strength" not in payload
+
+    def test_records_negative_prompt_scheduler_and_family(self):
+        request = _make_image_request(negative_prompt="blurry", scheduler="pkg.BetaScheduler", scheduler_name="beta")
+        payload = build_image_config_payload(request, ImageWorkingArtifacts(image=Image.new("RGB", (512, 384))))
+
+        assert payload["negative_prompt"] == "blurry"
+        assert payload["scheduler"] == "beta"
+        assert payload["model_family"] == "zimage"
+
+    def test_suppressed_negative_prompt_is_not_recorded(self):
+        request = _make_image_request(negative_prompt="blurry")
+        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (512, 384)), metadata={"negative_suppressed": True})
+
+        payload = build_image_config_payload(request, artifacts)
+
+        assert payload["negative_prompt"] is None
+
+    def test_generation_records_time_upscale_and_postprocessing(self):
+        request = _make_image_request(
+            upscale_factor=2,
+            upscale_denoise=0.4,
+            upscale_steps=3,
+            sharpen=True,
+            sharpen_amount_upscaled=1.2,
+            contrast=True,
+            contrast_amount=1.1,
+            saturation=False,
+        )
+        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (1024, 768)), generation_time=12.345, was_upscaled=True)
+
+        payload = build_image_config_payload(request, artifacts)
+
+        assert payload["generation"] == {
+            "time": 12.3,
+            "upscale": {"factor": 2, "denoise": 0.4, "steps": 3, "pre_sharpen": 0.4},
+            "sharpen": 1.2,
+            "contrast": 1.1,
+        }
+
+    def test_generation_omits_upscale_that_did_not_run(self):
+        request = _make_image_request(upscale_factor=2, upscale_denoise=0.4, sharpen=False)
+        payload = build_image_config_payload(request, ImageWorkingArtifacts(image=Image.new("RGB", (512, 384))))
+
+        assert payload["generation"] == {}
+
+    def test_img2img_records_strength(self):
+        request = _make_image_request(image_path="/tmp/ref.png", image_strength=0.6)
+        payload = build_image_config_payload(request, ImageWorkingArtifacts(image=Image.new("RGB", (512, 384))))
+
+        assert payload["image_strength"] == 0.6
+
+    def test_upscale_of_an_img2img_image_keeps_its_reference_and_source_workflow(self):
+        request = _make_image_request(upscale_source="/out/p.png", upscale_factor=2, upscale_denoise=0.4, image_path="/out/ref.png", image_strength=0.6)
+        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (1024, 768)), metadata={"upscale_source": {"path": "/out/p.png", "width": 512, "height": 384}})
+
+        payload = build_image_config_payload(request, artifacts)
+
+        assert payload["workflow"] == "upscale"
+        assert payload["image_path"] == "/out/ref.png"
+        assert payload["image_strength"] == 0.6
+        assert payload["source"]["workflow"] == "img2img"
+
+    def test_upscale_workflow_records_source(self):
+        request = _make_image_request(upscale_source="/out/portrait.png", upscale_factor=2, upscale_denoise=0.4)
+        source = {"path": "/out/portrait.png", "width": 512, "height": 384}
+        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (1024, 768)), was_upscaled=True, metadata={"upscale_source": source})
+
+        payload = build_image_config_payload(request, artifacts)
+
+        assert payload["workflow"] == "upscale"
+        assert payload["source"] == {**source, "workflow": "txt2img"}
+        assert payload["generation"]["upscale"]["factor"] == 2
 
     def test_workflow_is_img2img_when_image_path_set(self):
         request = _make_image_request(image_path="/tmp/ref.png")
@@ -313,22 +276,24 @@ class TestBuildVideoConfigPayload:
         assert payload["lora"] == "/models/motion.safetensors:0.7"
         json.dumps(payload)
 
-    def test_excludes_non_reusable_fields(self):
+    def test_excludes_runtime_and_output_fields(self):
         request = _make_video_request()
         artifacts = VideoWorkingArtifacts(generation_time=12.5, resolved_prompt="resolved version")
 
         payload = build_video_config_payload(request, artifacts)
 
         assert "model_name" not in payload
-        assert "model_family" not in payload
         assert "resolved_prompt" not in payload
-        assert "generation_time" not in payload
         assert "media_type" not in payload
         assert "output" not in payload
-        assert "generation" not in payload
         assert "no_audio" not in payload
-        assert "audio" not in payload
-        assert "output_format" not in payload
+
+    def test_generation_records_time_upscale_audio_and_format(self):
+        request = _make_video_request(upscale=2, upscale_steps=3, no_audio=True)
+        payload = build_video_config_payload(request, VideoWorkingArtifacts(generation_time=12.54))
+
+        assert payload["model_family"] == "ltx"
+        assert payload["generation"] == {"time": 12.5, "upscale": {"factor": 2, "steps": 3}, "audio": False, "output_format": "mp4"}
 
     def test_workflow_is_txt2vid_without_image_path(self):
         request = _make_video_request()
@@ -435,3 +400,52 @@ class TestReadMp4Config:
             result = read_mp4_config(video_path)
 
         assert result == payload
+
+
+class TestRecordedValueHelpers:
+    def test_optional_values_reject_missing_blank_bool_and_garbage(self):
+        for value in (None, "", True, "abc"):
+            assert optional_int(value) is None
+            assert optional_float(value) is None
+        assert optional_int("42") == 42
+        assert optional_float("0.4") == 0.4
+        assert optional_text("  beta ") == "beta"
+        assert optional_text("   ") is None
+
+    def test_image_prompt_text_reads_png_description(self, tmp_path):
+        path = tmp_path / "p.png"
+        info = PngInfo()
+        info.add_text("Description", "a red barn")
+        Image.new("RGB", (8, 8)).save(path, pnginfo=info)
+
+        with Image.open(path) as image:
+            assert image_prompt_text(image) == "a red barn"
+
+    def test_image_prompt_text_is_none_without_a_prompt(self, tmp_path):
+        path = tmp_path / "plain.png"
+        Image.new("RGB", (8, 8)).save(path)
+
+        with Image.open(path) as image:
+            assert image_prompt_text(image) is None
+
+
+class TestRecordedSettings:
+    def test_reads_top_level_settings_only(self):
+        # A missing top-level value must not be filled from a nested block, e.g. the upscale's own steps.
+        settings = recorded_settings({"prompt": "p", "seed": "7", "generation": {"upscale": {"factor": 2, "steps": 3}}})
+
+        assert settings.prompt == "p"
+        assert settings.seed == 7
+        assert settings.steps is None
+        assert settings.generation == {"upscale": {"factor": 2, "steps": 3}}
+
+    def test_reads_legacy_lora_lists(self):
+        settings = recorded_settings({"lora": [{"name": "style", "weight": 0.8}, "detail"]})
+
+        assert settings.lora == "style:0.8,detail"
+
+    def test_drops_malformed_blocks(self):
+        settings = recorded_settings({"generation": "oops", "source": {"width": 3}})
+
+        assert settings.generation == {}
+        assert settings.source is None

@@ -182,6 +182,11 @@ class _ProgressChecker:
     # ``**_``: newer mflux passes extra keywords (0.20 added ``control_images``); a strict signature fails every generation.
     def call_before_loop(self, seed, prompt, latents, config, **_):
         del seed, prompt
+        # img2img, refine and upscale runs start part-way through the schedule; count only the steps that run.
+        try:
+            self._total_steps = max(config.num_inference_steps - config.init_time_step, 1)
+        except AttributeError, TypeError:
+            pass
         if not self._previews_enabled:
             return
         self._previous_latents = latents

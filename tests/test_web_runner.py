@@ -233,6 +233,40 @@ class TestWebRunner:
         finally:
             runner.shutdown()
 
+    def test_upscale_job_loads_model_and_runs_workflow_once(self, tmp_path, monkeypatch):
+        """Upscale jobs load the recorded model (with its quant and LoRAs), run once, and accept only quit."""
+        loader_calls: dict = {}
+        runs: list = []
+
+        def _fake_loader(backend, model_ref, *, quantize, models_dir, model_name, lora_paths, lora_weights, on_phase, cancelled, release_memory):
+            loader_calls.update(model_ref=model_ref, quantize=quantize, model_name=model_name, lora_paths=lora_paths)
+            return MagicMock(name="model"), MagicMock(name="model_info")
+
+        def _fake_run_upscale(backend, model, request, workflow, *, progress_callback, skip_signal):
+            runs.append((request, workflow))
+            progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
+
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        _stub_request_job(monkeypatch)
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(web_runner_module, "load_image_model", _fake_loader)
+        monkeypatch.setattr(web_runner_module, "run_upscale", _fake_run_upscale)
+        request = ImageGenerationRequest(
+            backend=None, model=None, prompt="p", model_name="zit", lora_paths=["/l.safetensors"], lora_weights=[0.5], upscale_factor=2, upscale_source="/out/a.png", quantize=8
+        )
+        workflow = MagicMock(name="workflow")
+
+        try:
+            job_id = runner.submit_upscale_job(request=request, workflow=workflow, model_ref="/models/zit", context={"output_dir": str(tmp_path)})
+            snapshot = _wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        assert snapshot["job_type"] == "upscale"
+        assert snapshot["supported_controls"] == ["quit"]
+        assert loader_calls == {"model_ref": "/models/zit", "quantize": 8, "model_name": "zit", "lora_paths": ["/l.safetensors"]}
+        assert runs == [(request, workflow)]
+
     def test_completed_image_job_includes_output_assets(self, tmp_path, monkeypatch):
         """Successful generated output paths should become gallery-shaped job outputs."""
         output_path = tmp_path / "result.png"
@@ -246,7 +280,7 @@ class TestWebRunner:
         monkeypatch.setattr(
             web_runner_module,
             "load_web_config",
-            lambda: SimpleNamespace(default_models=SimpleNamespace(image="zit", video="ltx-8"), image_model_options=("zit",), video_model_options=("ltx-8",)),
+            lambda: SimpleNamespace(default_models=SimpleNamespace(image="zit", video="ltx-8"), image_model_options=("zit",), video_model_options=("ltx-8",), image_inventory=(), app_config={}),
         )
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 

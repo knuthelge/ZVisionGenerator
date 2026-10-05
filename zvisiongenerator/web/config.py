@@ -123,6 +123,13 @@ def load_web_config() -> WebUiConfig:
     )
 
 
+def preferred_option(preferred: str | None, options: tuple[str, ...]) -> str | None:
+    """Return *preferred* when it is one of *options*, else the first option (None when there are none)."""
+    if preferred in options:
+        return preferred
+    return options[0] if options else None
+
+
 def _resolve_enhancer(app_config: dict[str, Any]) -> dict[str, str | None]:
     """Return the effective prompt-enhancer model and revision (``None`` when none is configured)."""
     try:

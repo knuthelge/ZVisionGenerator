@@ -2,7 +2,11 @@ import { workflowMode } from './promptEnhance';
 import type { DraftState, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
+// Version 2 drafts always carried a sharpen amount: the old fixed default 0.8 now means "follow the config".
+const LEGACY_SHARPEN_DEFAULT = 0.8;
+/** Highest sharpen amount the backend accepts (`MAX_SHARPEN_AMOUNT` in utils/config.py). */
+export const MAX_SHARPEN_AMOUNT = 1.5;
 
 function _canonicalWorkflow(raw: string, ctx: WorkspaceContext): Workflow | null {
   const workflowValue = raw.trim();
@@ -45,7 +49,7 @@ const DEFAULT_DRAFT: DraftState = {
   version: SCHEMA_VERSION,
   scheduler: null,
   postprocessSharpenEnabled: true,
-  postprocessSharpenAmount: 0.8,
+  postprocessSharpenAmount: null,
   postprocessContrastEnabled: false,
   postprocessContrastAmount: 1.0,
   postprocessSaturationEnabled: false,
@@ -75,6 +79,8 @@ const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
   frames: 'frame_count',
   lora: 'loras',
   image_path: 'reference_image_path',
+  negative_prompt: 'negative_prompt',
+  scheduler: 'scheduler',
 };
 
 const _CLEAR_FIELD_STATE_UPDATES: Partial<Record<string, Partial<DraftState>>> = {
@@ -88,7 +94,7 @@ const _CLEAR_FIELD_STATE_UPDATES: Partial<Record<string, Partial<DraftState>>> =
   low_memory: { lowMemory: DEFAULT_DRAFT.lowMemory },
   upscale: { upscaleEnabled: false, upscaleFactor: DEFAULT_DRAFT.upscaleFactor },
   sharpen_enabled: { postprocessSharpenEnabled: false },
-  sharpen_amount: { postprocessSharpenAmount: 0.8 },
+  sharpen_amount: { postprocessSharpenAmount: null },
   contrast_enabled: { postprocessContrastEnabled: false },
   contrast_amount: { postprocessContrastAmount: 1.0 },
   saturation_enabled: { postprocessSaturationEnabled: false },
@@ -115,7 +121,7 @@ function _applyImageDefaults(state: DraftState, defaults: ImageModelDefaults): D
     referenceImageStrength: defaults.image_strength,
     scheduler: defaults.scheduler,
     postprocessSharpenEnabled: pp.sharpen !== false,
-    postprocessSharpenAmount: typeof pp.sharpen === 'number' ? pp.sharpen : 0.8,
+    postprocessSharpenAmount: typeof pp.sharpen === 'number' ? pp.sharpen : null,
     postprocessContrastEnabled: pp.contrast !== false,
     postprocessContrastAmount: typeof pp.contrast === 'number' ? pp.contrast : 1.0,
     postprocessSaturationEnabled: pp.saturation !== false,
@@ -228,11 +234,20 @@ function _presetIsValid(ctx: WorkspaceContext, state: DraftState): boolean {
   return offeredSizes(ctx, state.workflow, state.model, state.ratio).includes(state.size);
 }
 
+/** Upgrade a saved draft from the previous schema; other versions pass through unchanged. */
+function _migrateDraft<T extends Partial<DraftState>>(saved: T): T {
+  if (saved.version !== 2) return saved;
+  const amount = saved.postprocessSharpenAmount;
+  // The old control allowed up to 2; the server now rejects amounts above MAX_SHARPEN_AMOUNT.
+  const kept = amount === LEGACY_SHARPEN_DEFAULT || amount == null ? null : Math.min(amount, MAX_SHARPEN_AMOUNT);
+  return { ...saved, version: SCHEMA_VERSION, postprocessSharpenAmount: kept };
+}
+
 function loadFromStorage(): DraftState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_DRAFT };
-    const parsed = JSON.parse(raw) as Partial<DraftState> & { promptFileOptionId?: string | null };
+    const parsed = _migrateDraft(JSON.parse(raw) as Partial<DraftState> & { promptFileOptionId?: string | null });
     if (parsed.version !== SCHEMA_VERSION) return { ...DEFAULT_DRAFT };
     const { promptFileOptionId, ...saved } = parsed;
     return {
@@ -290,6 +305,8 @@ export const draft = {
     if (params.frames && canApply('frames')) prefill.frameCount = Number(params.frames);
     if (params.lora && canApply('lora')) prefill.loraString = params.lora;
     if (params.image_path && canApply('image_path')) prefill.referenceImagePath = params.image_path;
+    if (params.negative_prompt && canApply('negative_prompt')) prefill.negativePrompt = params.negative_prompt;
+    if (params.scheduler && canApply('scheduler')) prefill.scheduler = params.scheduler;
     // A reused preset the current model does not offer keeps the current preset size instead.
     if (ctx && prefill.size !== undefined && prefill.size !== 'custom'
       && !offeredSizes(ctx, workflow, prefill.model ?? _draft.model, prefill.ratio ?? _draft.ratio).includes(prefill.size)) {

@@ -21,12 +21,13 @@
 <script lang="ts">
   import { Icon, ShortcutList } from '$lib/components/atoms';
   import { isTyping } from '$lib/keyboard';
-  import { canUseAsReference, describeFallbackReason, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
+  import { canUseAsReference, describeFallbackReason, upscaleFactor, upscaleFactors, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
   import { addToast } from '$lib/state/toasts.svelte';
-  import type { GalleryAsset } from '$lib/types';
+  import type { GalleryAsset, UpscaleFactor } from '$lib/types';
   import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
-  import { referenceEntries } from './assetMenu';
-  import { VIEWER_SHORTCUTS, viewerActionFor, type ViewerAction } from './viewerShortcuts';
+  import { assetDetailSections, fileName, type DetailFact } from './assetDetails';
+  import { referenceEntries, upscaleEntries } from './assetMenu';
+  import { VIEWER_SHORTCUTS, stepUpscaleChord, viewerActionFor, type ViewerAction } from './viewerShortcuts';
 
   interface Props extends Omit<AssetActionHandlers, 'onpreview'> {
     assets: GalleryAsset[];
@@ -55,6 +56,7 @@
     onnavigate,
     onreuse,
     onreference,
+    onupscale,
     ondelete,
   }: Props = $props();
 
@@ -85,6 +87,8 @@
   let detailsOpen = $state(loadDetailsOpen());
   let referenceOpen = $state(false);
   let referenceButton = $state<HTMLButtonElement | null>(null);
+  let upscaleOpen = $state(false);
+  let upscaleButton = $state<HTMLButtonElement | null>(null);
   let closeButton = $state<HTMLButtonElement | null>(null);
   let downloadLink = $state<HTMLAnchorElement | null>(null);
   let helpOpen = $state(false);
@@ -93,21 +97,26 @@
     asset && onreference ? referenceEntries(asset, onreference, referenceUnavailable) : []
   );
 
-  const facts = $derived<{ label: string; value: string; wide?: boolean }[]>(
-    asset
-      ? [
-          { label: 'Model', value: asset.model || '—' },
-          { label: 'Workflow', value: asset.workflow },
-          { label: 'Dimensions', value: asset.width && asset.height ? `${asset.width}×${asset.height}` : '—' },
-          { label: 'Seed', value: asset.seed != null ? String(asset.seed) : '—' },
-          { label: 'Steps', value: asset.steps != null ? String(asset.steps) : '—' },
-          { label: 'Guidance', value: asset.guidance != null ? String(asset.guidance) : '—' },
-          ...(asset.frame_count ? [{ label: 'Frames', value: String(asset.frame_count) }] : []),
-          ...(asset.lora ? [{ label: 'LoRAs', value: asset.lora, wide: true }] : []),
-          { label: 'Created', value: new Date(asset.created_at).toLocaleString(), wide: true },
-        ]
-      : []
+  const upscaleItems = $derived<ActionMenuEntry[]>(
+    asset && onupscale ? upscaleEntries(asset, onupscale) : []
   );
+
+  const sections = $derived(asset ? assetDetailSections(asset) : null);
+  const source = $derived(asset?.details?.source ?? null);
+  const sourceIndex = $derived(source?.id ? assets.findIndex((item) => item.id === source.id) : -1);
+
+  /** Upscale the shown image by *factor* from the keyboard; a disallowed factor explains why instead. */
+  function runUpscale(factor: UpscaleFactor): boolean {
+    if (!asset || !onupscale) return false;
+    const option = upscaleFactor(asset, factor);
+    if (!option) return false;
+    if (!option.allowed) {
+      addToast(option.reason ?? `Upscaling ${factor}× is not available for this image.`, 'warning');
+      return true;
+    }
+    onupscale(asset, factor);
+    return true;
+  }
 
   function toggleDetails(): void {
     detailsOpen = !detailsOpen;
@@ -180,9 +189,25 @@
   $effect(() => {
     if (!open) return;
     queueMicrotask(() => closeButton?.focus());
+    let upscaleWaitingSince: number | null = null;
     function handleKeydown(e: KeyboardEvent): void {
-      // While the reference menu is open, keys belong to it.
-      if (e.defaultPrevented || referenceOpen || isTyping(e.target)) return;
+      // While a menu is open, keys belong to it.
+      if (e.defaultPrevented || referenceOpen || upscaleOpen || isTyping(e.target)) {
+        upscaleWaitingSince = null;
+        return;
+      }
+      if (onupscale && asset && upscaleFactors(asset).length > 0) {
+        const chord = stepUpscaleChord(upscaleWaitingSince, e, Date.now());
+        upscaleWaitingSince = chord.waitingSince;
+        if (chord.value) {
+          if (runUpscale(chord.value)) e.preventDefault();
+          return;
+        }
+        if (chord.consumed) {
+          e.preventDefault();
+          return;
+        }
+      }
       const action = viewerActionFor(e);
       // A held Del must not open a second confirmation.
       if ((action === 'delete' || action === 'delete-now') && e.repeat) {
@@ -231,6 +256,18 @@
           title="Use as reference (E)"
           onclick={() => { referenceOpen = !referenceOpen; }}
         ><Icon name="reference" size={14} />Use as reference<Icon name="chevdown" size={12} class="opacity-70" /></button>
+      {/if}
+      {#if upscaleItems.length > 0}
+        <button
+          type="button"
+          bind:this={upscaleButton}
+          class="viewer-btn surface-overlay-action"
+          data-action="upscale"
+          aria-haspopup="menu"
+          aria-expanded={upscaleOpen}
+          title="Upscale (X then 2 or 4)"
+          onclick={() => { upscaleOpen = !upscaleOpen; }}
+        ><Icon name="expand" size={14} />Upscale<Icon name="chevdown" size={12} class="opacity-70" /></button>
       {/if}
       <a
         bind:this={downloadLink}
@@ -312,17 +349,31 @@
             <h4 class="viewer-h">Prompt</h4>
             <p class="viewer-prompt surface-card">{asset.prompt || 'No prompt recorded.'}</p>
           </section>
-          <section>
-            <h4 class="viewer-h">Generation</h4>
-            <dl class="viewer-facts">
-              {#each facts as fact (fact.label)}
-                <div class:wide={fact.wide}>
-                  <dt>{fact.label}</dt>
-                  <dd title={fact.value}>{fact.value}</dd>
-                </div>
-              {/each}
-            </dl>
-          </section>
+          {#if sections?.negativePrompt}
+            <section>
+              <h4 class="viewer-h">Negative prompt</h4>
+              <p class="viewer-prompt surface-card">{sections.negativePrompt}</p>
+            </section>
+          {/if}
+          {#if source}
+            <section data-testid="viewer-source">
+              <h4 class="viewer-h">Upscaled from</h4>
+              {#snippet sourceLabel()}
+                <span class="truncate">{fileName(source.path)}</span>
+                {#if source.width && source.height}<small>{source.width}×{source.height}</small>{/if}
+              {/snippet}
+              {#if sourceIndex >= 0}
+                <button type="button" class="viewer-source surface-card" onclick={() => onnavigate(sourceIndex)}>{@render sourceLabel()}</button>
+              {:else}
+                <p class="viewer-source surface-card" title={source.path}>{@render sourceLabel()}</p>
+              {/if}
+            </section>
+          {/if}
+          {#if sections}
+            {@render factSection('Generation', sections.generation)}
+            {@render factSection('Post-processing', sections.postProcessing)}
+            {@render factSection('File', sections.file)}
+          {/if}
           {#if fallbackReasons.length > 0}
             <section class="surface-warning rounded-md border px-3 py-2" role="note">
               <h4 class="viewer-h">Reuse notice</h4>
@@ -373,8 +424,31 @@
       label="Use as reference"
       onclose={() => { referenceOpen = false; }}
     />
+    <ActionMenu
+      open={upscaleOpen}
+      anchor={upscaleButton}
+      items={upscaleItems}
+      label="Upscale"
+      onclose={() => { upscaleOpen = false; }}
+    />
   </div>
 {/if}
+
+{#snippet factSection(title: string, facts: DetailFact[])}
+  {#if facts.length > 0}
+    <section>
+      <h4 class="viewer-h">{title}</h4>
+      <dl class="viewer-facts">
+        {#each facts as fact (fact.label)}
+          <div class:wide={fact.wide}>
+            <dt>{fact.label}</dt>
+            <dd title={fact.value}>{fact.value}</dd>
+          </div>
+        {/each}
+      </dl>
+    </section>
+  {/if}
+{/snippet}
 
 <style>
   .asset-viewer { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; background: rgb(7 10 11 / 0.985); }
@@ -399,6 +473,9 @@
   .viewer-details { display: flex; flex: none; flex-direction: column; gap: 18px; width: 340px; overflow-y: auto; padding: 16px; border-left: 1px solid var(--color-border-subtle); background: var(--color-bg-base); }
   .viewer-h { margin: 0 0 6px; font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
   .viewer-prompt { padding: 10px 12px; font-size: 13px; line-height: 1.55; color: var(--color-zinc-300); white-space: pre-wrap; user-select: text; }
+  .viewer-source { display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 12px; font-size: 12.5px; color: var(--color-zinc-200); text-align: left; }
+  .viewer-source small { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); }
+  button.viewer-source:hover { border-color: var(--color-primary-main); }
   .viewer-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .viewer-facts div { min-width: 0; padding: 6px 9px; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-sm); background: var(--color-bg-surface); }
   .viewer-facts .wide { grid-column: span 2; }

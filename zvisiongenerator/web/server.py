@@ -30,7 +30,7 @@ from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
-from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_enhancer_model, resolve_upscale_steps, resolve_video_defaults, validate_scheduler
+from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_enhancer_model, resolve_upscale_steps, resolve_video_defaults, validate_scheduler, validate_sharpen_amount
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import resolve_lora_references
@@ -38,7 +38,9 @@ from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhance_by_set_for_mode, enhance_options, enhance_prompt, settings_from_mapping, validate_settings
 from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
+from zvisiongenerator.upscale_runner import read_upscale_source
 from zvisiongenerator.utils.video_model_detect import detect_video_model
+from zvisiongenerator.workflows import build_upscale_workflow
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response, huggingface_token_env_var
 from zvisiongenerator.web.config_contract import persist_writable_config_patch, resolve_output_dir as resolve_config_output_dir
@@ -54,9 +56,10 @@ from zvisiongenerator.web.gallery import (
 )
 from zvisiongenerator.web.path_picker import pick_path
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
+from zvisiongenerator.web.upscale_api import plan_upscale, upscale_json_request, upscale_size_label
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, read_prompt_file, resolve_prompt_file_options, write_prompt_file
 from zvisiongenerator.web.model_delete import delete_lora, delete_model, model_delete_target
-from zvisiongenerator.web.job_contract import IMAGE_SUPPORTED_CONTROLS, VIDEO_SUPPORTED_CONTROLS
+from zvisiongenerator.web.job_contract import IMAGE_SUPPORTED_CONTROLS, UPSCALE_SUPPORTED_CONTROLS, VIDEO_SUPPORTED_CONTROLS
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner, worker_runtime_context
 from zvisiongenerator.web.workspace_api import build_models_response, build_workspace_bootstrap_view, build_workspace_response
 from zvisiongenerator.web.workspace_contract import (
@@ -376,8 +379,11 @@ def _generate_from_form(form: Any) -> JSONResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    job_id = str(job_context["job_id"])
-    public = job_context["context"]
+    return _job_response(str(job_context["job_id"]), job_context["context"], job_context.get("supported_controls", ()))
+
+
+def _job_response(job_id: str, context: dict[str, Any], supported_controls: tuple[str, ...]) -> JSONResponse:
+    """Return the response to a job submission: its public context, event URLs and place in the queue."""
     try:
         queue_position = web_runner.get_job_snapshot(job_id)["queue_position"]
     except KeyError:
@@ -385,15 +391,17 @@ def _generate_from_form(form: Any) -> JSONResponse:
     return JSONResponse(
         {
             "job_id": job_id,
-            "workflow": public["workflow"],
-            "prompt": public["prompt"],
-            "model": public["model"],
-            "runs": public["runs"],
-            "created_at": public["created_at"],
-            "events_url": job_context.get("events_url", ""),
-            "status_url": job_context.get("status_url", ""),
-            "supported_controls": list(job_context.get("supported_controls", ())),
-            "meta": public["meta"],
+            "workflow": context["workflow"],
+            "job_type": context["job_type"],
+            "prompt": context["prompt"],
+            "model": context["model"],
+            "runs": context["runs"],
+            "created_at": context["created_at"],
+            "events_url": f"/jobs/{job_id}/events",
+            "status_url": f"/jobs/{job_id}",
+            "supported_controls": list(supported_controls),
+            "meta": context["meta"],
+            "notices": list(context.get("notices", ())),
             "queue_position": queue_position,
         }
     )
@@ -448,6 +456,62 @@ def _submitted_settings(form: Any, *, image_path: str | None) -> dict[str, str |
     if uploaded and image_path:
         settings["image_path"] = image_path
     return settings
+
+
+@app.post("/api/upscale")
+async def upscale(request: Request) -> JSONResponse:
+    """Queue a job that upscales an existing gallery image 2× or 4×, refined with its recorded settings."""
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
+    return await run_in_threadpool(_upscale_from_body, body)
+
+
+def _upscale_from_body(body: Any) -> JSONResponse:
+    """Validate an upscale request, plan the job and submit it; runs off the event loop."""
+    try:
+        asset_id, factor = upscale_json_request(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    source_path = resolve_output_asset_path(_media_output_root(), asset_id)
+    if source_path is None:
+        raise HTTPException(status_code=422, detail="The image must be inside the output folder.")
+    if source_path.suffix.lower() not in _IMAGE_EXTENSIONS or not source_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Unknown image: {asset_id}")
+
+    web_config = load_web_config()
+    try:
+        plan = plan_upscale(read_upscale_source(source_path), factor, web_config, backend_name=get_backend_name())
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # An upscale has no Workspace form, so it carries no settings to load back from the queue.
+    context = {
+        "workflow": "upscale",
+        "job_type": "Upscale",
+        "prompt": plan.request.resolved_prompt or plan.request.prompt,
+        "model": plan.request.model_name or "",
+        "runs": 1,
+        "meta": upscale_size_label(plan),
+        "notices": list(plan.notices),
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+        "output_dir": web_config.output_dir,
+        "settings": {},
+    }
+    try:
+        job_id = web_runner.submit_upscale_job(
+            request=plan.request,
+            workflow=build_upscale_workflow(sharpen=plan.request.sharpen),
+            model_ref=plan.model_ref,
+            admission_check=_reject_while_busy,
+            context=context,
+        )
+    except JobConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _job_response(job_id, context, UPSCALE_SUPPORTED_CONTROLS)
 
 
 @app.post("/jobs/{job_id}/controls/{action}")
@@ -537,13 +601,6 @@ def _resolve_docs_asset_path(asset_name: str) -> Path | None:
     except ValueError:
         return None
     return candidate
-
-
-def _preferred_option(preferred: str | None, options: tuple[str, ...]) -> str | None:
-    """Return the preferred option when it exists, otherwise the first available item."""
-    if preferred in options:
-        return preferred
-    return options[0] if options else None
 
 
 def _canonicalize_workflow(value: Any, *, fallback: str | None = None) -> str | None:
@@ -742,8 +799,6 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     return {
         "job_id": job_id,
         "context": context,
-        "events_url": f"/jobs/{job_id}/events",
-        "status_url": f"/jobs/{job_id}",
         "supported_controls": IMAGE_SUPPORTED_CONTROLS,
     }
 
@@ -875,8 +930,6 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     return {
         "job_id": job_id,
         "context": context,
-        "events_url": f"/jobs/{job_id}/events",
-        "status_url": f"/jobs/{job_id}",
         "supported_controls": VIDEO_SUPPORTED_CONTROLS,
     }
 
@@ -1127,8 +1180,8 @@ def _validate_image_args(args: argparse.Namespace, *, quantize_options: tuple[in
         raise ValueError("Guidance must be non-negative.")
     if args.upscale_guidance is not None and args.upscale_guidance < 0:
         raise ValueError("Upscale guidance must be non-negative.")
-    if isinstance(args.sharpen, float) and args.sharpen < 0:
-        raise ValueError("Sharpen amount must be non-negative.")
+    if isinstance(args.sharpen, float):
+        validate_sharpen_amount(args.sharpen)
     if isinstance(args.contrast, float) and args.contrast < 0:
         raise ValueError("Contrast amount must be non-negative.")
     if isinstance(args.saturation, float) and args.saturation < 0:
