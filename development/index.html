@@ -1308,6 +1308,7 @@ make install
 ├── preflight.py                   Preflight phase: plan seeds and prompts, rewrite them before the model loads
 ├── image_model_loader.py          Image model loading through stored quants (reuse, or save on first use)
 ├── image_runner.py                Image generation run orchestration
+├── upscale_runner.py              Upscale one existing image: read its recorded settings, run the upscale workflow
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/
@@ -1349,7 +1350,7 @@ make install
 │   ├── config.py                  Config loading (image + video)
 │   ├── console.py                 Console formatting
 │   ├── ffmpeg.py                  ffmpeg availability check and install
-│   ├── filename.py                Output filename generation
+│   ├── filename.py                Output filenames ({set}_{timestamp}) and collision counters
 │   ├── image_model_detect.py      Image model type detection
 │   ├── interactive.py             Keyboard interrupt handling
 │   ├── lora.py                    LoRA CLI argument parsing
@@ -1360,8 +1361,9 @@ make install
 │   ├── prompt_compose.py          Structured prompt flattening &amp; snippets
 │   ├── prompt_enhance.py          Prompt-enhancement build, run, and post-processing (no model I/O)
 │   ├── prompts.py                 Prompt file loading
-│   ├── provenance.py              Embedded asset config (PNG/MP4) and full provenance payload builders
+│   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
 │   ├── stored_quant.py            Stored-quant naming, manifests and folder handling
+│   ├── upscale.py                 Upscale output sizes, size limits and denoise defaults
 │   └── video_model_detect.py      Video model type detection
 ├── web/
 │   ├── config.py                  Web UI config loading and model inventory discovery
@@ -1376,6 +1378,7 @@ make install
 │   ├── path_picker.py             Host-local directory and file picker
 │   ├── prompt_files.py            Read and atomically update host-local prompt files
 │   ├── request_guard.py           DNS-rebinding and cross-site request protection
+│   ├── upscale_api.py             Plan a viewer upscale job: refinement model, carried settings, limits
 │   ├── web_runner.py              Background workers for generation batches
 │   ├── workspace_api.py           Shared SPA payloads for workspace and models routes
 │   ├── workspace_contract.py      Workflow aliases and static workspace capabilities
@@ -1395,7 +1398,7 @@ prompts.yaml                       Default prompt definitions
 <p>The Windows/Linux video backend is CUDA-only. Validation happens lazily during backend load so importing the package or running non-video code paths does not require torch, diffusers, or a GPU.</p>
 <p>The Windows/Linux diffusers image backend is also CUDA-only. Validation happens lazily during image backend load so importing the package or running non-image code paths does not require torch, diffusers, or a GPU.</p>
 <h3 id="workflow-stages">Workflow Stages</h3>
-<p>Image stage functions in <code>workflows/image_stages.py</code> have the uniform signature <code>(ImageGenerationRequest, ImageWorkingArtifacts) -&gt; StageOutcome</code>. Video stage functions in <code>workflows/video_stages.py</code> have the signature <code>(VideoGenerationRequest, VideoWorkingArtifacts) -&gt; StageOutcome</code>. Stages are composed dynamically by <code>build_workflow()</code> and <code>build_video_workflow()</code>.</p>
+<p>Image stage functions in <code>workflows/image_stages.py</code> have the uniform signature <code>(ImageGenerationRequest, ImageWorkingArtifacts) -&gt; StageOutcome</code>. Video stage functions in <code>workflows/video_stages.py</code> have the signature <code>(VideoGenerationRequest, VideoWorkingArtifacts) -&gt; StageOutcome</code>. Stages are composed dynamically by <code>build_workflow()</code> and <code>build_video_workflow()</code>. <code>build_upscale_workflow()</code> upscales an existing image (<code>load_source_stage</code> → <code>upscale_stage</code> → <code>sharpen_stage</code> → <code>save_image_stage</code>); the Web UI runs it through <code>WebRunner.submit_upscale_job</code> and <code>upscale_runner.run_upscale</code>, which emits the same events as a one-image batch, without preflight or the batch loop.</p>
 <h3 id="job-phases-preflight-and-generation">Job Phases: Preflight and Generation</h3>
 <p>Every image and video job (CLI and Web UI) runs in two phases, and only one model is resident at a time:</p>
 <ol>

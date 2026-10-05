@@ -646,6 +646,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#upscaling-an-existing-image-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upscaling an existing image (Web UI)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -726,6 +737,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output Files
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1103,6 +1125,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#upscaling-an-existing-image-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upscaling an existing image (Web UI)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1183,6 +1216,17 @@
         
       </ul>
     </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output Files
+      
+    </span>
+  </a>
   
 </li>
       
@@ -1422,6 +1466,18 @@ ziv-image -m my-model --prompt &quot;a landscape&quot; --upscale 2 --no-upscale-
 </tr>
 </tbody>
 </table>
+<h3 id="upscaling-an-existing-image-web-ui">Upscaling an existing image (Web UI)</h3>
+<p>To upscale an image you already have, choose <strong>Upscale → 2×</strong> or <strong>4×</strong> in the asset viewer (Gallery or Workspace) or in the <strong>⋯</strong> menu on its thumbnail. In the viewer you can also press <strong>X</strong> then <strong>2</strong> or <strong>4</strong>. Each option shows the output size, e.g. <code>2× → 1664×2432</code>. The job runs in the Workspace job panel, or joins the queue when another job is running; starting it from the Gallery takes you there.</p>
+<p>The image is resized, refined with img2img and sharpened, using the settings recorded in the file: prompt, model, seed, steps, guidance, scheduler, LoRAs, negative prompt and quantization. When the recorded model is not configured here, the default image model refines it with its own defaults. Images without recorded settings (imported or older files) are refined by the default image model with an empty prompt; the job panel notes this. The image is already sharpened, so by default the CAS pass before refinement is skipped (<code>sharpening.existing_pre_upscale: 0</code>); the final pass uses <code>sharpening.existing_upscaled</code>. Contrast and saturation are not applied again.</p>
+<p>The result is saved next to the original as <code>&lt;name&gt;_2x.png</code> or <code>&lt;name&gt;_4x.png</code>, with a counter (<code>_2</code>) if that name exists. An option is disabled, with the reason in its tooltip, when the model cannot upscale or refine images (e.g. Ideogram 4), or when the output would exceed the model's maximum dimension or the megapixel limit. These settings live in the <code>upscale</code> section of <code>~/.ziv/config.yaml</code>:</p>
+<pre><code class="language-yaml">upscale:
+  existing_denoise_small: 0.4      # Refinement denoise for outputs up to existing_large_megapixels
+  existing_denoise_large: 0.2      # Larger outputs: high denoise at large sizes invents detail and seams
+  existing_large_megapixels: 2
+  max_megapixels: 20               # Largest output a viewer upscale may produce
+</code></pre>
+<p>The denoise depends on the output size, not the factor, so upscaling an upscale (2× then 2×) refines as lightly as a direct 4× to the same size.</p>
+<p><code>default_denoise_2x</code> and <code>default_denoise_4x</code> apply to <code>--upscale</code> and the Workspace upscale settings only.</p>
 <h2 id="quantization">Quantization</h2>
 <p>Reduces memory usage and speeds up generation at the cost of some quality.</p>
 <table>
@@ -1473,9 +1529,21 @@ ziv-image -m my-model --prompt &quot;a sunset&quot; --no-saturation        # dis
 </code></pre>
 <h3 id="sharpening">Sharpening</h3>
 <pre><code class="language-bash">ziv-image -m my-model --prompt &quot;a sunset&quot; --sharpen              # enabled by default
-ziv-image -m my-model --prompt &quot;a sunset&quot; --sharpen 0.6          # custom amount (0.0–1.0)
+ziv-image -m my-model --prompt &quot;a sunset&quot; --sharpen 0.6          # custom amount (0.0–1.5)
 ziv-image -m my-model --prompt &quot;a sunset&quot; --no-sharpen           # disable
 </code></pre>
+<p>Without an amount, the final pass uses the config: <code>sharpening.normal</code> for plain images and <code>sharpening.upscaled</code> for upscaled ones (<code>sharpening.pre_upscale</code> is the pass before upscale refinement). In the Web UI, leave the <strong>Sharpen</strong> amount empty (<strong>auto</strong>) to use these, or type an amount to override them. Amounts above 1.5 are rejected: the filter breaks down beyond that.</p>
+<pre><code class="language-yaml">sharpening:
+  normal: 1.0
+  upscaled: 1.2
+  pre_upscale: 0.8
+  existing_upscaled: 1.2     # final pass when upscaling an existing image (viewer)
+  existing_pre_upscale: 0    # before refining an existing image; 0 = off
+</code></pre>
+<p>The asset viewer's <strong>Details</strong> show the amounts an image was made with, including the pre-sharpen of an upscale.</p>
+<h2 id="output-files">Output Files</h2>
+<p>Images are saved as <code>&lt;set name&gt;_&lt;YYYY-MM-DD_HH-MM-SS&gt;.png</code> (for example <code>portrait_2026-10-04_14-03-22.png</code>), with <code>_2</code>, <code>_3</code>… added when that name is already taken, so no file is overwritten. Videos follow the same pattern with their format's extension.</p>
+<p>The settings each file was made with are embedded in it: prompt, negative prompt, model and family, seed, steps, guidance, scheduler, size, LoRAs, reference image and strength, quantization, generation time, upscale factor/denoise/steps, and the sharpen, contrast and saturation amounts. The Web UI asset viewer shows them under <strong>Details</strong> (<strong>I</strong>), and <strong>Reuse settings</strong> loads them into the Workspace.</p>
 <h2 id="keyboard-shortcuts">Keyboard Shortcuts</h2>
 <p>During batch generation:</p>
 <table>
