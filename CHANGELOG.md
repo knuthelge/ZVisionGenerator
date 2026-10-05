@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b11] - 2026-10-05
+
 ### Added
 - Web UI: **job queue**. While a job runs, Generate becomes **Add to queue**: change the settings and add more runs, which start one after another. The queue shows under the job card (**Up next**) with **Load settings**, remove and **Clear queue**, is shared by every tab, and keeps going when a job fails. New `GET /api/jobs` and `DELETE /api/jobs/queue` endpoints
 - Web UI: more workspace shortcuts. `Alt+3` focuses the newest history tile, expanding the strip if needed. `P` pauses or resumes the running job, `N` skips to the next image and `R` repeats the current one
