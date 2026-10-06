@@ -14,6 +14,7 @@ _LTX_MLX_TEXT_ENCODER_FALLBACK = "mlx-community/gemma-3-12b-it-4bit"
 _LTX_MLX_MARKER = "connector.safetensors"
 _LTX_MLX_TRANSFORMERS = ("transformer.safetensors", "transformer-distilled.safetensors")
 _WEIGHTLESS_CLASS_HINTS = ("Tokenizer", "Scheduler", "Processor", "FeatureExtractor")
+_TRANSFORMER_COMPONENT = "transformer"
 _SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d+)-of-(?P<total>\d+)\.safetensors$")
 # Diffusers precision variants (e.g. ``diffusion_pytorch_model.fp16.safetensors``, optionally sharded).
 _VARIANT_RE = re.compile(r"\.(?:fp16|bf16|fp32|fp8)(?:-\d+-of-\d+)?\.safetensors$")
@@ -77,7 +78,9 @@ def model_weight_files(model_dir: Path, components: tuple[str, ...] | None = Non
     """Return the safetensors files the loader reads from *model_dir*, in one directory walk.
 
     For diffusers layouts only the weight-bearing components listed in ``model_index.json`` count, so
-    extra files in a full repo download (e.g. a root-level single-file checkpoint) are ignored. Precision
+    extra files in a full repo download (e.g. a root-level single-file checkpoint) are ignored. When the
+    ``transformer`` folder holds no weights, root-level files stand in for it: mflux downloads only Krea 2
+    Turbo's single-file ``turbo.safetensors`` and saves its stored quants' transformer at the root. Precision
     variants (``*.fp16.safetensors``) are ignored in any folder that also holds the plain weights. Symlinked
     component folders are followed: converted checkpoints link their text encoder and VAE from the base repo.
 
@@ -90,7 +93,10 @@ def model_weight_files(model_dir: Path, components: tuple[str, ...] | None = Non
     if components is None:
         return tuple(files)
     allowed = set(components)
-    return tuple(path for path in files if component_of(model_dir, path) in allowed)
+    selected = [path for path in files if component_of(model_dir, path) in allowed]
+    if _TRANSFORMER_COMPONENT in allowed and not any(component_of(model_dir, path) == _TRANSFORMER_COMPONENT for path in selected):
+        selected += [path for path in files if component_of(model_dir, path) == ""]
+    return tuple(selected)
 
 
 def weighted_components(model_dir: Path) -> tuple[str, ...] | None:
@@ -121,7 +127,8 @@ def has_complete_weights(model_dir: Path) -> bool:
         return False
     if is_ltx_mlx_layout(model_dir):
         return ltx_mlx_transformer_file(model_dir) is not None and (model_dir / "vae_decoder.safetensors").is_file()
-    present = {component_of(model_dir, path) for path in files}
+    # Root-level files are only selected when they stand in for the transformer folder.
+    present = {component_of(model_dir, path) or _TRANSFORMER_COMPONENT for path in files}
     return all(name in present for name in components or ()) and _shards_complete(files)
 
 

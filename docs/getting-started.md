@@ -116,7 +116,7 @@ The workspace model picker and the Models page show whether each model is alread
 - **Tight**: the estimate is at most 1.5 times the recommendation, which is MLX's default memory limit. The model runs, but macOS compresses or swaps other memory to make room, so the Mac can slow down while generating.
 - **Too large**: the estimate is above MLX's default memory limit. Expect heavy swapping that can make the whole Mac unresponsive, or an out-of-memory error.
 
-The workspace badge follows the selected quantize level, so you can see whether `q8` or `q4` brings a large model within reach. Hover the badge for the estimate. After each job the Web UI returns the model's memory to the system.
+The workspace badge follows the selected quantize level, so you can see whether `q8` or `q4` brings a large model within reach. Krea 2 keeps its 9 GB text encoder unquantized at every level, and its estimate includes it. Hover the badge for the estimate. After each job the Web UI returns the model's memory to the system.
 
 Ideogram 4 (`ideo`) is selectable in the workspace model dropdown. When it is selected, the workspace offers a structured-JSON-caption input and a first-step-sigma control, while reference-image (img2img) and upscale are unavailable, and width and height are constrained to the 256–2048 range in multiples of 16.
 

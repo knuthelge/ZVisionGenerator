@@ -11,7 +11,7 @@ Z-Vision Generator gives you a unified CLI for both image and video generation, 
 
 ## Features
 
-- **Image generation** — text-to-image with Z-Image and FLUX.2 Klein (4B/9B) model families, plus Ideogram 4 (FP8) on macOS/MLX
+- **Image generation** — text-to-image with Z-Image, FLUX.2 Klein (4B/9B) and Krea 2 Turbo model families, plus Ideogram 4 (FP8) on macOS/MLX
 - **Video generation** — text-to-video and image-to-video with platform-specific LTX aliases, audio included by default
 - **Cross-platform** — automatic backend selection: MLX on macOS, diffusers/CUDA on Windows and Linux for images, and the shared diffusers/CUDA LTX backend on Windows and Linux for video
 - **Prompt system** — YAML prompt files with variables (`{red|blue|green}`), structured prompts, snippets, and batch runs
@@ -23,15 +23,15 @@ Z-Vision Generator gives you a unified CLI for both image and video generation, 
 - **Model variants** — image quantization across supported image backends, plus macOS MLX video Q4/Q8 aliases
 - **Post-processing** — contrast, saturation, and CAS sharpening (image only)
 - **Interactive controls** — skip, quit, pause, and repeat during batch runs (image only)
-- **Live preview** — the Web UI shows the image taking shape at 25/50/75% of the steps so you can skip early (preview only, never saved). Supported for Z-Image and FLUX.2 Klein on every platform, and Ideogram 4 on macOS
+- **Live preview** — the Web UI shows the image taking shape at 25/50/75% of the steps so you can skip early (preview only, never saved). Supported for Z-Image, FLUX.2 Klein and Krea 2 on every platform, and Ideogram 4 on macOS
 
 ## Platform Support
 
 | Platform | Image Generation | Video Generation |
 |----------|------------------|------------------|
-| macOS (Apple Silicon) | ✅ Z-Image / FLUX / Ideogram 4 via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`) |
-| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX models via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
-| Linux (NVIDIA GPU) | ✅ Z-Image / FLUX models via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
+| macOS (Apple Silicon) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`) |
+| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 models via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
+| Linux (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 models via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
 
 ## Quick Links
 

@@ -12,7 +12,7 @@ from typing import Any
 from zvisiongenerator.backends import get_backend_name, supports_stored_quants
 from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
-from zvisiongenerator.utils.config import resolve_defaults, resolve_enhancer_model, resolve_video_defaults
+from zvisiongenerator.utils.config import model_capabilities, resolve_defaults, resolve_enhancer_model, resolve_video_defaults
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.model_files import find_local_model_dir
 from zvisiongenerator.utils.paths import resolve_model_path
@@ -229,7 +229,15 @@ def _status_resolver(
             return dict(_UNKNOWN_STATUS)
         quantize_options = _image_quantize_levels(web_config, image_model_defaults.get(entry.name, {})) if kind == "image" else ()
         try:
-            return describe_model_status(entry.resolved_path, kind=kind, quantize_options=quantize_options, budget_bytes=budget, find_local_dir=find_local_dir)
+            quantize_text_encoder = kind != "image" or model_capabilities(web_config.app_config, entry.family, get_backend_name())["quantizes_text_encoder"]
+            return describe_model_status(
+                entry.resolved_path,
+                kind=kind,
+                quantize_options=quantize_options,
+                budget_bytes=budget,
+                quantize_text_encoder=quantize_text_encoder,
+                find_local_dir=find_local_dir,
+            )
         except Exception as exc:  # noqa: BLE001 - one unreadable model must not break the whole listing
             warnings.warn(f"Could not determine status for model '{entry.name}': {exc}", stacklevel=2)
             return dict(_UNKNOWN_STATUS)
@@ -362,6 +370,7 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
             "supports_upscale": True,
             "supports_json_prompt": False,
             "supports_first_sigma": False,
+            "supports_scheduler": True,
             "dimension_min": 16,
             "dimension_max": None,
             "dimension_step": 16,
@@ -386,6 +395,7 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         "supports_upscale": bool(defaults.get("supports_upscale", True)),
         "supports_json_prompt": bool(defaults.get("supports_json_prompt", False)),
         "supports_first_sigma": bool(defaults.get("supports_first_sigma", False)),
+        "supports_scheduler": bool(defaults.get("supports_scheduler", True)),
         "dimension_min": int(defaults.get("dimension_min", 16)),
         "dimension_max": defaults.get("dimension_max", None),
         "dimension_step": int(defaults.get("dimension_step", 16)),

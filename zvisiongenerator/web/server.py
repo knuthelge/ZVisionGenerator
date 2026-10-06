@@ -26,6 +26,7 @@ from PIL import Image, UnidentifiedImageError
 
 from zvisiongenerator.backends import get_backend_name, get_prompt_enhancer_session
 from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu
+from zvisiongenerator.converters.convert_checkpoint import MODEL_TYPES
 from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_local
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
@@ -721,7 +722,8 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     args.guidance_explicit = args.guidance is not None
     args.steps = defaults["steps"]
     args.guidance = defaults["guidance"]
-    args.scheduler = defaults["scheduler"]
+    # A model with its own sampler ignores a scheduler carried over from another model, as with negative prompts.
+    args.scheduler = defaults["scheduler"] if defaults.get("supports_scheduler", True) else None
     validate_scheduler(args.scheduler, app_config)
     if args.upscale and args.upscale_steps is None:
         args.upscale_steps = resolve_upscale_steps(defaults, args.steps)
@@ -1250,8 +1252,8 @@ def _convert_model_from_form(form: Any) -> dict[str, str]:
     """
     input_path = _required_path(form, "input_path")
     model_type = _optional_text(form, "model_type") or "zimage"
-    if model_type not in {"zimage", "flux2-klein-4b", "flux2-klein-9b"}:
-        raise ValueError("Model type must be one of zimage, flux2-klein-4b, or flux2-klein-9b.")
+    if model_type not in MODEL_TYPES:
+        raise ValueError(f"Model type must be one of {', '.join(MODEL_TYPES)}.")
 
     args = ["model", "--input", input_path, "--model-type", model_type]
     model_name = _optional_text(form, "name")

@@ -96,6 +96,7 @@ model_aliases:
   zit: "Tongyi-MAI/Z-Image-Turbo"
   klein9b: "black-forest-labs/FLUX.2-klein-9B"
   klein4b: "black-forest-labs/FLUX.2-klein-4B"
+  krea2: "krea/Krea-2-Turbo"
   ideo:
     darwin: "ideogram-ai/ideogram-4-fp8"
     win32:
@@ -164,6 +165,28 @@ model_presets:
     default_scheduler:
       mflux: null
       diffusers: null
+
+  krea2:
+    # Guidance is the standard CFG scale on both backends (1.0 = off); the diffusers
+    # backend converts it to Krea 2's own scale, where 0.0 = off.
+    supports_negative_prompt: true
+    supports_scheduler: false  # Krea 2 samples with its own schedule
+    default_scheduler:
+      mflux: null
+      diffusers: null
+    variants:
+      distilled:  # Krea 2 Turbo
+        default_steps: 8
+        default_guidance: 1.0
+      base:  # Krea 2 Raw
+        default_steps: 28
+        default_guidance: 5.5
+    backends:
+      mflux:
+        quantizes_text_encoder: false  # kept in bfloat16 at q4/q8 (used by the memory estimate)
+      diffusers:  # diffusers has no Krea 2 image-to-image pipeline
+        supports_img2img: false
+        supports_upscale: false
 
   unknown:
     supports_negative_prompt: false

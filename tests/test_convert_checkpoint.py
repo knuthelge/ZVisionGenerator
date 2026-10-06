@@ -11,6 +11,7 @@ from zvisiongenerator.converters.convert_checkpoint import (  # noqa: E402
     _dequantize_scaled_fp8,
     convert_transformer_keys,
     convert_flux2_transformer_keys,
+    convert_krea2_transformer_keys,
 )
 
 
@@ -250,3 +251,49 @@ class TestDequantizeScaledFp8:
         result = convert_flux2_transformer_keys(_dequantize_scaled_fp8(self._comfy_state_dict(weight, 2.0)))
         assert torch.equal(result["transformer_blocks.0.attn.to_q.weight"], (weight[:2] * 2).to(torch.bfloat16))
         assert torch.equal(result["transformer_blocks.0.attn.to_v.weight"], (weight[4:] * 2).to(torch.bfloat16))
+
+
+# ── Krea 2 key conversion ────────────────────────────────────────────────────
+
+
+class TestConvertKrea2TransformerKeys:
+    @pytest.mark.parametrize("prefix", ["model.diffusion_model.", "diffusion_model.", ""])
+    def test_native_keys_map_to_diffusers_names(self, prefix):
+        state_dict = {
+            f"{prefix}first.weight": torch.zeros(2),
+            f"{prefix}tmlp.0.weight": torch.zeros(2),
+            f"{prefix}txtmlp.0.scale": torch.zeros(2),
+            f"{prefix}txtfusion.projector.weight": torch.zeros(2),
+            f"{prefix}blocks.3.attn.wo.weight": torch.zeros(2),
+            f"{prefix}blocks.3.attn.qknorm.knorm.scale": torch.zeros(2),
+            f"{prefix}blocks.3.mlp.gate.weight": torch.zeros(2),
+            f"{prefix}last.modulation.lin": torch.zeros(2),
+        }
+
+        result = convert_krea2_transformer_keys(state_dict)
+
+        assert set(result) == {
+            "img_in.weight",
+            "time_embed.linear_1.weight",
+            "txt_in.norm.weight",
+            "text_fusion.projector.weight",
+            "transformer_blocks.3.attn.to_out.0.weight",
+            "transformer_blocks.3.attn.norm_k.weight",
+            "transformer_blocks.3.ff.gate.weight",
+            "final_layer.scale_shift_table",
+        }
+
+    def test_block_modulation_is_split_into_six_rows(self):
+        result = convert_krea2_transformer_keys({"blocks.0.mod.lin": torch.arange(12.0)})
+
+        assert result["transformer_blocks.0.scale_shift_table"].shape == (6, 2)
+
+    def test_bundled_text_encoder_and_vae_are_dropped(self):
+        result = convert_krea2_transformer_keys({"model.diffusion_model.first.weight": torch.zeros(2), "text_encoders.qwen.weight": torch.zeros(2), "vae.decoder.weight": torch.zeros(2)})
+
+        assert set(result) == {"img_in.weight"}
+
+    def test_diffusers_format_passes_through(self):
+        state_dict = {"transformer_blocks.0.attn.to_q.weight": torch.zeros(2), "img_in.weight": torch.zeros(2), "vae.decoder.weight": torch.zeros(2)}
+
+        assert set(convert_krea2_transformer_keys(state_dict)) == {"transformer_blocks.0.attn.to_q.weight", "img_in.weight"}

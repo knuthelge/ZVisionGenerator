@@ -700,7 +700,7 @@ class TestStepCallbackLivePreview:
 
         assert events == [{"current_step": 3, "total_steps": 3}]
 
-    @pytest.mark.parametrize(("family", "expects_preview"), [("zimage", True), ("flux2_klein", True), ("flux1", False)])
+    @pytest.mark.parametrize(("family", "expects_preview"), [("zimage", True), ("flux2_klein", True), ("krea2", True), ("flux1", False)])
     def test_text_to_image_requests_latents_only_for_previewable_families(self, win_backend, family, expects_preview):
         mod, _, _ = win_backend
         backend = mod.DiffusersBackend()
@@ -790,3 +790,71 @@ class TestMakeBnbConfigs:
         te_cfg, tx_cfg = mod._make_bnb_configs(8, "bf16-sentinel")
         assert te_cfg is not None
         assert tx_cfg is not None
+
+
+# ---------------------------------------------------------------------------
+# Krea 2
+# ---------------------------------------------------------------------------
+
+
+class TestKrea2:
+    """Krea 2 converts guidance, offloads at NF4, and has no img2img pipeline."""
+
+    @pytest.mark.parametrize(("guidance", "expected"), [(1.0, 0.0), (None, 0.0), (0.0, 0.0), (5.5, 4.5)])
+    def test_text_to_image_converts_standard_cfg_to_krea2_scale(self, win_backend, guidance, expected):
+        mod, _, _ = win_backend
+        backend, mock_model = TestTextToImage._ready_backend(mod)
+        backend._model_info = _make_model_info(family="krea2")
+
+        backend.text_to_image(model=mock_model, prompt="a fox", width=64, height=64, seed=1, steps=8, guidance=guidance)
+
+        assert mock_model.call_args[1]["guidance_scale"] == expected
+
+    def test_text_to_image_passes_negative_prompt(self, win_backend):
+        mod, _, _ = win_backend
+        backend, mock_model = TestTextToImage._ready_backend(mod)
+        backend._model_info = _make_model_info(family="krea2")
+
+        backend.text_to_image(model=mock_model, prompt="a fox", width=64, height=64, seed=1, steps=8, guidance=3.0, negative_prompt="blurry")
+
+        assert mock_model.call_args[1]["negative_prompt"] == "blurry"
+
+    def test_image_to_image_raises(self, win_backend):
+        mod, _, _ = win_backend
+        backend = mod.DiffusersBackend()
+        backend._model_info = _make_model_info(family="krea2")
+
+        with pytest.raises(ValueError, match="(?i)img2img.*not supported.*Krea 2"):
+            backend.image_to_image(model=MagicMock(), image=Image.new("RGB", (64, 64)), prompt="p", strength=0.5, steps=8, seed=1, guidance=1.0)
+        sys.modules["diffusers"].AutoPipelineForImage2Image.from_pipe.assert_not_called()
+
+    def test_load_model_passes_family_to_quantized_loader(self, win_backend):
+        mod, _, _ = win_backend
+
+        with (
+            patch.object(mod, "detect_image_model", return_value=_make_model_info(family="krea2")),
+            patch.object(mod, "_load_quantized", return_value=MagicMock()) as mock_lq,
+        ):
+            mod.DiffusersBackend().load_model("krea/Krea-2-Turbo", quantize=4)
+
+        assert mock_lq.call_args[0][3] == "krea2"
+
+    def test_nf4_moves_text_encoder_off_gpu_and_uses_model_offload(self, win_backend):
+        mod, _, _ = win_backend
+        text_encoder = sys.modules["transformers"].AutoModel.from_pretrained.return_value
+        pipeline = mod.AutoPipelineForText2Image.from_pretrained.return_value
+
+        mod._load_quantized("krea/Krea-2-Turbo", 4, "bf16-sentinel", "krea2")
+
+        text_encoder.to.assert_called_once_with("cpu")
+        pipeline.enable_model_cpu_offload.assert_called_once()
+
+    def test_nf4_keeps_other_families_resident(self, win_backend):
+        mod, _, _ = win_backend
+        text_encoder = sys.modules["transformers"].AutoModel.from_pretrained.return_value
+        pipeline = mod.AutoPipelineForText2Image.from_pretrained.return_value
+
+        mod._load_quantized("Tongyi-MAI/Z-Image-Turbo", 4, "bf16-sentinel", "zimage")
+
+        text_encoder.to.assert_not_called()
+        pipeline.enable_model_cpu_offload.assert_not_called()
