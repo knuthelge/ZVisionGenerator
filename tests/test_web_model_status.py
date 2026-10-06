@@ -22,7 +22,7 @@ class TestDescribeModelStatus:
 
     def test_image_model_reports_every_quantize_level(self, tmp_path, monkeypatch):
         estimates = {None: 16 * _GIB, 8: 13 * _GIB, 4: 5 * _GIB}
-        monkeypatch.setattr(model_status, "estimate_image_memory", lambda model_dir, levels: {level: estimates[level] for level in levels})
+        monkeypatch.setattr(model_status, "estimate_image_memory", lambda model_dir, levels, **_: {level: estimates[level] for level in levels})
 
         status = describe_model_status("owner/repo", kind="image", quantize_options=(4, 8), budget_bytes=10 * _GIB, find_local_dir=_finder({"owner/repo": tmp_path}))
 
@@ -35,6 +35,19 @@ class TestDescribeModelStatus:
                 "8": {"status": "tight", "required_gb": 13.0},
             },
         }
+
+    def test_image_estimate_receives_text_encoder_quantization(self, tmp_path, monkeypatch):
+        calls: list[bool] = []
+
+        def _estimate(model_dir, levels, *, quantize_text_encoder):
+            calls.append(quantize_text_encoder)
+            return dict.fromkeys(levels, _GIB)
+
+        monkeypatch.setattr(model_status, "estimate_image_memory", _estimate)
+
+        describe_model_status("owner/repo", kind="image", quantize_options=(4,), budget_bytes=10 * _GIB, quantize_text_encoder=False, find_local_dir=_finder({"owner/repo": tmp_path}))
+
+        assert calls == [False]
 
     def test_no_budget_means_no_estimate(self, tmp_path):
         status = describe_model_status("owner/repo", kind="image", budget_bytes=None, find_local_dir=_finder({"owner/repo": tmp_path}))

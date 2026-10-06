@@ -124,7 +124,7 @@ def _read_totals_cached(path: str, size: int, mtime_ns: int, skipped_prefixes: t
     return WeightTotals(matrix, other, packed, prequantized)
 
 
-def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ...] = (None,)) -> dict[int | None, int] | None:
+def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ...] = (None,), *, quantize_text_encoder: bool = True) -> dict[int | None, int] | None:
     """Estimate resident memory for an mflux image model loaded in bfloat16, at each quantize level.
 
     Mirrors ``MfluxBackend.load_model``: floating-point weights load as bfloat16, the VAE is upcast to
@@ -135,6 +135,8 @@ def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ..
     Args:
         model_dir: Directory holding the model's safetensors files.
         quantize_levels: Levels to estimate: ``None`` for unquantized, or 4 / 8 bits.
+        quantize_text_encoder: Whether quantizing also packs the text encoder; mflux keeps some families'
+            (Krea 2) in bfloat16.
 
     Returns:
         Estimated peak bytes per level, or ``None`` when weights are missing or unreadable.
@@ -142,7 +144,10 @@ def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ..
     components = _image_components(model_dir)
     if components is None:
         return None
-    return {level: int(sum(_image_component_bytes(name, totals, level) for name, totals in components.items())) + _IMAGE_WORKING_BYTES for level in quantize_levels}
+    return {
+        level: int(sum(_image_component_bytes(name, totals, _component_quantize(name, level, quantize_text_encoder)) for name, totals in components.items())) + _IMAGE_WORKING_BYTES
+        for level in quantize_levels
+    }
 
 
 def estimate_ltx_mlx_memory(model_dir: Path, text_encoder_dir: Path, *, low_memory: bool = True) -> int | None:
@@ -197,6 +202,11 @@ def _image_components(model_dir: Path) -> dict[str, WeightTotals] | None:
         except OSError, ValueError, KeyError, TypeError:
             return None
     return components or None
+
+
+def _component_quantize(name: str, quantize: int | None, quantize_text_encoder: bool) -> int | None:
+    """Return the level *name* is quantized at: none for a text encoder the loader keeps unquantized."""
+    return None if name == "text_encoder" and not quantize_text_encoder else quantize
 
 
 def _image_component_bytes(name: str, totals: WeightTotals, quantize: int | None) -> float:

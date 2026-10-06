@@ -415,7 +415,9 @@
               { value: '', label: '-- Select type --', disabled: true },
               { value: 'zimage', label: 'zimage' },
               { value: 'flux2-klein-4b', label: 'flux2-klein-4b' },
-              { value: 'flux2-klein-9b', label: 'flux2-klein-9b' }
+              { value: 'flux2-klein-9b', label: 'flux2-klein-9b' },
+              { value: 'krea2-turbo', label: 'krea2-turbo' },
+              { value: 'krea2-raw', label: 'krea2-raw' }
             ]}
           />
         </FormField>

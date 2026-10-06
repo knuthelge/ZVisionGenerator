@@ -201,24 +201,37 @@ def get_variant_key(model_info: ImageModelInfo) -> str | None:
     """Determine the variant key for preset lookup.
 
     Returns:
-        ``"distilled"`` or ``"base"`` for flux2_klein, ``None`` otherwise.
+        ``"distilled"`` or ``"base"`` for flux2_klein and krea2, ``None`` otherwise.
     """
-    if model_info.family == "flux2_klein":
+    if model_info.family in ("flux2_klein", "krea2"):
         return "distilled" if model_info.is_distilled else "base"
     return None
 
 
-def model_capabilities(config: dict[str, Any], family: str) -> dict[str, Any]:
+def model_capabilities(config: dict[str, Any], family: str, backend_name: str | None = None) -> dict[str, Any]:
     """Return a model family's capability flags and dimension limits from its preset, with permissive defaults.
 
-    These are family-level only (variants change steps and guidance), so they can be looked up by family alone.
+    These are family-level (variants change steps and guidance only). A preset's ``backends`` entry, keyed by
+    backend name like ``default_scheduler``, overrides them where one backend cannot do what the family does
+    elsewhere (e.g. Krea 2 img2img, which mflux runs and diffusers has no pipeline for).
+
+    Args:
+        config: Loaded config dict.
+        family: Image model family.
+        backend_name: ``"mflux"`` or ``"diffusers"``; ``None`` reads the family-level flags only.
     """
     preset = config.get("model_presets", {}).get(family, {})
+    backends = preset.get("backends")
+    overrides = backends.get(backend_name) if isinstance(backends, dict) and backend_name is not None else None
+    if isinstance(overrides, dict):
+        preset = {**preset, **overrides}
     return {
         "supports_negative_prompt": preset.get("supports_negative_prompt", False),
         "supports_img2img": preset.get("supports_img2img", True),
         "supports_upscale": preset.get("supports_upscale", True),
         "supports_quantize": preset.get("supports_quantize", True),
+        "supports_scheduler": preset.get("supports_scheduler", True),
+        "quantizes_text_encoder": preset.get("quantizes_text_encoder", True),
         "supports_json_prompt": preset.get("supports_json_prompt", False),
         "supports_first_sigma": preset.get("supports_first_sigma", False),
         "dimension_min": preset.get("dimension_min", 16),
@@ -245,7 +258,7 @@ def resolve_defaults(
         model_info: Detected model metadata.
         config: Loaded config.yaml dict.
         cli_overrides: Only explicitly-provided CLI flags (not argparse defaults).
-        backend_name: ``"mflux"`` or ``"diffusers"`` — for scheduler default lookup.
+        backend_name: ``"mflux"`` or ``"diffusers"`` — for scheduler defaults and capability overrides.
 
     Returns:
         Dict with resolved ``steps``, ``guidance``, ``scheduler``, and
@@ -259,7 +272,7 @@ def resolve_defaults(
         "guidance": config["generation"]["default_guidance"],
         "scheduler": None,
         "upscale_steps": None,
-        **model_capabilities(config, model_info.family),
+        **model_capabilities(config, model_info.family, backend_name),
     }
 
     # Layer family defaults

@@ -9,14 +9,14 @@ import torch
 from PIL import Image
 from diffusers import FlowMatchEulerDiscreteScheduler
 
-from zvisiongenerator.core.latent_preview import FLUX2_RGB_BIAS, FLUX2_RGB_FACTORS, ZIMAGE_RGB_BIAS, ZIMAGE_RGB_FACTORS
+from zvisiongenerator.core.latent_preview import FLUX2_RGB_BIAS, FLUX2_RGB_FACTORS, QWEN_IMAGE_RGB_BIAS, QWEN_IMAGE_RGB_FACTORS, ZIMAGE_RGB_BIAS, ZIMAGE_RGB_FACTORS
 from zvisiongenerator.core.progress_events import preview_milestone_steps
 
 __all__ = ["LivePreview", "create_live_preview", "estimate_clean_latents", "render_latent_preview"]
 
 # FLUX.2 and FLUX.2 Klein pipelines share the FLUX.2 VAE and its packed latent layout.
 _FLUX2_FAMILIES = frozenset({"flux2", "flux2_klein"})
-_PREVIEW_FAMILIES = _FLUX2_FAMILIES | {"zimage"}
+_PREVIEW_FAMILIES = _FLUX2_FAMILIES | {"zimage", "krea2"}
 
 
 def estimate_clean_latents(previous: torch.Tensor, current: torch.Tensor, noise_previous: float, noise_current: float) -> torch.Tensor:
@@ -47,7 +47,7 @@ def render_latent_preview(pipe: Any, family: str, latents: torch.Tensor, height:
 
     Args:
         pipe: The running diffusers pipeline (FLUX.2 needs its VAE batch-norm statistics).
-        family: Image model family (``zimage``, ``flux2`` or ``flux2_klein``).
+        family: Image model family (``zimage``, ``flux2``, ``flux2_klein`` or ``krea2``).
         latents: Latents exactly as the pipeline passes them to ``callback_on_step_end``.
         height: Output image height in pixels.
         width: Output image width in pixels.
@@ -59,6 +59,8 @@ def render_latent_preview(pipe: Any, family: str, latents: torch.Tensor, height:
         return _project_to_image(latents[0], ZIMAGE_RGB_FACTORS, ZIMAGE_RGB_BIAS)
     if family in _FLUX2_FAMILIES:
         return _project_to_image(_flux2_spatial(pipe, latents, height, width), FLUX2_RGB_FACTORS, FLUX2_RGB_BIAS)
+    if family == "krea2":
+        return _project_to_image(_krea2_spatial(pipe, latents, height, width), QWEN_IMAGE_RGB_FACTORS, QWEN_IMAGE_RGB_BIAS)
     return None
 
 
@@ -134,6 +136,18 @@ def _flux2_spatial(pipe: Any, latents: torch.Tensor, height: int, width: int) ->
     packed = packed * std.view(-1, 1, 1) + bn.running_mean.float().to(packed.device).view(-1, 1, 1)
     spatial = packed.reshape(channels // 4, 2, 2, patch_h, patch_w).permute(0, 3, 1, 4, 2)
     return spatial.reshape(channels // 4, patch_h * 2, patch_w * 2)
+
+
+def _krea2_spatial(pipe: Any, latents: torch.Tensor, height: int, width: int) -> torch.Tensor:
+    """Undo Krea 2's token packing of ``patch_size``-square patches to recover ``(16, h, w)`` VAE latents."""
+    patch = pipe.patch_size
+    tokens_h, tokens_w = height // (pipe.vae_scale_factor * patch), width // (pipe.vae_scale_factor * patch)
+    tokens, channels = latents.shape[1:]
+    if tokens != tokens_h * tokens_w:
+        raise ValueError(f"Expected {tokens_h * tokens_w} latent tokens for {width}x{height}, got {tokens}.")
+    # Each token holds (channel, row, column) of its patch, as Krea2Pipeline._pack_latents lays it out.
+    packed = latents[0].float().reshape(tokens_h, tokens_w, channels // (patch * patch), patch, patch)
+    return packed.permute(2, 0, 3, 1, 4).reshape(channels // (patch * patch), tokens_h * patch, tokens_w * patch)
 
 
 def _project_to_image(spatial: torch.Tensor, factors: tuple[tuple[float, ...], ...], bias: tuple[float, ...]) -> Image.Image:

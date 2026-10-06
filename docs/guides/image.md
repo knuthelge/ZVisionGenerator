@@ -1,6 +1,6 @@
 # Image Generation Guide
 
-Generate images from text prompts using `ziv-image`. Supports Z-Image / FLUX models on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux with NVIDIA GPUs via diffusers/CUDA, plus Ideogram 4 on macOS.
+Generate images from text prompts using `ziv-image`. Supports Z-Image / FLUX / Krea 2 models on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux with NVIDIA GPUs via diffusers/CUDA, plus Ideogram 4 on macOS.
 
 On Windows and Linux, image generation requires CUDA to be visible to PyTorch. CPU fallback is not available for the diffusers image backend.
 
@@ -14,6 +14,7 @@ Built-in shorthands for common image models.
 | `klein4b` | `black-forest-labs/FLUX.2-klein-4B` |
 | `klein9b` | `black-forest-labs/FLUX.2-klein-9B` |
 | `ideo` | `ideogram-ai/ideogram-4-fp8` |
+| `krea2` | `krea/Krea-2-Turbo` |
 
 For video aliases, see [Video Guide → Model Aliases](video.md#model-aliases).
 
@@ -21,6 +22,7 @@ For video aliases, see [Video Guide → Model Aliases](video.md#model-aliases).
 ziv-image -m zit --prompt "a beautiful sunset"
 ziv-image -m klein4b --prompt "a portrait"
 ziv-image -m ideo --prompt "a portrait"
+ziv-image -m krea2 -q 4 --prompt "a portrait"
 ```
 
 ### Ideogram 4
@@ -46,6 +48,19 @@ Ideogram 4 applies an automatic first-step adjustment to its denoising schedule 
 #### In the Web UI
 
 Ideogram 4 is selectable in the workspace model dropdown. When it is selected, the workspace exposes a structured-JSON-caption input and a first-step-sigma control that mirror `--json-prompt` and `--first-sigma`. Reference-image (img2img) and upscale are unavailable for it, and width and height are constrained to the 256–2048 range in multiples of 16.
+
+### Krea 2
+
+`krea2` is Krea 2 Turbo, a 12B text-to-image model distilled to 8 steps. Its Hugging Face repo is gated: accept the Krea 2 Community License on the [model page](https://huggingface.co/krea/Krea-2-Turbo) and set a Hugging Face token before the first run. It defaults to 8 steps and guidance 1.0, which turns classifier-free guidance off; a negative prompt only has an effect with guidance above 1.0, and each step then takes about twice as long. Guidance uses the same scale on every platform.
+
+Krea 2 samples with its own schedule, so `--scheduler` is rejected for it and the Web UI hides the Scheduler control. Krea 2 Raw (`krea/Krea-2-Raw`, or a fine-tune converted with `--model-type krea2-raw`, see [Model & LoRA Guide](model.md)) defaults to 28 steps and guidance 5.5.
+
+The weights are large (about 26 GB for the transformer plus a 9 GB text encoder), so run it quantized on smaller machines:
+
+- **macOS:** `-q 8` or `-q 4`. The text encoder is not quantized, so it adds about 9 GB at any level. The first quantized run saves a stored quant (`krea2@q8`, `krea2@q4`).
+- **Windows and Linux:** `-q 4` is the level for 10–12 GB GPUs; its text encoder and transformer take turns on the GPU. Without quantization all 35 GB of weights are held in system memory. Reference images (`--image`) and `--upscale` are not available here, because diffusers has no Krea 2 image-to-image pipeline: `ziv-image` rejects them and the Web UI hides them. On macOS both work.
+
+LoRAs trained for Krea 2 load with `--lora` on both platforms.
 
 ### Custom Aliases
 

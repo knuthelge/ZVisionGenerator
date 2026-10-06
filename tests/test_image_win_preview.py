@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from zvisiongenerator.core.latent_preview import FLUX2_RGB_BIAS, ZIMAGE_RGB_BIAS
+from zvisiongenerator.core.latent_preview import FLUX2_RGB_BIAS, QWEN_IMAGE_RGB_BIAS, ZIMAGE_RGB_BIAS
 
 torch = pytest.importorskip("torch")
 diffusers = pytest.importorskip("diffusers")
@@ -81,6 +81,28 @@ class TestRenderLatentPreview:
         with pytest.raises(ValueError, match="latent tokens"):
             preview_module._flux2_spatial(_flux2_pipe(), torch.zeros((1, 10, 128)), height=128, width=64)
 
+    def test_krea2_preview_is_one_eighth_resolution_and_zero_latents_map_to_bias(self, preview_module):
+        pipe = SimpleNamespace(patch_size=2, vae_scale_factor=8)
+        latents = torch.zeros((1, 8 * 4, 64))
+
+        image = preview_module.render_latent_preview(pipe, "krea2", latents, height=128, width=64)
+
+        assert image.size == (8, 16)
+        actual, expected = _pixel(image, QWEN_IMAGE_RGB_BIAS)
+        assert np.allclose(actual, expected, atol=1)
+
+    def test_krea2_unpacks_like_the_diffusers_pipeline(self, preview_module):
+        from diffusers.pipelines.krea2.pipeline_krea2 import Krea2Pipeline
+
+        pipe = SimpleNamespace(patch_size=2, vae_scale_factor=8)
+        height, width = 128, 64
+        spatial_in = torch.randn((1, 16, height // 8, width // 8))
+        packed = Krea2Pipeline._pack_latents(pipe, spatial_in, 1, 16, height // 8, width // 8)
+
+        spatial = preview_module._krea2_spatial(pipe, packed, height, width)
+
+        assert torch.allclose(spatial, spatial_in[0])
+
     def test_unknown_family_has_no_preview(self, preview_module):
         assert preview_module.render_latent_preview(None, "flux1", torch.zeros((1, 16, 4, 4)), 32, 32) is None
 
@@ -102,7 +124,7 @@ class TestEstimateCleanLatents:
 
 
 class TestCreateLivePreview:
-    @pytest.mark.parametrize("family", ["zimage", "flux2", "flux2_klein"])
+    @pytest.mark.parametrize("family", ["zimage", "flux2", "flux2_klein", "krea2"])
     def test_supported_families(self, preview_module, family):
         assert isinstance(preview_module.create_live_preview(family, 8, 64, 64), preview_module.LivePreview)
 

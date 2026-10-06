@@ -8,6 +8,8 @@ Supported model types:
   - zimage      : Z-Image-Turbo (manual key remapping)
   - flux2-klein-4b : FLUX.2 Klein 4B (manual key remapping)
   - flux2-klein-9b : FLUX.2 Klein 9B (manual key remapping)
+  - krea2-turbo    : Krea 2 Turbo fine-tunes (manual key remapping)
+  - krea2-raw      : Krea 2 Raw fine-tunes (manual key remapping)
 
 Only the transformer weights are converted from the checkpoint.
 Text encoder, VAE, tokenizer, and scheduler are downloaded from the
@@ -34,6 +36,16 @@ FLUX2_KLEIN_REPOS = {
     "flux2-klein-4b": "black-forest-labs/FLUX.2-klein-4B",
     "flux2-klein-9b": "black-forest-labs/FLUX.2-klein-9B",
 }
+
+# ── Krea 2 HuggingFace repos ────────────────────────────────────────────────
+
+KREA2_REPOS = {
+    "krea2-turbo": "krea/Krea-2-Turbo",
+    "krea2-raw": "krea/Krea-2-Raw",
+}
+
+# Every --model-type the converter accepts (the CLI and the Web UI converter share this list).
+MODEL_TYPES = ("zimage", *FLUX2_KLEIN_REPOS, *KREA2_REPOS)
 
 
 # ── Transformer key conversion ──────────────────────────────────────────────
@@ -415,9 +427,79 @@ def convert_flux2_transformer_keys(state_dict: dict) -> dict:
 
 def convert_flux2_klein(input_path: Path, output_dir: Path, model_type: str, use_symlinks: bool):
     """Convert a safetensors FLUX.2 Klein checkpoint to HF diffusers format (manual key remapping)."""
-    from safetensors.torch import load_file, save_file
+    _convert_single_file(input_path, output_dir, FLUX2_KLEIN_REPOS[model_type], convert_flux2_transformer_keys, "FLUX.2 Klein", use_symlinks)
 
-    repo_id = FLUX2_KLEIN_REPOS[model_type]
+
+# ── Krea 2 key conversion ────────────────────────────────────────────────────
+
+# Native (Krea / ComfyUI) names → diffusers Krea2Transformer2DModel names, as diffusers' single-file loader maps them.
+KREA2_PREFIX_RENAMES = (
+    ("first.", "img_in."),
+    ("tmlp.0.", "time_embed.linear_1."),
+    ("tmlp.2.", "time_embed.linear_2."),
+    ("tproj.1.", "time_mod_proj."),
+    ("txtmlp.0.scale", "txt_in.norm.weight"),
+    ("txtmlp.1.", "txt_in.linear_1."),
+    ("txtmlp.3.", "txt_in.linear_2."),
+    ("txtfusion.", "text_fusion."),
+    ("blocks.", "transformer_blocks."),
+    ("last.linear.", "final_layer.linear."),
+    ("last.norm.scale", "final_layer.norm.weight"),
+    ("last.modulation.lin", "final_layer.scale_shift_table"),
+)
+KREA2_BLOCK_RENAMES = (
+    (".attn.wq.", ".attn.to_q."),
+    (".attn.wk.", ".attn.to_k."),
+    (".attn.wv.", ".attn.to_v."),
+    (".attn.wo.", ".attn.to_out.0."),
+    (".attn.gate.", ".attn.to_gate."),
+    (".attn.qknorm.qnorm.scale", ".attn.norm_q.weight"),
+    (".attn.qknorm.knorm.scale", ".attn.norm_k.weight"),
+    (".mlp.", ".ff."),
+    (".prenorm.scale", ".norm1.weight"),
+    (".postnorm.scale", ".norm2.weight"),
+    (".mod.lin", ".scale_shift_table"),
+)
+# Prefixes single-file exports put in front of the native transformer keys.
+KREA2_CHECKPOINT_PREFIXES = ("model.diffusion_model.", "diffusion_model.")
+# Top-level modules of the diffusers Krea2Transformer2DModel.
+KREA2_DIFFUSERS_PREFIXES = ("img_in.", "time_embed.", "time_mod_proj.", "txt_in.", "text_fusion.", "transformer_blocks.", "final_layer.")
+
+
+def convert_krea2_transformer_keys(state_dict: dict) -> dict:
+    """Convert native or ComfyUI Krea 2 transformer keys to HF diffusers format.
+
+    Only transformer keys are kept, so a checkpoint that also bundles the text encoder or VAE converts too.
+    Keys already in diffusers format pass through unchanged.
+    """
+    if any(key.startswith("transformer_blocks.") for key in state_dict):
+        print("  Detected format: diffusers (already converted)")
+        return {key: tensor for key, tensor in state_dict.items() if key.startswith(KREA2_DIFFUSERS_PREFIXES)}
+
+    converted = {}
+    for key, tensor in state_dict.items():
+        native_key = next((key[len(prefix) :] for prefix in KREA2_CHECKPOINT_PREFIXES if key.startswith(prefix)), key)
+        rename = next(((old, new) for old, new in KREA2_PREFIX_RENAMES if native_key.startswith(old)), None)
+        if rename is None:
+            continue  # not a transformer weight (e.g. a bundled text encoder or VAE)
+        new_key = rename[1] + native_key[len(rename[0]) :]
+        for old, new in KREA2_BLOCK_RENAMES:
+            new_key = new_key.replace(old, new)
+        # The native checkpoint stores each block's six modulation vectors flattened into one.
+        if new_key.startswith("transformer_blocks.") and new_key.endswith(".scale_shift_table"):
+            tensor = tensor.reshape(6, -1)
+        converted[new_key] = tensor
+    return converted
+
+
+def convert_krea2(input_path: Path, output_dir: Path, model_type: str, use_symlinks: bool):
+    """Convert a safetensors Krea 2 checkpoint to HF diffusers format (manual key remapping)."""
+    _convert_single_file(input_path, output_dir, KREA2_REPOS[model_type], convert_krea2_transformer_keys, "Krea 2", use_symlinks)
+
+
+def _convert_single_file(input_path: Path, output_dir: Path, repo_id: str, convert_keys, label: str, use_symlinks: bool):
+    """Convert a single-file transformer checkpoint with *convert_keys* and link the rest of *repo_id* around it."""
+    from safetensors.torch import load_file, save_file
 
     # Step 1: Load checkpoint
     print(f"Loading checkpoint: {input_path}")
@@ -425,14 +507,11 @@ def convert_flux2_klein(input_path: Path, output_dir: Path, model_type: str, use
     print(f"  Loaded {len(state_dict)} keys")
     state_dict = _dequantize_scaled_fp8(state_dict)
 
-    transformer_keys = [k for k in state_dict if k.startswith(TRANSFORMER_PREFIX)]
-    print(f"  Transformer: {len(transformer_keys)} keys")
-
     # Step 2: Convert transformer keys
-    print("\nConverting FLUX.2 Klein transformer weights...")
-    converted = convert_flux2_transformer_keys(state_dict)
+    print(f"\nConverting {label} transformer weights...")
+    converted = convert_keys(state_dict)
     converted = _ensure_bfloat16(converted)
-    print(f"  Converted to {len(converted)} keys (QKV splits: {len(transformer_keys)} → {len(converted)})")
+    print(f"  Converted to {len(converted)} keys")
 
     # Validate — never save an empty transformer
     if not converted:
@@ -488,6 +567,9 @@ def _cmd_model(args):
     if args.model_type in FLUX2_KLEIN_REPOS:
         # ── FLUX.2 Klein conversion path ──
         convert_flux2_klein(input_path, output_dir, args.model_type, use_symlinks)
+    elif args.model_type in KREA2_REPOS:
+        # ── Krea 2 conversion path ──
+        convert_krea2(input_path, output_dir, args.model_type, use_symlinks)
     else:
         # ── Z-Image conversion path (unchanged) ──
         # Step 1: Load checkpoint
@@ -629,7 +711,7 @@ def _build_model_parser(*, prog: str = "ziv-model") -> argparse.ArgumentParser:
     model_parser.add_argument("--name", default=None, help="Custom model folder name (default: checkpoint filename)")
     model_parser.add_argument(
         "--model-type",
-        choices=["zimage", "flux2-klein-4b", "flux2-klein-9b"],
+        choices=MODEL_TYPES,
         default="zimage",
         help="Type of model to convert (default: zimage)",
     )

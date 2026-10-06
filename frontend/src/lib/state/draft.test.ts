@@ -23,6 +23,7 @@ function makeImageDefaults(overrides: Partial<ImageModelDefaults> = {}): ImageMo
     supports_upscale: true,
     supports_json_prompt: false,
     supports_first_sigma: false,
+    supports_scheduler: true,
     dimension_min: 16,
     dimension_max: null,
     dimension_step: 16,
@@ -43,6 +44,7 @@ function makeIdeogramDefaults(overrides: Partial<ImageModelDefaults> = {}): Imag
     supports_upscale: false,
     supports_json_prompt: true,
     supports_first_sigma: true,
+    supports_scheduler: true,
     dimension_min: 256,
     dimension_max: 2048,
     dimension_step: 16,
@@ -361,6 +363,24 @@ describe('draft store', () => {
       draft.hydrateFromContext(ctx, null);
 
       expect(draft.state.model).toBe('ltx-v-0.9');
+    });
+
+    it('clears a kept scheduler on a model that uses its own sampler', () => {
+      const kreaDefaults = makeImageDefaults({ steps: 8, guidance: 1, supports_scheduler: false });
+      const ctx = makeContext({
+        image_models: [{ id: 'krea2', label: 'Krea 2', type: 'image' }],
+        current_image_model: 'krea2',
+        defaults: kreaDefaults,
+        image_model_defaults: { krea2: kreaDefaults },
+      });
+
+      draft.update('workflow', 'txt2img');
+      draft.hydrateFromContext(ctx, 'krea2');
+      draft.update('scheduler', 'beta');
+
+      draft.hydrateFromContext(ctx, 'krea2', { keepSettings: true });
+
+      expect(draft.state.scheduler).toBeNull();
     });
 
     it('clears structured-json and first-sigma draft fields when switching to a non-supporting image model', () => {

@@ -17,6 +17,7 @@ from mflux.models.flux2 import Flux2Klein
 from mflux.models.z_image import ZImageTurbo
 from mflux.models.ideogram4 import Ideogram4
 from mflux.models.ideogram4.model.ideogram4_scheduler.scheduler import Ideogram4Scheduler
+from mflux.models.krea2 import Krea2
 from mflux.models.common.config.model_config import ModelConfig
 from mflux.models.common.schedulers import FlowMatchEulerDiscreteScheduler, LinearScheduler
 from mflux.utils.exceptions import StopImageGenerationException
@@ -110,6 +111,15 @@ def _install_ideogram4_initial_sigma() -> None:
 _install_ideogram4_initial_sigma()
 
 
+# Families whose guidance is off at 1.0 (the rest are off at 0.0); used when no guidance is given.
+_GUIDANCE_OFF_AT_ONE = ("flux1", "flux2", "flux2_klein", "krea2")
+
+
+def _default_guidance(family: str) -> float:
+    """Return the guidance that turns classifier-free guidance off for *family*."""
+    return 1.0 if family in _GUIDANCE_OFF_AT_ONE else 0.0
+
+
 def _unregister_callback(model: Any, callback: Any) -> None:
     """Remove a callback from every mflux registry list so it never fires on later runs of a cached model."""
     registry = model.callbacks
@@ -198,27 +208,32 @@ class _ProgressChecker:
             warnings.warn(f"Live previews disabled for {self._family}: {exc}", stacklevel=2)
             self._previews_enabled = False
 
-    def call_in_loop(self, t, seed, prompt, latents, config, time_steps, **_):
+    def call_in_loop(self, t, seed, prompt, latents, config, time_steps, denoised=None, **_):
         del seed, prompt, time_steps
         self._current_step = min(self._current_step + 1, self._total_steps)
         payload = {
             "current_step": self._current_step,
             "total_steps": self._total_steps,
         }
-        preview = self._render_preview(t, latents, config)
+        preview = self._render_preview(t, latents, config, denoised)
         if preview is not None:
             payload["preview"] = preview
         # Keep these latents only when the next step renders a preview from them.
         self._previous_latents = latents if self._previews_enabled and t + 2 in self._preview_steps else None
         self._step_callback(payload)
 
-    def _render_preview(self, t, latents, config) -> Image.Image | None:
-        """Render a preview at milestone steps; never let a preview failure stop generation."""
+    def _render_preview(self, t, latents, config, denoised=None) -> Image.Image | None:
+        """Render a preview at milestone steps; never let a preview failure stop generation.
+
+        Samplers that report their clean-image prediction (``denoised``, e.g. Krea 2's) preview it directly.
+        """
         if not self._previews_enabled or t + 1 not in self._preview_steps:
             return None
         try:
             levels = _step_noise_levels(self._family, t, config)
-            if levels is not None and self._previous_latents is not None:
+            if denoised is not None:
+                latents = denoised
+            elif levels is not None and self._previous_latents is not None:
                 latents = estimate_clean_latents(self._previous_latents, latents, *levels)
             return render_latent_preview(self._model, self._family, latents, config.height, config.width)
         except Exception as exc:  # noqa: BLE001 - previews are best-effort
@@ -345,8 +360,15 @@ class MfluxBackend:
                 model_config=ModelConfig.ideogram4_fp8(),
                 **lora_kwargs,
             )
+        elif model_info.family == "krea2":
+            model = Krea2(
+                quantize=quantize,
+                model_path=model_path,
+                model_config=ModelConfig.krea2() if model_info.is_distilled else ModelConfig.krea2_raw(),
+                **lora_kwargs,
+            )
         else:
-            raise ValueError(f"Model family '{model_info.family}' is not supported by the mflux backend. Supported families: zimage, flux2_klein, ideogram4")
+            raise ValueError(f"Model family '{model_info.family}' is not supported by the mflux backend. Supported families: zimage, flux2_klein, ideogram4, krea2")
 
         if precision == "float32":
             _upcast_model_weights(model, ["transformer", "text_encoder", "vae"])
@@ -422,7 +444,7 @@ class MfluxBackend:
                 num_inference_steps=steps,
                 image_path=temp_path,
                 image_strength=image_strength,
-                guidance=guidance if guidance is not None else (1.0 if _is_flux else 0.0),
+                guidance=guidance if guidance is not None else _default_guidance(self._model_info.family),
             )
             if scheduler is not None:
                 gen_kwargs["scheduler"] = scheduler
@@ -492,7 +514,7 @@ class MfluxBackend:
                     height=height,
                     seed=seed,
                     num_inference_steps=steps,
-                    guidance=guidance if guidance is not None else (1.0 if _is_flux else 0.0),
+                    guidance=guidance if guidance is not None else _default_guidance(self._model_info.family),
                 )
                 if scheduler is not None:
                     gen_kwargs["scheduler"] = scheduler

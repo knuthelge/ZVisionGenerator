@@ -15,7 +15,7 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 
 ## Features
 
-- **Image generation** — text-to-image with Z-Image and FLUX.2 Klein (4B/9B) model families, plus Ideogram 4 (FP8) on macOS/MLX
+- **Image generation** — text-to-image with Z-Image, FLUX.2 Klein (4B/9B) and Krea 2 Turbo model families, plus Ideogram 4 (FP8) on macOS/MLX
 - **Video generation** — text-to-video and image-to-video with platform-specific LTX aliases across macOS, Windows, and Linux
 - **Cross-platform** — automatic backend selection: MLX on macOS, diffusers/CUDA on Windows and Linux for images, and the shared diffusers/CUDA LTX backend on Windows and Linux for video
 - **Prompt system** — YAML prompt files with variables, structured prompts, snippets, and batch runs
@@ -32,9 +32,9 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 
 | Platform | Image Generation | Video Generation |
 |----------|------------------|------------------|
-| macOS (Apple Silicon) | ✅ Z-Image / FLUX / Ideogram 4 via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`) |
-| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
-| Linux (NVIDIA GPU) | ✅ Z-Image / FLUX via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
+| macOS (Apple Silicon) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`) |
+| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
+| Linux (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
 
 ## Installation
 

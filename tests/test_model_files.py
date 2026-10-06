@@ -75,6 +75,22 @@ class TestHasCompleteWeights:
         (base / "vae" / "model.safetensors").unlink()
         assert has_complete_weights(model) is False
 
+    def test_root_single_file_stands_in_for_a_missing_transformer_folder(self, tmp_path):
+        # mflux downloads only Krea 2 Turbo's root turbo.safetensors, not the diffusers transformer/ shards.
+        _write_model_index(tmp_path)
+        _touch(tmp_path / "turbo.safetensors")
+        for component in ("text_encoder", "vae"):
+            _touch(tmp_path / component / "model.safetensors")
+
+        assert has_complete_weights(tmp_path) is True
+
+    def test_root_file_without_text_encoder_is_still_incomplete(self, tmp_path):
+        _write_model_index(tmp_path)
+        _touch(tmp_path / "turbo.safetensors")
+        _touch(tmp_path / "vae" / "model.safetensors")
+
+        assert has_complete_weights(tmp_path) is False
+
     def test_config_only_directory_is_not_downloaded(self, tmp_path):
         _write_model_index(tmp_path)
 
@@ -134,6 +150,18 @@ def test_model_weight_files_ignore_files_outside_index_components(tmp_path):
     files = {path.relative_to(tmp_path).as_posix() for path in model_files.model_weight_files(tmp_path)}
 
     assert files == {"transformer/model.safetensors", "text_encoder/model.safetensors", "vae/model.safetensors"}
+
+
+def test_root_single_file_counts_only_when_the_transformer_folder_is_empty(tmp_path):
+    _write_model_index(tmp_path)
+    root = _touch(tmp_path / "turbo.safetensors")
+    vae = _touch(tmp_path / "vae" / "model.safetensors")
+
+    assert set(model_files.model_weight_files(tmp_path)) == {root, vae}
+
+    shard = _touch(tmp_path / "transformer" / "model.safetensors")
+
+    assert set(model_files.model_weight_files(tmp_path)) == {shard, vae}
 
 
 def test_ltx_text_encoder_repo_comes_from_the_pipeline_default(monkeypatch):

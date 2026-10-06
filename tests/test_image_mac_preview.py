@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from zvisiongenerator.core.latent_preview import ZIMAGE_RGB_BIAS
+from zvisiongenerator.core.latent_preview import QWEN_IMAGE_RGB_BIAS, ZIMAGE_RGB_BIAS
 
 
 pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="mflux/MLX backend is macOS-only")
@@ -40,6 +40,15 @@ class TestRenderLatentPreview:
 
         assert image.size == (16, 32)
         expected = np.round(np.array(ZIMAGE_RGB_BIAS) * 255)
+        assert np.allclose(np.asarray(image)[0, 0], expected, atol=1)
+
+    def test_krea2_preview_is_one_eighth_resolution_and_zero_latents_map_to_bias(self, mx, preview_module):
+        latents = mx.zeros((1, 16, 32, 16))
+
+        image = preview_module.render_latent_preview(None, "krea2", latents, height=256, width=128)
+
+        assert image.size == (16, 32)
+        expected = np.round(np.array(QWEN_IMAGE_RGB_BIAS) * 255)
         assert np.allclose(np.asarray(image)[0, 0], expected, atol=1)
 
     def test_flux2_klein_unpacks_like_the_mflux_vae(self, mx, preview_module):
@@ -162,6 +171,18 @@ class TestProgressCheckerPreviews:
 
         assert len(rendered) == 3
         assert all(np.allclose(np.array(latents), np.array(x0), atol=1e-4) for latents in rendered)
+
+    def test_previews_use_the_samplers_own_clean_prediction_when_given(self, mx, image_mac, monkeypatch):
+        rendered: list = []
+        monkeypatch.setattr(image_mac, "render_latent_preview", lambda _model, _family, latents, *_size: rendered.append(latents))
+        config = self._config(4)
+        denoised = mx.ones((1, 16, 8, 8))
+        checker = image_mac._ProgressChecker(4, lambda _event: None, model=None, family="krea2")
+
+        checker.call_before_loop(1, "prompt", mx.zeros((1, 16, 8, 8)), config)
+        checker.call_in_loop(0, 1, "prompt", mx.zeros((1, 16, 8, 8)), config, None, denoised=denoised)
+
+        assert rendered == [denoised]
 
     def test_unknown_schedulers_preview_raw_latents(self, mx, image_mac, monkeypatch):
         rendered: list = []

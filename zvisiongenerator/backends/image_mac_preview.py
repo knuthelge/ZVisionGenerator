@@ -11,11 +11,12 @@ from mflux.models.flux2.latent_creator.flux2_latent_creator import Flux2LatentCr
 from mflux.models.ideogram4.latent_creator.ideogram4_latent_creator import Ideogram4LatentCreator
 from mflux.models.z_image.latent_creator.z_image_latent_creator import ZImageLatentCreator
 
-from zvisiongenerator.core.latent_preview import FLUX2_RGB_BIAS, FLUX2_RGB_FACTORS, ZIMAGE_RGB_BIAS, ZIMAGE_RGB_FACTORS
+from zvisiongenerator.core.latent_preview import FLUX2_RGB_BIAS, FLUX2_RGB_FACTORS, QWEN_IMAGE_RGB_BIAS, QWEN_IMAGE_RGB_FACTORS, ZIMAGE_RGB_BIAS, ZIMAGE_RGB_FACTORS
 
 # The projections as ``(factors, bias)`` arrays, built once rather than per preview.
 _ZIMAGE_PROJECTION = (mx.array(ZIMAGE_RGB_FACTORS, dtype=mx.float32), mx.array(ZIMAGE_RGB_BIAS, dtype=mx.float32))
 _FLUX2_PROJECTION = (mx.array(FLUX2_RGB_FACTORS, dtype=mx.float32), mx.array(FLUX2_RGB_BIAS, dtype=mx.float32))
+_QWEN_IMAGE_PROJECTION = (mx.array(QWEN_IMAGE_RGB_FACTORS, dtype=mx.float32), mx.array(QWEN_IMAGE_RGB_BIAS, dtype=mx.float32))
 
 
 def estimate_clean_latents(previous: mx.array, current: mx.array, noise_previous: float, noise_current: float) -> mx.array:
@@ -46,7 +47,7 @@ def render_latent_preview(model: Any, family: str, latents: mx.array, height: in
 
     Args:
         model: The loaded mflux model (FLUX.2 Klein needs its VAE batch-norm statistics).
-        family: Image model family (``zimage``, ``flux2_klein`` or ``ideogram4``).
+        family: Image model family (``zimage``, ``flux2_klein``, ``ideogram4`` or ``krea2``).
         latents: Latents exactly as the denoising loop passes them to in-loop callbacks.
         height: Output image height in pixels.
         width: Output image width in pixels.
@@ -62,6 +63,9 @@ def render_latent_preview(model: Any, family: str, latents: mx.array, height: in
     if family == "ideogram4":
         spatial = Ideogram4LatentCreator.unpack_latents(latents, height, width)[0]
         return _project_to_image(spatial, _FLUX2_PROJECTION)
+    if family == "krea2":
+        # Krea 2 denoises unpacked (1, 16, h, w) latents.
+        return _project_to_image(latents[0], _QWEN_IMAGE_PROJECTION)
     return None
 
 

@@ -289,6 +289,7 @@ export interface ImageModelDefaults {
   supports_upscale: boolean;
   supports_json_prompt: boolean;
   supports_first_sigma: boolean;
+  supports_scheduler: boolean;
   dimension_min: number;
   dimension_max: number | null;
   dimension_step: number;

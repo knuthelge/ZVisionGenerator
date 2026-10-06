@@ -51,6 +51,7 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
   // Permissive fallbacks keep models without explicit capability flags unaffected.
   const supportsImg2img = imageDefaults?.supports_img2img ?? true;
   const supportsUpscale = imageDefaults?.supports_upscale ?? true;
+  const supportsScheduler = imageDefaults?.supports_scheduler ?? true;
   const supportsNegativePrompt = isImageMode && (imageDefaults?.supports_negative_prompt ?? false);
   const enhancer = context?.prompt_enhancer ?? null;
   const videoDefaults = context?.video_model_defaults?.[state.model] as VideoModelDefaults | undefined;
@@ -82,7 +83,7 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
     showGuidance: visible.has('guidance'),
     showI2IStrength: visible.has('image_strength'),
     showSeed: visible.has('seed'),
-    showScheduler: isImageMode && visible.has('scheduler') && (context?.scheduler_options.length ?? 0) > 0,
+    showScheduler: isImageMode && visible.has('scheduler') && supportsScheduler && (context?.scheduler_options.length ?? 0) > 0,
     showPostprocessSharpen: isImageMode && visible.has('postprocess_sharpen'),
     showPostprocessContrast: isImageMode && visible.has('postprocess_contrast'),
     showPostprocessSaturation: isImageMode && visible.has('postprocess_saturation'),

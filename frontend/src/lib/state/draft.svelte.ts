@@ -371,6 +371,7 @@ export const draft = {
         jsonPromptEnabled: imageDefaults?.supports_json_prompt ? nextState.jsonPromptEnabled : false,
         jsonPrompt: imageDefaults?.supports_json_prompt ? nextState.jsonPrompt : '',
         firstSigma: imageDefaults?.supports_first_sigma ? nextState.firstSigma : null,
+        scheduler: imageDefaults?.supports_scheduler === false ? null : nextState.scheduler,
       };
     }
 
