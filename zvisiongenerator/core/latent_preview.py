@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__all__ = ["FLUX2_RGB_BIAS", "FLUX2_RGB_FACTORS", "ZIMAGE_RGB_BIAS", "ZIMAGE_RGB_FACTORS"]
+__all__ = ["FLUX2_RGB_BIAS", "FLUX2_RGB_FACTORS", "QWEN_IMAGE_RGB_BIAS", "QWEN_IMAGE_RGB_FACTORS", "ZIMAGE_RGB_BIAS", "ZIMAGE_RGB_FACTORS"]
 
 # Linear latent -> RGB projections (rows: latent channels, columns: R, G, B in [0, 1]).
 # Least-squares fits against each VAE's own encodings of a set of sample images, so a
@@ -63,3 +63,26 @@ FLUX2_RGB_FACTORS = (
     (0.0047, -0.0024, -0.0131),
 )
 FLUX2_RGB_BIAS = (0.5027, 0.4707, 0.4311)
+
+# The Qwen-Image VAE (Krea 2) shares the Wan 2.1 latent space. These are ComfyUI's Wan 2.1 preview factors,
+# mapped from its [-1, 1] output to [0, 1] (factors / 2, (bias + 1) / 2). They apply to the normalized
+# latents both mflux and diffusers denoise (before the VAE's latents_mean / latents_std are applied).
+QWEN_IMAGE_RGB_FACTORS = (
+    (-0.06495, -0.0846, 0.1466),
+    (0.03355, 0.0203, 0.0221),
+    (0.1784, 0.1274, 0.08735),
+    (0.0186, 0.1172, 0.071),
+    (0.01565, 0.00945, -0.0164),
+    (0.0148, -0.0478, -0.03325),
+    (-0.17385, -0.20295, -0.14625),
+    (0.0083, 0.0951, 0.09875),
+    (-0.0206, 0.01335, -0.0682),
+    (-0.06465, 0.037, 0.0818),
+    (0.034, 0.15095, 0.0564),
+    (0.0016, 0.02905, 0.03195),
+    (-0.06255, 0.04635, 0.08495),
+    (0.003, -0.03165, 0.00025),
+    (0.17385, 0.11375, 0.1475),
+    (0.0992, 0.04565, 0.09305),
+)
+QWEN_IMAGE_RGB_BIAS = (0.40825, 0.4566, 0.332)

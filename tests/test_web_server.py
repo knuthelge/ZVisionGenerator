@@ -151,6 +151,7 @@ def _make_resolved_image_defaults(
     supports_upscale: bool = True,
     supports_json_prompt: bool = False,
     supports_first_sigma: bool = False,
+    supports_scheduler: bool = True,
     dimension_min: int = 16,
     dimension_max: int | None = None,
     dimension_step: int = 16,
@@ -165,6 +166,7 @@ def _make_resolved_image_defaults(
         "supports_upscale": supports_upscale,
         "supports_json_prompt": supports_json_prompt,
         "supports_first_sigma": supports_first_sigma,
+        "supports_scheduler": supports_scheduler,
         "dimension_min": dimension_min,
         "dimension_max": dimension_max,
         "dimension_step": dimension_step,
@@ -439,6 +441,25 @@ def test_workspace_bootstrap_defaults_include_ideogram_capability_flags(monkeypa
     assert detect_calls == ["Tongyi-MAI/Z-Image-Turbo"]
 
 
+def test_workspace_bootstrap_defaults_include_scheduler_capability(monkeypatch):
+    web_config = _make_web_config()
+    web_config.app_config["model_aliases"] = {"krea2": "krea/Krea-2-Turbo", "zit": "Tongyi-MAI/Z-Image-Turbo"}
+    web_config.image_model_options = ("krea2", "zit")
+    families = {"krea/Krea-2-Turbo": "krea2", "Tongyi-MAI/Z-Image-Turbo": "zimage"}
+
+    monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: web_config.app_config["model_aliases"].get(model, model))
+    monkeypatch.setattr(workspace_api_module, "detect_image_model", lambda value: ImageModelInfo(family=families[str(value)], is_distilled=True, size=None))
+    monkeypatch.setattr(workspace_api_module, "get_backend_name", lambda: "mflux")
+    monkeypatch.setattr(
+        workspace_api_module,
+        "resolve_defaults",
+        lambda model_info, *_: _make_resolved_image_defaults(supports_scheduler=model_info.family != "krea2"),
+    )
+
+    assert workspace_api_module._build_image_bootstrap_defaults("krea2", web_config)["supports_scheduler"] is False
+    assert workspace_api_module._build_image_bootstrap_defaults("zit", web_config)["supports_scheduler"] is True
+
+
 def test_workspace_bootstrap_defaults_fall_back_to_supported_ideogram_preset(monkeypatch):
     web_config = _make_web_config()
     web_config.app_config["generation"] = {
@@ -695,6 +716,24 @@ def test_submit_image_job_rejects_unsupported_model_json_prompt_and_first_sigma(
         web_server._submit_image_job(form, web_config)
 
     assert expected_substring in str(exc_info.value)
+
+
+def test_submit_image_job_drops_scheduler_for_models_with_their_own_sampler(monkeypatch, tmp_path):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    _patch_image_submit_dependencies(
+        monkeypatch,
+        model_info=ImageModelInfo(family="krea2", is_distilled=True, size=None),
+        defaults=_make_resolved_image_defaults(supports_scheduler=False),
+        submitted=submitted,
+    )
+    monkeypatch.setattr(web_server, "resolve_defaults", lambda _info, _config, cli_overrides, _backend: {**_make_resolved_image_defaults(supports_scheduler=False), **cli_overrides})
+
+    web_server._submit_image_job({"model": "krea2", "prompt": "hello", "scheduler": "beta"}, web_config)
+
+    assert submitted[0]["args"].scheduler is None
+    assert submitted[0]["request"].scheduler is None
 
 
 def test_submit_image_job_rejects_ideogram_capability_violations_before_queue(monkeypatch, tmp_path):
@@ -1634,7 +1673,7 @@ def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
     web_config.app_config["model_presets"] = {"ideogram4": {"supports_quantize": False}}
     calls: list[tuple[str, str, tuple[int, ...]]] = []
 
-    def _fake_status(resolved_path, *, kind, quantize_options=(), budget_bytes=None, find_local_dir=None):
+    def _fake_status(resolved_path, *, kind, quantize_options=(), budget_bytes=None, quantize_text_encoder=True, find_local_dir=None):
         calls.append((resolved_path, kind, quantize_options))
         return {"downloaded": resolved_path != "owner/ltx", "memory_fit": None}
 

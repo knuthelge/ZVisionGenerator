@@ -21,6 +21,19 @@ torch.backends.cudnn.benchmark = True
 torch.set_float32_matmul_precision("high")
 
 
+# Families whose NF4 text encoder and transformer do not fit a 10-12 GB card together (Krea 2: ~3 + ~7 GB).
+# They take turns on the GPU through model CPU offload instead of both staying resident.
+_Q4_CPU_OFFLOAD_FAMILIES = frozenset({"krea2"})
+
+
+def _krea2_guidance_scale(guidance: float | None) -> float:
+    """Convert a standard CFG scale (1.0 = off) to Krea 2's ``guidance_scale`` (0.0 = off).
+
+    Krea 2's pipeline computes ``cond + g * (cond - uncond)``, which is standard CFG at ``1 + g``.
+    """
+    return max((1.0 if guidance is None else guidance) - 1.0, 0.0)
+
+
 def _make_bnb_configs(quantize: int, compute_dtype: torch.dtype):
     """Create matched BitsAndBytesConfig for transformers and diffusers components."""
     from diffusers import BitsAndBytesConfig as DiffusersBnBConfig
@@ -46,12 +59,14 @@ def _make_bnb_configs(quantize: int, compute_dtype: torch.dtype):
     return te_config, tx_config
 
 
-def _load_quantized(model_path: str, quantize: int, torch_dtype: torch.dtype):
+def _load_quantized(model_path: str, quantize: int, torch_dtype: torch.dtype, family: str):
     """Load pipeline with bitsandbytes-quantized transformer and text encoder."""
     from diffusers import AutoModel as DiffusersAutoModel
     from transformers import AutoModel as HFAutoModel
 
     te_config, tx_config = _make_bnb_configs(quantize, torch_dtype)
+
+    offload_q4 = quantize == 4 and family in _Q4_CPU_OFFLOAD_FAMILIES
 
     # Load text encoder (Qwen3Model) with quantization — placed on CUDA by bnb
     text_encoder = HFAutoModel.from_pretrained(
@@ -60,6 +75,9 @@ def _load_quantized(model_path: str, quantize: int, torch_dtype: torch.dtype):
         quantization_config=te_config,
         torch_dtype=torch_dtype,
     )
+    if offload_q4:
+        # Free the GPU for the transformer load; model CPU offload moves the encoder back when it runs.
+        text_encoder.to("cpu")
 
     # Load transformer (ZImageTransformer2DModel) with quantization — placed on CUDA by bnb
     transformer = DiffusersAutoModel.from_pretrained(
@@ -78,11 +96,11 @@ def _load_quantized(model_path: str, quantize: int, torch_dtype: torch.dtype):
         torch_dtype=torch_dtype,
     )
 
-    if quantize == 4:
+    if quantize == 4 and not offload_q4:
         # NF4: ~5GB total — everything fits on GPU, no offloading needed
         pipeline.vae.to(device="cuda", dtype=torch_dtype)
     else:
-        # INT8: use sequential CPU offloading via accelerate hooks.
+        # INT8 (and NF4 for _Q4_CPU_OFFLOAD_FAMILIES): use model CPU offloading via accelerate hooks.
         # Group offloading is ineffective for INT8 because bitsandbytes
         # stores quantized weights in state.CB/state.SCB (not parameters/buffers).
         pipeline.enable_model_cpu_offload()
@@ -169,7 +187,7 @@ class DiffusersBackend:
             raise RuntimeError("Ideogram 4 is not supported on this platform (macOS/MLX only).")
 
         if quantize in (4, 8):
-            pipeline = _load_quantized(model_path, quantize, torch_dtype)
+            pipeline = _load_quantized(model_path, quantize, torch_dtype, model_info.family)
         else:
             if quantize is not None:
                 print(f"Unsupported quantize value {quantize!r}; falling back to full precision. Use 4 (NF4) or 8 (INT8).")
@@ -250,6 +268,8 @@ class DiffusersBackend:
     ) -> Image.Image | None:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
+        if self._model_info.family == "krea2":
+            raise ValueError("img2img is not supported for Krea 2 on this platform: diffusers has no Krea 2 image-to-image pipeline.")
         if self._img2img_pipe is None:
             from diffusers import AutoPipelineForImage2Image
 
@@ -329,7 +349,9 @@ class DiffusersBackend:
                 generator=generator,
                 num_inference_steps=steps,
             )
-            if guidance is not None:
+            if self._model_info.family == "krea2":
+                kwargs["guidance_scale"] = _krea2_guidance_scale(guidance)
+            elif guidance is not None:
                 kwargs["guidance_scale"] = guidance
             elif _is_flux:
                 kwargs["guidance_scale"] = 1.0

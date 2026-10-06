@@ -626,6 +626,53 @@ class TestCLIValidation:
         assert re.search(r"upscal.*not supported", capsys.readouterr().err, re.IGNORECASE)
         mock_backend.load_model.assert_not_called()
 
+    def test_backend_without_img2img_rejects_reference_image_before_load_model(self, tmp_path, capsys):
+        image_path = tmp_path / "reference.png"
+        image_path.write_bytes(b"fake")
+        mock_backend = MagicMock()
+        mock_backend.name = "diffusers"
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["--prompt", "ok", "--image", str(image_path), "-m", "krea2"],
+                detect_image_model=lambda _path: MagicMock(family="krea2", size=None),
+                get_backend=lambda: mock_backend,
+                resolve_defaults=lambda *a, **kw: {"steps": 8, "guidance": 1.0, "scheduler": None, "supports_img2img": False, "supports_upscale": False},
+            )
+
+        assert "img2img is not supported for the 'krea2' model family" in capsys.readouterr().err
+        mock_backend.load_model.assert_not_called()
+
+    def test_backend_without_upscale_rejects_upscale_before_load_model(self, capsys):
+        mock_backend = MagicMock()
+        mock_backend.name = "diffusers"
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["--prompt", "ok", "--upscale", "2", "-m", "krea2"],
+                detect_image_model=lambda _path: MagicMock(family="krea2", size=None),
+                get_backend=lambda: mock_backend,
+                resolve_defaults=lambda *a, **kw: {"steps": 8, "guidance": 1.0, "scheduler": None, "supports_img2img": False, "supports_upscale": False},
+            )
+
+        assert re.search(r"upscal.*not supported", capsys.readouterr().err, re.IGNORECASE)
+        mock_backend.load_model.assert_not_called()
+
+    def test_model_with_its_own_sampler_rejects_scheduler(self, capsys):
+        mock_backend = MagicMock()
+        mock_backend.name = "mflux"
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_with_overrides(
+                ["--prompt", "ok", "--scheduler", "beta", "-m", "krea2"],
+                detect_image_model=lambda _path: MagicMock(family="krea2", size=None),
+                get_backend=lambda: mock_backend,
+                resolve_defaults=lambda *a, **kw: {"steps": 8, "guidance": 1.0, "scheduler": "beta", "supports_scheduler": False},
+            )
+
+        assert "own sampler" in capsys.readouterr().err
+        mock_backend.load_model.assert_not_called()
+
 
 # ── Post-processing flag parsing ────────────────────────────────────────────
 

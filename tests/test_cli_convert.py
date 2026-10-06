@@ -52,6 +52,11 @@ class TestModelSubcommand:
         assert args.base_model == "Tongyi-MAI/Z-Image-Turbo"
         assert args.copy is False
 
+    @pytest.mark.parametrize("model_type", ["krea2-turbo", "krea2-raw"])
+    def test_model_accepts_krea2_types(self, model_type):
+        args = _build_parser().parse_args(["model", "-i", "x.safetensors", "--model-type", model_type])
+        assert args.model_type == model_type
+
     def test_model_missing_input_exits(self):
         parser = _build_parser()
         with pytest.raises(SystemExit):
