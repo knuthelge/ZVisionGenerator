@@ -1052,7 +1052,7 @@ ziv-model model -i checkpoint.safetensors --name my-model --quantize 8
 <tr>
 <td><code>--model-type</code></td>
 <td><code>zimage</code></td>
-<td>Model type: <code>zimage</code>, <code>flux2-klein-4b</code>, <code>flux2-klein-9b</code></td>
+<td>Model type: <code>zimage</code>, <code>flux2-klein-4b</code>, <code>flux2-klein-9b</code>, <code>krea2-turbo</code>, <code>krea2-raw</code></td>
 </tr>
 <tr>
 <td><code>--base-model</code></td>
@@ -1072,6 +1072,7 @@ ziv-model model -i checkpoint.safetensors --name my-model --quantize 8
 </tbody>
 </table>
 <p>Checkpoints can be bfloat16, float16, float32, or FP8. Scaled FP8 checkpoints (for example ComfyUI FP8 exports, which store a <code>weight_scale</code> next to each weight) are dequantized to bfloat16 during conversion. Block-wise or other quantized formats (such as NVFP4) are not supported.</p>
+<p>For Krea 2, pick <code>krea2-turbo</code> for a fine-tune of Krea 2 Turbo and <code>krea2-raw</code> for one trained on Krea 2 Raw (most LoRA and full fine-tunes); the type decides the text encoder, VAE and defaults linked in from the base repo, and Raw models default to 28 steps with guidance 5.5. Native Krea 2 and ComfyUI checkpoints are both accepted, and a bundled text encoder or VAE is ignored. Both base repos are gated, so accept the Krea 2 license and set a Hugging Face token first.</p>
 <blockquote>
 <p><strong>Ideogram 4</strong> is used via the <code>ideo</code> alias or a local FP8 model directory and is distributed ready-to-use. It has no checkpoint-convert path, so it is not a <code>--model-type</code> option.</p>
 </blockquote>

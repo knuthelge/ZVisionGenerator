@@ -862,7 +862,7 @@
 <p>Z-Vision Generator gives you a unified CLI for both image and video generation, with batch runs, prompt variables, LoRA support, upscaling, and more — all while abstracting away platform-specific details.</p>
 <h2 id="features">Features</h2>
 <ul>
-<li><strong>Image generation</strong> — text-to-image with Z-Image and FLUX.2 Klein (4B/9B) model families, plus Ideogram 4 (FP8) on macOS/MLX</li>
+<li><strong>Image generation</strong> — text-to-image with Z-Image, FLUX.2 Klein (4B/9B) and Krea 2 Turbo model families, plus Ideogram 4 (FP8) on macOS/MLX</li>
 <li><strong>Video generation</strong> — text-to-video and image-to-video with platform-specific LTX aliases, audio included by default</li>
 <li><strong>Cross-platform</strong> — automatic backend selection: MLX on macOS, diffusers/CUDA on Windows and Linux for images, and the shared diffusers/CUDA LTX backend on Windows and Linux for video</li>
 <li><strong>Prompt system</strong> — YAML prompt files with variables (<code>{red|blue|green}</code>), structured prompts, snippets, and batch runs</li>
@@ -874,7 +874,7 @@
 <li><strong>Model variants</strong> — image quantization across supported image backends, plus macOS MLX video Q4/Q8 aliases</li>
 <li><strong>Post-processing</strong> — contrast, saturation, and CAS sharpening (image only)</li>
 <li><strong>Interactive controls</strong> — skip, quit, pause, and repeat during batch runs (image only)</li>
-<li><strong>Live preview</strong> — the Web UI shows the image taking shape at 25/50/75% of the steps so you can skip early (preview only, never saved). Supported for Z-Image and FLUX.2 Klein on every platform, and Ideogram 4 on macOS</li>
+<li><strong>Live preview</strong> — the Web UI shows the image taking shape at 25/50/75% of the steps so you can skip early (preview only, never saved). Supported for Z-Image, FLUX.2 Klein and Krea 2 on every platform, and Ideogram 4 on macOS</li>
 </ul>
 <h2 id="platform-support">Platform Support</h2>
 <table>
@@ -888,17 +888,17 @@
 <tbody>
 <tr>
 <td>macOS (Apple Silicon)</td>
-<td>✅ Z-Image / FLUX / Ideogram 4 via mflux/MLX</td>
+<td>✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via mflux/MLX</td>
 <td>✅ LTX via MLX aliases (<code>ltx-4</code>, <code>ltx-8</code>)</td>
 </tr>
 <tr>
 <td>Windows (NVIDIA GPU)</td>
-<td>✅ Z-Image / FLUX models via diffusers/CUDA</td>
+<td>✅ Z-Image / FLUX / Krea 2 models via diffusers/CUDA</td>
 <td>✅ LTX via diffusers/CUDA alias (<code>ltx-2.3</code>)</td>
 </tr>
 <tr>
 <td>Linux (NVIDIA GPU)</td>
-<td>✅ Z-Image / FLUX models via diffusers/CUDA</td>
+<td>✅ Z-Image / FLUX / Krea 2 models via diffusers/CUDA</td>
 <td>✅ LTX via diffusers/CUDA alias (<code>ltx-2.3</code>)</td>
 </tr>
 </tbody>
