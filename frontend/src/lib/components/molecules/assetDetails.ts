@@ -5,6 +5,8 @@ export interface DetailFact {
   label: string;
   value: string;
   wide?: boolean;
+  /** Hover text when it differs from the value, e.g. a full path. */
+  title?: string;
 }
 
 export interface AssetDetailSections {
@@ -35,7 +37,7 @@ export function assetDetailSections(asset: GalleryAsset): AssetDetailSections {
       details.scheduler ? { label: 'Scheduler', value: details.scheduler } : null,
       generation.quantize ? { label: 'Quantize', value: `${generation.quantize}-bit` } : null,
       asset.frame_count ? { label: 'Frames', value: String(asset.frame_count) } : null,
-      asset.lora ? { label: 'LoRAs', value: asset.lora, wide: true } : null,
+      ...(asset.lora ? loraFacts(asset.lora) : []),
       asset.image_path ? { label: 'Reference', value: fileName(asset.image_path), wide: details.image_strength == null } : null,
       asset.image_path && details.image_strength != null ? { label: 'Strength', value: String(details.image_strength) } : null,
     ]),
@@ -52,6 +54,23 @@ export function assetDetailSections(asset: GalleryAsset): AssetDetailSections {
       { label: 'Created', value: new Date(asset.created_at).toLocaleString(), wide: !generation.time },
     ]),
   };
+}
+
+/** List recorded LoRAs (`path:weight` entries joined by commas) one per row as `name · weight`, full entry on hover. */
+export function loraFacts(lora: string): DetailFact[] {
+  const entries = lora.split(',').map((entry) => entry.trim()).filter(Boolean);
+  return entries.map((entry, index) => {
+    const separator = entry.lastIndexOf(':');
+    const weight = separator > 0 ? entry.slice(separator + 1) : '';
+    const hasWeight = weight !== '' && Number.isFinite(Number(weight));
+    const name = fileName(hasWeight ? entry.slice(0, separator) : entry).replace(/\.safetensors$/i, '');
+    return {
+      label: entries.length > 1 ? `LoRA ${index + 1}` : 'LoRA',
+      value: hasWeight ? `${name} · ${weight}` : name,
+      wide: true,
+      title: entry,
+    };
+  });
 }
 
 /** Describe a recorded upscale, e.g. `2× · denoise 0.4 · 3 steps`. */

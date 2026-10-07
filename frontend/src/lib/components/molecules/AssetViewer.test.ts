@@ -353,4 +353,19 @@ describe('AssetViewer', () => {
     flushSync(() => details.querySelector<HTMLButtonElement>('[data-testid="viewer-source"] button')!.click());
     expect(onnavigate).toHaveBeenCalledWith(1);
   });
+
+  it('lists every recorded LoRA on its own row with the full entry on hover', () => {
+    const lora = '/Users/me/.ziv/loras/style.safetensors:0.8,C:\\loras\\detail.safetensors:1,legacy';
+    mountViewer({ assets: [makeAsset({ lora })] });
+    press('i');
+
+    const rows = Array.from(document.querySelectorAll('#asset-viewer-details dl div'));
+    const loraRows = rows.filter((row) => row.querySelector('dt')?.textContent?.startsWith('LoRA'));
+    expect(loraRows.map((row) => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent])).toEqual([
+      ['LoRA 1', 'style · 0.8'],
+      ['LoRA 2', 'detail · 1'],
+      ['LoRA 3', 'legacy'],
+    ]);
+    expect(loraRows[0].querySelector('dd')?.getAttribute('title')).toBe('/Users/me/.ziv/loras/style.safetensors:0.8');
+  });
 });

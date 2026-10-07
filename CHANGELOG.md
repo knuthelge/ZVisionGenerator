@@ -13,6 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Changed
 - diffusers is updated to 0.40.0
 
+### Fixed
+- Web UI: the asset viewer's Details panel lists every LoRA on its own row (`name · weight`, full path on hover); before, a second LoRA was cut off
+
 ## [0.13.0b11] - 2026-10-05
 
 ### Added
