@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import { acceptsPageShortcut } from '$lib/keyboard';
   import { workflowLabel } from '$lib/state/assetActions';
-  import type { ActiveJobState, GalleryAsset } from '$lib/types';
+  import { trackStepTiming, type StepTiming } from '$lib/state/stepTiming';
+  import type { ActiveJobState } from '$lib/types';
 
   interface Props {
     job: ActiveJobState;
-    onopenoutput?: (asset: GalleryAsset, trigger: HTMLElement) => void;
     oncancel?: (jobId: string) => void | Promise<unknown>;
     onpause?: (jobId: string) => void | Promise<unknown>;
     onresume?: (jobId: string) => void | Promise<unknown>;
@@ -15,7 +16,6 @@
 
   let {
     job,
-    onopenoutput,
     oncancel,
     onpause,
     onresume,
@@ -103,7 +103,27 @@
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   }
 
-  const elapsedStr = $derived(formatElapsed(job.elapsed));
+  // Count elapsed up every second between server updates, never backwards; it holds still while paused.
+  let elapsedBase = $state({ jobId: '', elapsed: 0, at: 0 });
+  let clock = $state(0);
+  $effect(() => {
+    const { job_id: jobId, elapsed } = job;
+    const now = performance.now();
+    const previous = untrack(() => elapsedBase);
+    const counted = previous.jobId === jobId ? previous.elapsed + (now - previous.at) / 1000 : 0;
+    elapsedBase = { jobId, elapsed: Math.max(elapsed, counted), at: now };
+    clock = now;
+  });
+  const ticking = $derived(active && !job.paused);
+  $effect(() => {
+    if (!ticking) return;
+    const timer = setInterval(() => { clock = performance.now(); }, 1000);
+    return () => clearInterval(timer);
+  });
+  const liveElapsed = $derived(
+    !active ? job.elapsed : elapsedBase.elapsed + (ticking ? Math.max(0, clock - elapsedBase.at) / 1000 : 0)
+  );
+  const elapsedStr = $derived(formatElapsed(liveElapsed));
   const remainingStr = $derived(job.remaining > 0 ? formatDuration(job.remaining) : '--:--');
   const stepLabel  = $derived(`${job.currentStep} / ${job.totalSteps}`);
   const hasPromptProgress = $derived(Number.isInteger(job.promptNumber) && Number.isInteger(job.promptCount)
@@ -137,6 +157,16 @@
       : job.status === 'queued' || job.status === 'pending' ? 'Waiting to start' : active ? 'Preparing generation' : 'Generation finished'
   );
   const stepWidth = $derived(`${stepPct}%`);
+  // current_step counts finished steps, so the step being worked on is the next one.
+  const showCurrentStep = $derived(active && hasProgress && job.currentStep >= 0 && job.currentStep < job.totalSteps);
+  const currentStepWidth = $derived(`${100 / job.totalSteps}%`);
+  // Time each step so the current one can fill in over about as long as the last one took.
+  let stepTiming = $state<StepTiming | null>(null);
+  $effect(() => {
+    const sample = { scope: `${job.job_id}:${job.stageName}:${job.totalSteps}`, step: job.currentStep, paused: job.paused, now: performance.now() };
+    stepTiming = trackStepTiming(untrack(() => stepTiming), sample);
+  });
+  const stepMs = $derived(stepTiming?.stepMs ?? null);
 
   const progressState = $derived(
     job.status === 'completed' ? 'completed' :
@@ -152,14 +182,6 @@
 
   const jobTypeLabel = $derived(workflowLabel(job.workflow));
   const statusLabel = $derived(active && job.paused ? 'paused' : job.status);
-  const uniqueOutputs = $derived.by(() => {
-    const seen = new Set<string>();
-    return job.outputs.filter((output) => {
-      if (seen.has(output.id)) return false;
-      seen.add(output.id);
-      return true;
-    });
-  });
 </script>
 
 <article class="job-card">
@@ -222,9 +244,18 @@
         aria-valuetext={hasProgress ? `${stepLabel} steps` : stepPhase}
       >
         <div
-          class="h-full rounded-full {progressFill} transition-all duration-300"
+          class="h-full {progressFill} transition-all duration-300"
           style="width: {stepWidth}"
         ></div>
+        {#if showCurrentStep && stepMs}
+          {#key job.currentStep}
+            <div
+              class="current-step"
+              data-state={job.paused ? 'paused' : 'running'}
+              style="left: {stepWidth}; width: {currentStepWidth}; --step-ms: {Math.round(stepMs)}ms"
+            ></div>
+          {/key}
+        {/if}
       </div>
       <div class="mt-2 text-right text-[11px] text-text-muted">
         <span class="font-mono shrink-0">{hasProgress ? `${stepLabel} steps` : 'Awaiting steps'}</span>
@@ -300,46 +331,13 @@
 
   </div>
 
-  <!-- Right column: the live preview and the outputs, their labels on one line. -->
-  {#if showPreview || uniqueOutputs.length > 0}
-    <div class="job-media" class:both={showPreview && uniqueOutputs.length > 0}>
-      {#if showPreview}
-        <span class="media-label" id="{job.job_id}-preview-label">Live preview</span>
-        <figure class="live-preview" aria-labelledby="{job.job_id}-preview-label">
-          <img src={job.previewUrl} alt="Live preview of the generation in progress" onerror={(event) => { failedPreviewUrl = event.currentTarget.getAttribute('src'); }} />
-        </figure>
-      {/if}
-      {#if uniqueOutputs.length > 0}
-        <span class="media-label">
-          Outputs · {uniqueOutputs.length}
-          <span class="sr-only" role="status" aria-live="polite" aria-atomic="true">{uniqueOutputs.length} {uniqueOutputs.length === 1 ? 'output' : 'outputs'} ready</span>
-        </span>
-        <div
-          class="output-preview-grid custom-scrollbar grid gap-2 {showPreview ? 'grid-cols-2' : 'grid-cols-3'}"
-          aria-label="Generated outputs"
-        >
-          {#each uniqueOutputs as output, index (output.id)}
-            {@const newest = index === uniqueOutputs.length - 1}
-            <button type="button" class="block w-full rounded-md focus-visible:focus-ring" aria-label="View {output.filename} fullscreen" onclick={(event) => onopenoutput?.(output, event.currentTarget)}>
-              {#if output.media_type === 'video'}
-                <video
-                  src={output.thumbnail_url || output.url}
-                  class="w-full aspect-square object-cover rounded-md border border-zinc-800"
-                  muted
-                  preload={newest ? 'metadata' : 'none'}
-                ></video>
-              {:else}
-                <img
-                  src={output.thumbnail_url || output.url}
-                  alt={output.filename}
-                  class="w-full aspect-square object-cover rounded-md border border-zinc-800"
-                  loading={newest ? 'eager' : 'lazy'}
-                />
-              {/if}
-            </button>
-          {/each}
-        </div>
-      {/if}
+  <!-- Right column: the live preview. -->
+  {#if showPreview}
+    <div class="job-media">
+      <span class="media-label" id="{job.job_id}-preview-label">Live preview</span>
+      <figure class="live-preview" aria-labelledby="{job.job_id}-preview-label">
+        <img src={job.previewUrl} alt="Live preview of the generation in progress" onerror={(event) => { failedPreviewUrl = event.currentTarget.getAttribute('src'); }} />
+      </figure>
     </div>
   {/if}
   </div>
@@ -376,8 +374,24 @@
     0% { transform: translateX(386%); }
     100% { transform: translateX(-100%); }
   }
+  /* A ghost fill that grows across the current step over the last step's duration. */
+  .current-step {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: var(--color-primary-main);
+    opacity: 0.4;
+    transform-origin: left;
+    animation: current-step-fill var(--step-ms) linear forwards;
+  }
+  .current-step[data-state='paused'] { animation-play-state: paused; }
+  @keyframes current-step-fill {
+    from { transform: scaleX(0); }
+    to { transform: scaleX(1); }
+  }
   @media (prefers-reduced-motion: reduce) {
     .step-pulse::after { animation: none; display: none; }
+    .current-step { animation: none; }
   }
   .job-card { width: 100%; overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: 8px; background: var(--color-bg-surface); }
   .job-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--color-border-subtle); }
@@ -389,9 +403,7 @@
   .job-status[data-status='failed'], .job-message.failed { color: var(--color-error); }
   .job-body { display: flex; flex-wrap: wrap; gap: 16px 20px; padding: 12px 14px; }
   .job-main { flex: 1 1 280px; min-width: 0; }
-  /* Column-major grid: each label sits above its content, so the two labels share a line. */
-  .job-media { flex: 1 1 300px; min-width: 0; display: grid; grid-auto-flow: column; grid-template-rows: auto minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); gap: 6px 12px; align-content: start; }
-  .job-media.both { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+  .job-media { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
   .media-label { font-size: 12px; color: var(--color-text-secondary); }
   .job-timing { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 14px; font-size: 11px; }
   .job-timing div { display: flex; align-items: baseline; gap: 8px; }
@@ -409,12 +421,6 @@
   .control-feedback { margin-top: 8px; font-size: 12px; color: var(--color-primary-main); overflow-wrap: anywhere; }
   .control-feedback.failed { color: var(--color-error); }
   .job-actions .cancel-button:hover { color: var(--color-error); border-color: var(--color-error); }
-  .output-preview-grid {
-    max-height: min(35vh, 14rem);
-    overflow-y: auto;
-    align-content: start;
-    padding-right: 2px;
-  }
   .live-preview { margin: 0; overflow: hidden; border: 1px solid var(--color-border-subtle); border-radius: 6px; background: var(--color-bg-base); }
   .live-preview img { display: block; width: 100%; max-height: min(40vh, 18rem); object-fit: contain; }
   .job-footer { display: flex; gap: 8px; padding: 7px 14px; font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-base); border-top: 1px solid var(--color-border-subtle); }

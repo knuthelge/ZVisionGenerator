@@ -847,7 +847,6 @@
               <MascotSpot mood={mascotMood} size={112} class="mx-auto mb-2 w-fit" />
               <JobCard
                 job={jobStore.current!}
-                onopenoutput={(asset, trigger) => openCompletedOutputViewer(jobOutputs.findIndex((output) => output.id === asset.id), trigger)}
                 oncancel={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/quit`)}
                 onpause={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/pause`)}
                 onresume={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/resume`)}
