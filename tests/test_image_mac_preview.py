@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from PIL import Image
 
 from zvisiongenerator.core.latent_preview import QWEN_IMAGE_RGB_BIAS, ZIMAGE_RGB_BIAS
 
@@ -123,6 +124,20 @@ class TestProgressCheckerPreviews:
 
         assert [event["current_step"] for event in events if "preview" in event] == [2, 4, 6]
         assert all(event["preview"].size == (8, 8) for event in events if "preview" in event)
+
+    def test_steps_are_reported_once_evaluated_and_before_their_preview(self, mx, image_mac, monkeypatch):
+        calls: list = []
+        real_eval = image_mac.mx.eval
+        monkeypatch.setattr(image_mac.mx, "eval", lambda *arrays: (calls.append("eval"), real_eval(*arrays))[1])
+        monkeypatch.setattr(image_mac, "render_latent_preview", lambda *_args: calls.append("preview") or Image.new("RGB", (8, 8)))
+        checker = image_mac._ProgressChecker(4, lambda event: calls.append(("preview " if "preview" in event else "step ") + str(event["current_step"])), model=None, family="zimage")
+        config = self._config(4)
+        checker.call_before_loop(1, "prompt", mx.zeros((16, 1, 8, 8)), config)
+
+        checker.call_in_loop(0, 1, "prompt", mx.zeros((16, 1, 8, 8)), config, None)
+
+        assert calls[0] == "eval"
+        assert calls[-3:] == ["step 1", "preview", "preview 1"]
 
     def test_callbacks_accept_keywords_added_by_newer_mflux(self, mx, image_mac):
         # mflux 0.20 passes control_images to before-loop callbacks; a strict signature failed every generation.

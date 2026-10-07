@@ -217,17 +217,20 @@ class _ProgressChecker:
 
     def call_in_loop(self, t, seed, prompt, latents, config, time_steps, denoised=None, **_):
         del seed, prompt, time_steps
+        # mflux calls this before it evaluates the step. Evaluate it first so every report is a finished step, and
+        # send a preview as a second report so its decode never holds this one back (steps would arrive in pairs).
+        mx.eval(latents)
         self._current_step = min(self._current_step + 1, self._total_steps)
         payload = {
             "current_step": self._current_step,
             "total_steps": self._total_steps,
         }
+        self._step_callback(payload)
         preview = self._render_preview(t, latents, config, denoised)
-        if preview is not None:
-            payload["preview"] = preview
         # Keep these latents only when the next step renders a preview from them; a reported prediction needs none.
         self._previous_latents = latents if self._previews_enabled and denoised is None and t + 2 in self._preview_steps else None
-        self._step_callback(payload)
+        if preview is not None:
+            self._step_callback({**payload, "preview": preview})
 
     def _render_preview(self, t, latents, config, denoised=None) -> Image.Image | None:
         """Render a preview at milestone steps; never let a preview failure stop generation.
