@@ -442,7 +442,7 @@
         {#each facts as fact (fact.label)}
           <div class:wide={fact.wide}>
             <dt>{fact.label}</dt>
-            <dd title={fact.value}>{fact.value}</dd>
+            <dd title={fact.title ?? fact.value}>{fact.value}</dd>
           </div>
         {/each}
       </dl>
