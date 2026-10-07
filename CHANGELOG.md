@@ -6,15 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b13] - 2026-10-07
+
 ### Added
-- **Krea 2 Turbo** image model (`krea2`, 8 steps) on macOS and Windows/Linux, from unsloth's ungated mirror. Supports reference images, upscale, LoRAs, q4/q8 and live previews; negative prompts and the Scheduler control are turned off for it. On Windows and Linux, `-q 4` runs on 10–12 GB GPUs
-- `ziv-model model --model-type krea2-turbo` converts native and ComfyUI Krea 2 Turbo checkpoints
+- Windows/Linux: reference images (img2img) and upscale, including the viewer's **Upscale**, now work with Krea 2
 
 ### Changed
-- diffusers is updated to 0.40.0
+- Krea 2: the `krea2` alias uses `unsloth/Krea-2-Turbo`, an ungated mirror, so no Hugging Face token or license acceptance is needed
+- Krea 2: only Krea 2 Turbo is supported. The Raw defaults and `ziv-model model --model-type krea2-raw` are removed
+- Krea 2: negative prompts are turned off for it
+- macOS: Krea 2 samples with Euler at the fixed timestep shift Krea trained it with, instead of mflux's er_sde sampler and size-dependent shift; upscales and reference images are no longer grainy
+- Krea 2 upscales refine in 3 steps instead of 4, which ranked better in side-by-side tests and is about 25% faster
+- Config: the per-backend `backends.<mflux|diffusers>` capability overrides added in 0.13.0b12 are removed; capability flags are per model family again
 
 ### Fixed
 - Web UI: the asset viewer's Details panel lists every LoRA on its own row (`name · weight`, full path on hover); before, a second LoRA was cut off
+
+## [0.13.0b12] - 2026-10-06
+
+### Added
+- **Krea 2 Turbo** image model (`krea2` alias, `krea/Krea-2-Turbo`) on macOS (mflux) and Windows/Linux (diffusers): 8 steps, guidance 1.0 (off), negative prompts, LoRAs, q4/q8 and live previews, with stored quants on macOS. On Windows and Linux, `-q 4` lets the text encoder and transformer take turns on the GPU so it runs on 10–12 GB cards. The model is gated on Hugging Face and needs its license accepted and a token
+- Krea 2 Raw models (`krea/Krea-2-Raw` and Raw fine-tunes) default to 28 steps and guidance 5.5
+- `ziv-model model --model-type krea2-turbo|krea2-raw` (and the Models page converter) converts native and ComfyUI Krea 2 checkpoints
+- Config: a model preset's `backends.<mflux|diffusers>` entry overrides its capability flags for one backend. Krea 2 uses it to turn off reference images and upscale on Windows and Linux, where diffusers has no Krea 2 image-to-image pipeline; `ziv-image` rejects them there and the Web UI hides them
+- Config: `supports_scheduler: false` hides the Scheduler control and rejects `--scheduler` for models that sample with their own schedule (Krea 2); a scheduler carried over from another model is dropped
+
+### Changed
+- macOS: memory estimates leave the text encoder unquantized for models whose loader keeps it in bfloat16 (Krea 2), so their q4/q8 estimates are no longer about 5–7 GB too low
+- diffusers is updated to 0.40.0, the first release with Krea 2 that does not build the full attention matrix for its text padding mask
 
 ## [0.13.0b11] - 2026-10-05
 
