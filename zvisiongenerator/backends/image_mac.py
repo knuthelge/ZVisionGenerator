@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import importlib.metadata
 import os
 import sys
@@ -109,6 +110,21 @@ def _install_ideogram4_initial_sigma() -> None:
 
 # Ideogram4-only: activate the first-step sigma override for the whole process.
 _install_ideogram4_initial_sigma()
+
+# Krea 2 Turbo samples with plain Euler, as Krea's own inference code does. mflux defaults to er_sde, which adds
+# fresh noise every step and leaves grain when refining an existing image (img2img, upscale).
+_KREA2_SAMPLER = "euler"
+
+
+def _krea2_turbo_config() -> ModelConfig:
+    """Return mflux's Krea 2 config with Turbo's fixed timestep shift (mu = 1.15), the shift Krea trained it at.
+
+    mflux derives the shift from the image size instead; at upscale sizes (about 4 MP, mu above 2) an img2img
+    refinement then starts from far more noise than its denoise asks for.
+    """
+    config = copy.copy(ModelConfig.krea2())
+    config.sigma_base_shift = config.sigma_max_shift  # equal endpoints: the shift no longer depends on image size
+    return config
 
 
 def _unregister_callback(model: Any, callback: Any) -> None:
@@ -354,7 +370,7 @@ class MfluxBackend:
             model = Krea2(
                 quantize=quantize,
                 model_path=model_path,
-                model_config=ModelConfig.krea2(),
+                model_config=_krea2_turbo_config(),
                 **lora_kwargs,
             )
         else:
@@ -438,6 +454,8 @@ class MfluxBackend:
             )
             if scheduler is not None:
                 gen_kwargs["scheduler"] = scheduler
+            if self._model_info.family == "krea2":
+                gen_kwargs["scheduler"] = _KREA2_SAMPLER
             if not _is_flux and negative_prompt is not None:
                 gen_kwargs["negative_prompt"] = negative_prompt
 
@@ -508,6 +526,8 @@ class MfluxBackend:
                 )
                 if scheduler is not None:
                     gen_kwargs["scheduler"] = scheduler
+                if self._model_info.family == "krea2":
+                    gen_kwargs["scheduler"] = _KREA2_SAMPLER
                 if not _is_flux and negative_prompt is not None:
                     gen_kwargs["negative_prompt"] = negative_prompt
 
