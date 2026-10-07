@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 from collections.abc import Mapping
 from unittest.mock import MagicMock
@@ -568,7 +569,6 @@ class TestKrea2MfluxBackend:
             monkeypatch.setattr(image_mac_module, "_upcast_model_weights", MagicMock())
             monkeypatch.setattr(image_mac_module, "_materialize_weights", MagicMock())
             monkeypatch.setattr(image_mac_module, "_apply_buffer_cache_policy", MagicMock())
-            monkeypatch.setattr(image_mac_module.ModelConfig, "krea2", MagicMock(return_value="krea2-config"))
             krea2_ctor = MagicMock(return_value=MagicMock())
             monkeypatch.setattr(image_mac_module, "Krea2", krea2_ctor)
 
@@ -576,13 +576,47 @@ class TestKrea2MfluxBackend:
 
         assert loaded_info == model_info
         assert model is krea2_ctor.return_value
-        assert krea2_ctor.call_args.kwargs == {
+        kwargs = krea2_ctor.call_args.kwargs
+        assert {key: value for key, value in kwargs.items() if key != "model_config"} == {
             "quantize": 4,
             "model_path": "unsloth/Krea-2-Turbo",
-            "model_config": "krea2-config",
             "lora_paths": ["/tmp/style.safetensors"],
             "lora_scales": [0.8],
         }
+        assert kwargs["model_config"].model_name == image_mac_module.ModelConfig.krea2().model_name
+
+    def test_krea2_turbo_config_pins_the_timestep_shift_at_every_size(self):
+        image_mac_module = self._import_backend_module()
+        from mflux.models.common.config.config import Config
+
+        def first_img2img_sigma(model_config, width, height):
+            config = Config(model_config=model_config, num_inference_steps=20, width=width, height=height, image_path="x.png", image_strength=0.8)
+            return float(config.scheduler.sigmas[config.init_time_step])
+
+        pinned = image_mac_module._krea2_turbo_config()
+
+        # Krea trained Turbo at mu = 1.15: denoise 0.2 starts at sigma e^1.15 / (e^1.15 + 4) whatever the size.
+        expected = math.exp(1.15) / (math.exp(1.15) + 4)
+        assert first_img2img_sigma(pinned, 1024, 1024) == pytest.approx(expected, abs=1e-3)
+        assert first_img2img_sigma(pinned, 1664, 2432) == pytest.approx(expected, abs=1e-3)
+        # The shared mflux config keeps its size-dependent shift.
+        assert first_img2img_sigma(image_mac_module.ModelConfig.krea2(), 1664, 2432) > expected + 0.1
+
+    @pytest.mark.parametrize("method", ["text_to_image", "image_to_image"])
+    def test_krea2_samples_with_euler(self, method):
+        image_mac_module = self._import_backend_module()
+        backend = image_mac_module.MfluxBackend()
+        backend._model_info = image_mac_module.ImageModelInfo(family="krea2", is_distilled=False, size=None)
+        model = MagicMock()
+        model.generate_image.return_value = _make_generated_image_result()
+        common = dict(model=model, prompt="a fox", seed=1, steps=8, guidance=1.0)
+
+        if method == "text_to_image":
+            backend.text_to_image(width=64, height=64, **common)
+        else:
+            backend.image_to_image(image=Image.new("RGB", (64, 64)), strength=0.4, **common)
+
+        assert model.generate_image.call_args.kwargs["scheduler"] == "euler"
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Selective MLX upcast only runs on macOS")
