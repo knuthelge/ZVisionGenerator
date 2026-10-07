@@ -174,6 +174,8 @@ model_presets:
     supports_scheduler: false  # Krea 2 samples with its own schedule
     default_steps: 8
     default_guidance: 1.0
+    upscale:
+      default_upscale_steps: 3  # ranked best against 1, 2, 4 and 8 refinement steps
     default_scheduler:
       mflux: null
       diffusers: null
