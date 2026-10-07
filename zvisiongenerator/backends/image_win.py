@@ -26,12 +26,63 @@ torch.set_float32_matmul_precision("high")
 _Q4_CPU_OFFLOAD_FAMILIES = frozenset({"krea2"})
 
 
-def _krea2_guidance_scale(guidance: float | None) -> float:
+def _krea2_guidance_scale(guidance: float) -> float:
     """Convert a standard CFG scale (1.0 = off) to Krea 2's ``guidance_scale`` (0.0 = off).
 
     Krea 2's pipeline computes ``cond + g * (cond - uncond)``, which is standard CFG at ``1 + g``.
     """
-    return max((1.0 if guidance is None else guidance) - 1.0, 0.0)
+    return max(guidance - 1.0, 0.0)
+
+
+# Krea2Pipeline's fixed timestep shift for Krea 2 Turbo. Copied from diffusers 0.40's Krea2Pipeline.__call__,
+# which does not expose it: recheck it when upgrading diffusers.
+_KREA2_TURBO_MU = 1.15
+
+
+def _img2img_sigmas(steps: int, strength: float) -> list[float]:
+    """Return the tail of Krea 2's unshifted sigma grid that an img2img run at *strength* denoises over.
+
+    The grid is the one Krea2Pipeline builds itself (``linspace(1, 1/steps, steps)``). Like diffusers' img2img
+    pipelines, ``strength`` skips the first ``int(steps - steps * strength)`` entries and always keeps at least one;
+    the workflow inflates ``steps`` by ``1 / strength`` and relies on this rounding to run the steps the user asked for.
+    """
+    grid = [1.0 - i / steps for i in range(steps)]
+    run = min(max(steps - int(max(steps - steps * strength, 0.0)), 1), steps)
+    return grid[steps - run :]
+
+
+def _krea2_size(pipe: Any, image: Image.Image) -> tuple[int, int]:
+    """Return *image*'s ``(width, height)`` rounded down to the pixel multiple Krea 2's latent patches need."""
+    multiple = pipe.vae_scale_factor * pipe.patch_size
+    return max(image.width // multiple, 1) * multiple, max(image.height // multiple, 1) * multiple
+
+
+def _krea2_encode_image(pipe: Any, image: Image.Image, width: int, height: int) -> torch.Tensor:
+    """Encode *image* to the packed, normalized latents Krea2Pipeline denoises."""
+    vae = pipe.vae
+    pixels = pipe.image_processor.preprocess(image, height=height, width=width).to(device=pipe._execution_device, dtype=vae.dtype)
+    # The Qwen-Image VAE encodes video-shaped (batch, channels, frames, height, width) input.
+    encoded = vae.encode(pixels.unsqueeze(2)).latent_dist.mode()
+    mean = torch.tensor(vae.config.latents_mean).view(1, -1, 1, 1, 1).to(encoded)
+    std = torch.tensor(vae.config.latents_std).view(1, -1, 1, 1, 1).to(encoded)
+    normalized = ((encoded - mean) / std)[:, :, 0]
+    batch, channels, latent_height, latent_width = normalized.shape
+    return pipe._pack_latents(normalized, batch, channels, latent_height, latent_width)
+
+
+def _krea2_start_sigma(pipe: Any, sigmas: list[float]) -> float:
+    """Return the noise level Krea2Pipeline starts *sigmas* at once its scheduler applies Turbo's timestep shift."""
+    scheduler = type(pipe.scheduler).from_config(pipe.scheduler.config)
+    scheduler.set_timesteps(sigmas=sigmas, mu=_KREA2_TURBO_MU)
+    return float(scheduler.sigmas[0])
+
+
+def _krea2_img2img_latents(pipe: Any, image: Image.Image, sigmas: list[float], width: int, height: int, generator: torch.Generator | None) -> torch.Tensor:
+    """Return *image*'s latents noised to the first of *sigmas*, ready to pass to Krea2Pipeline as ``latents``."""
+    clean = _krea2_encode_image(pipe, image, width, height)
+    noise = torch.randn(clean.shape, generator=generator, dtype=torch.float32).to(device=clean.device, dtype=clean.dtype)
+    sigma = _krea2_start_sigma(pipe, sigmas)
+    return (1.0 - sigma) * clean + sigma * noise
 
 
 def _make_bnb_configs(quantize: int, compute_dtype: torch.dtype):
@@ -269,7 +320,7 @@ class DiffusersBackend:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
         if self._model_info.family == "krea2":
-            raise ValueError("img2img is not supported for Krea 2 on this platform: diffusers has no Krea 2 image-to-image pipeline.")
+            return self._krea2_image_to_image(model, image, prompt, strength, steps, seed, guidance, skip_signal, step_callback)
         if self._img2img_pipe is None:
             from diffusers import AutoPipelineForImage2Image
 
@@ -312,6 +363,47 @@ class DiffusersBackend:
             return result.images[0]
         finally:
             self._img2img_pipe.scheduler = original_scheduler
+
+    def _krea2_image_to_image(
+        self,
+        pipe: Any,
+        image: Image.Image,
+        prompt: str,
+        strength: float,
+        steps: int,
+        seed: int | None,
+        guidance: float | None,
+        skip_signal: Any | None,
+        step_callback: Any | None,
+    ) -> Image.Image | None:
+        """Run Krea 2 img2img through its text-to-image pipeline, which diffusers ships without an img2img variant.
+
+        The image is VAE-encoded, noised to the run's first sigma and denoised over the tail of the schedule.
+        """
+        torch.cuda.empty_cache()
+        generator = torch.Generator(device="cpu").manual_seed(seed) if seed is not None else None
+        width, height = _krea2_size(pipe, image)
+        sigmas = _img2img_sigmas(steps, strength)
+        pipe_kwargs = dict(
+            prompt=prompt,
+            width=width,
+            height=height,
+            num_inference_steps=len(sigmas),
+            sigmas=sigmas,
+            latents=_krea2_img2img_latents(pipe, image, sigmas, width, height, generator),
+            guidance_scale=_krea2_guidance_scale(guidance),
+            generator=generator,
+        )
+        if skip_signal is not None or step_callback is not None:
+            pipe_kwargs.update(self._step_callback_kwargs(skip_signal, step_callback, len(sigmas), height, width))
+
+        result = pipe(**pipe_kwargs)
+
+        torch.cuda.empty_cache()
+        if skip_signal is not None and pipe._interrupt:
+            pipe._interrupt = False
+            return None
+        return result.images[0]
 
     @torch.inference_mode()
     def text_to_image(

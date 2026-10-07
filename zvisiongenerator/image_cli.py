@@ -262,10 +262,6 @@ def main(*, prog: str = "ziv-image") -> None:
             if eff < 256 or eff > 2048 or eff % 16 != 0:
                 parser.error(f"Ideogram 4 requires width/height between 256 and 2048 (multiple of 16), got {eff_w}x{eff_h} for --size {args.size} --ratio {args.ratio}")
     else:
-        if args.image_path is not None and not defaults.get("supports_img2img", True):
-            parser.error(f"img2img is not supported for the '{model_info.family}' model family on this platform.")
-        if args.upscale is not None and not defaults.get("supports_upscale", True):
-            parser.error(f"Upscaling requires img2img, which is not supported for the '{model_info.family}' model family on this platform.")
         if args.first_sigma is not None:
             warnings.warn(f"--first-sigma only affects Ideogram 4 and is ignored for the '{model_info.family}' family.", stacklevel=2)
         if args.json_prompt is not None:

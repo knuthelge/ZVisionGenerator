@@ -558,30 +558,10 @@ class TestKrea2MfluxBackend:
 
         return image_mac_module
 
-    @pytest.mark.parametrize(("is_distilled", "config_name"), [(True, "krea2"), (False, "krea2_raw")])
-    def test_krea2_load_model_picks_turbo_or_raw_config(self, is_distilled, config_name):
-        image_mac_module = self._import_backend_module()
-        model_info = image_mac_module.ImageModelInfo(family="krea2", is_distilled=is_distilled, size=None)
-
-        with pytest.MonkeyPatch.context() as monkeypatch:
-            monkeypatch.setattr(image_mac_module, "detect_image_model", lambda _path: model_info)
-            monkeypatch.setattr(image_mac_module, "_upcast_model_weights", MagicMock())
-            monkeypatch.setattr(image_mac_module, "_materialize_weights", MagicMock())
-            monkeypatch.setattr(image_mac_module, "_apply_buffer_cache_policy", MagicMock())
-            monkeypatch.setattr(image_mac_module.ModelConfig, "krea2", MagicMock(return_value="turbo-config"))
-            monkeypatch.setattr(image_mac_module.ModelConfig, "krea2_raw", MagicMock(return_value="raw-config"))
-            krea2_ctor = MagicMock(return_value=MagicMock())
-            monkeypatch.setattr(image_mac_module, "Krea2", krea2_ctor)
-
-            image_mac_module.MfluxBackend().load_model("krea/Krea-2", quantize=8)
-
-        expected = "turbo-config" if config_name == "krea2" else "raw-config"
-        assert krea2_ctor.call_args.kwargs["model_config"] == expected
-
     def test_krea2_load_model_forwards_quantize_and_loras(self):
         image_mac_module = self._import_backend_module()
         backend = image_mac_module.MfluxBackend()
-        model_info = image_mac_module.ImageModelInfo(family="krea2", is_distilled=True, size=None)
+        model_info = image_mac_module.ImageModelInfo(family="krea2", is_distilled=False, size=None)
 
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(image_mac_module, "detect_image_model", lambda _path: model_info)
@@ -592,30 +572,17 @@ class TestKrea2MfluxBackend:
             krea2_ctor = MagicMock(return_value=MagicMock())
             monkeypatch.setattr(image_mac_module, "Krea2", krea2_ctor)
 
-            model, loaded_info = backend.load_model("krea/Krea-2-Turbo", quantize=4, lora_paths=["/tmp/style.safetensors"], lora_weights=[0.8])
+            model, loaded_info = backend.load_model("unsloth/Krea-2-Turbo", quantize=4, lora_paths=["/tmp/style.safetensors"], lora_weights=[0.8])
 
         assert loaded_info == model_info
         assert model is krea2_ctor.return_value
         assert krea2_ctor.call_args.kwargs == {
             "quantize": 4,
-            "model_path": "krea/Krea-2-Turbo",
+            "model_path": "unsloth/Krea-2-Turbo",
             "model_config": "krea2-config",
             "lora_paths": ["/tmp/style.safetensors"],
             "lora_scales": [0.8],
         }
-
-    def test_krea2_text_to_image_defaults_guidance_to_off(self):
-        image_mac_module = self._import_backend_module()
-        backend = image_mac_module.MfluxBackend()
-        backend._model_info = image_mac_module.ImageModelInfo(family="krea2", is_distilled=False, size=None)
-        model = MagicMock()
-        model.generate_image.return_value = _make_generated_image_result()
-
-        backend.text_to_image(model=model, prompt="a fox", width=1024, height=1024, seed=1, steps=8, guidance=None, negative_prompt="blurry")
-
-        kwargs = model.generate_image.call_args.kwargs
-        assert kwargs["guidance"] == 1.0
-        assert kwargs["negative_prompt"] == "blurry"
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Selective MLX upcast only runs on macOS")

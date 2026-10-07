@@ -14,7 +14,7 @@ import struct
 from dataclasses import dataclass
 from pathlib import Path
 
-from zvisiongenerator.utils.model_files import component_of, is_ltx_mlx_layout, ltx_mlx_transformer_file, model_weight_files
+from zvisiongenerator.utils.model_files import component_of, is_ltx_mlx_layout, ltx_mlx_transformer_file, is_krea2_model, model_weight_files
 
 GIB = 1024**3
 _IMAGE_WORKING_BYTES = int(1.5 * GIB)
@@ -124,7 +124,7 @@ def _read_totals_cached(path: str, size: int, mtime_ns: int, skipped_prefixes: t
     return WeightTotals(matrix, other, packed, prequantized)
 
 
-def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ...] = (None,), *, quantize_text_encoder: bool = True) -> dict[int | None, int] | None:
+def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ...] = (None,)) -> dict[int | None, int] | None:
     """Estimate resident memory for an mflux image model loaded in bfloat16, at each quantize level.
 
     Mirrors ``MfluxBackend.load_model``: floating-point weights load as bfloat16, the VAE is upcast to
@@ -135,8 +135,6 @@ def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ..
     Args:
         model_dir: Directory holding the model's safetensors files.
         quantize_levels: Levels to estimate: ``None`` for unquantized, or 4 / 8 bits.
-        quantize_text_encoder: Whether quantizing also packs the text encoder; mflux keeps some families'
-            (Krea 2) in bfloat16.
 
     Returns:
         Estimated peak bytes per level, or ``None`` when weights are missing or unreadable.
@@ -144,6 +142,8 @@ def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ..
     components = _image_components(model_dir)
     if components is None:
         return None
+    # mflux keeps Krea 2's text encoder in bfloat16 at every quantize level.
+    quantize_text_encoder = not is_krea2_model(model_dir)
     return {
         level: int(sum(_image_component_bytes(name, totals, _component_quantize(name, level, quantize_text_encoder)) for name, totals in components.items())) + _IMAGE_WORKING_BYTES
         for level in quantize_levels

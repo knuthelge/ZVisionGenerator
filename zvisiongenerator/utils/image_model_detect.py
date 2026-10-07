@@ -27,7 +27,7 @@ _CLASS_NAME_MAP: dict[str, str] = {
 @dataclass(frozen=True)
 class ImageModelInfo:
     family: str  # "zimage" | "flux2_klein" | "flux2" | "flux1" | "ideogram4" | "krea2" | "unknown"
-    is_distilled: bool  # True for distilled Klein and Krea 2 Turbo, False otherwise
+    is_distilled: bool  # True for distilled Klein, False otherwise
     size: str | None  # "4b" | "9b" | None
 
 
@@ -80,8 +80,7 @@ def detect_image_model(model_path: str) -> ImageModelInfo:
     elif family == "ideogram4":
         info = ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
     elif family == "krea2":
-        # Krea2Pipeline records is_distilled (Turbo) in its config and defaults it to false (Raw).
-        info = ImageModelInfo(family="krea2", is_distilled=bool(index.get("is_distilled", False)), size=None)
+        info = ImageModelInfo(family="krea2", is_distilled=False, size=None)
     else:
         info = ImageModelInfo(family="unknown", is_distilled=False, size=None)
 

@@ -292,8 +292,3 @@ class TestConvertKrea2TransformerKeys:
         result = convert_krea2_transformer_keys({"model.diffusion_model.first.weight": torch.zeros(2), "text_encoders.qwen.weight": torch.zeros(2), "vae.decoder.weight": torch.zeros(2)})
 
         assert set(result) == {"img_in.weight"}
-
-    def test_diffusers_format_passes_through(self):
-        state_dict = {"transformer_blocks.0.attn.to_q.weight": torch.zeros(2), "img_in.weight": torch.zeros(2), "vae.decoder.weight": torch.zeros(2)}
-
-        assert set(convert_krea2_transformer_keys(state_dict)) == {"transformer_blocks.0.attn.to_q.weight", "img_in.weight"}

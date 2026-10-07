@@ -21,7 +21,6 @@ def describe_model_status(
     kind: str,
     quantize_options: tuple[int, ...] = (),
     budget_bytes: int | None = None,
-    quantize_text_encoder: bool = True,
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
 ) -> dict[str, Any]:
     """Return the ``downloaded`` flag and ``memory_fit`` summary for one inventory model.
@@ -31,7 +30,6 @@ def describe_model_status(
         kind: ``"image"`` or ``"video"``.
         quantize_options: Quantization levels the model supports (empty when it cannot be quantized).
         budget_bytes: GPU memory budget, or ``None`` when this platform is not estimated.
-        quantize_text_encoder: Whether an image model's quantize levels also pack its text encoder.
         find_local_dir: Resolver for fully downloaded model directories.
 
     Returns:
@@ -53,7 +51,7 @@ def describe_model_status(
         if kind == "video":
             memory_fit = _video_memory_fit(model_dir, text_encoder_dir, budget_bytes)
         else:
-            levels = estimate_image_memory(model_dir, (None, *quantize_options), quantize_text_encoder=quantize_text_encoder)
+            levels = estimate_image_memory(model_dir, (None, *quantize_options))
             if levels is not None:
                 by_quantize = {NO_QUANTIZE_KEY if level is None else str(level): _fit(value, budget_bytes) for level, value in levels.items()}
                 memory_fit = {"budget_gb": _to_gb(budget_bytes), "by_quantize": by_quantize}

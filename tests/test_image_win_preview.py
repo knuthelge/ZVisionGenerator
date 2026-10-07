@@ -36,6 +36,15 @@ def _pixel(image, bias):
     return np.asarray(image)[0, 0], np.round(np.array(bias) * 255)
 
 
+def _krea2_pipe() -> SimpleNamespace:
+    """Return a stand-in Krea 2 pipeline that unpacks latents with the real Krea2Pipeline method."""
+    from diffusers.pipelines.krea2.pipeline_krea2 import Krea2Pipeline
+
+    pipe = SimpleNamespace(patch_size=2, vae_scale_factor=8)
+    pipe._unpack_latents = lambda *args: Krea2Pipeline._unpack_latents(pipe, *args)
+    return pipe
+
+
 class TestRenderLatentPreview:
     def test_zimage_preview_is_one_eighth_resolution_and_zero_latents_map_to_bias(self, preview_module):
         latents = torch.zeros((1, 16, 32, 16))
@@ -82,7 +91,7 @@ class TestRenderLatentPreview:
             preview_module._flux2_spatial(_flux2_pipe(), torch.zeros((1, 10, 128)), height=128, width=64)
 
     def test_krea2_preview_is_one_eighth_resolution_and_zero_latents_map_to_bias(self, preview_module):
-        pipe = SimpleNamespace(patch_size=2, vae_scale_factor=8)
+        pipe = _krea2_pipe()
         latents = torch.zeros((1, 8 * 4, 64))
 
         image = preview_module.render_latent_preview(pipe, "krea2", latents, height=128, width=64)
@@ -94,7 +103,7 @@ class TestRenderLatentPreview:
     def test_krea2_unpacks_like_the_diffusers_pipeline(self, preview_module):
         from diffusers.pipelines.krea2.pipeline_krea2 import Krea2Pipeline
 
-        pipe = SimpleNamespace(patch_size=2, vae_scale_factor=8)
+        pipe = _krea2_pipe()
         height, width = 128, 64
         spatial_in = torch.randn((1, 16, height // 8, width // 8))
         packed = Krea2Pipeline._pack_latents(pipe, spatial_in, 1, 16, height // 8, width // 8)

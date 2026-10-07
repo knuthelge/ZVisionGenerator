@@ -443,9 +443,9 @@ def test_workspace_bootstrap_defaults_include_ideogram_capability_flags(monkeypa
 
 def test_workspace_bootstrap_defaults_include_scheduler_capability(monkeypatch):
     web_config = _make_web_config()
-    web_config.app_config["model_aliases"] = {"krea2": "krea/Krea-2-Turbo", "zit": "Tongyi-MAI/Z-Image-Turbo"}
+    web_config.app_config["model_aliases"] = {"krea2": "unsloth/Krea-2-Turbo", "zit": "Tongyi-MAI/Z-Image-Turbo"}
     web_config.image_model_options = ("krea2", "zit")
-    families = {"krea/Krea-2-Turbo": "krea2", "Tongyi-MAI/Z-Image-Turbo": "zimage"}
+    families = {"unsloth/Krea-2-Turbo": "krea2", "Tongyi-MAI/Z-Image-Turbo": "zimage"}
 
     monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: web_config.app_config["model_aliases"].get(model, model))
     monkeypatch.setattr(workspace_api_module, "detect_image_model", lambda value: ImageModelInfo(family=families[str(value)], is_distilled=True, size=None))
@@ -724,7 +724,7 @@ def test_submit_image_job_drops_scheduler_for_models_with_their_own_sampler(monk
     submitted: list[dict[str, object]] = []
     _patch_image_submit_dependencies(
         monkeypatch,
-        model_info=ImageModelInfo(family="krea2", is_distilled=True, size=None),
+        model_info=ImageModelInfo(family="krea2", is_distilled=False, size=None),
         defaults=_make_resolved_image_defaults(supports_scheduler=False),
         submitted=submitted,
     )

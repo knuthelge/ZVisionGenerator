@@ -139,15 +139,8 @@ def _flux2_spatial(pipe: Any, latents: torch.Tensor, height: int, width: int) ->
 
 
 def _krea2_spatial(pipe: Any, latents: torch.Tensor, height: int, width: int) -> torch.Tensor:
-    """Undo Krea 2's token packing of ``patch_size``-square patches to recover ``(16, h, w)`` VAE latents."""
-    patch = pipe.patch_size
-    tokens_h, tokens_w = height // (pipe.vae_scale_factor * patch), width // (pipe.vae_scale_factor * patch)
-    tokens, channels = latents.shape[1:]
-    if tokens != tokens_h * tokens_w:
-        raise ValueError(f"Expected {tokens_h * tokens_w} latent tokens for {width}x{height}, got {tokens}.")
-    # Each token holds (channel, row, column) of its patch, as Krea2Pipeline._pack_latents lays it out.
-    packed = latents[0].float().reshape(tokens_h, tokens_w, channels // (patch * patch), patch, patch)
-    return packed.permute(2, 0, 3, 1, 4).reshape(channels // (patch * patch), tokens_h * patch, tokens_w * patch)
+    """Undo Krea 2's token packing with the pipeline's own unpacking to recover ``(16, h, w)`` VAE latents."""
+    return pipe._unpack_latents(latents, height, width)[0, :, 0].float()
 
 
 def _project_to_image(spatial: torch.Tensor, factors: tuple[tuple[float, ...], ...], bias: tuple[float, ...]) -> Image.Image:

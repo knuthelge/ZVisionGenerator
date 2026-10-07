@@ -136,7 +136,7 @@ Operational notes:
 |---|---|---|
 | `-i`, `--input` | *(required)* | Path to  `.safetensors` checkpoint |
 | `--name` | input filename | Custom model folder name |
-| `--model-type` | `zimage` | Model type: `zimage`, `flux2-klein-4b`, `flux2-klein-9b`, `krea2-turbo`, `krea2-raw` |
+| `--model-type` | `zimage` | Model type: `zimage`, `flux2-klein-4b`, `flux2-klein-9b`, `krea2-turbo` |
 | `--base-model` | `Tongyi-MAI/Z-Image-Turbo` | Base HF repo (only for zimage type) |
 | `--copy` | off | Copy files instead of symlinking |
 | `--quantize` | off | Also save a quantized copy as `<name>@q4` or `<name>@q8` (`4` or `8`, macOS) |

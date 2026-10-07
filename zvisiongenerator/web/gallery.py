@@ -12,7 +12,6 @@ from urllib.parse import quote, unquote, urlencode
 
 from PIL import Image, UnidentifiedImageError
 
-from zvisiongenerator.backends import get_backend_name
 from zvisiongenerator.utils.provenance import image_prompt_text, optional_float, optional_int, optional_text, read_mp4_config, read_png_config, recorded_settings
 from zvisiongenerator.utils.config import model_capabilities
 from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, upscale_options, upscale_output_size
@@ -381,7 +380,7 @@ def _asset_upscale_json(asset: GalleryAsset, web_config: WebUiConfig, resolved_m
     else:
         # The inventory's family gives the same capabilities resolve_defaults uses for POST /api/upscale, without detection.
         family = next((entry.family for entry in web_config.image_inventory if entry.name == model), "unknown")
-        options = upscale_options(asset.width, asset.height, model_capabilities(web_config.app_config, family, get_backend_name()), web_config.app_config)
+        options = upscale_options(asset.width, asset.height, model_capabilities(web_config.app_config, family), web_config.app_config)
     return {"factors": [asdict(option) for option in options]}
 
 
