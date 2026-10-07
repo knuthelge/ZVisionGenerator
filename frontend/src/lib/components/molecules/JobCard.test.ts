@@ -6,8 +6,7 @@ import { jobStore } from '$lib/state/job.svelte';
 import type { ActiveJobState } from '$lib/types';
 
 import JobCard from './JobCard.svelte';
-// @ts-expect-error Vite resolves the raw source query during the Vitest transform.
-import jobCardSource from './JobCard.svelte?raw';
+import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
 import * as molecules from './index';
 
 describe('JobCard', () => {
@@ -111,6 +110,63 @@ describe('JobCard', () => {
     component = mount(JobCard, { target, props: { job: makeJob({ currentStep, totalSteps }) } });
     flushSync();
     expect(target.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe(expected);
+  });
+
+  it('fills in the step in progress over the time the last step took', () => {
+    const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
+    const props = reactiveProps({ job: makeJob({ currentStep: 3, totalSteps: 20 }) });
+    component = mount(JobCard, { target, props });
+    flushSync();
+    // No step has been timed yet, so there is nothing to fill.
+    expect(target.querySelector('.current-step')).toBeNull();
+
+    now.mockReturnValue(2500);
+    props.job = { ...props.job, currentStep: 4 };
+    flushSync();
+    const current = target.querySelector<HTMLElement>('[role="progressbar"] .current-step');
+    expect(current?.dataset.state).toBe('running');
+    expect(current?.style.left).toBe('20%');
+    expect(current?.style.width).toBe('5%');
+    expect(current?.style.getPropertyValue('--step-ms')).toBe('1500ms');
+
+    props.job = { ...props.job, paused: true };
+    flushSync();
+    expect(target.querySelector<HTMLElement>('.current-step')?.dataset.state).toBe('paused');
+
+    props.job = { ...props.job, paused: false, currentStep: 20 };
+    flushSync();
+    expect(target.querySelector('.current-step')).toBeNull();
+    now.mockRestore();
+  });
+
+  it('counts elapsed time up every second between updates and holds it while paused', () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'performance'] });
+    try {
+      const props = reactiveProps({ job: makeJob({ elapsed: 10 }) });
+      component = mount(JobCard, { target, props });
+      flushSync();
+      const elapsed = () => target.querySelector('.job-timing dd')?.textContent;
+      expect(elapsed()).toBe('0:10');
+
+      vi.advanceTimersByTime(3000);
+      flushSync();
+      expect(elapsed()).toBe('0:13');
+
+      // A server update that lags the local count never moves the clock backwards.
+      props.job = { ...props.job, elapsed: 12.5 };
+      flushSync();
+      vi.advanceTimersByTime(1000);
+      flushSync();
+      expect(elapsed()).toBe('0:14');
+
+      props.job = { ...props.job, paused: true };
+      flushSync();
+      vi.advanceTimersByTime(5000);
+      flushSync();
+      expect(elapsed()).toBe('0:14');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows resume without pause when a running job is paused', () => {
@@ -267,76 +323,7 @@ describe('JobCard', () => {
     expect(target.querySelector('button[aria-label="Cancel job"]')).toBeNull();
   });
 
-  it('renders completed output previews without requiring a legacy path field', () => {
-    component = mount(JobCard, {
-      target,
-      props: {
-        job: makeJob({
-          status: 'completed',
-          outputs: [
-            {
-              id: 'outputs/first.png',
-              url: '/media/first.png',
-              thumbnail_url: '/media/first-thumb.png',
-              filename: 'first.png',
-              created_at: '2026-04-22T00:00:00Z',
-              workflow: 'txt2img',
-              prompt: 'First output',
-              model: 'zit',
-              reuse_workspace_url: '#/workspace?workflow=txt2img',
-              media_type: 'image',
-            },
-            {
-              id: 'outputs/second.mp4',
-              url: '/media/second.mp4',
-              thumbnail_url: '/media/second-thumb.mp4',
-              filename: 'second.mp4',
-              created_at: '2026-04-22T00:00:01Z',
-              workflow: 'txt2vid',
-              prompt: 'Second output',
-              model: 'ltx-8',
-              reuse_workspace_url: '#/workspace?workflow=txt2vid',
-              media_type: 'video',
-            },
-          ],
-        }),
-      },
-    });
-    flushSync();
-
-    expect(target.querySelectorAll('button[aria-label^="View "]')).toHaveLength(2);
-    expect(target.querySelectorAll('img[alt="first.png"]')).toHaveLength(1);
-    expect(target.querySelectorAll('video')).toHaveLength(1);
-  });
-
-  it('announces the unique progressive count and eagerly loads only the newest output', () => {
-    const first = {
-      id: 'outputs/first.png', url: '/media/first.png', thumbnail_url: '/media/first-thumb.png', filename: 'first.png',
-      created_at: '', workflow: 'txt2img' as const, prompt: '', model: 'zit', reuse_workspace_url: '', media_type: 'image' as const,
-    };
-    const olderVideo = {
-      id: 'outputs/older.mp4', url: '/media/older.mp4', thumbnail_url: '/media/older-thumb.mp4', filename: 'older.mp4',
-      created_at: '', workflow: 'txt2vid' as const, prompt: '', model: 'ltx-8', reuse_workspace_url: '', media_type: 'video' as const,
-    };
-    const newest = {
-      id: 'outputs/newest.png', url: '/media/newest.png', thumbnail_url: '/media/newest-thumb.png', filename: 'newest.png',
-      created_at: '', workflow: 'txt2img' as const, prompt: '', model: 'zit', reuse_workspace_url: '', media_type: 'image' as const,
-    };
-    component = mount(JobCard, { target, props: { job: makeJob({ outputs: [first, first, olderVideo, newest] }) } });
-    flushSync();
-
-    expect(target.textContent).toContain('Outputs · 3');
-    const liveRegion = target.querySelector('.sr-only[role="status"]');
-    expect(liveRegion?.getAttribute('aria-live')).toBe('polite');
-    expect(liveRegion?.getAttribute('aria-atomic')).toBe('true');
-    expect(liveRegion?.textContent).toContain('3 outputs ready');
-    expect(target.querySelectorAll('button[aria-label^="View "]')).toHaveLength(3);
-    expect(target.querySelector('img[alt="first.png"]')?.getAttribute('loading')).toBe('lazy');
-    expect(target.querySelector('video')?.getAttribute('preload')).toBe('none');
-    expect(target.querySelector('img[alt="newest.png"]')?.getAttribute('loading')).toBe('eager');
-  });
-
-  it('puts the live preview and the outputs side by side, each under its own label', () => {
+  it('leaves generated outputs to the history and shows only the live preview', () => {
     const output = {
       id: 'out.png', url: '/media/out.png', thumbnail_url: '/media/out.png', filename: 'out.png',
       created_at: '', workflow: 'txt2img' as const, prompt: '', model: 'zit', reuse_workspace_url: '', media_type: 'image' as const,
@@ -346,10 +333,8 @@ describe('JobCard', () => {
 
     const figure = target.querySelector('figure') as HTMLElement;
     expect(document.getElementById(figure.getAttribute('aria-labelledby')!)?.textContent).toBe('Live preview');
-    const labels = Array.from(figure.parentElement!.children).filter((el) => el.tagName === 'SPAN').map((el) => el.textContent?.trim());
-    expect(labels[0]).toBe('Live preview');
-    expect(labels[1]).toContain('Outputs · 1');
-    expect(figure.parentElement!.contains(target.querySelector('[aria-label="Generated outputs"]'))).toBe(true);
+    expect(target.querySelector('img[alt="out.png"]')).toBeNull();
+    expect(target.querySelector('button[aria-label^="View "]')).toBeNull();
   });
 
   it('shows the live preview only while the job is active', () => {
@@ -366,26 +351,6 @@ describe('JobCard', () => {
     component = mount(JobCard, { target, props: { job: makeJob({ status: 'completed', previewUrl: '/jobs/job-card/preview?v=2' }) } });
     flushSync();
     expect(target.querySelector(previewAlt)).toBeNull();
-  });
-
-  it('bounds and scrolls its own many-output thumbnail grid instead of relying on an outer page scroller', () => {
-    const outputs = Array.from({ length: 15 }, (_, index) => ({
-      id: `outputs/many-${index}.png`, url: `/media/many-${index}.png`, thumbnail_url: `/media/many-${index}.png`,
-      filename: `many-${index}.png`, created_at: '', workflow: 'txt2img' as const, prompt: '', model: 'zit',
-      reuse_workspace_url: '', media_type: 'image' as const,
-    }));
-    component = mount(JobCard, { target, props: { job: makeJob({ outputs }) } });
-    flushSync();
-
-    const grid = target.querySelector<HTMLElement>('[aria-label="Generated outputs"]');
-    expect(grid).not.toBeNull();
-    expect(grid?.classList.contains('output-preview-grid')).toBe(true);
-    expect(grid?.classList.contains('custom-scrollbar')).toBe(true);
-    // jsdom does not apply component-scoped Svelte CSS, so assert the source rule
-    // against this exact inner grid rather than accidentally accepting page-level overflow.
-    expect(jobCardSource).toMatch(/\.output-preview-grid\s*\{[^}]*max-height:\s*min\(35vh,\s*14rem\);[^}]*overflow-y:\s*auto;/s);
-    expect(grid?.querySelectorAll('button[aria-label^="View "]')).toHaveLength(outputs.length);
-    expect(grid?.querySelector(`img[alt="${outputs.at(-1)!.filename}"]`)).not.toBeNull();
   });
 
   describe('job control keys', () => {

@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+- Web UI: the job card shows only the job and its live preview; finished outputs appear in the History strip instead of a thumbnail grid on the card
+- Web UI: the job card's progress bar fills in the step being processed, at the stage's average step pace, so it creeps forward instead of jumping
+- Web UI: the job card's elapsed time counts up every second instead of only when a step finishes
+
 ### Fixed
 - macOS: generation progress reports each step once it has finished, and live previews no longer hold a step back; before, the bar sat still at a preview and then jumped two steps
 
