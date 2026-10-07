@@ -219,54 +219,38 @@ def test_packaged_config_resolves_ideo_alias_on_darwin(monkeypatch, tmp_path):
     assert resolve_model_path("ideo", aliases=config["model_aliases"], platform_key="darwin") == "ideogram-ai/ideogram-4-fp8"
 
 
-def test_packaged_config_ships_krea2_alias_and_variant_defaults(monkeypatch, tmp_path):
+def test_packaged_config_ships_krea2_alias_and_defaults(monkeypatch, tmp_path):
     from zvisiongenerator.utils import config as config_module
 
     monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
 
     config = load_config()
-    turbo = ImageModelInfo(family="krea2", is_distilled=True, size=None)
-    raw = ImageModelInfo(family="krea2", is_distilled=False, size=None)
+    turbo = ImageModelInfo(family="krea2", is_distilled=False, size=None)
 
     for platform_key in ("darwin", "win32", "linux"):
-        assert resolve_model_path("krea2", aliases=config["model_aliases"], platform_key=platform_key) == "krea/Krea-2-Turbo"
+        assert resolve_model_path("krea2", aliases=config["model_aliases"], platform_key=platform_key) == "unsloth/Krea-2-Turbo"
+    assert config["model_alias_families"]["krea2"] == "krea2"
     for backend_name in ("mflux", "diffusers"):
-        turbo_defaults = resolve_defaults(turbo, config, {}, backend_name)
-        raw_defaults = resolve_defaults(raw, config, {}, backend_name)
-        assert (turbo_defaults["steps"], turbo_defaults["guidance"], turbo_defaults["scheduler"]) == (8, 1.0, None)
-        assert (raw_defaults["steps"], raw_defaults["guidance"]) == (28, 5.5)
-        assert turbo_defaults["supports_negative_prompt"] is True
-        assert turbo_defaults["supports_scheduler"] is False
+        defaults = resolve_defaults(turbo, config, {}, backend_name)
+        assert (defaults["steps"], defaults["guidance"], defaults["scheduler"]) == (8, 1.0, None)
+        assert defaults["supports_negative_prompt"] is False
+        assert defaults["supports_scheduler"] is False
 
 
-def test_packaged_config_gates_krea2_img2img_per_backend(monkeypatch, tmp_path):
+def test_packaged_config_krea2_capabilities(monkeypatch, tmp_path):
     from zvisiongenerator.utils import config as config_module
 
     monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
     config = load_config()
 
-    mflux = model_capabilities(config, "krea2", "mflux")
-    diffusers = model_capabilities(config, "krea2", "diffusers")
+    caps = model_capabilities(config, "krea2")
 
-    assert (mflux["supports_img2img"], mflux["supports_upscale"], mflux["quantizes_text_encoder"]) == (True, True, False)
-    assert (diffusers["supports_img2img"], diffusers["supports_upscale"], diffusers["quantizes_text_encoder"]) == (False, False, True)
+    assert (caps["supports_img2img"], caps["supports_upscale"]) == (True, True)
 
 
-_BACKEND_OVERRIDE_CONFIG = {"model_presets": {"fam": {"supports_img2img": True, "backends": {"diffusers": {"supports_img2img": False}}}}}
-
-
-class TestModelCapabilitiesBackendOverrides:
-    def test_backend_override_applies_to_its_backend_only(self):
-        assert model_capabilities(_BACKEND_OVERRIDE_CONFIG, "fam", "diffusers")["supports_img2img"] is False
-        assert model_capabilities(_BACKEND_OVERRIDE_CONFIG, "fam", "mflux")["supports_img2img"] is True
-
-    def test_no_backend_reads_family_flags(self):
-        assert model_capabilities(_BACKEND_OVERRIDE_CONFIG, "fam")["supports_img2img"] is True
-
-    def test_new_flags_default_permissive(self):
-        caps = model_capabilities({}, "unknown", "mflux")
-        assert caps["supports_scheduler"] is True
-        assert caps["quantizes_text_encoder"] is True
+def test_new_capability_flags_default_permissive():
+    caps = model_capabilities({}, "unknown")
+    assert caps["supports_scheduler"] is True
 
 
 # ---------------------------------------------------------------------------

@@ -1714,7 +1714,7 @@ requires-dist = [
     { name = "diffusers", specifier = "==0.40.0" },
     { name = "fastapi", specifier = ">=0.116.0" },
     { name = "hf-transfer", specifier = ">=0.1.9" },
-    { name = "huggingface-hub", specifier = ">=0.30.0" },
+    { name = "huggingface-hub", specifier = ">=1.23.0" },
     { name = "mflux", marker = "sys_platform == 'darwin'", specifier = ">=0.20.0,<0.21" },
     { name = "mlx", marker = "sys_platform == 'darwin'", specifier = ">=0.31.0" },
     { name = "mlx-lm", marker = "sys_platform == 'darwin'", specifier = ">=0.31.2" },

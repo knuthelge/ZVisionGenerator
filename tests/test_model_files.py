@@ -17,9 +17,9 @@ def _touch(path: Path, content: str = "x") -> Path:
     return path
 
 
-def _write_model_index(model_dir: Path) -> None:
+def _write_model_index(model_dir: Path, class_name: str = "ZImagePipeline") -> None:
     index = {
-        "_class_name": "ZImagePipeline",
+        "_class_name": class_name,
         "transformer": ["diffusers", "ZImageTransformer2DModel"],
         "text_encoder": ["transformers", "Qwen3Model"],
         "vae": ["diffusers", "AutoencoderKL"],
@@ -77,7 +77,7 @@ class TestHasCompleteWeights:
 
     def test_root_single_file_stands_in_for_a_missing_transformer_folder(self, tmp_path):
         # mflux downloads only Krea 2 Turbo's root turbo.safetensors, not the diffusers transformer/ shards.
-        _write_model_index(tmp_path)
+        _write_model_index(tmp_path, "Krea2Pipeline")
         _touch(tmp_path / "turbo.safetensors")
         for component in ("text_encoder", "vae"):
             _touch(tmp_path / component / "model.safetensors")
@@ -85,9 +85,18 @@ class TestHasCompleteWeights:
         assert has_complete_weights(tmp_path) is True
 
     def test_root_file_without_text_encoder_is_still_incomplete(self, tmp_path):
-        _write_model_index(tmp_path)
+        _write_model_index(tmp_path, "Krea2Pipeline")
         _touch(tmp_path / "turbo.safetensors")
         _touch(tmp_path / "vae" / "model.safetensors")
+
+        assert has_complete_weights(tmp_path) is False
+
+    def test_root_single_file_does_not_stand_in_for_other_pipelines(self, tmp_path):
+        # FLUX.2 Klein ships a root single-file checkpoint next to its diffusers folders.
+        _write_model_index(tmp_path, "Flux2KleinPipeline")
+        _touch(tmp_path / "flux-2-klein-4b.safetensors")
+        for component in ("text_encoder", "vae"):
+            _touch(tmp_path / component / "model.safetensors")
 
         assert has_complete_weights(tmp_path) is False
 
@@ -153,7 +162,7 @@ def test_model_weight_files_ignore_files_outside_index_components(tmp_path):
 
 
 def test_root_single_file_counts_only_when_the_transformer_folder_is_empty(tmp_path):
-    _write_model_index(tmp_path)
+    _write_model_index(tmp_path, "Krea2Pipeline")
     root = _touch(tmp_path / "turbo.safetensors")
     vae = _touch(tmp_path / "vae" / "model.safetensors")
 

@@ -71,8 +71,6 @@ def plan_upscale(source: UpscaleSource, factor: int, web_config: WebUiConfig, *,
     steps = recorded.steps if keeps_recorded and recorded.steps else defaults["steps"]
     guidance = recorded.guidance if keeps_recorded and recorded.guidance is not None else defaults["guidance"]
     scheduler = recorded.scheduler if keeps_recorded and recorded.scheduler in app_config.get("schedulers", {}) else defaults["scheduler"]
-    if not defaults.get("supports_scheduler", True):
-        scheduler = None
     lora_paths, lora_weights, dropped_loras = _existing_loras(recorded.lora) if keeps_recorded else (None, None, False)
     if dropped_loras:
         notices.append(NOTICE_LORA_MISSING)

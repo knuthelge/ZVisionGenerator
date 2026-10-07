@@ -9,7 +9,6 @@ Supported model types:
   - flux2-klein-4b : FLUX.2 Klein 4B (manual key remapping)
   - flux2-klein-9b : FLUX.2 Klein 9B (manual key remapping)
   - krea2-turbo    : Krea 2 Turbo fine-tunes (manual key remapping)
-  - krea2-raw      : Krea 2 Raw fine-tunes (manual key remapping)
 
 Only the transformer weights are converted from the checkpoint.
 Text encoder, VAE, tokenizer, and scheduler are downloaded from the
@@ -40,8 +39,7 @@ FLUX2_KLEIN_REPOS = {
 # ── Krea 2 HuggingFace repos ────────────────────────────────────────────────
 
 KREA2_REPOS = {
-    "krea2-turbo": "krea/Krea-2-Turbo",
-    "krea2-raw": "krea/Krea-2-Raw",
+    "krea2-turbo": "unsloth/Krea-2-Turbo",
 }
 
 # Every --model-type the converter accepts (the CLI and the Web UI converter share this list).
@@ -432,7 +430,7 @@ def convert_flux2_klein(input_path: Path, output_dir: Path, model_type: str, use
 
 # ── Krea 2 key conversion ────────────────────────────────────────────────────
 
-# Native (Krea / ComfyUI) names → diffusers Krea2Transformer2DModel names, as diffusers' single-file loader maps them.
+# Native (Krea / ComfyUI) names → diffusers Krea2Transformer2DModel names, matching mflux's Krea 2 weight mapping.
 KREA2_PREFIX_RENAMES = (
     ("first.", "img_in."),
     ("tmlp.0.", "time_embed.linear_1."),
@@ -462,20 +460,13 @@ KREA2_BLOCK_RENAMES = (
 )
 # Prefixes single-file exports put in front of the native transformer keys.
 KREA2_CHECKPOINT_PREFIXES = ("model.diffusion_model.", "diffusion_model.")
-# Top-level modules of the diffusers Krea2Transformer2DModel.
-KREA2_DIFFUSERS_PREFIXES = ("img_in.", "time_embed.", "time_mod_proj.", "txt_in.", "text_fusion.", "transformer_blocks.", "final_layer.")
 
 
 def convert_krea2_transformer_keys(state_dict: dict) -> dict:
     """Convert native or ComfyUI Krea 2 transformer keys to HF diffusers format.
 
     Only transformer keys are kept, so a checkpoint that also bundles the text encoder or VAE converts too.
-    Keys already in diffusers format pass through unchanged.
     """
-    if any(key.startswith("transformer_blocks.") for key in state_dict):
-        print("  Detected format: diffusers (already converted)")
-        return {key: tensor for key, tensor in state_dict.items() if key.startswith(KREA2_DIFFUSERS_PREFIXES)}
-
     converted = {}
     for key, tensor in state_dict.items():
         native_key = next((key[len(prefix) :] for prefix in KREA2_CHECKPOINT_PREFIXES if key.startswith(prefix)), key)

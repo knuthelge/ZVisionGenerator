@@ -6,6 +6,7 @@ mocking all heavy dependencies at the module level before import.
 
 from __future__ import annotations
 
+import math
 import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -798,9 +799,9 @@ class TestMakeBnbConfigs:
 
 
 class TestKrea2:
-    """Krea 2 converts guidance, offloads at NF4, and has no img2img pipeline."""
+    """Krea 2 converts guidance, offloads at NF4, and runs img2img through its text-to-image pipeline."""
 
-    @pytest.mark.parametrize(("guidance", "expected"), [(1.0, 0.0), (None, 0.0), (0.0, 0.0), (5.5, 4.5)])
+    @pytest.mark.parametrize(("guidance", "expected"), [(1.0, 0.0), (0.0, 0.0), (5.5, 4.5)])
     def test_text_to_image_converts_standard_cfg_to_krea2_scale(self, win_backend, guidance, expected):
         mod, _, _ = win_backend
         backend, mock_model = TestTextToImage._ready_backend(mod)
@@ -819,14 +820,55 @@ class TestKrea2:
 
         assert mock_model.call_args[1]["negative_prompt"] == "blurry"
 
-    def test_image_to_image_raises(self, win_backend):
+    def test_image_to_image_runs_text_to_image_pipeline_from_noised_latents(self, win_backend):
         mod, _, _ = win_backend
         backend = mod.DiffusersBackend()
         backend._model_info = _make_model_info(family="krea2")
+        pipe = MagicMock(vae_scale_factor=8, patch_size=2, _interrupt=False)
+        pipe.return_value.images = [Image.new("RGB", (64, 48))]
 
-        with pytest.raises(ValueError, match="(?i)img2img.*not supported.*Krea 2"):
-            backend.image_to_image(model=MagicMock(), image=Image.new("RGB", (64, 64)), prompt="p", strength=0.5, steps=8, seed=1, guidance=1.0)
+        with patch.object(mod, "_krea2_img2img_latents", return_value="noised-latents") as mock_latents:
+            result = backend.image_to_image(model=pipe, image=Image.new("RGB", (70, 50)), prompt="p", strength=0.4, steps=8, seed=1, guidance=1.0)
+
+        assert result is pipe.return_value.images[0]
+        kwargs = pipe.call_args.kwargs
+        assert (kwargs["width"], kwargs["height"]) == (64, 48)
+        assert kwargs["sigmas"] == pytest.approx([0.5, 0.375, 0.25, 0.125])
+        assert kwargs["num_inference_steps"] == 4
+        assert kwargs["latents"] == "noised-latents"
+        assert kwargs["guidance_scale"] == 0.0
+        assert mock_latents.call_args.args[2] == kwargs["sigmas"]
         sys.modules["diffusers"].AutoPipelineForImage2Image.from_pipe.assert_not_called()
+
+    def test_image_to_image_returns_none_when_skipped(self, win_backend):
+        mod, _, _ = win_backend
+        backend = mod.DiffusersBackend()
+        backend._model_info = _make_model_info(family="krea2")
+        pipe = MagicMock(vae_scale_factor=8, patch_size=2, _interrupt=True)
+        skip = MagicMock()
+        skip.check.return_value = False
+
+        with patch.object(mod, "_krea2_img2img_latents", return_value="noised-latents"):
+            result = backend.image_to_image(model=pipe, image=Image.new("RGB", (64, 64)), prompt="p", strength=0.5, steps=8, seed=1, guidance=1.0, skip_signal=skip)
+
+        assert result is None
+        assert pipe._interrupt is False
+
+    @pytest.mark.parametrize(
+        ("steps", "strength", "expected"),
+        [(8, 0.4, [0.5, 0.375, 0.25, 0.125]), (8, 1.0, [1.0, 0.875, 0.75, 0.625, 0.5, 0.375, 0.25, 0.125]), (8, 0.05, [0.125]), (4, 0.5, [0.5, 0.25])],
+    )
+    def test_img2img_sigmas_keep_the_tail_of_the_schedule(self, win_backend, steps, strength, expected):
+        mod, _, _ = win_backend
+
+        assert mod._img2img_sigmas(steps, strength) == pytest.approx(expected)
+
+    @pytest.mark.parametrize(("requested", "strength"), [(8, 0.3), (8, 0.35), (8, 0.4), (8, 0.5), (8, 0.6), (8, 0.7), (4, 0.7), (20, 0.3), (28, 0.45)])
+    def test_img2img_runs_the_requested_steps_after_workflow_inflation(self, win_backend, requested, strength):
+        mod, _, _ = win_backend
+        inflated = math.floor(requested / strength)  # as image_stages passes steps to image_to_image
+
+        assert len(mod._img2img_sigmas(inflated, strength)) == requested
 
     def test_load_model_passes_family_to_quantized_loader(self, win_backend):
         mod, _, _ = win_backend
@@ -835,7 +877,7 @@ class TestKrea2:
             patch.object(mod, "detect_image_model", return_value=_make_model_info(family="krea2")),
             patch.object(mod, "_load_quantized", return_value=MagicMock()) as mock_lq,
         ):
-            mod.DiffusersBackend().load_model("krea/Krea-2-Turbo", quantize=4)
+            mod.DiffusersBackend().load_model("unsloth/Krea-2-Turbo", quantize=4)
 
         assert mock_lq.call_args[0][3] == "krea2"
 
@@ -844,7 +886,7 @@ class TestKrea2:
         text_encoder = sys.modules["transformers"].AutoModel.from_pretrained.return_value
         pipeline = mod.AutoPipelineForText2Image.from_pretrained.return_value
 
-        mod._load_quantized("krea/Krea-2-Turbo", 4, "bf16-sentinel", "krea2")
+        mod._load_quantized("unsloth/Krea-2-Turbo", 4, "bf16-sentinel", "krea2")
 
         text_encoder.to.assert_called_once_with("cpu")
         pipeline.enable_model_cpu_offload.assert_called_once()

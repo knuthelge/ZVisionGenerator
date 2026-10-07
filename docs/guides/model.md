@@ -34,14 +34,14 @@ ziv-model model -i checkpoint.safetensors --name my-model --quantize 8
 |---|---|---|
 | `-i`, `--input` | *(required)* | Path to `.safetensors` checkpoint |
 | `--name` | input filename | Custom model folder name |
-| `--model-type` | `zimage` | Model type: `zimage`, `flux2-klein-4b`, `flux2-klein-9b`, `krea2-turbo`, `krea2-raw` |
+| `--model-type` | `zimage` | Model type: `zimage`, `flux2-klein-4b`, `flux2-klein-9b`, `krea2-turbo` |
 | `--base-model` | `Tongyi-MAI/Z-Image-Turbo` | Base HF repo (only for zimage type) |
 | `--copy` | off | Copy files instead of symlinking |
 | `--quantize` | off | Also save a quantized copy as `<name>@q4` or `<name>@q8` (`4` or `8`, macOS); see [Stored quants](image.md#stored-quants-macos) |
 
 Checkpoints can be bfloat16, float16, float32, or FP8. Scaled FP8 checkpoints (for example ComfyUI FP8 exports, which store a `weight_scale` next to each weight) are dequantized to bfloat16 during conversion. Block-wise or other quantized formats (such as NVFP4) are not supported.
 
-For Krea 2, pick `krea2-turbo` for a fine-tune of Krea 2 Turbo and `krea2-raw` for one trained on Krea 2 Raw (most LoRA and full fine-tunes); the type decides the text encoder, VAE and defaults linked in from the base repo, and Raw models default to 28 steps with guidance 5.5. Native Krea 2 and ComfyUI checkpoints are both accepted, and a bundled text encoder or VAE is ignored. Both base repos are gated, so accept the Krea 2 license and set a Hugging Face token first.
+`krea2-turbo` converts a fine-tune of Krea 2 Turbo. Native Krea 2 and ComfyUI checkpoints are both accepted, and a bundled text encoder or VAE is ignored; the text encoder and VAE come from unsloth's ungated mirror `unsloth/Krea-2-Turbo`.
 
 > **Ideogram 4** is used via the `ideo` alias or a local FP8 model directory and is distributed ready-to-use. It has no checkpoint-convert path, so it is not a `--model-type` option.
 

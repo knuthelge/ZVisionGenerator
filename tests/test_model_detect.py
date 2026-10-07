@@ -25,16 +25,11 @@ class TestDetectModelType:
         assert info.is_distilled is False
         assert info.size is None
 
-    def test_krea2_turbo_pipeline_is_distilled(self, tmp_path):
+    def test_krea2_pipeline(self, tmp_path):
         (tmp_path / "model_index.json").write_text(json.dumps({"_class_name": "Krea2Pipeline", "is_distilled": True}))
         info = detect_image_model(str(tmp_path))
         assert info.family == "krea2"
-        assert info.is_distilled is True
         assert info.size is None
-
-    def test_krea2_without_is_distilled_is_raw(self, tmp_path):
-        (tmp_path / "model_index.json").write_text(json.dumps({"_class_name": "Krea2Pipeline"}))
-        assert detect_image_model(str(tmp_path)).is_distilled is False
 
     def test_flux2_klein_pipeline(self, tmp_path):
         (tmp_path / "model_index.json").write_text(json.dumps({"_class_name": "Flux2KleinPipeline", "is_distilled": True}))

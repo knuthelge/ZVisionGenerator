@@ -111,15 +111,6 @@ def _install_ideogram4_initial_sigma() -> None:
 _install_ideogram4_initial_sigma()
 
 
-# Families whose guidance is off at 1.0 (the rest are off at 0.0); used when no guidance is given.
-_GUIDANCE_OFF_AT_ONE = ("flux1", "flux2", "flux2_klein", "krea2")
-
-
-def _default_guidance(family: str) -> float:
-    """Return the guidance that turns classifier-free guidance off for *family*."""
-    return 1.0 if family in _GUIDANCE_OFF_AT_ONE else 0.0
-
-
 def _unregister_callback(model: Any, callback: Any) -> None:
     """Remove a callback from every mflux registry list so it never fires on later runs of a cached model."""
     registry = model.callbacks
@@ -218,8 +209,8 @@ class _ProgressChecker:
         preview = self._render_preview(t, latents, config, denoised)
         if preview is not None:
             payload["preview"] = preview
-        # Keep these latents only when the next step renders a preview from them.
-        self._previous_latents = latents if self._previews_enabled and t + 2 in self._preview_steps else None
+        # Keep these latents only when the next step renders a preview from them; a reported prediction needs none.
+        self._previous_latents = latents if self._previews_enabled and denoised is None and t + 2 in self._preview_steps else None
         self._step_callback(payload)
 
     def _render_preview(self, t, latents, config, denoised=None) -> Image.Image | None:
@@ -230,10 +221,9 @@ class _ProgressChecker:
         if not self._previews_enabled or t + 1 not in self._preview_steps:
             return None
         try:
-            levels = _step_noise_levels(self._family, t, config)
             if denoised is not None:
                 latents = denoised
-            elif levels is not None and self._previous_latents is not None:
+            elif self._previous_latents is not None and (levels := _step_noise_levels(self._family, t, config)) is not None:
                 latents = estimate_clean_latents(self._previous_latents, latents, *levels)
             return render_latent_preview(self._model, self._family, latents, config.height, config.width)
         except Exception as exc:  # noqa: BLE001 - previews are best-effort
@@ -364,7 +354,7 @@ class MfluxBackend:
             model = Krea2(
                 quantize=quantize,
                 model_path=model_path,
-                model_config=ModelConfig.krea2() if model_info.is_distilled else ModelConfig.krea2_raw(),
+                model_config=ModelConfig.krea2(),
                 **lora_kwargs,
             )
         else:
@@ -444,7 +434,7 @@ class MfluxBackend:
                 num_inference_steps=steps,
                 image_path=temp_path,
                 image_strength=image_strength,
-                guidance=guidance if guidance is not None else _default_guidance(self._model_info.family),
+                guidance=guidance if guidance is not None else (1.0 if _is_flux else 0.0),
             )
             if scheduler is not None:
                 gen_kwargs["scheduler"] = scheduler
@@ -514,7 +504,7 @@ class MfluxBackend:
                     height=height,
                     seed=seed,
                     num_inference_steps=steps,
-                    guidance=guidance if guidance is not None else _default_guidance(self._model_info.family),
+                    guidance=guidance if guidance is not None else (1.0 if _is_flux else 0.0),
                 )
                 if scheduler is not None:
                     gen_kwargs["scheduler"] = scheduler

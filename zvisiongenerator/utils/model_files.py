@@ -78,11 +78,12 @@ def model_weight_files(model_dir: Path, components: tuple[str, ...] | None = Non
     """Return the safetensors files the loader reads from *model_dir*, in one directory walk.
 
     For diffusers layouts only the weight-bearing components listed in ``model_index.json`` count, so
-    extra files in a full repo download (e.g. a root-level single-file checkpoint) are ignored. When the
-    ``transformer`` folder holds no weights, root-level files stand in for it: mflux downloads only Krea 2
-    Turbo's single-file ``turbo.safetensors`` and saves its stored quants' transformer at the root. Precision
-    variants (``*.fp16.safetensors``) are ignored in any folder that also holds the plain weights. Symlinked
-    component folders are followed: converted checkpoints link their text encoder and VAE from the base repo.
+    extra files in a full repo download (e.g. a root-level single-file checkpoint) are ignored. For Krea 2 models
+    whose ``transformer`` folder holds no weights, root-level files stand in for it: mflux downloads only Krea 2
+    Turbo's single-file ``turbo.safetensors`` and saves Krea 2 stored quants as root-level shards.
+    Precision variants (``*.fp16.safetensors``) are ignored in any folder that also holds the plain weights.
+    Symlinked component folders are followed: converted checkpoints link their text encoder and VAE from the base
+    repo.
 
     Args:
         model_dir: The model directory.
@@ -94,13 +95,25 @@ def model_weight_files(model_dir: Path, components: tuple[str, ...] | None = Non
         return tuple(files)
     allowed = set(components)
     selected = [path for path in files if component_of(model_dir, path) in allowed]
-    if _TRANSFORMER_COMPONENT in allowed and not any(component_of(model_dir, path) == _TRANSFORMER_COMPONENT for path in selected):
+    if _TRANSFORMER_COMPONENT in allowed and not any(component_of(model_dir, path) == _TRANSFORMER_COMPONENT for path in selected) and is_krea2_model(model_dir):
         selected += [path for path in files if component_of(model_dir, path) == ""]
     return tuple(selected)
 
 
 def weighted_components(model_dir: Path) -> tuple[str, ...] | None:
     """Return the weight-bearing component folders from ``model_index.json``, or ``None`` without a readable index."""
+    index = _read_model_index(model_dir)
+    if index is None:
+        return None
+    return tuple(
+        name
+        for name, spec in index.items()
+        if not name.startswith("_") and isinstance(spec, list) and len(spec) == 2 and all(spec) and not any(hint in str(spec[1]) for hint in _WEIGHTLESS_CLASS_HINTS)
+    )
+
+
+def _read_model_index(model_dir: Path) -> dict | None:
+    """Return the parsed ``model_index.json`` of *model_dir*, or ``None`` when it is missing or unreadable."""
     index_path = model_dir / "model_index.json"
     if not index_path.is_file():
         return None
@@ -108,13 +121,13 @@ def weighted_components(model_dir: Path) -> tuple[str, ...] | None:
         index = json.loads(index_path.read_text(encoding="utf-8"))
     except OSError, ValueError:
         return None
-    if not isinstance(index, dict):
-        return None
-    return tuple(
-        name
-        for name, spec in index.items()
-        if not name.startswith("_") and isinstance(spec, list) and len(spec) == 2 and all(spec) and not any(hint in str(spec[1]) for hint in _WEIGHTLESS_CLASS_HINTS)
-    )
+    return index if isinstance(index, dict) else None
+
+
+def is_krea2_model(model_dir: Path) -> bool:
+    """Return whether *model_dir*'s ``model_index.json`` declares a Krea 2 pipeline."""
+    index = _read_model_index(model_dir)
+    return index is not None and index.get("_class_name") == "Krea2Pipeline"
 
 
 def has_complete_weights(model_dir: Path) -> bool:

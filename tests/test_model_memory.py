@@ -87,12 +87,14 @@ class TestEstimateImageMemory:
         estimates = estimate_image_memory(tmp_path, (None, bits))
         assert estimates == {None: (1024 * 1024 + 1024) * 2 + _IMAGE_MARGIN, bits: int(linear + 1024 * 2) + _IMAGE_MARGIN}
 
-    def test_text_encoder_stays_bfloat16_when_the_loader_does_not_quantize_it(self, tmp_path):
+    def test_krea2_text_encoder_stays_bfloat16_when_quantized(self, tmp_path):
+        index = {"_class_name": "Krea2Pipeline", "transformer": ["diffusers", "Krea2Transformer2DModel"], "text_encoder": ["transformers", "Qwen3VLModel"]}
+        (tmp_path / "model_index.json").write_text(json.dumps(index), encoding="utf-8")
         _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"linear": ("BF16", [1024, 1024])})
         _write_safetensors(tmp_path / "text_encoder" / "model.safetensors", {"linear": ("BF16", [1024, 1024])})
 
         transformer_q8 = int(1024 * 1024 * (8 / 8 + 4 / 64))
-        estimates = estimate_image_memory(tmp_path, (8,), quantize_text_encoder=False)
+        estimates = estimate_image_memory(tmp_path, (8,))
         assert estimates == {8: transformer_q8 + 1024 * 1024 * 2 + _IMAGE_MARGIN}
 
     def test_fp8_and_prequantized_weights_stay_as_stored(self, tmp_path):
