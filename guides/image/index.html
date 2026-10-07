@@ -1325,7 +1325,7 @@
 </tr>
 <tr>
 <td><code>krea2</code></td>
-<td><code>krea/Krea-2-Turbo</code></td>
+<td><code>unsloth/Krea-2-Turbo</code></td>
 </tr>
 </tbody>
 </table>
@@ -1348,14 +1348,14 @@ ziv-image -m krea2 -q 4 --prompt &quot;a portrait&quot;
 <h4 id="in-the-web-ui">In the Web UI</h4>
 <p>Ideogram 4 is selectable in the workspace model dropdown. When it is selected, the workspace exposes a structured-JSON-caption input and a first-step-sigma control that mirror <code>--json-prompt</code> and <code>--first-sigma</code>. Reference-image (img2img) and upscale are unavailable for it, and width and height are constrained to the 256–2048 range in multiples of 16.</p>
 <h3 id="krea-2">Krea 2</h3>
-<p><code>krea2</code> is Krea 2 Turbo, a 12B text-to-image model distilled to 8 steps. Its Hugging Face repo is gated: accept the Krea 2 Community License on the <a href="https://huggingface.co/krea/Krea-2-Turbo">model page</a> and set a Hugging Face token before the first run. It defaults to 8 steps and guidance 1.0, which turns classifier-free guidance off; a negative prompt only has an effect with guidance above 1.0, and each step then takes about twice as long. Guidance uses the same scale on every platform.</p>
-<p>Krea 2 samples with its own schedule, so <code>--scheduler</code> is rejected for it and the Web UI hides the Scheduler control. Krea 2 Raw (<code>krea/Krea-2-Raw</code>, or a fine-tune converted with <code>--model-type krea2-raw</code>, see <a href="../model/">Model &amp; LoRA Guide</a>) defaults to 28 steps and guidance 5.5.</p>
+<p><code>krea2</code> is Krea 2 Turbo, a 12B text-to-image model distilled to 8 steps. The alias points to unsloth's ungated mirror of Krea's repo, so no Hugging Face token is needed; the weights are under the <a href="https://huggingface.co/krea/Krea-2-Turbo">Krea 2 Community License</a>. It defaults to 8 steps and guidance 1.0, which turns classifier-free guidance off; guidance above 1.0 turns it on, and each step then takes about twice as long. Negative prompts are turned off for Krea 2.</p>
+<p>Krea 2 samples with its own schedule, so <code>--scheduler</code> is rejected for it and the Web UI hides the Scheduler control. Only Krea 2 Turbo and its fine-tunes are supported, not Krea 2 Raw.</p>
 <p>The weights are large (about 26 GB for the transformer plus a 9 GB text encoder), so run it quantized on smaller machines:</p>
 <ul>
-<li><strong>macOS:</strong> <code>-q 8</code> or <code>-q 4</code>. The text encoder is not quantized, so it adds about 9 GB at any level. The first quantized run saves a stored quant (<code>krea2@q8</code>, <code>krea2@q4</code>).</li>
-<li><strong>Windows and Linux:</strong> <code>-q 4</code> is the level for 10–12 GB GPUs; its text encoder and transformer take turns on the GPU. Without quantization all 35 GB of weights are held in system memory. Reference images (<code>--image</code>) and <code>--upscale</code> are not available here, because diffusers has no Krea 2 image-to-image pipeline: <code>ziv-image</code> rejects them and the Web UI hides them. On macOS both work.</li>
+<li><strong>macOS:</strong> <code>-q 8</code> or <code>-q 4</code>. The text encoder is not quantized, so it adds about 9 GB at any level.</li>
+<li><strong>Windows and Linux:</strong> <code>-q 4</code> fits 10–12 GB GPUs. Without quantization all 35 GB of weights are held in system memory.</li>
 </ul>
-<p>LoRAs trained for Krea 2 load with <code>--lora</code> on both platforms.</p>
+<p>Reference images (<code>--image</code>), <code>--upscale</code> and LoRAs trained for Krea 2 (<code>--lora</code>) work on every platform.</p>
 <h3 id="custom-aliases">Custom Aliases</h3>
 <p>Add your own aliases in <code>~/.ziv/config.yaml</code>:</p>
 <pre><code class="language-yaml">model_aliases:
