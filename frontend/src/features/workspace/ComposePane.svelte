@@ -5,7 +5,7 @@
   import { autogrow } from '$lib/actions/autogrow';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { Icon } from '$lib/components/atoms';
-  import { PromptFileField } from '$lib/components/molecules';
+  import { PromptFileField, Segmented } from '$lib/components/molecules';
   import type { PromptSource, WorkspaceContext } from '$lib/types';
   import PromptEnhancer from './PromptEnhancer.svelte';
   import { workspaceCapabilities } from './capabilities';
@@ -104,16 +104,13 @@
       <h2 id="ws-compose-title" class="ui-area-label">Compose</h2>
     </div>
     {#if caps.showPromptSource}
-      <div class="ui-segmented ui-segmented-sm" role="group" aria-label="Prompt source">
-        {#each context.prompt_sources as source (source)}
-          <button
-            type="button"
-            aria-pressed={s.promptSource === source}
-            data-prompt-source={source}
-            onclick={() => draft.update('promptSource', source)}
-          >{SOURCE_LABELS[source]}</button>
-        {/each}
-      </div>
+      <Segmented
+        size="sm"
+        label="Prompt source"
+        value={s.promptSource}
+        options={context.prompt_sources.map((source) => ({ value: source, label: SOURCE_LABELS[source] }))}
+        onchange={(source: PromptSource) => draft.update('promptSource', source)}
+      />
       <input type="hidden" name="prompt_source" value={s.promptSource}>
     {/if}
   </div>

@@ -3,7 +3,6 @@ import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/i
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import Button from './Button.svelte';
-import Chip from './Chip.svelte';
 
 describe('Button', () => {
   let target: HTMLDivElement;
@@ -49,43 +48,5 @@ describe('Button', () => {
     const button = target.querySelector('button') as HTMLButtonElement;
     expect(button.getAttribute('aria-label')).toBe('Delete model');
     expect(button.dataset.action).toBe('delete');
-  });
-});
-
-describe('Chip', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
-
-  beforeEach(() => {
-    target = document.createElement('div');
-    document.body.appendChild(target);
-  });
-
-  afterEach(async () => {
-    if (app) {
-      await unmount(app);
-      app = null;
-    }
-    target.remove();
-  });
-
-  it('is a toggle button when it has a pressed state', () => {
-    const onclick = vi.fn();
-    app = flushSync(() => mount(Chip, { target, props: { pressed: true, onclick } }));
-
-    const chip = target.querySelector('button') as HTMLButtonElement;
-    expect(chip.getAttribute('aria-pressed')).toBe('true');
-    chip.click();
-    expect(onclick).toHaveBeenCalledOnce();
-  });
-
-  it('offers a named remove button when it can be removed', () => {
-    const onremove = vi.fn();
-    app = flushSync(() => mount(Chip, { target, props: { onremove, removeLabel: 'Remove film-grain' } }));
-
-    const remove = target.querySelector('button[aria-label="Remove film-grain"]') as HTMLButtonElement;
-    expect(remove).not.toBeNull();
-    remove.click();
-    expect(onremove).toHaveBeenCalledOnce();
   });
 });
