@@ -19,7 +19,7 @@ function parseLocation(): RouterState {
 }
 
 function isValidPage(page: string): page is PageId {
-  return ['workspace', 'gallery', 'config', 'models'].includes(page);
+  return ['workspace', 'prompts', 'gallery', 'config', 'models'].includes(page);
 }
 
 // Reactive router state (Svelte 5 rune)

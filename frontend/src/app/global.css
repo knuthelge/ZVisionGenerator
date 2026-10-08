@@ -49,7 +49,7 @@
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-display: 'Nunito', ui-rounded, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-heading: 'Nunito', ui-rounded, 'Arial Rounded MT Bold', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, 'Courier New', monospace;
 
   /* Softer, rounder corners throughout */
   --radius: 0.375rem;
@@ -513,6 +513,88 @@
     background-color: rgb(248 113 113 / 0.08);
     border-color: rgb(248 113 113 / 0.32);
     color: var(--color-error);
+  }
+
+  /* Compact square-cornered controls for dense panels (the Prompts page): one look for every button.
+     26px in rows, `.panel-button-bar` (28px) in toolbars; `-icon` is square; `-primary` is the page's one main action. */
+  .panel-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 26px;
+    padding: 0 8px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-base);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+    transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  }
+
+  .panel-button:hover:not(:disabled) {
+    background: var(--color-bg-surface-hover);
+    color: var(--color-text-primary);
+  }
+
+  .panel-button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .panel-button[aria-pressed='true'],
+  .panel-button[aria-expanded='true'],
+  .panel-button-on {
+    border-color: color-mix(in srgb, var(--color-primary-main) 40%, var(--color-border-strong));
+    color: var(--color-primary-main);
+  }
+
+  .panel-button-icon { width: 26px; padding: 0; }
+  .panel-button-bar { height: 28px; }
+  .panel-button-bar.panel-button-icon { width: 28px; }
+  .panel-button-quiet { border-color: transparent; background: none; color: var(--color-text-muted); }
+  .panel-button-dashed { border-style: dashed; background: none; }
+
+  .panel-button-primary {
+    border-color: var(--color-primary-main);
+    background: var(--color-primary-main);
+    color: var(--color-primary-ink);
+    font-weight: 700;
+  }
+
+  .panel-button-primary:hover:not(:disabled) {
+    border-color: var(--color-primary-hover);
+    background: var(--color-primary-hover);
+    color: var(--color-primary-ink);
+  }
+
+  /* Two or three options as one outlined group; the chosen one is filled. */
+  .panel-segment { display: inline-flex; }
+  .panel-segment > button {
+    height: 26px;
+    padding: 0 7px;
+    border: 1px solid var(--color-border-strong);
+    background: var(--color-bg-base);
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--color-text-muted);
+  }
+  .panel-segment > button + button { border-left: 0; }
+  .panel-segment > button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+  .panel-segment > button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+  .panel-segment > button[aria-checked='true'] { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
+  .panel-segment > button:hover { color: var(--color-text-primary); }
+
+  /* Small-caps name of an area or a field. */
+  .panel-label {
+    font-family: var(--font-heading);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
   }
 
   .surface-shortcut {

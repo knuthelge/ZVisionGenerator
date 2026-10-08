@@ -10,6 +10,7 @@
 
   const navItems: { id: PageId; label: string }[] = [
     { id: 'workspace', label: 'Workspace' },
+    { id: 'prompts', label: 'Prompts' },
     { id: 'gallery', label: 'Gallery' },
     { id: 'models', label: 'Models' },
     { id: 'config', label: 'Config' }

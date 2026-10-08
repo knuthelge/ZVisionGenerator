@@ -150,7 +150,7 @@
 
   {#snippet footer()}
     {#if onedit}
-      <button type="button" class="surface-button-secondary mr-auto rounded-md px-3 py-1.5 text-sm" onclick={() => { open = false; onedit(); }}>Edit YAML</button>
+      <button type="button" class="surface-button-secondary mr-auto rounded-md px-3 py-1.5 text-sm" onclick={() => { open = false; onedit(); }}>Edit file</button>
     {/if}
     <button type="button" class="surface-button-secondary rounded-md px-3 py-1.5 text-sm" data-action="cancel-prompts" onclick={() => { open = false; }}>Cancel</button>
     <button type="button" class="surface-button-primary rounded-md px-3 py-1.5 text-sm" data-action="confirm-prompts" data-count={selectedCount} onclick={confirm}>

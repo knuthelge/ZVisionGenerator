@@ -208,20 +208,94 @@ export interface PromptFileContract {
     scope: 'server_host_only';
     manual_entry: 'submitted_value_kept_until_backend_validation';
     picker: 'server_host_native_picker';
-    read_write: 'existing_yaml_files_only';
+    read_write: 'yaml_files_only';
   };
   help: {
     path: string;
-    editor: string;
     option_required: string;
     option_optional: string;
     empty_options: string;
     stale_selection: string;
     loaded: string;
-    saved: string;
     ignored_negative_video: string;
     ignored_negative_unsupported: string;
   };
+}
+
+/** A prompt, negative prompt or snippet value as the prompt builder edits it. */
+export type PromptValue =
+  | { kind: 'text'; text: string }
+  | { kind: 'fields'; fields: PromptField[] }
+  /** Lists, nested mappings or other values the builder shows read-only and never rewrites. */
+  | { kind: 'structured'; data: unknown };
+
+export interface PromptField {
+  key: string;
+  value: string;
+}
+
+/** An entry's `enhance:` value: off, default options, or the mapping as written. */
+export type EntryEnhance = null | true | Partial<Record<EnhanceAxisKey, string | string[]>>;
+
+export interface DocumentEntry {
+  id: string;
+  prompt: PromptValue;
+  negative: PromptValue | null;
+  active: boolean;
+  enhance: EntryEnhance;
+}
+
+export interface DocumentSet {
+  id: string;
+  name: string;
+  entries: DocumentEntry[];
+}
+
+export interface DocumentSnippet {
+  id: string;
+  name: string;
+  value: PromptValue;
+}
+
+/** A prompt file as the builder edits it. Ids from a load are positional (`n0`, `s0`, `s0.e1`). */
+export interface PromptDocument {
+  snippets: DocumentSnippet[];
+  sets: DocumentSet[];
+}
+
+export interface PromptDocumentLoad {
+  path: string;
+  revision: string;
+  raw_text: string;
+  /** Missing when the file can't be built; `problem` then says why (repair view). */
+  document?: PromptDocument;
+  problem?: string;
+  enhance_matrix: { axes: EnhanceAxis[]; defaults: EnhanceSettings };
+}
+
+export interface PromptDocumentSaved {
+  path: string;
+  revision: string;
+  raw_text: string;
+  document: PromptDocument;
+  /** Every id sent, mapped to its positional id in the saved file. */
+  ids: Record<string, string>;
+  /** Active prompt ids before the save mapped to their ids after it. */
+  option_id_map: Record<string, string>;
+  warnings: string[];
+}
+
+export interface DocumentProblem {
+  target: string;
+  severity: 'error' | 'warning';
+  message: string;
+}
+
+export interface PromptDocumentPreview {
+  entries: Record<string, { prompt: string; negative: string | null }>;
+  problems: DocumentProblem[];
+  snippet_uses: Record<string, number>;
+  rolled: { entry_id: string; prompt: string } | null;
 }
 
 export interface PromptFileOption {
@@ -238,10 +312,6 @@ export interface PromptFileOption {
 export interface PromptFileInspection {
   path: string;
   options: PromptFileOption[];
-}
-
-export interface PromptFileDocument extends PromptFileInspection {
-  raw_text: string;
 }
 
 export type PathPickerStatus = 'selected' | 'cancelled' | 'unsupported' | 'error';
@@ -642,7 +712,7 @@ export interface ModelOperationResult {
 
 // ── Page/navigation types ──────────────────────────────────────────────────────
 
-export type PageId = 'workspace' | 'gallery' | 'config' | 'models';
+export type PageId = 'workspace' | 'prompts' | 'gallery' | 'config' | 'models';
 
 export interface RouterState {
   page: PageId;

@@ -6,10 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Web UI: a **Prompts** page that builds prompt files visually. Define snippets, then build sets of prompt entries with `$snippet` chips, editable `{a|b}` choices (also while typing, and from selected words with `⌥↵`), text or named fields, an active switch, a negative prompt and full `enhance:` options. Drag sets, entries and snippets to arrange them. A preview shows each prompt as the model receives it, with a **Roll** of its choices. **Generate this one** queues a single prompt with the Workspace settings
+- Web UI: saving a prompt file keeps its comments and layout, keeps the Workspace's selected prompts pointing at the same entries after reordering or renaming, and asks before overwriting a file that changed on disk. `⌘Z` undoes, and unsaved changes survive leaving the page
+- Web UI: **New file…** creates an empty prompt file; a file that doesn't load opens in a repair view
+
 ### Changed
 - Web UI: the job card shows only the job and its live preview; finished outputs appear in the History strip instead of a thumbnail grid on the card
 - Web UI: the job card's progress bar fills in the step being processed, at the stage's average step pace, so it creeps forward instead of jumping
 - Web UI: the job card's elapsed time counts up every second instead of only when a step finishes
+- Web UI: **Edit YAML** in the prompt-file box is now **Edit** and opens the file on the Prompts page; the YAML text dialog is removed
 
 ### Fixed
 - macOS: generation progress reports each step once it has finished, and live previews no longer hold a step back; before, the bar sat still at a preview and then jumped two steps
