@@ -613,6 +613,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#prompt-builder-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt Builder (Web UI)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#prompt-variables" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -991,6 +1002,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#prompt-builder-web-ui" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt Builder (Web UI)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#prompt-variables" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1213,7 +1235,21 @@ woman:
 <li>Multiple prompts per set are supported.</li>
 <li>The set name becomes the output filename prefix.</li>
 </ul>
-<p>In the Web UI, choose <strong>Prompt file</strong> as the prompt source and type or browse to a YAML file on the machine running the server. Compose then summarizes the selected prompts; click <strong>Prompts…</strong> (or the summary) to open the chooser, where you can filter prompts, select whole sets with <strong>All</strong>/<strong>None</strong>, expand a prompt to see its negative prompt, and confirm with <strong>Use N prompts</strong>. <strong>✨ Enhance</strong> sets the options for <strong>Enhance each image when generating</strong>, and <strong>Edit YAML</strong> opens the file editor. The YAML editor reloads the file from disk each time you open it, so reopening the same path reflects changes made outside the browser. If you edit the path manually, the visible value is the value submitted; use Enter or Browse when you want the UI to inspect the file and refresh the option list before generating.</p>
+<p>In the Web UI, choose <strong>Prompt file</strong> as the prompt source and type or browse to a YAML file on the machine running the server. Compose then summarizes the selected prompts; click <strong>Prompts…</strong> (or the summary) to open the chooser, where you can filter prompts, select whole sets with <strong>All</strong>/<strong>None</strong>, expand a prompt to see its negative prompt, and confirm with <strong>Use N prompts</strong>. <strong>✨ Enhance</strong> sets the options for <strong>Enhance each image when generating</strong>, and <strong>Edit</strong> opens the file on the <a href="#prompt-builder-web-ui">Prompts page</a>. If you edit the path manually, the visible value is the value submitted; use Enter or Browse when you want the UI to inspect the file and refresh the option list before generating.</p>
+<h2 id="prompt-builder-web-ui">Prompt Builder (Web UI)</h2>
+<p>The Web UI's <strong>Prompts</strong> page (<code>G</code> then <code>P</code>) builds prompt files without typing YAML. It reads and writes the same file the CLI uses, and keeps the file's comments, quoting and <code>|</code> blocks.</p>
+<ul>
+<li><strong>Snippets</strong> (left) are listed with how often each is used; unused ones are dimmed. Click one to edit it, <strong>＋</strong> to add one, and drag one onto a prompt to add a <code>$reference</code>. Renaming a snippet updates every reference to it.</li>
+<li><strong>Sets</strong> (centre) are panels of prompts, one row each. Rename a set in place (the name starts the output filenames), add prompts with <strong>＋</strong>, and use a set's <strong>⋯</strong> menu to duplicate, move, turn all prompts on or off, or delete it.</li>
+<li><strong>Entries</strong> show <code>$snippets</code> as chips (red when undefined) and <code>{a|b}</code> choices as pills. Click the text, or press <code>↵</code> on it, to edit; typing <code>$</code> suggests snippet names. Click a pill to edit its options, one per line; an empty line is an empty option. While typing, put the caret in a choice and press <code>⌥↵</code> (or <strong>Edit choice</strong> under the text) to edit it the same way, select words and press <code>⌥↵</code> (<strong>Make a random choice</strong>) to turn them into a choice, or press <code>⌥↵</code> anywhere else (<strong>New random choice</strong>) to type the options of a new choice at the caret, one per line. The options box takes focus; <code>⌘↵</code> applies and <code>Esc</code> cancels, both returning you to the prompt. Each prompt has an <strong>active</strong> switch and <strong>✨ Enhance</strong>: off, the default options (<code>enhance: true</code>), or chosen style, mood, details, length and motion (motion applies to video only). Its <strong>⋯</strong> menu adds or removes a negative prompt, and duplicates, moves or deletes the prompt.</li>
+<li><strong>Text / Fields</strong> switches a prompt between plain text and named fields (a structured prompt). Switching to fields puts the text in one field for you to name; a field without a name is a problem until you name it. Lists and nested values that the builder can't edit are shown flattened and kept exactly as written; <strong>Convert to text</strong> replaces one with its flattened text.</li>
+<li><strong>Drag</strong> a set or an entry by its ⠿ grip to reorder it; drop an entry on another set's header to move it there. The menus offer the same moves.</li>
+<li><strong>Preview</strong> (right) shows the selected entry as the model receives it, with snippets resolved and fields flattened, its prompt id, its enhancement and its problems. <strong>🎲 Roll</strong> picks one option of every choice, as a run would.</li>
+<li><strong>▶</strong> (Generate this one) saves the file, then queues that one prompt with the current Workspace settings. Your prompt selection in the Workspace doesn't change. <strong>Use in Workspace</strong> saves and selects the file there.</li>
+</ul>
+<p>Saving (<code>⌘S</code>) is blocked while the file has errors that would stop it from loading (an undefined snippet in an active entry, an empty prompt, two sets with the same name); the Save button says what to fix. Warnings, such as an invalid <code>enhance:</code> block, don't block saving. Saving keeps the prompts selected in the Workspace pointing at the same entries, even when you reorder, move or rename them.</p>
+<p><code>⌘Z</code> undoes changes back to the last save. Unsaved changes are kept in the browser, so leaving the page or reloading doesn't lose them; reopening the file offers to restore them. If the file changed on disk since you opened it (for example in another editor), saving asks before overwriting it.</p>
+<p>A file that isn't valid YAML, or isn't shaped like a prompt file, opens in a repair view with the error and the raw text to fix. <strong>New file…</strong> in the file menu creates an empty prompt file in a folder you choose.</p>
 <h2 id="prompt-variables">Prompt Variables</h2>
 <p>Use <code>{option1|option2|option3}</code> syntax for random selection each run:</p>
 <pre><code>&quot;A {red|blue} car&quot;                         → &quot;A red car&quot; or &quot;A blue car&quot;

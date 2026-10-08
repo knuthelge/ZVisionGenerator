@@ -1194,6 +1194,7 @@ uv run ziv ui --no-browser
 <p>By default, the Web UI listens on <code>http://127.0.0.1:8080/</code> and opens your browser automatically. If port <code>8080</code> is busy, Z-Vision Generator chooses the next available local port and prints the final address in the terminal. If a local environment is missing required Web UI packages, <code>ziv ui</code> and <code>ziv-ui</code> print repair guidance for the base install instead of failing with an import traceback.</p>
 <p>While a generation is running, the Web UI keeps the active job attached to the current browser tab. Refreshing the tab reconnects to the running job when the server still has it, and stale completed or missing jobs are cleared automatically. Job controls are shown only when the running job supports them.</p>
 <p>You can keep working while a job runs: change the settings and press <strong>Add to queue</strong> (the Generate button while jobs are active, or <code>⌘/Ctrl+↵</code>). Queued jobs run one after another, in order, and use the settings they had when you added them. They are listed under the job card as <strong>Up next</strong>, where each one can be removed or its settings copied back into the form with <strong>Load settings</strong>; <strong>Clear queue</strong> removes them all (after asking) and never stops the running job. If a job fails, the next one starts anyway. The queue is shared by every open tab and is kept in the server's memory, so stopping the server clears it. While jobs are running or queued, the manual <strong>Enhance prompt</strong> button is unavailable, because the enhancer would need the same memory; auto enhancement still runs inside each job.</p>
+<p>The <strong>Prompts</strong> page builds prompt files visually: snippets, sets of prompts, and per-prompt enhancement. See <a href="../guides/prompts/#prompt-builder-web-ui">Prompt Builder</a>.</p>
 <p>Workspace settings are remembered in the browser between visits and restarts, as long as the Web UI starts on the same port. Choosing a different model applies that model's defaults.</p>
 <p>To give the preview more room, collapse the Compose and Settings sidebar with the <strong>«</strong> button next to <em>Compose</em>. It folds into a narrow strip with an expand button and a Generate button, and the choice is remembered in the browser. On phone-width screens the sidebar always shows above the preview. While a job runs, its card shows the progress and controls on the left and the live preview and outputs on the right.</p>
 <p>The workspace model picker and the Models page show whether each model is already downloaded; models that are not yet downloaded download on first use. On macOS they also show whether a downloaded model fits this Mac's memory, compared with the GPU memory Apple recommends for the machine:</p>
@@ -1220,8 +1221,8 @@ uv run ziv ui --no-browser
 <td>Show all keyboard shortcuts</td>
 </tr>
 <tr>
-<td><code>G</code> then <code>W</code> / <code>G</code> / <code>M</code> / <code>C</code></td>
-<td>Go to Workspace / Gallery / Models / Config</td>
+<td><code>G</code> then <code>W</code> / <code>P</code> / <code>G</code> / <code>M</code> / <code>C</code></td>
+<td>Go to Workspace / Prompts / Gallery / Models / Config</td>
 </tr>
 </tbody>
 </table>
@@ -1269,6 +1270,41 @@ uv run ziv ui --no-browser
 <tr>
 <td><code>R</code></td>
 <td>Repeat the current image</td>
+</tr>
+</tbody>
+</table>
+<p>Prompts:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>⌘S</code></td>
+<td>Save the prompt file</td>
+</tr>
+<tr>
+<td><code>⌘Z</code></td>
+<td>Undo (outside text fields)</td>
+</tr>
+<tr>
+<td><code>↵</code></td>
+<td>Edit the focused prompt text or random choice</td>
+</tr>
+<tr>
+<td><code>$</code></td>
+<td>Suggest snippets while editing a prompt</td>
+</tr>
+<tr>
+<td><code>⌥↵</code></td>
+<td>Edit the <code>{a|b}</code> choice at the caret, make one from the selected words, or start a new one (while editing)</td>
+</tr>
+<tr>
+<td><code>Esc</code> / <code>⌘↵</code></td>
+<td>Finish editing a prompt</td>
 </tr>
 </tbody>
 </table>
