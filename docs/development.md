@@ -23,12 +23,13 @@ make install
 | `make frontend-build` | Build the Svelte app into `zvisiongenerator/web/static/app/` |
 | `make frontend-static-check` | Rebuild the Svelte app and fail if packaged static artifacts changed or are untracked |
 | `make frontend-test` | Run frontend type checks and Vitest tests |
+| `make frontend-palette-check` | Fail on raw colour classes or literals in Svelte files (`PALETTE_STRICT=0` only warns) |
 | `make build` | Build wheel and sdist |
 | `make clean` | Remove build artifacts, caches, venv |
 | `make run` | Run `ziv-image` CLI (use `ARGS="..."`) |
 | `make model` | Run `ziv-model` CLI (use `ARGS="..."`) |
 
-`make check` covers the full verification gate: the Python test suite, frontend type checks and Vitest tests, packaged SPA artifact drift detection, and a strict docs build. The narrower targets (`make frontend-test`, `make frontend-static-check`, `make docs-check`) are available for iterating on a single surface.
+`make check` covers the full verification gate: the Python test suite, frontend type checks and Vitest tests, the raw colour check, packaged SPA artifact drift detection, and a strict docs build. The narrower targets (`make frontend-test`, `make frontend-static-check`, `make docs-check`) are available for iterating on a single surface.
 
 ## Testing Conventions
 
@@ -224,6 +225,17 @@ Raise `ValueError`, `FileNotFoundError`, `RuntimeError` directly with descriptiv
 ### Web UI Confirmations
 
 Ask the user to approve an action with `ConfirmDialog` (`frontend/src/lib/components/molecules/`), never `window.confirm`. It has no title: it shows the question, an optional line of information, and a cancel button plus a confirm button named after the action (danger-styled for destructive actions). Enter confirms (except on the focused cancel button), Esc cancels, and a held key never confirms; while it is open, no other key reaches the page or a viewer underneath. Call `requestConfirm({ question, info, confirmLabel })`, which resolves `true` on confirm, or render `<ConfirmDialog>` directly when the dialog needs a body or stays open while the action runs (`pending`).
+
+### Web UI Design System
+
+The Web UI has one design system ([proposal](https://github.com/knuthelge/ZVisionGenerator/blob/main/proposals/web-design-system.md)). Its tokens live in `@theme` in `frontend/src/app/global.css`, and its component classes are the `ui-*` classes in the same file. Build pages from the shared components in `frontend/src/lib/components/` (`Button`, `Input`, `Select`, `Toggle`, `Chip`, `Badge`, `Panel`, `Segmented`, `ActionBar`, `PageHeader`, `KeyValueList`, `Alert`, `EmptyState`, `InspectorSection`, `InspectorRow`) rather than styling elements by hand.
+
+- **Size:** controls are 28px (`h-control`), small ones 22px, rows 30px. Buttons that sit together share one height; inside an `ActionBar` every button is 36px and the one marked `main` takes the remaining width.
+- **Type:** four sizes only: `text-meta` (11px), `text-ui` (12px), `text-content` (13px), `text-title` (16px). Nunito (`font-heading`) is for titles, area names and the main action; monospace is for numbers, paths and shortcuts.
+- **Labels:** field and row labels are sentence case (`ui-label`). The one small-caps style (`ui-area-label`) names areas: panels, sections, table headers and menu groups.
+- **Shape and surfaces:** corners are 4px for chips and badges, 6px for controls and 10px for containers. Overlays (menus, tooltips, toasts, dialogs) use `bg-raised` and a border, never a drop shadow.
+- **Colour:** teal means on, selected or the main action; pink and amber are reserved for prompt syntax; red is for errors and destructive actions, which always show red text. Use tokens, never raw palette classes or colour literals; `make check` fails on them.
+- **Focus:** every control shows the same 2px teal outline with a 2px offset.
 
 ### Test Strategy
 
