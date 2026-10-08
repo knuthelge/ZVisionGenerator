@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Changed
 - Web UI: dialogs, menus, tooltips and notifications sit on one raised surface with a clear border instead of a drop shadow; destructive buttons are red, and every control shows the same focus ring
 - Web UI: Workspace settings sections have a header band with a summary of the hidden settings, and switches, badges and path fields share one compact size
+- Web UI: Config and Models share the page bar and panels; Config's **Save** and **Discard changes** sit in the page bar, both pages list folders and Hugging Face access the same way, and Models shows image models in a full-width table so names are no longer cut short
 - Web UI: the top bar uses underline tabs; in the Workspace, ratio and resolution presets are joined button groups, Reset and Generate share one height, LoRA chips show their weight in a neutral chip, and the queue's **Clear queue** is red
 - Web UI: the Prompts page uses the shared buttons, labels and page bar; all prompt text has one size, and an empty page says what to do next
 

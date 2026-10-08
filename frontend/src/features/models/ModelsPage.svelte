@@ -3,8 +3,8 @@
   import { getModelInventory, convertCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteLora } from '$lib/api/models';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { ModelDeleteInfo, ModelInventory, ModelStatusFields } from '$lib/types';
-  import { Button, Input, Select, Tooltip } from '$lib/components/atoms';
-  import { ConfirmDialog, FormField, ModelStatusBadges, PathField } from '$lib/components/molecules';
+  import { Button, Icon, Input, Select, Tooltip } from '$lib/components/atoms';
+  import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField } from '$lib/components/molecules';
   import { DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
 
@@ -173,33 +173,24 @@
   {#if m.downloaded === true || m.downloaded === false}
     <Tooltip text={`${m.name}\n${m.downloaded ? DOWNLOADED_TOOLTIP : NOT_DOWNLOADED_TOOLTIP}`} focusable={false} class="max-w-full items-center gap-1.5">
       {#if m.downloaded}
-        <svg class="h-3.5 w-3.5 shrink-0 text-teal-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <svg class="h-3.5 w-3.5 shrink-0 text-primary-main" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
         </svg>
       {:else}
-        <svg class="h-3.5 w-3.5 shrink-0 text-zinc-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <svg class="h-3.5 w-3.5 shrink-0 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"></path>
         </svg>
       {/if}
-      <span class="truncate {m.downloaded ? 'text-zinc-200' : 'text-zinc-500'}" data-testid="model-name" data-downloaded={String(m.downloaded)}>{m.name}</span>
+      <span class="break-words {m.downloaded ? 'text-text-primary' : 'text-text-muted'}" data-testid="model-name" data-downloaded={String(m.downloaded)}>{m.name}</span>
     </Tooltip>
   {:else}
-    <span class="block truncate text-zinc-200" title={m.name} data-testid="model-name" data-downloaded="unknown">{m.name}</span>
+    <span class="block break-words text-text-primary" title={m.name} data-testid="model-name" data-downloaded="unknown">{m.name}</span>
   {/if}
 {/snippet}
 
 {#snippet deleteButton(label: string, onclick: () => void)}
-  <button
-    type="button"
-    class="rounded p-1 text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-400 focus-visible:focus-ring"
-    aria-label={label}
-    title={label}
-    data-testid="delete-button"
-    {onclick}
-  >
-    <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-    </svg>
+  <button type="button" class="ui-btn ui-btn-row ui-btn-danger" aria-label={label} title={label} data-testid="delete-button" {onclick}>
+    <Icon name="trash" size={14} />
   </button>
 {/snippet}
 
@@ -214,328 +205,252 @@
   {#if m.memory_fit}
     <ModelStatusBadges memoryFit={m.memory_fit} tooltipAlign="end" />
   {:else}
-    <span class="text-zinc-600">—</span>
+    <span class="text-text-muted">—</span>
   {/if}
 {/snippet}
 
+{#snippet count(n: number)}
+  <span class="font-mono text-meta text-text-muted">{n}</span>
+{/snippet}
+
 <AdminPageShell
-  title="Models &amp; LoRAs"
-  description="Manage installed models, convert checkpoints, and import LoRA adapters."
+  title="Models"
+  description="Installed models and LoRAs. Convert checkpoints and import LoRAs."
   {loading}
   {error}
 >
   {#if inventory}
-    <div class="min-w-0 space-y-8 pb-6">
-      <!-- Directory paths -->
-      <div class="grid min-w-0 grid-cols-1 gap-6 sm:grid-cols-2">
-        <div class="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 px-4 py-2">
-          <span class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Models Dir</span>
-          <p class="mt-0.5 break-all font-mono text-sm text-zinc-300">{inventory.models_dir || '—'}</p>
-        </div>
-        <div class="min-w-0 rounded-md border border-zinc-800 bg-zinc-950 px-4 py-2">
-          <span class="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">LoRAs Dir</span>
-          <p class="mt-0.5 break-all font-mono text-sm text-zinc-300">{inventory.loras_dir || '—'}</p>
-        </div>
-      </div>
-
+    <div class="flex min-w-0 flex-col gap-4 pb-6">
       {#if notice}
-        <div
-          class="rounded-lg border px-4 py-3 text-sm
-            {notice.tone === 'success'
-              ? 'border-teal-500/30 bg-teal-500/10 text-teal-100'
-              : 'border-red-500/30 bg-red-500/10 text-red-100'}"
-        >
-          {notice.message}
-        </div>
+        <Alert tone={notice.tone} live>{notice.message}</Alert>
       {/if}
 
-      <!-- Runtime access card -->
-      <div class="admin-section min-w-0">
-        <div class="admin-section-header">
-          <svg class="w-5 h-5 text-teal-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
-          </svg>
-          <h3 class="admin-section-title">HuggingFace Access</h3>
-        </div>
-        <p class="break-words text-sm text-zinc-300">
-          {#if inventory.huggingface_configured}
-            <span class="text-teal-400 font-medium">Configured.</span>
-            Token read from <span class="font-mono">{inventory.huggingface_token_env_var ?? 'HF_TOKEN'}</span>.
-          {:else}
-            <span class="text-zinc-400">Not configured.</span>
-            Set <span class="font-mono text-zinc-300">HF_TOKEN</span> for gated model downloads.
-          {/if}
-        </p>
-      </div>
+      <Panel title="Folders and access" icon="folder">
+        <KeyValueList items={[
+          { label: 'Models folder', value: inventory.models_dir || '—', mono: true },
+          { label: 'LoRAs folder', value: inventory.loras_dir || '—', mono: true },
+          inventory.huggingface_configured
+            ? { label: 'Hugging Face token', value: 'Available', tone: 'success', hint: `Read from ${inventory.huggingface_token_env_var ?? 'HF_TOKEN'}.` }
+            : { label: 'Hugging Face token', value: 'Not set', tone: 'muted', hint: 'Set HF_TOKEN for gated model downloads.' },
+        ]} />
+      </Panel>
 
-      <!-- Inventory tables row -->
-      <div class="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
-      <!-- Image Models -->
-      <div class="admin-section min-w-0 overflow-hidden">
-        <div class="flex items-center justify-between border-b border-border-subtle pb-4 mb-4">
-          <h3 class="text-sm font-semibold text-zinc-100">Image Models</h3>
-          <span class="rounded-full bg-teal-500/10 border border-teal-500/20 px-2 py-0.5 text-xs font-semibold text-teal-400">{inventory.image_models.length}</span>
-        </div>
+      <!-- Image models get the full width, so names are not cut short. -->
+      <Panel title="Image models" icon="cube" flush>
+        {#snippet actions()}{@render count(inventory!.image_models.length)}{/snippet}
         {#if inventory.image_models.length === 0}
-          <p class="text-xs text-zinc-500 text-center">None discovered</p>
+          <p class="ui-help p-3 text-center">None found</p>
         {:else}
-          <table class="w-full table-fixed border-collapse text-xs">
-            <thead>
-              <tr class="text-zinc-500 uppercase text-[10px] tracking-wider border-b border-border-subtle">
-                <th class="px-2 py-2 text-left">Name</th>
-                <th class="px-2 py-2 text-left">Family</th>
-                <th class="px-2 py-2 text-left">Size</th>
-                <th class="w-24 px-2 py-2 text-left">Memory</th>
-                <th class="w-8 px-1 py-2"><span class="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each inventory.image_models as m}
-                <tr class="border-b border-border-subtle hover:bg-bg-surface-hover/60 transition">
-                  <td class="px-2 py-2">
-                    {@render modelName(m)}
-                    {#if m.stored_quant}
-                      <span class="block truncate text-[10px] text-zinc-500" data-testid="stored-quant" title="Used automatically when {m.stored_quant.base_model} runs at q{m.stored_quant.bits}">q{m.stored_quant.bits} copy of {m.stored_quant.base_model}</span>
-                    {/if}
-                  </td>
-                  <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.family}>{m.family}</td>
-                  <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.size_label ?? '—'}>{m.size_label ?? '—'}</td>
-                  <td class="px-2 py-2">{@render memoryFitCell(m)}</td>
-                  <td class="px-1 py-2 text-right">{@render modelDeleteCell(m)}</td>
+          <div class="overflow-x-auto px-1 pb-1">
+            <table class="ui-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Family</th>
+                  <th>Size</th>
+                  <th>Memory</th>
+                  <th class="w-8"><span class="sr-only">Actions</span></th>
                 </tr>
-              {/each}
-            </tbody>
-          </table>
-        {/if}
-      </div>
-
-      <!-- Video Models -->
-      <div class="admin-section min-w-0 overflow-hidden">
-        <div class="flex items-center justify-between border-b border-border-subtle pb-4 mb-4">
-          <h3 class="text-sm font-semibold text-zinc-100">Video Models</h3>
-          <span class="rounded-full bg-teal-500/10 border border-teal-500/20 px-2 py-0.5 text-xs font-semibold text-teal-400">{inventory.video_models.length}</span>
-        </div>
-        {#if inventory.video_models.length === 0}
-          <p class="text-xs text-zinc-500 text-center">None discovered</p>
-        {:else}
-          <table class="w-full table-fixed border-collapse text-xs">
-            <thead>
-              <tr class="text-zinc-500 uppercase text-[10px] tracking-wider border-b border-border-subtle">
-                <th class="px-2 py-2 text-left">Name</th>
-                <th class="px-2 py-2 text-left">Family</th>
-                <th class="px-2 py-2 text-left">I2V</th>
-                <th class="w-24 px-2 py-2 text-left">Memory</th>
-                <th class="w-8 px-1 py-2"><span class="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each inventory.video_models as m}
-                <tr class="border-b border-border-subtle hover:bg-bg-surface-hover/60 transition">
-                  <td class="px-2 py-2">{@render modelName(m)}</td>
-                  <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.family}>{m.family}</td>
-                  <td class="px-2 py-2 text-zinc-400">{m.supports_i2v ? '✓' : '—'}</td>
-                  <td class="px-2 py-2">{@render memoryFitCell(m)}</td>
-                  <td class="px-1 py-2 text-right">{@render modelDeleteCell(m)}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        {/if}
-      </div>
-
-      <!-- LoRAs -->
-      <div class="admin-section min-w-0 overflow-hidden">
-        <div class="flex items-center justify-between border-b border-border-subtle pb-4 mb-4">
-          <h3 class="text-sm font-semibold text-zinc-100">Discovered LoRAs</h3>
-          <span class="rounded-full bg-teal-500/10 border border-teal-500/20 px-2 py-0.5 text-xs font-semibold text-teal-400">{inventory.loras.length}</span>
-        </div>
-        {#if inventory.loras.length === 0}
-          <p class="text-xs text-zinc-500 text-center">None discovered</p>
-        {:else}
-          <table class="w-full table-fixed border-collapse text-xs">
-            <thead>
-              <tr class="text-zinc-500 uppercase text-[10px] tracking-wider border-b border-border-subtle">
-                <th class="px-2 py-2 text-left">Name</th>
-                <th class="px-2 py-2 text-left">Size</th>
-                <th class="w-8 px-1 py-2"><span class="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each inventory.loras as l}
-                <tr class="border-b border-border-subtle hover:bg-bg-surface-hover/60 transition">
-                  <td class="px-2 py-2 text-zinc-200 truncate max-w-25" title={l.name}>{l.name}</td>
-                  <td class="truncate px-2 py-2 font-mono text-zinc-400" title={l.size_label ?? '—'}>{l.size_label ?? '—'}</td>
-                  <td class="px-1 py-2 text-right">{@render deleteButton(`Delete ${l.name}`, () => requestDelete({ type: 'lora', name: l.name }))}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        {/if}
-      </div>
-      </div>
-
-      <!-- Operation Forms -->
-      <div class="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
-
-      <!-- Convert Checkpoint -->
-      <form class="admin-section min-w-0 flex flex-col gap-5" onsubmit={handleConvertCheckpoint}>
-        <h3 class="text-sm font-semibold text-zinc-100 border-b border-border-subtle pb-3">Convert a Checkpoint</h3>
-        
-        {#key checkpointPathReset}
-          <PathField
-            id="convert-input-path"
-            name="input_path"
-            label="Input Path"
-            value={checkpointPath}
-            placeholder="/path/to/model.safetensors"
-            helper="Path to the checkpoint file"
-            pickerKind="existing_file"
-            pickerPurpose="checkpoint_file"
-            required
-            onresolve={async (candidate) => candidate}
-            onvaluechange={(value) => (checkpointPath = value)}
-          />
-        {/key}
-
-        <FormField label="Alias Name" for="convert-name" helper="Display name for this model">
-          <Input
-            id="convert-name"
-            type="text"
-            name="name"
-            placeholder="my-model-name"
-          />
-        </FormField>
-
-        <FormField label="Model Type" for="convert-model-type" required>
-          <Select
-            id="convert-model-type"
-            name="model_type"
-            required
-            options={[
-              { value: '', label: '-- Select type --', disabled: true },
-              { value: 'zimage', label: 'zimage' },
-              { value: 'flux2-klein-4b', label: 'flux2-klein-4b' },
-              { value: 'flux2-klein-9b', label: 'flux2-klein-9b' },
-              { value: 'krea2-turbo', label: 'krea2-turbo' }
-            ]}
-          />
-        </FormField>
-
-        <FormField label="Base Model (optional)" for="convert-base-model" helper="Base model ID or path">
-          <Input
-            id="convert-base-model"
-            type="text"
-            name="base_model"
-            placeholder="base model id or path"
-          />
-        </FormField>
-
-        {#if inventory?.stored_quants_supported}
-          <FormField label="Quantized Copy (optional)" for="convert-quantize" helper="Also save a q8 or q4 copy, used when that quantize level is selected">
-            <Select
-              id="convert-quantize"
-              name="quantize"
-              options={[
-                { value: '', label: 'None' },
-                { value: '8', label: 'q8' },
-                { value: '4', label: 'q4' }
-              ]}
-            />
-          </FormField>
-        {/if}
-
-        <div class="flex items-center gap-2">
-          <input
-            type="checkbox"
-            name="copy"
-            id="convert-copy"
-            class="rounded border-zinc-700 bg-zinc-900 text-teal-500 focus:ring-teal-500 h-4 w-4"
-          />
-          <label class="text-xs text-zinc-400 cursor-pointer" for="convert-copy">Copy instead of moving</label>
-        </div>
-
-        <Button variant="primary" type="submit" disabled={formsBusy} loading={formsBusy} class="mt-auto w-full">
-          Convert Checkpoint
-        </Button>
-      </form>
-
-      <!-- Import Local LoRA -->
-      <form class="admin-section min-w-0 flex flex-col gap-5" onsubmit={handleImportLoraLocal}>
-        <h3 class="text-sm font-semibold text-zinc-100 border-b border-border-subtle pb-3">Import Local LoRA</h3>
-        
-        {#key localLoraPathReset}
-          <PathField
-            id="import-local-source-path"
-            name="source_path"
-            label="Source Path"
-            value={localLoraPath}
-            placeholder="/path/to/lora.safetensors"
-            helper="Path to the LoRA file"
-            pickerKind="existing_file"
-            pickerPurpose="lora_file"
-            required
-            onresolve={async (candidate) => candidate}
-            onvaluechange={(value) => (localLoraPath = value)}
-          />
-        {/key}
-
-        <FormField label="Alias Name" for="import-local-name" helper="Display name for this LoRA">
-          <Input
-            id="import-local-name"
-            type="text"
-            name="name"
-            placeholder="my-lora"
-          />
-        </FormField>
-
-        <Button variant="primary" type="submit" disabled={formsBusy} loading={formsBusy} class="mt-auto w-full">
-          Import LoRA
-        </Button>
-      </form>
-
-      <!-- Import HuggingFace LoRA -->
-      <form class="admin-section min-w-0 flex flex-col gap-5" onsubmit={handleImportLoraHF}>
-        <h3 class="text-sm font-semibold text-zinc-100 border-b border-border-subtle pb-3">Import from HuggingFace</h3>
-        
-        <FormField label="Repository ID" for="import-hf-repo-id" required helper="Format: username/repository">
-          <Input
-            id="import-hf-repo-id"
-            type="text"
-            name="repo_id"
-            placeholder="username/repository"
-            required
-          />
-        </FormField>
-
-        <FormField label="Filename" for="import-hf-filename" required helper="Name of the file in the repository">
-          <Input
-            id="import-hf-filename"
-            type="text"
-            name="filename"
-            placeholder="model.safetensors"
-            required
-          />
-        </FormField>
-
-        <FormField label="Alias Name" for="import-hf-name" helper="Display name for this LoRA">
-          <Input
-            id="import-hf-name"
-            type="text"
-            name="name"
-            placeholder="my-hf-lora"
-          />
-        </FormField>
-
-        {#if !inventory.huggingface_configured}
-          <div class="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-            Set <span class="font-mono">HF_TOKEN</span> for gated model downloads.
+              </thead>
+              <tbody>
+                {#each inventory.image_models as m}
+                  <tr>
+                    <td>
+                      {@render modelName(m)}
+                      {#if m.stored_quant}
+                        <span class="ui-help block font-normal" data-testid="stored-quant" title="Used automatically when {m.stored_quant.base_model} runs at q{m.stored_quant.bits}">q{m.stored_quant.bits} copy of {m.stored_quant.base_model}</span>
+                      {/if}
+                    </td>
+                    <td class="font-mono">{m.family}</td>
+                    <td class="font-mono">{m.size_label ?? '—'}</td>
+                    <td>{@render memoryFitCell(m)}</td>
+                    <td class="text-right">{@render modelDeleteCell(m)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
           </div>
         {/if}
+      </Panel>
 
-        <Button variant="primary" type="submit" disabled={formsBusy} loading={formsBusy} class="mt-auto w-full">
-          Download LoRA
-        </Button>
-      </form>
+      <div class="grid min-w-0 grid-cols-1 items-start gap-4 lg:grid-cols-2">
+        <Panel title="Video models" icon="cube" flush>
+          {#snippet actions()}{@render count(inventory!.video_models.length)}{/snippet}
+          {#if inventory.video_models.length === 0}
+            <p class="ui-help p-3 text-center">None found</p>
+          {:else}
+            <div class="overflow-x-auto px-1 pb-1">
+              <table class="ui-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Family</th>
+                    <th>Image to video</th>
+                    <th>Memory</th>
+                    <th class="w-8"><span class="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each inventory.video_models as m}
+                    <tr>
+                      <td>{@render modelName(m)}</td>
+                      <td class="font-mono">{m.family}</td>
+                      <td>{m.supports_i2v ? 'Yes' : '—'}</td>
+                      <td>{@render memoryFitCell(m)}</td>
+                      <td class="text-right">{@render modelDeleteCell(m)}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
+        </Panel>
+
+        <Panel title="LoRAs" icon="list" flush>
+          {#snippet actions()}{@render count(inventory!.loras.length)}{/snippet}
+          {#if inventory.loras.length === 0}
+            <p class="ui-help p-3 text-center">None found</p>
+          {:else}
+            <div class="overflow-x-auto px-1 pb-1">
+              <table class="ui-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Size</th>
+                    <th class="w-8"><span class="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each inventory.loras as l}
+                    <tr>
+                      <td class="break-words">{l.name}</td>
+                      <td class="font-mono">{l.size_label ?? '—'}</td>
+                      <td class="text-right">{@render deleteButton(`Delete ${l.name}`, () => requestDelete({ type: 'lora', name: l.name }))}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
+        </Panel>
+      </div>
+
+      <div class="grid min-w-0 grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <Panel as="form" title="Convert a checkpoint" onsubmit={handleConvertCheckpoint}>
+          <div class="flex flex-col gap-4">
+            {#key checkpointPathReset}
+              <PathField
+                id="convert-input-path"
+                name="input_path"
+                label="Checkpoint file"
+                value={checkpointPath}
+                placeholder="/path/to/model.safetensors"
+                pickerKind="existing_file"
+                pickerPurpose="checkpoint_file"
+                required
+                onresolve={async (candidate) => candidate}
+                onvaluechange={(value) => (checkpointPath = value)}
+              />
+            {/key}
+
+            <FormField label="Name" for="convert-name" helper="How the model is listed in the app">
+              <Input id="convert-name" type="text" name="name" placeholder="my-model-name" />
+            </FormField>
+
+            <FormField label="Model type" for="convert-model-type" required>
+              <Select
+                id="convert-model-type"
+                name="model_type"
+                required
+                options={[
+                  { value: '', label: 'Choose a type', disabled: true },
+                  { value: 'zimage', label: 'zimage' },
+                  { value: 'flux2-klein-4b', label: 'flux2-klein-4b' },
+                  { value: 'flux2-klein-9b', label: 'flux2-klein-9b' },
+                  { value: 'krea2-turbo', label: 'krea2-turbo' }
+                ]}
+              />
+            </FormField>
+
+            <FormField label="Base model (optional)" for="convert-base-model" helper="Base model ID or path">
+              <Input id="convert-base-model" type="text" name="base_model" placeholder="base model id or path" />
+            </FormField>
+
+            {#if inventory?.stored_quants_supported}
+              <FormField label="Quantized copy (optional)" for="convert-quantize" helper="Also save a q8 or q4 copy, used when that quantize level is selected">
+                <Select
+                  id="convert-quantize"
+                  name="quantize"
+                  options={[
+                    { value: '', label: 'None' },
+                    { value: '8', label: 'q8' },
+                    { value: '4', label: 'q4' }
+                  ]}
+                />
+              </FormField>
+            {/if}
+
+            <label class="flex cursor-pointer items-center gap-2 text-ui text-text-secondary" for="convert-copy">
+              <input type="checkbox" name="copy" id="convert-copy" class="accent-primary h-3.5 w-3.5" />
+              Copy instead of moving
+            </label>
+
+            <div class="flex justify-end">
+              <Button variant="primary" type="submit" disabled={formsBusy} loading={formsBusy}>Convert checkpoint</Button>
+            </div>
+          </div>
+        </Panel>
+
+        <Panel as="form" title="Import a local LoRA" onsubmit={handleImportLoraLocal}>
+          <div class="flex flex-col gap-4">
+            {#key localLoraPathReset}
+              <PathField
+                id="import-local-source-path"
+                name="source_path"
+                label="LoRA file"
+                value={localLoraPath}
+                placeholder="/path/to/lora.safetensors"
+                pickerKind="existing_file"
+                pickerPurpose="lora_file"
+                required
+                onresolve={async (candidate) => candidate}
+                onvaluechange={(value) => (localLoraPath = value)}
+              />
+            {/key}
+
+            <FormField label="Name" for="import-local-name" helper="How the LoRA is listed in the app">
+              <Input id="import-local-name" type="text" name="name" placeholder="my-lora" />
+            </FormField>
+
+            <div class="flex justify-end">
+              <Button variant="primary" type="submit" disabled={formsBusy} loading={formsBusy}>Import LoRA</Button>
+            </div>
+          </div>
+        </Panel>
+
+        <Panel as="form" title="Download a LoRA from Hugging Face" onsubmit={handleImportLoraHF}>
+          <div class="flex flex-col gap-4">
+            <FormField label="Repository" for="import-hf-repo-id" required helper="For example owner/repository">
+              <Input id="import-hf-repo-id" type="text" name="repo_id" placeholder="owner/repository" required />
+            </FormField>
+
+            <FormField label="File" for="import-hf-filename" required helper="Name of the file in the repository">
+              <Input id="import-hf-filename" type="text" name="filename" placeholder="model.safetensors" required />
+            </FormField>
+
+            <FormField label="Name" for="import-hf-name" helper="How the LoRA is listed in the app">
+              <Input id="import-hf-name" type="text" name="name" placeholder="my-hf-lora" />
+            </FormField>
+
+            {#if !inventory.huggingface_configured}
+              <Alert tone="warning">Set <span class="font-mono">HF_TOKEN</span> for gated model downloads.</Alert>
+            {/if}
+
+            <div class="flex justify-end">
+              <Button variant="primary" type="submit" disabled={formsBusy} loading={formsBusy}>Download LoRA</Button>
+            </div>
+          </div>
+        </Panel>
       </div>
     </div>
   {/if}
@@ -553,18 +468,18 @@
   {#if pendingDelete}
     <div class="space-y-2" data-testid="delete-dialog">
       {#if pendingDelete.type === 'model' && pendingDelete.info.kind === 'installed'}
-        <p class="text-zinc-400">Hugging Face files it links to are kept.</p>
+        <p>Hugging Face files it links to are kept.</p>
       {:else if pendingDelete.type === 'model'}
-        <p class="text-zinc-400">The <span class="font-mono">{pendingDelete.name}</span> alias stays in your config and downloads the model again the next time you use it.</p>
+        <p>The <span class="font-mono">{pendingDelete.name}</span> alias stays in your config and downloads the model again the next time you use it.</p>
         {#if pendingDelete.info.linked_by.length > 0}
-          <div class="rounded-md border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300" data-testid="delete-linked-warning">
+          <Alert tone="warning" testId="delete-linked-warning">
             These converted models use files from this download and will stop working until it is downloaded again:
             <span class="font-mono">{pendingDelete.info.linked_by.join(', ')}</span>
-          </div>
+          </Alert>
         {/if}
       {/if}
       {#if pendingDelete.type === 'model' && (pendingDelete.info.stored_quants?.length ?? 0) > 0}
-        <p class="text-zinc-400" data-testid="delete-stored-quants">
+        <p data-testid="delete-stored-quants">
           Its quantized copies are deleted too: <span class="font-mono">{pendingDelete.info.stored_quants?.join(', ')}</span>
         </p>
       {/if}

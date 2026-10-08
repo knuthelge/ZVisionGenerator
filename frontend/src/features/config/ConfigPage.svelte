@@ -3,18 +3,18 @@
   import { getConfig, updateConfig } from '$lib/api/config';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { AppConfig, WritableConfigField, WritableConfigValue } from '$lib/types';
-  import { Button, Input, Select } from '$lib/components/atoms';
-  import { FormField, PathField } from '$lib/components/molecules';
+  import { Button, Icon, Input, Select } from '$lib/components/atoms';
+  import { Alert, FormField, KeyValueList, Panel, PathField, type KeyValueItem } from '$lib/components/molecules';
   import { AdminPageShell } from '$lib/components/organisms';
 
   type SelectOption = { value: string; label: string; disabled?: boolean };
 
   const FIELD_LABELS: Record<string, string> = {
-    'ui.default_models.image': 'Default Image Model',
-    'ui.default_models.video': 'Default Video Model',
-    'generation.default_size': 'Base Resolution',
-    'ui.output_dir': 'Output Directory',
-    'prompt_enhancer.user_model': 'Prompt Enhancer Model',
+    'ui.default_models.image': 'Default image model',
+    'ui.default_models.video': 'Default video model',
+    'generation.default_size': 'Base resolution',
+    'ui.output_dir': 'Output folder',
+    'prompt_enhancer.user_model': 'Prompt enhancer model',
   };
 
   let config = $state<AppConfig | null>(null);
@@ -167,6 +167,18 @@
     }
   }
 
+  /** Read-only folders and the Hugging Face token, which only the server's environment can change. */
+  function locationItems(c: AppConfig): KeyValueItem[] {
+    const tokenVar = c.ui.huggingface_token_env_var ?? 'HF_TOKEN';
+    return [
+      { label: 'Model cache', value: c.ui.model_cache_dir ?? '(runtime-only)', mono: true, hint: 'Set when the app starts; not editable here.' },
+      { label: 'LoRAs folder', value: c.ui.loras_dir ?? '(runtime-only)', mono: true, hint: 'Inside the current data folder.' },
+      c.ui.huggingface_token_configured
+        ? { label: 'Hugging Face token', value: 'Available', tone: 'success', hint: `Read from ${tokenVar}.` }
+        : { label: 'Hugging Face token', value: 'Not set', tone: 'muted', hint: 'Set HF_TOKEN before starting the app for gated model downloads.' },
+    ];
+  }
+
   function handleReset(): void {
     if (!config) return;
     formValues = valuesFromConfig(config);
@@ -175,34 +187,27 @@
 </script>
 
 <AdminPageShell
-  title="System Configuration"
-  description="Manage persistent settings, paths, and default models to be applied across the application."
+  title="Config"
+  description="Defaults and folders used across the app. Saved settings apply from the next generation."
   {loading}
   {error}
 >
+  {#snippet actions()}
+    <Button type="reset" form="config-form">Discard changes</Button>
+    <Button variant="primary" type="submit" form="config-form" loading={saving}>
+      {#if !saving}<Icon name="check" size={14} />{/if}
+      {saving ? 'Saving…' : 'Save'}
+    </Button>
+  {/snippet}
   {#if config}
-    <form class="space-y-8" onsubmit={handleSave} onreset={handleReset}>
+    <form id="config-form" class="flex flex-col gap-4" onsubmit={handleSave} onreset={handleReset}>
       {#if saveStatus}
-        <div
-          class="rounded-lg border px-4 py-3 text-sm
-            {saveStatus.tone === 'success'
-              ? 'border-teal-500/30 bg-teal-500/10 text-teal-100'
-              : 'border-red-500/30 bg-red-500/10 text-red-100'}"
-        >
-          {saveStatus.message}
-        </div>
+        <Alert tone={saveStatus.tone} live>{saveStatus.message}</Alert>
       {/if}
 
       <!-- Writable settings are rendered from the backend schema inventory. -->
-      <section class="admin-section">
-        <div class="admin-section-header">
-          <svg class="w-5 h-5 text-teal-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-          </svg>
-          <h2 class="admin-section-title">Writable Settings</h2>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <Panel title="Settings" icon="list">
+        <div class="grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2">
           {#each config.writable_config.fields as field (field.key)}
             {@const options = selectOptionsForField(field)}
             {#if field.key === 'ui.output_dir'}
@@ -243,75 +248,11 @@
             {/if}
           {/each}
         </div>
-      </section>
+      </Panel>
 
-      <!-- Directories & Storage -->
-      <section class="admin-section">
-        <div class="admin-section-header">
-          <svg class="w-5 h-5 text-teal-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path>
-          </svg>
-          <h2 class="admin-section-title">Directories &amp; Storage</h2>
-        </div>
-
-        <div class="space-y-6">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div class="space-y-2">
-              <div class="block text-sm font-medium text-zinc-300">Models Cache Directory</div>
-              <div class="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 font-mono break-all">
-                {config.ui.model_cache_dir ?? '(runtime-only)'}
-              </div>
-              <p class="text-xs text-zinc-500">Runtime-only. Not writable from the Web UI.</p>
-            </div>
-            <div class="space-y-2">
-              <div class="block text-sm font-medium text-zinc-300">LoRAs Directory</div>
-              <div class="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 font-mono break-all">
-                {config.ui.loras_dir ?? '(runtime-only)'}
-              </div>
-              <p class="text-xs text-zinc-500">Derived from the current data directory.</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <!-- API Keys & Authentication -->
-      <section class="admin-section">
-        <div class="admin-section-header">
-          <svg class="w-5 h-5 text-teal-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
-          </svg>
-          <h2 class="admin-section-title">API Keys &amp; Authentication</h2>
-        </div>
-
-        <div class="space-y-2">
-          <div class="block text-sm font-medium text-zinc-300">HuggingFace Token</div>
-          <div class="rounded-md border border-zinc-800 bg-zinc-900 px-3 py-3 text-sm text-zinc-200">
-            <p class="font-medium text-zinc-100">
-              {config.ui.huggingface_token_configured ? 'Available at runtime' : 'Not configured for this process'}
-            </p>
-            <p class="mt-1 text-xs text-zinc-500">
-              {#if config.ui.huggingface_token_configured}
-                Read from <span class="font-mono text-zinc-300">{config.ui.huggingface_token_env_var ?? 'HF_TOKEN'}</span>.
-              {:else}
-                Set <span class="font-mono text-zinc-300">HF_TOKEN</span> before starting the app for gated model downloads.
-              {/if}
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <!-- Actions -->
-      <div class="flex items-center justify-end gap-4 py-8">
-        <Button variant="secondary" type="reset">Discard Changes</Button>
-        <Button variant="primary" type="submit" disabled={saving} loading={saving}>
-          {#if !saving}
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-            </svg>
-          {/if}
-          {saving ? 'Saving...' : 'Save Configuration'}
-        </Button>
-      </div>
+      <Panel title="Folders and access" icon="folder">
+        <KeyValueList items={locationItems(config)} />
+      </Panel>
     </form>
   {/if}
 </AdminPageShell>
