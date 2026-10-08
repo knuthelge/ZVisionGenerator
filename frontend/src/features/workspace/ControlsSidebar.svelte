@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Icon, Spinner } from '$lib/components/atoms';
+  import { ActionBar } from '$lib/components/molecules';
   import { draft } from '$lib/state/draft.svelte';
   import type { WorkspaceContext } from '$lib/types';
   import ComposePane from './ComposePane.svelte';
@@ -40,13 +41,13 @@
       <div class="flex-1 overflow-y-auto p-3 custom-scrollbar">
         <p class="flex items-center gap-2 text-ui text-text-muted" role="status"><Spinner size="sm" />Loading settings…</p>
       </div>
-      <div class="panel-footer ui-action-bar z-10 w-full shrink-0 p-3">
+      <ActionBar class="panel-footer z-10 w-full shrink-0 p-3">
         <button id="ws-submit" type="submit" disabled={true} class="ui-btn ui-btn-primary ui-btn-main">
           <Icon name="bolt" size={16} />
           <span>Generate</span>
           <kbd>⌘↵</kbd>
         </button>
-      </div>
+      </ActionBar>
     {/if}
   </div>
 

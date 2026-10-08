@@ -1750,7 +1750,7 @@ describe('WorkspacePage', () => {
     draft.update('negativePrompt', 'stale negative');
     await settle();
 
-    const promptSource = target.querySelector('[data-prompt-source="file"]') as HTMLButtonElement | null;
+    const promptSource = target.querySelector('[aria-label="Prompt source"] [data-value="file"]') as HTMLButtonElement | null;
     expect(promptSource).not.toBeNull();
     promptSource!.click();
     await settle();
@@ -1903,7 +1903,7 @@ describe('WorkspacePage', () => {
     const context = makeContext();
     await mountWorkspace(context);
 
-    const promptSource = target.querySelector('[data-prompt-source="file"]') as HTMLButtonElement | null;
+    const promptSource = target.querySelector('[aria-label="Prompt source"] [data-value="file"]') as HTMLButtonElement | null;
     promptSource!.click();
     await settle();
 
@@ -1933,7 +1933,7 @@ describe('WorkspacePage', () => {
 
     await mountWorkspace(makeContext());
 
-    const promptSource = target.querySelector('[data-prompt-source="file"]') as HTMLButtonElement | null;
+    const promptSource = target.querySelector('[aria-label="Prompt source"] [data-value="file"]') as HTMLButtonElement | null;
     promptSource!.click();
     await settle();
 
@@ -1968,7 +1968,7 @@ describe('WorkspacePage', () => {
     const context = makeContext();
     await mountWorkspace(context);
 
-    const promptSource = target.querySelector('[data-prompt-source="file"]') as HTMLButtonElement | null;
+    const promptSource = target.querySelector('[aria-label="Prompt source"] [data-value="file"]') as HTMLButtonElement | null;
     promptSource!.click();
     await settle();
 

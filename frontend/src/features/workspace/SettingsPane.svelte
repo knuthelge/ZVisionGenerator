@@ -1,7 +1,7 @@
 <script lang="ts">
   import { draft, MAX_SHARPEN_AMOUNT, offeredSizes, settingDefaultsFor, type SettingKey } from '$lib/state/draft.svelte';
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
-  import { InspectorRow, InspectorSection } from '$lib/components/molecules';
+  import { ActionBar, InspectorRow, InspectorSection } from '$lib/components/molecules';
   import type { NumberSpec, ScrubOptions } from '$lib/actions/scrub';
   import type { WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
@@ -469,7 +469,7 @@
     {#if promptFileMode && s.promptFileOptionIds.length === 0}
       <p class="ui-alert ui-alert-warning footer-note">{context.prompt_file.help.option_required}</p>
     {/if}
-    <div class="ui-action-bar">
+    <ActionBar>
       <button
         id="ws-reset"
         type="button"
@@ -492,7 +492,7 @@
         <span>{busy ? 'Submitting…' : jobsActive ? 'Add to queue' : 'Generate'}</span>
         <kbd>⌘↵</kbd>
       </button>
-    </div>
+    </ActionBar>
   </div>
 </section>
 

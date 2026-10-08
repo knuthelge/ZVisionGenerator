@@ -77,7 +77,7 @@ Buttons that sit together share one height; the context sets the size, not the b
 | Segmented control, presets | `.surface-toggle-pill`, `.panel-segment`, Workspace preset buttons | One joined `Segmented` component |
 | Tabs | Prompt / Enhanced tabs in Compose | Underline tabs |
 | Switch, checkbox | `Toggle` atom (36 × 20), Prompts `.switch` (26 × 15), native checkboxes | `Toggle` at 26 × 15; native checkbox with the accent colour |
-| Chips | `.surface-chip`, `.prompt-tool` chips, LoRA chips | `Chip` with pressed and removable forms |
+| Chips | `.surface-chip`, `.prompt-tool` chips, LoRA chips | The `ui-chip` class, pressed through `aria-pressed`; LoRA chips are neutral with a weight field |
 | Text field, select, path field | `Input`, `Select`, `FormField`, `PathField`, native `<select>`s | The same atoms at 28 px with sentence-case labels; no native selects |
 | Rows, collapsible sections | `InspectorRow`, `InspectorSection`, Prompts preview rows | `InspectorRow`, `InspectorSection` restyled; used on Config too |
 | Panel | `.admin-section`, `.surface-card`, Prompts set sections | One `Panel` with a small-caps header |

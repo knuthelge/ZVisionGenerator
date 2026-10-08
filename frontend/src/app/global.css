@@ -128,7 +128,8 @@
   }
 
   /* One focus ring everywhere. */
-  :where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  /* Containers focused from code (tabindex="-1": dialogs, menus, the viewer) get no ring. */
+  :where(button, a, input, select, textarea, summary, [tabindex]:not([tabindex='-1'])):focus-visible {
     outline: 2px solid var(--color-primary-main);
     outline-offset: 2px;
   }

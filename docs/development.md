@@ -228,7 +228,7 @@ Ask the user to approve an action with `ConfirmDialog` (`frontend/src/lib/compon
 
 ### Web UI Design System
 
-The Web UI has one design system ([proposal](https://github.com/knuthelge/ZVisionGenerator/blob/main/proposals/web-design-system.md)). Its tokens live in `@theme` in `frontend/src/app/global.css`, and its component classes are the `ui-*` classes in the same file. Build pages from the shared components in `frontend/src/lib/components/` (`Button`, `Input`, `Select`, `Toggle`, `Chip`, `Badge`, `Panel`, `Segmented`, `ActionBar`, `PageHeader`, `KeyValueList`, `Alert`, `EmptyState`, `InspectorSection`, `InspectorRow`) rather than styling elements by hand.
+The Web UI has one design system ([proposal](https://github.com/knuthelge/ZVisionGenerator/blob/main/proposals/web-design-system.md)). Its tokens live in `@theme` in `frontend/src/app/global.css`, and its component classes are the `ui-*` classes in the same file. Build pages from the shared components in `frontend/src/lib/components/` (`Button`, `Input`, `Select`, `Toggle`, `Badge`, `Panel`, `Segmented`, `ActionBar`, `PageHeader`, `KeyValueList`, `Alert`, `EmptyState`, `InspectorSection`, `InspectorRow`) or, where no component fits, the `ui-*` classes (for example `ui-chip`), rather than styling elements by hand.
 
 - **Size:** controls are 28px (`h-control`), small ones 22px, rows 30px. Buttons that sit together share one height; inside an `ActionBar` every button is 36px and the one marked `main` takes the remaining width.
 - **Type:** four sizes only: `text-meta` (11px), `text-ui` (12px), `text-content` (13px), `text-title` (16px). Nunito (`font-heading`) is for titles, area names and the main action; monospace is for numbers, paths and shortcuts.
