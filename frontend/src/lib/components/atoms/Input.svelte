@@ -49,10 +49,8 @@
     oninvalid
   }: Props = $props();
 
-  const baseCls = 'surface-input w-full transition-colors';
   const invalid = $derived(ariaInvalid ?? Boolean(error));
-  const errorCls = 'border-red-500 focus:border-red-500';
-  const cls = $derived(`${baseCls} ${invalid ? errorCls : ''} ${extraClass}`);
+  const cls = $derived(`ui-field ${extraClass}`);
 </script>
 
 <input
@@ -79,5 +77,5 @@
   {oninvalid}
 />
 {#if error}
-  <p id="{id}-error" class="mt-1 text-xs text-red-400">{error}</p>
+  <p id="{id}-error" class="ui-help ui-help-error mt-1">{error}</p>
 {/if}

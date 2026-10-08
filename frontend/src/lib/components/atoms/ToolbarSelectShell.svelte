@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import Icon from './Icon.svelte';
 
   interface Props {
     id?: string;
@@ -32,14 +33,14 @@
 
   const stateClass = $derived(
     focused
-      ? 'bg-bg-surface border-primary-main ring-4 ring-primary-main'
+      ? 'bg-bg-base border-border-strong outline-2 outline-offset-2 outline-primary-main'
       : hovered
-        ? 'bg-bg-surface-hover border-border-subtle'
-        : 'bg-bg-surface border-border-subtle'
+        ? 'bg-bg-surface-hover border-border-strong'
+        : 'bg-bg-base border-border-strong'
   );
 
   const shellClass = $derived(
-    `relative flex items-center justify-between rounded-md border px-3 py-2 text-sm transition-colors text-text-primary ${stateClass} ${extraClass}`
+    `relative flex h-control items-center justify-between gap-2 rounded-sm border px-2 text-ui transition-colors text-text-primary ${stateClass} ${extraClass}`
   );
 
   function handlePointerEnter(): void {
@@ -66,9 +67,7 @@
   class={shellClass}
 >
   {@render children?.()}
-  <svg class="w-4 h-4 text-zinc-500 pointer-events-none shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-  </svg>
+  <Icon name="chevdown" size={14} class="pointer-events-none shrink-0 text-text-muted" />
   <select
     {id}
     {name}

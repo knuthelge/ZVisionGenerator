@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import Icon from '../atoms/Icon.svelte';
 
   interface Props {
     open?: boolean;
@@ -124,7 +125,7 @@
     <!-- Backdrop (native button so click-to-dismiss requires no role suppression) -->
     <button
       type="button"
-      class="absolute inset-0 bg-black/70 backdrop-blur-sm"
+      class="absolute inset-0 bg-scrim"
       onclick={close}
       aria-label="Close dialog"
       tabindex="-1"
@@ -140,28 +141,26 @@
         aria-labelledby={labelledby}
         aria-describedby={describedby}
         tabindex="-1"
-        class="relative flex max-h-full w-full {SIZE_CLASSES[size]} flex-col rounded-xl border border-zinc-700 bg-zinc-900 shadow-2xl focus:outline-none pointer-events-auto"
+        class="ui-overlay relative flex max-h-full w-full {SIZE_CLASSES[size]} flex-col focus:outline-none pointer-events-auto"
       >
       {#if title}
-        <div class="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-          <h2 class="text-base font-semibold text-zinc-100">{title}</h2>
+        <div class="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-2.5">
+          <h2 class="font-heading text-content font-extrabold text-text-primary">{title}</h2>
           <button
             type="button"
             onclick={close}
-            class="rounded-md p-1 text-zinc-500 hover:text-zinc-100 hover:bg-zinc-800 transition-colors focus-visible:focus-ring"
+            class="ui-btn ui-btn-quiet ui-btn-icon ui-btn-sm"
             aria-label="Close dialog"
           >
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Icon name="close" size={14} />
           </button>
         </div>
       {/if}
-      <div class="min-h-0 overflow-y-auto px-6 py-4">
+      <div class="min-h-0 overflow-y-auto px-4 py-3 text-content text-text-secondary">
         {@render children?.()}
       </div>
       {#if footer}
-        <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-zinc-800">
+        <div class="flex flex-wrap items-center justify-end gap-2 border-t border-border-subtle px-4 py-2.5">
           {@render footer()}
         </div>
       {/if}

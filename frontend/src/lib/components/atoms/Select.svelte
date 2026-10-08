@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Icon from './Icon.svelte';
+
   interface SelectOption {
     value: string;
     label: string;
@@ -30,20 +32,16 @@
     class: extraClass = '',
     onchange
   }: Props = $props();
-
-  const baseCls = 'surface-select w-full appearance-none pr-8 transition-colors bg-no-repeat';
-  const errorCls = 'border-red-500';
-  const cls = $derived(`${baseCls} ${error ? errorCls : ''} ${extraClass}`);
 </script>
 
-<div class="relative">
+<div class="relative min-w-0">
   <select
     {id}
     {name}
     bind:value
     {disabled}
     {required}
-    class={cls}
+    class="ui-field {extraClass}"
     aria-invalid={error ? 'true' : undefined}
     aria-describedby={error ? `${id}-error` : undefined}
     {onchange}
@@ -55,13 +53,8 @@
       <option value={opt.value} disabled={opt.disabled}>{opt.label}</option>
     {/each}
   </select>
-  <!-- Chevron icon -->
-  <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-zinc-500">
-    <svg class="h-4 w-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-      <path stroke-linecap="round" stroke-linejoin="round" d="M4 6l4 4 4-4" />
-    </svg>
-  </div>
+  <Icon name="chevdown" size={14} class="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-text-muted" />
 </div>
 {#if error}
-  <p id="{id}-error" class="mt-1 text-xs text-red-400">{error}</p>
+  <p id="{id}-error" class="ui-help ui-help-error mt-1">{error}</p>
 {/if}

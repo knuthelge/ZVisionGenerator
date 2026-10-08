@@ -64,7 +64,7 @@
   <div
     use:popover={{ anchor, align, onclose }}
     bind:this={menuEl}
-    class="action-menu surface-popover"
+    class="action-menu ui-overlay"
     role="menu"
     tabindex="-1"
     aria-label={label}
@@ -72,7 +72,7 @@
   >
     {#each items as entry, index (index)}
       {#if entry.kind === 'heading'}
-        <p class="action-menu-heading" role="presentation">{entry.label}</p>
+        <p class="action-menu-heading ui-area-label" role="presentation">{entry.label}</p>
       {:else if entry.kind === 'separator'}
         <div class="action-menu-separator" role="separator"></div>
       {:else if entry.href}
@@ -103,12 +103,13 @@
 {/if}
 
 <style>
-  .action-menu { z-index: 120; min-width: 220px; max-height: min(60vh, 22rem); overflow-y: auto; padding: 6px; border-radius: var(--radius-md); }
-  .action-menu-heading { padding: 6px 8px 3px; font-family: var(--font-display); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
-  .action-menu-separator { height: 1px; margin: 5px 2px; background: var(--color-border-subtle); }
-  .action-menu-item { display: flex; width: 100%; align-items: center; gap: 8px; border-radius: var(--radius-sm); padding: 7px 8px; text-align: left; font-size: 13px; color: var(--color-text-secondary); }
-  .action-menu-item:hover, .action-menu-item:focus { background: var(--color-bg-surface); color: var(--color-text-primary); outline: none; }
+  .action-menu { z-index: 120; min-width: 200px; max-height: min(60vh, 22rem); overflow-y: auto; padding: 4px; }
+  .action-menu-heading { padding: 6px 8px 3px; }
+  .action-menu-separator { height: 1px; margin: 4px 0; background: var(--color-border-subtle); }
+  .action-menu-item { display: flex; width: 100%; align-items: center; gap: 8px; border-radius: var(--radius-sm); padding: 6px 8px; text-align: left; font-size: var(--text-ui); color: var(--color-text-secondary); }
+  .action-menu-item:hover, .action-menu-item:focus { background: var(--color-bg-surface-hover); color: var(--color-text-primary); outline: none; }
   .action-menu-item:focus-visible { box-shadow: inset 0 0 0 2px var(--color-primary-main); }
-  .action-menu-item.danger:hover, .action-menu-item.danger:focus { background: rgb(248 113 113 / 0.08); color: var(--color-error); }
+  .action-menu-item.danger { color: var(--color-error); }
+  .action-menu-item.danger:hover, .action-menu-item.danger:focus { background: var(--color-error-surface); color: var(--color-error); }
   .action-menu-item[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
 </style>

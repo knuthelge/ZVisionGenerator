@@ -84,16 +84,16 @@
   onclose={() => oncancel?.()}
 >
   <div data-testid="confirm-dialog">
-    <p id={questionId} class="text-[15px] font-semibold text-zinc-100">{question}</p>
+    <p id={questionId} class="font-heading text-content font-extrabold text-text-primary">{question}</p>
     {#if info}
-      <p id={infoId} class="mt-1.5 text-sm text-zinc-400">{info}</p>
+      <p id={infoId} class="mt-1.5 text-content text-text-secondary">{info}</p>
     {/if}
     {#if children}
-      <div class="mt-3 space-y-2 text-sm text-zinc-300">{@render children()}</div>
+      <div class="mt-3 space-y-2 text-ui text-text-secondary">{@render children()}</div>
     {/if}
   </div>
   {#snippet footer()}
-    <Button variant="ghost" data-action="cancel" disabled={pending} onclick={cancel}>{cancelLabel}</Button>
+    <Button data-action="cancel" disabled={pending} onclick={cancel}>{cancelLabel}</Button>
     <Button variant={danger ? 'danger' : 'primary'} data-action="confirm" loading={pending} onclick={confirm}>{confirmLabel}</Button>
   {/snippet}
 </Modal>

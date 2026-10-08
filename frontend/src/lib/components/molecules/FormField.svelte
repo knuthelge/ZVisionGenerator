@@ -32,18 +32,18 @@
 
   const statusClass = $derived(
     statusTone === 'success'
-      ? 'text-emerald-400'
+      ? 'ui-help-success'
       : statusTone === 'warning'
-        ? 'text-amber-400'
+        ? 'ui-help-warning'
         : statusTone === 'error'
-          ? 'text-red-400'
-          : 'text-zinc-500'
+          ? 'ui-help-error'
+          : ''
   );
   const feedbackText = $derived(error || status || helper || null);
-  const feedbackClass = $derived(error ? 'text-red-400' : status ? statusClass : 'text-zinc-500');
+  const feedbackClass = $derived(error ? 'ui-help-error' : status ? statusClass : '');
 </script>
 
-<div class="flex flex-col gap-1.5 {extraClass}">
+<div class="flex min-w-0 flex-col gap-1.5 {extraClass}">
   {#if label}
     <Label for={htmlFor} {required}>{label}</Label>
   {/if}
@@ -51,7 +51,7 @@
   {#if feedbackText}
     <p
       id={feedbackId}
-      class="text-xs {feedbackClass}"
+      class="ui-help {feedbackClass}"
       role={announceFeedback ? (error ? 'alert' : 'status') : undefined}
       aria-live={announceFeedback ? (error ? 'assertive' : 'polite') : undefined}
       aria-atomic={announceFeedback ? 'true' : undefined}

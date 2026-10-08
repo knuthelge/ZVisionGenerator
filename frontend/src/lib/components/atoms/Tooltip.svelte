@@ -103,6 +103,6 @@
     {id}
     style={position}
     data-open={open ? 'true' : 'false'}
-    class="surface-tooltip pointer-events-none fixed z-50 w-max max-w-64 whitespace-pre-line px-2.5 py-1.5 text-xs font-normal normal-case tracking-normal transition-opacity duration-100 {open ? 'opacity-100' : 'opacity-0'}"
+    class="ui-overlay pointer-events-none fixed z-50 w-max max-w-64 whitespace-pre-line rounded-sm px-2 py-1 text-meta font-normal normal-case tracking-normal transition-opacity duration-100 {open ? 'opacity-100' : 'opacity-0'}"
   >{text}</span>
 </span>
