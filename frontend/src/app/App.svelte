@@ -9,10 +9,11 @@
   import ShortcutsDialog from '$lib/components/organisms/ShortcutsDialog.svelte';
   import WorkspacePage from '$features/workspace/WorkspacePage.svelte';
   import GalleryPage from '$features/gallery/GalleryPage.svelte';
+  import PromptsPage from '$features/prompts/PromptsPage.svelte';
   import ConfigPage from '$features/config/ConfigPage.svelte';
   import ModelsPage from '$features/models/ModelsPage.svelte';
 
-  const _validPages: PageId[] = ['workspace', 'gallery', 'config', 'models'];
+  const _validPages: PageId[] = ['workspace', 'prompts', 'gallery', 'config', 'models'];
 
   let ready = $state(false);
 
@@ -39,6 +40,8 @@
     <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
       {#if router.page === 'workspace'}
         <WorkspacePage />
+      {:else if router.page === 'prompts'}
+        <PromptsPage />
       {:else if router.page === 'gallery'}
         <GalleryPage />
       {:else if router.page === 'config'}

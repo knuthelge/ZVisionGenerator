@@ -106,6 +106,8 @@ While a generation is running, the Web UI keeps the active job attached to the c
 
 You can keep working while a job runs: change the settings and press **Add to queue** (the Generate button while jobs are active, or `⌘/Ctrl+↵`). Queued jobs run one after another, in order, and use the settings they had when you added them. They are listed under the job card as **Up next**, where each one can be removed or its settings copied back into the form with **Load settings**; **Clear queue** removes them all (after asking) and never stops the running job. If a job fails, the next one starts anyway. The queue is shared by every open tab and is kept in the server's memory, so stopping the server clears it. While jobs are running or queued, the manual **Enhance prompt** button is unavailable, because the enhancer would need the same memory; auto enhancement still runs inside each job.
 
+The **Prompts** page builds prompt files visually: snippets, sets of prompts, and per-prompt enhancement. See [Prompt Builder](guides/prompts.md#prompt-builder-web-ui).
+
 Workspace settings are remembered in the browser between visits and restarts, as long as the Web UI starts on the same port. Choosing a different model applies that model's defaults.
 
 To give the preview more room, collapse the Compose and Settings sidebar with the **«** button next to *Compose*. It folds into a narrow strip with an expand button and a Generate button, and the choice is remembered in the browser. On phone-width screens the sidebar always shows above the preview. While a job runs, its card shows the progress and controls on the left and the live preview and outputs on the right.
@@ -129,7 +131,7 @@ Anywhere:
 | Key | Action |
 |-----|--------|
 | `?` | Show all keyboard shortcuts |
-| `G` then `W` / `G` / `M` / `C` | Go to Workspace / Gallery / Models / Config |
+| `G` then `W` / `P` / `G` / `M` / `C` | Go to Workspace / Prompts / Gallery / Models / Config |
 
 Workspace:
 
@@ -144,6 +146,17 @@ Workspace:
 | `P` | Pause or resume the running job |
 | `N` | Skip to the next image |
 | `R` | Repeat the current image |
+
+Prompts:
+
+| Key | Action |
+|-----|--------|
+| `⌘S` | Save the prompt file |
+| `⌘Z` | Undo (outside text fields) |
+| `↵` | Edit the focused prompt text or random choice |
+| `$` | Suggest snippets while editing a prompt |
+| `⌥↵` | Edit the `{a|b}` choice at the caret, make one from the selected words, or start a new one (while editing) |
+| `Esc` / `⌘↵` | Finish editing a prompt |
 
 Gallery:
 

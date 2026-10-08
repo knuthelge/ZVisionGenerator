@@ -58,7 +58,8 @@ from zvisiongenerator.web.gallery import (
 from zvisiongenerator.web.path_picker import pick_path
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
 from zvisiongenerator.web.upscale_api import plan_upscale, upscale_json_request, upscale_size_label
-from zvisiongenerator.web.prompt_files import inspect_prompt_file, read_prompt_file, resolve_prompt_file_options, write_prompt_file
+from zvisiongenerator.web.prompt_builder import PromptFileChangedError, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
+from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
 from zvisiongenerator.web.model_delete import delete_lora, delete_model, model_delete_target
 from zvisiongenerator.web.job_contract import IMAGE_SUPPORTED_CONTROLS, UPSCALE_SUPPORTED_CONTROLS, VIDEO_SUPPORTED_CONTROLS
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner, worker_runtime_context
@@ -188,17 +189,6 @@ async def api_prompt_file_inspect(request: Request) -> dict[str, Any]:
     return {"path": document.path, "options": document.options}
 
 
-@app.post("/api/prompt-files/read")
-async def api_prompt_file_read(request: Request) -> dict[str, Any]:
-    """Read raw prompt-file YAML plus active option metadata."""
-    payload = await request.json()
-    try:
-        document = await run_in_threadpool(read_prompt_file, _required_json_string(payload, "path"), accepted_extensions=_PROMPT_FILE_EXTENSIONS)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"path": document.path, "raw_text": document.raw_text, "options": document.options}
-
-
 @app.put("/api/prompt-files/write")
 async def api_prompt_file_write(request: Request) -> dict[str, Any]:
     """Validate and atomically replace a host-local prompt file."""
@@ -213,6 +203,63 @@ async def api_prompt_file_write(request: Request) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"path": document.path, "options": document.options}
+
+
+@app.post("/api/prompt-files/document")
+async def api_prompt_file_document(request: Request) -> dict[str, Any]:
+    """Load a prompt file as a builder document (or its raw text and problem, for repair)."""
+    payload = await request.json()
+    try:
+        return await run_in_threadpool(load_document_payload, _required_json_string(payload, "path"), accepted_extensions=_PROMPT_FILE_EXTENSIONS)
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.put("/api/prompt-files/document")
+async def api_prompt_file_document_save(request: Request) -> dict[str, Any]:
+    """Save a builder document onto its prompt file; 409 when the file changed on disk since it was loaded."""
+    payload = await request.json()
+    base_text = payload.get("base_text")
+    try:
+        return await run_in_threadpool(
+            save_document_payload,
+            _required_json_string(payload, "path"),
+            _required_json_string(payload, "revision"),
+            payload.get("document"),
+            base_text=base_text if isinstance(base_text, str) else None,
+            force=payload.get("force") is True,
+            accepted_extensions=_PROMPT_FILE_EXTENSIONS,
+        )
+    except PromptFileChangedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/prompt-files/preview")
+async def api_prompt_file_preview(request: Request) -> dict[str, Any]:
+    """Preview a builder document: resolved prompts, problems, snippet use counts, and an optional roll."""
+    payload = await request.json()
+    roll_entry_id = payload.get("roll_entry_id")
+    try:
+        return await run_in_threadpool(preview_document_payload, payload.get("document"), roll_entry_id=roll_entry_id if isinstance(roll_entry_id, str) else None)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/prompt-files/create")
+async def api_prompt_file_create(request: Request) -> dict[str, Any]:
+    """Create a new, empty prompt file in an existing folder."""
+    payload = await request.json()
+    try:
+        return await run_in_threadpool(
+            create_prompt_file,
+            _required_json_string(payload, "directory"),
+            _required_json_string(payload, "name"),
+            accepted_extensions=_PROMPT_FILE_EXTENSIONS,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/api/prompt/enhance")

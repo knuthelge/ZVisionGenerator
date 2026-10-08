@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { draft } from '$lib/state/draft.svelte';
 import { historyStore } from '$lib/state/history.svelte';
 import { jobStore } from '$lib/state/job.svelte';
+import { requestPromptRun } from '$lib/state/pendingPromptRun';
+import { router } from '$lib/state/router.svelte';
 import type { ImageModelDefaults, JobContext, JobSnapshot, VideoModelDefaults, WorkspaceContext, GalleryAsset, GalleryPage } from '$lib/types';
 
 const workspaceApiMocks = vi.hoisted(() => ({
@@ -23,7 +25,6 @@ const workspaceApiMocks = vi.hoisted(() => ({
 const promptFileApiMocks = vi.hoisted(() => ({
   openPathPicker: vi.fn(),
   inspectPromptFile: vi.fn(),
-  readPromptFile: vi.fn(),
   writePromptFile: vi.fn(),
 }));
 
@@ -72,7 +73,6 @@ vi.mock('$lib/api/promptEnhance', async (importOriginal) => {
 vi.mock('$lib/api/promptFiles', () => ({
   openPathPicker: promptFileApiMocks.openPathPicker,
   inspectPromptFile: promptFileApiMocks.inspectPromptFile,
-  readPromptFile: promptFileApiMocks.readPromptFile,
   writePromptFile: promptFileApiMocks.writePromptFile,
 }));
 
@@ -282,17 +282,15 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         scope: 'server_host_only',
         manual_entry: 'submitted_value_kept_until_backend_validation',
         picker: 'server_host_native_picker',
-        read_write: 'existing_yaml_files_only',
+        read_write: 'yaml_files_only',
       },
       help: {
         path: 'Prompt file path.',
-        editor: 'Prompt file editor help.',
         option_required: 'Select an active prompt option before generating.',
         option_optional: 'Select an active prompt option from the file.',
         empty_options: 'This prompt file has no active prompt options.',
         stale_selection: 'The previously selected prompt option is no longer active.',
         loaded: 'Prompt file loaded.',
-        saved: 'Prompt file saved.',
         ignored_negative_video: 'Negative prompt entries are ignored for video workflows.',
         ignored_negative_unsupported: 'The current image model ignores negative prompt entries.',
       },
@@ -368,7 +366,6 @@ describe('WorkspacePage', () => {
     workspaceApiMocks.parseUrlPrefill.mockReset();
     promptFileApiMocks.openPathPicker.mockReset();
     promptFileApiMocks.inspectPromptFile.mockReset();
-    promptFileApiMocks.readPromptFile.mockReset();
     promptFileApiMocks.writePromptFile.mockReset();
     // Default: no URL prefill params (plain workspace navigation)
     workspaceApiMocks.parseUrlPrefill.mockReturnValue({});
@@ -1901,49 +1898,14 @@ describe('WorkspacePage', () => {
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
   });
 
-  it('renders prompt-file path and editor guidance from the backend contract', async () => {
-    const context = makeContext({
-      prompt_file: {
-        accepted_extensions: ['.yaml', '.yml'],
-        browse_kind: 'existing_file',
-        selection_required: true,
-        trust_boundary: {
-          scope: 'server_host_only',
-          manual_entry: 'submitted_value_kept_until_backend_validation',
-          picker: 'server_host_native_picker',
-          read_write: 'existing_yaml_files_only',
-        },
-        help: {
-          path: 'Backend-owned prompt path guidance.',
-          editor: 'Backend-owned prompt editor guidance.',
-          option_required: 'Select an active prompt option before generating.',
-          option_optional: 'Select an active prompt option from the file.',
-          empty_options: 'This prompt file has no active prompt options.',
-          stale_selection: 'The previously selected prompt option is no longer active.',
-          loaded: 'Prompt file loaded.',
-          saved: 'Prompt file saved.',
-          ignored_negative_video: 'Negative prompt entries are ignored for video workflows.',
-          ignored_negative_unsupported: 'The current image model ignores negative prompt entries.',
-        },
-      },
-    });
-    promptFileApiMocks.inspectPromptFile.mockResolvedValueOnce({
-      path: '/server/prompts.yaml',
-      options: [],
-    });
-    promptFileApiMocks.readPromptFile.mockResolvedValueOnce({
-      path: '/server/prompts.yaml',
-      raw_text: 'prompts: []\n',
-      options: [],
-    });
+  it('opens the prompt file on the Prompts page from Edit', async () => {
+    promptFileApiMocks.inspectPromptFile.mockResolvedValueOnce({ path: '/server/prompts.yaml', options: [] });
 
-    await mountWorkspace(context);
+    await mountWorkspace(makeContext());
 
     const promptSource = target.querySelector('[data-prompt-source="file"]') as HTMLButtonElement | null;
     promptSource!.click();
     await settle();
-
-    expect(target.querySelector('#ws-prompts-file')).not.toBeNull();
 
     const pathInput = target.querySelector('#ws-prompts-file') as HTMLInputElement | null;
     pathInput!.value = '~/prompts.yaml';
@@ -1951,11 +1913,11 @@ describe('WorkspacePage', () => {
     pathInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await settle();
 
-    const editButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.includes('Edit YAML')) as HTMLButtonElement | undefined;
-    editButton!.click();
+    (target.querySelector('[data-action="edit-prompts"]') as HTMLButtonElement).click();
     await settle();
 
-    expect(target.querySelector('#ws-prompt-file-editor')).not.toBeNull();
+    expect(router.page).toBe('prompts');
+    expect(router.params).toEqual({ path: '/server/prompts.yaml' });
   });
 
   it('invalidates prompt-file options when the visible path is manually changed', async () => {
@@ -1999,138 +1961,20 @@ describe('WorkspacePage', () => {
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
   });
 
-  it('reloads prompt-file editor content every time the same file is opened', async () => {
-    promptFileApiMocks.inspectPromptFile.mockResolvedValue({
-      path: '/server/prompts.yaml',
-      options: [
-        {
-          id: 'portrait:0',
-          set_name: 'portrait',
-          source_index: 0,
-          label: 'portrait #1 · first option',
-          prompt_preview: 'first option',
-          negative_preview: null,
-        },
-      ],
-    });
-    promptFileApiMocks.readPromptFile
-      .mockResolvedValueOnce({
-        path: '/server/prompts.yaml',
-        options: [],
-        raw_text: 'portrait:\n  - prompt: first disk version\n',
-      })
-      .mockResolvedValueOnce({
-        path: '/server/prompts.yaml',
-        options: [],
-        raw_text: 'portrait:\n  - prompt: second disk version\n',
-      });
+  it('queues a prompt sent from the Prompts page without changing the prompt selection', async () => {
+    requestPromptRun({ path: '/server/prompts.yaml', optionId: 'portrait:1' });
 
-    const context = makeContext();
-    await mountWorkspace(context);
-
-    const promptSource = target.querySelector('[data-prompt-source="file"]') as HTMLButtonElement | null;
-    promptSource!.click();
+    await mountWorkspace(makeContext());
     await settle();
 
-    const pathInput = target.querySelector('#ws-prompts-file') as HTMLInputElement | null;
-    pathInput!.value = '~/prompts.yaml';
-    pathInput!.dispatchEvent(new Event('input', { bubbles: true }));
-    pathInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    await settle();
-
-    const editButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Edit YAML');
-    expect(editButton).not.toBeUndefined();
-    editButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-    expect((target.querySelector('#ws-prompt-file-editor') as HTMLTextAreaElement | null)?.value).toContain('first disk version');
-
-    const cancelButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Cancel');
-    expect(cancelButton).not.toBeUndefined();
-    cancelButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    editButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    expect(promptFileApiMocks.readPromptFile).toHaveBeenCalledTimes(2);
-    expect((target.querySelector('#ws-prompt-file-editor') as HTMLTextAreaElement | null)?.value).toContain('second disk version');
-  });
-
-  it('clears a stale prompt-file selection after saving edited yaml', async () => {
-    promptFileApiMocks.inspectPromptFile.mockResolvedValue({
-      path: '/server/prompts.yaml',
-      options: [
-        {
-          id: 'portrait:0',
-          set_name: 'portrait',
-          source_index: 0,
-          label: 'portrait #1 · first option',
-          prompt_preview: 'first option',
-          negative_preview: null,
-        },
-      ],
-    });
-    promptFileApiMocks.readPromptFile.mockResolvedValue({
-      path: '/server/prompts.yaml',
-      options: [
-        {
-          id: 'portrait:0',
-          set_name: 'portrait',
-          source_index: 0,
-          label: 'portrait #1 · first option',
-          prompt_preview: 'first option',
-          negative_preview: null,
-        },
-      ],
-      raw_text: 'portrait:\n  - prompt: first option\n',
-    });
-    promptFileApiMocks.writePromptFile.mockResolvedValue({
-      path: '/server/prompts.yaml',
-      options: [
-        {
-          id: 'portrait:9',
-          set_name: 'portrait',
-          source_index: 9,
-          label: 'portrait #10 · replacement option',
-          prompt_preview: 'replacement option',
-          negative_preview: null,
-        },
-      ],
-    });
-
-    const context = makeContext();
-    await mountWorkspace(context);
-
-    const promptSource = target.querySelector('[data-prompt-source="file"]') as HTMLButtonElement | null;
-    promptSource!.click();
-    await settle();
-
-    const pathInput = target.querySelector('#ws-prompts-file') as HTMLInputElement | null;
-    pathInput!.value = '~/prompts.yaml';
-    pathInput!.dispatchEvent(new Event('input', { bubbles: true }));
-    pathInput!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-    await settle();
-
-    await choosePrompts(target, ['portrait:0']);
-
-    const editButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Edit YAML');
-    expect(editButton).not.toBeUndefined();
-    editButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    const editor = target.querySelector('#ws-prompt-file-editor') as HTMLTextAreaElement | null;
-    expect(editor?.value).toContain('first option');
-    editor!.value = 'portrait:\n  - prompt: replacement option\n';
-    editor!.dispatchEvent(new Event('input', { bubbles: true }));
-    const saveButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Save File');
-    expect(saveButton).not.toBeUndefined();
-    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    expect(promptFileApiMocks.writePromptFile).toHaveBeenCalledWith('/server/prompts.yaml', 'portrait:\n  - prompt: replacement option\n');
-    expect(target.querySelectorAll('input[name="prompt_option_id"]')).toHaveLength(0);
-    expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
-    expect(target.textContent).toContain('no longer active');
+    expect(workspaceApiMocks.submitGenerate).toHaveBeenCalledTimes(1);
+    const form = workspaceApiMocks.submitGenerate.mock.calls[0][0];
+    expect(form.get('prompt_source')).toBe('file');
+    expect(form.get('prompts_file')).toBe('/server/prompts.yaml');
+    expect(form.getAll('prompt_option_id')).toEqual(['portrait:1']);
+    expect(form.has('prompt')).toBe(false);
+    expect(draft.state.promptSource).toBe('inline');
+    expect(draft.state.promptFileOptionIds).toEqual([]);
   });
 
   it('revokes the reference image blob URL on teardown to prevent memory leaks', async () => {

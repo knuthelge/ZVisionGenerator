@@ -280,15 +280,14 @@ def test_phase_a_routes_share_config_and_path_authority(monkeypatch):
     assert prompt_file["selection_required"] is True
     assert prompt_file["trust_boundary"]["scope"] == "server_host_only"
     assert prompt_file["trust_boundary"]["manual_entry"] == "submitted_value_kept_until_backend_validation"
+    assert prompt_file["trust_boundary"]["read_write"] == "yaml_files_only"
     assert set(prompt_file["help"]) == {
         "path",
-        "editor",
         "option_required",
         "option_optional",
         "empty_options",
         "stale_selection",
         "loaded",
-        "saved",
         "ignored_negative_video",
         "ignored_negative_unsupported",
     }

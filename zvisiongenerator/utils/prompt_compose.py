@@ -70,6 +70,17 @@ def resolve_snippets(
     return value
 
 
+def snippet_references(value: Any) -> list[str]:
+    """Return every ``$name`` reference in *value*'s strings, in order, with repeats."""
+    if isinstance(value, str):
+        return _SNIPPET_REF_RE.findall(value)
+    if isinstance(value, dict):
+        return [name for item in value.values() for name in snippet_references(item)]
+    if isinstance(value, list):
+        return [name for item in value for name in snippet_references(item)]
+    return []
+
+
 _INNERMOST_RE = re.compile(r"\{([^{}]+)\}")
 
 

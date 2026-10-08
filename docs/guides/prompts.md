@@ -42,7 +42,25 @@ woman:
 - Multiple prompts per set are supported.
 - The set name becomes the output filename prefix.
 
-In the Web UI, choose **Prompt file** as the prompt source and type or browse to a YAML file on the machine running the server. Compose then summarizes the selected prompts; click **Prompts…** (or the summary) to open the chooser, where you can filter prompts, select whole sets with **All**/**None**, expand a prompt to see its negative prompt, and confirm with **Use N prompts**. **✨ Enhance** sets the options for **Enhance each image when generating**, and **Edit YAML** opens the file editor. The YAML editor reloads the file from disk each time you open it, so reopening the same path reflects changes made outside the browser. If you edit the path manually, the visible value is the value submitted; use Enter or Browse when you want the UI to inspect the file and refresh the option list before generating.
+In the Web UI, choose **Prompt file** as the prompt source and type or browse to a YAML file on the machine running the server. Compose then summarizes the selected prompts; click **Prompts…** (or the summary) to open the chooser, where you can filter prompts, select whole sets with **All**/**None**, expand a prompt to see its negative prompt, and confirm with **Use N prompts**. **✨ Enhance** sets the options for **Enhance each image when generating**, and **Edit** opens the file on the [Prompts page](#prompt-builder-web-ui). If you edit the path manually, the visible value is the value submitted; use Enter or Browse when you want the UI to inspect the file and refresh the option list before generating.
+
+## Prompt Builder (Web UI)
+
+The Web UI's **Prompts** page (`G` then `P`) builds prompt files without typing YAML. It reads and writes the same file the CLI uses, and keeps the file's comments, quoting and `|` blocks.
+
+- **Snippets** (left) are listed with how often each is used; unused ones are dimmed. Click one to edit it, **＋** to add one, and drag one onto a prompt to add a `$reference`. Renaming a snippet updates every reference to it.
+- **Sets** (centre) are panels of prompts, one row each. Rename a set in place (the name starts the output filenames), add prompts with **＋**, and use a set's **⋯** menu to duplicate, move, turn all prompts on or off, or delete it.
+- **Entries** show `$snippets` as chips (red when undefined) and `{a|b}` choices as pills. Click the text, or press `↵` on it, to edit; typing `$` suggests snippet names. Click a pill to edit its options, one per line; an empty line is an empty option. While typing, put the caret in a choice and press `⌥↵` (or **Edit choice** under the text) to edit it the same way, select words and press `⌥↵` (**Make a random choice**) to turn them into a choice, or press `⌥↵` anywhere else (**New random choice**) to type the options of a new choice at the caret, one per line. The options box takes focus; `⌘↵` applies and `Esc` cancels, both returning you to the prompt. Each prompt has an **active** switch and **✨ Enhance**: off, the default options (`enhance: true`), or chosen style, mood, details, length and motion (motion applies to video only). Its **⋯** menu adds or removes a negative prompt, and duplicates, moves or deletes the prompt.
+- **Text / Fields** switches a prompt between plain text and named fields (a structured prompt). Switching to fields puts the text in one field for you to name; a field without a name is a problem until you name it. Lists and nested values that the builder can't edit are shown flattened and kept exactly as written; **Convert to text** replaces one with its flattened text.
+- **Drag** a set or an entry by its ⠿ grip to reorder it; drop an entry on another set's header to move it there. The menus offer the same moves.
+- **Preview** (right) shows the selected entry as the model receives it, with snippets resolved and fields flattened, its prompt id, its enhancement and its problems. **🎲 Roll** picks one option of every choice, as a run would.
+- **▶** (Generate this one) saves the file, then queues that one prompt with the current Workspace settings. Your prompt selection in the Workspace doesn't change. **Use in Workspace** saves and selects the file there.
+
+Saving (`⌘S`) is blocked while the file has errors that would stop it from loading (an undefined snippet in an active entry, an empty prompt, two sets with the same name); the Save button says what to fix. Warnings, such as an invalid `enhance:` block, don't block saving. Saving keeps the prompts selected in the Workspace pointing at the same entries, even when you reorder, move or rename them.
+
+`⌘Z` undoes changes back to the last save. Unsaved changes are kept in the browser, so leaving the page or reloading doesn't lose them; reopening the file offers to restore them. If the file changed on disk since you opened it (for example in another editor), saving asks before overwriting it.
+
+A file that isn't valid YAML, or isn't shaped like a prompt file, opens in a repair view with the error and the raw text to fix. **New file…** in the file menu creates an empty prompt file in a folder you choose.
 
 ## Prompt Variables
 

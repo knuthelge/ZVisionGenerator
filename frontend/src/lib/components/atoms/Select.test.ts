@@ -14,11 +14,11 @@ const promptFileContract: PromptFileContract = {
     scope: 'server_host_only',
     manual_entry: 'submitted_value_kept_until_backend_validation',
     picker: 'server_host_native_picker',
-    read_write: 'existing_yaml_files_only',
+    read_write: 'yaml_files_only',
   },
   help: {
-    path: 'Path', editor: 'Editor', option_required: 'Required', option_optional: 'Optional',
-    empty_options: 'Empty', stale_selection: 'Stale', loaded: 'Loaded', saved: 'Saved',
+    path: 'Path', option_required: 'Required', option_optional: 'Optional',
+    empty_options: 'Empty', stale_selection: 'Stale', loaded: 'Loaded',
     ignored_negative_video: 'Ignored', ignored_negative_unsupported: 'Unsupported',
   },
 };

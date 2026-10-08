@@ -30,6 +30,7 @@
   import { randomSeed } from './seed';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { startUpscale } from '$lib/state/upscale';
+  import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
   import type { GalleryAsset, JobSnapshot, UpscaleFactor, WorkspaceContext, Workflow } from '$lib/types';
 
   let context = $state<WorkspaceContext | null>(null);
@@ -477,6 +478,9 @@
         _prevWorkflow = draft.state.workflow;
         jobStore.seedQueue(ctx.queued_jobs ?? []);
         void jobStore.reconnectActiveJob({ snapshot: ctx.active_job });
+        // "Generate this one" on the Prompts page: queue that prompt with these settings once the form exists.
+        const run = takePromptRun();
+        if (run) void tick().then(() => submitForm(run));
 
         historyTimer = setTimeout(() => {
           if (cancelled) return;
@@ -556,8 +560,13 @@
 
   async function handleSubmit(e: Event): Promise<void> {
     e.preventDefault();
+    await submitForm(null);
+  }
+
+  /** Submit the form; with `run`, queue that one prompt-file prompt instead of the form's prompt. */
+  async function submitForm(run: PendingPromptRun | null): Promise<void> {
     if (!formEl || busy || !authorityReady) return;
-    if (draft.state.promptSource === 'file' && (!draft.state.promptFilePath || draft.state.promptFileOptionIds.length === 0)) {
+    if (!run && draft.state.promptSource === 'file' && (!draft.state.promptFilePath || draft.state.promptFileOptionIds.length === 0)) {
       return;
     }
     loadError = null;
@@ -576,12 +585,15 @@
       // Sync lora string
       formData.set('lora', draft.state.loraString);
       // A non-blank Enhanced prompt replaces the inline prompt (never in JSON-caption, file, or auto-enhance mode).
-      if (enhancedOverrideActive(draft.state) && formData.has('prompt')) {
+      if (run) {
+        applyPromptRun(formData, run);
+      } else if (enhancedOverrideActive(draft.state) && formData.has('prompt')) {
         formData.set('prompt', submittedPrompt(draft.state));
       }
 
       const jobCtx = await submitGenerate(formData);
       jobStore.jobSubmitted(jobCtx);
+      if (run) addToast(`Queued ${run.optionId} from the prompt file.`, 'success');
       if (jobCtx.queue_position) addToast(`Added to the queue as #${jobCtx.queue_position}.`, 'info');
     } catch (err) {
       loadError = err instanceof Error ? err.message : 'Generate failed';

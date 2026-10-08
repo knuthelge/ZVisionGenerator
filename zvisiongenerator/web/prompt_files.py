@@ -1,4 +1,4 @@
-"""Normalize, inspect, read, and atomically update host-local prompt files."""
+"""Normalize, inspect, and atomically update host-local prompt files."""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ class PromptFileDocument:
 
     path: str
     options: list[dict[str, str | int | None]]
-    raw_text: str | None = None
 
 
 def inspect_prompt_file(path: str, *, accepted_extensions: tuple[str, ...]) -> PromptFileDocument:
@@ -24,14 +23,6 @@ def inspect_prompt_file(path: str, *, accepted_extensions: tuple[str, ...]) -> P
     normalized_path = normalize_prompt_file_path(path, accepted_extensions=accepted_extensions)
     inspection = inspect_prompts_file(str(normalized_path))
     return PromptFileDocument(path=str(normalized_path), options=_serialize_options(inspection.options))
-
-
-def read_prompt_file(path: str, *, accepted_extensions: tuple[str, ...]) -> PromptFileDocument:
-    """Read raw prompt-file YAML plus active option metadata."""
-    normalized_path = normalize_prompt_file_path(path, accepted_extensions=accepted_extensions)
-    raw_text = normalized_path.read_text(encoding="utf-8")
-    inspection = inspect_prompts_text(raw_text, source_name=str(normalized_path))
-    return PromptFileDocument(path=str(normalized_path), raw_text=raw_text, options=_serialize_options(inspection.options))
 
 
 def write_prompt_file(path: str, raw_text: str, *, accepted_extensions: tuple[str, ...]) -> PromptFileDocument:
@@ -69,11 +60,7 @@ def normalize_prompt_file_path(path: str, *, accepted_extensions: tuple[str, ...
         raise ValueError("A prompt file path is required.")
     if "://" in text:
         raise ValueError("Prompt file must be a host-local path on the machine running the Web UI host, not a URL.")
-    candidate = Path(text).expanduser()
-    if not candidate.is_absolute():
-        candidate = (Path.cwd() / candidate).resolve()
-    else:
-        candidate = candidate.resolve()
+    candidate = host_local_path(text)
     if candidate.suffix.lower() not in accepted_extensions:
         raise ValueError(f"Prompt file must use one of: {', '.join(accepted_extensions)}.")
     if not candidate.exists():
@@ -81,6 +68,11 @@ def normalize_prompt_file_path(path: str, *, accepted_extensions: tuple[str, ...
     if not candidate.is_file():
         raise ValueError(f"Prompt file path must point to a file: {candidate}")
     return candidate
+
+
+def host_local_path(text: str) -> Path:
+    """Expand ``~`` and resolve *text* to an absolute path on the Web UI host (relative to its working directory)."""
+    return (Path.cwd() / Path(text.strip()).expanduser()).resolve()
 
 
 def _find_option(inspection: PromptFileInspection, option_id: str) -> PromptFileOption:
@@ -91,6 +83,7 @@ def _find_option(inspection: PromptFileInspection, option_id: str) -> PromptFile
 
 
 def _serialize_options(options: list[PromptFileOption]) -> list[dict[str, str | int | None]]:
+    """Serialize active prompt options for the Web UI chooser."""
     return [
         {
             "id": option.id,

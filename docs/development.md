@@ -115,6 +115,8 @@ zvisiongenerator/
 │   ├── paths.py                   ~/.ziv/ model store resolution
 │   ├── platform.py                Platform metadata and platform-aware alias values
 │   ├── prompt_compose.py          Structured prompt flattening & snippets
+│   ├── prompt_document.py         Prompt file ↔ editable document for the Web UI builder (comment-preserving, ruamel.yaml)
+│   ├── prompt_document_check.py   Builder document previews and problems, with the prompt loader's rules
 │   ├── prompt_enhance.py          Prompt-enhancement build, run, and post-processing (no model I/O)
 │   ├── prompts.py                 Prompt file loading
 │   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
@@ -132,6 +134,7 @@ zvisiongenerator/
 │   ├── model_inventory.py         Backend model inventory for Web UI contracts
 │   ├── model_status.py            Per-model downloaded / memory-fit status for the SPA
 │   ├── path_picker.py             Host-local directory and file picker
+│   ├── prompt_builder.py          Prompts page API: load, preview, save (revision-checked) and create prompt files
 │   ├── prompt_files.py            Read and atomically update host-local prompt files
 │   ├── request_guard.py           DNS-rebinding and cross-site request protection
 │   ├── upscale_api.py             Plan a viewer upscale job: refinement model, carried settings, limits

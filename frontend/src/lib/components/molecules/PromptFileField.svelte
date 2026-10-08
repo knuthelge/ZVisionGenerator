@@ -2,7 +2,7 @@
   import { inspectPromptFile } from '$lib/api/promptFiles';
   import type { Snippet } from 'svelte';
   import { Icon } from '$lib/components/atoms';
-  import PromptFileEditorDialog from '$lib/components/organisms/PromptFileEditorDialog.svelte';
+  import { router } from '$lib/state/router.svelte';
   import type { PromptFileContract, PromptFileInspection, PromptFileOption, PromptSource, WorkflowMode } from '$lib/types';
   import PathField from './PathField.svelte';
   import PromptChooserDialog from './PromptChooserDialog.svelte';
@@ -41,8 +41,6 @@
   let optionsStatusTone = $state<'muted' | 'success' | 'warning' | 'error'>('muted');
   let loadedPath = $state<string | null>(null);
   let manualPath = $state<string | null>(null);
-  let editorOpen = $state(false);
-  let editorRevision = $state(0);
   let chooserOpen = $state(false);
   const SUMMARY_LIMIT = 3;
 
@@ -79,7 +77,6 @@
     optionsStatus = successMessage;
     optionsStatusTone = successMessage ? 'success' : 'muted';
     onPathChange(inspection.path);
-    editorRevision += 1;
 
     if (activeSelection.length !== previousSelection.length) {
       if (previousSelection.length > 0) {
@@ -138,8 +135,8 @@
     onPathChange(nextPath);
   }
 
-  function handleSaved(inspection: PromptFileInspection): void {
-    void applyInspection(inspection, contract.help.saved);
+  function openBuilder(): void {
+    if (path) router.navigate('prompts', { path });
   }
 
 </script>
@@ -197,8 +194,8 @@
         disabled={disabled || options.length === 0}
         onclick={() => { chooserOpen = true; }}
       ><Icon name="list" size={13} />Prompts…</button>
-      <button type="button" class="prompt-tool" data-action="edit-yaml" disabled={disabled || !path} onclick={() => (editorOpen = true)}>
-        Edit YAML
+      <button type="button" class="prompt-tool" data-action="edit-prompts" title="Edit the file on the Prompts page" disabled={disabled || !path} onclick={openBuilder}>
+        Edit
       </button>
     </div>
   </div>
@@ -225,15 +222,7 @@
     {workflowMode}
     {selectedOptionIds}
     onconfirm={onOptionChange}
-    onedit={path && !disabled ? () => { editorOpen = true; } : undefined}
-  />
-  <PromptFileEditorDialog
-    bind:open={editorOpen}
-    path={path}
-    acceptedExtensions={contract.accepted_extensions}
-    helperText={contract.help.editor}
-    revision={editorRevision}
-    onsaved={handleSaved}
+    onedit={path && !disabled ? openBuilder : undefined}
   />
 </div>
 

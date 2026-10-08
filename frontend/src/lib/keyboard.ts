@@ -35,6 +35,7 @@ export function acceptsPageShortcut(event: KeyboardEvent): boolean {
 /** Pages reached by pressing `G` then the page's key. */
 export const GO_TO_KEYS: Readonly<Record<string, PageId>> = {
   w: 'workspace',
+  p: 'prompts',
   g: 'gallery',
   m: 'models',
   c: 'config',
@@ -94,6 +95,7 @@ export const APP_SHORTCUTS: readonly ShortcutGroup[] = [
     entries: [
       { keys: ['?'], label: 'Show keyboard shortcuts' },
       { keys: ['G → W'], label: 'Go to Workspace' },
+      { keys: ['G → P'], label: 'Go to Prompts' },
       { keys: ['G → G'], label: 'Go to Gallery' },
       { keys: ['G → M'], label: 'Go to Models' },
       { keys: ['G → C'], label: 'Go to Config' },
@@ -112,6 +114,17 @@ export const APP_SHORTCUTS: readonly ShortcutGroup[] = [
       { keys: ['P'], label: 'Pause or resume the running job' },
       { keys: ['N'], label: 'Skip to the next image' },
       { keys: ['R'], label: 'Repeat the current image' },
+    ],
+  },
+  {
+    title: 'Prompts',
+    entries: [
+      { keys: ['⌘/Ctrl+S'], label: 'Save the prompt file' },
+      { keys: ['⌘/Ctrl+Z'], label: 'Undo (outside text fields)' },
+      { keys: ['↵'], label: 'Edit the focused prompt text or choice' },
+      { keys: ['$'], label: 'Insert a snippet (while editing)' },
+      { keys: ['⌥/Alt+↵'], label: 'Edit or start a random choice at the caret (while editing)' },
+      { keys: ['Esc', '⌘/Ctrl+↵'], label: 'Finish editing' },
     ],
   },
   {
