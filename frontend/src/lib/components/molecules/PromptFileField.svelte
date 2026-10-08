@@ -172,7 +172,7 @@
       >
         <span class="prompt-file-count">{summaryCount}</span>
         {#if selectedOptions.length === 0}
-          <span class="prompt-file-line text-amber-400">No prompts selected. Choose the prompts to run.</span>
+          <span class="prompt-file-line text-warning">No prompts selected. Choose the prompts to run.</span>
         {/if}
         {#each selectedOptions.slice(0, SUMMARY_LIMIT) as option (option.id)}
           <span class="prompt-file-line"><b>{option.set_name} #{option.source_index + 1}</b> {option.prompt_preview}</span>
@@ -187,14 +187,14 @@
       {@render tools?.()}
       <button
         type="button"
-        class="prompt-tool"
+        class="ui-btn ui-btn-sm"
         data-action="choose-prompts"
         title="Choose prompts"
         aria-label="Choose prompts"
         disabled={disabled || options.length === 0}
         onclick={() => { chooserOpen = true; }}
       ><Icon name="list" size={13} />Prompts…</button>
-      <button type="button" class="prompt-tool" data-action="edit-prompts" title="Edit the file on the Prompts page" disabled={disabled || !path} onclick={openBuilder}>
+      <button type="button" class="ui-btn ui-btn-sm" data-action="edit-prompts" title="Edit the file on the Prompts page" disabled={disabled || !path} onclick={openBuilder}>
         Edit
       </button>
     </div>
@@ -210,7 +210,7 @@
     <p class="prompt-file-status" data-tone={optionsStatusTone} role="status">{optionsStatus}</p>
   {/if}
   {#if selectedOptions.some((option) => option.negative_preview) && (workflowMode === 'video' || !negativePromptSupported)}
-    <p class="prompt-file-status text-amber-400">
+    <p class="prompt-file-status text-warning">
       {workflowMode === 'video' ? contract.help.ignored_negative_video : contract.help.ignored_negative_unsupported}
     </p>
   {/if}
@@ -229,15 +229,15 @@
 <style>
   .prompt-file { display: flex; flex-direction: column; gap: 6px; }
   .prompt-file-path { padding: 8px 10px; }
-  .prompt-file-note { padding: 4px 10px 8px; font-size: 12px; color: var(--color-text-muted); }
+  .prompt-file-note { padding: 4px 10px 8px; font-size: var(--text-ui); color: var(--color-text-muted); }
   .prompt-file-summary { display: flex; width: 100%; flex-direction: column; gap: 4px; padding: 8px 10px; border-top: 1px solid var(--color-border-subtle); text-align: left; }
   .prompt-file-summary:hover:not(:disabled) { background: color-mix(in srgb, var(--color-bg-surface) 60%, transparent); }
   .prompt-file-summary:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: -2px; }
-  .prompt-file-count { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); }
-  .prompt-file-line { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; font-size: 12px; line-height: 1.45; color: var(--color-zinc-300); }
+  .prompt-file-count { font-size: var(--text-meta); font-weight: 600; color: var(--color-text-secondary); }
+  .prompt-file-line { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; font-size: var(--text-ui); line-height: 1.45; color: var(--color-text-secondary); }
   .prompt-file-line b { margin-right: 4px; font-weight: 600; color: var(--color-text-muted); }
-  .prompt-file-more { font-size: 11px; color: var(--color-text-muted); }
-  .prompt-file-status { font-size: 12px; color: var(--color-text-muted); }
+  .prompt-file-more { font-size: var(--text-meta); color: var(--color-text-muted); }
+  .prompt-file-status { font-size: var(--text-ui); color: var(--color-text-muted); }
   .prompt-file-status[data-tone='success'] { color: var(--color-success); }
   .prompt-file-status[data-tone='warning'] { color: var(--color-warning); }
   .prompt-file-status[data-tone='error'] { color: var(--color-error); }

@@ -101,14 +101,13 @@
           <Icon name="collapse" size={14} />
         </button>
       {/if}
-      <h2 id="ws-compose-title" class="field-label">Compose</h2>
+      <h2 id="ws-compose-title" class="ui-area-label">Compose</h2>
     </div>
     {#if caps.showPromptSource}
-      <div class="surface-toggle-group flex items-center p-0.5" role="group" aria-label="Prompt source">
+      <div class="ui-segmented ui-segmented-sm" role="group" aria-label="Prompt source">
         {#each context.prompt_sources as source (source)}
           <button
             type="button"
-            class="surface-toggle-pill px-2 py-0.5 text-[11px] font-medium {s.promptSource === source ? 'surface-toggle-pill-active' : ''}"
             aria-pressed={s.promptSource === source}
             data-prompt-source={source}
             onclick={() => draft.update('promptSource', source)}
@@ -133,7 +132,7 @@
             tabindex={activeTab === 'prompt' ? 0 : -1}
             onclick={(e) => selectTab('prompt', e)}
             onkeydown={onTabKeydown}
-          >Prompt{#if !enhancedUsed}<span class="used-pill">used</span>{/if}</button>
+          >Prompt{#if !enhancedUsed}<span class="ui-badge ui-badge-info used-pill">used</span>{/if}</button>
           <button
             type="button"
             role="tab"
@@ -144,7 +143,7 @@
             tabindex={activeTab === 'enhanced' ? 0 : -1}
             onclick={(e) => selectTab('enhanced', e)}
             onkeydown={onTabKeydown}
-          >Enhanced{#if enhancedUsed}<span class="used-pill">used</span>{/if}{#if stale && !s.enhanceAuto}<span class="stale-pill" title="The prompt or workflow changed after this was enhanced. It is still used until you clear it.">Out of date</span>{/if}</button>
+          >Enhanced{#if enhancedUsed}<span class="ui-badge ui-badge-info used-pill">used</span>{/if}{#if stale && !s.enhanceAuto}<span class="ui-badge ui-badge-warning used-pill" title="The prompt or workflow changed after this was enhanced. It is still used until you clear it.">Out of date</span>{/if}</button>
         </div>
       {/if}
 
@@ -214,7 +213,7 @@
           <button
             type="button"
             id="ws-json-prompt-toggle"
-            class="prompt-tool"
+            class="ui-btn ui-btn-sm"
             aria-pressed={s.jsonPromptEnabled}
             disabled={busy}
             title="Structured JSON caption: replaces the normal prompt"
@@ -237,15 +236,15 @@
     </div>
 
     {#if jsonMode}
-      <p class="field-hint-label">Must be a JSON object. Replaces the normal prompt.</p>
+      <p class="ui-help">Must be a JSON object. Replaces the normal prompt.</p>
     {/if}
     {#if errorText}
-      <p class="text-xs text-error" role="alert">{errorText}</p>
+      <p class="ui-help ui-help-error" role="alert">{errorText}</p>
     {/if}
     {#if noteText}
-      <p class="field-hint-label">{noteText}</p>
+      <p class="ui-help">{noteText}</p>
     {:else if enhancedUsed}
-      <p class="field-hint-label">The Enhanced text is generated instead of the prompt.</p>
+      <p class="ui-help">The Enhanced text is generated instead of the prompt.</p>
     {/if}
   {/if}
 
@@ -271,12 +270,12 @@
 
   {#if !promptFileMode && caps.showNegativePrompt}
     <div id="ws-negative-shell">
-      <label class="field-label mb-1 block" for="ws-negative-prompt">Negative prompt</label>
+      <label class="ui-label mb-1" for="ws-negative-prompt">Negative prompt</label>
       <textarea
         id="ws-negative-prompt"
         name="negative_prompt"
         rows="1"
-        class="surface-textarea negative-text w-full rounded-md"
+        class="ui-field negative-text"
         placeholder="What to exclude..."
         value={s.negativePrompt}
         use:autogrow={s.negativePrompt}
@@ -297,23 +296,22 @@
     .collapse-toggle { display: none; }
   }
   .prompt-tabs { display: flex; align-items: center; gap: 2px; padding: 4px 4px 0; border-bottom: 1px solid var(--color-border-subtle); }
-  .prompt-tab { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 6px; border-radius: 6px 6px 0 0; font-family: var(--font-display); font-size: 12px; font-weight: 600; color: var(--color-text-muted); }
+  .prompt-tab { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 6px; border-radius: 6px 6px 0 0; font-size: var(--text-ui); font-weight: 600; color: var(--color-text-muted); }
   .prompt-tab:hover { color: var(--color-text-primary); }
   .prompt-tab:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: -2px; }
   .prompt-tab[aria-selected='true'] { color: var(--color-text-primary); }
   .prompt-tab[aria-selected='true']::after { content: ''; position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; border-radius: 2px; background: var(--color-primary-main); }
-  .used-pill, .stale-pill { padding: 0 6px; border-radius: 9999px; font-size: 10px; font-weight: 700; line-height: 16px; }
-  .used-pill { background: color-mix(in srgb, var(--color-primary-main) 14%, transparent); color: var(--color-primary-main); }
-  .stale-pill { border: 1px solid var(--color-warning-border); background: var(--color-warning-surface); color: var(--color-warning); }
-  .prompt-text { display: block; width: 100%; min-height: 88px; max-height: 180px; overflow-y: auto; resize: none; padding: 9px 10px; border: 0; background: transparent; font-size: 13px; line-height: 1.5; color: var(--color-text-primary); }
+  .used-pill { height: 16px; padding: 0 4px; }
+  .prompt-text { display: block; width: 100%; min-height: 88px; max-height: 180px; overflow-y: auto; resize: none; padding: 9px 10px; border: 0; background: transparent; font-size: var(--text-content); line-height: 1.5; color: var(--color-text-primary); }
   .prompt-text[hidden] { display: none; }
-  .prompt-text:focus { outline: none; box-shadow: none; }
+  /* The focus ring belongs to the prompt box, not the textarea. */
+  .prompt-text:focus, .prompt-text:focus-visible { outline: none; }
   .prompt-text::placeholder { color: var(--color-zinc-600); }
   .prompt-text:disabled { opacity: 0.6; }
-  .prompt-link { font-size: 11px; font-weight: 500; color: var(--color-text-muted); }
+  .prompt-link { font-size: var(--text-meta); font-weight: 600; color: var(--color-text-muted); }
   .prompt-link:hover { color: var(--color-text-primary); }
   .prompt-link:disabled { opacity: 0.5; }
-  .prompt-status { font-size: 11px; color: var(--color-text-muted); }
-  .word-count { margin-left: auto; padding-right: 4px; font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); }
+  .prompt-status { font-size: var(--text-meta); color: var(--color-text-muted); }
+  .word-count { margin-left: auto; padding-right: 4px; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
   .negative-text { min-height: 34px; max-height: 96px; resize: none; }
 </style>

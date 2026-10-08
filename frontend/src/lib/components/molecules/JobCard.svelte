@@ -193,7 +193,7 @@
   <div class="job-body">
   <div class="job-main">
   {#if runCount > 1 || hasPromptProgress}
-    <p class="mb-2 flex flex-wrap items-center gap-x-2 text-xs font-medium text-primary-main" role="status" aria-live="polite" aria-atomic="true">
+    <p class="mb-2 flex flex-wrap items-center gap-x-2 text-ui font-medium text-primary-main" role="status" aria-live="polite" aria-atomic="true">
       <span>Run {currentRun + 1} of {runCount || 1}</span>
       {#if hasPromptProgress}<span class="text-text-secondary">· Prompt {job.promptNumber} of {job.promptCount}</span>{/if}
     </p>
@@ -213,7 +213,7 @@
       {#if sequenceStart + sequenceItems.length < sequenceCount}<span class="sequence-more" aria-hidden="true">…</span>{/if}
     </div>
   {/if}
-  <p class="text-sm text-text-primary line-clamp-2 break-words" title={job.prompt}>{job.prompt || 'No prompt supplied'}</p>
+  <p class="text-content text-text-primary line-clamp-2 break-words" title={job.prompt}>{job.prompt || 'No prompt supplied'}</p>
   {#if job.enhancedPrompt}
     <p class="job-enhanced line-clamp-3 break-words" title={job.enhancedPrompt}><span class="job-enhanced-label">✨ Enhanced</span> {job.enhancedPrompt}</p>
   {:else if job.enhanceStatus === 'failed'}
@@ -221,20 +221,20 @@
   {:else if job.enhanceStatus === 'skipped'}
     <p class="job-enhanced break-words" data-enhance-status="skipped"><span class="job-enhanced-label">Not enhanced:</span> skipped, so the original prompt is used.</p>
   {/if}
-  <p class="mt-1 text-xs text-text-muted truncate" title={job.model}>{job.model}</p>
+  <p class="mt-1 text-ui text-text-muted truncate" title={job.model}>{job.model}</p>
   {#if job.notices?.length}
     <p class="job-notices" data-testid="job-notices">{job.notices.join(' · ')}</p>
   {/if}
 
   <!-- Progress -->
   <div class="mt-4">
-      <div class="flex items-center justify-between gap-3 text-xs">
+      <div class="flex items-center justify-between gap-3 text-ui">
         <span class="text-text-secondary break-words min-w-0">{stepPhase}</span>
         <span class="font-mono text-text-primary shrink-0">{hasProgress ? `${Math.round(stepPct)}%` : '—'}</span>
       </div>
 
       <div
-        class="progress-track mt-2 h-1.5 overflow-hidden rounded-full bg-zinc-800"
+        class="progress-track mt-2 h-1.5 overflow-hidden rounded-full bg-border-subtle"
         class:step-pulse={job.status === 'running' && !job.paused && hasProgress && job.currentStep < job.totalSteps}
         role="progressbar"
         aria-label="Generation stage progress"
@@ -257,7 +257,7 @@
           {/key}
         {/if}
       </div>
-      <div class="mt-2 text-right text-[11px] text-text-muted">
+      <div class="mt-2 text-right text-meta text-text-muted">
         <span class="font-mono shrink-0">{hasProgress ? `${stepLabel} steps` : 'Awaiting steps'}</span>
       </div>
 
@@ -279,7 +279,7 @@
           onclick={() => sendControl('Resume', onresume)}
           title="Resume (P)"
           disabled={pending || !onresume}
-          class="rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-teal-500 hover:text-zinc-100 focus-visible:focus-ring"
+          class="ui-btn ui-btn-sm"
         >
           {pending && currentFeedback?.action === 'Resume' ? 'Sending…' : 'Resume'}
         </button>
@@ -290,7 +290,7 @@
           onclick={() => sendControl('Pause', onpause)}
           title="Pause (P)"
           disabled={pending || !onpause}
-          class="rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-teal-500 hover:text-zinc-100 focus-visible:focus-ring"
+          class="ui-btn ui-btn-sm"
         >
           {pending && currentFeedback?.action === 'Pause' ? 'Sending…' : 'Pause'}
         </button>
@@ -301,7 +301,7 @@
           onclick={() => sendControl('Next', onnext)}
           title="Next (N)"
           disabled={pending || !onnext}
-          class="rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-teal-500 hover:text-zinc-100 focus-visible:focus-ring"
+          class="ui-btn ui-btn-sm"
         >
           {pending && currentFeedback?.action === 'Next' ? 'Sending…' : 'Next'}
         </button>
@@ -312,13 +312,13 @@
           onclick={() => sendControl('Repeat', onrepeat)}
           title="Repeat (R)"
           disabled={pending || !onrepeat}
-          class="rounded-md border border-zinc-700 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-teal-500 hover:text-zinc-100 focus-visible:focus-ring"
+          class="ui-btn ui-btn-sm"
         >
           {pending && currentFeedback?.action === 'Repeat' ? 'Sending…' : 'Repeat'}
         </button>
       {/if}
       {#if canCancel}
-        <button type="button" onclick={() => sendControl('Cancel', oncancel)} disabled={pending || !oncancel} class="cancel-button" aria-label="Cancel job" title="Cancel (Esc)">{pending && currentFeedback?.action === 'Cancel' ? 'Sending…' : 'Cancel'}</button>
+        <button type="button" onclick={() => sendControl('Cancel', oncancel)} disabled={pending || !oncancel} class="ui-btn ui-btn-sm ui-btn-danger cancel-button" aria-label="Cancel job" title="Cancel (Esc)">{pending && currentFeedback?.action === 'Cancel' ? 'Sending…' : 'Cancel'}</button>
       {/if}
     </div>
   {/if}
@@ -354,7 +354,7 @@
   .sequence-segment[data-state='failed'] { height: 12px; background: var(--color-error); border-color: var(--color-error); }
   .sequence-segment[data-state='stopped'],
   .sequence-segment[data-state='unknown'] { height: 12px; border-style: dashed; }
-  .sequence-more { color: var(--color-text-muted); font-size: 11px; line-height: 1; }
+  .sequence-more { color: var(--color-text-muted); font-size: var(--text-meta); line-height: 1; }
 
   .progress-track { position: relative; isolation: isolate; }
   .step-pulse::after {
@@ -393,10 +393,10 @@
     .step-pulse::after { animation: none; display: none; }
     .current-step { animation: none; }
   }
-  .job-card { width: 100%; overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: 8px; background: var(--color-bg-surface); }
+  .job-card { width: 100%; overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-bg-surface); }
   .job-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--color-border-subtle); }
-  h3 { font-size: 12px; font-weight: 600; }
-  .job-status { display: flex; align-items: center; gap: 6px; font-size: 11px; text-transform: capitalize; color: var(--color-text-secondary); }
+  h3 { font-size: var(--text-ui); font-weight: 600; }
+  .job-status { display: flex; align-items: center; gap: 6px; font-size: var(--text-meta); text-transform: capitalize; color: var(--color-text-secondary); }
   .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
   .job-status[data-status='running'], .job-status[data-status='completed'] { color: var(--color-primary-main); }
   .job-status[data-status='paused'] { color: var(--color-warning); }
@@ -404,24 +404,21 @@
   .job-body { display: flex; flex-wrap: wrap; gap: 16px 20px; padding: 12px 14px; }
   .job-main { flex: 1 1 280px; min-width: 0; }
   .job-media { flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
-  .media-label { font-size: 12px; color: var(--color-text-secondary); }
-  .job-timing { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 14px; font-size: 11px; }
+  .media-label { font-size: var(--text-ui); color: var(--color-text-secondary); }
+  .job-timing { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 14px; font-size: var(--text-meta); }
   .job-timing div { display: flex; align-items: baseline; gap: 8px; }
   dt { color: var(--color-text-muted); }
   dd { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--color-text-primary); }
-  .job-enhanced { margin-top: 6px; font-size: 12px; color: var(--color-text-secondary); }
-  .job-notices { margin-top: 4px; font-size: 12px; color: var(--color-warning); }
+  .job-enhanced { margin-top: 6px; font-size: var(--text-ui); color: var(--color-text-secondary); }
+  .job-notices { margin-top: 4px; font-size: var(--text-ui); color: var(--color-warning); }
   .job-enhanced-label { color: var(--color-primary-main); font-weight: 500; }
-  .job-message { margin-top: 12px; padding: 8px 10px; background: var(--color-bg-base); border-radius: 4px; font-size: 12px; color: var(--color-text-secondary); overflow-wrap: anywhere; }
+  .job-message { margin-top: 12px; padding: 8px 10px; background: var(--color-bg-base); border-radius: 4px; font-size: var(--text-ui); color: var(--color-text-secondary); overflow-wrap: anywhere; }
   .job-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border-subtle); }
-  .job-actions button { padding: 5px 9px; font-size: 11px; border: 1px solid var(--color-border-strong); border-radius: 4px; color: var(--color-text-secondary); }
-  .job-actions button:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
+
   .job-actions .cancel-button { margin-left: auto; }
-  .job-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .control-feedback { margin-top: 8px; font-size: 12px; color: var(--color-primary-main); overflow-wrap: anywhere; }
+  .control-feedback { margin-top: 8px; font-size: var(--text-ui); color: var(--color-primary-main); overflow-wrap: anywhere; }
   .control-feedback.failed { color: var(--color-error); }
-  .job-actions .cancel-button:hover { color: var(--color-error); border-color: var(--color-error); }
   .live-preview { margin: 0; overflow: hidden; border: 1px solid var(--color-border-subtle); border-radius: 6px; background: var(--color-bg-base); }
   .live-preview img { display: block; width: 100%; max-height: min(40vh, 18rem); object-fit: contain; }
-  .job-footer { display: flex; gap: 8px; padding: 7px 14px; font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-base); border-top: 1px solid var(--color-border-subtle); }
+  .job-footer { display: flex; gap: 8px; padding: 7px 14px; font-size: var(--text-meta); color: var(--color-text-muted); background: var(--color-bg-base); border-top: 1px solid var(--color-border-subtle); }
 </style>

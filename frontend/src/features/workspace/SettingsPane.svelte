@@ -186,7 +186,7 @@
 
 <section class="settings-pane" aria-labelledby="ws-settings-title">
   <div class="settings-head">
-    <h2 id="ws-settings-title" class="field-label">Settings</h2>
+    <h2 id="ws-settings-title" class="ui-area-label">Settings</h2>
     <span class="settings-hint" title="Drag a label left or right to change its value; arrow keys nudge (Shift ×10)">Drag labels to scrub</span>
   </div>
 
@@ -194,14 +194,14 @@
     {#if caps.showDimensions}
       <InspectorSection id="size" title="Size" summary={sizeSummary}>
         <InspectorRow label="Ratio" changed={changed('ratio')} onreset={() => reset('ratio', 'size', 'dimensionMode')}>
-          <div class="mini-seg" role="group" aria-label="Aspect ratio">
+          <div class="ui-segmented ui-segmented-sm ui-segmented-mono mini-seg" role="group" aria-label="Aspect ratio">
             {#each ratios as ratio (ratio)}
               <button type="button" aria-pressed={dimensionMode === 'ratio' && s.ratio === ratio} onclick={() => pickRatio(ratio)}>{ratio}</button>
             {/each}
           </div>
         </InspectorRow>
         <InspectorRow label="Resolution" changed={changed('size')} onreset={() => reset('size', 'dimensionMode')}>
-          <div class="mini-seg" role="group" aria-label="Resolution">
+          <div class="ui-segmented ui-segmented-sm ui-segmented-mono mini-seg" role="group" aria-label="Resolution">
             {#each sizeOptions as size (size)}
               <button type="button" aria-pressed={dimensionMode === 'ratio' && s.size === size} aria-label="Resolution {size}" onclick={() => pickSize(size)}>{size.toUpperCase()}</button>
             {/each}
@@ -253,13 +253,13 @@
           <InspectorNumber id="ws-seed" name="seed" value={s.seed} {...SPEC.seed} nullable placeholder="Random each run" onchange={(v) => draft.update('seed', v)} />
           <button
             type="button"
-            class="mini-icon"
+            class="ui-btn ui-btn-row"
             aria-pressed={s.seed !== null}
             aria-label={s.seed !== null ? 'Unlock seed (random each run)' : 'Lock seed (reuse it every run)'}
             title={s.seed !== null ? 'Seed locked: click for a random seed each run' : 'Random each run: click to lock'}
             onclick={toggleSeedLock}
           ><Icon name={s.seed !== null ? 'lock' : 'unlock'} size={14} /></button>
-          <button type="button" class="mini-icon" aria-label="Pick a new random seed" title="New random seed" onclick={() => draft.update('seed', randomSeed())}>
+          <button type="button" class="ui-btn ui-btn-row" aria-label="Pick a new random seed" title="New random seed" onclick={() => draft.update('seed', randomSeed())}>
             <Icon name="dice" size={14} />
           </button>
         </InspectorRow>
@@ -312,8 +312,8 @@
             <span class="reference-name" title={referenceName}>{referenceName || 'Drop or browse'}</span>
             <!-- No name: the chosen file is attached on submit only while it is the reference (see WorkspacePage). -->
             <input id="ws-image-file" bind:this={fileInput} type="file" accept="image/png,image/jpeg,image/webp" class="hidden" onchange={(e) => onImageFileChange(e.currentTarget.files?.[0] ?? null)}>
-            <label for="ws-image-file" class="mini-icon" title="Browse for an image" aria-label="Browse for a reference image"><Icon name="plus" size={14} /></label>
-            <button type="button" class="mini-icon" aria-label="Clear reference image" title="Clear" onclick={clearImage}><Icon name="close" size={14} /></button>
+            <label for="ws-image-file" class="ui-btn ui-btn-row" title="Browse for an image" aria-label="Browse for a reference image"><Icon name="plus" size={14} /></label>
+            <button type="button" class="ui-btn ui-btn-row" aria-label="Clear reference image" title="Clear" onclick={clearImage}><Icon name="close" size={14} /></button>
           </InspectorRow>
           <InspectorRow label="Path" forId="ws-image-path">
             <input
@@ -387,7 +387,7 @@
       <InspectorSection id="upscale" title="Upscale" summary={s.upscaleEnabled ? `${s.upscaleFactor}×` : 'Off'} active={s.upscaleEnabled}>
         <InspectorRow label="Upscale" changed={changed('upscaleEnabled', 'upscaleFactor')} onreset={() => reset('upscaleEnabled', 'upscaleFactor')}>
           <Toggle id="ws-upscale-enabled" ariaLabel="Enable upscale" checked={s.upscaleEnabled} disabled={busy} onchange={(e) => draft.update('upscaleEnabled', (e.currentTarget as HTMLInputElement).checked)} />
-          <div class="mini-seg factor" role="group" aria-label="Upscale factor">
+          <div class="ui-segmented ui-segmented-sm ui-segmented-mono mini-seg factor" role="group" aria-label="Upscale factor">
             {#each [2, 4] as factor (factor)}
               <button type="button" aria-pressed={s.upscaleFactor === factor} disabled={!s.upscaleEnabled} onclick={() => draft.update('upscaleFactor', factor)}>{factor}×</button>
             {/each}
@@ -462,14 +462,14 @@
 
   <div class="panel-footer settings-footer">
     {#if jobsActive}
-      <p id="ws-busy-note" class="surface-card-muted footer-note text-zinc-400">
+      <p id="ws-busy-note" class="ui-alert ui-alert-info footer-note">
         A job is running. New runs join the queue.
       </p>
     {/if}
     {#if promptFileMode && s.promptFileOptionIds.length === 0}
-      <p class="surface-card-muted footer-note text-amber-400">{context.prompt_file.help.option_required}</p>
+      <p class="ui-alert ui-alert-warning footer-note">{context.prompt_file.help.option_required}</p>
     {/if}
-    <div class="footer-actions">
+    <div class="ui-action-bar">
       <button
         id="ws-reset"
         type="button"
@@ -477,7 +477,7 @@
         onclick={resetAll}
         title="Reset settings to model defaults (keeps model, LoRAs, quantization, and prompt)"
         aria-label="Reset settings"
-        class="surface-button-secondary reset-button disabled:cursor-not-allowed disabled:opacity-50"
+        class="ui-btn"
       >
         <Icon name="reset" size={14} />Reset
         {#if changedRows > 0}<span class="reset-count" data-testid="changed-count">{changedRows}</span>{/if}
@@ -486,11 +486,11 @@
         id="ws-submit"
         type="submit"
         disabled={submitDisabled}
-        class="surface-button surface-button-primary generate-button"
+        class="ui-btn ui-btn-primary ui-btn-main"
       >
         <Icon name="bolt" size={16} />
         <span>{busy ? 'Submitting…' : jobsActive ? 'Add to queue' : 'Generate'}</span>
-        <span class="surface-shortcut ml-2 px-1.5 py-0.5 font-mono text-xs opacity-80">⌘↵</span>
+        <kbd>⌘↵</kbd>
       </button>
     </div>
   </div>
@@ -499,41 +499,31 @@
 <style>
   .settings-pane { display: flex; flex: 1; min-height: 0; flex-direction: column; }
   .settings-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 8px; border-bottom: 1px solid var(--color-border-subtle); }
-  .settings-hint { font-size: 11px; color: var(--color-text-muted); }
+  .settings-hint { font-size: var(--text-meta); color: var(--color-text-muted); }
   .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 
-  .mini-seg { display: flex; flex: 1; flex-wrap: wrap; gap: 2px; min-width: 0; }
-  .mini-seg.factor { flex: none; width: 90px; flex-wrap: nowrap; }
-  .mini-seg button { flex: 1; min-width: 0; height: 22px; padding: 0 4px; border: 1px solid var(--color-border-subtle); border-radius: 4px; background: var(--color-bg-base); font-family: var(--font-mono); font-size: 11px; color: var(--color-text-secondary); }
-  .mini-seg button:hover:not(:disabled) { border-color: var(--color-border-strong); color: var(--color-text-primary); }
-  .mini-seg button[aria-pressed='true'] { border-color: color-mix(in srgb, var(--color-primary-main) 55%, transparent); background: color-mix(in srgb, var(--color-primary-main) 12%, var(--color-bg-base)); color: var(--color-primary-main); }
-  .mini-seg button:disabled { opacity: 0.4; cursor: not-allowed; }
-  .mini-seg button:focus-visible, .mini-icon:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 1px; }
-
-  .mini-icon { display: inline-grid; flex: none; place-items: center; width: 24px; height: 24px; border: 1px solid transparent; border-radius: 4px; color: var(--color-text-muted); cursor: pointer; }
-  .mini-icon:hover { background: var(--color-bg-surface); color: var(--color-text-primary); }
-  .mini-icon[aria-pressed='true'] { border-color: color-mix(in srgb, var(--color-primary-main) 40%, transparent); color: var(--color-primary-main); }
+  /* Presets fill the value column; each option takes an equal share. */
+  .mini-seg { display: flex; flex: 1; }
+  .mini-seg.factor { flex: none; width: 90px; }
+  .mini-seg > button { flex: 1; min-width: 0; padding: 0 2px; }
   .mini-range { flex: none; width: 90px; }
-  .dim-times { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); }
+  .dim-times { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
 
-  .inspector-select, .inspector-text { width: 100%; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: 12px; color: var(--color-text-primary); }
+  .inspector-select, .inspector-text { width: 100%; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: var(--text-ui); color: var(--color-text-primary); }
   .inspector-text { font-family: var(--font-mono); }
   .inspector-select.factor { flex: none; width: 70px; }
-  .inspector-select:hover, .inspector-text:hover { border-color: var(--color-border-strong); background: var(--color-zinc-900); }
-  .inspector-select:focus, .inspector-text:focus { outline: none; border-color: var(--color-primary-main); background: var(--color-zinc-900); }
-  .inspector-select option { background: var(--color-zinc-900); }
-  .row-hint { padding: 0 12px 6px 116px; font-size: 11px; color: var(--color-text-muted); }
+  .inspector-select:hover, .inspector-text:hover { border-color: var(--color-border-strong); background: var(--color-bg-surface); }
+  .inspector-select:focus, .inspector-text:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-surface); }
+  .inspector-select option { background: var(--color-bg-surface); }
+  .row-hint { padding: 0 12px 6px 116px; font-size: var(--text-meta); color: var(--color-text-muted); }
 
   .reference-drop { border-radius: var(--radius-sm); }
   .reference-drop[data-dragover='true'] { outline: 2px dashed var(--color-primary-main); outline-offset: -2px; }
   .reference-thumb { display: grid; flex: none; place-items: center; width: 40px; height: 40px; margin: 4px 0; overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-bg-surface); color: var(--color-text-muted); }
   .reference-thumb img { width: 100%; height: 100%; object-fit: cover; }
-  .reference-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+  .reference-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui); }
 
   .settings-footer { flex: none; padding: 10px 12px; }
-  .footer-note { margin-bottom: 8px; padding: 8px 12px; font-size: 12px; }
-  .footer-actions { display: flex; align-items: center; gap: 8px; }
-  .reset-button { display: inline-flex; flex: none; align-items: center; gap: 6px; padding: 8px 12px; border-radius: 9999px; font-size: 12px; }
-  .reset-count { font-family: var(--font-mono); font-size: 11px; color: var(--color-primary-main); }
-  .generate-button { display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; gap: 8px; padding: 10px 16px; border-radius: 9999px; }
+  .footer-note { margin-bottom: 8px; }
+  .reset-count { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-primary-main); }
 </style>

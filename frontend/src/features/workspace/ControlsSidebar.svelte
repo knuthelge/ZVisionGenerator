@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Icon } from '$lib/components/atoms';
+  import { Icon, Spinner } from '$lib/components/atoms';
   import { draft } from '$lib/state/draft.svelte';
   import type { WorkspaceContext } from '$lib/types';
   import ComposePane from './ComposePane.svelte';
@@ -38,20 +38,13 @@
       <SettingsPane {context} {busy} {jobsActive} {imageFile} {referencePreviewUrl} {lastSeed} {onImageFileChange} />
     {:else}
       <div class="flex-1 overflow-y-auto p-3 custom-scrollbar">
-        <div class="surface-card-muted space-y-3 rounded-md p-4">
-          <p class="field-label">Loading Workspace Controls</p>
-          <p class="text-sm text-zinc-400">Loading editable defaults and controls.</p>
-        </div>
+        <p class="flex items-center gap-2 text-ui text-text-muted" role="status"><Spinner size="sm" />Loading settings…</p>
       </div>
-      <div class="panel-footer z-10 w-full shrink-0 p-3">
-        <button
-          id="ws-submit"
-          type="submit"
-          disabled={true}
-          class="surface-button surface-button-primary flex w-full items-center justify-center gap-2 rounded-full py-2.5"
-        >
+      <div class="panel-footer ui-action-bar z-10 w-full shrink-0 p-3">
+        <button id="ws-submit" type="submit" disabled={true} class="ui-btn ui-btn-primary ui-btn-main">
+          <Icon name="bolt" size={16} />
           <span>Generate</span>
-          <span class="surface-shortcut ml-2 px-1.5 py-0.5 text-xs font-mono opacity-80">⌘↵</span>
+          <kbd>⌘↵</kbd>
         </button>
       </div>
     {/if}
@@ -96,13 +89,13 @@
     .workspace-left.collapsed .sidebar-panes { display: none; }
     .workspace-left.collapsed .sidebar-strip { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: space-between; padding: 8px 0 12px; }
   }
-  .strip-expand { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; color: var(--color-text-secondary); }
+  .strip-expand { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-sm); color: var(--color-text-secondary); }
   .strip-expand:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
-  .strip-generate { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 999px; background: var(--color-primary-main); color: var(--color-primary-ink); }
+  .strip-generate { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-sm); background: var(--color-primary-main); color: var(--color-primary-ink); }
   .strip-generate:hover { background: var(--color-primary-hover); }
-  .strip-generate:disabled { opacity: 0.5; cursor: not-allowed; }
+  .strip-generate:disabled { border: 1px solid var(--color-border-strong); background: var(--color-bg-base); color: var(--color-text-muted); cursor: not-allowed; }
   .strip-generate-wrap { position: relative; }
-  .strip-badge { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border: 2px solid var(--color-bg-surface); border-radius: 999px; background: var(--color-primary-main); color: var(--color-primary-ink); font-size: 11px; font-weight: 700; }
+  .strip-badge { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border: 2px solid var(--color-bg-base); border-radius: var(--radius-xs); background: var(--color-primary-main); color: var(--color-primary-ink); font-size: var(--text-meta); font-weight: 700; }
   @media (max-width: 639px) {
     .workspace-left { flex: none; }
   }

@@ -10,7 +10,7 @@
   import { getWorkspaceCoreContext, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
   import { deleteAsset } from '$lib/api/gallery';
   import { referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
-  import { MascotSpot, ToolbarSelectShell } from '$lib/components/atoms';
+  import { Icon, MascotSpot, ToolbarSelectShell } from '$lib/components/atoms';
   import { rememberMascotSpots } from '$lib/components/atoms/MascotSpot.svelte';
   import {
     DROWSY_AFTER_MS,
@@ -647,7 +647,7 @@
 
       <!-- Model selector -->
       <div class="flex flex-wrap items-center gap-2 min-w-0">
-        <label class="field-label" for="ws-model">Model</label>
+        <label class="ui-label" for="ws-model">Model</label>
         <ToolbarSelectShell
           id="ws-model"
           name="model"
@@ -677,7 +677,7 @@
           <ToolbarSelectShell
             name="quantize"
             testId="quantize-shell"
-            class="w-44 font-mono"
+            class="w-40"
             value={draft.state.quantize !== null ? String(draft.state.quantize) : ''}
             disabled={!authorityReady}
             onchange={(e) => {
@@ -712,28 +712,30 @@
 
       <!-- LoRA chips area -->
       <div class="flex items-center gap-2 flex-1 min-w-0">
-        <span class="field-label mt-0.5 shrink-0">LoRAs</span>
+        <span class="ui-label shrink-0">LoRAs</span>
         {#if authorityReady}
           <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
             <!-- Chips -->
             {#each loraChips as chip}
-              <div class="surface-chip flex items-center gap-1 px-2 py-0.5 text-xs">
-                <span class="max-w-20 truncate">{chip.name}</span>
+              <!-- Neutral chip: pink is reserved for $snippet syntax in prompts. -->
+              <div class="ui-chip lora-chip">
+                <span class="max-w-28 truncate" title={chip.name}>{chip.name}</span>
                 <input
                   type="number"
                   step="0.1"
                   min="-10"
                   max="10"
                   value={chip.weight}
-                  class="w-10 bg-transparent text-zinc-400 font-mono text-center focus:outline-none"
+                  aria-label="{chip.name} weight"
+                  class="lora-weight"
                   onchange={(e) => updateLoraWeight(chip.name, Number((e.currentTarget as HTMLInputElement).value))}
                 >
                 <button
                   type="button"
-                  class="surface-link-muted ml-0.5"
+                  class="lora-remove"
                   onclick={() => removeLora(chip.name)}
                   aria-label="Remove {chip.name}"
-                >×</button>
+                ><Icon name="close" size={11} /></button>
               </div>
             {/each}
 
@@ -741,15 +743,13 @@
             <button
               type="button"
               bind:this={loraButtonEl}
-              class="surface-chip-muted flex shrink-0 items-center gap-1 rounded-md border-dashed px-2.5 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+              class="ui-btn ui-btn-sm ui-btn-add"
               disabled={loraOptions.length === 0}
               aria-haspopup="menu"
               aria-expanded={loraPopoverOpen}
               onclick={() => (loraPopoverOpen = !loraPopoverOpen)}
             >
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-              </svg>
+              <Icon name="plus" size={12} />
               Add LoRA
             </button>
             <ActionMenu
@@ -762,7 +762,7 @@
             />
           </div>
         {:else}
-          <p class="text-sm text-zinc-500">Loading authoritative model options…</p>
+          <p class="ui-help">Loading models…</p>
         {/if}
       </div>
     </div>
@@ -783,24 +783,24 @@
 
     <section class="workspace-preview relative z-0 flex min-h-0 min-w-0 flex-col bg-bg-base">
       <div class="panel-header flex h-10 shrink-0 items-center justify-between px-3">
-        <h2 class="field-label">Preview</h2>
-        <span class="text-xs text-text-muted">{jobStore.isRunning ? 'Generating…' : hasCompletedOutputs || historyStore.assets.length ? 'Latest output' : 'Ready'}</span>
+        <h2 class="ui-area-label">Preview</h2>
+        <span class="text-meta text-text-muted">{jobStore.isRunning ? 'Generating…' : hasCompletedOutputs || historyStore.assets.length ? 'Latest output' : 'Ready'}</span>
       </div>
       <div class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
         {#if loadError}
           <div class="flex flex-col items-center gap-3 text-center p-8">
             <MascotSpot mood={mascotMood} size={112} />
-            <p class="text-red-400 text-sm font-medium">Error</p>
-            <p class="text-zinc-500 text-xs mt-1">{loadError}</p>
+            <p class="font-heading text-content font-extrabold text-error">The Workspace could not load</p>
+            <p class="ui-help">{loadError}</p>
           </div>
         {:else if hasCompletedOutputs}
           <div class="completed-output-region flex h-full w-full min-w-0 flex-col p-4">
             <div class="mb-3 flex shrink-0 items-center justify-between gap-3">
               <div class="flex items-center gap-2">
                 <MascotSpot mood={mascotMood} size={48} />
-                <h3 class="text-xs font-medium text-text-secondary">Completed outputs</h3>
+                <h3 class="ui-area-label">Completed outputs</h3>
               </div>
-              <span class="text-xs text-text-muted">{jobOutputs.length}</span>
+              <span class="font-mono text-meta text-text-muted">{jobOutputs.length}</span>
             </div>
             {#if jobOutputs.length === 1}
               {@const output = jobOutputs[0]}
@@ -888,18 +888,18 @@
           {#if latestLoading}
             <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-4" data-testid="latest-loading">
               <MascotSpot mood={mascotMood} size={128} />
-              <p class="text-zinc-400 text-sm font-medium">Loading latest output…</p>
+              <p class="text-content text-text-secondary">Loading latest output…</p>
             </div>
           {/if}
         {:else}
           <div class="flex flex-col items-center justify-center gap-3 text-center p-4">
             <MascotSpot mood={mascotMood} size={128} />
             {#if lookingForHistory}
-              <p class="text-zinc-400 text-sm font-medium">Looking for your latest work…</p>
+              <p class="text-content text-text-secondary">Looking for your latest work…</p>
             {:else}
               <div>
-                <p class="text-zinc-400 text-sm font-medium">No generated assets yet</p>
-                <p class="text-zinc-600 text-xs mt-1">Write a prompt and press Generate to get started</p>
+                <p class="ui-empty-title">No generated assets yet</p>
+                <p class="mt-1 text-ui text-text-muted">Write a prompt and press Generate to get started</p>
               </div>
             {/if}
           </div>
@@ -943,6 +943,12 @@
 />
 
 <style>
+  .lora-chip { background: var(--color-bg-surface); color: var(--color-text-primary); }
+  .lora-weight { width: 3.5ch; border-radius: var(--radius-xs); background: transparent; text-align: center; font-family: var(--font-mono); font-weight: 400; color: var(--color-text-muted); appearance: textfield; -moz-appearance: textfield; }
+  .lora-weight::-webkit-inner-spin-button, .lora-weight::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
+  .lora-weight:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
+  .lora-remove { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: -3px; border-radius: var(--radius-xs); color: var(--color-text-muted); }
+  .lora-remove:hover { background: var(--color-error-surface); color: var(--color-error); }
   .workspace-layout { display: grid; grid-template-columns: 360px minmax(0, 1fr); }
   .workspace-layout.sidebar-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
   @media (max-width: 639px) {
@@ -951,9 +957,9 @@
   }
   .latest-region :global(.latest-media) { opacity: 0; transition: opacity 250ms ease; }
   .latest-region :global(.latest-media.loaded) { opacity: 1; }
-  .latest-meta { display: flex; flex: none; align-items: center; justify-content: center; gap: 14px; min-width: 0; padding-top: 8px; font-size: 12px; color: var(--color-text-muted); }
+  .latest-meta { display: flex; flex: none; align-items: center; justify-content: center; gap: 14px; min-width: 0; padding-top: 8px; font-size: var(--text-ui); color: var(--color-text-muted); }
   .latest-meta span { max-width: 520px; color: var(--color-text-secondary); }
-  .latest-meta b { flex: none; font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--color-text-secondary); }
+  .latest-meta b { flex: none; font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 500; color: var(--color-text-secondary); }
   .completed-output-scroll { display: flex; flex-direction: column; }
   .completed-output-grid { display: grid; justify-content: center; margin-block: auto; }
 </style>
