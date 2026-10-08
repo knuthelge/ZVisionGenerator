@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b14] - 2026-10-08
+
 ### Added
 - Web UI: a **Prompts** page that builds prompt files visually. Define snippets, then build sets of prompt entries with `$snippet` chips, editable `{a|b}` choices (also while typing, and from selected words with `⌥↵`), text or named fields, an active switch, a negative prompt and full `enhance:` options. Drag sets, entries and snippets to arrange them. A preview shows each prompt as the model receives it, with a **Roll** of its choices. **Generate this one** queues a single prompt with the Workspace settings
 - Web UI: saving a prompt file keeps its comments and layout, keeps the Workspace's selected prompts pointing at the same entries after reordering or renaming, and asks before overwriting a file that changed on disk. `⌘Z` undoes, and unsaved changes survive leaving the page
