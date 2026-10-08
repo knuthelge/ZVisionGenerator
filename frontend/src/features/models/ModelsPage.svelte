@@ -272,7 +272,7 @@
       <div class="grid min-w-0 grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
       <!-- Image Models -->
       <div class="admin-section min-w-0 overflow-hidden">
-        <div class="flex items-center justify-between border-b border-zinc-900 pb-4 mb-4">
+        <div class="flex items-center justify-between border-b border-border-subtle pb-4 mb-4">
           <h3 class="text-sm font-semibold text-zinc-100">Image Models</h3>
           <span class="rounded-full bg-teal-500/10 border border-teal-500/20 px-2 py-0.5 text-xs font-semibold text-teal-400">{inventory.image_models.length}</span>
         </div>
@@ -281,7 +281,7 @@
         {:else}
           <table class="w-full table-fixed border-collapse text-xs">
             <thead>
-              <tr class="text-zinc-500 uppercase text-[10px] tracking-wider border-b border-zinc-900">
+              <tr class="text-zinc-500 uppercase text-[10px] tracking-wider border-b border-border-subtle">
                 <th class="px-2 py-2 text-left">Name</th>
                 <th class="px-2 py-2 text-left">Family</th>
                 <th class="px-2 py-2 text-left">Size</th>
@@ -291,7 +291,7 @@
             </thead>
             <tbody>
               {#each inventory.image_models as m}
-                <tr class="border-b border-zinc-900 hover:bg-zinc-900/50 transition">
+                <tr class="border-b border-border-subtle hover:bg-bg-surface-hover/60 transition">
                   <td class="px-2 py-2">
                     {@render modelName(m)}
                     {#if m.stored_quant}
@@ -311,7 +311,7 @@
 
       <!-- Video Models -->
       <div class="admin-section min-w-0 overflow-hidden">
-        <div class="flex items-center justify-between border-b border-zinc-900 pb-4 mb-4">
+        <div class="flex items-center justify-between border-b border-border-subtle pb-4 mb-4">
           <h3 class="text-sm font-semibold text-zinc-100">Video Models</h3>
           <span class="rounded-full bg-teal-500/10 border border-teal-500/20 px-2 py-0.5 text-xs font-semibold text-teal-400">{inventory.video_models.length}</span>
         </div>
@@ -320,7 +320,7 @@
         {:else}
           <table class="w-full table-fixed border-collapse text-xs">
             <thead>
-              <tr class="text-zinc-500 uppercase text-[10px] tracking-wider border-b border-zinc-900">
+              <tr class="text-zinc-500 uppercase text-[10px] tracking-wider border-b border-border-subtle">
                 <th class="px-2 py-2 text-left">Name</th>
                 <th class="px-2 py-2 text-left">Family</th>
                 <th class="px-2 py-2 text-left">I2V</th>
@@ -330,7 +330,7 @@
             </thead>
             <tbody>
               {#each inventory.video_models as m}
-                <tr class="border-b border-zinc-900 hover:bg-zinc-900/50 transition">
+                <tr class="border-b border-border-subtle hover:bg-bg-surface-hover/60 transition">
                   <td class="px-2 py-2">{@render modelName(m)}</td>
                   <td class="truncate px-2 py-2 font-mono text-zinc-400" title={m.family}>{m.family}</td>
                   <td class="px-2 py-2 text-zinc-400">{m.supports_i2v ? '✓' : '—'}</td>
@@ -345,7 +345,7 @@
 
       <!-- LoRAs -->
       <div class="admin-section min-w-0 overflow-hidden">
-        <div class="flex items-center justify-between border-b border-zinc-900 pb-4 mb-4">
+        <div class="flex items-center justify-between border-b border-border-subtle pb-4 mb-4">
           <h3 class="text-sm font-semibold text-zinc-100">Discovered LoRAs</h3>
           <span class="rounded-full bg-teal-500/10 border border-teal-500/20 px-2 py-0.5 text-xs font-semibold text-teal-400">{inventory.loras.length}</span>
         </div>
@@ -354,7 +354,7 @@
         {:else}
           <table class="w-full table-fixed border-collapse text-xs">
             <thead>
-              <tr class="text-zinc-500 uppercase text-[10px] tracking-wider border-b border-zinc-900">
+              <tr class="text-zinc-500 uppercase text-[10px] tracking-wider border-b border-border-subtle">
                 <th class="px-2 py-2 text-left">Name</th>
                 <th class="px-2 py-2 text-left">Size</th>
                 <th class="w-8 px-1 py-2"><span class="sr-only">Actions</span></th>
@@ -362,7 +362,7 @@
             </thead>
             <tbody>
               {#each inventory.loras as l}
-                <tr class="border-b border-zinc-900 hover:bg-zinc-900/50 transition">
+                <tr class="border-b border-border-subtle hover:bg-bg-surface-hover/60 transition">
                   <td class="px-2 py-2 text-zinc-200 truncate max-w-25" title={l.name}>{l.name}</td>
                   <td class="truncate px-2 py-2 font-mono text-zinc-400" title={l.size_label ?? '—'}>{l.size_label ?? '—'}</td>
                   <td class="px-1 py-2 text-right">{@render deleteButton(`Delete ${l.name}`, () => requestDelete({ type: 'lora', name: l.name }))}</td>
@@ -379,7 +379,7 @@
 
       <!-- Convert Checkpoint -->
       <form class="admin-section min-w-0 flex flex-col gap-5" onsubmit={handleConvertCheckpoint}>
-        <h3 class="text-sm font-semibold text-zinc-100 border-b border-zinc-900 pb-3">Convert a Checkpoint</h3>
+        <h3 class="text-sm font-semibold text-zinc-100 border-b border-border-subtle pb-3">Convert a Checkpoint</h3>
         
         {#key checkpointPathReset}
           <PathField
@@ -461,7 +461,7 @@
 
       <!-- Import Local LoRA -->
       <form class="admin-section min-w-0 flex flex-col gap-5" onsubmit={handleImportLoraLocal}>
-        <h3 class="text-sm font-semibold text-zinc-100 border-b border-zinc-900 pb-3">Import Local LoRA</h3>
+        <h3 class="text-sm font-semibold text-zinc-100 border-b border-border-subtle pb-3">Import Local LoRA</h3>
         
         {#key localLoraPathReset}
           <PathField
@@ -495,7 +495,7 @@
 
       <!-- Import HuggingFace LoRA -->
       <form class="admin-section min-w-0 flex flex-col gap-5" onsubmit={handleImportLoraHF}>
-        <h3 class="text-sm font-semibold text-zinc-100 border-b border-zinc-900 pb-3">Import from HuggingFace</h3>
+        <h3 class="text-sm font-semibold text-zinc-100 border-b border-border-subtle pb-3">Import from HuggingFace</h3>
         
         <FormField label="Repository ID" for="import-hf-repo-id" required helper="Format: username/repository">
           <Input

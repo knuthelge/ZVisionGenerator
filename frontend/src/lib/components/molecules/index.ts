@@ -1,6 +1,6 @@
 export { default as EnhanceOptions } from './EnhanceOptions.svelte';
 export { default as FormField } from './FormField.svelte';
-export { default as ActionMenu } from './ActionMenu.svelte';
+export { default as ActionMenu, type ActionMenuEntry } from './ActionMenu.svelte';
 export { default as AssetTile } from './AssetTile.svelte';
 export { default as AssetViewer } from './AssetViewer.svelte';
 export { default as Toast } from './Toast.svelte';

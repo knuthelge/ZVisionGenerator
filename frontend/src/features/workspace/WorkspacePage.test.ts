@@ -1327,6 +1327,36 @@ describe('WorkspacePage', () => {
     expect(target.querySelector('select[name="quantize"]'), 'Quantize select must be rendered for zit model (supports_quantize: true)').not.toBeNull();
   });
 
+  it('adds a LoRA from the Add LoRA menu and closes the menu on Escape or an outside click', async () => {
+    draft.update('workflow', 'txt2img');
+    draft.update('model', 'zit');
+    const context = makeContext();
+    context.loras = [
+      { name: 'film-grain', path: '/loras/film-grain.safetensors' },
+      { name: 'krea-flat', path: '/loras/krea-flat.safetensors' },
+    ];
+    await mountWorkspace(context);
+    await settle();
+
+    const addButton = Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.includes('Add LoRA')) as HTMLButtonElement;
+    const menu = () => document.querySelector('[role="menu"][aria-label="Available LoRAs"]');
+
+    flushSync(() => addButton.click());
+    expect(menu()).not.toBeNull();
+    flushSync(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(menu()).toBeNull();
+
+    flushSync(() => addButton.click());
+    flushSync(() => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(menu()).toBeNull();
+
+    flushSync(() => addButton.click());
+    const item = menu()?.querySelector('[data-action="krea-flat"]') as HTMLButtonElement;
+    flushSync(() => item.click());
+    expect(menu()).toBeNull();
+    expect(draft.state.loraString).toBe('krea-flat:1');
+  });
+
   it('renders model and quantize selects enabled for txt2img with zit model', async () => {
     draft.update('workflow', 'txt2img');
     draft.update('model', 'zit');
