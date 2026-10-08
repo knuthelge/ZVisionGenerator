@@ -20,7 +20,7 @@
     mascotMood as pickMascotMood,
     type MascotReaction,
   } from '$lib/state/mascot';
-  import { AssetTile, AssetViewer, JobCard, ModelStatusBadges, requestConfirm } from '$lib/components/molecules';
+  import { ActionMenu, AssetTile, AssetViewer, JobCard, ModelStatusBadges, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
   import { jobSettingsPrefill } from '$lib/state/jobSettings';
   import QueuePanel from './QueuePanel.svelte';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
@@ -164,6 +164,11 @@
   );
 
   let loraPopoverOpen = $state(false);
+  let loraButtonEl = $state<HTMLButtonElement | null>(null);
+  const loraMenuItems = $derived<ActionMenuEntry[]>([
+    { kind: 'heading', label: 'Available LoRAs' },
+    ...loraOptions.map((lora): ActionMenuEntry => ({ kind: 'item', id: lora.name, label: lora.name, onselect: () => addLora(lora.name) })),
+  ]);
 
   function addLora(name: string): void {
     const existing = loraChips.find((c) => c.name === name);
@@ -732,37 +737,29 @@
               </div>
             {/each}
 
-            <!-- Add LoRA popover -->
-            <div class="relative shrink-0">
-              <button
-                type="button"
-                class="surface-chip-muted flex items-center gap-1 rounded-md border-dashed px-2.5 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={loraOptions.length === 0}
-                onclick={() => (loraPopoverOpen = !loraPopoverOpen)}
-              >
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                </svg>
-                Add LoRA
-              </button>
-              {#if loraPopoverOpen}
-                <div class="surface-popover absolute left-0 top-full z-20 mt-2 w-64 p-2 shadow-2xl shadow-black/40">
-                  <p class="field-label px-2 pb-2">Available LoRAs</p>
-                  <div class="max-h-56 overflow-y-auto custom-scrollbar flex flex-col gap-1">
-                    {#each loraOptions as lora}
-                      <button
-                        type="button"
-                        class="surface-popover-option flex items-center justify-between rounded-md px-2 py-2 text-left text-sm"
-                        onclick={() => addLora(lora.name)}
-                      >
-                        <span class="truncate">{lora.name}</span>
-                        <span class="text-[10px] uppercase tracking-wide text-zinc-500">Add</span>
-                      </button>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
-            </div>
+            <!-- Add LoRA menu -->
+            <button
+              type="button"
+              bind:this={loraButtonEl}
+              class="surface-chip-muted flex shrink-0 items-center gap-1 rounded-md border-dashed px-2.5 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={loraOptions.length === 0}
+              aria-haspopup="menu"
+              aria-expanded={loraPopoverOpen}
+              onclick={() => (loraPopoverOpen = !loraPopoverOpen)}
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+              </svg>
+              Add LoRA
+            </button>
+            <ActionMenu
+              open={loraPopoverOpen}
+              anchor={loraButtonEl}
+              align="start"
+              label="Available LoRAs"
+              items={loraMenuItems}
+              onclose={() => (loraPopoverOpen = false)}
+            />
           </div>
         {:else}
           <p class="text-sm text-zinc-500">Loading authoritative model options…</p>

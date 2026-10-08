@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Fixed
+- Web UI: the Workspace's **Add LoRA** menu closes on Escape, an outside click or a choice, and works with the arrow keys; before, it stayed open until you picked a LoRA, even under other menus
+- Web UI: the Models page shows the dividers under card titles and table headers, and highlights the table row under the pointer; before, both were the same colour as the card
+
 ## [0.13.0b14] - 2026-10-08
 
 ### Added

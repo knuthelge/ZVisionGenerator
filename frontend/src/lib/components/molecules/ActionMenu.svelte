@@ -18,17 +18,19 @@
 </script>
 
 <script lang="ts">
-  import { popover } from '$lib/actions/popover';
+  import { popover, type PopoverAlign } from '$lib/actions/popover';
 
   interface Props {
     open: boolean;
     anchor: HTMLElement | null;
     items: ActionMenuEntry[];
     label: string;
+    /** Which edge of the anchor the menu lines up with. */
+    align?: PopoverAlign;
     onclose: () => void;
   }
 
-  let { open, anchor, items, label, onclose }: Props = $props();
+  let { open, anchor, items, label, align = 'end', onclose }: Props = $props();
 
   let menuEl = $state<HTMLDivElement | null>(null);
 
@@ -60,7 +62,7 @@
 
 {#if open}
   <div
-    use:popover={{ anchor, align: 'end', onclose }}
+    use:popover={{ anchor, align, onclose }}
     bind:this={menuEl}
     class="action-menu surface-popover"
     role="menu"
@@ -101,7 +103,7 @@
 {/if}
 
 <style>
-  .action-menu { z-index: 120; min-width: 220px; padding: 6px; border-radius: var(--radius-md); }
+  .action-menu { z-index: 120; min-width: 220px; max-height: min(60vh, 22rem); overflow-y: auto; padding: 6px; border-radius: var(--radius-md); }
   .action-menu-heading { padding: 6px 8px 3px; font-family: var(--font-display); font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
   .action-menu-separator { height: 1px; margin: 5px 2px; background: var(--color-border-subtle); }
   .action-menu-item { display: flex; width: 100%; align-items: center; gap: 8px; border-radius: var(--radius-sm); padding: 7px 8px; text-align: left; font-size: 13px; color: var(--color-text-secondary); }
