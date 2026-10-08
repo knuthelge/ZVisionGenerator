@@ -63,8 +63,8 @@
 </script>
 
 <div class="snippets-head">
-  <h2 class="panel-label">Snippets</h2>
-  <button type="button" class="panel-button panel-button-icon" aria-label="New snippet" title="New snippet" onclick={add}>＋</button>
+  <h2 class="ui-area-label">Snippets</h2>
+  <button type="button" class="ui-btn ui-btn-sm ui-btn-icon" aria-label="New snippet" title="New snippet" onclick={add}>＋</button>
 </div>
 <p class="snippets-hint">Reusable prompt text. Use one in a prompt as <b>$name</b>, or drag it onto an entry.</p>
 
@@ -115,8 +115,8 @@
         {/if}
         <p class="snippet-note">{count === 0 ? 'Not used yet.' : `Used ${count} ${count === 1 ? 'time' : 'times'}.`} Renaming updates every reference.</p>
         <div class="snippet-actions">
-          <button type="button" class="panel-button" onclick={() => void remove(snippet)}>Delete</button>
-          <button type="button" class="panel-button" onclick={() => { openId = null; }}>Done</button>
+          <button type="button" class="ui-btn ui-btn-sm ui-btn-danger" onclick={() => void remove(snippet)}>Delete</button>
+          <button type="button" class="ui-btn ui-btn-sm" onclick={() => { openId = null; }}>Done</button>
         </div>
       {:else}
         <button type="button" class="snippet-row" aria-label="Edit snippet ${snippet.name}" onclick={() => { openId = snippet.id; }}>
@@ -137,7 +137,7 @@
 
 <style>
   .snippets-head { display: flex; align-items: center; justify-content: space-between; min-height: 26px; margin-bottom: 2px; }
-  .snippets-hint { margin-bottom: 8px; font-size: 11.5px; color: var(--color-text-muted); }
+  .snippets-hint { margin-bottom: 8px; font-size: var(--text-meta); color: var(--color-text-muted); }
   .snippets-hint b { color: var(--color-text-secondary); font-family: var(--font-mono); font-weight: 500; }
   .snippets { overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-bg-base); }
   .snippet { position: relative; padding: 5px 8px 6px; cursor: grab; }
@@ -150,17 +150,17 @@
   .snippet[data-drop='before']::before { top: -1px; }
   .snippet[data-drop='after']::after { bottom: -1px; }
   .snippet-row { display: flex; width: 100%; align-items: center; gap: 4px; text-align: left; cursor: inherit; }
-  .grip { width: 10px; font-size: 12px; color: var(--color-text-muted); opacity: 0; }
+  .grip { width: 10px; font-size: var(--text-ui); color: var(--color-text-muted); opacity: 0; }
   .snippet:hover .grip { opacity: 0.6; }
-  .snippet-name { font-family: var(--font-mono); font-size: 12.5px; font-weight: 500; color: var(--color-accent-blush); }
-  .snippet-uses { margin-left: auto; font-size: 11px; color: var(--color-text-muted); }
-  .snippet-preview { overflow: hidden; padding-left: 14px; font-size: 12px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-secondary); }
-  .snippet-name-input { width: 100%; height: 26px; padding: 0 6px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-bg-base); font-family: var(--font-mono); font-size: 12.5px; color: var(--color-accent-blush); }
-  .snippet-name-input:focus { outline: none; border-color: var(--color-primary-main); }
-  .snippet-value { margin-top: 4px; padding: 0 6px; font-size: 12.5px; }
-  .snippet-structured { margin-top: 4px; white-space: pre-wrap; font-size: 12px; color: var(--color-text-secondary); }
-  .snippet-note { margin-top: 4px; font-size: 11px; color: var(--color-text-muted); }
-  .snippet-problem { margin-top: 2px; font-size: 11px; color: var(--color-error); }
+  .snippet-name { font-family: var(--font-mono); font-size: var(--text-ui); font-weight: 500; color: var(--color-accent-blush); }
+  .snippet-uses { margin-left: auto; font-size: var(--text-meta); color: var(--color-text-muted); }
+  .snippet-preview { overflow: hidden; padding-left: 14px; font-size: var(--text-ui); line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-secondary); }
+  .snippet-name-input { width: 100%; height: 26px; padding: 0 6px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-bg-base); font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-accent-blush); }
+  .snippet-name-input:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
+  .snippet-value { margin-top: 4px; padding: 0 6px; font-size: var(--text-ui); }
+  .snippet-structured { margin-top: 4px; white-space: pre-wrap; font-size: var(--text-ui); color: var(--color-text-secondary); }
+  .snippet-note { margin-top: 4px; font-size: var(--text-meta); color: var(--color-text-muted); }
+  .snippet-problem { margin-top: 2px; font-size: var(--text-meta); color: var(--color-error); }
   .snippet-actions { display: flex; justify-content: flex-end; gap: 4px; margin-top: 6px; }
-  .snippets-empty { padding: 8px; font-size: 12px; color: var(--color-text-muted); }
+  .snippets-empty { padding: 8px; font-size: var(--text-ui); color: var(--color-text-muted); }
 </style>

@@ -55,25 +55,21 @@
         onresolve={async (candidate) => candidate}
         onvaluechange={(value) => { directory = value.trim() || null; }}
       />
-      <label class="new-file-label" for="prompts-new-name">Name</label>
-      <input id="prompts-new-name" class="surface-input new-file-name" bind:value={name} spellcheck="false" autocomplete="off">
-      <p class="new-file-hint">Creates an empty <code>{fileName}</code>.</p>
+      <label class="ui-label new-file-label" for="prompts-new-name">Name</label>
+      <input id="prompts-new-name" class="ui-field" bind:value={name} spellcheck="false" autocomplete="off">
+      <p class="ui-help">Creates an empty <code>{fileName}</code>.</p>
       {#if error}
-        <p class="new-file-error" role="alert">{error}</p>
+        <p class="ui-help ui-help-error" role="alert">{error}</p>
       {/if}
     </form>
   {/snippet}
   {#snippet footer()}
-    <button type="button" class="surface-button-secondary new-file-button" onclick={() => { open = false; }}>Cancel</button>
-    <button type="button" class="surface-button-primary new-file-button" disabled={creating || !directory || !name.trim()} onclick={() => void create()}>Create</button>
+    <button type="button" class="ui-btn" onclick={() => { open = false; }}>Cancel</button>
+    <button type="button" class="ui-btn ui-btn-primary" disabled={creating || !directory || !name.trim()} onclick={() => void create()}>Create</button>
   {/snippet}
 </Modal>
 
 <style>
   .new-file { display: flex; flex-direction: column; gap: 8px; }
-  .new-file-label { margin-top: 4px; font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }
-  .new-file-name { padding: 6px 8px; font-size: 13px; }
-  .new-file-hint { font-size: 12px; color: var(--color-text-muted); }
-  .new-file-error { font-size: 12.5px; color: var(--color-error); }
-  .new-file-button { padding: 6px 14px; border-radius: var(--radius-md); font-size: 13px; }
+  .new-file-label { margin-top: 4px; }
 </style>

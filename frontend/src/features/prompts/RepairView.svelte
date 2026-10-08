@@ -41,18 +41,18 @@
     <p class="repair-error" role="alert">{error}</p>
   {/if}
   <div class="repair-actions">
-    <button type="button" class="panel-button panel-button-bar" onclick={onreload}>Reload from disk</button>
-    <button type="button" class="panel-button panel-button-bar panel-button-primary" disabled={saving} onclick={() => void save()}>Save and open</button>
+    <button type="button" class="ui-btn" onclick={onreload}>Reload from disk</button>
+    <button type="button" class="ui-btn ui-btn-primary" disabled={saving} onclick={() => void save()}>Save and open</button>
   </div>
 </section>
 
 <style>
   .repair { display: flex; flex-direction: column; gap: 10px; max-width: 900px; margin: 0 auto; padding: 24px 16px; }
-  .repair-title { font-size: 16px; font-weight: 800; }
-  .repair-problem { padding: 8px 12px; border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-error) 10%, transparent); color: var(--color-error); font-family: var(--font-mono); font-size: 12.5px; white-space: pre-wrap; }
-  .repair-hint { font-size: 12.5px; color: var(--color-text-muted); }
-  .repair-text { min-height: 50vh; padding: 10px 12px; border: 1px solid var(--color-zinc-700); border-radius: var(--radius-md); background: var(--color-zinc-900); font-family: var(--font-mono); font-size: 12.5px; line-height: 1.6; tab-size: 2; resize: vertical; }
-  .repair-text:focus { outline: none; border-color: var(--color-primary-main); }
-  .repair-error { font-size: 12.5px; color: var(--color-error); }
+  .repair-title { font-size: var(--text-title); font-weight: 800; }
+  .repair-problem { padding: 8px 12px; border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-error) 10%, transparent); color: var(--color-error); font-family: var(--font-mono); font-size: var(--text-ui); white-space: pre-wrap; }
+  .repair-hint { font-size: var(--text-ui); color: var(--color-text-muted); }
+  .repair-text { min-height: 50vh; padding: 10px 12px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-bg-surface); font-family: var(--font-mono); font-size: var(--text-ui); line-height: 1.6; tab-size: 2; resize: vertical; }
+  .repair-text:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
+  .repair-error { font-size: var(--text-ui); color: var(--color-error); }
   .repair-actions { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

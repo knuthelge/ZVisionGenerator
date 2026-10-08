@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Changed
 - Web UI: dialogs, menus, tooltips and notifications sit on one raised surface with a clear border instead of a drop shadow; destructive buttons are red, and every control shows the same focus ring
 - Web UI: Workspace settings sections have a header band with a summary of the hidden settings, and switches, badges and path fields share one compact size
+- Web UI: the Prompts page uses the shared buttons, labels and page bar; all prompt text has one size, and an empty page says what to do next
 
 ### Fixed
 - Web UI: the Workspace's **Add LoRA** menu closes on Escape, an outside click or a choice, and works with the arrow keys; before, it stayed open until you picked a LoRA, even under other menus

@@ -77,9 +77,9 @@
         ontype={(text) => builder.type(() => { const live = liveValue(); if (live?.kind === 'fields' && live.fields[index]) live.fields[index].value = text; })}
         onreplace={(text) => builder.edit(() => { const live = liveValue(); if (live?.kind === 'fields' && live.fields[index]) live.fields[index].value = text; })}
       />
-      <button type="button" class="panel-button panel-button-icon panel-button-quiet field-remove" aria-label="Remove field {field.key}" title="Remove field" onclick={() => builder.removeField(entry.id, valueKey, index)}>×</button>
+      <button type="button" class="ui-btn ui-btn-row field-remove" aria-label="Remove field {field.key}" title="Remove field" onclick={() => builder.removeField(entry.id, valueKey, index)}>×</button>
     {/each}
-    <button type="button" class="panel-button panel-button-quiet add-field" onclick={() => builder.addField(entry.id, valueKey)}>＋ Field</button>
+    <button type="button" class="ui-btn ui-btn-sm ui-btn-quiet add-field" onclick={() => builder.addField(entry.id, valueKey)}>＋ Field</button>
   </div>
 {:else if value?.kind === 'structured'}
   <div class="structured">
@@ -93,15 +93,15 @@
 
 <style>
   .fields { display: grid; grid-template-columns: max-content minmax(0, 1fr) auto; gap: 0 8px; align-items: start; }
-  .field-key { min-width: 6ch; max-width: 18ch; field-sizing: content; height: 22px; margin-top: 2px; padding: 0 4px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; font-family: var(--font-heading); font-size: 10.5px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
+  .field-key { min-width: 6ch; max-width: 18ch; field-sizing: content; height: 22px; margin-top: 2px; padding: 0 4px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
   .field-key::placeholder { color: var(--color-error); opacity: 0.7; }
   .field-key:hover { border-color: var(--color-border-strong); }
-  .field-key:focus { outline: none; border-color: var(--color-primary-main); background: var(--color-bg-base); color: var(--color-text-primary); }
+  .field-key:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-base); color: var(--color-text-primary); }
   .field-remove { opacity: 0; }
   .fields:hover .field-remove, .field-remove:focus-visible { opacity: 1; }
-  .add-field { grid-column: 1 / -1; justify-self: start; height: 22px; padding: 0 4px; font-size: 11.5px; }
+  .add-field { grid-column: 1 / -1; justify-self: start; height: 22px; padding: 0 4px; font-size: var(--text-meta); }
   .add-field:hover { color: var(--color-primary-main); }
   .structured { padding: 2px 0; }
-  .structured-text { white-space: pre-wrap; line-height: 1.6; color: var(--color-text-secondary); }
-  .structured-note { margin-top: 2px; font-size: 11.5px; color: var(--color-text-muted); }
+  .structured-text { white-space: pre-wrap; font-size: var(--text-content); line-height: 1.6; color: var(--color-text-secondary); }
+  .structured-note { margin-top: 2px; font-size: var(--text-meta); color: var(--color-text-muted); }
 </style>

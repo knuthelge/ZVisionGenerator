@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Icon } from '$lib/components/atoms';
   import { ActionMenu, requestConfirm } from '$lib/components/molecules';
   import type { ActionMenuEntry } from '$lib/components/molecules/ActionMenu.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
@@ -89,7 +90,7 @@
       ondragstart={(event) => dnd.start(event, 'set', set.id, sectionEl)}
       ondragend={() => dnd.end()}
     >⠿</span>
-    <button type="button" class="caret" class:caret-closed={collapsed} aria-expanded={!collapsed} aria-label={collapsed ? 'Expand set' : 'Collapse set'} onclick={() => { collapsed = !collapsed; }}>▾</button>
+    <button type="button" class="caret" class:caret-closed={collapsed} aria-expanded={!collapsed} aria-label={collapsed ? 'Expand set' : 'Collapse set'} onclick={() => { collapsed = !collapsed; }}><Icon name="chevdown" size={14} /></button>
     <input
       class="set-name"
       aria-label="Set name"
@@ -100,8 +101,8 @@
     >
     <span class="count">{activeCount} of {set.entries.length} active</span>
     <span class="spacer"></span>
-    <button type="button" class="panel-button panel-button-icon" aria-label="Add prompt to {set.name}" title="Add prompt" onclick={addEntry}>＋</button>
-    <button bind:this={menuAnchor} type="button" class="panel-button panel-button-icon" aria-label="Set actions" aria-haspopup="menu" aria-expanded={menuOpen} onclick={() => { menuOpen = !menuOpen; }}>⋯</button>
+    <button type="button" class="ui-btn ui-btn-sm ui-btn-icon" aria-label="Add prompt to {set.name}" title="Add prompt" onclick={addEntry}>＋</button>
+    <button bind:this={menuAnchor} type="button" class="ui-btn ui-btn-sm ui-btn-icon" aria-label="Set actions" aria-haspopup="menu" aria-expanded={menuOpen} onclick={() => { menuOpen = !menuOpen; }}>⋯</button>
     <ActionMenu open={menuOpen} anchor={menuAnchor} items={menuItems} label="Set actions" onclose={() => { menuOpen = false; }} />
   </header>
   {#if problems.length > 0}
@@ -113,7 +114,7 @@
       {#each set.entries as entry, entryIndex (entry.id)}
         <PromptEntryCard {builder} {dnd} {set} {entry} index={entryIndex} {ongenerate} />
       {/each}
-      <button type="button" class="panel-button panel-button-quiet add-entry" onclick={addEntry}>＋ Add prompt</button>
+      <button type="button" class="ui-btn ui-btn-sm ui-btn-quiet add-entry" onclick={addEntry}>＋ Add prompt</button>
     </div>
   {/if}
 </section>
@@ -125,18 +126,18 @@
   .set[data-drop='before']::before { top: 0; }
   .set[data-drop='after']::after { bottom: 0; }
   .set[data-drop='into'] > .set-head { background: var(--color-primary-subtle); box-shadow: inset 0 0 0 1px var(--color-primary-main); }
-  .set-head { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 6px 0 4px; background: var(--color-zinc-850); border-bottom: 1px solid var(--color-border-strong); }
-  .grip { width: 10px; cursor: grab; font-size: 12px; line-height: 1; color: var(--color-text-muted); opacity: 0; user-select: none; }
+  .set-head { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 6px 0 4px; background: var(--color-bg-raised); border-bottom: 1px solid var(--color-border-strong); }
+  .grip { width: 10px; cursor: grab; font-size: var(--text-ui); line-height: 1; color: var(--color-text-muted); opacity: 0; user-select: none; }
   .set-head:hover .grip { opacity: 0.6; }
-  .caret { width: 20px; height: 20px; color: var(--color-text-muted); transition: transform 150ms; }
+  .caret { display: grid; place-items: center; width: 20px; height: 20px; border-radius: var(--radius-xs); color: var(--color-text-muted); transition: transform 120ms; }
   .caret:hover { color: var(--color-text-primary); }
   .caret-closed { transform: rotate(-90deg); }
-  .set-name { min-width: 4ch; max-width: 100%; field-sizing: content; height: 26px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; font-family: var(--font-heading); font-size: 13.5px; font-weight: 800; color: var(--color-text-primary); }
+  .set-name { min-width: 4ch; max-width: 100%; field-sizing: content; height: 26px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; font-family: var(--font-heading); font-size: var(--text-content); font-weight: 800; color: var(--color-text-primary); }
   .set-name:hover { border-color: var(--color-border-strong); }
-  .set-name:focus { outline: none; border-color: var(--color-primary-main); background: var(--color-bg-base); }
-  .count { font-size: 11.5px; color: var(--color-text-muted); white-space: nowrap; }
+  .set-name:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-base); }
+  .count { font-size: var(--text-meta); color: var(--color-text-muted); white-space: nowrap; }
   .spacer { flex: 1; }
-  .set-problem { padding: 4px 10px; border-bottom: 1px solid var(--color-border-subtle); font-size: 11.5px; color: var(--color-error); }
+  .set-problem { padding: 4px 10px; border-bottom: 1px solid var(--color-border-subtle); font-size: var(--text-meta); color: var(--color-error); }
   .entries { display: flex; flex-direction: column; }
   .add-entry { align-self: flex-start; margin: 4px 6px 6px 22px; }
   .add-entry:hover { color: var(--color-primary-main); }
