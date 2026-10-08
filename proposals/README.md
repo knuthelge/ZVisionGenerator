@@ -21,4 +21,5 @@ These files are not part of the published docs site.
 | [Decode in float32 on CUDA](cuda-vae-float32.md) | Proposed | Test, then fix grainy CUDA output by keeping the image VAE in float32 like macOS |
 | [Keep image models resident and reuse quantized weights](image-model-memory.md) | Done (v0.13.0b10) | Load mflux weights eagerly, cap MLX's buffer cache, and store a selected quant next to the model for reuse |
 | [Queue jobs in the Web UI and collapse the sidebar](web-job-queue.md) | Done (unreleased) | Queue generation jobs on the server instead of refusing them, collapse the left sidebar, and add a shared confirmation dialog |
+| [One design system for the Web UI](web-design-system.md) | Accepted | Replace the four styling systems in the Web UI with one compact system: shared sizes, type scale, labels, panels and overlays, enforced by `make check` |
 | [Prompt builder in the Web UI](web-prompt-builder.md) | Done (v0.13.0b14) | A Prompts page that builds prompt files visually (snippets, sets, entries, enhance), keeps comments on save, and keeps the Workspace selection right |
