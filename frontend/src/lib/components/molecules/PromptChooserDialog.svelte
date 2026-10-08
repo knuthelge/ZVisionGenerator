@@ -118,7 +118,7 @@
               <label class="flex min-w-0 flex-1 cursor-pointer items-start gap-2">
                 <input
                   type="checkbox"
-                  class="surface-checkbox mt-0.5 shrink-0"
+                  class="accent-primary mt-0.5 shrink-0"
                   value={option.id}
                   {checked}
                   aria-label="Select {option.set_name} #{option.source_index + 1}"

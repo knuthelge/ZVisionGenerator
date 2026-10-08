@@ -49,7 +49,7 @@
   <div class="shortcut-groups" data-testid="shortcut-groups">
     {#each GROUPS as group (group.title)}
       <section>
-        <h3 class="field-label mb-2">{group.title}</h3>
+        <h3 class="ui-area-label mb-2">{group.title}</h3>
         <ShortcutList entries={group.entries} />
       </section>
     {/each}
