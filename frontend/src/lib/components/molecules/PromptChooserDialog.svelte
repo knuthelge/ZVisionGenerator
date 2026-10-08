@@ -86,11 +86,11 @@
     <div class="chooser-bar">
       <label class="chooser-filter">
         <span class="sr-only">Filter prompts</span>
-        <input type="search" class="surface-input w-full rounded-md" placeholder="Filter prompts…" bind:value={filter} onkeydown={(event) => { if (event.key === 'Enter') event.preventDefault(); }}>
+        <input type="search" class="ui-field" placeholder="Filter prompts…" bind:value={filter} onkeydown={(event) => { if (event.key === 'Enter') event.preventDefault(); }}>
       </label>
       <span class="chooser-count">{selectedCount} of {options.length} selected</span>
-      <button type="button" class="surface-link-muted chooser-link" data-action="select-all" onclick={() => setSelected(visible, true)}>All</button>
-      <button type="button" class="surface-link-muted chooser-link" data-action="select-none" onclick={() => setSelected(visible, false)}>None</button>
+      <button type="button" class="ui-btn ui-btn-sm ui-btn-quiet chooser-link" data-action="select-all" onclick={() => setSelected(visible, true)}>All</button>
+      <button type="button" class="ui-btn ui-btn-sm ui-btn-quiet chooser-link" data-action="select-none" onclick={() => setSelected(visible, false)}>None</button>
     </div>
 
     {#if groups.length === 0}
@@ -104,11 +104,11 @@
         <div class="chooser-set-head">
           <button type="button" class="chooser-set-toggle" aria-expanded={!collapsed} onclick={() => toggleSet(group.name)}>
             <Icon name="chevright" size={12} class="chooser-chev" />
-            <span class="font-semibold text-zinc-200">{group.name}</span>
-            <span class="text-zinc-500">{groupSelected} of {group.items.length}</span>
+            <span class="font-semibold text-text-primary">{group.name}</span>
+            <span class="text-text-muted">{groupSelected} of {group.items.length}</span>
           </button>
-          <button type="button" class="surface-link-muted chooser-link" aria-label="Select all in {group.name}" onclick={() => setSelected(group.items, true)}>All</button>
-          <button type="button" class="surface-link-muted chooser-link" aria-label="Select none in {group.name}" onclick={() => setSelected(group.items, false)}>None</button>
+          <button type="button" class="ui-btn ui-btn-sm ui-btn-quiet chooser-link" aria-label="Select all in {group.name}" onclick={() => setSelected(group.items, true)}>All</button>
+          <button type="button" class="ui-btn ui-btn-sm ui-btn-quiet chooser-link" aria-label="Select none in {group.name}" onclick={() => setSelected(group.items, false)}>None</button>
         </div>
         {#if !collapsed}
           {#each group.items as option (option.id)}
@@ -125,17 +125,17 @@
                   onchange={(event) => setSelected([option], event.currentTarget.checked)}
                 >
                 <span class="min-w-0 flex-1">
-                  <span class="mr-1.5 text-xs font-medium text-zinc-400">#{option.source_index + 1}</span>
-                  {#if option.enhance}<span class="mr-1.5 text-xs text-teal-400" title="Enhanced each image: {enhanceSummary(option.enhance)}">✨ enhanced</span>{/if}
-                  <span id="prompt-detail-{option.id}" class="whitespace-pre-wrap break-words text-sm text-zinc-200" class:line-clamp-2={!expanded} class:block={expanded}>{option.prompt_preview}</span>
+                  <span class="mr-1.5 font-mono text-meta text-text-muted">#{option.source_index + 1}</span>
+                  {#if option.enhance}<span class="mr-1.5 text-meta text-primary-main" title="Enhanced each image: {enhanceSummary(option.enhance)}">✨ enhanced</span>{/if}
+                  <span id="prompt-detail-{option.id}" class="whitespace-pre-wrap break-words text-content text-text-primary" class:line-clamp-2={!expanded} class:block={expanded}>{option.prompt_preview}</span>
                   {#if expanded && option.negative_preview}
-                    <span class="mt-2 block border-t border-zinc-700/50 pt-2 text-xs text-zinc-400"><span class="font-medium">Negative:</span> {option.negative_preview}</span>
+                    <span class="mt-2 block border-t border-border-subtle pt-2 text-ui text-text-secondary"><span class="font-medium">Negative:</span> {option.negative_preview}</span>
                   {/if}
                 </span>
               </label>
               <button
                 type="button"
-                class="surface-link-muted shrink-0 text-xs"
+                class="ui-btn ui-btn-sm ui-btn-quiet shrink-0"
                 aria-expanded={expanded}
                 aria-controls="prompt-detail-{option.id}"
                 aria-label="{expanded ? 'Show less' : 'Show more'} for {option.set_name} #{option.source_index + 1}"
@@ -150,10 +150,10 @@
 
   {#snippet footer()}
     {#if onedit}
-      <button type="button" class="surface-button-secondary mr-auto rounded-md px-3 py-1.5 text-sm" onclick={() => { open = false; onedit(); }}>Edit file</button>
+      <button type="button" class="ui-btn mr-auto" onclick={() => { open = false; onedit(); }}>Edit file</button>
     {/if}
-    <button type="button" class="surface-button-secondary rounded-md px-3 py-1.5 text-sm" data-action="cancel-prompts" onclick={() => { open = false; }}>Cancel</button>
-    <button type="button" class="surface-button-primary rounded-md px-3 py-1.5 text-sm" data-action="confirm-prompts" data-count={selectedCount} onclick={confirm}>
+    <button type="button" class="ui-btn" data-action="cancel-prompts" onclick={() => { open = false; }}>Cancel</button>
+    <button type="button" class="ui-btn ui-btn-primary" data-action="confirm-prompts" data-count={selectedCount} onclick={confirm}>
       Use {selectedCount} prompt{selectedCount === 1 ? '' : 's'}
     </button>
   {/snippet}
@@ -161,18 +161,18 @@
 
 <style>
   .chooser { display: flex; flex-direction: column; gap: 12px; }
-  .chooser-bar { position: sticky; top: -16px; z-index: 1; display: flex; align-items: center; gap: 10px; padding: 4px 0 8px; background: var(--color-zinc-900); }
+  .chooser-bar { position: sticky; top: -12px; z-index: 1; display: flex; align-items: center; gap: 10px; padding: 4px 0 8px; background: var(--color-bg-raised); }
   .chooser-filter { flex: 1; min-width: 0; }
-  .chooser-count { flex: none; font-size: 12px; color: var(--color-text-muted); }
-  .chooser-link { flex: none; font-size: 12px; font-weight: 500; }
-  .chooser-empty { padding: 16px 0; text-align: center; font-size: 13px; color: var(--color-text-muted); }
+  .chooser-count { flex: none; font-size: var(--text-ui); color: var(--color-text-muted); }
+  .chooser-link { flex: none; }
+  .chooser-empty { padding: 16px 0; text-align: center; font-size: var(--text-content); color: var(--color-text-muted); }
   .chooser-set { border-top: 1px solid var(--color-border-subtle); padding-top: 6px; }
   .chooser-set-head { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
-  .chooser-set-toggle { display: inline-flex; flex: 1; min-width: 0; align-items: center; gap: 6px; font-size: 13px; text-align: left; }
+  .chooser-set-toggle { display: inline-flex; flex: 1; min-width: 0; align-items: center; gap: 6px; font-size: var(--text-content); text-align: left; }
   .chooser-set-toggle :global(.chooser-chev) { transition: transform 0.12s ease; color: var(--color-text-muted); }
   .chooser-set-toggle[aria-expanded='true'] :global(.chooser-chev) { transform: rotate(90deg); }
   .chooser-option { display: flex; align-items: flex-start; gap: 12px; margin: 4px 0; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--radius-sm); }
-  .chooser-option:hover { background: var(--color-bg-surface); }
+  .chooser-option:hover { background: var(--color-bg-surface-hover); }
   .chooser-option[data-selected='true'] { border-color: color-mix(in srgb, var(--color-primary-main) 30%, transparent); background: color-mix(in srgb, var(--color-primary-main) 5%, transparent); }
   .chooser-set-toggle:focus-visible, .chooser-link:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
 </style>

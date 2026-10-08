@@ -44,14 +44,14 @@
       onclick={() => draft.update('historyCollapsed', !collapsed)}
     >
       <Icon name="chevdown" size={14} class="strip-chev" />
-      <span id="ws-history-title" class="field-label">History</span>
-      <span class="strip-count">{assets.length}</span>
+      <span id="ws-history-title" class="ui-area-label">History</span>
+      <span class="strip-count font-mono">{assets.length}</span>
     </button>
     <span class="flex-1"></span>
     {#if !collapsed && assets.length > 0}
       <span class="strip-hint">Click a tile to open the viewer</span>
     {/if}
-    <button type="button" class="surface-link-muted text-xs" onclick={() => router.navigate('gallery')}>Gallery ↗</button>
+    <button type="button" class="ui-btn ui-btn-sm ui-btn-quiet" onclick={() => router.navigate('gallery')}>Open Gallery</button>
   </div>
 
   {#if !collapsed}
@@ -80,14 +80,14 @@
 
 <style>
   .history-strip { flex: none; border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-base); }
-  .strip-head { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 12px; }
+  .strip-head { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 12px; border-bottom: 1px solid var(--color-border-subtle); background: var(--color-bg-raised); }
   .strip-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 4px; }
-  .strip-toggle:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 1px; }
-  .strip-toggle :global(.strip-chev) { transition: transform 0.15s ease; }
+  .strip-toggle:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
+  .strip-toggle :global(.strip-chev) { transition: transform 0.12s ease; }
   .history-strip[data-collapsed='true'] .strip-toggle :global(.strip-chev) { transform: rotate(180deg); }
-  .strip-count { font-size: 12px; color: var(--color-text-muted); }
-  .strip-hint { font-size: 11px; color: var(--color-text-muted); }
-  .strip-scroll { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 2px 12px 10px; }
+  .strip-count { font-size: var(--text-ui); color: var(--color-text-muted); }
+  .strip-hint { font-size: var(--text-meta); color: var(--color-text-muted); }
+  .strip-scroll { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 10px 12px; }
   .strip-item { flex: none; }
-  .strip-empty { padding: 12px 0 18px; font-size: 12px; color: var(--color-text-muted); }
+  .strip-empty { padding: 12px 0 18px; font-size: var(--text-ui); color: var(--color-text-muted); }
 </style>

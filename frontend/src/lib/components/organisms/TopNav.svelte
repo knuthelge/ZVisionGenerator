@@ -66,19 +66,22 @@
 </header>
 
 <style>
-  .app-nav { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; padding: 0 16px; flex-shrink: 0; background: var(--color-bg-base); border-bottom: 1px solid var(--color-border-subtle); }
-  .nav-workflows { display: flex; align-items: center; gap: 24px; min-width: 0; }
-  .workflow-tabs, .main-tabs { display: flex; align-items: center; gap: 2px; }
+  .app-nav { display: flex; align-items: stretch; justify-content: space-between; gap: 16px; min-height: 48px; padding: 0 16px; flex-shrink: 0; background: var(--color-bg-base); border-bottom: 1px solid var(--color-border-subtle); }
+  .nav-workflows { display: flex; align-items: stretch; gap: 24px; min-width: 0; }
+  .brand { align-self: center; }
+  /* Underline tabs that run the full bar height, so the active line sits on the bar's bottom edge. */
+  .workflow-tabs, .main-tabs { display: flex; align-items: stretch; gap: 2px; }
   .workflow-tabs { overflow-x: auto; }
   .main-tabs { flex-shrink: 0; }
-  .brand { color: var(--color-text-primary); font-family: var(--font-heading); font-size: 16px; font-weight: 800; letter-spacing: -0.01em; }
-  .nav-tab { white-space: nowrap; padding: 6px 12px; border-radius: 9999px; font-family: var(--font-display); font-size: 12.5px; font-weight: 600; color: var(--color-text-muted); transition: background-color 120ms, color 120ms, box-shadow 120ms; }
-  .nav-tab:hover { background: var(--color-bg-surface); color: var(--color-text-primary); }
-  .main-tabs .active { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
-  .workflow-tabs .active { background: var(--color-primary-subtle); color: var(--color-primary-main); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-primary-main) 35%, transparent); }
+  .brand { color: var(--color-text-primary); font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; letter-spacing: -0.01em; }
+  .nav-tab { display: flex; align-items: center; margin-bottom: -1px; padding: 0 10px; border-bottom: 2px solid transparent; white-space: nowrap; font-size: var(--text-ui); font-weight: 600; color: var(--color-text-muted); transition: color 0.12s ease, border-color 0.12s ease; }
+  .nav-tab:hover { color: var(--color-text-primary); }
+  .nav-tab:focus-visible { outline-offset: -2px; }
+  .nav-tab.active { border-color: var(--color-primary-main); color: var(--color-text-primary); }
   @media (max-width: 900px) {
-    .app-nav { flex-wrap: wrap; gap: 0; padding: 8px 12px; }
+    .app-nav { flex-wrap: wrap; gap: 0; padding: 0 12px; }
     .nav-workflows { display: contents; }
-    .workflow-tabs { order: 3; width: 100%; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--color-border-subtle); }
+    .brand { min-height: 44px; }
+    .workflow-tabs { order: 3; width: 100%; min-height: 40px; border-top: 1px solid var(--color-border-subtle); }
   }
 </style>

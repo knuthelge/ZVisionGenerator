@@ -153,7 +153,7 @@
   type="button"
   id={variant === 'inline' ? 'ws-enhance-toggle' : 'ws-enhance-toggle-file'}
   bind:this={toggleEl}
-  class="prompt-tool"
+  class="ui-btn ui-btn-sm"
   aria-haspopup="dialog"
   aria-expanded={panelOpen}
   aria-controls="ws-enhance-panel"
@@ -166,7 +166,7 @@
   <div
     use:popover={{ anchor: toggleEl, align: 'start', onclose: () => { panelOpen = false; } }}
     id="ws-enhance-panel"
-    class="enhance-popover surface-popover space-y-3"
+    class="enhance-popover ui-overlay space-y-3"
     role="dialog"
     aria-label="Prompt enhancer"
   >
@@ -174,12 +174,12 @@
     {#if variant === 'inline' && !draft.state.enhanceAuto}
       <div class="flex flex-wrap items-center gap-2">
         {#if enhancing}
-          <button type="button" class="surface-button rounded-full px-3 py-1.5 text-xs" onclick={stopEnhance}>Stop</button>
+          <button type="button" class="ui-btn ui-btn-danger" onclick={stopEnhance}>Stop</button>
         {:else}
           <button
             type="button"
             id="ws-enhance-run"
-            class="surface-button surface-button-primary rounded-full px-3 py-1.5 text-xs"
+            class="ui-btn ui-btn-primary"
             disabled={enhanceDisabled}
             onclick={runEnhance}
           >
@@ -187,18 +187,18 @@
           </button>
         {/if}
         {#if disabledHint && !enhancing}
-          <span class="text-xs text-text-muted">{disabledHint}</span>
+          <span class="ui-help">{disabledHint}</span>
         {:else if downloadSize && !enhancing}
-          <span class="text-xs text-text-muted">First use downloads ≈{downloadSize}.</span>
+          <span class="ui-help">First use downloads ≈{downloadSize}.</span>
         {:else if !contract.downloaded && !downloadedThisSession && !enhancing}
-          <span class="text-xs text-text-muted">First use downloads the model.</span>
+          <span class="ui-help">First use downloads the model.</span>
         {/if}
       </div>
     {:else if draft.state.enhanceAuto && noOp}
-      <p class="text-xs text-warning" role="alert">Pick a style, a mood, a detail, or a length.</p>
+      <p class="ui-help ui-help-warning" role="alert">Pick a style, a mood, a detail, or a length.</p>
     {/if}
     {#if variant === 'file'}
-      <p class="field-hint-label">Off: entries with their own <span class="font-mono">enhance:</span> setting (✨) are still enhanced.</p>
+      <p class="ui-help">Off: entries with their own <span class="font-mono">enhance:</span> setting (✨) are still enhanced.</p>
     {/if}
   </div>
 {/if}

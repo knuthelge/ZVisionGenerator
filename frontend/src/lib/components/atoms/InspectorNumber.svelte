@@ -84,15 +84,15 @@
     border-radius: 4px;
     background: transparent;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-ui);
     color: var(--color-text-primary);
     appearance: textfield;
     -moz-appearance: textfield;
   }
   .inspector-number::-webkit-inner-spin-button,
   .inspector-number::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
-  .inspector-number:hover { border-color: var(--color-border-strong); background: var(--color-zinc-900); }
-  .inspector-number:focus { outline: none; border-color: var(--color-primary-main); background: var(--color-zinc-900); }
+  .inspector-number:hover { border-color: var(--color-border-strong); background: var(--color-bg-surface); }
+  .inspector-number:focus { outline: none; border-color: var(--color-primary-main); background: var(--color-bg-surface); }
   .inspector-number:disabled { opacity: 0.4; }
   .inspector-number::placeholder { color: var(--color-zinc-600); }
 </style>
