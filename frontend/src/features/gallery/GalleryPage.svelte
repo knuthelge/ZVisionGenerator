@@ -9,7 +9,8 @@
   import { referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { startUpscale } from '$lib/state/upscale';
   import type { GalleryAsset, UpscaleFactor } from '$lib/types';
-  import { AssetTile, AssetViewer, requestConfirm } from '$lib/components/molecules';
+  import { Button, Select, Spinner } from '$lib/components/atoms';
+  import { Alert, AssetTile, AssetViewer, EmptyState, PageHeader, requestConfirm } from '$lib/components/molecules';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import { hasOpenModal, isCommandKey, isPlainKey, isTyping } from '$lib/keyboard';
   import { gridColumns, moveInGrid } from './gridNav';
@@ -477,128 +478,92 @@
   }
 </script>
 
-<div id="gallery-view" class="flex-1 flex overflow-hidden">
+<div id="gallery-view" class="flex min-h-0 flex-1 flex-col bg-bg-base">
+  <PageHeader
+    title="Gallery"
+    description="Browsing {assets.length} loaded asset{assets.length !== 1 ? 's' : ''} of {totalCount}, {sortOrder === 'newest' ? 'newest' : 'oldest'} first."
+  >
+    {#snippet actions()}
+      <Select
+        ariaLabel="Filter gallery media"
+        class="w-36"
+        value={mediaFilter}
+        options={[
+          { value: 'all', label: 'All media' },
+          { value: 'image', label: 'Images only' },
+          { value: 'video', label: 'Videos only' },
+        ]}
+        onchange={(event) => onFilterChange((event.currentTarget as HTMLSelectElement).value as 'all' | 'image' | 'video')}
+      />
+      <Select
+        ariaLabel="Sort gallery assets"
+        class="w-36"
+        value={sortOrder}
+        options={[
+          { value: 'newest', label: 'Newest first' },
+          { value: 'oldest', label: 'Oldest first' },
+        ]}
+        onchange={(event) => onSortChange((event.currentTarget as HTMLSelectElement).value as 'newest' | 'oldest')}
+      />
+      <span class="text-ui text-text-muted">{selectedCount} selected</span>
+      <Button variant="danger" disabled={selectedCount === 0 || deletableSelectedCount === 0} onclick={deleteSelected}>
+        {bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete selected'}
+      </Button>
+    {/snippet}
+  </PageHeader>
 
-  <!-- Left: scrollable grid -->
-  <section id="gallery-scroll-region" class="panel-scroll-surface custom-scrollbar min-w-0 flex-1 overflow-y-auto p-4">
-    <div class="mx-auto max-w-[120rem]">
-      <!-- Header -->
-      <div class="flex flex-wrap items-center justify-between mb-4 gap-3 border-b border-border-subtle pb-3">
-        <div>
-          <h2 class="text-base font-semibold text-zinc-100">Gallery History</h2>
-          <p class="text-xs text-zinc-500 mt-1">
-            Browsing {assets.length} loaded asset{assets.length !== 1 ? 's' : ''} of {totalCount}, {sortOrder === 'newest' ? 'newest' : 'oldest'} first.
-          </p>
-        </div>
-        <div class="flex flex-wrap items-center justify-end gap-2">
-          <!-- Filter -->
-          <select
-            class="surface-select"
-            aria-label="Filter gallery media"
-            bind:value={mediaFilter}
-            onchange={() => onFilterChange(mediaFilter)}
-          >
-            <option value="all">All Media</option>
-            <option value="image">Images Only</option>
-            <option value="video">Videos Only</option>
-          </select>
-
-          <!-- Sort -->
-          <select
-            class="surface-select"
-            aria-label="Sort gallery assets"
-            bind:value={sortOrder}
-            onchange={() => onSortChange(sortOrder)}
-          >
-            <option value="newest">Newest First</option>
-            <option value="oldest">Oldest First</option>
-          </select>
-
-          <button
-            type="button"
-            class="surface-button-danger rounded-md px-3 py-1.5 text-sm disabled:opacity-50"
-            disabled={selectedCount === 0 || deletableSelectedCount === 0}
-            onclick={deleteSelected}
-          >{bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete Selected'}</button>
-          <span class="text-xs text-zinc-500">{selectedCount} selected</span>
-        </div>
+  <section id="gallery-scroll-region" class="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
+    {#if loading}
+      <p class="flex items-center justify-center gap-2 py-24 text-ui text-text-muted" role="status"><Spinner />Loading…</p>
+    {:else if error}
+      <Alert tone="error" live>{error}</Alert>
+    {:else if emptyState}
+      <EmptyState title={filteredEmptyState ? 'No matching assets' : 'No generated assets yet'} class="min-h-96 justify-center">
+        <p>{filteredEmptyState ? `No ${mediaFilter} assets match the current gallery filter.` : 'Generated outputs appear here after an image or video job completes.'}</p>
+        {#snippet actions()}
+          {#if filteredEmptyState}
+            <Button onclick={clearMediaFilter}>Show all media</Button>
+          {:else}
+            <Button variant="primary" onclick={openWorkspace}>Open Workspace</Button>
+          {/if}
+        {/snippet}
+      </EmptyState>
+    {:else}
+      <!-- Grid -->
+      <div bind:this={gridEl} class="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+        {#each assets as asset (asset.id)}
+          <AssetTile
+            {asset}
+            density="card"
+            selected={selected.has(asset.id)}
+            deleting={deletingIds.has(asset.id)}
+            onselect={toggleSelect}
+            onpreview={openViewer}
+            onreuse={reuseInWorkspace}
+            onreference={useAsReference}
+            onupscale={upscaleAsset}
+            ondelete={deleteSingle}
+          />
+        {/each}
       </div>
 
-      {#if loading}
-        <div class="flex items-center justify-center py-24">
-          <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-teal-500"></div>
-        </div>
-      {:else if error}
-        <div class="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-          {error}
-        </div>
-      {:else if emptyState}
-        <div class="surface-empty-state flex min-h-96 flex-col items-center justify-center gap-4 rounded-md border border-border-subtle px-6 py-12 text-center">
-          <div>
-            <h3 class="text-base font-semibold text-zinc-100">
-              {filteredEmptyState ? 'No matching assets' : 'No generated assets yet'}
-            </h3>
-            <p class="mt-2 max-w-md text-sm text-zinc-400">
-              {filteredEmptyState ? `No ${mediaFilter} assets match the current gallery filter.` : 'Generated outputs appear here after an image or video job completes.'}
-            </p>
+      <!-- Infinite scroll sentinel + pagination -->
+      <div id="gallery-pagination" class="flex items-center justify-center py-10">
+        {#if hasMore}
+          <div bind:this={sentinelEl} class="flex items-center gap-2 text-ui text-text-muted">
+            {#if loadingMore}
+              <Spinner size="sm" class="text-primary-main" />
+              <span>Loading more…</span>
+            {:else}
+              <span>Scroll for more</span>
+            {/if}
           </div>
-          {#if filteredEmptyState}
-            <button
-              type="button"
-              class="surface-button-secondary rounded-md px-3 py-2 text-sm"
-              onclick={clearMediaFilter}
-            >Show All Media</button>
-          {:else}
-            <button
-              type="button"
-              class="surface-button-primary rounded-md px-3 py-2 text-sm"
-              onclick={openWorkspace}
-            >Open Workspace</button>
-          {/if}
-        </div>
-      {:else}
-        <!-- Grid -->
-        <div bind:this={gridEl} class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-          {#each assets as asset (asset.id)}
-            <AssetTile
-              {asset}
-              density="card"
-              selected={selected.has(asset.id)}
-              deleting={deletingIds.has(asset.id)}
-              onselect={toggleSelect}
-              onpreview={openViewer}
-              onreuse={reuseInWorkspace}
-              onreference={useAsReference}
-              onupscale={upscaleAsset}
-              ondelete={deleteSingle}
-            />
-          {/each}
-        </div>
-
-        <!-- Infinite scroll sentinel + pagination -->
-        <div id="gallery-pagination" class="py-12 flex justify-center items-center">
-          {#if hasMore}
-            <div bind:this={sentinelEl} class="surface-card-muted flex items-center gap-3 px-4 py-3 text-sm text-zinc-400">
-              {#if loadingMore}
-                <svg class="text-primary-main h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <span>Loading more...</span>
-              {:else}
-                <span>Scroll for more</span>
-              {/if}
-            </div>
-          {:else if assets.length > 0}
-            <div class="flex items-center gap-2 text-zinc-500 text-sm">
-              <span>All assets loaded</span>
-            </div>
-          {/if}
-        </div>
-      {/if}
-    </div>
+        {:else if assets.length > 0}
+          <p class="text-ui text-text-muted">All assets loaded</p>
+        {/if}
+      </div>
+    {/if}
   </section>
-
 </div>
 
 <AssetViewer

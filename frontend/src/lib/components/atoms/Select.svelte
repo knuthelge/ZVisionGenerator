@@ -16,6 +16,8 @@
     disabled?: boolean;
     required?: boolean;
     error?: string | null;
+    /** Accessible name when there is no visible label. */
+    ariaLabel?: string;
     class?: string;
     onchange?: (event: Event) => void;
   }
@@ -29,6 +31,7 @@
     disabled = false,
     required = false,
     error = null,
+    ariaLabel,
     class: extraClass = '',
     onchange
   }: Props = $props();
@@ -42,6 +45,7 @@
     {disabled}
     {required}
     class="ui-field {extraClass}"
+    aria-label={ariaLabel}
     aria-invalid={error ? 'true' : undefined}
     aria-describedby={error ? `${id}-error` : undefined}
     {onchange}

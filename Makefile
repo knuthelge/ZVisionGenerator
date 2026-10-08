@@ -94,7 +94,7 @@ frontend-static-check: ## Verify packaged SPA artifacts match the frontend build
 # Raw colours in Svelte files bypass the design tokens in frontend/src/app/global.css.
 # The mascot artwork is exempt. Set PALETTE_STRICT=1 to fail instead of warn.
 PALETTE_STRICT ?= 0
-PALETTE_PATTERN := (\b(text|bg|border|ring|divide|placeholder|from|to|via|fill|stroke|outline|accent|shadow|decoration)-(zinc|red|green|emerald|amber|yellow|blue|sky|teal|cyan|rose|pink|orange|purple|violet|indigo|slate|gray|neutral|stone|black|white)(-[0-9]{2,3})?(/[0-9]+)?\b)|(\#[0-9a-fA-F]{3,8}\b)|(rgba?\()
+PALETTE_PATTERN := ((^|[^-[:alnum:]])(text|bg|border|ring|divide|placeholder|from|to|via|fill|stroke|outline|accent|shadow|decoration)-(zinc|red|green|emerald|amber|yellow|blue|sky|teal|cyan|rose|pink|orange|purple|violet|indigo|slate|gray|neutral|stone|black|white)(-[0-9]{2,3})?(/[0-9]+)?\b)|(\#[0-9a-fA-F]{3,8}\b)|(rgba?\()
 
 frontend-palette-check: ## Report raw colour classes and literals in Svelte files
 	@hits=$$(grep -rnE '$(PALETTE_PATTERN)' frontend/src --include='*.svelte' | grep -v '/Mascot[A-Za-z]*\.svelte:' || true); \

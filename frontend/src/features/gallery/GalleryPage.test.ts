@@ -393,7 +393,7 @@ describe('GalleryPage regressions', () => {
 
     expect(target.textContent).toContain('No matching assets');
 
-    const clearButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Show All Media');
+    const clearButton = Array.from(target.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Show all media');
     expect(clearButton).not.toBeUndefined();
     clearButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
@@ -860,7 +860,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     selectAssetForBatch(target, assetB);
     await settle();
 
-    const deleteButton = queryButtonByName(target, 'Delete Selected')!;
+    const deleteButton = queryButtonByName(target, 'Delete selected')!;
     deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     expect(deleteButton.disabled).toBe(true);
@@ -879,7 +879,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     expect(target.textContent).toContain('2 selected');
     // The viewer moves on to the neighbouring asset instead of closing.
     expect(getViewer()?.textContent).toContain('b.png');
-    expect(queryButtonByName(target, 'Delete Selected')?.disabled).toBe(false);
+    expect(queryButtonByName(target, 'Delete selected')?.disabled).toBe(false);
     expect(toastMocks.addToast).toHaveBeenCalledWith('Deleted 1; 1 failed and remain selected for retry.', 'warning');
   });
 
@@ -898,7 +898,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     await settle();
     selectAssetForBatch(target, assetA);
     selectAssetForBatch(target, assetB);
-    queryButtonByName(target, 'Delete Selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    queryButtonByName(target, 'Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     selectAssetForBatch(target, assetC);
     deleteA.resolve();
@@ -926,7 +926,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     await settle();
     selectAssetForBatch(target, assetA);
     selectAssetForBatch(target, assetB);
-    queryButtonByName(target, 'Delete Selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    queryButtonByName(target, 'Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     expect(target.textContent).toContain('a.png');
@@ -934,7 +934,7 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     expect(target.textContent).toContain('Browsing 2 loaded assets of 2');
     expect(target.textContent).toContain('2 selected');
     expect(getViewer()?.textContent).toContain('active failed asset');
-    expect(queryButtonByName(target, 'Delete Selected')?.disabled).toBe(false);
+    expect(queryButtonByName(target, 'Delete selected')?.disabled).toBe(false);
     expect(toastMocks.addToast).toHaveBeenCalledWith('Delete failed for 2 selected assets; they remain selected for retry.', 'error');
   });
 });
@@ -987,7 +987,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     filter.value = 'image';
     filter.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
-    queryButtonByName(target, 'Show All Media')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    queryButtonByName(target, 'Show all media')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(5, 1, 'all', 'oldest');
   });
@@ -1172,7 +1172,7 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     deleteAssetFromCard(target, assetA);
     await settle();
     deleteAssetFromCard(target, assetA);
-    queryButtonByName(target, 'Delete Selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    queryButtonByName(target, 'Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
     expect(galleryApiMocks.deleteAsset).toHaveBeenCalledTimes(2);
