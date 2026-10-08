@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+- Web UI: dialogs, menus, tooltips and notifications sit on one raised surface with a clear border instead of a drop shadow; destructive buttons are red, and every control shows the same focus ring
+- Web UI: Workspace settings sections have a header band with a summary of the hidden settings, and switches, badges and path fields share one compact size
+
 ### Fixed
 - Web UI: the Workspace's **Add LoRA** menu closes on Escape, an outside click or a choice, and works with the arrow keys; before, it stayed open until you picked a LoRA, even under other menus
 - Web UI: the Models page shows the dividers under card titles and table headers, and highlights the table row under the pointer; before, both were the same colour as the card

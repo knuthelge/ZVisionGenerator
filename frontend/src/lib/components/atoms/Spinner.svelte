@@ -1,34 +1,36 @@
 <script lang="ts">
   interface Props {
+    /** 12px inside controls, 16px beside text, 24px for a page. */
     size?: 'sm' | 'md' | 'lg';
+    /** Announce the spinner as a loading status; leave off when nearby text already says so. */
+    label?: string;
     class?: string;
   }
 
-  let {
-    size = 'md',
-    class: extraClass = ''
-  }: Props = $props();
+  let { size = 'md', label, class: extraClass = '' }: Props = $props();
 
-  const sizes: Record<string, string> = {
-    sm: 'h-4 w-4',
-    md: 'h-6 w-6',
-    lg: 'h-8 w-8'
-  };
-
-  const cls = $derived(`animate-spin text-teal-400 ${sizes[size]} ${extraClass}`);
+  const PX = { sm: 12, md: 16, lg: 24 } as const;
 </script>
 
-<svg
-  class={cls}
-  fill="none"
-  viewBox="0 0 24 24"
-  aria-label="Loading"
-  role="status"
->
-  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-  <path
-    class="opacity-75"
-    fill="currentColor"
-    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-  ></path>
-</svg>
+<span
+  class="spinner {extraClass}"
+  style:width="{PX[size]}px"
+  style:height="{PX[size]}px"
+  role={label ? 'status' : undefined}
+  aria-label={label}
+  aria-hidden={label ? undefined : 'true'}
+></span>
+
+<style>
+  .spinner {
+    display: inline-block;
+    flex-shrink: 0;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spinner-turn 0.7s linear infinite;
+  }
+  @keyframes spinner-turn {
+    to { transform: rotate(360deg); }
+  }
+</style>

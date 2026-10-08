@@ -233,7 +233,7 @@
         ariaDescribedby={hasFeedback ? feedbackId : undefined}
         ariaInvalid={Boolean(fieldError)}
         ariaBusy={pending}
-        class="min-w-0 rounded-md focus:border-primary-main focus:ring-4 focus:ring-primary-main"
+        class="min-w-0"
         oninput={(event) => {
           editing = true;
           inputValue = (event.currentTarget as HTMLInputElement).value;
@@ -260,10 +260,10 @@
         }}
       />
       <div class="flex flex-wrap gap-2 sm:contents">
-        <Button type="button" size="sm" disabled={disabled || pending} loading={pending} onclick={() => void browse()}>
+        <Button type="button" disabled={disabled || pending} loading={pending} onclick={() => void browse()}>
           {pending ? pendingLabel : browseLabel}
         </Button>
-        <Button type="button" size="sm" variant="ghost" disabled={disabled || pending || (!syncedValue && !inputValue)} onclick={clear}>
+        <Button type="button" variant="quiet" disabled={disabled || pending || (!syncedValue && !inputValue)} onclick={clear}>
           {clearLabel}
         </Button>
       </div>

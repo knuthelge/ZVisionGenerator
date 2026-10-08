@@ -16,12 +16,9 @@
   }: Props = $props();
 </script>
 
-<label
-  for={htmlFor}
-  class="block text-xs text-zinc-400 font-medium uppercase tracking-wider {extraClass}"
->
+<label for={htmlFor} class="ui-label {extraClass}">
   {@render children?.()}
   {#if required}
-    <span class="text-red-400 ml-0.5" aria-hidden="true">*</span>
+    <span class="ml-0.5 text-error" aria-hidden="true">*</span>
   {/if}
 </label>

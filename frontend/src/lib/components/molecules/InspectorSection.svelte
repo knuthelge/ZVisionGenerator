@@ -62,21 +62,26 @@
 </section>
 
 <style>
-  .inspector-section { border-bottom: 1px solid var(--color-border-subtle); }
+  /* Header band: a border above and below and the raised shade; adjacent headers share one line. */
+  .inspector-section + :global(.inspector-section) { margin-top: -1px; }
   .inspector-head {
     display: flex;
     width: 100%;
     align-items: center;
     gap: 6px;
-    padding: 7px 12px;
-    font-family: var(--font-display);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
+    min-height: 30px;
+    padding: 0 12px;
+    border-block: 1px solid var(--color-border-subtle);
+    background: var(--color-bg-raised);
+    font-family: var(--font-heading);
+    font-size: var(--text-meta);
+    font-weight: 800;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--color-text-muted);
+    transition: color 0.12s ease, background-color 0.12s ease;
   }
-  .inspector-head:hover { color: var(--color-text-primary); }
+  .inspector-head:hover { background: color-mix(in srgb, var(--color-bg-raised) 70%, var(--color-bg-surface-hover)); color: var(--color-text-primary); }
   .inspector-head:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: -2px; }
   .inspector-head :global(.inspector-chev) { transition: transform 0.12s ease; }
   .inspector-head[aria-expanded='true'] :global(.inspector-chev) { transform: rotate(90deg); }
@@ -87,12 +92,12 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--font-sans);
-    font-size: 11px;
+    font-size: var(--text-meta);
     font-weight: 400;
     letter-spacing: 0;
     text-transform: none;
   }
   .inspector-summary.active { color: var(--color-primary-main); }
-  .inspector-body { padding-bottom: 6px; }
+  .inspector-body { padding-block: 4px 6px; }
   .inspector-body[hidden] { display: none; }
 </style>

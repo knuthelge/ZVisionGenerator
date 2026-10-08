@@ -27,33 +27,33 @@
   }: Props = $props();
 </script>
 
-<label class="inline-flex items-center gap-3 cursor-pointer {disabled ? 'opacity-50 cursor-not-allowed' : ''} {extraClass}">
-  <div class="relative shrink-0">
-    <input
-      {id}
-      {name}
-      type="checkbox"
-      bind:checked
-      {disabled}
-      aria-label={ariaLabel}
-      class="sr-only peer"
-      {onchange}
-    />
-    <!-- Track -->
-    <div
-      class="w-9 h-5 rounded-full bg-zinc-700 peer-checked:bg-teal-500 transition-colors
-             peer-focus-visible:outline-none peer-focus-visible:ring-2 peer-focus-visible:ring-offset-2
-             peer-focus-visible:ring-offset-zinc-950 peer-focus-visible:ring-teal-400"
-    ></div>
-    <!-- Thumb -->
-    <div
-      class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm
-             transition-transform peer-checked:translate-x-4"
-    ></div>
-  </div>
+<label class="toggle {extraClass}" class:toggle-disabled={disabled}>
+  <input
+    {id}
+    {name}
+    type="checkbox"
+    role="switch"
+    bind:checked
+    {disabled}
+    aria-label={ariaLabel}
+    class="sr-only"
+    {onchange}
+  />
+  <span class="track" aria-hidden="true"></span>
   {#if label}
-    <span class="text-sm text-zinc-300 select-none">{label}</span>
+    <span class="toggle-label">{label}</span>
   {:else if labelSnippet}
     {@render labelSnippet()}
   {/if}
 </label>
+
+<style>
+  .toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .toggle-disabled { opacity: 0.4; cursor: not-allowed; }
+  .track { position: relative; flex-shrink: 0; width: 26px; height: 15px; border-radius: 9999px; background: var(--color-zinc-700); transition: background-color 0.12s ease; }
+  .track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--color-zinc-500); transition: transform 0.12s ease, background-color 0.12s ease; }
+  input:checked + .track { background: var(--color-primary-main); }
+  input:checked + .track::after { transform: translateX(11px); background: var(--color-primary-ink); }
+  input:focus-visible + .track { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
+  .toggle-label { font-size: var(--text-ui); color: var(--color-text-secondary); user-select: none; }
+</style>

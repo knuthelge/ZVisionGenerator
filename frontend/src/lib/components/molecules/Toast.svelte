@@ -17,18 +17,19 @@
     ondismiss
   }: Props = $props();
 
+  // Every toast sits on the raised surface; only the icon (and an error's border) carries the tone.
   const styles: Record<string, string> = {
-    info:    'bg-zinc-800 border-zinc-700 text-zinc-100',
-    success: 'bg-emerald-900/40 border-emerald-700/50 text-emerald-100',
-    error:   'bg-red-900/40 border-red-700/50 text-red-100',
-    warning: 'bg-amber-900/40 border-amber-700/50 text-amber-100'
+    info:    '',
+    success: '',
+    error:   'border-error-border',
+    warning: 'border-warning-border'
   };
 
   const iconColor: Record<string, string> = {
-    info:    'text-zinc-400',
-    success: 'text-emerald-400',
-    error:   'text-red-400',
-    warning: 'text-amber-400'
+    info:    'text-text-muted',
+    success: 'text-success',
+    error:   'text-error',
+    warning: 'text-warning'
   };
 
   let visible = $state(true);
@@ -53,7 +54,7 @@
   <div
     role="alert"
     aria-live="polite"
-    class="pointer-events-auto flex items-start gap-3 rounded-lg border px-4 py-3 shadow-lg max-w-sm {styles[type]}"
+    class="ui-overlay pointer-events-auto flex max-w-sm items-start gap-2.5 px-3 py-2.5 {styles[type]}"
   >
     <!-- Icon -->
     <div class="mt-0.5 shrink-0 {iconColor[type]}">
@@ -76,12 +77,12 @@
       {/if}
     </div>
     <!-- Message -->
-    <p class="flex-1 text-sm">{message}</p>
+    <p class="flex-1 text-ui leading-snug">{message}</p>
     <!-- Dismiss -->
     <button
       type="button"
       onclick={dismiss}
-      class="shrink-0 rounded p-0.5 opacity-60 hover:opacity-100 transition-opacity focus-visible:focus-ring"
+      class="shrink-0 rounded-xs p-0.5 text-text-muted transition-colors hover:text-text-primary"
       aria-label="Dismiss notification"
     >
       <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
