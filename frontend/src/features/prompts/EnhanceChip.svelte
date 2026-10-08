@@ -45,8 +45,8 @@
 <button
   bind:this={anchor}
   type="button"
-  class="panel-button enhance-button"
-  class:panel-button-on={enhance !== null}
+  class="ui-btn ui-btn-sm enhance-button"
+  class:ui-btn-on={enhance !== null}
   aria-haspopup="dialog"
   aria-expanded={open}
   title={enhance === null ? 'Enhance this prompt on every run' : `Enhanced: ${enhanceSummary(enhance, axes)}. Click to change.`}
@@ -54,9 +54,9 @@
 ><span aria-hidden="true">✨</span><span class="enhance-text">{enhance === null ? 'Enhance' : enhanceShortLabel(enhance, axes)}</span></button>
 
 {#if open}
-  <div use:popover={{ anchor, align: 'end', onclose: () => { open = false; } }} class="surface-popover enhance-popover" role="dialog" aria-label="Enhance this prompt">
-    <p class="panel-label enhance-title">Enhance this prompt</p>
-    <div class="panel-segment enhance-mode" role="radiogroup" aria-label="Enhance options">
+  <div use:popover={{ anchor, align: 'end', onclose: () => { open = false; } }} class="ui-overlay enhance-popover" role="dialog" aria-label="Enhance this prompt">
+    <p class="ui-area-label enhance-title">Enhance this prompt</p>
+    <div class="ui-segmented enhance-mode" role="radiogroup" aria-label="Enhance options">
       <button type="button" role="radio" aria-checked={useDefaults} onclick={() => { useDefaults = true; }}>Default options</button>
       <button type="button" role="radio" aria-checked={!useDefaults} onclick={() => { useDefaults = false; }}>Choose</button>
     </div>
@@ -71,9 +71,9 @@
     {/if}
     <div class="enhance-actions">
       {#if enhance !== null}
-        <button type="button" class="panel-button panel-button-bar" onclick={turnOff}>Turn off</button>
+        <button type="button" class="ui-btn" onclick={turnOff}>Turn off</button>
       {/if}
-      <button type="button" class="panel-button panel-button-bar panel-button-primary" disabled={noop} onclick={apply}>{enhance === null ? 'Enhance' : 'Apply'}</button>
+      <button type="button" class="ui-btn ui-btn-primary" disabled={noop} onclick={apply}>{enhance === null ? 'Enhance' : 'Apply'}</button>
     </div>
   </div>
 {/if}
@@ -84,7 +84,7 @@
   .enhance-popover { z-index: 60; width: 360px; max-height: 80vh; overflow-y: auto; padding: 10px 12px 12px; }
   .enhance-title { margin-bottom: 8px; }
   .enhance-mode { margin-bottom: 10px; }
-  .enhance-hint { margin-top: 8px; font-size: 11.5px; color: var(--color-text-muted); }
-  .enhance-warning { margin-top: 8px; font-size: 11.5px; color: var(--color-warning); }
+  .enhance-hint { margin-top: 8px; font-size: var(--text-meta); color: var(--color-text-muted); }
+  .enhance-warning { margin-top: 8px; font-size: var(--text-meta); color: var(--color-warning); }
   .enhance-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }
 </style>

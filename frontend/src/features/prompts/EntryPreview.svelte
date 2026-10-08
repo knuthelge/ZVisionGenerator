@@ -45,7 +45,7 @@
   }
 </script>
 
-<div class="preview-head"><h2 class="panel-label">Preview</h2></div>
+<div class="preview-head"><h2 class="ui-area-label">Preview</h2></div>
 {#if !selected}
   <p class="preview-empty">Select a prompt to see what the model receives.</p>
 {:else}
@@ -57,12 +57,12 @@
 
     <section class="box" aria-label="Prompt">
       <div class="box-head">
-        <span class="panel-label" title="What the model receives: snippets resolved, fields flattened">Prompt</span>
+        <span class="ui-area-label" title="What the model receives: snippets resolved, fields flattened">Prompt</span>
         <span class="box-tools">
           {#if rolled}
-            <button type="button" class="panel-button panel-button-quiet small" onclick={() => builder.clearRoll()}>Show choices</button>
+            <button type="button" class="ui-btn ui-btn-sm ui-btn-quiet" onclick={() => builder.clearRoll()}>Show choices</button>
           {/if}
-          <button type="button" class="panel-button small" title="Pick one option of every choice, as a run would" disabled={!preview} onclick={() => selected && void builder.roll(selected.entry.id)}>🎲 Roll</button>
+          <button type="button" class="ui-btn ui-btn-sm" title="Pick one option of every choice, as a run would" disabled={!preview} onclick={() => selected && void builder.roll(selected.entry.id)}>🎲 Roll</button>
         </span>
       </div>
       <div class="box-body" aria-live="polite">
@@ -78,13 +78,13 @@
 
     {#if preview?.negative}
       <section class="box" aria-label="Negative prompt">
-        <div class="box-head"><span class="panel-label">Negative</span></div>
+        <div class="box-head"><span class="ui-area-label">Negative</span></div>
         <div class="box-body">{preview.negative}</div>
       </section>
     {/if}
 
     <section class="box" aria-label="Settings">
-      <div class="box-head"><span class="panel-label">Settings</span></div>
+      <div class="box-head"><span class="ui-area-label">Settings</span></div>
       <dl class="box-body settings">
         <dt>Runs</dt>
         <dd>{selected.entry.active ? 'Yes, active' : 'No, inactive'}</dd>
@@ -98,7 +98,7 @@
     </section>
 
     <section class="box" aria-label="Problems">
-      <div class="box-head"><span class="panel-label">Problems</span></div>
+      <div class="box-head"><span class="ui-area-label">Problems</span></div>
       <div class="box-body">
         {#if problems.length === 0}
           <span class="muted">None.</span>
@@ -115,23 +115,22 @@
 <style>
   .preview-head { display: flex; align-items: center; min-height: 26px; margin-bottom: 4px; }
   .preview { display: flex; flex-direction: column; gap: 8px; }
-  .preview-empty { padding: 16px 0; font-size: 12px; color: var(--color-text-muted); }
+  .preview-empty { padding: 16px 0; font-size: var(--text-ui); color: var(--color-text-muted); }
   .preview-id { display: flex; align-items: baseline; gap: 6px; }
-  .preview-name { font-family: var(--font-heading); font-size: 13.5px; font-weight: 800; }
-  .preview-code { font-size: 11.5px; color: var(--color-text-muted); }
+  .preview-name { font-family: var(--font-heading); font-size: var(--text-content); font-weight: 800; }
+  .preview-code { font-size: var(--text-meta); color: var(--color-text-muted); }
   .box { overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-bg-base); }
   .box-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 32px; padding: 0 5px 0 10px; border-bottom: 1px solid var(--color-border-subtle); }
-  .box-head .panel-label { white-space: nowrap; }
+  .box-head .ui-area-label { white-space: nowrap; }
   .box-tools { display: flex; gap: 4px; }
-  .small { height: 22px; font-size: 11.5px; }
-  .box-body { padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; line-height: 1.6; }
+  .box-body { padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-ui); line-height: 1.6; }
   .box-body mark { padding: 0 2px; border-radius: 3px; background: color-mix(in srgb, var(--color-accent-amber) 18%, transparent); color: var(--color-accent-amber); }
   .settings { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; white-space: normal; }
   .settings dt { color: var(--color-text-muted); }
   .settings dd { color: var(--color-text-secondary); }
   .settings dd.on { color: var(--color-primary-main); }
   .muted { color: var(--color-text-muted); }
-  .problem { font-size: 12px; white-space: normal; }
+  .problem { font-size: var(--text-ui); white-space: normal; }
   .problem + .problem { margin-top: 2px; }
   .problem[data-severity='error'] { color: var(--color-error); }
   .problem[data-severity='warning'] { color: var(--color-warning); }

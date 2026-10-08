@@ -2,7 +2,8 @@
   import { onDestroy, onMount } from 'svelte';
   import { ApiError } from '$lib/api/client';
   import { loadPromptDocument, openPathPicker, previewPromptDocument, savePromptDocument } from '$lib/api/promptFiles';
-  import { ActionMenu, requestConfirm } from '$lib/components/molecules';
+  import { Icon, Spinner } from '$lib/components/atoms';
+  import { ActionMenu, EmptyState, requestConfirm } from '$lib/components/molecules';
   import type { ActionMenuEntry } from '$lib/components/molecules/ActionMenu.svelte';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { draft } from '$lib/state/draft.svelte';
@@ -259,15 +260,15 @@
 </script>
 
 <div class="prompts-page">
-  <div class="file-bar">
-    <button bind:this={fileMenuAnchor} type="button" class="panel-button panel-button-bar file-button" class:file-dirty={builder.dirty} aria-haspopup="menu" aria-expanded={fileMenuOpen} aria-label="Prompt file menu" title={builder.path ?? 'Open a prompt file'} onclick={() => { fileMenuOpen = !fileMenuOpen; }}>
+  <div class="ui-page-bar file-bar">
+    <button bind:this={fileMenuAnchor} type="button" class="ui-btn file-button" class:file-dirty={builder.dirty} aria-haspopup="menu" aria-expanded={fileMenuOpen} aria-label="Prompt file menu" title={builder.path ?? 'Open a prompt file'} onclick={() => { fileMenuOpen = !fileMenuOpen; }}>
       <span class="dirty-dot" aria-hidden="true"></span>
       {#if builder.path}
         <span class="file-folder">{folder}</span><span class="file-name">{fileName}</span>
       {:else}
         <span class="file-name">Open a prompt file</span>
       {/if}
-      <span class="file-caret" aria-hidden="true">▾</span>
+      <Icon name="chevdown" size={14} class="file-caret" />
     </button>
     <ActionMenu open={fileMenuOpen} anchor={fileMenuAnchor} items={fileMenuItems} label="Prompt file" onclose={() => { fileMenuOpen = false; }} />
     <span class="spacer"></span>
@@ -275,16 +276,16 @@
       <span class="save-status" role="status">
         {#if saving}Saving…{:else if builder.dirty}{errorCount > 0 ? `${errorCount} ${errorCount === 1 ? 'problem' : 'problems'} to fix` : 'Unsaved changes'}{:else}Saved{/if}
       </span>
-      <button type="button" class="panel-button panel-button-bar" title="Save if needed, then select this file in the Workspace" onclick={() => void useInWorkspace()}>Use in Workspace</button>
-      <button type="button" class="panel-button panel-button-bar panel-button-primary" disabled={!builder.dirty || saving || errorCount > 0} title={saveTitle} onclick={() => void save()}>Save <kbd>⌘S</kbd></button>
+      <button type="button" class="ui-btn" title="Save if needed, then select this file in the Workspace" onclick={() => void useInWorkspace()}>Use in Workspace</button>
+      <button type="button" class="ui-btn ui-btn-primary" disabled={!builder.dirty || saving || errorCount > 0} title={saveTitle} onclick={() => void save()}>Save <kbd>⌘S</kbd></button>
     {/if}
   </div>
 
   {#if restoreOffer}
     <div class="restore-bar" role="status">
       <span>You have unsaved changes to this file from an earlier visit.</span>
-      <button type="button" class="panel-button panel-button-primary" onclick={restoreUnsaved}>Restore</button>
-      <button type="button" class="panel-button" onclick={discardUnsaved}>Discard</button>
+      <button type="button" class="ui-btn ui-btn-sm ui-btn-primary" onclick={restoreUnsaved}>Restore</button>
+      <button type="button" class="ui-btn ui-btn-sm" onclick={discardUnsaved}>Discard</button>
     </div>
   {/if}
 
@@ -295,7 +296,7 @@
       </aside>
       <main class="column column-sets" aria-label="Prompt sets">
         <div class="sets-head">
-          <h2 class="panel-label">Sets</h2>
+          <h2 class="ui-area-label">Sets</h2>
           <p class="sets-hint">Click a prompt to edit it. Type <b class="hint-snippet">$</b> for a snippet and <b class="hint-choice">{'{a|b}'}</b> for a random choice.</p>
         </div>
         <div class="sets">
@@ -304,7 +305,7 @@
           {:else}
             <p class="sets-empty">No sets yet. A set is a group of prompts; its name starts the output filenames.</p>
           {/each}
-          <button type="button" class="panel-button panel-button-bar panel-button-dashed new-set" onclick={() => builder.addSet()}>＋ New set</button>
+          <button type="button" class="ui-btn ui-btn-add new-set" onclick={() => builder.addSet()}>＋ New set</button>
         </div>
       </main>
       <aside class="column column-preview" aria-label="Preview">
@@ -316,20 +317,20 @@
       <RepairView path={repair.path} problem={repair.problem} rawText={repair.rawText} onreload={() => repair && void openFile(repair.path)} />
     {/key}
   {:else if phase === 'loading'}
-    <p class="page-note">Opening…</p>
+    <p class="page-loading" role="status"><Spinner size="sm" />Opening…</p>
   {:else if phase === 'error'}
-    <div class="page-note">
+    <EmptyState title="This file could not be opened">
       <p class="page-error" role="alert">{loadError}</p>
       <p>Choose another file from the file menu, or create a new one.</p>
-    </div>
+    </EmptyState>
   {:else}
-    <div class="page-note">
-      <p class="page-lead">Build prompt files from snippets and sets of prompts.</p>
-      <div class="page-actions">
-        <button type="button" class="panel-button panel-button-bar panel-button-primary" onclick={() => void browse()}>Open a prompt file…</button>
-        <button type="button" class="panel-button panel-button-bar" onclick={() => { newFileOpen = true; }}>New file…</button>
-      </div>
-    </div>
+    <EmptyState title="No prompt file open">
+      <p>Build prompt files from snippets and sets of prompts.</p>
+      {#snippet actions()}
+        <button type="button" class="ui-btn ui-btn-primary" onclick={() => void browse()}>Open a prompt file…</button>
+        <button type="button" class="ui-btn" onclick={() => { newFileOpen = true; }}>New file…</button>
+      {/snippet}
+    </EmptyState>
   {/if}
 </div>
 
@@ -337,17 +338,16 @@
 
 <style>
   .prompts-page { display: flex; flex: 1; flex-direction: column; min-height: 0; }
-  .file-bar { display: flex; flex-shrink: 0; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--color-border-strong); background: var(--color-bg-surface); }
+  .file-bar { flex-wrap: nowrap; gap: 6px; padding-inline: 12px; }
   .file-button { min-width: 0; gap: 6px; color: var(--color-text-primary); }
   .dirty-dot { display: none; width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--color-warning); }
   .file-dirty .dirty-dot { display: inline-block; }
-  .file-folder { overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: 12px; font-weight: 400; color: var(--color-text-muted); direction: rtl; }
+  .file-folder { overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: var(--text-ui); font-weight: 400; color: var(--color-text-muted); direction: rtl; }
   .file-name { font-weight: 700; }
-  .file-caret { color: var(--color-text-muted); }
+  .file-button :global(.file-caret) { color: var(--color-text-muted); }
   .spacer { flex: 1; }
-  .save-status { margin-right: 2px; font-size: 12px; color: var(--color-text-muted); white-space: nowrap; }
-  .file-bar kbd { margin-left: 2px; font-family: var(--font-mono); font-size: 11px; font-weight: 400; opacity: 0.7; }
-  .restore-bar { display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--color-warning-border); background: var(--color-warning-surface); font-size: 12px; color: var(--color-warning); }
+  .save-status { margin-right: 2px; font-size: var(--text-ui); color: var(--color-text-muted); white-space: nowrap; }
+  .restore-bar { display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--color-warning-border); background: var(--color-warning-surface); font-size: var(--text-ui); color: var(--color-warning); }
   .restore-bar span { margin-right: 4px; }
   .builder { display: grid; flex: 1; grid-template-columns: 250px minmax(0, 1fr) 310px; min-height: 0; }
   .column { min-height: 0; overflow-y: auto; padding: 10px 12px 24px; }
@@ -355,16 +355,14 @@
   .column-snippets { border-right: 1px solid var(--color-border-strong); }
   .column-preview { border-left: 1px solid var(--color-border-strong); }
   .sets-head { display: flex; align-items: center; gap: 10px; min-height: 26px; margin-bottom: 8px; }
-  .sets-hint { overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); }
+  .sets-hint { overflow: hidden; font-size: var(--text-meta); text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); }
   .hint-snippet { color: var(--color-accent-blush); font-family: var(--font-mono); font-weight: 500; }
   .hint-choice { color: var(--color-accent-amber); font-family: var(--font-mono); font-weight: 500; }
   .sets { display: flex; flex-direction: column; gap: 10px; }
-  .sets-empty { font-size: 12px; color: var(--color-text-muted); }
+  .sets-empty { font-size: var(--text-ui); color: var(--color-text-muted); }
   .new-set { align-self: flex-start; }
-  .page-note { padding: 48px 16px; text-align: center; font-size: 13px; color: var(--color-text-muted); }
-  .page-lead { font-size: 14px; color: var(--color-text-secondary); }
+  .page-loading { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 48px 16px; font-size: var(--text-ui); color: var(--color-text-muted); }
   .page-error { margin-bottom: 6px; color: var(--color-error); }
-  .page-actions { display: flex; justify-content: center; gap: 6px; margin-top: 14px; }
   @media (max-width: 1100px) {
     .builder { grid-template-columns: 230px minmax(0, 1fr); }
     .column-preview { display: none; }

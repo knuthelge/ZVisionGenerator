@@ -108,7 +108,7 @@
 
   <div class="actions">
     {#if mode !== 'structured'}
-      <div class="panel-segment on-hover" role="radiogroup" aria-label="Prompt layout">
+      <div class="ui-segmented ui-segmented-sm on-hover" role="radiogroup" aria-label="Prompt layout">
         <button type="button" role="radio" aria-checked={mode === 'text'} onclick={() => builder.setValueMode(entry.id, 'prompt', 'text')}>Text</button>
         <button type="button" role="radio" aria-checked={mode === 'fields'} onclick={() => builder.setValueMode(entry.id, 'prompt', 'fields')}>Fields</button>
       </div>
@@ -122,13 +122,13 @@
     />
     <button
       type="button"
-      class="panel-button panel-button-icon generate"
+      class="ui-btn ui-btn-sm ui-btn-icon generate"
       aria-label="Generate this one"
       title={entry.active ? 'Generate this one: save, then queue it with the Workspace settings' : 'Turn the prompt on to generate it'}
       disabled={!entry.active}
       onclick={() => ongenerate(entry.id)}
     >▶</button>
-    <button bind:this={menuAnchor} type="button" class="panel-button panel-button-icon on-hover" aria-label="Prompt actions" aria-haspopup="menu" aria-expanded={menuOpen} onclick={() => { menuOpen = !menuOpen; }}>⋯</button>
+    <button bind:this={menuAnchor} type="button" class="ui-btn ui-btn-sm ui-btn-icon on-hover" aria-label="Prompt actions" aria-haspopup="menu" aria-expanded={menuOpen} onclick={() => { menuOpen = !menuOpen; }}>⋯</button>
     <ActionMenu open={menuOpen} anchor={menuAnchor} items={menuItems} label="Prompt actions" onclose={() => { menuOpen = false; }} />
   </div>
 </div>
@@ -146,20 +146,20 @@
   .entry[data-drop='after']::after { bottom: -1px; }
 
   .gutter { display: flex; align-items: center; gap: 6px; height: 26px; }
-  .grip { width: 10px; cursor: grab; font-size: 12px; line-height: 1; color: var(--color-text-muted); opacity: 0; user-select: none; }
+  .grip { width: 10px; cursor: grab; font-size: var(--text-ui); line-height: 1; color: var(--color-text-muted); opacity: 0; user-select: none; }
   .entry:hover .grip { opacity: 0.6; }
-  .ordinal { width: 14px; text-align: right; font-family: var(--font-heading); font-size: 11.5px; font-weight: 700; color: var(--color-text-muted); }
-  .switch { position: relative; flex-shrink: 0; width: 26px; height: 15px; border-radius: 9999px; background: var(--color-zinc-700); transition: background-color 150ms; }
-  .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--color-zinc-300); transition: transform 150ms; }
+  .ordinal { width: 14px; text-align: right; font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 700; color: var(--color-text-muted); }
+  .switch { position: relative; flex-shrink: 0; width: 26px; height: 15px; border-radius: 9999px; background: var(--color-zinc-700); transition: background-color 120ms; }
+  .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--color-zinc-500); transition: transform 120ms, background-color 120ms; }
   .switch-on { background: var(--color-primary-main); }
   .switch-on::after { transform: translateX(11px); background: var(--color-primary-ink); }
   .switch:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
 
   .main { min-width: 0; padding-top: 1px; }
   .negative { display: flex; align-items: baseline; gap: 10px; margin-top: 2px; }
-  .negative-label { flex-shrink: 0; font-family: var(--font-heading); font-size: 10px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
-  .negative-value { flex: 1; min-width: 0; font-size: 12px; }
-  .problem { margin-top: 2px; font-size: 11.5px; }
+  .negative-label { flex-shrink: 0; font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
+  .negative-value { flex: 1; min-width: 0; font-size: var(--text-ui); }
+  .problem { margin-top: 2px; font-size: var(--text-meta); }
   .problem[data-severity='error'] { color: var(--color-error); }
   .problem[data-severity='warning'] { color: var(--color-warning); }
 

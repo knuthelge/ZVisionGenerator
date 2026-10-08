@@ -228,17 +228,17 @@
     <div class="choice-bar">
       {#if caretChoice}
         <span>In a random choice of {choiceOptions(text, caretChoice.start, caretChoice.end).length} options.</span>
-        <button type="button" class="panel-button panel-button-quiet choice-bar-button" onmousedown={(event) => event.preventDefault()} onclick={editChoiceWhileTyping}>Edit choice <kbd>⌥↵</kbd></button>
+        <button type="button" class="ui-btn ui-btn-sm ui-btn-quiet choice-bar-button" onmousedown={(event) => event.preventDefault()} onclick={editChoiceWhileTyping}>Edit choice <kbd>⌥↵</kbd></button>
       {:else if selection}
         <span>Selected text.</span>
-        <button type="button" class="panel-button panel-button-quiet choice-bar-button" onmousedown={(event) => event.preventDefault()} onclick={editChoiceWhileTyping}>Make a random choice <kbd>⌥↵</kbd></button>
+        <button type="button" class="ui-btn ui-btn-sm ui-btn-quiet choice-bar-button" onmousedown={(event) => event.preventDefault()} onclick={editChoiceWhileTyping}>Make a random choice <kbd>⌥↵</kbd></button>
       {:else}
         <span>Type <b>$</b> for a snippet.</span>
-        <button type="button" class="panel-button panel-button-quiet choice-bar-button" onmousedown={(event) => event.preventDefault()} onclick={editChoiceWhileTyping}>New random choice <kbd>⌥↵</kbd></button>
+        <button type="button" class="ui-btn ui-btn-sm ui-btn-quiet choice-bar-button" onmousedown={(event) => event.preventDefault()} onclick={editChoiceWhileTyping}>New random choice <kbd>⌥↵</kbd></button>
       {/if}
     </div>
     {#if suggestions.length > 0 && textareaEl}
-      <div use:popover={{ anchor: textareaEl, onclose: () => { suggestions = []; } }} class="surface-popover snippet-suggestions" role="listbox" aria-label="Snippets">
+      <div use:popover={{ anchor: textareaEl, onclose: () => { suggestions = []; } }} class="ui-overlay snippet-suggestions" role="listbox" aria-label="Snippets">
         {#each suggestions as snippet, index (snippet.id)}
           <button
             type="button"
@@ -292,8 +292,8 @@
 {/if}
 
 {#if choice}
-  <div use:popover={{ anchor: choice.anchor, onclose: () => void closeChoice() }} class="surface-popover choice-editor" role="dialog" aria-label="Random choice">
-    <p class="panel-label">{choice.wrap ? 'New random choice' : 'Random choice'}</p>
+  <div use:popover={{ anchor: choice.anchor, onclose: () => void closeChoice() }} class="ui-overlay choice-editor" role="dialog" aria-label="Random choice">
+    <p class="ui-area-label">{choice.wrap ? 'New random choice' : 'Random choice'}</p>
     <p class="choice-hint">One option per line; one is picked for each image. An empty line is an empty option. <kbd>⌘↵</kbd> applies, <kbd>Esc</kbd> cancels.</p>
     <textarea
       use:focusAtEnd
@@ -305,9 +305,9 @@
     ></textarea>
     <div class="choice-actions">
       {#if !choice.wrap}
-        <button type="button" class="panel-button panel-button-bar" title="Replace the choice with its first option" onclick={() => void applyChoice([choiceOptions(text, choice!.start, choice!.end)[0]])}>Remove choice</button>
+        <button type="button" class="ui-btn" title="Replace the choice with its first option" onclick={() => void applyChoice([choiceOptions(text, choice!.start, choice!.end)[0]])}>Remove choice</button>
       {/if}
-      <button type="button" class="panel-button panel-button-bar panel-button-primary" onclick={() => void applyChoice(draft.split('\n'))}>Apply</button>
+      <button type="button" class="ui-btn ui-btn-primary" onclick={() => void applyChoice(draft.split('\n'))}>Apply</button>
     </div>
   </div>
 {/if}
@@ -321,12 +321,12 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     line-height: 1.6;
-    font-size: 13px;
+    font-size: var(--text-content);
     color: var(--color-text-primary);
     cursor: text;
   }
-  .prompt-text-display:hover { background: var(--color-zinc-850); }
-  .prompt-text-display:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 1px; }
+  .prompt-text-display:hover { background: var(--color-bg-raised); }
+  .prompt-text-display:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
   .prompt-text-empty { color: var(--color-text-muted); font-style: italic; }
   .prompt-text-edit { position: relative; }
   .prompt-textarea {
@@ -338,24 +338,24 @@
     padding: 2px 6px;
     margin: 0 -6px;
     width: calc(100% + 12px);
-    border: 1px solid var(--color-primary-main);
+    border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-sm);
     background: var(--color-bg-base);
     color: var(--color-text-primary);
-    font-size: 13px;
+    font-size: var(--text-content);
     line-height: 1.6;
-    outline: none;
   }
+  .prompt-textarea:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
   .tok-snippet {
     display: inline-flex;
     align-items: center;
     padding: 0 7px;
     border: 1px solid color-mix(in srgb, var(--color-accent-blush) 30%, transparent);
-    border-radius: 9999px;
+    border-radius: var(--radius-xs);
     background: color-mix(in srgb, var(--color-accent-blush) 12%, transparent);
     color: var(--color-accent-blush);
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: var(--text-ui);
     line-height: 1.45;
   }
   .tok-undefined {
@@ -375,22 +375,22 @@
     line-height: 1.45;
   }
   .tok-choice:hover { border-color: var(--color-accent-amber); }
-  .tok-choice:focus-visible { outline: 2px solid var(--color-accent-amber); outline-offset: 1px; }
+  .tok-choice:focus-visible { outline: 2px solid var(--color-accent-amber); outline-offset: 2px; }
   .tok-option { padding: 0 4px; color: var(--color-accent-amber); }
   .tok-option + .tok-option { border-left: 1px solid color-mix(in srgb, var(--color-accent-amber) 30%, transparent); }
-  .choice-bar { display: flex; align-items: center; gap: 6px; min-height: 24px; margin-top: 2px; font-size: 11.5px; color: var(--color-text-muted); }
+  .choice-bar { display: flex; align-items: center; gap: 6px; min-height: 24px; margin-top: 2px; font-size: var(--text-meta); color: var(--color-text-muted); }
   .choice-bar b { font-family: var(--font-mono); font-weight: 500; color: var(--color-text-secondary); }
-  .choice-bar-button { height: 22px; padding: 0 6px; font-size: 11.5px; color: var(--color-accent-amber); }
-  .choice-bar-button kbd { font-family: var(--font-mono); font-size: 10.5px; opacity: 0.7; }
+  .choice-bar-button { height: 22px; padding: 0 6px; font-size: var(--text-meta); color: var(--color-accent-amber); }
+  .choice-bar-button kbd { font-family: var(--font-mono); font-size: var(--text-meta); opacity: 0.7; }
   .snippet-suggestions { z-index: 60; min-width: 220px; max-width: 360px; padding: 4px; }
   .suggestion { display: flex; width: 100%; align-items: baseline; gap: 10px; padding: 5px 8px; border-radius: var(--radius-sm); text-align: left; }
   .suggestion-on, .suggestion:hover { background: var(--color-bg-surface-hover); }
-  .suggestion-name { font-family: var(--font-mono); font-size: 12px; color: var(--color-accent-blush); }
-  .suggestion-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--color-text-muted); }
+  .suggestion-name { font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-accent-blush); }
+  .suggestion-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-meta); color: var(--color-text-muted); }
   .choice-editor { z-index: 60; width: 300px; padding: 10px; }
-  .choice-hint { margin-top: 2px; font-size: 11.5px; color: var(--color-text-muted); }
-  .choice-textarea { width: 100%; margin-top: 8px; padding: 6px 8px; border: 1px solid var(--color-zinc-700); border-radius: var(--radius-sm); background: var(--color-zinc-900); font-size: 13px; resize: vertical; }
-  .choice-textarea:focus { outline: none; border-color: var(--color-primary-main); }
-  .choice-hint kbd { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-text-secondary); }
+  .choice-hint { margin-top: 2px; font-size: var(--text-meta); color: var(--color-text-muted); }
+  .choice-textarea { width: 100%; margin-top: 8px; padding: 6px 8px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-bg-surface); font-size: var(--text-content); resize: vertical; }
+  .choice-textarea:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
+  .choice-hint kbd { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-secondary); }
   .choice-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 </style>
