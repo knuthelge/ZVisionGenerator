@@ -48,7 +48,8 @@
 </label>
 
 <style>
-  .toggle { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  /* Relative, so the visually hidden input sits at the switch and focusing it never scrolls elsewhere. */
+  .toggle { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
   .toggle-disabled { opacity: 0.4; cursor: not-allowed; }
   .track { position: relative; flex-shrink: 0; width: 26px; height: 15px; border-radius: 9999px; background: var(--color-zinc-700); transition: background-color 0.12s ease; }
   .track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--color-zinc-500); transition: transform 0.12s ease, background-color 0.12s ease; }
