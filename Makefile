@@ -42,7 +42,7 @@ test: ## Run tests with pytest
 docs-check: ## Build documentation strictly with MkDocs
 	uv run --frozen mkdocs build --strict
 
-check: lint format-check test frontend-test frontend-static-check docs-check ## Run lint + format-check + pytest + frontend checks + docs build + packaged SPA static gate (full CI gate)
+check: lint format-check test frontend-test frontend-palette-check frontend-static-check docs-check ## Run lint + format-check + pytest + frontend checks + docs build + packaged SPA static gate (full CI gate)
 
 # ——— Vendored Dependencies ————————————————————————————————
 
@@ -64,7 +64,7 @@ update-ltx: ## Update vendored ltx-core-mlx and ltx-pipelines-mlx
 
 # ——— Frontend ————————————————————————————————————————————
 
-.PHONY: frontend-install frontend-build frontend-static-check frontend-test frontend-dev
+.PHONY: frontend-install frontend-build frontend-static-check frontend-palette-check frontend-test frontend-dev
 
 frontend-install: ## Install frontend pnpm dependencies
 	pnpm --dir frontend install --frozen-lockfile
@@ -90,6 +90,20 @@ frontend-static-check: ## Verify packaged SPA artifacts match the frontend build
 		exit 1; \
 	}
 	@rm -rf $(TMP)
+
+# Raw colours in Svelte files bypass the design tokens in frontend/src/app/global.css.
+# The mascot artwork is exempt. Set PALETTE_STRICT=1 to fail instead of warn.
+PALETTE_STRICT ?= 0
+PALETTE_PATTERN := (\b(text|bg|border|ring|divide|placeholder|from|to|via|fill|stroke|outline|accent|shadow|decoration)-(zinc|red|green|emerald|amber|yellow|blue|sky|teal|cyan|rose|pink|orange|purple|violet|indigo|slate|gray|neutral|stone|black|white)(-[0-9]{2,3})?(/[0-9]+)?\b)|(\#[0-9a-fA-F]{3,8}\b)|(rgba?\()
+
+frontend-palette-check: ## Report raw colour classes and literals in Svelte files
+	@hits=$$(grep -rnE '$(PALETTE_PATTERN)' frontend/src --include='*.svelte' | grep -v '/Mascot[A-Za-z]*\.svelte:' || true); \
+	if [ -n "$$hits" ]; then \
+		count=$$(printf '%s\n' "$$hits" | wc -l | tr -d ' '); \
+		echo "$$count raw colour use(s) in Svelte files; use the tokens in frontend/src/app/global.css:"; \
+		printf '%s\n' "$$hits" | head -20; \
+		if [ "$(PALETTE_STRICT)" = "1" ]; then exit 1; fi; \
+	fi
 
 frontend-test: ## TypeScript check + vitest tests
 	pnpm --dir frontend run check
