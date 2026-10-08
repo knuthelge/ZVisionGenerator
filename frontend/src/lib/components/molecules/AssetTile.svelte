@@ -97,7 +97,7 @@
   {#if onselect}
     <input
       type="checkbox"
-      class="asset-tile-check surface-checkbox"
+      class="asset-tile-check accent-primary"
       checked={selected}
       aria-label="Select {asset.filename}"
       onchange={(event) => onselect(asset, (event.currentTarget as HTMLInputElement).checked)}
@@ -138,8 +138,8 @@
 
   {#if density === 'card'}
     <div class="asset-tile-foot surface-footer-strip">
-      <p class="truncate text-xs font-medium text-zinc-300">{asset.filename}</p>
-      <p class="mt-0.5 truncate text-xs text-zinc-500">{asset.workflow} &middot; {new Date(asset.created_at).toLocaleDateString()}</p>
+      <p class="truncate text-ui font-medium text-text-secondary">{asset.filename}</p>
+      <p class="mt-0.5 truncate text-meta text-text-muted">{asset.workflow} &middot; {new Date(asset.created_at).toLocaleDateString()}</p>
     </div>
   {/if}
 
@@ -162,7 +162,7 @@
     border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-md);
     background: var(--color-bg-surface);
-    transition: border-color 0.15s ease;
+    transition: border-color 0.12s ease;
   }
   .asset-tile:hover, .asset-tile:focus-within { border-color: color-mix(in srgb, var(--color-primary-main) 45%, var(--color-border-strong)); }
   .asset-tile[data-selected='true'] { border-color: var(--color-primary-main); box-shadow: 0 0 0 1px var(--color-primary-main); }
@@ -183,7 +183,7 @@
     inset: 0;
     z-index: 1;
     pointer-events: none;
-    background: linear-gradient(180deg, rgb(0 0 0 / 0.55), transparent 42%);
+    background: linear-gradient(180deg, var(--color-scrim), transparent 42%);
     opacity: 0;
     transition: opacity 0.12s ease;
   }
@@ -210,11 +210,11 @@
     .asset-tile-actions { opacity: 1; pointer-events: auto; }
   }
 
-  .asset-tile-action { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; }
+  .asset-tile-action { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-sm); }
   .asset-tile-action:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 1px; }
   .asset-tile-action:disabled { opacity: 0.5; cursor: not-allowed; }
   .asset-tile[data-density='compact'] .asset-tile-actions { top: 4px; right: 4px; gap: 3px; }
-  .asset-tile[data-density='compact'] .asset-tile-action { width: 24px; height: 24px; border-radius: 6px; }
+  .asset-tile[data-density='compact'] .asset-tile-action { width: 24px; height: 24px; border-radius: var(--radius-sm); }
 
   .asset-tile-check { position: absolute; top: 8px; left: 8px; z-index: 2; width: 16px; height: 16px; cursor: pointer; border-radius: 4px; }
   .asset-tile-foot { padding: 8px 12px; }

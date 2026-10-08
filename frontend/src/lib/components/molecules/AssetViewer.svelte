@@ -238,7 +238,7 @@
       {#if onreuse}
         <button
           type="button"
-          class="viewer-btn surface-button-primary"
+          class="viewer-btn ui-btn ui-btn-primary"
           data-action="reuse"
           disabled={!canReuse}
           title={canReuse ? 'Load these settings into the workspace (R)' : 'Reusable settings unavailable'}
@@ -249,7 +249,7 @@
         <button
           type="button"
           bind:this={referenceButton}
-          class="viewer-btn surface-overlay-action"
+          class="viewer-btn ui-btn"
           data-action="reference"
           aria-haspopup="menu"
           aria-expanded={referenceOpen}
@@ -261,7 +261,7 @@
         <button
           type="button"
           bind:this={upscaleButton}
-          class="viewer-btn surface-overlay-action"
+          class="viewer-btn ui-btn"
           data-action="upscale"
           aria-haspopup="menu"
           aria-expanded={upscaleOpen}
@@ -271,7 +271,7 @@
       {/if}
       <a
         bind:this={downloadLink}
-        class="viewer-btn surface-overlay-action"
+        class="viewer-btn ui-btn"
         data-action="download"
         href={asset.url}
         download={asset.filename}
@@ -282,7 +282,7 @@
       {#if ondelete}
         <button
           type="button"
-          class="viewer-btn surface-overlay-action-danger"
+          class="viewer-btn ui-btn ui-btn-danger"
           data-action="delete"
           disabled={deleting}
           title="Delete (Del)"
@@ -292,7 +292,7 @@
       <span class="viewer-sep" aria-hidden="true"></span>
       <button
         type="button"
-        class="viewer-btn surface-overlay-action"
+        class="viewer-btn ui-btn"
         data-action="details"
         aria-expanded={detailsOpen}
         aria-controls="asset-viewer-details"
@@ -301,7 +301,7 @@
       ><Icon name="info" size={14} />Details <kbd class="viewer-kbd">I</kbd></button>
       <button
         type="button"
-        class="viewer-btn viewer-icon surface-overlay-action"
+        class="viewer-btn ui-btn ui-btn-icon"
         data-action="shortcuts"
         aria-label="Keyboard shortcuts"
         aria-expanded={helpOpen}
@@ -312,7 +312,7 @@
       <button
         type="button"
         bind:this={closeButton}
-        class="viewer-btn viewer-icon surface-overlay-action"
+        class="viewer-btn ui-btn ui-btn-icon"
         aria-label="Close viewer"
         title="Close (Esc)"
         onclick={onclose}
@@ -323,7 +323,7 @@
       <div class="viewer-stage">
         <button
           type="button"
-          class="viewer-nav prev surface-overlay-action"
+          class="viewer-nav prev ui-btn ui-btn-icon"
           aria-label="Previous asset"
           disabled={!hasPrev}
           onclick={() => hasPrev && onnavigate(index - 1)}
@@ -336,7 +336,7 @@
         {/if}
         <button
           type="button"
-          class="viewer-nav next surface-overlay-action"
+          class="viewer-nav next ui-btn ui-btn-icon"
           aria-label="Next asset"
           disabled={!hasNext}
           onclick={() => hasNext && onnavigate(index + 1)}
@@ -346,26 +346,26 @@
       {#if detailsOpen}
         <aside id="asset-viewer-details" class="viewer-details custom-scrollbar" aria-label="Asset details">
           <section>
-            <h4 class="viewer-h">Prompt</h4>
-            <p class="viewer-prompt surface-card">{asset.prompt || 'No prompt recorded.'}</p>
+            <h4 class="viewer-h ui-area-label">Prompt</h4>
+            <p class="viewer-prompt">{asset.prompt || 'No prompt recorded.'}</p>
           </section>
           {#if sections?.negativePrompt}
             <section>
-              <h4 class="viewer-h">Negative prompt</h4>
-              <p class="viewer-prompt surface-card">{sections.negativePrompt}</p>
+              <h4 class="viewer-h ui-area-label">Negative prompt</h4>
+              <p class="viewer-prompt">{sections.negativePrompt}</p>
             </section>
           {/if}
           {#if source}
             <section data-testid="viewer-source">
-              <h4 class="viewer-h">Upscaled from</h4>
+              <h4 class="viewer-h ui-area-label">Upscaled from</h4>
               {#snippet sourceLabel()}
                 <span class="truncate">{fileName(source.path)}</span>
                 {#if source.width && source.height}<small>{source.width}×{source.height}</small>{/if}
               {/snippet}
               {#if sourceIndex >= 0}
-                <button type="button" class="viewer-source surface-card" onclick={() => onnavigate(sourceIndex)}>{@render sourceLabel()}</button>
+                <button type="button" class="viewer-source" onclick={() => onnavigate(sourceIndex)}>{@render sourceLabel()}</button>
               {:else}
-                <p class="viewer-source surface-card" title={source.path}>{@render sourceLabel()}</p>
+                <p class="viewer-source" title={source.path}>{@render sourceLabel()}</p>
               {/if}
             </section>
           {/if}
@@ -375,9 +375,9 @@
             {@render factSection('File', sections.file)}
           {/if}
           {#if fallbackReasons.length > 0}
-            <section class="surface-warning rounded-md border px-3 py-2" role="note">
-              <h4 class="viewer-h">Reuse notice</h4>
-              <ul class="list-inside list-disc space-y-0.5 text-xs text-zinc-300">
+            <section class="ui-alert ui-alert-warning flex-col gap-1" role="note">
+              <h4 class="viewer-h ui-area-label">Reuse notice</h4>
+              <ul class="list-inside list-disc space-y-0.5 text-ui text-text-secondary">
                 {#each fallbackReasons as reason (reason)}
                   <li>{describeFallbackReason(reason)}</li>
                 {/each}
@@ -411,8 +411,8 @@
     {/if}
 
     {#if helpOpen}
-      <div id="asset-viewer-shortcuts" class="viewer-shortcuts surface-card" role="note" aria-label="Keyboard shortcuts">
-        <h4 class="viewer-h">Keyboard shortcuts</h4>
+      <div id="asset-viewer-shortcuts" class="viewer-shortcuts ui-overlay" role="note" aria-label="Keyboard shortcuts">
+        <h4 class="viewer-h ui-area-label">Keyboard shortcuts</h4>
         <ShortcutList entries={VIEWER_SHORTCUTS} />
       </div>
     {/if}
@@ -437,7 +437,7 @@
 {#snippet factSection(title: string, facts: DetailFact[])}
   {#if facts.length > 0}
     <section>
-      <h4 class="viewer-h">{title}</h4>
+      <h4 class="viewer-h ui-area-label">{title}</h4>
       <dl class="viewer-facts">
         {#each facts as fact (fact.label)}
           <div class:wide={fact.wide}>
@@ -451,48 +451,44 @@
 {/snippet}
 
 <style>
-  .asset-viewer { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; background: rgb(7 10 11 / 0.985); }
-  .viewer-bar { display: flex; flex: none; align-items: center; gap: 8px; height: 52px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--color-border-subtle); background: rgb(16 22 23 / 0.8); }
+  .asset-viewer { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; background: color-mix(in srgb, var(--color-bg-base) 70%, black); }
+  .viewer-bar { display: flex; flex: none; align-items: center; gap: 6px; min-height: 44px; padding: 6px 12px 6px 16px; border-bottom: 1px solid var(--color-border-strong); background: var(--color-bg-surface); }
   .viewer-title { display: flex; min-width: 0; flex-direction: column; margin-right: auto; }
-  .viewer-title b { font-size: 13px; font-weight: 600; }
-  .viewer-title small { font-size: 11px; color: var(--color-text-muted); }
-  .viewer-btn { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 32px; padding: 0 11px; border-radius: var(--radius-sm); font-family: var(--font-display); font-size: 12.5px; font-weight: 600; }
-  .viewer-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .viewer-btn:focus-visible, .viewer-nav:focus-visible, .viewer-film button:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
-  .viewer-icon { width: 32px; justify-content: center; padding: 0; }
-  .viewer-sep { width: 1px; height: 22px; margin: 0 2px; background: var(--color-border-subtle); }
-  .viewer-kbd { padding: 0 5px; border: 1px solid var(--color-border-strong); border-radius: 4px; font-family: var(--font-mono); font-size: 10.5px; line-height: 16px; color: var(--color-text-muted); }
-  .viewer-shortcuts { position: absolute; top: 60px; right: 12px; z-index: 3; width: 280px; padding: 12px 14px; box-shadow: 0 12px 40px rgb(0 0 0 / 0.5); }
+  .viewer-title b { font-size: var(--text-content); font-weight: 600; }
+  .viewer-title small { font-size: var(--text-meta); color: var(--color-text-muted); }
+  .viewer-sep { width: 1px; height: 20px; margin: 0 2px; background: var(--color-border-subtle); }
+  .viewer-kbd { padding: 0 4px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-xs); font-family: var(--font-mono); font-size: var(--text-meta); line-height: 15px; color: var(--color-text-muted); }
+  .viewer-shortcuts { position: absolute; top: 52px; right: 12px; z-index: 3; width: 280px; padding: 12px; }
   .viewer-main { display: flex; flex: 1; min-height: 0; }
-  .viewer-stage { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; padding: 20px 72px; }
-  .viewer-media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; box-shadow: 0 20px 60px rgb(0 0 0 / 0.5); }
-  .viewer-nav { position: absolute; top: 50%; z-index: 2; display: grid; place-items: center; width: 44px; height: 44px; border-radius: var(--radius-md); transform: translateY(-50%); }
-  .viewer-nav:disabled { opacity: 0.35; cursor: not-allowed; }
-  .viewer-nav.prev { left: 16px; }
-  .viewer-nav.next { right: 16px; }
-  .viewer-details { display: flex; flex: none; flex-direction: column; gap: 18px; width: 340px; overflow-y: auto; padding: 16px; border-left: 1px solid var(--color-border-subtle); background: var(--color-bg-base); }
-  .viewer-h { margin: 0 0 6px; font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
-  .viewer-prompt { padding: 10px 12px; font-size: 13px; line-height: 1.55; color: var(--color-zinc-300); white-space: pre-wrap; user-select: text; }
-  .viewer-source { display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 12px; font-size: 12.5px; color: var(--color-zinc-200); text-align: left; }
-  .viewer-source small { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); }
-  button.viewer-source:hover { border-color: var(--color-primary-main); }
+  .viewer-stage { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; padding: 20px 64px; }
+  .viewer-media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--radius-xs); }
+  .viewer-nav { position: absolute; top: 50%; z-index: 2; width: var(--spacing-bar); height: var(--spacing-bar); transform: translateY(-50%); }
+  .viewer-nav.prev { left: 14px; }
+  .viewer-nav.next { right: 14px; }
+  .viewer-details { display: flex; flex: none; flex-direction: column; gap: 16px; width: 340px; overflow-y: auto; padding: 16px; border-left: 1px solid var(--color-border-strong); background: var(--color-bg-surface); }
+  .viewer-h { margin: 0 0 6px; }
+  .viewer-prompt { padding: 8px 10px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-bg-base); font-size: var(--text-content); line-height: 1.55; color: var(--color-text-secondary); white-space: pre-wrap; user-select: text; }
+  .viewer-source { display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-bg-base); font-size: var(--text-ui); color: var(--color-text-primary); text-align: left; }
+  .viewer-source small { flex: none; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
+  button.viewer-source:hover { border-color: var(--color-primary-border); }
+  button.viewer-source:focus-visible, .viewer-film button:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
   .viewer-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .viewer-facts div { min-width: 0; padding: 6px 9px; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-sm); background: var(--color-bg-surface); }
+  .viewer-facts div { min-width: 0; padding: 6px 8px; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-sm); background: var(--color-bg-base); }
   .viewer-facts .wide { grid-column: span 2; }
-  .viewer-facts dt { font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--color-text-muted); }
-  .viewer-facts dd { margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: 12.5px; color: var(--color-zinc-200); }
+  .viewer-facts dt { font-size: var(--text-meta); color: var(--color-text-muted); }
+  .viewer-facts dd { margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-primary); }
   .viewer-film { display: flex; flex: none; gap: 6px; overflow-x: auto; padding: 8px 12px 12px; }
   /* Auto margins centre a short strip but keep a long one scrollable from its first item. */
   .viewer-film > :first-child { margin-left: auto; }
   .viewer-film > :last-child { margin-right: auto; }
-  .viewer-film button { flex: none; width: 44px; height: 44px; overflow: hidden; padding: 0; border: 2px solid transparent; border-radius: 6px; opacity: 0.55; }
+  .viewer-film button { flex: none; width: 44px; height: 44px; overflow: hidden; padding: 0; border: 2px solid transparent; border-radius: var(--radius-sm); opacity: 0.55; transition: opacity 0.12s ease; }
   .viewer-film button:hover { opacity: 0.9; }
   .viewer-film button[aria-current='true'] { border-color: var(--color-primary-main); opacity: 1; }
-  .film-video-placeholder { display: grid; width: 100%; height: 100%; place-items: center; background: var(--color-bg-surface); font-size: 12px; color: var(--color-text-muted); }
+  .film-video-placeholder { display: grid; width: 100%; height: 100%; place-items: center; background: var(--color-bg-surface); font-size: var(--text-ui); color: var(--color-text-muted); }
   .viewer-film img, .viewer-film video { display: block; width: 100%; height: 100%; object-fit: cover; }
   @media (max-width: 767px) {
-    .viewer-bar { flex-wrap: wrap; height: auto; padding: 8px; }
-    .viewer-stage { padding: 12px 56px; }
-    .viewer-details { position: absolute; inset: auto 0 0 0; width: auto; max-height: 50%; border-top: 1px solid var(--color-border-subtle); border-left: 0; }
+    .viewer-bar { flex-wrap: wrap; padding: 8px; }
+    .viewer-stage { padding: 12px 52px; }
+    .viewer-details { position: absolute; inset: auto 0 0 0; width: auto; max-height: 50%; border-top: 1px solid var(--color-border-strong); border-left: 0; }
   }
 </style>

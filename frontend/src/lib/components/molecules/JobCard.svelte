@@ -175,9 +175,9 @@
                                  'running'
   );
   const progressFill = $derived(
-    progressState === 'completed' ? 'bg-emerald-400' :
-    progressState === 'failed' ? 'bg-red-400' :
-    progressState === 'cancelled' ? 'bg-zinc-500' : 'bg-primary-main'
+    progressState === 'completed' ? 'bg-success' :
+    progressState === 'failed' ? 'bg-error' :
+    progressState === 'cancelled' ? 'bg-text-muted' : 'bg-primary-main'
   );
 
   const jobTypeLabel = $derived(workflowLabel(job.workflow));

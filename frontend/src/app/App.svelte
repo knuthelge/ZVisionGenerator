@@ -4,6 +4,7 @@
   import { getConfig } from '$lib/api/config';
   import { shouldApplyStartupView } from './startupRouting';
   import type { PageId } from '$lib/types';
+  import Spinner from '$lib/components/atoms/Spinner.svelte';
   import TopNav from '$lib/components/organisms/TopNav.svelte';
   import ToastContainer from '$lib/components/molecules/ToastContainer.svelte';
   import ShortcutsDialog from '$lib/components/organisms/ShortcutsDialog.svelte';
@@ -35,7 +36,7 @@
 </script>
 
 {#if ready}
-  <div class="h-dvh flex flex-col overflow-hidden bg-zinc-950 text-zinc-50 font-sans">
+  <div class="h-dvh flex flex-col overflow-hidden bg-bg-base text-text-primary font-sans">
     <TopNav currentPage={router.page} />
     <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
       {#if router.page === 'workspace'}
@@ -54,7 +55,7 @@
     <ShortcutsDialog currentPage={router.page} onnavigate={(page) => router.navigate(page)} />
   </div>
 {:else}
-  <div class="flex items-center justify-center min-h-screen bg-zinc-950">
-    <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-teal-500"></div>
+  <div class="flex min-h-screen items-center justify-center bg-bg-base text-primary-main">
+    <Spinner size="lg" label="Loading" />
   </div>
 {/if}
