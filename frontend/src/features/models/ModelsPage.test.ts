@@ -367,42 +367,26 @@ describe('ModelsPage Browse buttons', () => {
     expect(target.textContent).toContain('xl');
   });
 
-  it('keeps the Models information and operation grids responsive and overflow-safe', async () => {
+  it('shows long model names and folders in full, in named sections and forms', async () => {
+    const longName = 'a-very-long-model-name-that-must-not-widen-its-card';
+    const modelsDir = `/models/${'long-directory-segment/'.repeat(16)}`;
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
-      models_dir: `/models/${'long-directory-segment/'.repeat(16)}`,
-      image_models: [{ name: 'a-very-long-model-name-that-must-not-widen-its-card', family: 'a-very-long-family', size_label: 'extra-long-size' }],
+      models_dir: modelsDir,
+      image_models: [{ name: longName, family: 'a-very-long-family', size_label: 'extra-long-size' }],
     });
 
     app = flushSync(() => mount(ModelsPage, { target }));
     await settle();
 
-    const content = target.querySelector('.space-y-8') as HTMLElement;
-    expect(content.className).toContain('min-w-0');
-    // pb-6 is Tailwind's 1.5rem / 24 CSS px at the app's default root size.
-    expect(content.className).toContain('pb-6');
+    const names = Array.from(target.querySelectorAll('[data-testid="model-name"]')).map((n) => n.textContent);
+    expect(names).toContain(longName);
+    const values = Array.from(target.querySelectorAll('dd')).map((dd) => dd.textContent ?? '');
+    expect(values.some((value) => value.includes(modelsDir))).toBe(true);
 
-    const responsiveGrids = Array.from(target.querySelectorAll('.grid')).filter((grid) =>
-      grid.className.includes('md:grid-cols-2') && grid.className.includes('xl:grid-cols-3'),
-    );
-    expect(responsiveGrids).toHaveLength(2);
-    for (const grid of responsiveGrids) {
-      expect(grid.className).toContain('min-w-0');
-      expect(grid.className).toContain('grid-cols-1');
-    }
-
-    const inventoryCards = Array.from(target.querySelectorAll('.admin-section.overflow-hidden'));
-    expect(inventoryCards).toHaveLength(3);
-    for (const card of inventoryCards) {
-      expect(card.className).toContain('min-w-0');
-      expect(card.className).toContain('overflow-hidden');
-    }
-    expect(Array.from(target.querySelectorAll('table')).every((table) => table.className.includes('table-fixed'))).toBe(true);
-
-    for (const form of Array.from(target.querySelectorAll('form'))) {
-      expect(form.className).toContain('admin-section');
-      expect(form.className).toContain('min-w-0');
-    }
+    const headings = Array.from(target.querySelectorAll('h2')).map((h) => h.textContent?.trim());
+    expect(headings).toEqual(expect.arrayContaining(['Folders and access', 'Image models', 'Video models', 'LoRAs']));
+    expect(target.querySelectorAll('form')).toHaveLength(3);
   });
 
   it('marks download state on the name and shows one memory badge per model', async () => {

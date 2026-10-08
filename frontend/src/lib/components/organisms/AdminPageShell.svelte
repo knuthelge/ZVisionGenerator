@@ -1,11 +1,15 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { Spinner } from '$lib/components/atoms';
+  import { Alert, PageHeader } from '$lib/components/molecules';
 
   interface Props {
     title: string;
     description?: string;
     loading?: boolean;
     error?: string | null;
+    /** Page-level controls in the page bar, e.g. Save. */
+    actions?: Snippet;
     class?: string;
     children?: Snippet;
   }
@@ -15,34 +19,23 @@
     description,
     loading = false,
     error = null,
+    actions,
     class: extraClass = '',
     children
   }: Props = $props();
 </script>
 
-<main class="flex-1 bg-zinc-900 overflow-y-auto p-4 custom-scrollbar {extraClass}">
-  <div class="max-w-7xl mx-auto space-y-5">
-    <!-- Header -->
-    <header class="border-b border-border-subtle pb-3">
-      <h1 class="text-base font-semibold text-white tracking-tight">{title}</h1>
-      {#if description}
-        <p class="text-zinc-400 mt-1 text-xs">{description}</p>
+<main class="flex min-h-0 flex-1 flex-col bg-bg-base {extraClass}">
+  <PageHeader {title} {description} actions={loading || error ? undefined : actions} />
+  <div class="custom-scrollbar min-h-0 flex-1 overflow-y-auto">
+    <div class="p-4">
+      {#if loading}
+        <p class="flex items-center justify-center gap-2 py-24 text-ui text-text-muted" role="status"><Spinner />Loading…</p>
+      {:else if error}
+        <Alert tone="error" live>{error}</Alert>
+      {:else}
+        {@render children?.()}
       {/if}
-    </header>
-
-    <!-- Loading state -->
-    {#if loading}
-      <div class="flex items-center justify-center py-24">
-        <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-teal-500"></div>
-      </div>
-    <!-- Error state -->
-    {:else if error}
-      <div class="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-100">
-        {error}
-      </div>
-    <!-- Content -->
-    {:else}
-      {@render children?.()}
-    {/if}
+    </div>
   </div>
 </main>

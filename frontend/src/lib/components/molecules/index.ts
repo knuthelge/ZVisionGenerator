@@ -20,3 +20,4 @@ export { default as EmptyState } from './EmptyState.svelte';
 export { default as Segmented } from './Segmented.svelte';
 export { default as ActionBar } from './ActionBar.svelte';
 export { default as PageHeader } from './PageHeader.svelte';
+export { default as KeyValueList, type KeyValueItem } from './KeyValueList.svelte';
