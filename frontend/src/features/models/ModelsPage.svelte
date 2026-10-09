@@ -4,7 +4,7 @@
   import { addToast } from '$lib/state/toasts.svelte';
   import type { ModelDeleteInfo, ModelInventory, ModelStatusFields } from '$lib/types';
   import { Button, Icon, Input, Select, Tooltip } from '$lib/components/atoms';
-  import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField, Segmented } from '$lib/components/molecules';
+  import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField } from '$lib/components/molecules';
   import { DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
 
@@ -21,13 +21,6 @@
   let deleteOpen = $state(false);
   let deleting = $state(false);
 
-  type AddMode = 'convert' | 'local' | 'hf';
-  const ADD_MODES: { value: AddMode; label: string }[] = [
-    { value: 'convert', label: 'Convert a checkpoint' },
-    { value: 'local', label: 'Import a local LoRA' },
-    { value: 'hf', label: 'Download from Hugging Face' },
-  ];
-  let addMode = $state<AddMode>('convert');
 
   onMount(async () => {
     await loadInventory();
@@ -352,13 +345,9 @@
         </Panel>
       </div>
 
-      <!-- One form at a time; the others stay on the page, hidden, so switching keeps what you typed. -->
-      <Panel title="Add a model or LoRA" icon="plus">
-        {#snippet actions()}
-          <Segmented size="sm" label="What to add" value={addMode} options={ADD_MODES} onchange={(mode: AddMode) => (addMode = mode)} />
-        {/snippet}
 
-        <form class="flex flex-col" hidden={addMode !== 'convert'} onsubmit={handleConvertCheckpoint}>
+      <Panel as="form" title="Convert a checkpoint" icon="cube" onsubmit={handleConvertCheckpoint}>
+        <div class="flex flex-col">
           {#key checkpointPathReset}
             <PathField
               id="convert-input-path"
@@ -420,9 +409,11 @@
           </FormField>
 
           {@render submitRow('Convert checkpoint')}
-        </form>
+        </div>
+      </Panel>
 
-        <form class="flex flex-col" hidden={addMode !== 'local'} onsubmit={handleImportLoraLocal}>
+      <Panel as="form" title="Import a local LoRA" icon="folder" onsubmit={handleImportLoraLocal}>
+        <div class="flex flex-col">
           {#key localLoraPathReset}
             <PathField
               id="import-local-source-path"
@@ -444,9 +435,11 @@
           </FormField>
 
           {@render submitRow('Import LoRA')}
-        </form>
+        </div>
+      </Panel>
 
-        <form class="flex flex-col" hidden={addMode !== 'hf'} onsubmit={handleImportLoraHF}>
+      <Panel as="form" title="Download a LoRA from Hugging Face" icon="download" onsubmit={handleImportLoraHF}>
+        <div class="flex flex-col">
           <FormField label="Repository" for="import-hf-repo-id" required helper="For example owner/repository" layout="row">
             <Input id="import-hf-repo-id" type="text" name="repo_id" placeholder="owner/repository" required />
           </FormField>
@@ -466,7 +459,7 @@
           {/if}
 
           {@render submitRow('Download LoRA')}
-        </form>
+        </div>
       </Panel>
     </div>
   {/if}
