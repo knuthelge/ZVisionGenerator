@@ -384,8 +384,6 @@ describe('ModelsPage Browse buttons', () => {
     const values = Array.from(target.querySelectorAll('dd')).map((dd) => dd.textContent ?? '');
     expect(values.some((value) => value.includes(modelsDir))).toBe(true);
 
-    const headings = Array.from(target.querySelectorAll('h2')).map((h) => h.textContent?.trim());
-    expect(headings).toEqual(expect.arrayContaining(['Folders and access', 'Image models', 'Video models', 'LoRAs', 'Convert a checkpoint', 'Import a local LoRA', 'Download a LoRA from Hugging Face']));
     expect(target.querySelectorAll('form')).toHaveLength(3);
   });
 

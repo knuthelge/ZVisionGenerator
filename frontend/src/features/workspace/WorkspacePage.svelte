@@ -22,7 +22,7 @@
   } from '$lib/state/mascot';
   import { ActionMenu, AssetTile, AssetViewer, JobCard, ModelStatusBadges, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
   import { jobSettingsPrefill } from '$lib/state/jobSettings';
-  import { loraLabel, parseLoraString, type LoraChip } from '$lib/state/loras';
+  import { formatLoraString, loraLabel, parseLoraString, type LoraChip } from '$lib/state/loras';
   import QueuePanel from './QueuePanel.svelte';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import ControlsSidebar from './ControlsSidebar.svelte';
@@ -161,27 +161,18 @@
   function addLora(name: string): void {
     const existing = loraChips.find((c) => c.name === name);
     if (existing) { loraPopoverOpen = false; return; }
-    const newStr = [...loraChips, { name, weight: 1.0 }]
-      .map((c) => `${c.name}:${c.weight}`)
-      .join(',');
-    draft.update('loraString', newStr);
+    draft.update('loraString', formatLoraString([...loraChips, { name, weight: 1.0 }]));
     loraPopoverOpen = false;
   }
 
   function removeLora(name: string): void {
-    const newStr = loraChips
-      .filter((c) => c.name !== name)
-      .map((c) => `${c.name}:${c.weight}`)
-      .join(',');
-    draft.update('loraString', newStr);
+    draft.update('loraString', formatLoraString(loraChips.filter((c) => c.name !== name)));
   }
 
   function updateLoraWeight(name: string, weight: number): void {
-    const newStr = loraChips
-      .map((c) => (c.name === name ? `${c.name}:${weight}` : `${c.name}:${c.weight}`))
-      .join(',');
-    draft.update('loraString', newStr);
+    draft.update('loraString', formatLoraString(loraChips.map((c) => (c.name === name ? { name, weight } : c))));
   }
+
 
   function react(next: MascotReaction): void {
     clearTimeout(reactionTimer);
@@ -576,7 +567,7 @@
         formData.set('image_file', imageFile);
       }
       // Sync lora string
-      formData.set('lora', draft.state.loraString);
+      formData.set('lora', formatLoraString(loraChips));
       // A non-blank Enhanced prompt replaces the inline prompt (never in JSON-caption, file, or auto-enhance mode).
       if (run) {
         applyPromptRun(formData, run);
@@ -627,7 +618,7 @@
   <!-- Hidden fields -->
   <input type="hidden" name="mode" value={isImageMode ? 'image' : 'video'}>
   <input type="hidden" name="workflow" value={draft.state.workflow}>
-  <input type="hidden" name="lora" value={draft.state.loraString}>
+  <input type="hidden" name="lora" value={formatLoraString(loraChips)}>
 
   <!-- Toolbar bar: model, quantize, loras -->
   <div class="ui-pane-toolbar z-10 shrink-0">
