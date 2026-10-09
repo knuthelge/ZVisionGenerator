@@ -21,8 +21,10 @@
   --color-bg-base: #101617;
   --color-bg-surface: #161e20;
   --color-bg-surface-hover: #202b2e;
-  /* Collapsible section headers and every overlay (menu, tooltip, toast, dialog). */
+  /* Collapsible section headers. */
   --color-bg-raised: #1b2527;
+  /* Every overlay (menu, popover, tooltip, toast, dialog): darker than any page surface, so it stands out. */
+  --color-bg-overlay: #0b1011;
   --color-border-subtle: #223033;
   --color-border-strong: #2f4045;
   --color-text-primary: #edf3f3;
@@ -76,6 +78,9 @@
   --radius-lg: 0.875rem;
   --radius-xl: 1.125rem;
   --radius-2xl: 1.5rem;
+
+  /* Width of reference pages such as Config and Models; the block is centred on wider screens. */
+  --container-page: 75rem;
 
   /* Spacing */
   --spacing-header-h: 3rem;
@@ -258,7 +263,8 @@
   .ui-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .ui-btn[aria-pressed='true'], .ui-btn[aria-expanded='true'], .ui-btn-on { border-color: var(--color-primary-border); color: var(--color-primary-main); }
   .ui-btn kbd { font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 400; opacity: 0.7; }
-  .ui-btn-primary { border-color: var(--color-primary-main); background: var(--color-primary-main); color: var(--color-primary-ink); font-weight: 700; }
+  /* The main action of a section (a bar, panel, form, dialog or popover): at most one per section. */
+  .ui-btn-primary { border-color: var(--color-primary-main); background: var(--color-primary-main); color: var(--color-primary-ink); font-family: var(--font-heading); font-weight: 800; }
   .ui-btn-primary:hover:not(:disabled) { border-color: var(--color-primary-hover); background: var(--color-primary-hover); color: var(--color-primary-ink); }
   .ui-btn-primary:disabled { opacity: 1; border-color: var(--color-border-strong); background: var(--color-bg-base); color: var(--color-text-muted); }
   .ui-btn-quiet { border-color: transparent; background: transparent; color: var(--color-text-muted); }
@@ -276,7 +282,7 @@
   .ui-action-bar { display: flex; align-items: center; gap: 8px; }
   .ui-action-bar .ui-btn { height: var(--spacing-bar); padding: 0 14px; font-size: var(--text-content); }
   .ui-action-bar .ui-btn-icon { width: var(--spacing-bar); padding: 0; }
-  .ui-action-bar .ui-btn-main { flex: 1; font-family: var(--font-heading); font-weight: 800; }
+  .ui-action-bar .ui-btn-main { flex: 1; }
 
   /* Fields */
   .ui-field {
@@ -357,7 +363,7 @@
   .ui-panel-head { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 12px; border-bottom: 1px solid var(--color-border-subtle); }
   .ui-panel-head > svg { flex-shrink: 0; color: var(--color-primary-main); }
   .ui-panel-body { padding: 12px; }
-  .ui-overlay { border: 1px solid var(--color-zinc-700); border-radius: var(--radius-md); background: var(--color-bg-raised); color: var(--color-text-primary); }
+  .ui-overlay { border: 1px solid var(--color-zinc-700); border-radius: var(--radius-md); background: var(--color-bg-overlay); color: var(--color-text-primary); }
 
   .ui-alert { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid; border-radius: var(--radius-md); font-size: var(--text-ui); line-height: 1.45; }
   .ui-alert > svg { flex-shrink: 0; margin-top: 1px; }
@@ -371,6 +377,10 @@
   .ui-table td { padding: 6px 8px; border-bottom: 1px solid var(--color-border-subtle); color: var(--color-text-secondary); }
   .ui-table td:first-child { font-weight: 600; color: var(--color-text-primary); }
   .ui-table tbody tr:hover td { background: color-mix(in srgb, var(--color-bg-surface-hover) 50%, transparent); }
+  /* Reference pages read tables rather than scan them: content-size text and taller rows. */
+  .ui-table-comfortable { font-size: var(--text-content); }
+  .ui-table-comfortable td { padding: 9px 10px; }
+  .ui-table-comfortable th { padding: 8px 10px; }
 
   .ui-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 40px 16px; text-align: center; font-size: var(--text-ui); color: var(--color-text-muted); }
   .ui-empty-title { font-family: var(--font-heading); font-size: var(--text-content); font-weight: 800; color: var(--color-text-primary); }

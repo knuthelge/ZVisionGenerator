@@ -55,13 +55,14 @@ Buttons that sit together share one height; the context sets the size, not the b
 ### Shape and surfaces
 
 - Corners: 4 px for chips, badges and inline values; 6 px for controls; 10 px for containers (panels, prompt box, dialogs, menus, tiles). Only the switch is a pill.
-- Surfaces: `bg-base` for the page and controls, `bg-surface` for panels, a new **raised** surface for collapsible section headers and every overlay (menu, tooltip, toast, dialog), `bg-surface-hover` for hover.
-- No drop shadows. Overlays separate from the page by the raised surface and a stronger border; dialogs add a dark backdrop. The only box shadows left are focus and selection rings.
+- Surfaces: `bg-base` for the page and controls, `bg-surface` for panels, a **raised** surface for collapsible section headers, a darker **overlay** surface for every menu, popover, tooltip, toast and dialog so it stands out from any page, and `bg-surface-hover` for hover.
+- No drop shadows. Overlays separate from the page by the overlay surface and a stronger border; dialogs add a dark backdrop. The only box shadows left are focus and selection rings.
+- Reference pages (Config, Models) centre their content at 1200px, lined up with the page bar; their settings are label-left rows and their tables use content-size text.
 - Collapsible section headers are a band with a border above and below; adjacent headers share one line.
 
 ### Colour and state
 
-- Teal means on, selected or the main action.
+- Teal means on, selected or the main action. Each section (a bar, panel, form, dialog or popover) has at most one main action, shown with a teal fill and a bold Nunito label; a page can have several sections.
 - Pink (`--color-accent-blush`) and amber are reserved for prompt syntax (`$snippet`, `{a|b}`). LoRA chips are neutral: the name in normal text, the weight in muted monospace.
 - Red means error or destructive. Destructive buttons (Delete, Stop, a dialog's confirm action) are always red text; delete icons in rows are neutral until hover.
 - Disabled: 40 % opacity and a not-allowed cursor. A disabled primary button turns neutral instead of fading.

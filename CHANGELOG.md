@@ -10,7 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Web UI: Config marks each setting you have set yourself with a dot and a reset button that returns it to the default, like the Workspace settings; the help under each setting says which default applies
 
 ### Changed
-- Web UI: dialogs, menus, tooltips and notifications sit on one raised surface with a clear border instead of a drop shadow; destructive buttons are red, and every control shows the same focus ring
+- Web UI: dialogs, menus, popovers, tooltips and notifications sit on a dark surface with a clear border instead of a drop shadow, so they stand out from the page; destructive buttons are red, and every control shows the same focus ring
+- Web UI: each section's main action (Generate, Save, a form's submit button, a dialog's confirm button) has a teal fill and a bold label, so it stands apart from the other buttons
+- Web UI: on wide screens, Config and Models keep their content in a centred column instead of stretching across the window; Config lists its settings as rows with the reset button beside each value, and Models shows models and LoRAs side by side with one panel for adding a model or LoRA
 - Web UI: Workspace settings sections have a header band with a summary of the hidden settings, and switches, badges and path fields share one compact size
 - Web UI: Config and Models share the page bar and panels; Config's **Save** and **Discard changes** sit in the page bar, both pages list folders and Hugging Face access the same way, and Models shows image models in a full-width table so names are no longer cut short
 - Web UI: the Gallery uses the shared page bar with its filter, sort and **Delete selected** in it, and its filter and sort controls look like every other dropdown in the app; the asset viewer's buttons, details panel and shortcuts match the rest of the app

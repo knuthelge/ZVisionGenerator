@@ -233,7 +233,9 @@ The Web UI has one design system ([proposal](https://github.com/knuthelge/ZVisio
 - **Size:** controls are 28px (`h-control`), small ones 22px, rows 30px. Buttons that sit together share one height; inside an `ActionBar` every button is 36px and the one marked `main` takes the remaining width.
 - **Type:** four sizes only: `text-meta` (11px), `text-ui` (12px), `text-content` (13px), `text-title` (16px). Nunito (`font-heading`) is for titles, area names and the main action; monospace is for numbers, paths and shortcuts.
 - **Labels:** field and row labels are sentence case (`ui-label`). The one small-caps style (`ui-area-label`) names areas: panels, sections, table headers and menu groups.
-- **Shape and surfaces:** corners are 4px for chips and badges, 6px for controls and 10px for containers. Overlays (menus, tooltips, toasts, dialogs) use `bg-raised` and a border, never a drop shadow.
+- **Shape and surfaces:** corners are 4px for chips and badges, 6px for controls and 10px for containers. Overlays (menus, popovers, tooltips, toasts, dialogs) use `bg-overlay`, darker than any page surface, with a border and never a drop shadow; `bg-raised` is for section header bands.
+- **Main action:** each section (a bar, panel, form, dialog or popover) has at most one main action, a `primary` button: teal fill and a bold Nunito label. Every other button in the section is secondary.
+- **Reference pages:** Config and Models centre their content at `max-w-page` (1200px), with the page bar lined up to it. Settings use label-left rows (`FormField layout="row"`), and tables use `ui-table-comfortable`.
 - **Colour:** teal means on, selected or the main action; pink and amber are reserved for prompt syntax; red is for errors and destructive actions, which always show red text. Use tokens, never raw palette classes or colour literals; `make check` fails on them.
 - **Focus:** every control shows the same 2px teal outline with a 2px offset.
 

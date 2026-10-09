@@ -161,7 +161,7 @@
 
 <style>
   .chooser { display: flex; flex-direction: column; gap: 12px; }
-  .chooser-bar { position: sticky; top: -12px; z-index: 1; display: flex; align-items: center; gap: 10px; padding: 4px 0 8px; background: var(--color-bg-raised); }
+  .chooser-bar { position: sticky; top: -12px; z-index: 1; display: flex; align-items: center; gap: 10px; padding: 4px 0 8px; background: var(--color-bg-overlay); }
   .chooser-filter { flex: 1; min-width: 0; }
   .chooser-count { flex: none; font-size: var(--text-ui); color: var(--color-text-muted); }
   .chooser-link { flex: none; }

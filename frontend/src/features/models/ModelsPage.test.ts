@@ -389,6 +389,29 @@ describe('ModelsPage Browse buttons', () => {
     expect(target.querySelectorAll('form')).toHaveLength(3);
   });
 
+  it('shows one add form at a time and keeps what was typed when switching', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue(makeInventory());
+
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    const visibleForms = () => Array.from(target.querySelectorAll('form')).filter((form) => !form.hidden);
+    const modes = target.querySelector('[role="group"][aria-label="What to add"]') as HTMLElement;
+    expect(visibleForms()).toHaveLength(1);
+    expect(visibleForms()[0].querySelector('#convert-input-path')).not.toBeNull();
+
+    const name = target.querySelector('#convert-name') as HTMLInputElement;
+    name.value = 'my-model';
+    (modes.querySelector('[data-value="hf"]') as HTMLButtonElement).click();
+    await settle();
+    expect(visibleForms()).toHaveLength(1);
+    expect(visibleForms()[0].querySelector('#import-hf-repo-id')).not.toBeNull();
+
+    (modes.querySelector('[data-value="convert"]') as HTMLButtonElement).click();
+    await settle();
+    expect((target.querySelector('#convert-name') as HTMLInputElement).value).toBe('my-model');
+  });
+
   it('marks download state on the name and shows one memory badge per model', async () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
