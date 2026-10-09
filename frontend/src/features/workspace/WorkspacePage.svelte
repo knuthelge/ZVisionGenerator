@@ -943,7 +943,7 @@
 />
 
 <style>
-  .lora-chip { background: var(--color-bg-surface); color: var(--color-text-primary); }
+  .lora-chip { color: var(--color-text-primary); }
   .lora-weight { width: 3.5ch; border-radius: var(--radius-xs); background: transparent; text-align: center; font-family: var(--font-mono); font-weight: 400; color: var(--color-text-muted); appearance: textfield; -moz-appearance: textfield; }
   .lora-weight::-webkit-inner-spin-button, .lora-weight::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
   .lora-weight:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
