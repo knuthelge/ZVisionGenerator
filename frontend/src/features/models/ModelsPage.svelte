@@ -215,8 +215,7 @@
 {/snippet}
 
 {#snippet submitRow(label: string)}
-  <!-- Lines the main action up under the controls of the label-left rows above it. -->
-  <div class="form-actions">
+  <div class="flex justify-end">
     <Button variant="primary" type="submit" disabled={formsBusy} loading={formsBusy}>{label}</Button>
   </div>
 {/snippet}
@@ -346,14 +345,16 @@
       </div>
 
 
+      <!-- The three ways to add something, side by side; fields stack inside each. -->
+      <div class="grid min-w-0 grid-cols-1 items-start gap-4 lg:grid-cols-3">
       <Panel as="form" title="Convert a checkpoint" icon="cube" onsubmit={handleConvertCheckpoint}>
-        <div class="flex flex-col">
+        <div class="flex flex-col gap-4">
           {#key checkpointPathReset}
             <PathField
               id="convert-input-path"
               name="input_path"
               label="Checkpoint file"
-              layout="row"
+             
               value={checkpointPath}
               placeholder="/path/to/model.safetensors"
               pickerKind="existing_file"
@@ -364,11 +365,11 @@
             />
           {/key}
 
-          <FormField label="Name" for="convert-name" helper="How the model is listed in the app" layout="row">
+          <FormField label="Name" for="convert-name" helper="How the model is listed in the app">
             <Input id="convert-name" type="text" name="name" placeholder="my-model-name" />
           </FormField>
 
-          <FormField label="Model type" for="convert-model-type" required layout="row">
+          <FormField label="Model type" for="convert-model-type" required>
             <Select
               id="convert-model-type"
               name="model_type"
@@ -383,12 +384,12 @@
             />
           </FormField>
 
-          <FormField label="Base model (optional)" for="convert-base-model" helper="Base model ID or path" layout="row">
+          <FormField label="Base model (optional)" for="convert-base-model" helper="Base model ID or path">
             <Input id="convert-base-model" type="text" name="base_model" placeholder="base model id or path" />
           </FormField>
 
           {#if inventory?.stored_quants_supported}
-            <FormField label="Quantized copy (optional)" for="convert-quantize" helper="Also save a q8 or q4 copy, used when that quantize level is selected" layout="row">
+            <FormField label="Quantized copy (optional)" for="convert-quantize" helper="Also save a q8 or q4 copy, used when that quantize level is selected">
               <Select
                 id="convert-quantize"
                 name="quantize"
@@ -401,7 +402,7 @@
             </FormField>
           {/if}
 
-          <FormField label="Source file" layout="row">
+          <FormField label="Source file">
             <label class="flex min-h-control cursor-pointer items-center gap-2 text-ui text-text-secondary" for="convert-copy">
               <input type="checkbox" name="copy" id="convert-copy" class="accent-primary-main h-3.5 w-3.5" />
               Copy instead of moving
@@ -413,13 +414,13 @@
       </Panel>
 
       <Panel as="form" title="Import a local LoRA" icon="folder" onsubmit={handleImportLoraLocal}>
-        <div class="flex flex-col">
+        <div class="flex flex-col gap-4">
           {#key localLoraPathReset}
             <PathField
               id="import-local-source-path"
               name="source_path"
               label="LoRA file"
-              layout="row"
+             
               value={localLoraPath}
               placeholder="/path/to/lora.safetensors"
               pickerKind="existing_file"
@@ -430,7 +431,7 @@
             />
           {/key}
 
-          <FormField label="Name" for="import-local-name" helper="How the LoRA is listed in the app" layout="row">
+          <FormField label="Name" for="import-local-name" helper="How the LoRA is listed in the app">
             <Input id="import-local-name" type="text" name="name" placeholder="my-lora" />
           </FormField>
 
@@ -439,28 +440,27 @@
       </Panel>
 
       <Panel as="form" title="Download a LoRA from Hugging Face" icon="download" onsubmit={handleImportLoraHF}>
-        <div class="flex flex-col">
-          <FormField label="Repository" for="import-hf-repo-id" required helper="For example owner/repository" layout="row">
+        <div class="flex flex-col gap-4">
+          <FormField label="Repository" for="import-hf-repo-id" required helper="For example owner/repository">
             <Input id="import-hf-repo-id" type="text" name="repo_id" placeholder="owner/repository" required />
           </FormField>
 
-          <FormField label="File" for="import-hf-filename" required helper="Name of the file in the repository" layout="row">
+          <FormField label="File" for="import-hf-filename" required helper="Name of the file in the repository">
             <Input id="import-hf-filename" type="text" name="filename" placeholder="model.safetensors" required />
           </FormField>
 
-          <FormField label="Name" for="import-hf-name" helper="How the LoRA is listed in the app" layout="row">
+          <FormField label="Name" for="import-hf-name" helper="How the LoRA is listed in the app">
             <Input id="import-hf-name" type="text" name="name" placeholder="my-hf-lora" />
           </FormField>
 
           {#if !inventory.huggingface_configured}
-            <div class="form-actions">
-              <Alert tone="warning">Set <span class="font-mono">HF_TOKEN</span> for gated model downloads.</Alert>
-            </div>
+            <Alert tone="warning">Set <span class="font-mono">HF_TOKEN</span> for gated model downloads.</Alert>
           {/if}
 
           {@render submitRow('Download LoRA')}
         </div>
       </Panel>
+      </div>
     </div>
   {/if}
 </AdminPageShell>
@@ -496,12 +496,3 @@
   {/if}
 </ConfirmDialog>
 
-<style>
-  /* Same columns as a row-layout field: the content starts under the controls. */
-  .form-actions { display: grid; grid-template-columns: 200px minmax(0, 480px); column-gap: 24px; padding-top: 12px; }
-  .form-actions > :global(*) { grid-column: 2; justify-self: start; }
-  @media (max-width: 639px) {
-    .form-actions { grid-template-columns: minmax(0, 1fr); }
-    .form-actions > :global(*) { grid-column: 1; }
-  }
-</style>
