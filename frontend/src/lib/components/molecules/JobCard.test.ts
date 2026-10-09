@@ -202,7 +202,8 @@ describe('JobCard', () => {
     flushSync();
     const segments = target.querySelectorAll('[aria-label="Generation sequence"] [role="listitem"]');
     expect(Array.from(segments).map((segment) => segment.getAttribute('data-state'))).toEqual(['previous', 'previous', 'previous', 'previous', 'current', 'waiting']);
-    expect(segments[3].classList.contains('run-boundary')).toBe(true);
+    expect(segments[2].getAttribute('aria-label')).toMatch(/^Run 1 · Prompt 3/);
+    expect(segments[3].getAttribute('aria-label')).toMatch(/^Run 2 · Prompt 1/);
     expect(segments[4].getAttribute('aria-label')).toBe('Run 2 · Prompt 2: current');
     expect(target.textContent?.match(/Run 2 of 2/g)).toHaveLength(1);
   });
