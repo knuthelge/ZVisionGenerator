@@ -6,7 +6,7 @@
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { Icon } from '$lib/components/atoms';
   import { PromptFileField, Segmented } from '$lib/components/molecules';
-  import type { PromptSource, WorkspaceContext } from '$lib/types';
+  import type { DraftState, PromptSource, WorkspaceContext } from '$lib/types';
   import PromptEnhancer from './PromptEnhancer.svelte';
   import { workspaceCapabilities } from './capabilities';
 
@@ -20,6 +20,13 @@
   }
 
   let { context, busy, jobsActive = false, oncollapse }: Props = $props();
+
+  /** Remember the loaded prompts file; an unchanged file is not written again. */
+  function setPromptFileLoaded(loaded: DraftState['promptFileLoaded']): void {
+    const current = draft.state.promptFileLoaded;
+    if (current?.path === loaded?.path && current?.count === loaded?.count) return;
+    draft.update('promptFileLoaded', loaded);
+  }
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -256,6 +263,7 @@
       disabled={busy}
       onPathChange={(path) => draft.update('promptFilePath', path)}
       onOptionChange={(optionIds) => draft.update('promptFileOptionIds', optionIds)}
+      onOptionsLoaded={setPromptFileLoaded}
     >
       {#snippet tools()}
         {#if caps.showEnhanceAuto && caps.enhancer}

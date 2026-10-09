@@ -19,9 +19,11 @@
     /** Seed of the most recent output, reused when the seed gets locked. */
     lastSeed: number | null;
     onImageFileChange: (file: File | null) => void;
+    /** Copy the CLI command for the current settings; the button is hidden without it. */
+    oncopycli?: () => void;
   }
 
-  let { context, busy, jobsActive = false, imageFile, referencePreviewUrl, lastSeed, onImageFileChange }: Props = $props();
+  let { context, busy, jobsActive = false, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, oncopycli }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -193,7 +195,19 @@
 <section class="settings-pane" aria-labelledby="ws-settings-title">
   <div class="settings-head">
     <h2 id="ws-settings-title" class="ui-area-label">Settings</h2>
-    <span class="settings-hint" title="Drag a label left or right to change its value; arrow keys nudge (Shift ×10)">Drag labels to scrub</span>
+    <div class="settings-head-end">
+      <span class="settings-hint" title="Drag a label left or right to change its value; arrow keys nudge (Shift ×10)">Drag labels to scrub</span>
+      {#if oncopycli}
+        <button
+          id="ws-copy-cli"
+          type="button"
+          class="ui-btn ui-btn-sm ui-btn-icon"
+          title="Copy these settings as a ziv CLI command"
+          aria-label="Copy CLI command"
+          onclick={oncopycli}
+        ><Icon name="terminal" size={14} /></button>
+      {/if}
+    </div>
   </div>
 
   <div class="settings-scroll">
@@ -505,6 +519,7 @@
 <style>
   .settings-pane { display: flex; flex: 1; min-height: 0; flex-direction: column; }
   .settings-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 8px; border-bottom: 1px solid var(--color-border-subtle); }
+  .settings-head-end { display: flex; align-items: center; gap: 6px; }
   .settings-hint { font-size: var(--text-meta); color: var(--color-text-muted); }
   .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 

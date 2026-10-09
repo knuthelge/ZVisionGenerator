@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Web UI: **Copy CLI command** (the terminal button in the Workspace's *Settings* header) copies the `ziv image` / `ziv video` command for the current model, prompt, LoRAs and settings, and says when the CLI can't match the job exactly (inline negative prompts, a subset of a prompt file's prompts, an uploaded reference image)
+
 ### Changed
 - Web UI: notifications appear one at a time at the bottom centre of the page instead of stacking over the top navigation, and they show above the asset viewer. Repeats merge into one with a count, others wait behind a "+N" marker, and errors come first and stay until dismissed (or until others have waited 8 s). Each one is tinted by its tone, and pauses while the pointer is on it. A failed Config save and a failed Gallery delete offer **Retry**, and a job added to the queue raises one message instead of two
 

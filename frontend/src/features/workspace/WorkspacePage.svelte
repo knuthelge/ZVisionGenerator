@@ -22,6 +22,7 @@
   } from '$lib/state/mascot';
   import { ActionMenu, AssetTile, AssetViewer, JobCard, ModelStatusBadges, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
   import { jobSettingsPrefill } from '$lib/state/jobSettings';
+  import { cliCommand, formSettings, type CliCaveat, type CliCommand } from '$lib/state/cliCommand';
   import { formatLoraString, loraLabel, parseLoraString, type LoraChip } from '$lib/state/loras';
   import QueuePanel from './QueuePanel.svelte';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
@@ -56,6 +57,11 @@
   let reactionTimer: ReturnType<typeof setTimeout> | undefined;
   let typingTimer: ReturnType<typeof setTimeout> | undefined;
 
+  const CLI_CAVEAT_NOTES: Record<CliCaveat, string> = {
+    negative_prompt: 'The CLI takes negative prompts only from a prompts file, so it was left out.',
+    prompt_options: 'The CLI runs every prompt in the file, not only the chosen ones.',
+    uploaded_image: 'The uploaded reference image is named by file name; replace it with its path.',
+  };
   const OUTPUT_GAP_PX = 12;
   const MIN_OUTPUT_CELL_PX = 160;
   let outputAreaWidth = $state(0);
@@ -542,6 +548,66 @@
     });
   }
 
+  /** Collect the fields Generate submits; with `run`, that one prompt-file prompt replaces the form's prompt. */
+  function buildFormData(form: HTMLFormElement, run: PendingPromptRun | null): FormData {
+    const formData = new FormData(form);
+    // Send canonical workflow directly; backend accepts and normalises it.
+    formData.set('mode', isImageMode ? 'image' : 'video');
+    formData.set('workflow', draft.state.workflow);
+    // Attach image file only for workflows that actually use a reference image
+    if (imageFile && (draft.state.workflow === 'img2img' || draft.state.workflow === 'img2vid')) {
+      formData.set('image_file', imageFile);
+    }
+    // Sync lora string
+    formData.set('lora', formatLoraString(loraChips));
+    // A non-blank Enhanced prompt replaces the inline prompt (never in JSON-caption, file, or auto-enhance mode).
+    if (run) {
+      applyPromptRun(formData, run);
+    } else if (enhancedOverrideActive(draft.state) && formData.has('prompt')) {
+      formData.set('prompt', submittedPrompt(draft.state));
+    }
+    return formData;
+  }
+
+  /** Whether prompt-file mode lacks a file or a chosen prompt, so there is nothing to run. */
+  function promptChoiceMissing(): boolean {
+    return draft.state.promptSource === 'file' && (!draft.state.promptFilePath || draft.state.promptFileOptionIds.length === 0);
+  }
+
+  /** Copy the CLI command that would run what Generate submits now. */
+  async function copyCliCommand(): Promise<void> {
+    // Report empty or invalid fields the way Generate does, rather than copying a command for them.
+    if (!formEl || !authorityReady || !formEl.reportValidity()) return;
+    if (promptChoiceMissing()) {
+      addToast(context?.prompt_file.help.option_required ?? 'Choose a prompt first.', 'error');
+      return;
+    }
+    const settings = formSettings(buildFormData(formEl, null));
+    // Only a count from the file the command names is trusted; an unknown count reports the caveat.
+    const loaded = draft.state.promptFileLoaded;
+    const promptFileOptionCount = loaded && loaded.path === settings.prompts_file ? loaded.count : null;
+    let built: CliCommand;
+    try {
+      built = cliCommand(settings, { outputDir: context?.output_dir, promptFileOptionCount });
+    } catch (err) {
+      addToast(err instanceof Error ? err.message : 'Could not build the CLI command', 'error');
+      return;
+    }
+    const { command, caveats } = built;
+    try {
+      await navigator.clipboard.writeText(command);
+    } catch {
+      addToast('Could not copy the CLI command', 'error');
+      return;
+    }
+    if (caveats.length === 0) {
+      addToast('CLI command copied', 'success');
+      return;
+    }
+    // Caveat notes take longer to read than the plain confirmation.
+    addToast(`CLI command copied. ${caveats.map((caveat) => CLI_CAVEAT_NOTES[caveat]).join(' ')}`, 'info', { timeout: 10000 });
+  }
+
   async function handleSubmit(e: Event): Promise<void> {
     e.preventDefault();
     await submitForm(null);
@@ -550,7 +616,7 @@
   /** Submit the form; with `run`, queue that one prompt-file prompt instead of the form's prompt. */
   async function submitForm(run: PendingPromptRun | null): Promise<void> {
     if (!formEl || busy || !authorityReady) return;
-    if (!run && draft.state.promptSource === 'file' && (!draft.state.promptFilePath || draft.state.promptFileOptionIds.length === 0)) {
+    if (!run && promptChoiceMissing()) {
       return;
     }
     loadError = null;
@@ -558,24 +624,7 @@
     draft.saveDraft();
 
     try {
-      const formData = new FormData(formEl);
-      // Send canonical workflow directly; backend accepts and normalises it.
-      formData.set('mode', isImageMode ? 'image' : 'video');
-      formData.set('workflow', draft.state.workflow);
-      // Attach image file only for workflows that actually use a reference image
-      if (imageFile && (draft.state.workflow === 'img2img' || draft.state.workflow === 'img2vid')) {
-        formData.set('image_file', imageFile);
-      }
-      // Sync lora string
-      formData.set('lora', formatLoraString(loraChips));
-      // A non-blank Enhanced prompt replaces the inline prompt (never in JSON-caption, file, or auto-enhance mode).
-      if (run) {
-        applyPromptRun(formData, run);
-      } else if (enhancedOverrideActive(draft.state) && formData.has('prompt')) {
-        formData.set('prompt', submittedPrompt(draft.state));
-      }
-
-      const jobCtx = await submitGenerate(formData);
+      const jobCtx = await submitGenerate(buildFormData(formEl, run));
       jobStore.jobSubmitted(jobCtx);
       if (jobCtx.queue_position) addToast(`${run ? `Queued ${run.optionId}` : 'Added to the queue'} as #${jobCtx.queue_position}.`, 'info');
       else if (run) addToast(`Queued ${run.optionId} from the prompt file.`, 'success');
@@ -759,6 +808,7 @@
       {referencePreviewUrl}
       lastSeed={historyStore.assets[0]?.seed ?? null}
       onImageFileChange={(f) => { imageFile = f; }}
+      oncopycli={copyCliCommand}
     />
 
     <section class="workspace-preview relative z-0 flex min-h-0 min-w-0 flex-col bg-bg-base">

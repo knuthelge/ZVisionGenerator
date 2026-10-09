@@ -460,6 +460,8 @@ export interface DraftState {
   negativePrompt: string;
   promptFilePath: string | null;
   promptFileOptionIds: string[];
+  /** The prompts file the Workspace last loaded and how many prompts it holds; null until one loads. */
+  promptFileLoaded: { path: string; count: number } | null;
   model: string;
   ratio: string;
   /** `ratio`: submit the ratio/size preset. `custom`: submit width/height. */

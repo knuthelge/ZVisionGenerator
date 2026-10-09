@@ -110,6 +110,8 @@ The **Prompts** page builds prompt files visually: snippets, sets of prompts, an
 
 Workspace settings are remembered in the browser between visits and restarts, as long as the Web UI starts on the same port. Choosing a different model applies that model's defaults.
 
+To run the same job from a terminal, press the terminal button in the *Settings* header. It copies a `ziv image` or `ziv video` command with the current model, prompt, LoRAs and settings, writing to the Web UI's output folder. The CLI has no inline negative prompt and runs every prompt in a prompts file rather than only the selected ones, so a notice says when the copied command differs from what Generate would run; an uploaded reference image is named by its file name, so replace it with the file's path.
+
 To give the preview more room, collapse the Compose and Settings sidebar with the **«** button next to *Compose*. It folds into a narrow strip with an expand button and a Generate button, and the choice is remembered in the browser. On phone-width screens the sidebar always shows above the preview. While a job runs, its card shows the progress and controls on the left and the live preview and outputs on the right.
 
 The workspace model picker and the Models page show whether each model is already downloaded; models that are not yet downloaded download on first use. On macOS they also show whether a downloaded model fits this Mac's memory, compared with the GPU memory Apple recommends for the machine:
