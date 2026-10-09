@@ -26,20 +26,19 @@ dependencies = [
     "accelerate>=1.13.0",
     "bitsandbytes>=0.49.0; sys_platform != 'darwin'",
     "diffusers==0.40.0",
-    "fastapi>=0.116.0",
-    "hf-transfer>=0.1.9",
-    "huggingface-hub>=1.23.0",
+    "fastapi>=0.143.0",
+    "huggingface-hub>=1.32.0,<2.0",
     "mflux>=0.20.0,<0.21; sys_platform == 'darwin'",
     "numpy>=2.0.0",
     "peft>=0.17.0; sys_platform != 'darwin'",
-    "Pillow>=12.0.0",
-    "python-multipart>=0.0.20",
+    "Pillow>=12.3.0",
+    "python-multipart>=0.0.32",
     "psutil>=5.9.0",
     "pyyaml>=6.0.3",
     "scipy>=1.17.0",
     "torch>=2.11.0",
     "transformers>=5.8.0",
-    "uvicorn>=0.35.0",
+    "uvicorn>=0.54.0",
     "mlx>=0.31.0; sys_platform == 'darwin'",
     "mlx-lm>=0.31.2; sys_platform == 'darwin'",
     "safetensors>=0.4.0",
@@ -54,6 +53,10 @@ build-backend = "hatchling.build"
 [tool.ruff]
 line-length = 200
 exclude = ["zvisiongenerator/_version.py", "packages"]
+
+[tool.ruff.lint]
+# Ruff 0.16 widened the default rule set; keep the previous defaults.
+select = ["E4", "E7", "E9", "F"]
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
