@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+- Web UI: Blob blends smoothly from one mood to the next instead of snapping mid-move, keeps painting between the images of a batch instead of flickering back to thinking, and thinks rather than paints while prompts are enhanced. A paused job gets its own waiting pose with a pause badge, so it no longer looks like Blob dozing off. Blob stops cheering once the next queued job starts painting, stays awake for a minute after reacting to a finished job, and is surprised when the Workspace loses track of a job
+
 ## [0.13.0b17] - 2026-10-09
 
 ### Added
