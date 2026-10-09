@@ -45,6 +45,20 @@ class TestManifest:
 
         assert sq.is_current(stored, source, 8, "mflux-1.0")
 
+    def test_stored_quant_bits_reads_the_manifest(self, tmp_path):
+        source = _make_source(tmp_path)
+        stored = tmp_path / "atlas@q4"
+        stored.mkdir()
+        sq.write_manifest(stored, sq.build_manifest(source, 4, "fmt"))
+
+        assert sq.stored_quant_bits(stored) == 4
+
+    @pytest.mark.parametrize("manifest", [None, "not json", '{"bits": 3}', "[]"])
+    def test_stored_quant_bits_is_none_without_a_valid_manifest(self, tmp_path, manifest):
+        if manifest is not None:
+            (tmp_path / sq.MANIFEST_NAME).write_text(manifest)
+        assert sq.stored_quant_bits(tmp_path) is None
+
     def test_missing_manifest_is_not_current(self, tmp_path):
         source = _make_source(tmp_path)
         stored = tmp_path / "atlas@q8"
@@ -103,6 +117,68 @@ class TestFolders:
         assert (stored / "transformer" / "config.json").is_file()
         assert (stored / "scheduler" / "scheduler_config.json").is_file()
         assert not (stored / "transformer" / "weights.safetensors").exists()
+
+    def test_copy_detection_files_keeps_component_configs_the_backend_wrote(self, tmp_path):
+        source = _make_source(tmp_path)
+        stored = tmp_path / "out"
+        (stored / "transformer").mkdir(parents=True)
+        (stored / "transformer" / "config.json").write_text('{"quantization_config": {}}')
+        (stored / "model_index.json").write_text('{"saved": true}')
+
+        sq.copy_detection_files(source, stored)
+
+        assert (stored / "transformer" / "config.json").read_text() == '{"quantization_config": {}}'
+        assert (stored / "model_index.json").read_text() == (source / "model_index.json").read_text()
+
+    def test_copy_detection_files_never_writes_through_a_hard_link_to_the_source(self, tmp_path):
+        source = _make_source(tmp_path)
+        (source / "model_index.json").write_text('{"source": true}')
+        stored = tmp_path / "out"
+        stored.mkdir()
+        os.link(source / "model_index.json", stored / "model_index.json")
+
+        sq.copy_detection_files(source, stored)
+
+        assert (source / "model_index.json").read_text() == '{"source": true}'
+        assert (stored / "model_index.json").stat().st_ino != (source / "model_index.json").stat().st_ino
+
+    def test_flush_to_disk_syncs_written_files_and_skips_links_to_the_source(self, tmp_path, monkeypatch):
+        source = _make_source(tmp_path)
+        stored = tmp_path / "out"
+        (stored / "transformer").mkdir(parents=True)
+        (stored / "transformer" / "w.safetensors").write_bytes(b"q")
+        os.link(source / "model_index.json", stored / "model_index.json")
+        synced: list[int] = []
+        monkeypatch.setattr(sq.os, "fsync", synced.append)
+
+        sq.flush_to_disk(stored)
+
+        assert len(synced) == 1  # the written weights; the hard link to the source's model_index.json is skipped
+
+    def test_a_file_that_cannot_be_synced_never_fails_the_flush(self, tmp_path, monkeypatch):
+        stored = tmp_path / "out"
+        stored.mkdir()
+        (stored / "w.safetensors").write_bytes(b"q")
+
+        def refuse(_fd):
+            raise OSError("EBADF")
+
+        monkeypatch.setattr(sq.os, "fsync", refuse)
+
+        sq.flush_to_disk(stored)  # no exception: the copy is kept
+
+    def test_flush_to_disk_syncs_read_only_files(self, tmp_path, monkeypatch):
+        stored = tmp_path / "out"
+        stored.mkdir()
+        weights = stored / "w.safetensors"
+        weights.write_bytes(b"q")
+        weights.chmod(0o444)
+        synced: list[int] = []
+        monkeypatch.setattr(sq.os, "fsync", synced.append)
+
+        sq.flush_to_disk(stored)
+
+        assert len(synced) == 1
 
     def test_partial_dir_is_hidden_and_unique(self, tmp_path):
         target = tmp_path / "atlas@q8"

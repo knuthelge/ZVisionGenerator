@@ -8,9 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 - Web UI: **Copy CLI command** (the terminal button in the Workspace's *Settings* header) copies the `ziv image` / `ziv video` command for the current model, prompt, LoRAs and settings, and says when the CLI can't match the job exactly (inline negative prompts, a subset of a prompt file's prompts, an uploaded reference image)
+- Windows/Linux: **stored quants**, as on macOS. The first q8 or q4 job saves a quantized copy of the model (`<name>@q8`, `<name>@q4`) that later jobs load. `ziv-model model --quantize` and **Quantized Copy** on the Models page work too
 
 ### Changed
 - Web UI: notifications appear one at a time at the bottom centre of the page instead of stacking over the top navigation, and they show above the asset viewer. Repeats merge into one with a count, others wait behind a "+N" marker, and errors come first and stay until dismissed (or until others have waited 8 s). Each one is tinted by its tone, and pauses while the pointer is on it. A failed Config save and a failed Gallery delete offer **Retry**, and a job added to the queue raises one message instead of two
+- Windows/Linux: q8 stores weights in FP8 and streams them from system memory, so any model that runs unquantized also runs at q8, including Krea 2 on 10–12 GB GPUs. Images differ from the previous q8 for the same seed
 
 ### Fixed
 - Windows/Linux: a finished job's model is freed before the next job loads

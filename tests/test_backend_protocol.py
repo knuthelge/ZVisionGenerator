@@ -77,6 +77,14 @@ class TestBackendRegistryLookup:
         assert result is backend
         assert backends.BACKENDS["diffusers"] is backend
 
+    @pytest.mark.parametrize("platform", ["darwin", "win32", "linux"])
+    def test_every_supported_platform_stores_quants(self, monkeypatch, platform):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends.sys, "platform", platform)
+
+        assert backends.supports_stored_quants() is True
+
     @pytest.mark.parametrize("platform", ["win32", "linux"])
     def test_cuda_platforms_release_finished_models(self, monkeypatch, platform):
         import zvisiongenerator.backends as backends
@@ -89,6 +97,33 @@ class TestBackendRegistryLookup:
         backends.release_accelerator_memory()
 
         assert released == [True]
+
+    def test_drop_cached_files_syncs_and_drops_every_file(self, monkeypatch, tmp_path):
+        import os
+
+        from zvisiongenerator.backends import memory_cuda
+
+        (tmp_path / "transformer").mkdir()
+        (tmp_path / "transformer" / "weights.safetensors").write_bytes(b"w")
+        (tmp_path / "config.json").write_text("{}")
+        dropped: list[int] = []
+        monkeypatch.setattr(os, "posix_fadvise", lambda fd, _offset, _length, advice: dropped.append(advice), raising=False)
+        monkeypatch.setattr(os, "POSIX_FADV_DONTNEED", 4, raising=False)
+
+        memory_cuda.drop_cached_files(tmp_path)
+
+        assert dropped == [4, 4]
+
+    def test_release_memory_trims_the_heap(self, monkeypatch):
+        from zvisiongenerator.backends import memory_cuda
+
+        trimmed: list[bool] = []
+        monkeypatch.setitem(sys.modules, "torch", MagicMock())
+        monkeypatch.setattr(memory_cuda, "_trim_heap", lambda: trimmed.append(True))
+
+        memory_cuda.release_memory()
+
+        assert trimmed == [True]
 
     def test_unsupported_platform_error_lists_supported_image_platforms(self, monkeypatch):
         import zvisiongenerator.backends as backends

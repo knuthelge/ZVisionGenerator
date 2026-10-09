@@ -10,7 +10,7 @@ import sys
 import tempfile
 import threading
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import Any
 
 from PIL import Image
@@ -391,9 +391,17 @@ class MfluxBackend:
         self._model_info = model_info
         return model, model_info
 
-    def stored_quant_format(self) -> str | None:
-        """Return the format tag of quantized weights this backend saves (the mflux version)."""
+    def stored_quant_format(self, bits: int) -> str | None:
+        """Return the format tag of quantized weights this backend saves: the mflux version, at every level."""
         return f"mflux-{importlib.metadata.version('mflux')}"
+
+    def quantizes_from_files(self, bits: int) -> bool:
+        """Return ``False``: mflux saves every level from a model loaded at that level."""
+        return False
+
+    def write_quantized_files(self, source: str, path: str, bits: int, cancelled: Callable[[], bool] | None = None) -> None:
+        """Raise: mflux saves stored quants from a loaded model (see :meth:`save_quantized`)."""
+        raise NotImplementedError("mflux saves stored quants from a loaded model.")
 
     def save_quantized(self, model: Any, path: str) -> None:
         """Write a loaded, quantized model's weights to *path* in mflux's own format.

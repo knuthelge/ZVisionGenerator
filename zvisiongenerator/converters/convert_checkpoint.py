@@ -628,17 +628,12 @@ def _store_quantized_copy(model_dir: Path, bits: int) -> Path:
         RuntimeError: When this platform's backend cannot store quantized weights, or the save fails.
     """
     from zvisiongenerator.backends import get_backend
-    from zvisiongenerator.image_model_loader import save_stored_quant
+    from zvisiongenerator.image_model_loader import create_stored_quant
     from zvisiongenerator.utils.stored_quant import stored_quant_dir
 
-    backend = get_backend()
-    backend_format = backend.stored_quant_format()
-    if backend_format is None:
-        raise RuntimeError("Saving quantized models is only supported on macOS (mflux).")
     target = stored_quant_dir(model_dir, bits)
     print(f"\nQuantizing to q{bits} and saving {target.name}...")
-    model, _info = backend.load_model(str(model_dir), quantize=bits)
-    if not save_stored_quant(backend, model, source=model_dir, target=target, bits=bits, backend_format=backend_format):
+    if not create_stored_quant(get_backend(), model_dir, target, bits):
         raise RuntimeError("the save failed (see the warning above)")
     print(f"Saved quantized model: {target}")
     return target
@@ -717,7 +712,7 @@ def _build_model_parser(*, prog: str = "ziv-model") -> argparse.ArgumentParser:
         type=int,
         choices=[4, 8],
         default=None,
-        help="Also save a quantized copy as <name>@q4 or <name>@q8, used when that quantize level is selected (macOS)",
+        help="Also save a quantized copy as <name>@q4 or <name>@q8, used when that quantize level is selected",
     )
 
     # lora subcommand

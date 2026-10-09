@@ -8,6 +8,7 @@ manifest recording what it was made from, so a changed source or backend format 
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import time
@@ -23,6 +24,8 @@ __all__ = [
     "build_manifest",
     "copy_detection_files",
     "discard_partial",
+    "flush_to_disk",
+    "fsync_file",
     "is_current",
     "parse_stored_quant_name",
     "partial_dir",
@@ -31,6 +34,7 @@ __all__ = [
     "stored_quant_dir",
     "stored_quant_dirs_for",
     "stored_quant_name",
+    "stored_quant_bits",
     "sweep_stale_partials",
     "write_manifest",
 ]
@@ -39,11 +43,15 @@ MANIFEST_NAME = "ziv-quant.json"
 STORED_QUANT_BITS = (4, 8)
 _MANIFEST_VERSION = 1
 _NAME_PATTERN = re.compile(r"^(?P<base>.+)@q(?P<bits>4|8)$")
-# Files detect_image_model needs (family, distillation, Klein size) that backends do not save with the weights.
-_DETECTION_FILES = ("model_index.json", "transformer/config.json")
+# Files detect_image_model needs (family, distillation, Klein size) that backends may not save with the weights.
+# The source's model_index.json always wins; a component config a backend wrote (e.g. with its quantization
+# settings) is kept.
+_INDEX_FILE = "model_index.json"
+_COMPONENT_DETECTION_FILES = ("transformer/config.json",)
 _DETECTION_DIRS = ("scheduler",)
-# A save takes well under a minute; older partial folders are left over from an interrupted process.
-_STALE_PARTIAL_SECONDS = 15 * 60
+# A running save writes to its partial folder at least every few minutes; one with nothing written for an hour
+# was left by an interrupted process.
+_STALE_PARTIAL_SECONDS = 60 * 60
 
 
 def stored_quant_name(name: str, bits: int) -> str:
@@ -94,12 +102,54 @@ def is_current(stored_dir: Path, source_dir: Path, bits: int, backend_format: st
 
     The source path is informational only, so renaming the models directory keeps copies valid.
     """
+    manifest = _read_manifest(stored_dir)
+    expected = {"version": _MANIFEST_VERSION, "bits": bits, "backend_format": backend_format, **source_fingerprint(source_dir)}
+    return manifest is not None and all(manifest.get(key) == value for key, value in expected.items())
+
+
+def stored_quant_bits(stored_dir: Path) -> int | None:
+    """Return the bits recorded in *stored_dir*'s manifest, or ``None`` when it is not a complete stored quant."""
+    bits = (_read_manifest(stored_dir) or {}).get("bits")
+    return bits if bits in STORED_QUANT_BITS else None
+
+
+def _read_manifest(stored_dir: Path) -> dict[str, Any] | None:
+    """Return *stored_dir*'s manifest, or ``None`` when it is missing or unreadable (an incomplete copy)."""
     try:
         manifest = json.loads((stored_dir / MANIFEST_NAME).read_text(encoding="utf-8"))
     except OSError, ValueError:
-        return False
-    expected = {"version": _MANIFEST_VERSION, "bits": bits, "backend_format": backend_format, **source_fingerprint(source_dir)}
-    return isinstance(manifest, dict) and all(manifest.get(key) == value for key, value in expected.items())
+        return None
+    return manifest if isinstance(manifest, dict) else None
+
+
+def flush_to_disk(stored_dir: Path) -> None:
+    """Write every file in *stored_dir* through to disk.
+
+    A new copy is several gigabytes of page cache the kernel cannot release until it is written back, so it is
+    flushed before the model loads. Flushing also makes the copy durable before its manifest marks it complete.
+    """
+    for path in stored_dir.rglob("*"):
+        # Hard links to the source need no flush.
+        if path.is_file() and not path.is_symlink() and path.stat().st_nlink == 1:
+            fsync_file(path)
+
+
+def fsync_file(path: Path) -> None:
+    """Write *path* through to disk if this platform can; a file it cannot sync stays in the page cache.
+
+    Windows only syncs handles opened for writing, so a file copied with read-only permissions is opened
+    read-only and, there, cannot be synced. Flushing is a memory and durability aid, never a reason to discard
+    a finished copy.
+    """
+    try:
+        try:
+            handle = open(path, "r+b")
+        except PermissionError:
+            handle = open(path, "rb")
+        with handle:
+            os.fsync(handle.fileno())
+    except OSError:
+        pass  # e.g. another process holding the file on Windows
 
 
 def write_manifest(stored_dir: Path, manifest: dict[str, Any]) -> None:
@@ -108,17 +158,23 @@ def write_manifest(stored_dir: Path, manifest: dict[str, Any]) -> None:
 
 
 def copy_detection_files(source_dir: Path, stored_dir: Path) -> None:
-    """Copy the detection files that exist in *source_dir* into *stored_dir* (following symlinks)."""
-    for relative in _DETECTION_FILES:
+    """Copy the detection files that exist in *source_dir* into *stored_dir* (following symlinks).
+
+    ``model_index.json`` is always replaced by the source's; component configs and folders the backend already
+    wrote are kept.
+    """
+    for relative in (_INDEX_FILE, *_COMPONENT_DETECTION_FILES):
         source = source_dir / relative
-        if source.is_file():
-            target = stored_dir / relative
+        target = stored_dir / relative
+        if source.is_file() and (relative == _INDEX_FILE or not target.exists()):
             target.parent.mkdir(parents=True, exist_ok=True)
+            # Unlink first: the target may be a hard link to the source's own file.
+            target.unlink(missing_ok=True)
             shutil.copyfile(source, target)
     for relative in _DETECTION_DIRS:
         source = source_dir / relative
-        if source.is_dir():
-            shutil.copytree(source, stored_dir / relative, dirs_exist_ok=True)
+        if source.is_dir() and not (stored_dir / relative).exists():
+            shutil.copytree(source, stored_dir / relative)
 
 
 def partial_dir(target: Path) -> Path:
@@ -139,7 +195,7 @@ def discard_partial(partial: Path) -> None:
 
 
 def sweep_stale_partials(target: Path, *, older_than_seconds: float = _STALE_PARTIAL_SECONDS) -> None:
-    """Remove *target*'s partial folders older than *older_than_seconds* (left by a killed or crashed save)."""
+    """Remove *target*'s partial folders with nothing written for *older_than_seconds* (left by a killed or crashed save)."""
     cutoff = time.time() - older_than_seconds
     try:
         candidates = list(target.parent.glob(f".{target.name}.*.partial"))
@@ -147,7 +203,12 @@ def sweep_stale_partials(target: Path, *, older_than_seconds: float = _STALE_PAR
         return
     for partial in candidates:
         try:
-            if partial.stat().st_mtime < cutoff:
+            if _last_write(partial) < cutoff:
                 discard_partial(partial)
         except OSError:
             continue
+
+
+def _last_write(folder: Path) -> float:
+    """Return the newest modification time of *folder* and everything in it."""
+    return max([folder.stat().st_mtime, *(path.stat().st_mtime for path in folder.rglob("*"))])
