@@ -1,6 +1,6 @@
 # No borders and Graphite with teal and coral
 
-**Status:** Done (unreleased; branch `worktree-web-design-system`)
+**Status:** Done (v0.13.0b16, 2026-10-09)
 
 Follows [One design system for the Web UI](web-design-system.md). Decided from the previews in `.agent-work/ui-explorations.html` of the worktree (not committed): study 1 (borders), 3 (components) and 4 (Graphite colours).
 

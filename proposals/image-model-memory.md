@@ -1,6 +1,6 @@
 # Keep image models resident and reuse quantized weights
 
-**Status:** Done (2026-10-04, v0.13.0b10)
+**Status:** Done (2026-10-04, v0.13.0b16)
 
 ## Problem
 

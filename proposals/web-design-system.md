@@ -1,6 +1,6 @@
 # One design system for the Web UI
 
-**Status:** Done (2026-10-09, unreleased; branch `worktree-web-design-system`)
+**Status:** Done (v0.13.0b16, 2026-10-09)
 
 ## Problem
 

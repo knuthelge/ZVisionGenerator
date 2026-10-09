@@ -22,7 +22,7 @@ Diffusers-layout download size of each shipped image alias, read from the Huggin
 | `klein9b` | `black-forest-labs/FLUX.2-klein-9B` | yes | 34.7 GB | `unsloth/FLUX.2-klein-9B`: all 8 weight files byte-identical (LFS sha256) |
 | `klein4b` | `black-forest-labs/FLUX.2-klein-4B` | no | 16.0 GB | `unsloth/FLUX.2-klein-4B`: identical |
 | `zit` | `Tongyi-MAI/Z-Image-Turbo` | no | 32.8 GB | `unsloth/Z-Image-Turbo`: identical |
-| `krea2` | `unsloth/Krea-2-Turbo` (since 0.13.0b13) | no | 35.7 GB | — |
+| `krea2` | `unsloth/Krea-2-Turbo` | no | 35.7 GB | — |
 | `ideo` (macOS) | `ideogram-ai/ideogram-4-fp8` | yes | 27.5 GB | `unsloth/ideogram-4-fp8`: all 4 weight files identical |
 
 The mirrors keep the upstream licenses (`flux-non-commercial-license`, `ideogram-4-non-commercial`). They only remove the click-through gate. The backends already pass `model_path` through to mflux and diffusers, and Klein's size detection reads `9B`/`4B` from the repo name, so a mirror works exactly as `unsloth/Krea-2-Turbo` does today.

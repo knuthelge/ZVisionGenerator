@@ -6,12 +6,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
-## [0.13.0b15] - 2026-10-09
+## [0.13.0b16] - 2026-10-09
 
 ### Added
+- **Krea 2 Turbo** image model (`krea2` alias, `unsloth/Krea-2-Turbo`, an ungated mirror, so no Hugging Face token is needed) on macOS (mflux) and Windows/Linux (diffusers): 8 steps, guidance 1.0 (off), LoRAs, q4/q8, live previews, reference images and upscale, with stored quants on macOS. On Windows and Linux, `-q 4` lets the text encoder and transformer take turns on the GPU so it runs on 10–12 GB cards. On macOS it samples with Euler at the fixed timestep shift Krea trained it with, and its upscales refine in 3 steps
+- `ziv-model model --model-type krea2-turbo` (and the Models page converter) converts native and ComfyUI Krea 2 Turbo checkpoints
+- Config: `supports_scheduler: false` hides the Scheduler control and rejects `--scheduler` for models that sample with their own schedule (Krea 2); a scheduler carried over from another model is dropped
+- macOS: **stored quants**. The first job that runs a model at q8 or q4 saves the quantized weights in the models folder (`<name>@q8`, `<name>@q4`, named after the installed model or alias, e.g. `zit@q8`); later jobs load that copy instead of quantizing again. LoRAs apply on top. Copies are listed on the Models page and are deleted with their model
+- `ziv-model model --quantize 4|8` and **Quantized Copy** on the Models page save a quantized copy while converting a checkpoint
+- Web UI: **job queue**. While a job runs, Generate becomes **Add to queue**: change the settings and add more runs, which start one after another. The queue shows under the job card (**Up next**) with **Load settings**, remove and **Clear queue**, is shared by every tab, and keeps going when a job fails. New `GET /api/jobs` and `DELETE /api/jobs/queue` endpoints
+- Web UI: a **Prompts** page that builds prompt files visually. Define snippets, then build sets of prompt entries with `$snippet` chips, editable `{a|b}` choices (also while typing, and from selected words with `⌥↵`), text or named fields, an active switch, a negative prompt and full `enhance:` options. Drag sets, entries and snippets to arrange them. A preview shows each prompt as the model receives it, with a **Roll** of its choices. **Generate this one** queues a single prompt with the Workspace settings
+- Web UI: saving a prompt file keeps its comments and layout, keeps the Workspace's selected prompts pointing at the same entries after reordering or renaming, and asks before overwriting a file that changed on disk. `⌘Z` undoes, and unsaved changes survive leaving the page. **New file…** creates an empty prompt file; a file that doesn't load opens in a repair view
+- Web UI: **Upscale → 2× / 4×** in the asset viewer (or **X** then **2** / **4**) and in the **⋯** menu on thumbnails upscales an existing image, refined with the settings recorded in it. Each option shows the output size and is disabled, with the reason, when the model can't upscale or the output is too large. The result is saved next to the original as `<name>_2x.png` / `<name>_4x.png`; jobs started from the Gallery open the Workspace
+- Config: viewer upscales refine with `upscale.existing_denoise_small` (0.4) up to `upscale.existing_large_megapixels` (2) of output and `upscale.existing_denoise_large` (0.2) above it, so an upscale of an upscale refines as lightly as a direct 4×; `upscale.max_megapixels` (20) caps their output size. `sharpening.existing_upscaled` (1.2) and `sharpening.existing_pre_upscale` (0, off) set their final and pre-refinement sharpening
+- Saved files also record the negative prompt, scheduler, model family, quantization, reference strength, generation time, upscale settings and the sharpen, contrast and saturation amounts
+- Web UI: the asset viewer's **Details** panel shows everything recorded in the file, grouped into Generation, Post-processing and File, plus the original image of an upscale, with every LoRA on its own row (`name · weight`, full path on hover). **Reuse settings** also restores the negative prompt and scheduler
+- Web UI: more workspace shortcuts. `Alt+3` focuses the newest history tile, expanding the strip if needed. `P` pauses or resumes the running job, `N` skips to the next image and `R` repeats the current one
+- Web UI: the Compose and Settings sidebar can be collapsed into a narrow strip with expand and Generate buttons; the choice is remembered in the browser
 - Web UI: Config marks each setting you have set yourself with a dot and a reset button that returns it to the default, like the Workspace settings; the help under each setting says which default applies
 
 ### Changed
+- macOS: image models stay in memory for the whole job instead of re-reading (and re-quantizing) their weights for every image. On a 32 GB Mac, FLUX.2 Klein 9B q8 batches went from 60–80 s to about 28 s per image, with steady speed and no swap growth through the batch
+- macOS: MLX's free-buffer cache is capped at 4 GB and cleared after each image, which kept up to 29 GB of unused buffers resident before
+- macOS: memory estimates leave the text encoder unquantized for models whose loader keeps it in bfloat16 (Krea 2), so their q4/q8 estimates are no longer about 5–7 GB too low
+- `ziv-image` rejects `-q` for models that cannot be quantized (Ideogram 4), as the Web UI does
+- diffusers is updated to 0.40.0
+- Output files are named `<set name>_<YYYY-MM-DD_HH-MM-SS>.png` (or the video's extension). Settings are no longer packed into the name, since they are embedded in the file; a taken name gets `_2`, `_3`… instead of being overwritten. Scripts that parse the old names need updating; the gallery still reads older names
+- Step counts for img2img refinement and upscale passes show the steps that actually run (e.g. 3 / 3 instead of 3 / 7)
+- Web UI: the **Sharpen** amount defaults to **auto**, which uses the config like `ziv-image` does (`sharpening.normal`, 1.0, for plain images and `sharpening.upscaled`, 1.2, for upscaled ones). Before, the Web UI always sent 0.8. A saved Workspace still on the old 0.8 switches to auto; type an amount to override
+- Web UI: the form stays editable while a job runs; the manual Enhance prompt button waits until all jobs have finished
+- Web UI: the running job's card shows the progress and controls with the live preview beside them; finished outputs appear in the History strip
+- Web UI: the job card's progress bar fills in the step being processed, at the stage's average step pace, so it creeps forward instead of jumping, and its elapsed time counts up every second
+- Web UI: **Edit YAML** in the prompt-file box is now **Edit** and opens the file on the Prompts page; the YAML text dialog is removed
+- Web UI: deleting assets, models and LoRAs asks in the app's own confirmation dialog instead of the browser's. `Enter` confirms and `Esc` cancels
 - Web UI: a calmer look with fewer lines: panels, cards and controls no longer have outlines and are told apart by shade, with dividers kept between rows; buttons, fields, chips and badges are filled, and segmented controls show the chosen option as a lighter pill in a darker track
 - Web UI: neutral grey surfaces replace the teal-tinted ones, so images carry the colour; teal stays the main colour, `$snippets` are coral like Blob's beret, and placeholders and grey badges are easier to read
 - Web UI: dialogs, menus, popovers, tooltips and notifications sit on a dark surface with a faint ring instead of a drop shadow, so they stand out from the page; destructive buttons are red, and every control shows the same focus ring
@@ -25,87 +52,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Web UI: the Prompts page uses the shared buttons, labels and page bar; all prompt text has one size, and an empty page says what to do next
 
 ### Fixed
+- Sharpen amounts above 1.5 are rejected (CLI, Web UI and config); higher values broke the sharpening filter. The Workspace control now stops at 1.5
+- macOS: generation progress reports each step once it has finished, and live previews no longer hold a step back; before, the bar sat still at a preview and then jumped two steps
 - Web UI: the Workspace's **Add LoRA** menu closes on Escape, an outside click or a choice, and works with the arrow keys; before, it stayed open until you picked a LoRA, even under other menus
 - Web UI: reusing an image's settings shows its LoRAs by name in the Workspace instead of by file path, so they match LoRAs added from the menu; negative LoRA weights are no longer cut off
-- Web UI: the Models page shows the dividers under card titles and table headers, and highlights the table row under the pointer; before, both were the same colour as the card
-
-## [0.13.0b14] - 2026-10-08
-
-### Added
-- Web UI: a **Prompts** page that builds prompt files visually. Define snippets, then build sets of prompt entries with `$snippet` chips, editable `{a|b}` choices (also while typing, and from selected words with `⌥↵`), text or named fields, an active switch, a negative prompt and full `enhance:` options. Drag sets, entries and snippets to arrange them. A preview shows each prompt as the model receives it, with a **Roll** of its choices. **Generate this one** queues a single prompt with the Workspace settings
-- Web UI: saving a prompt file keeps its comments and layout, keeps the Workspace's selected prompts pointing at the same entries after reordering or renaming, and asks before overwriting a file that changed on disk. `⌘Z` undoes, and unsaved changes survive leaving the page
-- Web UI: **New file…** creates an empty prompt file; a file that doesn't load opens in a repair view
-
-### Changed
-- Web UI: the job card shows only the job and its live preview; finished outputs appear in the History strip instead of a thumbnail grid on the card
-- Web UI: the job card's progress bar fills in the step being processed, at the stage's average step pace, so it creeps forward instead of jumping
-- Web UI: the job card's elapsed time counts up every second instead of only when a step finishes
-- Web UI: **Edit YAML** in the prompt-file box is now **Edit** and opens the file on the Prompts page; the YAML text dialog is removed
-
-### Fixed
-- macOS: generation progress reports each step once it has finished, and live previews no longer hold a step back; before, the bar sat still at a preview and then jumped two steps
-
-## [0.13.0b13] - 2026-10-07
-
-### Added
-- Windows/Linux: reference images (img2img) and upscale, including the viewer's **Upscale**, now work with Krea 2
-
-### Changed
-- Krea 2: the `krea2` alias uses `unsloth/Krea-2-Turbo`, an ungated mirror, so no Hugging Face token or license acceptance is needed
-- Krea 2: only Krea 2 Turbo is supported. The Raw defaults and `ziv-model model --model-type krea2-raw` are removed
-- Krea 2: negative prompts are turned off for it
-- macOS: Krea 2 samples with Euler at the fixed timestep shift Krea trained it with, instead of mflux's er_sde sampler and size-dependent shift; upscales and reference images are no longer grainy
-- Krea 2 upscales refine in 3 steps instead of 4, which ranked better in side-by-side tests and is about 25% faster
-- Config: the per-backend `backends.<mflux|diffusers>` capability overrides added in 0.13.0b12 are removed; capability flags are per model family again
-
-### Fixed
-- Web UI: the asset viewer's Details panel lists every LoRA on its own row (`name · weight`, full path on hover); before, a second LoRA was cut off
-
-## [0.13.0b12] - 2026-10-06
-
-### Added
-- **Krea 2 Turbo** image model (`krea2` alias, `krea/Krea-2-Turbo`) on macOS (mflux) and Windows/Linux (diffusers): 8 steps, guidance 1.0 (off), negative prompts, LoRAs, q4/q8 and live previews, with stored quants on macOS. On Windows and Linux, `-q 4` lets the text encoder and transformer take turns on the GPU so it runs on 10–12 GB cards. The model is gated on Hugging Face and needs its license accepted and a token
-- Krea 2 Raw models (`krea/Krea-2-Raw` and Raw fine-tunes) default to 28 steps and guidance 5.5
-- `ziv-model model --model-type krea2-turbo|krea2-raw` (and the Models page converter) converts native and ComfyUI Krea 2 checkpoints
-- Config: a model preset's `backends.<mflux|diffusers>` entry overrides its capability flags for one backend. Krea 2 uses it to turn off reference images and upscale on Windows and Linux, where diffusers has no Krea 2 image-to-image pipeline; `ziv-image` rejects them there and the Web UI hides them
-- Config: `supports_scheduler: false` hides the Scheduler control and rejects `--scheduler` for models that sample with their own schedule (Krea 2); a scheduler carried over from another model is dropped
-
-### Changed
-- macOS: memory estimates leave the text encoder unquantized for models whose loader keeps it in bfloat16 (Krea 2), so their q4/q8 estimates are no longer about 5–7 GB too low
-- diffusers is updated to 0.40.0, the first release with Krea 2 that does not build the full attention matrix for its text padding mask
-
-## [0.13.0b11] - 2026-10-05
-
-### Added
-- Web UI: **job queue**. While a job runs, Generate becomes **Add to queue**: change the settings and add more runs, which start one after another. The queue shows under the job card (**Up next**) with **Load settings**, remove and **Clear queue**, is shared by every tab, and keeps going when a job fails. New `GET /api/jobs` and `DELETE /api/jobs/queue` endpoints
-- Web UI: more workspace shortcuts. `Alt+3` focuses the newest history tile, expanding the strip if needed. `P` pauses or resumes the running job, `N` skips to the next image and `R` repeats the current one
-- Web UI: the Compose and Settings sidebar can be collapsed into a narrow strip with expand and Generate buttons; the choice is remembered in the browser
-- Web UI: **Upscale → 2× / 4×** in the asset viewer (or **X** then **2** / **4**) and in the **⋯** menu on thumbnails upscales an existing image, refined with the settings recorded in it. Each option shows the output size and is disabled, with the reason, when the model can't upscale or the output is too large. The result is saved next to the original as `<name>_2x.png` / `<name>_4x.png`; jobs started from the Gallery open the Workspace
-- Config: viewer upscales refine with `upscale.existing_denoise_small` (0.4) up to `upscale.existing_large_megapixels` (2) of output and `upscale.existing_denoise_large` (0.2) above it, so an upscale of an upscale refines as lightly as a direct 4×; `upscale.max_megapixels` (20) caps their output size. `sharpening.existing_upscaled` (1.2) and `sharpening.existing_pre_upscale` (0, off) set their final and pre-refinement sharpening
-- Saved files also record the negative prompt, scheduler, model family, quantization, reference strength, generation time, upscale settings and the sharpen, contrast and saturation amounts
-- Web UI: the asset viewer's **Details** panel shows everything recorded in the file, grouped into Generation, Post-processing and File, plus the original image of an upscale. **Reuse settings** also restores the negative prompt and scheduler
-
-### Changed
-- Web UI: the form stays editable while a job runs; the manual Enhance prompt button waits until all jobs have finished
-- Web UI: the running job's card puts the live preview and outputs in a column to the right of the progress and controls
-- Web UI: deleting assets, models and LoRAs asks in the app's own confirmation dialog instead of the browser's. `Enter` confirms and `Esc` cancels
-- Output files are named `<set name>_<YYYY-MM-DD_HH-MM-SS>.png` (or the video's extension). Settings are no longer packed into the name, since they are embedded in the file; a taken name gets `_2`, `_3`… instead of being overwritten. Scripts that parse the old names need updating; the gallery still reads older names
-- Step counts for img2img refinement and upscale passes show the steps that actually run (e.g. 3 / 3 instead of 3 / 7)
-- Web UI: the **Sharpen** amount defaults to **auto**, which uses the config like `ziv-image` does (`sharpening.normal`, 1.0, for plain images and `sharpening.upscaled`, 1.2, for upscaled ones). Before, the Web UI always sent 0.8. A saved Workspace still on the old 0.8 switches to auto; type an amount to override
-
-### Fixed
-- Sharpen amounts above 1.5 are rejected (CLI, Web UI and config); higher values broke the sharpening filter. The Workspace control now stops at 1.5
-
-## [0.13.0b10] - 2026-10-04
-
-### Added
-- macOS: **stored quants**. The first job that runs a model at q8 or q4 saves the quantized weights in the models folder (`<name>@q8`, `<name>@q4`, named after the installed model or alias, e.g. `zit@q8`); later jobs load that copy instead of quantizing again. LoRAs apply on top. Copies are listed on the Models page and are deleted with their model
-- `ziv-model model --quantize 4|8` and **Quantized Copy** on the Models page save a quantized copy while converting a checkpoint
-
-### Changed
-- macOS: image models stay in memory for the whole job instead of re-reading (and re-quantizing) their weights for every image. On a 32 GB Mac, FLUX.2 Klein 9B q8 batches went from 60–80 s to about 28 s per image, with steady speed and no swap growth through the batch
-- macOS: MLX's free-buffer cache is capped at 4 GB and cleared after each image, which kept up to 29 GB of unused buffers resident before
-- `ziv-image` rejects `-q` for models that cannot be quantized (Ideogram 4), as the Web UI does
+- Web UI: the Models page shows the dividers under card titles and table headers, and highlights the table row under the pointer
 
 ## [0.13.0b9] - 2026-10-04
 
