@@ -22,6 +22,7 @@
   } from '$lib/state/mascot';
   import { ActionMenu, AssetTile, AssetViewer, JobCard, ModelStatusBadges, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
   import { jobSettingsPrefill } from '$lib/state/jobSettings';
+  import { loraLabel, parseLoraString, type LoraChip } from '$lib/state/loras';
   import QueuePanel from './QueuePanel.svelte';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import ControlsSidebar from './ControlsSidebar.svelte';
@@ -147,21 +148,8 @@
       : false
   );
 
-  // Active lora chips parsed from draft.state.loraString
-  interface LoraChip {
-    name: string;
-    weight: number;
-  }
-
-  const loraChips = $derived<LoraChip[]>(
-    draft.state.loraString
-      ? draft.state.loraString.split(',').flatMap((entry) => {
-          const [name, w] = entry.trim().split(':');
-          if (!name) return [];
-          return [{ name, weight: w ? Number(w) : 1.0 }];
-        })
-      : []
-  );
+  // Active lora chips parsed from draft.state.loraString; reused settings record paths, shown by LoRA name.
+  const loraChips = $derived<LoraChip[]>(parseLoraString(draft.state.loraString, loraOptions));
 
   let loraPopoverOpen = $state(false);
   let loraButtonEl = $state<HTMLButtonElement | null>(null);
@@ -703,6 +691,7 @@
             memoryFit={selectedModel.memory_fit}
             quantize={supportsQuantize ? draft.state.quantize : null}
             lowMemory={!visibleControls.has('low_memory') || draft.state.lowMemory}
+            size="control"
             tooltipPlacement="bottom"
           />
         {/if}
@@ -717,16 +706,16 @@
           <div class="flex flex-wrap items-center gap-2 flex-1 min-w-0">
             <!-- Chips -->
             {#each loraChips as chip}
-              <!-- Neutral chip: pink is reserved for $snippet syntax in prompts. -->
+              <!-- Neutral chip: coral is reserved for $snippet syntax in prompts. -->
               <div class="ui-chip lora-chip">
-                <span class="max-w-28 truncate" title={chip.name}>{chip.name}</span>
+                <span class="max-w-28 truncate" title={chip.name}>{loraLabel(chip.name)}</span>
                 <input
                   type="number"
                   step="0.1"
                   min="-10"
                   max="10"
                   value={chip.weight}
-                  aria-label="{chip.name} weight"
+                  aria-label="{loraLabel(chip.name)} weight"
                   class="lora-weight"
                   onchange={(e) => updateLoraWeight(chip.name, Number((e.currentTarget as HTMLInputElement).value))}
                 >
@@ -734,7 +723,7 @@
                   type="button"
                   class="lora-remove"
                   onclick={() => removeLora(chip.name)}
-                  aria-label="Remove {chip.name}"
+                  aria-label="Remove {loraLabel(chip.name)}"
                 ><Icon name="close" size={11} /></button>
               </div>
             {/each}
@@ -743,7 +732,7 @@
             <button
               type="button"
               bind:this={loraButtonEl}
-              class="ui-btn ui-btn-sm ui-btn-add"
+              class="ui-btn ui-btn-add"
               disabled={loraOptions.length === 0}
               aria-haspopup="menu"
               aria-expanded={loraPopoverOpen}
@@ -943,8 +932,9 @@
 />
 
 <style>
-  .lora-chip { color: var(--color-text-primary); }
-  .lora-weight { width: 3.5ch; border-radius: var(--radius-xs); background: transparent; text-align: center; font-family: var(--font-mono); font-weight: 400; color: var(--color-text-muted); appearance: textfield; -moz-appearance: textfield; }
+  /* Chips in the toolbar share the height of the selects beside them. */
+  .lora-chip { height: var(--spacing-control); padding: 0 8px; border-radius: var(--radius-sm); color: var(--color-text-primary); }
+  .lora-weight { field-sizing: content; min-width: 2ch; border-radius: var(--radius-xs); background: transparent; text-align: center; font-family: var(--font-mono); font-weight: 400; color: var(--color-text-muted); appearance: textfield; -moz-appearance: textfield; }
   .lora-weight::-webkit-inner-spin-button, .lora-weight::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
   .lora-weight:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
   .lora-remove { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: -3px; border-radius: var(--radius-xs); color: var(--color-text-muted); }

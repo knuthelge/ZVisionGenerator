@@ -371,6 +371,8 @@
   .ui-badge-warning { background: color-mix(in srgb, var(--color-warning) 14%, transparent); color: var(--color-warning); }
   .ui-badge-error { background: color-mix(in srgb, var(--color-error) 14%, transparent); color: var(--color-error); }
   .ui-badge-info { background: color-mix(in srgb, var(--color-primary-main) 14%, transparent); color: var(--color-primary-main); }
+  /* A badge in a row of controls takes their height, so the row lines up. */
+  .ui-badge-control { height: var(--spacing-control); padding: 0 8px; border-radius: var(--radius-sm); font-size: var(--text-ui); }
 
   /* Containers */
   .ui-panel { min-width: 0; border-radius: var(--radius-md); background: var(--color-bg-surface); }

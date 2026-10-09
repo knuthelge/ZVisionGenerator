@@ -56,10 +56,14 @@
     lowMemory?: boolean;
     tooltipPlacement?: 'top' | 'bottom';
     tooltipAlign?: 'start' | 'end';
+    /** `control` matches the height of the controls beside it, as in the Workspace toolbar. */
+    size?: 'badge' | 'control';
     class?: string;
   }
 
-  let { downloaded = null, memoryFit = null, quantize = null, lowMemory = true, tooltipPlacement = 'top', tooltipAlign = 'start', class: extraClass = '' }: Props = $props();
+  let { downloaded = null, memoryFit = null, quantize = null, lowMemory = true, tooltipPlacement = 'top', tooltipAlign = 'start', size = 'badge', class: extraClass = '' }: Props = $props();
+
+  const badgeClass = $derived(size === 'control' ? 'ui-badge-control whitespace-nowrap' : 'whitespace-nowrap');
 
   const variants: Record<MemoryFitStatus, 'success' | 'warning' | 'error'> = {
     fits: 'success',
@@ -74,13 +78,13 @@
   <span class="inline-flex flex-wrap items-center gap-1 {extraClass}">
     {#if downloaded === false}
       <Tooltip text={NOT_DOWNLOADED_TOOLTIP} placement={tooltipPlacement} align={tooltipAlign} testId="model-download-status">
-        <Badge variant="neutral" class="whitespace-nowrap">Not downloaded</Badge>
+        <Badge variant="neutral" class={badgeClass}>Not downloaded</Badge>
       </Tooltip>
     {/if}
     {#if memoryFit && estimate}
       <Tooltip text={memoryFitTitle(memoryFit, estimate)} placement={tooltipPlacement} align={tooltipAlign} testId="model-memory-fit">
         <span data-status={estimate.status}>
-          <Badge variant={variants[estimate.status]} class="whitespace-nowrap">{MEMORY_FIT_LABELS[estimate.status]}</Badge>
+          <Badge variant={variants[estimate.status]} class={badgeClass}>{MEMORY_FIT_LABELS[estimate.status]}</Badge>
         </span>
       </Tooltip>
     {/if}
