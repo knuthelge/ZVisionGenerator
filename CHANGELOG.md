@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 - Web UI: the Workspace's **Add LoRA** menu closes on Escape, an outside click or a choice, and works with the arrow keys; before, it stayed open until you picked a LoRA, even under other menus
+- Web UI: reusing an image's settings shows its LoRAs by name in the Workspace instead of by file path, so they match LoRAs added from the menu; negative LoRA weights are no longer cut off
 - Web UI: the Models page shows the dividers under card titles and table headers, and highlights the table row under the pointer; before, both were the same colour as the card
 
 ## [0.13.0b14] - 2026-10-08
