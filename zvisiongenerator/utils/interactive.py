@@ -57,7 +57,12 @@ class SkipSignal:
         if normalized not in self._KNOWN_ACTIONS:
             raise ValueError(f"Unknown action '{action}'.")
         with self._lock:
-            self._action = normalized
+            self._set_action(normalized)
+
+    def _set_action(self, action: str) -> None:
+        """Queue *action*, unless a quit is already queued: a requested quit is never replaced (call with the lock held)."""
+        if self._action != "quit":
+            self._action = action
 
     def resume(self) -> None:
         with self._lock:
@@ -85,17 +90,19 @@ class SkipSignal:
                 return
 
             ch = ch.lower()
-            if ch == "n":
-                self._action = "skip"
+            if self._action == "quit" and ch in ("n", "p", "r"):
+                msg = "⏹  quit already queued."
+            elif ch == "n":
+                self._set_action("skip")
                 msg = "⏭  [n] skip — queued, takes effect after current step."
             elif ch == "q":
-                self._action = "quit"
+                self._set_action("quit")
                 msg = "⏹  [q] quit — queued, takes effect after current step."
             elif ch == "p":
-                self._action = "pause"
+                self._set_action("pause")
                 msg = "⏸  [p] pause — queued, takes effect after current image."
             elif ch == "r":
-                self._action = "repeat"
+                self._set_action("repeat")
                 msg = "♻  [r] repeat — queued, takes effect after current image."
 
         if msg:

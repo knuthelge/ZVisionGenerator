@@ -6,6 +6,8 @@ import io
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 def test_listen_unix_eof_breaks_loop():
     """_listen_unix should stop when stdin returns empty string (EOF)."""
@@ -83,3 +85,17 @@ class TestSkipSignalPending:
         assert signal.pending() == "quit"
         assert signal.consume() == "quit"
         assert signal.pending() is None
+
+    @pytest.mark.parametrize("later", ["skip", "pause", "repeat"])
+    def test_a_queued_quit_is_never_replaced(self, later):
+        """A stopped job may hold no model; a key pressed after Quit must not turn the stop into a generation."""
+        from zvisiongenerator.utils.interactive import SkipSignal
+
+        signal = SkipSignal()
+        signal.queue_action("quit")
+        signal.queue_action(later)
+        signal._on_key(later[0])
+
+        assert signal.consume() == "quit"
+        signal.queue_action(later)
+        assert signal.consume() == later
