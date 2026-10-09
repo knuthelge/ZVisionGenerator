@@ -94,12 +94,21 @@ export type MemoryFitStatus = 'fits' | 'tight' | 'too_large';
 
 export interface MemoryFitEstimate {
   status: MemoryFitStatus;
+  /** GPU memory needed (unified memory on Apple Silicon). */
   required_gb: number;
+  /** Discrete GPUs only: system memory needed for the weights that stream to the GPU. */
+  system_gb?: number;
 }
+
+/** `unified`: Apple Silicon, one memory pool. `discrete`: a CUDA GPU with its own memory, fed from system memory. */
+export type MemoryKind = 'unified' | 'discrete';
 
 /** Estimated memory need per quantize level (`none`, `4`, `8`) against this machine's GPU budget. */
 export interface MemoryFit {
+  kind?: MemoryKind;
   budget_gb: number;
+  /** Discrete GPUs only: this machine's system memory. */
+  system_budget_gb?: number;
   by_quantize: Record<string, MemoryFitEstimate>;
   /** LTX MLX video only: the estimate when low-memory mode is off and every component stays loaded. */
   without_low_memory?: MemoryFitEstimate;

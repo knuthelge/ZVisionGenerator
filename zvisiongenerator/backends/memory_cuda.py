@@ -1,4 +1,4 @@
-"""CUDA memory for the diffusers backends: the allocator options, and release after a job."""
+"""GPU and system memory for the CUDA backends: release after a job, and the machine's sizes."""
 
 from __future__ import annotations
 
@@ -74,3 +74,31 @@ def _trim_heap() -> None:
         ctypes.CDLL("libc.so.6").malloc_trim(0)
     except OSError, AttributeError:  # not glibc
         pass
+
+
+def memory_sizes() -> tuple[int, int] | None:
+    """Return ``(GPU memory, system memory)`` in bytes for the first NVIDIA GPU, or ``None`` without one.
+
+    The GPU's memory comes from ``nvidia-smi``, so the query does not start CUDA in this process.
+    """
+    gpu_bytes = _gpu_memory_bytes()
+    if gpu_bytes is None:
+        return None
+    import psutil
+
+    return gpu_bytes, int(psutil.virtual_memory().total)
+
+
+def _gpu_memory_bytes() -> int | None:
+    """Return the first NVIDIA GPU's memory in bytes as ``nvidia-smi`` reports it, or ``None`` when unavailable."""
+    import shutil
+    import subprocess
+
+    executable = shutil.which("nvidia-smi")
+    if executable is None:
+        return None
+    try:
+        result = subprocess.run([executable, "--query-gpu=memory.total", "--format=csv,noheader,nounits"], check=True, capture_output=True, text=True, timeout=10)
+        return int(float(result.stdout.strip().splitlines()[0])) * 1024 * 1024  # reported in MiB
+    except OSError, subprocess.SubprocessError, ValueError, IndexError:
+        return None

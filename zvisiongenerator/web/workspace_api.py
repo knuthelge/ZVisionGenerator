@@ -22,7 +22,7 @@ from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
 from zvisiongenerator.web.model_delete import installed_models_linking_to, model_delete_target
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
-from zvisiongenerator.web.model_status import describe_model_status, memory_budget_bytes
+from zvisiongenerator.web.model_status import describe_model_status, memory_budget
 
 
 _UNKNOWN_STATUS: dict[str, Any] = {"downloaded": None, "memory_fit": None}
@@ -173,8 +173,8 @@ def build_models_response(
     """
     data_dir = Path(web_config.data_dir)
     image_defaults_for = image_defaults_for or _build_image_bootstrap_defaults
-    # Quantize levels only shape memory estimates, so skip resolving them where there is no budget (off macOS).
-    image_defaults = {entry.name: image_defaults_for(entry.name, web_config) for entry in web_config.image_inventory} if memory_budget_bytes() else {}
+    # Quantize levels only shape memory estimates, so skip resolving them where there is no budget (no GPU found).
+    image_defaults = {entry.name: image_defaults_for(entry.name, web_config) for entry in web_config.image_inventory} if memory_budget() else {}
     find_local_dir = functools.cache(find_local_model_dir)
     status = _status_resolver(web_config, image_defaults, find_local_dir)
     delete_info = _delete_info_resolver(data_dir / "models", find_local_dir)
@@ -221,7 +221,7 @@ def _status_resolver(
     Image quantize levels come from the same bootstrap defaults that drive the workspace quantize picker, and
     download lookups are memoised for the request (LTX MLX models share one Gemma text-encoder lookup).
     """
-    budget = memory_budget_bytes()
+    budget = memory_budget()
     find_local_dir = find_local_dir or functools.cache(find_local_model_dir)
 
     def _status(entry: ImageInventoryEntry | VideoInventoryEntry | None, kind: str) -> dict[str, Any]:
@@ -229,7 +229,7 @@ def _status_resolver(
             return dict(_UNKNOWN_STATUS)
         quantize_options = _image_quantize_levels(web_config, image_model_defaults.get(entry.name, {})) if kind == "image" else ()
         try:
-            return describe_model_status(entry.resolved_path, kind=kind, quantize_options=quantize_options, budget_bytes=budget, find_local_dir=find_local_dir)
+            return describe_model_status(entry.resolved_path, kind=kind, quantize_options=quantize_options, budget=budget, find_local_dir=find_local_dir)
         except Exception as exc:  # noqa: BLE001 - one unreadable model must not break the whole listing
             warnings.warn(f"Could not determine status for model '{entry.name}': {exc}", stacklevel=2)
             return dict(_UNKNOWN_STATUS)
