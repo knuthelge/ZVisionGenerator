@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 - Windows/Linux: a finished job's model is freed before the next job loads
+- A queued quit is no longer replaced by a later skip, pause or repeat
 - Windows/Linux: Krea 2 decodes in tiles, avoiding out-of-memory errors at large sizes
 - Windows/Linux: unquantized Krea 2 runs on 10–12 GB GPUs
 - Windows/Linux: a refine or upscale pass no longer switches the rest of the job to float32
