@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import torch
@@ -10,13 +9,11 @@ from PIL import Image
 from diffusers import AutoPipelineForText2Image
 
 from zvisiongenerator.backends.image_win_preview import LivePreview, create_live_preview
+from zvisiongenerator.backends.memory_cuda import configure_allocator
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 
 # CUDA allocation and kernel tuning hints for the diffusers image backend.
-os.environ.setdefault(
-    "PYTORCH_CUDA_ALLOC_CONF",
-    "expandable_segments:True,garbage_collection_threshold:0.8",
-)
+configure_allocator()
 torch.backends.cudnn.benchmark = True
 torch.set_float32_matmul_precision("high")
 
@@ -160,6 +157,17 @@ def _load_quantized(model_path: str, quantize: int, torch_dtype: torch.dtype, fa
     return pipeline
 
 
+def _text_encoder_offload_type(text_encoder: Any) -> str:
+    """Return how to stream *text_encoder*: block by block when its layers form a top-level list, else leaf by leaf.
+
+    Block-level offloading only splits a top-level layer list. Qwen3-VL (Krea 2) nests its layers under
+    ``language_model`` and calls its embedding directly, so at block level its whole language model would move to
+    the GPU at once.
+    """
+    has_block_list = any(type(child).__name__ in ("ModuleList", "Sequential") for child in text_encoder.children())
+    return "block_level" if has_block_list else "leaf_level"
+
+
 def _make_step_callback(skip_signal, *, total_steps: int, step_callback=None, live_preview: LivePreview | None = None):
     """Create a callback_on_step_end that reports progress and interrupts on skip.
 
@@ -196,13 +204,13 @@ def _make_skip_callback(skip_signal):
 class DiffusersBackend:
     """diffusers/CUDA backend for Windows and Linux.
 
-    Stateful: holds a lazy-initialized img2img pipeline in self._img2img_pipe.
+    Holds only the loaded model's detected info. It keeps no pipeline between calls: the backend lives for the
+    whole process, so a cached pipeline would keep a finished job's model in memory.
     """
 
     name = "diffusers"
 
     def __init__(self):
-        self._img2img_pipe = None
         self._model_info: ImageModelInfo | None = None
 
     def stored_quant_format(self) -> str | None:
@@ -221,7 +229,6 @@ class DiffusersBackend:
         lora_paths: list[str] | None = None,
         lora_weights: list[float] | None = None,
     ) -> tuple[Any, "ImageModelInfo"]:
-        self._img2img_pipe = None
         if not torch.cuda.is_available():
             raise RuntimeError("CUDA is not available. The diffusers/CUDA image backend requires an NVIDIA GPU with CUDA support on Windows and Linux.")
         dtype_map = {
@@ -262,11 +269,10 @@ class DiffusersBackend:
                 low_cpu_mem_usage=True,
             )
 
-            # Stream text encoder layers similarly
             apply_group_offloading(
                 pipeline.text_encoder,
                 onload_device=torch.device("cuda"),
-                offload_type="block_level",
+                offload_type=_text_encoder_offload_type(pipeline.text_encoder),
                 num_blocks_per_group=1,
                 use_stream=True,
                 record_stream=True,
@@ -283,10 +289,13 @@ class DiffusersBackend:
             adapter_names = [f"lora_{i}" for i in range(len(lora_paths))]
             pipeline.set_adapters(adapter_names, adapter_weights=lora_weights)
 
-        if hasattr(pipeline, "enable_vae_slicing"):
-            pipeline.enable_vae_slicing()
-        if hasattr(pipeline, "enable_vae_tiling"):
-            pipeline.enable_vae_tiling()
+        # Decode in slices and tiles to bound VAE memory. Called on the VAE itself: some pipelines (Krea 2) have no
+        # enable_vae_tiling wrapper and would otherwise decode the whole frame at once.
+        for method in ("enable_slicing", "enable_tiling"):
+            try:
+                getattr(pipeline.vae, method, lambda: None)()
+            except NotImplementedError:
+                pass  # diffusers' base VAE class has the method but this VAE cannot tile or slice
 
         return pipeline, model_info
 
@@ -321,48 +330,41 @@ class DiffusersBackend:
             raise RuntimeError("load_model() must be called before generation")
         if self._model_info.family == "krea2":
             return self._krea2_image_to_image(model, image, prompt, strength, steps, seed, guidance, skip_signal, step_callback)
-        if self._img2img_pipe is None:
-            from diffusers import AutoPipelineForImage2Image
+        from diffusers import AutoPipelineForImage2Image
 
-            self._img2img_pipe = AutoPipelineForImage2Image.from_pipe(model)
+        # Built per call from the loaded components (cheap): a scheduler swap stays on this pipeline only, and
+        # no reference to the model outlives the job. Without a dtype, from_pipe casts the shared components to
+        # float32; the VAE carries the dtype the model loaded in.
+        img2img = AutoPipelineForImage2Image.from_pipe(model, torch_dtype=model.vae.dtype)
+        if scheduler == "beta":
+            from diffusers import FlowMatchEulerDiscreteScheduler
 
-        original_scheduler = self._img2img_pipe.scheduler
-        try:
-            if scheduler == "beta":
-                from diffusers import FlowMatchEulerDiscreteScheduler
+            img2img.scheduler = FlowMatchEulerDiscreteScheduler.from_config(img2img.scheduler.config, use_beta_sigmas=True)
 
-                self._img2img_pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(self._img2img_pipe.scheduler.config, use_beta_sigmas=True)
+        _is_flux = self._model_info.family in ("flux1", "flux2", "flux2_klein")
 
-            _is_flux = self._model_info is not None and self._model_info.family in ("flux1", "flux2", "flux2_klein")
+        # Free VRAM from the generation pass before refinement
+        torch.cuda.empty_cache()
 
-            # Free VRAM from the generation pass before refinement
-            torch.cuda.empty_cache()
+        generator = torch.Generator(device="cpu").manual_seed(seed) if seed is not None else None
+        pipe_kwargs = dict(
+            prompt=prompt,
+            image=image,
+            strength=strength,
+            num_inference_steps=steps,
+            guidance_scale=guidance if guidance is not None else (1.0 if _is_flux else 0.0),
+            generator=generator,
+        )
+        if not _is_flux and negative_prompt is not None:
+            pipe_kwargs["negative_prompt"] = negative_prompt
+        if skip_signal is not None or step_callback is not None:
+            pipe_kwargs.update(self._step_callback_kwargs(skip_signal, step_callback, steps, image.height, image.width))
 
-            generator = torch.Generator(device="cpu").manual_seed(seed) if seed is not None else None
-            pipe_kwargs = dict(
-                prompt=prompt,
-                image=image,
-                strength=strength,
-                num_inference_steps=steps,
-                guidance_scale=guidance if guidance is not None else (1.0 if _is_flux else 0.0),
-                generator=generator,
-            )
-            if not _is_flux and negative_prompt is not None:
-                pipe_kwargs["negative_prompt"] = negative_prompt
-            if skip_signal is not None or step_callback is not None:
-                pipe_kwargs.update(self._step_callback_kwargs(skip_signal, step_callback, steps, image.height, image.width))
-
-            result = self._img2img_pipe(**pipe_kwargs)
-
-            if skip_signal is not None and self._img2img_pipe._interrupt:
-                self._img2img_pipe._interrupt = False
-                torch.cuda.empty_cache()
-                return None
-
-            torch.cuda.empty_cache()
-            return result.images[0]
-        finally:
-            self._img2img_pipe.scheduler = original_scheduler
+        result = img2img(**pipe_kwargs)
+        torch.cuda.empty_cache()
+        if skip_signal is not None and img2img._interrupt:
+            return None
+        return result.images[0]
 
     def _krea2_image_to_image(
         self,

@@ -133,7 +133,12 @@ def get_video_backend(family: str) -> "VideoBackend":
 
 
 def release_accelerator_memory() -> None:
-    """Return cached accelerator memory to the system after a generation job (macOS/MLX only)."""
+    """Return a finished job's model memory to the system (MLX's buffer cache on macOS; collected models on CUDA)."""
+    if sys.platform in ("win32", "linux"):
+        from zvisiongenerator.backends.memory_cuda import release_memory as release_cuda_memory
+
+        release_cuda_memory()
+        return
     if sys.platform != "darwin":
         return
     from zvisiongenerator.backends.memory_mac import release_memory

@@ -26,6 +26,12 @@ from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import web_runner as web_runner_module
 
 
+@pytest.fixture(autouse=True)
+def _no_real_memory_release(monkeypatch):
+    """Never run the real accelerator cleanup (on CUDA it imports torch and collects garbage); tests may override it."""
+    monkeypatch.setattr(web_runner_module, "release_accelerator_memory", lambda: None)
+
+
 def _wait_for_status(runner: web_runner_module.WebRunner, job_id: str, expected_status: str, *, timeout: float = 1.0) -> dict[str, object]:
     """Poll a job until it reaches the expected status."""
     deadline = time.monotonic() + timeout

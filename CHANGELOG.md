@@ -12,6 +12,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Changed
 - Web UI: notifications appear one at a time at the bottom centre of the page instead of stacking over the top navigation, and they show above the asset viewer. Repeats merge into one with a count, others wait behind a "+N" marker, and errors come first and stay until dismissed (or until others have waited 8 s). Each one is tinted by its tone, and pauses while the pointer is on it. A failed Config save and a failed Gallery delete offer **Retry**, and a job added to the queue raises one message instead of two
 
+### Fixed
+- Windows/Linux: a finished job's model is freed before the next job loads
+- Windows/Linux: Krea 2 decodes in tiles, avoiding out-of-memory errors at large sizes
+- Windows/Linux: unquantized Krea 2 runs on 10–12 GB GPUs
+- Windows/Linux: a refine or upscale pass no longer switches the rest of the job to float32
+
 ## [0.13.0b16] - 2026-10-09
 
 ### Added
