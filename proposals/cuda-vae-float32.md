@@ -1,6 +1,22 @@
 # Decode in float32 on CUDA
 
-**Status:** Proposed (2026-10-04)
+**Status:** Rejected (2026-10-09): step 1 found no visible difference, so the cause is in sampling, not the VAE
+
+## Result of step 1
+
+Run on an RTX 3080 (10 GB), 1024×1024, seed 7, no LoRAs, with a face at medium distance and a smooth dusk gradient. Each prompt was decoded three ways: bfloat16 VAE (current), float32 VAE with the latents cast to its dtype, and float32 with tiling off.
+
+| Model | Mean / max pixel difference, bf16 vs fp32 | High-frequency energy, bf16 → fp32 (face; gradient) | Peak VRAM, bf16 → fp32 |
+|---|---|---|---|
+| Z-Image Turbo (10 steps) | 0.28 / 10 | eyes 3.575 → 3.563; sky 0.489 → 0.492 | 2.9 → 4.4–5.5 GB |
+| FLUX.2 Klein 4B (4 steps) | 0.29 / 4 | 4.084 → 4.080; 0.966 → 0.973 | 2.9 → 4.4 GB, one 9.1 GB spike |
+| Krea 2 Turbo, q4 (8 steps) | 0.30 / 35 (thin fence wires only) | 1.608 → 1.605; 0.767 → 0.764 | not recorded |
+
+- Eyes, lashes and freckles at 4× zoom are indistinguishable, and grain in smooth skies measures the same (high-frequency energy is the mean absolute difference from a 1.5 px Gaussian blur).
+- Tiling off changed nothing: at 1024×1024 diffusers does not tile.
+- float32 costs VRAM, including one 9.1 GB peak on a 10 GB card (Klein), for no visible gain.
+
+Per the outcomes below, this proposal is closed. The grain reported on CUDA is decided during sampling; the next step is a proposal comparing the mflux and diffusers scheduler configs for the same model.
 
 ## Problem
 
