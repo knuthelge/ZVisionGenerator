@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Web UI: Config marks each setting you have set yourself with a dot and a reset button that returns it to the default, like the Workspace settings; the help under each setting says which default applies
+
 ### Changed
 - Web UI: dialogs, menus, tooltips and notifications sit on one raised surface with a clear border instead of a drop shadow; destructive buttons are red, and every control shows the same focus ring
 - Web UI: Workspace settings sections have a header band with a summary of the hidden settings, and switches, badges and path fields share one compact size

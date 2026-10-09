@@ -14,6 +14,10 @@
     required?: boolean;
     browseLabel?: string;
     clearLabel?: string;
+    /** The value differs from the default (see FormField). */
+    changed?: boolean;
+    /** Clearing returns to the default: a reset button by the label replaces the Clear button. */
+    resettable?: boolean;
     pickerKind?: 'existing_file' | 'directory';
     pickerPurpose?: string;
     onresolve: (candidate: string) => Promise<string>;
@@ -32,6 +36,8 @@
     required = false,
     browseLabel = 'Browse',
     clearLabel = 'Clear',
+    changed = false,
+    resettable = false,
     pickerKind = 'existing_file',
     pickerPurpose = 'path',
     onresolve,
@@ -218,6 +224,8 @@
   {required}
   {feedbackId}
   announceFeedback
+  {changed}
+  onreset={resettable ? clear : undefined}
 >
   <div class="flex flex-col gap-2">
     {#if name}
@@ -263,9 +271,11 @@
         <Button type="button" disabled={disabled || pending} loading={pending} onclick={() => void browse()}>
           {pending ? pendingLabel : browseLabel}
         </Button>
-        <Button type="button" variant="quiet" disabled={disabled || pending || (!syncedValue && !inputValue)} onclick={clear}>
-          {clearLabel}
-        </Button>
+        {#if !resettable}
+          <Button type="button" variant="quiet" disabled={disabled || pending || (!syncedValue && !inputValue)} onclick={clear}>
+            {clearLabel}
+          </Button>
+        {/if}
       </div>
     </div>
   </div>

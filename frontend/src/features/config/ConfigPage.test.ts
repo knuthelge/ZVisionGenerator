@@ -296,6 +296,29 @@ describe('ConfigPage', () => {
     expect(values.some((value) => value.includes(cacheDir))).toBe(true);
   });
 
+  it('marks settings that have their own value and resets one to the default', async () => {
+    configApiMocks.getConfig.mockResolvedValue(makeConfig());
+    configApiMocks.updateConfig.mockResolvedValue(makeConfig());
+
+    app = flushSync(() => mount(ConfigPage, { target }));
+    await settle();
+
+    const reset = target.querySelector('button[aria-label="Reset Default image model to the default"]') as HTMLButtonElement;
+    expect(reset.getAttribute('aria-hidden')).toBeNull();
+    expect(target.textContent).toContain('Default: the first available image model.');
+
+    reset.click();
+    await settle();
+    const imageSelect = target.querySelector('select[name="ui.default_models.image"]') as HTMLSelectElement;
+    expect(imageSelect.value).toBe('');
+    expect(reset.getAttribute('aria-hidden')).toBe('true');
+    expect(target.textContent).toContain('Uses the default once you save.');
+
+    (target.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(configApiMocks.updateConfig.mock.calls[0][0]['ui.default_models.image']).toBeNull();
+  });
+
   it('saves and discards from the page bar through the settings form', async () => {
     configApiMocks.getConfig.mockResolvedValue(makeConfig());
 
