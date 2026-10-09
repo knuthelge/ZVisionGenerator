@@ -18,6 +18,8 @@
     changed?: boolean;
     /** Clearing returns to the default: a reset button by the label replaces the Clear button. */
     resettable?: boolean;
+    /** Field layout; see FormField. */
+    layout?: 'stack' | 'row';
     pickerKind?: 'existing_file' | 'directory';
     pickerPurpose?: string;
     onresolve: (candidate: string) => Promise<string>;
@@ -38,6 +40,7 @@
     clearLabel = 'Clear',
     changed = false,
     resettable = false,
+    layout = 'stack',
     pickerKind = 'existing_file',
     pickerPurpose = 'path',
     onresolve,
@@ -226,6 +229,7 @@
   announceFeedback
   {changed}
   onreset={resettable ? clear : undefined}
+  {layout}
 >
   <div class="flex flex-col gap-2">
     {#if name}

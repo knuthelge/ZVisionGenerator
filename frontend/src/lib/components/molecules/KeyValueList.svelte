@@ -34,7 +34,7 @@
 
 <style>
   .kv { display: flex; flex-direction: column; }
-  .kv-row { display: grid; grid-template-columns: minmax(120px, 200px) minmax(0, 1fr); gap: 4px 16px; padding: 8px 0; border-top: 1px solid var(--color-border-subtle); }
+  .kv-row { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 4px 24px; padding: 10px 0; border-top: 1px solid var(--color-border-subtle); }
   .kv-row:first-child { border-top: 0; padding-top: 0; }
   .kv-row:last-child { padding-bottom: 0; }
   .kv-value { display: block; font-size: var(--text-ui); color: var(--color-text-primary); overflow-wrap: anywhere; }

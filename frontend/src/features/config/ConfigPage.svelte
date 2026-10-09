@@ -214,7 +214,7 @@
 
       <!-- Writable settings are rendered from the backend schema inventory. -->
       <Panel title="Settings" icon="list">
-        <div class="grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2">
+        <div class="flex flex-col">
           {#each config.writable_config.fields as field (field.key)}
             {@const options = selectOptionsForField(field)}
             {#if field.key === 'ui.output_dir'}
@@ -226,6 +226,7 @@
                 helper={fieldHelper(field)}
                 changed={isChanged(field)}
                 resettable={field.clearable}
+                layout="row"
                 pickerKind="directory"
                 pickerPurpose="output_directory"
                 onresolve={async (candidate) => candidate}
@@ -237,7 +238,7 @@
                 }}
               />
             {:else if options}
-              <FormField label={fieldLabel(field)} for={fieldId(field)} helper={fieldHelper(field)} changed={isChanged(field)} onreset={field.clearable ? () => resetField(field) : undefined}>
+              <FormField label={fieldLabel(field)} for={fieldId(field)} helper={fieldHelper(field)} changed={isChanged(field)} onreset={field.clearable ? () => resetField(field) : undefined} layout="row">
                 <Select
                   id={fieldId(field)}
                   name={field.key}
@@ -246,7 +247,7 @@
                 />
               </FormField>
             {:else}
-              <FormField label={fieldLabel(field)} for={fieldId(field)} helper={fieldHelper(field)} changed={isChanged(field)} onreset={field.clearable ? () => resetField(field) : undefined}>
+              <FormField label={fieldLabel(field)} for={fieldId(field)} helper={fieldHelper(field)} changed={isChanged(field)} onreset={field.clearable ? () => resetField(field) : undefined} layout="row">
                 <Input
                   id={fieldId(field)}
                   name={field.key}

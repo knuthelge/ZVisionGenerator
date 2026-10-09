@@ -26,9 +26,10 @@
 </script>
 
 <main class="flex min-h-0 flex-1 flex-col bg-bg-base {extraClass}">
-  <PageHeader {title} {description} actions={loading || error ? undefined : actions} />
-  <div class="min-h-0 flex-1 overflow-y-auto">
-    <div class="p-4">
+  <PageHeader {title} {description} contained actions={loading || error ? undefined : actions} />
+  <!-- The padding sits outside the centred block, so content lines up with the page bar's title. -->
+  <div class="min-h-0 flex-1 overflow-y-auto p-4">
+    <div class="mx-auto max-w-page">
       {#if loading}
         <p class="flex items-center justify-center gap-2 py-24 text-ui text-text-muted" role="status"><Spinner />Loading…</p>
       {:else if error}

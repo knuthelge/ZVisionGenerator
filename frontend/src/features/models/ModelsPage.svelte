@@ -4,7 +4,7 @@
   import { addToast } from '$lib/state/toasts.svelte';
   import type { ModelDeleteInfo, ModelInventory, ModelStatusFields } from '$lib/types';
   import { Button, Icon, Input, Select, Tooltip } from '$lib/components/atoms';
-  import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField } from '$lib/components/molecules';
+  import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField, Segmented } from '$lib/components/molecules';
   import { DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
 
@@ -20,6 +20,14 @@
   let pendingDelete = $state<{ type: 'model'; name: string; info: ModelDeleteInfo } | { type: 'lora'; name: string } | null>(null);
   let deleteOpen = $state(false);
   let deleting = $state(false);
+
+  type AddMode = 'convert' | 'local' | 'hf';
+  const ADD_MODES: { value: AddMode; label: string }[] = [
+    { value: 'convert', label: 'Convert a checkpoint' },
+    { value: 'local', label: 'Import a local LoRA' },
+    { value: 'hf', label: 'Download from Hugging Face' },
+  ];
+  let addMode = $state<AddMode>('convert');
 
   onMount(async () => {
     await loadInventory();
@@ -213,6 +221,13 @@
   <span class="font-mono text-meta text-text-muted">{n}</span>
 {/snippet}
 
+{#snippet submitRow(label: string)}
+  <!-- Lines the main action up under the controls of the label-left rows above it. -->
+  <div class="form-actions">
+    <Button variant="primary" type="submit" disabled={formsBusy} loading={formsBusy}>{label}</Button>
+  </div>
+{/snippet}
+
 <AdminPageShell
   title="Models"
   description="Installed models and LoRAs. Convert checkpoints and import LoRAs."
@@ -235,76 +250,78 @@
         ]} />
       </Panel>
 
-      <!-- Image models get the full width, so names are not cut short. -->
-      <Panel title="Image models" icon="cube" flush>
-        {#snippet actions()}{@render count(inventory!.image_models.length)}{/snippet}
-        {#if inventory.image_models.length === 0}
-          <p class="ui-help p-3 text-center">None found</p>
-        {:else}
-          <div class="overflow-x-auto px-1 pb-1">
-            <table class="ui-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Family</th>
-                  <th>Size</th>
-                  <th>Memory</th>
-                  <th class="w-8"><span class="sr-only">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each inventory.image_models as m}
-                  <tr>
-                    <td>
-                      {@render modelName(m)}
-                      {#if m.stored_quant}
-                        <span class="ui-help block font-normal" data-testid="stored-quant" title="Used automatically when {m.stored_quant.base_model} runs at q{m.stored_quant.bits}">q{m.stored_quant.bits} copy of {m.stored_quant.base_model}</span>
-                      {/if}
-                    </td>
-                    <td class="font-mono">{m.family}</td>
-                    <td class="font-mono">{m.size_label ?? '—'}</td>
-                    <td>{@render memoryFitCell(m)}</td>
-                    <td class="text-right">{@render modelDeleteCell(m)}</td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        {/if}
-      </Panel>
-
-      <div class="grid min-w-0 grid-cols-1 items-start gap-4 lg:grid-cols-2">
-        <Panel title="Video models" icon="cube" flush>
-          {#snippet actions()}{@render count(inventory!.video_models.length)}{/snippet}
-          {#if inventory.video_models.length === 0}
-            <p class="ui-help p-3 text-center">None found</p>
-          {:else}
-            <div class="overflow-x-auto px-1 pb-1">
-              <table class="ui-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Family</th>
-                    <th>Image to video</th>
-                    <th>Memory</th>
-                    <th class="w-8"><span class="sr-only">Actions</span></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {#each inventory.video_models as m}
+      <!-- Models on the left, the longer LoRA list in its own narrower column. -->
+      <div class="grid min-w-0 grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div class="flex min-w-0 flex-col gap-4">
+          <Panel title="Image models" icon="cube" flush>
+            {#snippet actions()}{@render count(inventory!.image_models.length)}{/snippet}
+            {#if inventory.image_models.length === 0}
+              <p class="ui-help p-3 text-center">None found</p>
+            {:else}
+              <div class="overflow-x-auto px-1 pb-1">
+                <table class="ui-table ui-table-comfortable">
+                  <thead>
                     <tr>
-                      <td>{@render modelName(m)}</td>
-                      <td class="font-mono">{m.family}</td>
-                      <td>{m.supports_i2v ? 'Yes' : '—'}</td>
-                      <td>{@render memoryFitCell(m)}</td>
-                      <td class="text-right">{@render modelDeleteCell(m)}</td>
+                      <th>Name</th>
+                      <th>Family</th>
+                      <th>Size</th>
+                      <th>Memory</th>
+                      <th class="w-8"><span class="sr-only">Actions</span></th>
                     </tr>
-                  {/each}
-                </tbody>
-              </table>
-            </div>
-          {/if}
-        </Panel>
+                  </thead>
+                  <tbody>
+                    {#each inventory.image_models as m}
+                      <tr>
+                        <td>
+                          {@render modelName(m)}
+                          {#if m.stored_quant}
+                            <span class="ui-help block font-normal" data-testid="stored-quant" title="Used automatically when {m.stored_quant.base_model} runs at q{m.stored_quant.bits}">q{m.stored_quant.bits} copy of {m.stored_quant.base_model}</span>
+                          {/if}
+                        </td>
+                        <td class="font-mono">{m.family}</td>
+                        <td class="font-mono">{m.size_label ?? '—'}</td>
+                        <td>{@render memoryFitCell(m)}</td>
+                        <td class="text-right">{@render modelDeleteCell(m)}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            {/if}
+          </Panel>
+
+          <Panel title="Video models" icon="cube" flush>
+            {#snippet actions()}{@render count(inventory!.video_models.length)}{/snippet}
+            {#if inventory.video_models.length === 0}
+              <p class="ui-help p-3 text-center">None found</p>
+            {:else}
+              <div class="overflow-x-auto px-1 pb-1">
+                <table class="ui-table ui-table-comfortable">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Family</th>
+                      <th>Image to video</th>
+                      <th>Memory</th>
+                      <th class="w-8"><span class="sr-only">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each inventory.video_models as m}
+                      <tr>
+                        <td>{@render modelName(m)}</td>
+                        <td class="font-mono">{m.family}</td>
+                        <td>{m.supports_i2v ? 'Yes' : '—'}</td>
+                        <td>{@render memoryFitCell(m)}</td>
+                        <td class="text-right">{@render modelDeleteCell(m)}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            {/if}
+          </Panel>
+        </div>
 
         <Panel title="LoRAs" icon="list" flush>
           {#snippet actions()}{@render count(inventory!.loras.length)}{/snippet}
@@ -312,7 +329,7 @@
             <p class="ui-help p-3 text-center">None found</p>
           {:else}
             <div class="overflow-x-auto px-1 pb-1">
-              <table class="ui-table">
+              <table class="ui-table ui-table-comfortable">
                 <thead>
                   <tr>
                     <th>Name</th>
@@ -324,7 +341,7 @@
                   {#each inventory.loras as l}
                     <tr>
                       <td class="break-words">{l.name}</td>
-                      <td class="font-mono">{l.size_label ?? '—'}</td>
+                      <td class="whitespace-nowrap font-mono">{l.size_label ?? '—'}</td>
                       <td class="text-right">{@render deleteButton(`Delete ${l.name}`, () => requestDelete({ type: 'lora', name: l.name }))}</td>
                     </tr>
                   {/each}
@@ -335,123 +352,122 @@
         </Panel>
       </div>
 
-      <div class="grid min-w-0 grid-cols-1 items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <Panel as="form" title="Convert a checkpoint" onsubmit={handleConvertCheckpoint}>
-          <div class="flex flex-col gap-4">
-            {#key checkpointPathReset}
-              <PathField
-                id="convert-input-path"
-                name="input_path"
-                label="Checkpoint file"
-                value={checkpointPath}
-                placeholder="/path/to/model.safetensors"
-                pickerKind="existing_file"
-                pickerPurpose="checkpoint_file"
-                required
-                onresolve={async (candidate) => candidate}
-                onvaluechange={(value) => (checkpointPath = value)}
-              />
-            {/key}
+      <!-- One form at a time; the others stay on the page, hidden, so switching keeps what you typed. -->
+      <Panel title="Add a model or LoRA" icon="plus">
+        {#snippet actions()}
+          <Segmented size="sm" label="What to add" value={addMode} options={ADD_MODES} onchange={(mode: AddMode) => (addMode = mode)} />
+        {/snippet}
 
-            <FormField label="Name" for="convert-name" helper="How the model is listed in the app">
-              <Input id="convert-name" type="text" name="name" placeholder="my-model-name" />
-            </FormField>
+        <form class="flex flex-col" hidden={addMode !== 'convert'} onsubmit={handleConvertCheckpoint}>
+          {#key checkpointPathReset}
+            <PathField
+              id="convert-input-path"
+              name="input_path"
+              label="Checkpoint file"
+              layout="row"
+              value={checkpointPath}
+              placeholder="/path/to/model.safetensors"
+              pickerKind="existing_file"
+              pickerPurpose="checkpoint_file"
+              required
+              onresolve={async (candidate) => candidate}
+              onvaluechange={(value) => (checkpointPath = value)}
+            />
+          {/key}
 
-            <FormField label="Model type" for="convert-model-type" required>
+          <FormField label="Name" for="convert-name" helper="How the model is listed in the app" layout="row">
+            <Input id="convert-name" type="text" name="name" placeholder="my-model-name" />
+          </FormField>
+
+          <FormField label="Model type" for="convert-model-type" required layout="row">
+            <Select
+              id="convert-model-type"
+              name="model_type"
+              required
+              options={[
+                { value: '', label: 'Choose a type', disabled: true },
+                { value: 'zimage', label: 'zimage' },
+                { value: 'flux2-klein-4b', label: 'flux2-klein-4b' },
+                { value: 'flux2-klein-9b', label: 'flux2-klein-9b' },
+                { value: 'krea2-turbo', label: 'krea2-turbo' }
+              ]}
+            />
+          </FormField>
+
+          <FormField label="Base model (optional)" for="convert-base-model" helper="Base model ID or path" layout="row">
+            <Input id="convert-base-model" type="text" name="base_model" placeholder="base model id or path" />
+          </FormField>
+
+          {#if inventory?.stored_quants_supported}
+            <FormField label="Quantized copy (optional)" for="convert-quantize" helper="Also save a q8 or q4 copy, used when that quantize level is selected" layout="row">
               <Select
-                id="convert-model-type"
-                name="model_type"
-                required
+                id="convert-quantize"
+                name="quantize"
                 options={[
-                  { value: '', label: 'Choose a type', disabled: true },
-                  { value: 'zimage', label: 'zimage' },
-                  { value: 'flux2-klein-4b', label: 'flux2-klein-4b' },
-                  { value: 'flux2-klein-9b', label: 'flux2-klein-9b' },
-                  { value: 'krea2-turbo', label: 'krea2-turbo' }
+                  { value: '', label: 'None' },
+                  { value: '8', label: 'q8' },
+                  { value: '4', label: 'q4' }
                 ]}
               />
             </FormField>
+          {/if}
 
-            <FormField label="Base model (optional)" for="convert-base-model" helper="Base model ID or path">
-              <Input id="convert-base-model" type="text" name="base_model" placeholder="base model id or path" />
-            </FormField>
-
-            {#if inventory?.stored_quants_supported}
-              <FormField label="Quantized copy (optional)" for="convert-quantize" helper="Also save a q8 or q4 copy, used when that quantize level is selected">
-                <Select
-                  id="convert-quantize"
-                  name="quantize"
-                  options={[
-                    { value: '', label: 'None' },
-                    { value: '8', label: 'q8' },
-                    { value: '4', label: 'q4' }
-                  ]}
-                />
-              </FormField>
-            {/if}
-
-            <label class="flex cursor-pointer items-center gap-2 text-ui text-text-secondary" for="convert-copy">
+          <FormField label="Source file" layout="row">
+            <label class="flex min-h-control cursor-pointer items-center gap-2 text-ui text-text-secondary" for="convert-copy">
               <input type="checkbox" name="copy" id="convert-copy" class="accent-primary-main h-3.5 w-3.5" />
               Copy instead of moving
             </label>
+          </FormField>
 
-            <div class="flex justify-end">
-              <Button variant="primary" type="submit" disabled={formsBusy} loading={formsBusy}>Convert checkpoint</Button>
-            </div>
-          </div>
-        </Panel>
+          {@render submitRow('Convert checkpoint')}
+        </form>
 
-        <Panel as="form" title="Import a local LoRA" onsubmit={handleImportLoraLocal}>
-          <div class="flex flex-col gap-4">
-            {#key localLoraPathReset}
-              <PathField
-                id="import-local-source-path"
-                name="source_path"
-                label="LoRA file"
-                value={localLoraPath}
-                placeholder="/path/to/lora.safetensors"
-                pickerKind="existing_file"
-                pickerPurpose="lora_file"
-                required
-                onresolve={async (candidate) => candidate}
-                onvaluechange={(value) => (localLoraPath = value)}
-              />
-            {/key}
+        <form class="flex flex-col" hidden={addMode !== 'local'} onsubmit={handleImportLoraLocal}>
+          {#key localLoraPathReset}
+            <PathField
+              id="import-local-source-path"
+              name="source_path"
+              label="LoRA file"
+              layout="row"
+              value={localLoraPath}
+              placeholder="/path/to/lora.safetensors"
+              pickerKind="existing_file"
+              pickerPurpose="lora_file"
+              required
+              onresolve={async (candidate) => candidate}
+              onvaluechange={(value) => (localLoraPath = value)}
+            />
+          {/key}
 
-            <FormField label="Name" for="import-local-name" helper="How the LoRA is listed in the app">
-              <Input id="import-local-name" type="text" name="name" placeholder="my-lora" />
-            </FormField>
+          <FormField label="Name" for="import-local-name" helper="How the LoRA is listed in the app" layout="row">
+            <Input id="import-local-name" type="text" name="name" placeholder="my-lora" />
+          </FormField>
 
-            <div class="flex justify-end">
-              <Button variant="primary" type="submit" disabled={formsBusy} loading={formsBusy}>Import LoRA</Button>
-            </div>
-          </div>
-        </Panel>
+          {@render submitRow('Import LoRA')}
+        </form>
 
-        <Panel as="form" title="Download a LoRA from Hugging Face" onsubmit={handleImportLoraHF}>
-          <div class="flex flex-col gap-4">
-            <FormField label="Repository" for="import-hf-repo-id" required helper="For example owner/repository">
-              <Input id="import-hf-repo-id" type="text" name="repo_id" placeholder="owner/repository" required />
-            </FormField>
+        <form class="flex flex-col" hidden={addMode !== 'hf'} onsubmit={handleImportLoraHF}>
+          <FormField label="Repository" for="import-hf-repo-id" required helper="For example owner/repository" layout="row">
+            <Input id="import-hf-repo-id" type="text" name="repo_id" placeholder="owner/repository" required />
+          </FormField>
 
-            <FormField label="File" for="import-hf-filename" required helper="Name of the file in the repository">
-              <Input id="import-hf-filename" type="text" name="filename" placeholder="model.safetensors" required />
-            </FormField>
+          <FormField label="File" for="import-hf-filename" required helper="Name of the file in the repository" layout="row">
+            <Input id="import-hf-filename" type="text" name="filename" placeholder="model.safetensors" required />
+          </FormField>
 
-            <FormField label="Name" for="import-hf-name" helper="How the LoRA is listed in the app">
-              <Input id="import-hf-name" type="text" name="name" placeholder="my-hf-lora" />
-            </FormField>
+          <FormField label="Name" for="import-hf-name" helper="How the LoRA is listed in the app" layout="row">
+            <Input id="import-hf-name" type="text" name="name" placeholder="my-hf-lora" />
+          </FormField>
 
-            {#if !inventory.huggingface_configured}
+          {#if !inventory.huggingface_configured}
+            <div class="form-actions">
               <Alert tone="warning">Set <span class="font-mono">HF_TOKEN</span> for gated model downloads.</Alert>
-            {/if}
-
-            <div class="flex justify-end">
-              <Button variant="primary" type="submit" disabled={formsBusy} loading={formsBusy}>Download LoRA</Button>
             </div>
-          </div>
-        </Panel>
-      </div>
+          {/if}
+
+          {@render submitRow('Download LoRA')}
+        </form>
+      </Panel>
     </div>
   {/if}
 </AdminPageShell>
@@ -486,3 +502,13 @@
     </div>
   {/if}
 </ConfirmDialog>
+
+<style>
+  /* Same columns as a row-layout field: the content starts under the controls. */
+  .form-actions { display: grid; grid-template-columns: 200px minmax(0, 480px); column-gap: 24px; padding-top: 12px; }
+  .form-actions > :global(*) { grid-column: 2; justify-self: start; }
+  @media (max-width: 639px) {
+    .form-actions { grid-template-columns: minmax(0, 1fr); }
+    .form-actions > :global(*) { grid-column: 1; }
+  }
+</style>
