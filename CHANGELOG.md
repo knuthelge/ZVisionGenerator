@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+- Web server and shared libraries updated (FastAPI 0.143, uvicorn 0.54, python-multipart 0.0.32, Pillow 12.3, huggingface-hub ≥1.32)
+
+### Removed
+- Windows/Linux: `hf-transfer` is no longer installed; downloads use Xet. Set `HF_XET_HIGH_PERFORMANCE=1` instead of `HF_HUB_ENABLE_HF_TRANSFER` for faster downloads
+
 ## [0.13.0b18] - 2026-10-10
 
 ### Added

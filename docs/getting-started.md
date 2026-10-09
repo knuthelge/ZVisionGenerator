@@ -230,6 +230,15 @@ When you pass `-m <name>` (both `ziv-image` and `ziv-video`):
 
 LoRA generation inputs are local paths or bare names from `~/.ziv/loras/`. To use a HuggingFace LoRA, import it first with `ziv-model lora --hf ...`, then reference the local LoRA name or path during generation.
 
+### Download speed
+
+Model downloads from HuggingFace use Xet. Set `HF_XET_HIGH_PERFORMANCE=1` to let downloads try to saturate the network bandwidth and use all CPU cores. The variable is read when the program starts, so set it before launching `ziv`:
+
+```bash
+export HF_XET_HIGH_PERFORMANCE=1
+ziv-image -m my-model --prompt "a landscape"
+```
+
 ### `ZIV_DATA_DIR` Override
 
 Set the `ZIV_DATA_DIR` environment variable to use a custom location instead of `~/.ziv/`:
