@@ -33,6 +33,9 @@ describe('Mascot', () => {
 
   it.each([
     ['thinking', 'Z-Vision mascot is thinking'],
+    ['reading', 'Z-Vision mascot is reading your prompt'],
+    ['finishing', 'Z-Vision mascot is adding the finishing touches'],
+    ['nodding', 'Z-Vision mascot nods: added to the queue'],
     ['creating', 'Z-Vision mascot is creating an image'],
     ['cheerful', 'Z-Vision mascot is cheering'],
     ['waving', 'Z-Vision mascot is waving hello'],
@@ -51,10 +54,30 @@ describe('Mascot', () => {
   });
 
   it('renders a travelling spot around the mascot', () => {
-    app = flushSync(() => mount(MascotSpot, { target, props: { mood: 'curious', size: 64, class: 'dock' } }));
+    app = flushSync(() => mount(MascotSpot, { target, props: { mood: 'curious', tool: 'clapper', size: 64, class: 'dock' } }));
 
     const svg = target.querySelector('div.dock > svg.mascot') as SVGSVGElement;
     expect(svg.dataset.mood).toBe('curious');
+    expect(svg.dataset.tool).toBe('clapper');
     expect(svg.getAttribute('width')).toBe('64');
+  });
+
+  it('holds a brush by default', () => {
+    app = flushSync(() => mount(Mascot, { target }));
+
+    expect((target.querySelector('svg') as SVGSVGElement).dataset.tool).toBe('brush');
+  });
+
+  it('bounces once when clicked, ignoring clicks until the bounce ends', () => {
+    app = flushSync(() => mount(Mascot, { target }));
+    const svg = target.querySelector('svg') as SVGSVGElement;
+    expect(svg.hasAttribute('data-boop')).toBe(false);
+
+    flushSync(() => svg.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(svg.hasAttribute('data-boop')).toBe(true);
+
+    const bounce = svg.querySelector('.boop') as SVGGElement;
+    flushSync(() => bounce.dispatchEvent(new Event('animationend', { bubbles: true })));
+    expect(svg.hasAttribute('data-boop')).toBe(false);
   });
 });

@@ -18,6 +18,7 @@
     REACTION_DURATION_MS,
     TYPING_DURATION_MS,
     mascotMood as pickMascotMood,
+    mascotTool as pickMascotTool,
     type MascotReaction,
   } from '$lib/state/mascot';
   import { ActionMenu, AssetTile, AssetViewer, JobCard, ModelStatusBadges, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
@@ -117,6 +118,8 @@
     typing,
     drowsy,
   }));
+  // A running job decides the tool; otherwise the form's workflow does.
+  const mascotTool = $derived(pickMascotTool(jobStore.isRunning ? jobStore.current?.workflow : draft.state.workflow));
   const lightboxAssets = $derived<GalleryAsset[]>(
     lightboxMode === 'completed-output'
       ? jobOutputs
@@ -310,7 +313,9 @@
 
   async function upscaleAsset(asset: GalleryAsset, factor: UpscaleFactor): Promise<void> {
     // Like Generate, an upscale joins the queue while another job runs.
-    if (await startUpscale(asset, factor)) closeLightbox();
+    const job = await startUpscale(asset, factor);
+    if (job?.queue_position) react('nodding');
+    if (job) closeLightbox();
   }
 
   // Reference targets the model that would run them can't use, with the reason shown in the menu.
@@ -631,8 +636,10 @@
     try {
       const jobCtx = await submitGenerate(buildFormData(formEl, run));
       jobStore.jobSubmitted(jobCtx);
-      if (jobCtx.queue_position) addToast(`${run ? `Queued ${run.optionId}` : 'Added to the queue'} as #${jobCtx.queue_position}.`, 'info');
-      else if (run) addToast(`Queued ${run.optionId} from the prompt file.`, 'success');
+      if (jobCtx.queue_position) {
+        react('nodding');
+        addToast(`${run ? `Queued ${run.optionId}` : 'Added to the queue'} as #${jobCtx.queue_position}.`, 'info');
+      } else if (run) addToast(`Queued ${run.optionId} from the prompt file.`, 'success');
     } catch (err) {
       loadError = err instanceof Error ? err.message : 'Generate failed';
       addToast('Generation failed', 'error');
@@ -824,7 +831,7 @@
       <div class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
         {#if loadError}
           <div class="flex flex-col items-center gap-3 text-center p-8">
-            <MascotSpot mood={mascotMood} size={112} />
+            <MascotSpot mood={mascotMood} tool={mascotTool} size={112} />
             <p class="font-heading text-content font-extrabold text-error">The Workspace could not load</p>
             <p class="ui-help">{loadError}</p>
           </div>
@@ -832,7 +839,7 @@
           <div class="completed-output-region flex h-full w-full min-w-0 flex-col p-4">
             <div class="mb-3 flex shrink-0 items-center justify-between gap-3">
               <div class="flex items-center gap-2">
-                <MascotSpot mood={mascotMood} size={48} />
+                <MascotSpot mood={mascotMood} tool={mascotTool} size={48} />
                 <h3 class="ui-area-label">Completed outputs</h3>
               </div>
               <span class="font-mono text-meta text-text-muted">{jobOutputs.length}</span>
@@ -888,7 +895,7 @@
         {:else if jobStore.current && (jobStore.isRunning || jobOutputs.length > 0)}
           <div class="h-full w-full overflow-y-auto p-6">
             <div class="mx-auto w-full max-w-4xl">
-              <MascotSpot mood={mascotMood} size={112} class="mx-auto mb-2 w-fit" />
+              <MascotSpot mood={mascotMood} tool={mascotTool} size={112} class="mx-auto mb-2 w-fit" />
               <JobCard
                 job={jobStore.current!}
                 oncancel={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/quit`)}
@@ -922,13 +929,13 @@
           </div>
           {#if latestLoading}
             <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-4" data-testid="latest-loading">
-              <MascotSpot mood={mascotMood} size={128} />
+              <MascotSpot mood={mascotMood} tool={mascotTool} size={128} />
               <p class="text-content text-text-secondary">Loading latest output…</p>
             </div>
           {/if}
         {:else}
           <div class="flex flex-col items-center justify-center gap-3 text-center p-4">
-            <MascotSpot mood={mascotMood} size={128} />
+            <MascotSpot mood={mascotMood} tool={mascotTool} size={128} />
             {#if lookingForHistory}
               <p class="text-content text-text-secondary">Looking for your latest work…</p>
             {:else}
@@ -941,7 +948,7 @@
         {/if}
         {#if dockMascot}
           <div class="mascot-dock pointer-events-none absolute top-3 left-3 z-10" data-testid="mascot-dock">
-            <MascotSpot mood={mascotMood} size={64} />
+            <MascotSpot mood={mascotMood} tool={mascotTool} size={64} />
           </div>
         {/if}
       </div>
