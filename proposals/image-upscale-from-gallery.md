@@ -1,6 +1,6 @@
 # Upscale existing images
 
-**Status:** Done (v0.13.0b11, 2026-10-05)
+**Status:** Done (v0.13.0b16, 2026-10-05)
 
 ## Problem
 

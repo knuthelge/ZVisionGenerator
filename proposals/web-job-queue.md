@@ -1,6 +1,6 @@
 # Queue jobs in the Web UI and collapse the sidebar
 
-**Status:** Done (2026-10-04, unreleased; branch `feat/web-job-queue`)
+**Status:** Done (2026-10-04, v0.13.0b16)
 
 ## Problem
 

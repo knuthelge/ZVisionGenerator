@@ -1,6 +1,6 @@
 # Prompt builder in the Web UI
 
-**Status:** Done (v0.13.0b14, 2026-10-08)
+**Status:** Done (v0.13.0b16, 2026-10-08)
 
 ## Problem
 
