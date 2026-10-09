@@ -77,6 +77,19 @@ class TestBackendRegistryLookup:
         assert result is backend
         assert backends.BACKENDS["diffusers"] is backend
 
+    @pytest.mark.parametrize("platform", ["win32", "linux"])
+    def test_cuda_platforms_release_finished_models(self, monkeypatch, platform):
+        import zvisiongenerator.backends as backends
+        from zvisiongenerator.backends import memory_cuda
+
+        released: list[bool] = []
+        monkeypatch.setattr(backends.sys, "platform", platform)
+        monkeypatch.setattr(memory_cuda, "release_memory", lambda: released.append(True))
+
+        backends.release_accelerator_memory()
+
+        assert released == [True]
+
     def test_unsupported_platform_error_lists_supported_image_platforms(self, monkeypatch):
         import zvisiongenerator.backends as backends
 

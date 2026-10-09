@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import inspect
-import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -134,11 +133,9 @@ def _validate_cuda(runtime: _RuntimeDependencies) -> None:
 
 def _configure_torch_runtime(torch: Any) -> None:
     """Apply the same lightweight CUDA tuning used by the image diffusers backend."""
+    from zvisiongenerator.backends.memory_cuda import configure_allocator
 
-    os.environ.setdefault(
-        "PYTORCH_CUDA_ALLOC_CONF",
-        "expandable_segments:True,garbage_collection_threshold:0.8",
-    )
+    configure_allocator()
     if hasattr(torch, "backends") and hasattr(torch.backends, "cudnn"):
         torch.backends.cudnn.benchmark = True
     if hasattr(torch, "set_float32_matmul_precision"):

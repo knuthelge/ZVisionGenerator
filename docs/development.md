@@ -73,6 +73,7 @@ zvisiongenerator/
 │   ├── image_mac_preview.py       Cheap latent → RGB live previews for the mflux backend
 │   ├── image_win.py               Windows/Linux image backend (diffusers/CUDA)
 │   ├── image_win_preview.py       Cheap latent → RGB live previews for the diffusers backend
+│   ├── memory_cuda.py             CUDA allocator options and memory release after a job
 │   ├── memory_mac.py              MLX memory release and recommended GPU memory budget
 │   ├── prompt_enhancer_mac.py     macOS prompt-enhancer LLM (mlx-lm)
 │   ├── prompt_enhancer_win.py     Windows/Linux prompt-enhancer LLM (transformers)

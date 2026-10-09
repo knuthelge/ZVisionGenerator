@@ -124,7 +124,6 @@ class TestDiffusersBackendConstruction:
         mod, _, _ = win_backend
         backend = mod.DiffusersBackend()
         assert backend.name == "diffusers"
-        assert backend._img2img_pipe is None
         assert backend._model_info is None
 
     def test_has_required_methods(self, win_backend):
@@ -240,9 +239,7 @@ class TestLoadModelFullPrecision:
     def test_full_precision_loads_pipeline(self, win_backend):
         mod, _, _ = win_backend
 
-        fake_pipeline = MagicMock()
-        fake_pipeline.enable_vae_slicing = MagicMock()
-        fake_pipeline.enable_vae_tiling = MagicMock()
+        fake_pipeline = MagicMock(spec=["vae", "transformer", "text_encoder"])
         mod.AutoPipelineForText2Image.from_pretrained.return_value = fake_pipeline
 
         with patch.object(mod, "detect_image_model", return_value=_make_model_info()):
@@ -252,8 +249,23 @@ class TestLoadModelFullPrecision:
         mod.AutoPipelineForText2Image.from_pretrained.assert_called_once()
         assert info.family == "zimage"
         assert pipeline is fake_pipeline
-        fake_pipeline.enable_vae_slicing.assert_called_once()
-        fake_pipeline.enable_vae_tiling.assert_called_once()
+        # Tiling is set on the VAE itself, so pipelines without the wrapper methods (Krea 2) tile too.
+        fake_pipeline.vae.enable_slicing.assert_called_once()
+        fake_pipeline.vae.enable_tiling.assert_called_once()
+
+    @pytest.mark.parametrize(("top_level_children", "expected"), [(["Embedding", "ModuleList", "RMSNorm"], "block_level"), (["Qwen3VLVisionModel", "Qwen3VLTextModel"], "leaf_level")])
+    def test_text_encoder_streams_by_block_only_with_a_top_level_layer_list(self, win_backend, top_level_children, expected):
+        """Block-level offloading needs the layers in a top-level list; nested layouts (Krea 2's Qwen3-VL) stream by leaf."""
+        mod, _, diffusers_mod = win_backend
+        fake_pipeline = MagicMock()
+        fake_pipeline.text_encoder.children.return_value = [type(name, (), {})() for name in top_level_children]
+        mod.AutoPipelineForText2Image.from_pretrained.return_value = fake_pipeline
+
+        with patch.object(mod, "detect_image_model", return_value=_make_model_info()):
+            mod.DiffusersBackend().load_model("fake-model-path")
+
+        offload_types = {call.args[0]: call.kwargs["offload_type"] for call in diffusers_mod.hooks.apply_group_offloading.call_args_list}
+        assert offload_types == {fake_pipeline.transformer: "block_level", fake_pipeline.text_encoder: expected}
 
     def test_precision_mapping(self, win_backend):
         """torch_dtype is mapped from precision string."""
@@ -268,20 +280,6 @@ class TestLoadModelFullPrecision:
 
         call_kwargs = mod.AutoPipelineForText2Image.from_pretrained.call_args[1]
         assert call_kwargs["torch_dtype"] == "fp16-sentinel"
-
-    def test_resets_img2img_pipe(self, win_backend):
-        """load_model() clears any cached img2img pipeline."""
-        mod, _, _ = win_backend
-
-        fake_pipeline = MagicMock()
-        mod.AutoPipelineForText2Image.from_pretrained.return_value = fake_pipeline
-
-        with patch.object(mod, "detect_image_model", return_value=_make_model_info()):
-            backend = mod.DiffusersBackend()
-            backend._img2img_pipe = MagicMock()  # simulate previous load
-            backend.load_model("fake-model-path")
-
-        assert backend._img2img_pipe is None
 
 
 # ---------------------------------------------------------------------------
@@ -544,31 +542,24 @@ class TestImageToImage:
         )
         assert isinstance(result, Image.Image)
 
-    def test_reuses_img2img_pipe(self, win_backend):
-        """Second call should reuse the cached _img2img_pipe."""
+    def test_keeps_no_pipeline_between_calls(self, win_backend):
+        """The long-lived backend must not keep a finished job's model alive through a cached pipeline."""
         mod, _, _ = win_backend
         backend = mod.DiffusersBackend()
         backend._model_info = _make_model_info()
-
         fake_i2i_pipe = MagicMock()
-        fake_result = MagicMock()
-        fake_result.images = [Image.new("RGB", (64, 64))]
-        fake_i2i_pipe.return_value = fake_result
+        fake_i2i_pipe.return_value.images = [Image.new("RGB", (64, 64))]
         fake_i2i_pipe._interrupt = False
+        from_pipe = sys.modules["diffusers"].AutoPipelineForImage2Image.from_pipe
+        from_pipe.return_value = fake_i2i_pipe
+        model = MagicMock()
 
-        # Pre-set the pipe so it's already cached
-        backend._img2img_pipe = fake_i2i_pipe
+        for _ in range(2):
+            backend.image_to_image(model=model, image=Image.new("RGB", (64, 64)), prompt="sharper", strength=0.3, steps=4, seed=42, guidance=0.5)
 
-        result = backend.image_to_image(
-            model=MagicMock(),
-            image=Image.new("RGB", (64, 64)),
-            prompt="sharper",
-            strength=0.3,
-            steps=4,
-            seed=42,
-            guidance=0.5,
-        )
-        assert isinstance(result, Image.Image)
+        assert [call.args[0] for call in from_pipe.call_args_list] == [model, model]
+        assert all(call.kwargs["torch_dtype"] is model.vae.dtype for call in from_pipe.call_args_list)  # never float32
+        assert all(not isinstance(value, MagicMock) for value in vars(backend).values())
 
     def test_skip_signal_returns_none(self, win_backend):
         """When skip_signal fires during img2img, result is None."""
@@ -581,8 +572,7 @@ class TestImageToImage:
         fake_result.images = [Image.new("RGB", (64, 64))]
         fake_i2i_pipe.return_value = fake_result
         fake_i2i_pipe._interrupt = True
-
-        backend._img2img_pipe = fake_i2i_pipe
+        sys.modules["diffusers"].AutoPipelineForImage2Image.from_pipe.return_value = fake_i2i_pipe
 
         skip = MagicMock()
         skip.check.return_value = True
@@ -610,7 +600,7 @@ class TestImageToImage:
         fake_result.images = [Image.new("RGB", (64, 64))]
         fake_i2i_pipe.return_value = fake_result
         fake_i2i_pipe._interrupt = False
-        backend._img2img_pipe = fake_i2i_pipe
+        sys.modules["diffusers"].AutoPipelineForImage2Image.from_pipe.return_value = fake_i2i_pipe
 
         backend.image_to_image(
             model=MagicMock(),

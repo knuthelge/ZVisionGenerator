@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import types
 from unittest.mock import MagicMock
@@ -129,6 +130,26 @@ class TestTransformersAdapter:
         monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", MagicMock(side_effect=OSError("offline")))
         with pytest.raises(RuntimeError, match="owner/repo@rev: offline"):
             TransformersPromptEnhancer("owner/repo", "rev")
+
+    def test_sets_cuda_allocator_options_before_checking_for_cuda(self, monkeypatch):
+        """Preflight enhancement can be the first thing to start CUDA, which reads PYTORCH_CUDA_ALLOC_CONF once."""
+        torch = pytest.importorskip("torch")
+        transformers = pytest.importorskip("transformers")
+        from zvisiongenerator.backends.prompt_enhancer_win import TransformersPromptEnhancer
+
+        monkeypatch.delenv("PYTORCH_CUDA_ALLOC_CONF", raising=False)
+        seen: dict[str, str | None] = {}
+
+        def is_available() -> bool:
+            seen["conf"] = os.environ.get("PYTORCH_CUDA_ALLOC_CONF")
+            return False
+
+        monkeypatch.setattr(torch.cuda, "is_available", is_available)
+        monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", MagicMock(side_effect=OSError("offline")))
+        with pytest.raises(RuntimeError):
+            TransformersPromptEnhancer("owner/repo", None)
+
+        assert "expandable_segments:True" in (seen["conf"] or "")
 
     def test_cpu_load_has_no_quantization(self, monkeypatch):
         torch = pytest.importorskip("torch")
