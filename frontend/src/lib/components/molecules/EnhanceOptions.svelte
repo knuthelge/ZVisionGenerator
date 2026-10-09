@@ -83,7 +83,7 @@
 <style>
   .toggle-all { margin-left: auto; }
   /* Single-choice chips mark their choice with aria-checked, multi-choice ones with aria-pressed. */
-  .enhance-chip { cursor: pointer; transition: border-color 0.12s ease, color 0.12s ease; }
-  .enhance-chip-on { border-color: var(--color-primary-border); color: var(--color-primary-main); }
+  .enhance-chip { cursor: pointer; transition: background-color 0.12s ease, color 0.12s ease; }
+  .enhance-chip-on { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); }
   .enhance-chip:disabled { cursor: not-allowed; opacity: 0.4; }
 </style>

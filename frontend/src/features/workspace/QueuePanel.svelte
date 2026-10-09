@@ -57,7 +57,7 @@
   .queue-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .queue-title { display: flex; align-items: center; gap: 6px; }
   .queue-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-  .queue-item { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 10px; border: 1px solid var(--color-border-subtle); border-radius: var(--radius-md); background: var(--color-bg-surface); }
+  .queue-item { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 10px; border-radius: var(--radius-md); background: var(--color-bg-surface); }
   .queue-pos { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-xs); font-family: var(--font-mono); font-size: var(--text-meta); background: var(--color-bg-raised); color: var(--color-text-secondary); }
   .queue-pos.next { background: var(--color-primary-subtle); color: var(--color-primary-hover); }
   .queue-text { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }

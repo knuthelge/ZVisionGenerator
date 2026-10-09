@@ -94,7 +94,7 @@
   .strip-expand:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
   .strip-generate { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-sm); background: var(--color-primary-main); color: var(--color-primary-ink); }
   .strip-generate:hover { background: var(--color-primary-hover); }
-  .strip-generate:disabled { border: 1px solid var(--color-border-strong); background: var(--color-bg-base); color: var(--color-text-muted); cursor: not-allowed; }
+  .strip-generate:disabled { background: var(--color-bg-surface-hover); color: var(--color-text-muted); cursor: not-allowed; }
   .strip-generate-wrap { position: relative; }
   .strip-badge { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border: 2px solid var(--color-bg-base); border-radius: var(--radius-xs); background: var(--color-primary-main); color: var(--color-primary-ink); font-size: var(--text-meta); font-weight: 700; }
   @media (max-width: 639px) {

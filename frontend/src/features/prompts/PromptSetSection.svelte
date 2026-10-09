@@ -120,20 +120,20 @@
 </section>
 
 <style>
-  .set { position: relative; overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-bg-surface); }
+  .set { position: relative; overflow: hidden; border-radius: var(--radius-md); background: var(--color-bg-surface); }
   .set-dragging { opacity: 0.35; }
   .set[data-drop='before']::before, .set[data-drop='after']::after { content: ''; position: absolute; left: 0; right: 0; height: 2px; background: var(--color-primary-main); pointer-events: none; z-index: 2; }
   .set[data-drop='before']::before { top: 0; }
   .set[data-drop='after']::after { bottom: 0; }
   .set[data-drop='into'] > .set-head { background: var(--color-primary-subtle); box-shadow: inset 0 0 0 1px var(--color-primary-main); }
-  .set-head { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 6px 0 4px; background: var(--color-bg-raised); border-bottom: 1px solid var(--color-border-strong); }
+  .set-head { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 6px 0 4px; background: var(--color-bg-raised); }
   .grip { width: 10px; cursor: grab; font-size: var(--text-ui); line-height: 1; color: var(--color-text-muted); opacity: 0; user-select: none; }
   .set-head:hover .grip { opacity: 0.6; }
   .caret { display: grid; place-items: center; width: 20px; height: 20px; border-radius: var(--radius-xs); color: var(--color-text-muted); transition: transform 120ms; }
   .caret:hover { color: var(--color-text-primary); }
   .caret-closed { transform: rotate(-90deg); }
   .set-name { min-width: 4ch; max-width: 100%; field-sizing: content; height: 26px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; font-family: var(--font-heading); font-size: var(--text-content); font-weight: 800; color: var(--color-text-primary); }
-  .set-name:hover { border-color: var(--color-border-strong); }
+  .set-name:hover { background: var(--color-bg-surface-hover); }
   .set-name:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-base); }
   .count { font-size: var(--text-meta); color: var(--color-text-muted); white-space: nowrap; }
   .spacer { flex: 1; }

@@ -1,6 +1,6 @@
 # No borders and Graphite with teal and coral
 
-**Status:** Accepted (2026-10-09; not built yet; branch `worktree-web-design-system`)
+**Status:** Done (unreleased; branch `worktree-web-design-system`)
 
 Follows [One design system for the Web UI](web-design-system.md). Decided from the previews in `.agent-work/ui-explorations.html` of the worktree (not committed): study 1 (borders), 3 (components) and 4 (Graphite colours).
 
@@ -22,8 +22,8 @@ Follows [One design system for the Web UI](web-design-system.md). Decided from t
 - **Buttons:** filled, no outline. Secondary buttons use `bg-surface-hover` with primary text; the main action stays teal; danger buttons use a red-tinted fill with red text; quiet buttons stay transparent; add buttons keep a dashed outline.
 - **Pressed and selected states** (pressed buttons, chips, enhance options) use a teal-tinted fill instead of a teal outline.
 - **Fields and selects:** filled with `bg-surface-hover`; inside panels and overlays, filled with `bg-base` so they still contrast. An error adds a 1px red inset ring.
-- **Segmented controls and presets:** a recessed well. The track and unselected options sit on a background darker than their surroundings (overlay mixed with black), unselected text is muted, and the chosen option is a clearly lighter raised pill (text mixed 18% into surface) with primary text. The first preview without this read too flat.
-- **Badges and chips:** tinted fills (status colour at about 14%), no outline.
+- **Segmented controls and presets:** a recessed well. The track and unselected options sit on a background darker than their surroundings (overlay mixed with black), unselected text is muted, and the chosen option is a clearly lighter raised pill (text mixed 24% into surface) with primary text. The first preview without this read too flat.
+- **Badges and chips:** tinted fills (status colour at about 14%), no outline. Neutral badges use secondary text.
 - **Checkboxes:** filled box; checked is teal.
 - **Panels, prompt box, queue items, tiles:** separated by shade only. The prompt box uses a fill tone between base and surface. The selected tile keeps a 2px teal ring.
 - **Section header bands:** the raised shade, no border above or below.
@@ -46,7 +46,7 @@ Follows [One design system for the Web UI](web-design-system.md). Decided from t
 | `text-primary` | `#ececee` |
 | `text-secondary` | `#b4b6bc` |
 | `text-muted` | `#8f939a` |
-| Placeholder (`zinc-600`) | `#7a7e85` |
+| Placeholder (`zinc-600`) | `#8b8f96` (was `#7a7e85`; see Contrast) |
 | Secondary accent (replaces `accent-blush` for snippets) | `#fb8f7c` |
 
 The rest of the `zinc-*` scale should be re-derived as neutral greys so nothing keeps the teal tint.
@@ -59,6 +59,16 @@ The rest of the `zinc-*` scale should be re-derived as neutral greys so nothing 
 | Teal `#2dd4bf` | a Graphite panel `#18191c` | 9.4:1 (AAA) |
 | Coral `#fb8f7c` | a Graphite panel | 7.8:1 (AAA) |
 | Amber `#fbbf24` | a Graphite panel | 10.5:1 (AAA) |
+
+A full check of every text and background pair (2026-10-09) found three changes, all adopted:
+
+| Change | Before | After |
+|---|---|---|
+| Placeholder `#7a7e85` → `#8b8f96` | 3.8:1 in a filled field | 4.7:1 or better on every background |
+| Neutral badge text: muted → secondary | 4.3:1 on a raised band | 6.6:1 or better |
+| Selected segmented option: 18% → 24% text into surface | 1.9:1 against the track | 2.3:1 against the track (text still 7.3:1) |
+
+All other text is AA or better on every surface; primary, secondary and muted text are 13.0, 7.6 and 5.0:1 at worst. Unchecked checkboxes and switches that are off (`#393c42`, 1.5–1.8:1 against their background) were left as they are by choice: a 3:1 edge was tried and rejected. The fills of fields and buttons are 1.1–1.3:1 against their container, no lower than the old borders (1.56:1); labels and placement identify them.
 
 ## Alternatives considered
 

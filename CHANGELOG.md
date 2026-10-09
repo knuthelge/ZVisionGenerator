@@ -10,7 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Web UI: Config marks each setting you have set yourself with a dot and a reset button that returns it to the default, like the Workspace settings; the help under each setting says which default applies
 
 ### Changed
-- Web UI: dialogs, menus, popovers, tooltips and notifications sit on a dark surface with a clear border instead of a drop shadow, so they stand out from the page; destructive buttons are red, and every control shows the same focus ring
+- Web UI: a calmer look with fewer lines: panels, cards and controls no longer have outlines and are told apart by shade, with dividers kept between rows; buttons, fields, chips and badges are filled, and segmented controls show the chosen option as a lighter pill in a darker track
+- Web UI: neutral grey surfaces replace the teal-tinted ones, so images carry the colour; teal stays the main colour, `$snippets` are coral like Blob's beret, and placeholders and grey badges are easier to read
+- Web UI: dialogs, menus, popovers, tooltips and notifications sit on a dark surface with a faint ring instead of a drop shadow, so they stand out from the page; destructive buttons are red, and every control shows the same focus ring
 - Web UI: each section's main action (Generate, Save, a form's submit button, a dialog's confirm button) has a teal fill and a bold label, so it stands apart from the other buttons
 - Web UI: on wide screens, Config and Models keep their content in a centred column instead of stretching across the window; Config lists its settings as rows with the reset button beside each value, and Models shows models and LoRAs side by side, with the three add forms side by side below them
 - Web UI: Workspace settings sections have a header band with a summary of the hidden settings, and switches, badges and path fields share one compact size

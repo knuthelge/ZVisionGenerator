@@ -159,15 +159,15 @@
     flex-direction: column;
     overflow: hidden;
     isolation: isolate;
-    border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-md);
     background: var(--color-bg-surface);
-    transition: border-color 0.12s ease;
+    transition: background-color 0.12s ease;
   }
-  .asset-tile:hover, .asset-tile:focus-within { border-color: color-mix(in srgb, var(--color-primary-main) 45%, var(--color-border-strong)); }
-  .asset-tile[data-selected='true'] { border-color: var(--color-primary-main); box-shadow: 0 0 0 1px var(--color-primary-main); }
+  .asset-tile:hover, .asset-tile:focus-within { background: var(--color-bg-surface-hover); }
+  /* The selected tile keeps an outline: it carries meaning. */
+  .asset-tile[data-selected='true'] { box-shadow: 0 0 0 2px var(--color-primary-main); }
   .asset-tile[aria-busy='true'] { opacity: 0.6; }
-  .asset-tile[data-density='stage'] { border-color: transparent; background: transparent; }
+  .asset-tile[data-density='stage'] { background: transparent; }
 
   .asset-tile-media { position: relative; display: block; flex: 1; min-height: 0; width: 100%; padding: 0; cursor: zoom-in; }
   .asset-tile-media:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: -2px; }

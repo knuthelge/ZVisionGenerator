@@ -62,8 +62,7 @@
 </section>
 
 <style>
-  /* Header band: a border above and below and the raised shade; adjacent headers share one line. */
-  .inspector-section + :global(.inspector-section) { margin-top: -1px; }
+  /* Header band: the raised shade, no border above or below. */
   .inspector-head {
     display: flex;
     width: 100%;
@@ -71,7 +70,6 @@
     gap: 6px;
     min-height: 30px;
     padding: 0 12px;
-    border-block: 1px solid var(--color-border-subtle);
     background: var(--color-bg-raised);
     font-family: var(--font-heading);
     font-size: var(--text-meta);

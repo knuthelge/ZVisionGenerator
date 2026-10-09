@@ -139,11 +139,11 @@
   .snippets-head { display: flex; align-items: center; justify-content: space-between; min-height: 26px; margin-bottom: 2px; }
   .snippets-hint { margin-bottom: 8px; font-size: var(--text-meta); color: var(--color-text-muted); }
   .snippets-hint b { color: var(--color-text-secondary); font-family: var(--font-mono); font-weight: 500; }
-  .snippets { overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-bg-base); }
+  .snippets { overflow: hidden; border-radius: var(--radius-md); background: var(--color-bg-surface); }
   .snippet { position: relative; padding: 5px 8px 6px; cursor: grab; }
   .snippet + .snippet { border-top: 1px solid var(--color-border-subtle); }
   .snippet:hover { background: var(--color-bg-surface-hover); }
-  .snippet-open, .snippet-open:hover { background: var(--color-bg-surface); cursor: default; }
+  .snippet-open, .snippet-open:hover { background: var(--color-bg-raised); cursor: default; }
   .snippet-unused { opacity: 0.55; }
   .snippet-dragging { opacity: 0.35; }
   .snippet[data-drop='before']::before, .snippet[data-drop='after']::after { content: ''; position: absolute; left: 0; right: 0; height: 2px; background: var(--color-primary-main); pointer-events: none; }
@@ -152,10 +152,10 @@
   .snippet-row { display: flex; width: 100%; align-items: center; gap: 4px; text-align: left; cursor: inherit; }
   .grip { width: 10px; font-size: var(--text-ui); color: var(--color-text-muted); opacity: 0; }
   .snippet:hover .grip { opacity: 0.6; }
-  .snippet-name { font-family: var(--font-mono); font-size: var(--text-ui); font-weight: 500; color: var(--color-accent-blush); }
+  .snippet-name { font-family: var(--font-mono); font-size: var(--text-ui); font-weight: 500; color: var(--color-accent-coral); }
   .snippet-uses { margin-left: auto; font-size: var(--text-meta); color: var(--color-text-muted); }
   .snippet-preview { overflow: hidden; padding-left: 14px; font-size: var(--text-ui); line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-secondary); }
-  .snippet-name-input { width: 100%; height: 26px; padding: 0 6px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-bg-base); font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-accent-blush); }
+  .snippet-name-input { width: 100%; height: 26px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--color-bg-base); font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-accent-coral); }
   .snippet-name-input:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
   .snippet-value { margin-top: 4px; padding: 0 6px; font-size: var(--text-ui); }
   .snippet-structured { margin-top: 4px; white-space: pre-wrap; font-size: var(--text-ui); color: var(--color-text-secondary); }

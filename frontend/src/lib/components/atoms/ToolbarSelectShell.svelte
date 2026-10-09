@@ -31,16 +31,11 @@
   let hovered = $state(false);
   let focused = $state(false);
 
-  const stateClass = $derived(
-    focused
-      ? 'bg-bg-base border-border-strong outline-2 outline-offset-2 outline-primary-main'
-      : hovered
-        ? 'bg-bg-surface-hover border-border-strong'
-        : 'bg-bg-base border-border-strong'
-  );
+  const stateClass = $derived(focused ? 'outline-2 outline-offset-2 outline-primary-main' : '');
 
+  // ui-select-shell gives the fill; the hover shade follows data-hovered.
   const shellClass = $derived(
-    `relative flex h-control items-center justify-between gap-2 rounded-sm border px-2 text-ui transition-colors text-text-primary ${stateClass} ${extraClass}`
+    `ui-select-shell relative flex h-control items-center justify-between gap-2 rounded-sm px-2 text-ui transition-colors text-text-primary ${stateClass} ${extraClass}`
   );
 
   function handlePointerEnter(): void {

@@ -119,7 +119,7 @@
   .preview-id { display: flex; align-items: baseline; gap: 6px; }
   .preview-name { font-family: var(--font-heading); font-size: var(--text-content); font-weight: 800; }
   .preview-code { font-size: var(--text-meta); color: var(--color-text-muted); }
-  .box { overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-bg-base); }
+  .box { overflow: hidden; border-radius: var(--radius-md); background: var(--color-bg-surface); }
   .box-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; height: 32px; padding: 0 5px 0 10px; border-bottom: 1px solid var(--color-border-subtle); }
   .box-head .ui-area-label { white-space: nowrap; }
   .box-tools { display: flex; gap: 4px; }

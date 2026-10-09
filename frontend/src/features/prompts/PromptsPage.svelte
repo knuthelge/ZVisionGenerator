@@ -356,7 +356,7 @@
   .column-preview { border-left: 1px solid var(--color-border-strong); }
   .sets-head { display: flex; align-items: center; gap: 10px; min-height: 26px; margin-bottom: 8px; }
   .sets-hint { overflow: hidden; font-size: var(--text-meta); text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); }
-  .hint-snippet { color: var(--color-accent-blush); font-family: var(--font-mono); font-weight: 500; }
+  .hint-snippet { color: var(--color-accent-coral); font-family: var(--font-mono); font-weight: 500; }
   .hint-choice { color: var(--color-accent-amber); font-family: var(--font-mono); font-weight: 500; }
   .sets { display: flex; flex-direction: column; gap: 10px; }
   .sets-empty { font-size: var(--text-ui); color: var(--color-text-muted); }
