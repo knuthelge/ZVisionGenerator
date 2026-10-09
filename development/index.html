@@ -900,6 +900,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#web-ui-toasts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web UI Toasts
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#web-ui-design-system" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1142,6 +1153,17 @@
     <span class="md-ellipsis">
       
         Web UI Confirmations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#web-ui-toasts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web UI Toasts
       
     </span>
   </a>
@@ -1500,6 +1522,8 @@ prompts.yaml                       Default prompt definitions
 <p>Raise <code>ValueError</code>, <code>FileNotFoundError</code>, <code>RuntimeError</code> directly with descriptive f-string messages. Use <code>warnings.warn()</code> with <code>stacklevel=2</code> for non-fatal conditions. Add a custom exception class only when callers must catch it distinctly (for example <code>JobConflictError</code> in <code>web/web_runner.py</code>) or as a private sentinel.</p>
 <h3 id="web-ui-confirmations">Web UI Confirmations</h3>
 <p>Ask the user to approve an action with <code>ConfirmDialog</code> (<code>frontend/src/lib/components/molecules/</code>), never <code>window.confirm</code>. It has no title: it shows the question, an optional line of information, and a cancel button plus a confirm button named after the action (danger-styled for destructive actions). Enter confirms (except on the focused cancel button), Esc cancels, and a held key never confirms; while it is open, no other key reaches the page or a viewer underneath. Call <code>requestConfirm({ question, info, confirmLabel })</code>, which resolves <code>true</code> on confirm, or render <code>&lt;ConfirmDialog&gt;</code> directly when the dialog needs a body or stays open while the action runs (<code>pending</code>).</p>
+<h3 id="web-ui-toasts">Web UI Toasts</h3>
+<p>Report the outcome of an action with <code>addToast(message, type, options)</code> from <code>$lib/state/toasts.svelte</code>. One toast shows at a time at the bottom centre of the page content (pages with a fixed left sidebar set <code>--toast-inset-left</code>); the rest wait their turn, shown as "+N". A repeat of a waiting or showing message merges into it ("×2"), and an error goes ahead of every non-error. Each tone has a default time on screen (success 2.5 s, info 4 s, warning 7 s); errors stay until dismissed, or give way after 8 s once other toasts are waiting, and hovering or focusing a toast pauses it. Pass <code>{ action: { label, run } }</code> for one follow-up such as Retry, and <code>{ timeout }</code> only when the default doesn't fit. An action that acts on a page must not outlive it: keep the id <code>addToast</code> returns and call <code>dismissToast(id)</code> in the page's <code>onDestroy</code>. Raise one toast per action, and skip it when the screen already shows the result.</p>
 <h3 id="web-ui-design-system">Web UI Design System</h3>
 <p>The Web UI has one design system (<a href="https://github.com/knuthelge/ZVisionGenerator/blob/main/proposals/web-design-system.md">proposal</a>; borders and colours in <a href="https://github.com/knuthelge/ZVisionGenerator/blob/main/proposals/web-no-borders-graphite.md">No borders and Graphite</a>). Its tokens live in <code>@theme</code> in <code>frontend/src/app/global.css</code>, and its component classes are the <code>ui-*</code> classes in the same file. Build pages from the shared components in <code>frontend/src/lib/components/</code> (<code>Button</code>, <code>Input</code>, <code>Select</code>, <code>Toggle</code>, <code>Badge</code>, <code>Panel</code>, <code>Segmented</code>, <code>ActionBar</code>, <code>PageHeader</code>, <code>KeyValueList</code>, <code>Alert</code>, <code>EmptyState</code>, <code>InspectorSection</code>, <code>InspectorRow</code>) or, where no component fits, the <code>ui-*</code> classes (for example <code>ui-chip</code>), rather than styling elements by hand.</p>
 <ul>
