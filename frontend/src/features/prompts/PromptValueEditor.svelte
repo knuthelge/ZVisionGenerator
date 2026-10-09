@@ -86,7 +86,7 @@
     <p class="structured-text">{flattenValue(value.data)}</p>
     <p class="structured-note">
       Lists or nested fields: shown flattened, kept as written.
-      <button type="button" class="surface-link-muted" onclick={() => void convertToText()}>Convert to text</button>
+      <button type="button" class="ui-link" onclick={() => void convertToText()}>Convert to text</button>
     </p>
   </div>
 {/if}

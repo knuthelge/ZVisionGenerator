@@ -32,16 +32,16 @@
 
 <!-- Left column: Compose on top, Settings below with Generate pinned at its foot. When collapsed, the panes stay
      in the DOM (hidden) because their fields belong to the generate form; a narrow strip takes their place. -->
-<aside id="ws-controls-sidebar" class="workspace-left panel-shell panel-shell-left" class:collapsed aria-label="Compose and settings">
+<aside id="ws-controls-sidebar" class="workspace-left ui-pane ui-pane-left" class:collapsed aria-label="Compose and settings">
   <div class="sidebar-panes">
     {#if authorityReady && context}
       <ComposePane {context} {busy} {jobsActive} oncollapse={() => setCollapsed(true)} />
       <SettingsPane {context} {busy} {jobsActive} {imageFile} {referencePreviewUrl} {lastSeed} {onImageFileChange} />
     {:else}
-      <div class="flex-1 overflow-y-auto p-3 custom-scrollbar">
+      <div class="flex-1 overflow-y-auto p-3">
         <p class="flex items-center gap-2 text-ui text-text-muted" role="status"><Spinner size="sm" />Loading settings…</p>
       </div>
-      <ActionBar class="panel-footer z-10 w-full shrink-0 p-3">
+      <ActionBar class="ui-pane-footer z-10 w-full shrink-0 p-3">
         <button id="ws-submit" type="submit" disabled={true} class="ui-btn ui-btn-primary ui-btn-main">
           <Icon name="bolt" size={16} />
           <span>Generate</span>

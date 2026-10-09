@@ -97,7 +97,7 @@
   {#if onselect}
     <input
       type="checkbox"
-      class="asset-tile-check accent-primary"
+      class="asset-tile-check accent-primary-main"
       checked={selected}
       aria-label="Select {asset.filename}"
       onchange={(event) => onselect(asset, (event.currentTarget as HTMLInputElement).checked)}
@@ -108,7 +108,7 @@
     {#if onpreview}
       <button
         type="button"
-        class="asset-tile-action surface-overlay-action"
+        class="asset-tile-action ui-media-action"
         title="View fullscreen"
         aria-label="View {asset.filename} fullscreen"
         onclick={(event) => preview(event.currentTarget)}
@@ -117,7 +117,7 @@
     {#if onreuse}
       <button
         type="button"
-        class="asset-tile-action surface-overlay-action-primary"
+        class="asset-tile-action ui-media-action-primary"
         title={canReuse ? 'Reuse settings' : 'Reusable settings unavailable'}
         aria-label={canReuse ? `Reuse settings from ${asset.filename}` : 'Reusable settings unavailable'}
         disabled={!canReuse}
@@ -127,7 +127,7 @@
     <button
       type="button"
       bind:this={moreButton}
-      class="asset-tile-action surface-overlay-action"
+      class="asset-tile-action ui-media-action"
       title="More actions"
       aria-label="More actions for {asset.filename}"
       aria-haspopup="menu"
@@ -137,7 +137,7 @@
   </div>
 
   {#if density === 'card'}
-    <div class="asset-tile-foot surface-footer-strip">
+    <div class="asset-tile-foot ui-media-foot">
       <p class="truncate text-ui font-medium text-text-secondary">{asset.filename}</p>
       <p class="mt-0.5 truncate text-meta text-text-muted">{asset.workflow} &middot; {new Date(asset.created_at).toLocaleDateString()}</p>
     </div>

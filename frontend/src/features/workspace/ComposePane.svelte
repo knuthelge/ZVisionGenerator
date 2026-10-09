@@ -93,7 +93,7 @@
   }
 </script>
 
-<section class="compose-pane custom-scrollbar" aria-labelledby="ws-compose-title">
+<section class="compose-pane" aria-labelledby="ws-compose-title">
   <div class="compose-head">
     <div class="compose-title">
       {#if oncollapse}
@@ -116,7 +116,7 @@
   </div>
 
   {#if !promptFileMode && caps.showPromptInline}
-    <div class="prompt-box">
+    <div class="ui-prompt-box">
       {#if showTabs}
         <div class="prompt-tabs" role="tablist" aria-label="Prompt version">
           <button
@@ -189,7 +189,7 @@
         {/if}
       {/if}
 
-      <div class="prompt-tools">
+      <div class="ui-prompt-tools">
         {#if caps.showEnhance && caps.enhancer && !jsonMode}
           <PromptEnhancer
             bind:this={enhancer}
