@@ -24,6 +24,7 @@ from zvisiongenerator.web.gallery import list_gallery_assets
 from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.provenance import embed_png_config
 
 
@@ -1672,12 +1673,12 @@ def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
     web_config.app_config["model_presets"] = {"ideogram4": {"supports_quantize": False}}
     calls: list[tuple[str, str, tuple[int, ...]]] = []
 
-    def _fake_status(resolved_path, *, kind, quantize_options=(), budget_bytes=None, quantize_text_encoder=True, find_local_dir=None):
+    def _fake_status(resolved_path, *, kind, quantize_options=(), budget=None, find_local_dir=None):
         calls.append((resolved_path, kind, quantize_options))
         return {"downloaded": resolved_path != "owner/ltx", "memory_fit": None}
 
     monkeypatch.setattr(workspace_api_module, "describe_model_status", _fake_status)
-    monkeypatch.setattr(workspace_api_module, "memory_budget_bytes", lambda: 10 * 1024**3)
+    monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: MemoryBudget(10 * 1024**3))
     monkeypatch.setattr(workspace_api_module, "list_loras", lambda _data_dir: [])
     bootstrap_view = _make_workspace_bootstrap_view()
     bootstrap_view["image_model_defaults"]["zit"]["supports_quantize"] = False  # the picker hides quantize for zit
@@ -1713,7 +1714,7 @@ def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
 def test_workspace_models_without_inventory_entry_report_unknown_status(monkeypatch):
     """Names with no inventory entry (e.g. stale config) report unknown rather than guessing."""
     web_config = _make_web_config()
-    monkeypatch.setattr(workspace_api_module, "memory_budget_bytes", lambda: None)
+    monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: None)
 
     workspace = workspace_api_module.build_workspace_response(
         web_config,
@@ -1743,7 +1744,7 @@ def test_one_failing_model_status_does_not_break_the_listing(monkeypatch):
         return {"downloaded": True, "memory_fit": None}
 
     monkeypatch.setattr(workspace_api_module, "describe_model_status", _fake_status)
-    monkeypatch.setattr(workspace_api_module, "memory_budget_bytes", lambda: None)
+    monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: None)
 
     with pytest.warns(UserWarning, match="local-image"):
         workspace = workspace_api_module.build_workspace_response(
@@ -1765,7 +1766,7 @@ def test_models_page_skips_quantize_resolution_without_a_memory_budget(monkeypat
     """Off macOS there is no budget, so per-model defaults (and their detection lookups) are not resolved."""
     web_config = _make_web_config()
     web_config.image_inventory = (ImageInventoryEntry(name="zit", family="zimage", size=None, source="alias", resolved_path="owner/zit"),)
-    monkeypatch.setattr(workspace_api_module, "memory_budget_bytes", lambda: None)
+    monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: None)
     monkeypatch.setattr(workspace_api_module, "describe_model_status", lambda resolved_path, **_: {"downloaded": True, "memory_fit": None})
     monkeypatch.setattr(workspace_api_module, "list_loras", lambda _data_dir: [])
 

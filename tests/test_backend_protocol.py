@@ -86,6 +86,17 @@ class TestBackendRegistryLookup:
         assert backends.supports_stored_quants() is True
 
     @pytest.mark.parametrize("platform", ["win32", "linux"])
+    def test_cuda_memory_budget_is_vram_plus_system_memory(self, monkeypatch, platform):
+        import zvisiongenerator.backends as backends
+        from zvisiongenerator.backends import memory_cuda
+        from zvisiongenerator.utils.model_memory import MemoryBudget
+
+        monkeypatch.setattr(backends.sys, "platform", platform)
+        monkeypatch.setattr(memory_cuda, "memory_sizes", lambda: (10, 30))
+
+        assert backends.get_accelerator_memory_budget() == MemoryBudget(10, 30)
+
+    @pytest.mark.parametrize("platform", ["win32", "linux"])
     def test_cuda_platforms_release_finished_models(self, monkeypatch, platform):
         import zvisiongenerator.backends as backends
         from zvisiongenerator.backends import memory_cuda
@@ -97,6 +108,21 @@ class TestBackendRegistryLookup:
         backends.release_accelerator_memory()
 
         assert released == [True]
+
+    def test_gpu_memory_comes_from_nvidia_smi_without_starting_cuda(self, monkeypatch):
+        import shutil
+        import subprocess
+
+        from zvisiongenerator.backends import memory_cuda
+
+        psutil_mod = MagicMock()
+        psutil_mod.virtual_memory.return_value.total = 30
+        monkeypatch.setitem(sys.modules, "psutil", psutil_mod)
+        monkeypatch.setitem(sys.modules, "torch", None)  # importing torch would raise
+        monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: MagicMock(stdout="10240\n"))
+
+        assert memory_cuda.memory_sizes() == (10240 * 1024 * 1024, 30)
 
     def test_drop_cached_files_syncs_and_drops_every_file(self, monkeypatch, tmp_path):
         import os
@@ -124,6 +150,24 @@ class TestBackendRegistryLookup:
         memory_cuda.release_memory()
 
         assert trimmed == [True]
+
+    def test_no_nvidia_smi_means_no_sizes(self, monkeypatch):
+        import shutil
+
+        from zvisiongenerator.backends import memory_cuda
+
+        monkeypatch.setattr(shutil, "which", lambda _name: None)
+
+        assert memory_cuda.memory_sizes() is None
+
+    def test_no_cuda_device_means_no_budget(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+        from zvisiongenerator.backends import memory_cuda
+
+        monkeypatch.setattr(backends.sys, "platform", "linux")
+        monkeypatch.setattr(memory_cuda, "memory_sizes", lambda: None)
+
+        assert backends.get_accelerator_memory_budget() is None
 
     def test_unsupported_platform_error_lists_supported_image_platforms(self, monkeypatch):
         import zvisiongenerator.backends as backends

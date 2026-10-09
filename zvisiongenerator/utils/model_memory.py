@@ -1,7 +1,7 @@
-"""Estimate how much unified memory a downloaded model needs on the MLX backends.
+"""Estimate how much memory a downloaded model needs: unified memory on MLX, GPU and system memory on CUDA.
 
 Estimates read only safetensors headers (tensor dtypes and shapes), never the weights, and mirror how
-the MLX backends hold each component in memory. They are deliberately rough: a fixed working-memory
+each backend holds each component in memory. They are deliberately rough: a fixed working-memory
 margin stands in for activations, which vary with resolution, frame count, and LoRAs.
 """
 
@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from zvisiongenerator.utils.model_files import component_of, is_ltx_mlx_layout, ltx_mlx_transformer_file, is_krea2_model, model_weight_files
+from zvisiongenerator.utils.stored_quant import stored_quant_bits
 
 GIB = 1024**3
 _IMAGE_WORKING_BYTES = int(1.5 * GIB)
@@ -26,6 +27,18 @@ _FITS_RATIO = 1.1
 # lets macOS compress and swap, so models in that range run, at the cost of slowing the rest of the Mac.
 _TIGHT_LIMIT_RATIO = 1.5
 _MAX_HEADER_BYTES = 100 * 1024 * 1024
+# CUDA (diffusers backend). Unquantized and q8 weights stay in system memory and stream to the GPU block by
+# block; the GPU holds the blocks in flight plus activations (up to about 4 GB at 1024x1024).
+_CUDA_STREAMED_GPU_BYTES = 4 * GIB
+_CUDA_RESIDENT_WORKING_BYTES = int(1.5 * GIB)
+_CUDA_SYSTEM_WORKING_BYTES = int(1.5 * GIB)
+# bitsandbytes NF4 packs two weights per byte plus a double-quantized scale per 64-weight block (~4.13 bits).
+_NF4_BYTES_PER_WEIGHT = 4.13 / 8
+_CUDA_QUANTIZED_COMPONENTS = ("text_encoder", "transformer")
+# A CUDA model fits while its GPU need stays under 90% of VRAM and its weights under 80% of system memory,
+# leaving the rest to the desktop and other apps. Weights beyond that stream from disk, which is much slower.
+_CUDA_GPU_FITS_RATIO = 0.9
+_CUDA_SYSTEM_FITS_RATIO = 0.8
 
 _DTYPE_BYTES = {
     "F64": 8,
@@ -51,6 +64,27 @@ _QUANT_GROUP_OVERHEAD_BYTES = 4 / 64
 _TEXT_ENCODER_SKIPPED_PREFIXES = ("lm_head.",)
 _LTX_MLX_CONNECTOR_FILE = "connector.safetensors"
 _LTX_MLX_DECODER_FILES = ("vae_decoder.safetensors", "vae_encoder.safetensors", "audio_vae.safetensors", "vocoder.safetensors")
+
+
+@dataclass(frozen=True)
+class MemoryBudget:
+    """The memory a model may use on this machine.
+
+    On Apple Silicon (unified memory) *gpu_bytes* is Apple's recommended GPU working set and *system_bytes* is
+    ``None``. On a discrete GPU (CUDA) *gpu_bytes* is the VRAM and *system_bytes* the system memory that
+    offloaded weights stream from.
+    """
+
+    gpu_bytes: int
+    system_bytes: int | None = None
+
+
+@dataclass(frozen=True)
+class CudaMemoryEstimate:
+    """Estimated peak GPU memory and system memory for a model on the diffusers/CUDA backend."""
+
+    gpu_bytes: int
+    system_bytes: int
 
 
 @dataclass(frozen=True)
@@ -150,6 +184,30 @@ def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ..
     }
 
 
+def estimate_cuda_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ...] = (None,)) -> dict[int | None, CudaMemoryEstimate] | None:
+    """Estimate GPU and system memory for a diffusers image model on CUDA, at each quantize level.
+
+    Mirrors ``DiffusersBackend.load_model``: unquantized (bfloat16) and q8 (FP8 weight storage) keep the
+    transformer and text encoder in system memory and stream them to the GPU; q4 holds them in NF4 on the GPU,
+    one at a time for Krea 2 (whose NF4 pair does not fit a 10-12 GB card together). The VAE stays on the GPU.
+    A stored quant loads at its own level whatever level is asked for.
+
+    Args:
+        model_dir: Directory holding the model's safetensors files.
+        quantize_levels: Levels to estimate: ``None`` for unquantized, or 4 / 8 bits.
+
+    Returns:
+        Estimated peak memory per level, or ``None`` when weights are missing or unreadable.
+    """
+    components = _image_components(model_dir)
+    if components is None:
+        return None
+    # Mirrors _Q4_CPU_OFFLOAD_FAMILIES in backends/image_win.py.
+    text_encoder_offloaded = is_krea2_model(model_dir)
+    stored_bits = stored_quant_bits(model_dir)
+    return {level: _cuda_level_estimate(components, stored_bits or level, text_encoder_offloaded) for level in quantize_levels}
+
+
 def estimate_ltx_mlx_memory(model_dir: Path, text_encoder_dir: Path, *, low_memory: bool = True) -> int | None:
     """Estimate peak memory for ltx-pipelines-mlx.
 
@@ -190,6 +248,38 @@ def classify_memory_fit(required_bytes: int, budget_bytes: int) -> str:
     if required_bytes <= budget_bytes * _TIGHT_LIMIT_RATIO:
         return "tight"
     return "too_large"
+
+
+def classify_cuda_memory_fit(estimate: CudaMemoryEstimate, budget: MemoryBudget) -> str:
+    """Classify a CUDA estimate as ``fits``, ``tight`` (runs, but slowly), or ``too_large`` (out of GPU memory).
+
+    ``too_large`` needs more GPU memory than the card has. ``tight`` needs over 90% of it, or weights over 80%
+    of system memory, so part of them streams from disk; otherwise it ``fits``.
+    """
+    if estimate.gpu_bytes > budget.gpu_bytes:
+        return "too_large"
+    system_limit = (budget.system_bytes or 0) * _CUDA_SYSTEM_FITS_RATIO
+    if estimate.gpu_bytes > budget.gpu_bytes * _CUDA_GPU_FITS_RATIO or estimate.system_bytes > system_limit:
+        return "tight"
+    return "fits"
+
+
+def _cuda_level_estimate(components: dict[str, WeightTotals], quantize: int | None, text_encoder_offloaded: bool) -> CudaMemoryEstimate:
+    vae = components["vae"].bfloat16_bytes if "vae" in components else 0
+    unquantized = sum(totals.bfloat16_bytes for name, totals in components.items() if name not in ("vae", *_CUDA_QUANTIZED_COMPONENTS))
+    if quantize == 4:
+        nf4 = {name: _cuda_component_bytes(components[name], _NF4_BYTES_PER_WEIGHT) for name in _CUDA_QUANTIZED_COMPONENTS if name in components}
+        total = sum(nf4.values())
+        on_gpu = max(nf4.values(), default=0) if text_encoder_offloaded else total
+        return CudaMemoryEstimate(int(on_gpu + vae + _CUDA_RESIDENT_WORKING_BYTES), int(total - on_gpu + unquantized + _CUDA_SYSTEM_WORKING_BYTES))
+    bytes_per_weight = 1 if quantize == 8 else 2
+    streamed = sum(_cuda_component_bytes(components[name], bytes_per_weight) for name in _CUDA_QUANTIZED_COMPONENTS if name in components)
+    return CudaMemoryEstimate(vae + _CUDA_STREAMED_GPU_BYTES, int(streamed + unquantized + _CUDA_SYSTEM_WORKING_BYTES))
+
+
+def _cuda_component_bytes(totals: WeightTotals, bytes_per_weight: float) -> float:
+    """Return a component's bytes with its 2-D weights at *bytes_per_weight* and other floats in bfloat16."""
+    return totals.float_matrix_elements * bytes_per_weight + totals.float_other_elements * 2 + totals.packed_bytes
 
 
 def _image_components(model_dir: Path) -> dict[str, WeightTotals] | None:

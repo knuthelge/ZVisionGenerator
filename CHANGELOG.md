@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 - Web UI: **Copy CLI command** (the terminal button in the Workspace's *Settings* header) copies the `ziv image` / `ziv video` command for the current model, prompt, LoRAs and settings, and says when the CLI can't match the job exactly (inline negative prompts, a subset of a prompt file's prompts, an uploaded reference image)
 - Windows/Linux: **stored quants**, as on macOS. The first q8 or q4 job saves a quantized copy of the model (`<name>@q8`, `<name>@q4`) that later jobs load. `ziv-model model --quantize` and **Quantized Copy** on the Models page work too
+- Windows/Linux: the model picker and Models page show whether each image model **fits** the GPU and system memory
 - Windows/Linux: LyCORIS **LoKr** LoRAs, as on macOS
 
 ### Changed

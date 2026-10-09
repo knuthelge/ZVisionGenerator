@@ -10,7 +10,11 @@ import pytest
 
 from zvisiongenerator.utils import model_memory
 from zvisiongenerator.utils.model_memory import (
+    CudaMemoryEstimate,
+    MemoryBudget,
+    classify_cuda_memory_fit,
     classify_memory_fit,
+    estimate_cuda_image_memory,
     estimate_image_memory,
     estimate_ltx_mlx_memory,
     read_safetensors_totals,
@@ -158,3 +162,66 @@ class TestEstimateLtxMlxMemory:
 )
 def test_classify_memory_fit(required, expected):
     assert classify_memory_fit(required, 10 * _GIB) == expected
+
+
+class TestEstimateCudaImageMemory:
+    """Mirror DiffusersBackend: unquantized and q8 stream from system memory, q4 holds NF4 on the GPU."""
+
+    def _model(self, tmp_path: Path, pipeline: str = "ZImagePipeline") -> Path:
+        index = {"_class_name": pipeline, "transformer": ["diffusers", "T"], "text_encoder": ["transformers", "E"], "vae": ["diffusers", "V"]}
+        (tmp_path / "model_index.json").write_text(json.dumps(index), encoding="utf-8")
+        _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"linear": ("BF16", [4096, 1024]), "norm": ("BF16", [1024])})
+        _write_safetensors(tmp_path / "text_encoder" / "model.safetensors", {"linear": ("BF16", [1024, 1024])})
+        _write_safetensors(tmp_path / "vae" / "model.safetensors", {"conv": ("BF16", [64, 64, 3, 3])})
+        return tmp_path
+
+    def test_streamed_levels_hold_weights_in_system_memory(self, tmp_path):
+        estimates = estimate_cuda_image_memory(self._model(tmp_path), (None, 8))
+
+        vae = 64 * 64 * 9 * 2
+        bf16 = (4096 * 1024 + 1024 + 1024 * 1024) * 2
+        fp8 = (4096 * 1024 + 1024 * 1024) + 1024 * 2
+        assert estimates[None].gpu_bytes == estimates[8].gpu_bytes == vae + model_memory._CUDA_STREAMED_GPU_BYTES
+        assert estimates[None].system_bytes == bf16 + model_memory._CUDA_SYSTEM_WORKING_BYTES
+        assert estimates[8].system_bytes == fp8 + model_memory._CUDA_SYSTEM_WORKING_BYTES
+
+    def test_nf4_holds_transformer_and_text_encoder_on_the_gpu(self, tmp_path):
+        estimate = estimate_cuda_image_memory(self._model(tmp_path), (4,))[4]
+
+        nf4 = (4096 * 1024 + 1024 * 1024) * model_memory._NF4_BYTES_PER_WEIGHT + 1024 * 2
+        assert estimate.gpu_bytes == int(nf4 + 64 * 64 * 9 * 2 + model_memory._CUDA_RESIDENT_WORKING_BYTES)
+        assert estimate.system_bytes == model_memory._CUDA_SYSTEM_WORKING_BYTES
+
+    def test_krea2_nf4_holds_one_component_on_the_gpu_at_a_time(self, tmp_path):
+        estimate = estimate_cuda_image_memory(self._model(tmp_path, "Krea2Pipeline"), (4,))[4]
+
+        transformer = 4096 * 1024 * model_memory._NF4_BYTES_PER_WEIGHT + 1024 * 2
+        text_encoder = 1024 * 1024 * model_memory._NF4_BYTES_PER_WEIGHT
+        assert estimate.gpu_bytes == int(transformer + 64 * 64 * 9 * 2 + model_memory._CUDA_RESIDENT_WORKING_BYTES)
+        assert estimate.system_bytes == int(text_encoder + model_memory._CUDA_SYSTEM_WORKING_BYTES)
+
+    def test_stored_q4_copy_holds_its_weights_on_the_gpu(self, tmp_path):
+        (tmp_path / "stored").mkdir()
+        (tmp_path / "plain").mkdir()
+        model_dir = self._model(tmp_path / "stored")
+        (model_dir / "ziv-quant.json").write_text(json.dumps({"version": 1, "bits": 4}), encoding="utf-8")
+
+        estimates = estimate_cuda_image_memory(model_dir)
+
+        assert estimates[None] == estimate_cuda_image_memory(self._model(tmp_path / "plain"), (4,))[4]
+
+    def test_returns_none_without_weights(self, tmp_path):
+        assert estimate_cuda_image_memory(tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    ("gpu", "system", "expected"),
+    [
+        (4 * _GIB, 20 * _GIB, "fits"),
+        (4 * _GIB, 25 * _GIB, "tight"),  # over 80% of system memory: weights stream from disk
+        (9.5 * _GIB, 4 * _GIB, "tight"),  # over 90% of the GPU
+        (10 * _GIB + 1, 4 * _GIB, "too_large"),
+    ],
+)
+def test_classify_cuda_memory_fit(gpu, system, expected):
+    assert classify_cuda_memory_fit(CudaMemoryEstimate(int(gpu), int(system)), MemoryBudget(10 * _GIB, 30 * _GIB)) == expected

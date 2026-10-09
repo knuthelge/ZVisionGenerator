@@ -114,11 +114,17 @@ To run the same job from a terminal, press the terminal button in the *Settings*
 
 To give the preview more room, collapse the Compose and Settings sidebar with the **«** button next to *Compose*. It folds into a narrow strip with an expand button and a Generate button, and the choice is remembered in the browser. On phone-width screens the sidebar always shows above the preview. While a job runs, its card shows the progress and controls on the left and the live preview and outputs on the right.
 
-The workspace model picker and the Models page show whether each model is already downloaded; models that are not yet downloaded download on first use. On macOS they also show whether a downloaded model fits this Mac's memory, compared with the GPU memory Apple recommends for the machine:
+The workspace model picker and the Models page show whether each model is already downloaded; models that are not yet downloaded download on first use. They also show whether a downloaded model fits this machine's memory. On macOS this is compared with the GPU memory Apple recommends for the machine:
 
 - **Fits**: the estimate is at most 1.1 times the recommendation.
 - **Tight**: the estimate is at most 1.5 times the recommendation, which is MLX's default memory limit. The model runs, but macOS compresses or swaps other memory to make room, so the Mac can slow down while generating.
 - **Too large**: the estimate is above MLX's default memory limit. Expect heavy swapping that can make the whole Mac unresponsive, or an out-of-memory error.
+
+On Windows and Linux the badges compare an image model with the GPU's memory and the machine's system memory (see [Quantization](guides/image.md#quantization)):
+
+- **Fits**: the model fits comfortably.
+- **Tight**: the model runs, but slowly, because it does not fit in system memory or the GPU is nearly full.
+- **Too large**: the model needs more GPU memory than the GPU has. Try a lower quant.
 
 The workspace badge follows the selected quantize level, so you can see whether `q8` or `q4` brings a large model within reach. Hover the badge for the estimate. After each job the Web UI returns the model's memory to the system.
 

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { MemoryFit } from '$lib/types';
 
-import ModelStatusBadges, { NOT_DOWNLOADED_TOOLTIP, memoryFitFor } from './ModelStatusBadges.svelte';
+import ModelStatusBadges, { NOT_DOWNLOADED_TOOLTIP, memoryFitFor, memoryFitTitle } from './ModelStatusBadges.svelte';
 import * as molecules from './index';
 
 const FIT: MemoryFit = {
@@ -38,6 +38,25 @@ describe('memoryFitFor', () => {
     expect(memoryFitFor(video, null, true)?.status).toBe('tight');
     expect(memoryFitFor(video, null, false)?.status).toBe('too_large');
     expect(memoryFitFor(FIT, null, false)?.status).toBe('too_large'); // image models have no low-memory variant
+  });
+});
+
+describe('memoryFitTitle on a discrete GPU', () => {
+  const CUDA_FIT: MemoryFit = {
+    kind: 'discrete',
+    budget_gb: 10,
+    system_budget_gb: 30,
+    by_quantize: {
+      none: { status: 'tight', required_gb: 4.2, system_gb: 33.6 },
+      '8': { status: 'fits', required_gb: 4.2, system_gb: 17.6 }
+    }
+  };
+
+  it('reports the system memory need of the selected level and of each quantized level', () => {
+    const title = memoryFitTitle(CUDA_FIT, CUDA_FIT.by_quantize.none);
+
+    expect(title).toContain('33.6 GB');
+    expect(title).toContain('17.6 GB');
   });
 });
 

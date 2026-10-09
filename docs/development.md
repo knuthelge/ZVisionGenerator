@@ -75,7 +75,7 @@ zvisiongenerator/
 │   ├── image_win_lokr.py          LyCORIS LoKr adapters for the diffusers backend (applied like mflux)
 │   ├── image_win_preview.py       Cheap latent → RGB live previews for the diffusers backend
 │   ├── image_win_quant.py         NF4 (q4) and FP8 (q8) weights for the diffusers backend, at load and as stored quants
-│   ├── memory_cuda.py             CUDA allocator options and memory release after a job
+│   ├── memory_cuda.py             CUDA memory release after a job, and GPU and system memory sizes
 │   ├── memory_mac.py              MLX memory release and recommended GPU memory budget
 │   ├── prompt_enhancer_mac.py     macOS prompt-enhancer LLM (mlx-lm)
 │   ├── prompt_enhancer_win.py     Windows/Linux prompt-enhancer LLM (transformers)
@@ -115,7 +115,7 @@ zvisiongenerator/
 │   ├── interactive.py             Keyboard interrupt handling
 │   ├── lora.py                    LoRA CLI argument parsing
 │   ├── model_files.py             Offline check for fully downloaded model weights
-│   ├── model_memory.py            Header-only memory estimates for MLX models
+│   ├── model_memory.py            Header-only memory estimates (MLX unified memory; CUDA GPU and system memory)
 │   ├── paths.py                   ~/.ziv/ model store resolution
 │   ├── platform.py                Platform metadata and platform-aware alias values
 │   ├── prompt_compose.py          Structured prompt flattening & snippets

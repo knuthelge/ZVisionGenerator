@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
     from zvisiongenerator.core.image_backend import ImageBackend
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
+    from zvisiongenerator.utils.model_memory import MemoryBudget
 
 __all__ = [
     "create_prompt_enhancer",
@@ -146,17 +147,25 @@ def release_accelerator_memory() -> None:
     release_memory()
 
 
-def get_accelerator_memory_budget() -> int | None:
-    """Return the GPU memory a model may use without starving the system, or ``None`` when unknown.
+def get_accelerator_memory_budget() -> MemoryBudget | None:
+    """Return the memory a model may use on this machine, or ``None`` when unknown.
 
-    Only macOS reports this: Apple Silicon shares one memory pool between CPU and GPU, so the
-    budget is Apple's recommended working set. CUDA has dedicated VRAM and is not estimated here.
+    Apple Silicon shares one memory pool between CPU and GPU, so its budget is Apple's recommended GPU
+    working set. On CUDA it is the GPU's VRAM plus the system memory that offloaded weights stream from.
     """
-    if sys.platform != "darwin":
-        return None
-    from zvisiongenerator.backends.memory_mac import memory_budget_bytes
+    from zvisiongenerator.utils.model_memory import MemoryBudget
 
-    return memory_budget_bytes()
+    if sys.platform == "darwin":
+        from zvisiongenerator.backends.memory_mac import memory_budget_bytes
+
+        budget = memory_budget_bytes()
+        return MemoryBudget(budget) if budget else None
+    if sys.platform in ("win32", "linux"):
+        from zvisiongenerator.backends.memory_cuda import memory_sizes
+
+        sizes = memory_sizes()
+        return MemoryBudget(*sizes) if sizes else None
+    return None
 
 
 def supports_stored_quants() -> bool:
