@@ -1,6 +1,7 @@
 <script lang="ts" module>
   import { backOut, cubicInOut } from 'svelte/easing';
   import type { TransitionConfig } from 'svelte/transition';
+  import { prefersReducedMotion } from './Mascot.svelte';
 
   // Where the mascot last left from, keyed so separate mascots never swap places.
   const departures = new Map<string, { rect: DOMRect; at: number }>();
@@ -8,7 +9,7 @@
 
   function motionAllowed(): boolean {
     if (typeof Element === 'undefined' || typeof Element.prototype.animate !== 'function') return false;
-    return !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    return !prefersReducedMotion();
   }
 
   function isFresh(entry: { at: number } | undefined): boolean {
@@ -70,10 +71,11 @@
 </script>
 
 <script lang="ts">
-  import Mascot, { type MascotMood } from './Mascot.svelte';
+  import Mascot, { type MascotMood, type MascotTool } from './Mascot.svelte';
 
   interface Props {
     mood?: MascotMood;
+    tool?: MascotTool;
     size?: number | string;
     /** Spots sharing a key hand the mascot over to each other with a hop. */
     travelKey?: string;
@@ -82,6 +84,7 @@
 
   let {
     mood = 'idle',
+    tool = 'brush',
     size = 120,
     travelKey = 'mascot',
     class: extraClass = ''
@@ -94,5 +97,5 @@
   in:arrive|global={travelKey}
   out:depart|global={travelKey}
 >
-  <Mascot {mood} {size} />
+  <Mascot {mood} {tool} {size} />
 </div>

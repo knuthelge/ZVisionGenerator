@@ -2,14 +2,25 @@
   export type MascotMood =
     | 'idle'
     | 'thinking'
+    | 'reading'
     | 'creating'
+    | 'finishing'
     | 'cheerful'
     | 'waving'
     | 'curious'
     | 'sleeping'
     | 'paused'
     | 'sad'
-    | 'surprised';
+    | 'surprised'
+    | 'nodding';
+
+  /** What the mascot holds: a paintbrush for images, a clapperboard for video. */
+  export type MascotTool = 'brush' | 'clapper';
+
+  /** Report whether the user asked the system to reduce motion. */
+  export function prefersReducedMotion(): boolean {
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  }
 </script>
 
 <script lang="ts">
@@ -17,12 +28,14 @@
 
   interface Props {
     mood?: MascotMood;
+    tool?: MascotTool;
     size?: number | string;
     class?: string;
   }
 
   let {
     mood = 'idle',
+    tool = 'brush',
     size = 120,
     class: extraClass = ''
   }: Props = $props();
@@ -30,14 +43,17 @@
   const labels: Record<MascotMood, string> = {
     idle: 'Z-Vision mascot',
     thinking: 'Z-Vision mascot is thinking',
+    reading: 'Z-Vision mascot is reading your prompt',
     creating: 'Z-Vision mascot is creating an image',
+    finishing: 'Z-Vision mascot is adding the finishing touches',
     cheerful: 'Z-Vision mascot is cheering',
     waving: 'Z-Vision mascot is waving hello',
     curious: 'Z-Vision mascot is watching you type',
     sleeping: 'Z-Vision mascot is sleeping',
     paused: 'Z-Vision mascot is waiting for you to resume',
     sad: 'Z-Vision mascot is sad',
-    surprised: 'Z-Vision mascot is surprised'
+    surprised: 'Z-Vision mascot is surprised',
+    nodding: 'Z-Vision mascot nods: added to the queue'
   };
 
   interface Pose {
@@ -46,16 +62,24 @@
   }
 
   const BLEND_MS = 280;
+  // The viewBox and the eye centre, for mapping the pointer into SVG units.
+  const VIEW = { x: -20, y: -20, width: 240, height: 225 };
+  const EYE = { x: 100, y: 100 };
+  // Furthest the iris looks (SVG units), reached once the pointer is this far away (CSS px).
+  const LOOK_MAX = 7;
+  const LOOK_RANGE_PX = 320;
 
   let svg = $state<SVGSVGElement | null>(null);
   let fromPoses: Map<Element, Pose> | null = null;
   let blends: Animation[] = [];
   let blendRun = 0;
+  let booping = $state(false);
 
   /** Read the rendered pose of every styled part, including any running animation. */
   function readPoses(root: SVGSVGElement): Map<Element, Pose> {
     const poses = new Map<Element, Pose>();
-    root.querySelectorAll('[class]').forEach((el) => {
+    // The click bounce plays on regardless of mood, so it is left out of the blend.
+    root.querySelectorAll('[class]:not(.boop)').forEach((el) => {
       const style = getComputedStyle(el);
       poses.set(el, { transform: style.transform, opacity: style.opacity });
     });
@@ -103,12 +127,60 @@
       if (svg && from) blendInto(svg, from);
     });
   });
+
+  /** Aim the iris at a pointer position, in SVG units relative to the eye. */
+  function lookAt(root: SVGSVGElement, clientX: number, clientY: number): void {
+    const rect = root.getBoundingClientRect();
+    const scale = Math.min(rect.width / VIEW.width, rect.height / VIEW.height);
+    const eyeX = rect.left + (rect.width - VIEW.width * scale) / 2 + (EYE.x - VIEW.x) * scale;
+    const eyeY = rect.top + (rect.height - VIEW.height * scale) / 2 + (EYE.y - VIEW.y) * scale;
+    const dx = clientX - eyeX;
+    const dy = clientY - eyeY;
+    const distance = Math.hypot(dx, dy);
+    const reach = distance === 0 ? 0 : (LOOK_MAX * Math.min(1, distance / LOOK_RANGE_PX)) / distance;
+    root.style.setProperty('--look-x', `${(dx * reach).toFixed(2)}px`);
+    root.style.setProperty('--look-y', `${(dy * reach * 0.8).toFixed(2)}px`);
+  }
+
+  // While idle, the eye follows the pointer around the page.
+  $effect(() => {
+    if (mood !== 'idle' || !svg || prefersReducedMotion()) return;
+    const root = svg;
+    let frame = 0;
+    let pointer = { x: 0, y: 0 };
+    function onPointerMove(event: PointerEvent): void {
+      pointer = { x: event.clientX, y: event.clientY };
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; lookAt(root, pointer.x, pointer.y); });
+    }
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      cancelAnimationFrame(frame);
+      root.style.removeProperty('--look-x');
+      root.style.removeProperty('--look-y');
+    };
+  });
+
+  /** Bounce once when clicked; clicks during a bounce are ignored. */
+  function boop(): void {
+    if (booping || prefersReducedMotion()) return;
+    booping = true;
+  }
+
+  function boopEnded(event: AnimationEvent): void {
+    if (event.target === event.currentTarget) booping = false;
+  }
 </script>
 
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+<!-- The bounce is a pointer-only flourish that carries no information. -->
 <svg
   bind:this={svg}
   class="mascot {extraClass}"
   data-mood={mood}
+  data-tool={tool}
+  data-boop={booping ? '' : undefined}
+  onclick={boop}
   width={size}
   height={size}
   viewBox="-20 -20 240 225"
@@ -139,6 +211,14 @@
     </g>
   </g>
 
+  <!-- Nodding: check badge -->
+  <g class="fx fx-nodding">
+    <g class="check">
+      <circle cx="168" cy="10" r="13" fill="#2dd4bf" />
+      <path d="M161,10 L166,15 L175,5" stroke="#fff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+    </g>
+  </g>
+
   <!-- Surprised: exclamation mark -->
   <g class="fx fx-surprised">
     <g class="exclaim">
@@ -147,59 +227,77 @@
     </g>
   </g>
 
-  <g class="root">
-    <!-- Brush arm (behind body) -->
-    <g class="brush">
-      <line x1="168" y1="126" x2="188" y2="84" stroke="#a16207" stroke-width="6" stroke-linecap="round" />
-      <path d="M184,86 Q186,68 196,62 Q198,78 192,90 Z" fill="#fbbf24" />
-    </g>
-
-    <path
-      class="body"
-      d="M100,42 C150,42 172,90 170,130 C168,168 140,182 100,182 C60,182 32,168 30,130 C28,90 50,42 100,42 Z"
-      fill="#2dd4bf"
-    />
-    <ellipse cx="100" cy="150" rx="42" ry="24" fill="#99f6e4" opacity=".45" />
-    <circle class="hand-r" cx="168" cy="128" r="10" fill="#14b8a6" />
-    <circle class="hand-l" cx="32" cy="132" r="10" fill="#14b8a6" />
-
-    <g class="beret">
-      <ellipse cx="100" cy="46" rx="36" ry="10" fill="#fb8f7c" />
-      <circle cx="100" cy="35" r="5" fill="#fb8f7c" />
-    </g>
-
-    <!-- Open eye -->
-    <g class="eye">
-      <path d="M60,100 Q100,66 140,100 Q100,134 60,100 Z" fill="#fff" stroke="#134e4a" stroke-width="3" />
-      <g class="iris">
-        <circle cx="100" cy="100" r="17" fill="#134e4a" />
-        <circle cx="107" cy="93" r="6" fill="#fff" />
+  <g class="boop" onanimationend={boopEnded}>
+    <g class="root">
+      <!-- Tool arm (behind body): a brush for images, a clapperboard for video -->
+      <g class="brush">
+        <line x1="168" y1="126" x2="188" y2="84" stroke="#a16207" stroke-width="6" stroke-linecap="round" />
+        <path class="tool-brush" d="M184,86 Q186,68 196,62 Q198,78 192,90 Z" fill="#fbbf24" />
+        <g class="tool-clapper">
+          <g transform="rotate(-20 190 78)">
+            <rect x="176" y="72" width="28" height="19" rx="2.5" fill="#3f4650" stroke="#b0b5ba" stroke-width="1.5" />
+            <g class="clap-arm">
+              <rect x="176" y="63" width="28" height="7" rx="2" fill="#3f4650" stroke="#b0b5ba" stroke-width="1.5" />
+              <path d="M181,63.8 L186,63.8 L182,69.2 L177,69.2 Z M190,63.8 L195,63.8 L191,69.2 L186,69.2 Z M199,63.8 L203,63.8 L200,69.2 L195,69.2 Z" fill="#fbbf24" />
+            </g>
+          </g>
+        </g>
       </g>
-    </g>
-    <!-- Sleeping closed eye -->
-    <path class="eye-closed" d="M70,100 Q100,122 130,100" stroke="#134e4a" stroke-width="7" stroke-linecap="round" fill="none" />
-    <!-- Sad tear -->
-    <path class="tear" d="M136,108 Q141,118 136,122 Q131,118 136,108 Z" fill="#60a5fa" />
-    <!-- Happy closed eye -->
-    <path class="eye-happy" d="M70,106 Q100,74 130,106" stroke="#134e4a" stroke-width="7" stroke-linecap="round" fill="none" />
 
-    <ellipse class="blush" cx="62" cy="126" rx="9" ry="4.5" fill="#f9a8d4" />
-    <ellipse class="blush" cx="138" cy="126" rx="9" ry="4.5" fill="#f9a8d4" />
+      <path
+        class="body"
+        d="M100,42 C150,42 172,90 170,130 C168,168 140,182 100,182 C60,182 32,168 30,130 C28,90 50,42 100,42 Z"
+        fill="#2dd4bf"
+      />
+      <ellipse cx="100" cy="150" rx="42" ry="24" fill="#99f6e4" opacity=".45" />
+      <circle class="hand-r" cx="168" cy="128" r="10" fill="#14b8a6" />
+      <!-- Reading: the prompt, held up like a recipe -->
+      <g class="scroll">
+        <rect x="8" y="88" width="34" height="32" rx="2" fill="#fef3c7" />
+        <rect x="5" y="84" width="40" height="7" rx="3.5" fill="#fde68a" />
+        <rect x="5" y="117" width="40" height="7" rx="3.5" fill="#fde68a" />
+        <path d="M14,98 H36 M14,104 H34 M14,110 H29" stroke="#b45309" stroke-width="2" stroke-linecap="round" opacity=".6" />
+      </g>
+      <circle class="hand-l" cx="32" cy="132" r="10" fill="#14b8a6" />
 
-    <!-- Mouths, one visible per mood -->
-    <path class="mouth m-idle" d="M89,130 Q100,140 111,130" stroke="#134e4a" stroke-width="3.5" stroke-linecap="round" fill="none" />
-    <path class="mouth m-thinking" d="M91,135 Q96,131 101,134 T111,132" stroke="#134e4a" stroke-width="3.5" stroke-linecap="round" fill="none" />
-    <g class="mouth m-creating">
-      <ellipse cx="105" cy="136" rx="4" ry="5" fill="#f472b6" />
-      <path d="M90,131 Q100,137 110,131" stroke="#134e4a" stroke-width="3.5" stroke-linecap="round" fill="none" />
-    </g>
-    <path class="mouth m-sad" d="M88,138 Q100,128 112,138" stroke="#134e4a" stroke-width="3.5" stroke-linecap="round" fill="none" />
-    <ellipse class="mouth m-surprised" cx="100" cy="136" rx="7" ry="9" fill="#134e4a" />
-    <ellipse class="mouth m-sleeping" cx="100" cy="135" rx="4" ry="3" fill="#134e4a" />
-    <path class="mouth m-paused" d="M92,133 Q100,136 108,133" stroke="#134e4a" stroke-width="3.5" stroke-linecap="round" fill="none" />
-    <g class="mouth m-cheerful">
-      <path d="M84,126 Q100,152 116,126 Z" fill="#134e4a" stroke="#134e4a" stroke-width="3" stroke-linejoin="round" />
-      <ellipse cx="100" cy="140" rx="7" ry="4" fill="#f472b6" />
+      <g class="beret">
+        <ellipse cx="100" cy="46" rx="36" ry="10" fill="#fb8f7c" />
+        <circle cx="100" cy="35" r="5" fill="#fb8f7c" />
+      </g>
+
+      <!-- Open eye -->
+      <g class="eye">
+        <path d="M60,100 Q100,66 140,100 Q100,134 60,100 Z" fill="#fff" stroke="#134e4a" stroke-width="3" />
+        <g class="iris">
+          <circle cx="100" cy="100" r="17" fill="#134e4a" />
+          <circle cx="107" cy="93" r="6" fill="#fff" />
+        </g>
+      </g>
+      <!-- Sleeping closed eye -->
+      <path class="eye-closed" d="M70,100 Q100,122 130,100" stroke="#134e4a" stroke-width="7" stroke-linecap="round" fill="none" />
+      <!-- Sad tear -->
+      <path class="tear" d="M136,108 Q141,118 136,122 Q131,118 136,108 Z" fill="#60a5fa" />
+      <!-- Happy closed eye -->
+      <path class="eye-happy" d="M70,106 Q100,74 130,106" stroke="#134e4a" stroke-width="7" stroke-linecap="round" fill="none" />
+
+      <ellipse class="blush" cx="62" cy="126" rx="9" ry="4.5" fill="#f9a8d4" />
+      <ellipse class="blush" cx="138" cy="126" rx="9" ry="4.5" fill="#f9a8d4" />
+
+      <!-- Mouths, one visible per mood -->
+      <path class="mouth m-idle" d="M89,130 Q100,140 111,130" stroke="#134e4a" stroke-width="3.5" stroke-linecap="round" fill="none" />
+      <path class="mouth m-thinking" d="M91,135 Q96,131 101,134 T111,132" stroke="#134e4a" stroke-width="3.5" stroke-linecap="round" fill="none" />
+      <g class="mouth m-creating">
+        <ellipse cx="105" cy="136" rx="4" ry="5" fill="#f472b6" />
+        <path d="M90,131 Q100,137 110,131" stroke="#134e4a" stroke-width="3.5" stroke-linecap="round" fill="none" />
+      </g>
+      <path class="mouth m-sad" d="M88,138 Q100,128 112,138" stroke="#134e4a" stroke-width="3.5" stroke-linecap="round" fill="none" />
+      <ellipse class="mouth m-surprised" cx="100" cy="136" rx="7" ry="9" fill="#134e4a" />
+      <ellipse class="mouth m-sleeping" cx="100" cy="135" rx="4" ry="3" fill="#134e4a" />
+      <path class="mouth m-paused" d="M92,133 Q100,136 108,133" stroke="#134e4a" stroke-width="3.5" stroke-linecap="round" fill="none" />
+      <g class="mouth m-cheerful">
+        <path d="M84,126 Q100,152 116,126 Z" fill="#134e4a" stroke="#134e4a" stroke-width="3" stroke-linejoin="round" />
+        <ellipse cx="100" cy="140" rx="7" ry="4" fill="#f472b6" />
+      </g>
     </g>
   </g>
 
@@ -211,6 +309,12 @@
     <circle class="speck p1" cx="194" cy="70" r="3.5" fill="#fb8f7c" />
     <circle class="speck p2" cx="190" cy="76" r="3" fill="#60a5fa" />
     <circle class="speck p3" cx="198" cy="74" r="3" fill="#fbbf24" />
+  </g>
+
+  <!-- Finishing: extra sparkles for the last strokes -->
+  <g class="fx fx-finishing">
+    <g transform="translate(186 26)"><path class="spark s4" d="M0,-8 L1.8,-1.8 L8,0 L1.8,1.8 L0,8 L-1.8,1.8 L-8,0 L-1.8,-1.8Z" fill="#fbbf24" /></g>
+    <g transform="translate(214 76)"><path class="spark s5" d="M0,-6 L1.4,-1.4 L6,0 L1.4,1.4 L0,6 L-1.4,1.4 L-6,0 L-1.4,-1.4Z" fill="#fb8f7c" /></g>
   </g>
 
   <!-- Cheerful: confetti -->
@@ -240,23 +344,48 @@
   .beret { transform-origin: 100px 50px; }
   .iris { transform-origin: 100px 100px; }
   .exclaim { transform-origin: 164px 30px; }
+  .check { transform-origin: 168px 10px; }
+  .clap-arm { transform-origin: 177px 70px; }
+  .boop { transform-origin: 100px 182px; }
   .blush { opacity: 0.7; }
 
   /* While a mood change blends in (see blendInto), the new loops wait on their first frame. */
-  .mascot:global([data-settling]) * { animation-play-state: paused !important; }
+  .mascot:global([data-settling]) *:not(.boop) { animation-play-state: paused !important; }
+
+  /* Clicks bounce the mascot, even inside a pointer-events: none dock. */
+  .mascot { pointer-events: auto; }
+  [data-boop] .boop { animation: boop 0.5s ease-out 1; }
+
+  /* Tool: a brush for images, a clapperboard for video */
+  .tool-brush,
+  .tool-clapper { transition: opacity 250ms ease; }
+  .tool-clapper,
+  [data-tool='clapper'] .tool-brush { opacity: 0; }
+  [data-tool='clapper'] .tool-clapper { opacity: 1; }
+  /* Paint specks animate their opacity, so they are hidden rather than faded. */
+  [data-tool='clapper'] .speck { visibility: hidden; }
 
   /* Mood-dependent visibility */
   .mouth,
   .eye-happy,
   .eye-closed,
   .tear,
+  .scroll,
   .fx { opacity: 0; }
 
   [data-mood='idle'] .m-idle,
   [data-mood='thinking'] .m-thinking,
   [data-mood='thinking'] .fx-thinking,
+  [data-mood='reading'] .m-idle,
+  [data-mood='reading'] .scroll,
   [data-mood='creating'] .m-creating,
   [data-mood='creating'] .fx-creating,
+  [data-mood='finishing'] .m-creating,
+  [data-mood='finishing'] .fx-creating,
+  [data-mood='finishing'] .fx-finishing,
+  [data-mood='nodding'] .m-idle,
+  [data-mood='nodding'] .eye-happy,
+  [data-mood='nodding'] .fx-nodding,
   [data-mood='cheerful'] .m-cheerful,
   [data-mood='cheerful'] .eye-happy,
   [data-mood='cheerful'] .fx-cheerful,
@@ -272,16 +401,31 @@
   [data-mood='surprised'] .fx-surprised { opacity: 1; }
 
   [data-mood='cheerful'] .eye,
+  [data-mood='nodding'] .eye,
   [data-mood='sleeping'] .eye { opacity: 0; }
   [data-mood='sleeping'] .blush,
   [data-mood='sad'] .blush { opacity: 0.3; }
   [data-mood='paused'] .blush { opacity: 0.5; }
-  [data-mood='cheerful'] .blush { opacity: 1; }
+  [data-mood='cheerful'] .blush,
+  [data-mood='finishing'] .blush,
+  [data-mood='nodding'] .blush { opacity: 1; }
 
   /* Idle: gentle float and blink */
   [data-mood='idle'] .root { animation: float 3.2s ease-in-out infinite; }
   [data-mood='idle'] .shadow { animation: shadow-float 3.2s ease-in-out infinite; }
   [data-mood='idle'] .eye { animation: blink 4.5s infinite; }
+  /* Idle: the iris follows the pointer (set by the component) */
+  [data-mood='idle'] .iris {
+    transform: translate(var(--look-x, 0px), var(--look-y, 0px));
+    transition: transform 180ms ease-out;
+  }
+
+  /* Reading: lean toward the prompt scroll and read it line by line */
+  [data-mood='reading'] .root { animation: peek 2.4s ease-in-out infinite; }
+  [data-mood='reading'] .iris { animation: scan 1.6s ease-in-out infinite; }
+  [data-mood='reading'] .hand-l { transform: translate(6px, -8px); }
+  [data-mood='reading'] .brush { transform: rotate(30deg); }
+  [data-mood='reading'] .beret { transform: rotate(-6deg); }
 
   /* Thinking: look up, sway, bubbles, brush tapping */
   [data-mood='thinking'] .root { animation: sway 3s ease-in-out infinite; }
@@ -303,6 +447,29 @@
   [data-mood='creating'] .speck { animation: speck 1.2s ease-out infinite; }
   [data-mood='creating'] .p2 { animation-delay: 0.4s; }
   [data-mood='creating'] .p3 { animation-delay: 0.8s; }
+
+  /* Finishing: the creating pose, faster, with extra sparkles */
+  [data-mood='finishing'] .root { animation: lean 0.55s ease-in-out infinite; }
+  [data-mood='finishing'] .eye { transform: scaleY(0.72); }
+  [data-mood='finishing'] .iris { animation: follow 0.55s ease-in-out infinite; }
+  [data-mood='finishing'] .brush { animation: paint 0.55s ease-in-out infinite; }
+  [data-mood='finishing'] .spark { animation: twinkle 0.7s ease-in-out infinite; }
+  [data-mood='finishing'] .s2 { animation-delay: 0.23s; }
+  [data-mood='finishing'] .s3 { animation-delay: 0.46s; }
+  [data-mood='finishing'] .s4 { animation-delay: 0.12s; }
+  [data-mood='finishing'] .s5 { animation-delay: 0.35s; }
+  [data-mood='finishing'] .speck { animation: speck 0.7s ease-out infinite; }
+  [data-mood='finishing'] .p2 { animation-delay: 0.23s; }
+  [data-mood='finishing'] .p3 { animation-delay: 0.46s; }
+
+  /* Video: the clapperboard snaps shut with every stroke */
+  [data-tool='clapper'][data-mood='creating'] .clap-arm { animation: clap 0.9s ease-in-out infinite; }
+  [data-tool='clapper'][data-mood='finishing'] .clap-arm { animation: clap 0.55s ease-in-out infinite; }
+
+  /* Nodding: two quick nods, a happy squint and a check badge */
+  [data-mood='nodding'] .root { animation: nod 0.9s ease-in-out 1; }
+  [data-mood='nodding'] .brush { transform: rotate(-14deg); }
+  [data-mood='nodding'] .check { animation: exclaim 0.6s ease-out 1 both; }
 
   /* Cheerful: squash-and-stretch hop, waving brush, confetti */
   [data-mood='cheerful'] .root { animation: hop 0.8s ease-in-out infinite; }
@@ -455,6 +622,26 @@
     100% { transform: translate(10px, -14px); opacity: 0; }
   }
   @keyframes pulse { 50% { opacity: 0.45; } }
+  @keyframes scan {
+    0%, 100% { transform: translate(-14px, 3px); }
+    30% { transform: translate(-6px, 4px); }
+    45% { transform: translate(-14px, 7px); }
+    75% { transform: translate(-6px, 8px); }
+    90% { transform: translate(-14px, 3px); }
+  }
+  @keyframes clap {
+    0%, 55%, 100% { transform: rotate(0deg); }
+    30% { transform: rotate(-26deg); }
+  }
+  @keyframes nod {
+    0%, 45%, 100% { transform: translateY(0) rotate(0deg); }
+    20%, 70% { transform: translateY(4px) rotate(3deg) scale(1.02, 0.97); }
+  }
+  @keyframes boop {
+    0%, 100% { transform: scale(1, 1); }
+    30% { transform: scale(1.12, 0.86); }
+    60% { transform: translateY(-10px) scale(0.94, 1.08); }
+  }
   @keyframes droop {
     0%, 100% { transform: scale(1.03, 0.96); }
     50% { transform: scale(1.04, 0.94); }
@@ -491,6 +678,9 @@
     [data-mood='waving'] .hand-l { transform: translate(-4px, -58px); }
     [data-mood='curious'] .iris { transform: translate(-13px, 3px); }
     [data-mood='curious'] .root { transform: rotate(-5deg); }
+    [data-mood='reading'] .iris { transform: translate(-10px, 5px); }
+    [data-mood='reading'] .root { transform: rotate(-5deg); }
+    [data-mood='finishing'] .spark { opacity: 1; }
     [data-mood='sleeping'] .z { opacity: 1; }
     [data-mood='sad'] .tear { opacity: 1; }
   }

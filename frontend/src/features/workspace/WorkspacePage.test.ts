@@ -659,6 +659,7 @@ describe('WorkspacePage', () => {
       await settle();
 
       expect(jobStore.current?.job_id).toBe('job-live');
+      expect((target.querySelector('svg.mascot') as SVGSVGElement).dataset.mood).toBe('nodding');
       const panel = target.querySelector('[data-testid="queue-panel"]') as HTMLElement;
       expect(panel.textContent).toContain('Up next · 1');
       expect(panel.textContent).toContain('Another run');
