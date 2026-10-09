@@ -22,8 +22,15 @@ describe('parseLoraString', () => {
     ]);
   });
 
-  it('matches a moved file by its name', () => {
-    expect(parseLoraString('/old/place/ink-sketch.safetensors:0.4', installed)).toEqual([{ name: 'ink-sketch', weight: 0.4 }]);
+  it('keeps a Hugging Face repo or a file elsewhere that shares an installed name', () => {
+    expect(parseLoraString('owner/ink-sketch:0.8,/old/place/ink-sketch.safetensors:0.4', installed)).toEqual([
+      { name: 'owner/ink-sketch', weight: 0.8 },
+      { name: '/old/place/ink-sketch.safetensors', weight: 0.4 },
+    ]);
+  });
+
+  it('keeps the first entry when a LoRA is listed twice', () => {
+    expect(parseLoraString('ink-sketch:1,/Users/me/.ziv/loras/ink-sketch.safetensors:0.4', installed)).toEqual([{ name: 'ink-sketch', weight: 1 }]);
   });
 
   it('keeps a path with no installed LoRA, including a Windows path', () => {
@@ -44,7 +51,7 @@ describe('parseLoraString', () => {
 
 describe('formatLoraString', () => {
   it('sends a reused path as the installed LoRA it matched', () => {
-    const chips = parseLoraString('/old/place/ink-sketch.safetensors:0.4,/gone/x.safetensors:1', installed);
+    const chips = parseLoraString('/Users/me/.ziv/loras/ink-sketch.safetensors:0.4,/gone/x.safetensors:1', installed);
     expect(formatLoraString(chips)).toBe('ink-sketch:0.4,/gone/x.safetensors:1');
   });
 });

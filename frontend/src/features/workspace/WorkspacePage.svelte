@@ -926,6 +926,8 @@
   /* Chips in the toolbar share the height of the selects beside them. */
   .lora-chip { height: var(--spacing-control); padding: 0 8px; border-radius: var(--radius-sm); color: var(--color-text-primary); }
   .lora-weight { field-sizing: content; min-width: 2ch; border-radius: var(--radius-xs); background: transparent; text-align: center; font-family: var(--font-mono); font-weight: 400; color: var(--color-text-muted); appearance: textfield; -moz-appearance: textfield; }
+  /* Browsers without field-sizing would give the number its default width of 150px or more. */
+  @supports not (field-sizing: content) { .lora-weight { width: 4.5ch; } }
   .lora-weight::-webkit-inner-spin-button, .lora-weight::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
   .lora-weight:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
   .lora-remove { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: -3px; border-radius: var(--radius-xs); color: var(--color-text-muted); }
