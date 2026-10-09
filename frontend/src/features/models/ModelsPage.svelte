@@ -404,7 +404,7 @@
 
           <FormField label="Source file">
             <label class="flex min-h-control cursor-pointer items-center gap-2 text-ui text-text-secondary" for="convert-copy">
-              <input type="checkbox" name="copy" id="convert-copy" class="accent-primary-main h-3.5 w-3.5" />
+              <input type="checkbox" name="copy" id="convert-copy" class="ui-checkbox" />
               Copy instead of moving
             </label>
           </FormField>

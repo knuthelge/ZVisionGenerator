@@ -30,6 +30,12 @@
   const model = $derived(s.model);
   const defaults = $derived(settingDefaultsFor(context, { workflow, model }));
 
+  /** How far along its range a slider value sits, as a CSS percentage for the filled part of the track. */
+  function rangeFill(value: number, spec: { min: number; max: number }): string {
+    const share = (value - spec.min) / (spec.max - spec.min);
+    return `${Math.min(1, Math.max(0, share)) * 100}%`;
+  }
+
   const SPEC = {
     runs: { step: 1, min: 1, max: 100 },
     frames: { step: 1, min: 1, max: 256 },
@@ -233,19 +239,19 @@
       {#if caps.showSteps}
         <InspectorRow label="Steps" forId="ws-steps" scrubber={scrubber(s.steps, SPEC.steps, (v) => draft.update('steps', v))} changed={changed('steps')} onreset={() => reset('steps')}>
           <InspectorNumber id="ws-steps" name="steps" value={s.steps} {...SPEC.steps} onchange={(v) => v !== null && draft.update('steps', v)} />
-          <input class="mini-range accent-primary-main" type="range" tabindex="-1" aria-hidden="true" {...SPEC.steps} value={s.steps} oninput={(e) => draft.update('steps', Number(e.currentTarget.value))}>
+          <input class="mini-range ui-range" type="range" tabindex="-1" aria-hidden="true" {...SPEC.steps} value={s.steps} style:--fill={rangeFill(s.steps, SPEC.steps)} oninput={(e) => draft.update('steps', Number(e.currentTarget.value))}>
         </InspectorRow>
       {/if}
       {#if caps.showGuidance}
         <InspectorRow label="Guidance" forId="ws-guidance" scrubber={scrubber(s.guidance, SPEC.guidance, (v) => draft.update('guidance', v))} changed={changed('guidance')} onreset={() => reset('guidance')}>
           <InspectorNumber id="ws-guidance" name="guidance" value={s.guidance} {...SPEC.guidance} onchange={(v) => v !== null && draft.update('guidance', v)} />
-          <input class="mini-range accent-primary-main" type="range" tabindex="-1" aria-hidden="true" {...SPEC.guidance} value={s.guidance} oninput={(e) => draft.update('guidance', Number(e.currentTarget.value))}>
+          <input class="mini-range ui-range" type="range" tabindex="-1" aria-hidden="true" {...SPEC.guidance} value={s.guidance} style:--fill={rangeFill(s.guidance, SPEC.guidance)} oninput={(e) => draft.update('guidance', Number(e.currentTarget.value))}>
         </InspectorRow>
       {/if}
       {#if caps.showI2IStrength}
         <InspectorRow label="Img strength" forId="ws-image-strength" scrubber={scrubber(s.referenceImageStrength, SPEC.strength, (v) => draft.update('referenceImageStrength', v))} changed={changed('referenceImageStrength')} onreset={() => reset('referenceImageStrength')}>
           <InspectorNumber id="ws-image-strength" name="image_strength" value={s.referenceImageStrength} {...SPEC.strength} onchange={(v) => v !== null && draft.update('referenceImageStrength', v)} />
-          <input class="mini-range accent-primary-main" type="range" tabindex="-1" aria-hidden="true" {...SPEC.strength} value={s.referenceImageStrength} oninput={(e) => draft.update('referenceImageStrength', Number(e.currentTarget.value))}>
+          <input class="mini-range ui-range" type="range" tabindex="-1" aria-hidden="true" {...SPEC.strength} value={s.referenceImageStrength} style:--fill={rangeFill(s.referenceImageStrength, SPEC.strength)} oninput={(e) => draft.update('referenceImageStrength', Number(e.currentTarget.value))}>
         </InspectorRow>
       {/if}
       {#if caps.showSeed}

@@ -314,6 +314,39 @@
   .ui-field:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
   .ui-field[aria-invalid='true'] { box-shadow: inset 0 0 0 1px var(--color-error); }
 
+  /* Checkboxes: a filled box with no outline; checked is teal with a dark tick. */
+  .ui-checkbox {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    appearance: none;
+    border-radius: 3px;
+    background: var(--color-zinc-700) center / 10px 10px no-repeat;
+    cursor: pointer;
+    transition: background-color 0.12s ease;
+  }
+  .ui-checkbox:hover:not(:disabled) { background-color: color-mix(in srgb, var(--color-text-primary) 18%, var(--color-zinc-700)); }
+  .ui-checkbox:checked, .ui-checkbox:checked:hover:not(:disabled) {
+    background-color: var(--color-primary-main);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230b3b37' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E");
+  }
+  .ui-checkbox:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Range sliders: a filled track with no outline; the part up to the thumb is teal (set --fill to the percentage). */
+  .ui-range { height: 14px; margin: 0; appearance: none; background: transparent; cursor: pointer; }
+  .ui-range::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: linear-gradient(to right, var(--color-primary-main) var(--fill, 0%), var(--color-zinc-700) var(--fill, 0%));
+  }
+  .ui-range::-moz-range-track { height: 4px; border-radius: 9999px; background: var(--color-zinc-700); }
+  .ui-range::-moz-range-progress { height: 4px; border-radius: 9999px; background: var(--color-primary-main); }
+  .ui-range::-webkit-slider-thumb { width: 12px; height: 12px; margin-top: -4px; appearance: none; border: 0; border-radius: 50%; background: var(--color-primary-main); }
+  .ui-range::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: var(--color-primary-main); }
+  .ui-range:hover::-webkit-slider-thumb { background: var(--color-primary-hover); }
+  .ui-range:hover::-moz-range-thumb { background: var(--color-primary-hover); }
+
   /* The custom select (ToolbarSelectShell) follows the field fills. */
   .ui-select-shell { border: 1px solid transparent; background: var(--color-bg-surface-hover); }
   .ui-panel .ui-select-shell, .ui-overlay .ui-select-shell { background: var(--color-bg-base); }

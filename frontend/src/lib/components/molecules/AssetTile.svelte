@@ -97,7 +97,7 @@
   {#if onselect}
     <input
       type="checkbox"
-      class="asset-tile-check accent-primary-main"
+      class="asset-tile-check ui-checkbox"
       checked={selected}
       aria-label="Select {asset.filename}"
       onchange={(event) => onselect(asset, (event.currentTarget as HTMLInputElement).checked)}
@@ -216,6 +216,6 @@
   .asset-tile[data-density='compact'] .asset-tile-actions { top: 4px; right: 4px; gap: 3px; }
   .asset-tile[data-density='compact'] .asset-tile-action { width: 24px; height: 24px; border-radius: var(--radius-sm); }
 
-  .asset-tile-check { position: absolute; top: 8px; left: 8px; z-index: 2; width: 16px; height: 16px; cursor: pointer; border-radius: 4px; }
+  .asset-tile-check { position: absolute; top: 8px; left: 8px; z-index: 2; width: 16px; height: 16px; border-radius: 4px; }
   .asset-tile-foot { padding: 8px 12px; }
 </style>
