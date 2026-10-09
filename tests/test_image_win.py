@@ -391,27 +391,114 @@ class TestStoredQuants:
 
 
 class TestLoadModelLoRA:
-    """LoRA paths are forwarded to pipeline.load_lora_weights / set_adapters."""
+    """LoRA files go to diffusers by path; only files with LoKr tensors are split, their LoKr layers applied last."""
 
-    def test_lora_loaded_and_set(self, win_backend):
+    @pytest.fixture
+    def loras(self, win_backend):
+        """Patch LoRA file reading and the LoKr module; yield (module, parts by path, LoKr paths, LoKr module stub)."""
         mod, _, _ = win_backend
+        parts: dict[str, SimpleNamespace] = {}
+        lokr_paths: set[str] = set()
+        lokr_module = MagicMock()
+        lokr_module.split_lora_tensors.side_effect = lambda state: state
+        lokr_module.apply_lokr.return_value = ()
+        safetensors_torch = MagicMock()
+        safetensors_torch.load_file.side_effect = lambda path: parts[path]
+        fakes = {"safetensors.torch": safetensors_torch, "zvisiongenerator.backends.image_win_lokr": lokr_module}
+        with patch.dict(sys.modules, fakes), patch.object(mod, "_has_lokr", side_effect=lambda path: path in lokr_paths):
+            yield mod, parts, lokr_paths, lokr_module
 
-        fake_pipeline = MagicMock()
-        mod.AutoPipelineForText2Image.from_pretrained.return_value = fake_pipeline
+    @staticmethod
+    def _parts(rest=None, lora=None, lokr=None, unsupported=()):
+        return SimpleNamespace(rest=rest or {}, lora=lora or {}, lokr=lokr or {}, unsupported=tuple(unsupported))
 
+    @staticmethod
+    def _load(mod, paths, weights, pipeline=None, registers=True):
+        pipeline = pipeline or MagicMock()
+        # diffusers registers each adapter it loads tensors for (unless *registers* is off).
+        pipeline.get_list_adapters.side_effect = lambda: {"transformer": [call.kwargs["adapter_name"] for call in pipeline.load_lora_weights.call_args_list] if registers else []}
+        mod.AutoPipelineForText2Image.from_pretrained.return_value = pipeline
         with patch.object(mod, "detect_image_model", return_value=_make_model_info()):
-            backend = mod.DiffusersBackend()
-            backend.load_model(
-                "fake-model-path",
-                lora_paths=["/path/lora1.safetensors", "/path/lora2.safetensors"],
-                lora_weights=[0.8, 0.5],
-            )
+            mod.DiffusersBackend().load_model("fake-model-path", lora_paths=paths, lora_weights=weights)
+        return pipeline
 
-        assert fake_pipeline.load_lora_weights.call_count == 2
-        fake_pipeline.set_adapters.assert_called_once_with(
-            ["lora_0", "lora_1"],
-            adapter_weights=[0.8, 0.5],
-        )
+    def test_files_without_lokr_load_by_path(self, loras):
+        mod, _, _, lokr_module = loras
+
+        pipeline = self._load(mod, ["/l/a.safetensors", "/l/b.bin"], [0.8, 0.5])
+
+        assert [call.args[0] for call in pipeline.load_lora_weights.call_args_list] == ["/l/a.safetensors", "/l/b.bin"]
+        pipeline.set_adapters.assert_called_once_with(["lora_0", "lora_1"], adapter_weights=[0.8, 0.5])
+        lokr_module.apply_lokr.assert_not_called()
+
+    def test_lokr_files_load_their_other_tensors_first_and_lokr_layers_last(self, loras):
+        mod, parts, lokr_paths, lokr_module = loras
+        lokr_paths.add("/l/mixed.safetensors")
+        parts["/l/mixed.safetensors"] = self._parts(rest={"b": 1}, lora={"b": 1}, lokr={"blocks.0": {}})
+        events: list[str] = []
+        pipeline = MagicMock()
+        pipeline.load_lora_weights.side_effect = lambda source, **_k: events.append(f"lora {source}")
+        lokr_module.apply_lokr.side_effect = lambda *_a, **_k: events.append("lokr") or ()
+
+        self._load(mod, ["/l/mixed.safetensors", "/l/plain.safetensors"], [0.7, 1.0], pipeline)
+
+        assert events == ["lora {'b': 1}", "lora /l/plain.safetensors", "lokr"]
+        assert lokr_module.apply_lokr.call_args.args[1:3] == ({"blocks.0": {}}, 0.7)
+        pipeline.set_adapters.assert_called_once_with(["lora_0", "lora_1"], adapter_weights=[0.7, 1.0])
+
+    def test_lokr_only_file_adds_no_diffusers_adapter(self, loras):
+        mod, parts, lokr_paths, lokr_module = loras
+        lokr_paths.add("/l/lokr.safetensors")
+        parts["/l/lokr.safetensors"] = self._parts(lokr={"blocks.0": {}})
+
+        pipeline = self._load(mod, ["/l/lokr.safetensors"], [1.0])
+
+        pipeline.load_lora_weights.assert_not_called()
+        pipeline.set_adapters.assert_not_called()
+        lokr_module.apply_lokr.assert_called_once()
+
+    def test_tensors_diffusers_rejects_are_skipped_with_a_warning(self, loras):
+        mod, parts, _, _ = loras
+        parts["/l/diff.safetensors"] = self._parts(rest={"a": 1, "d": 2}, lora={"a": 1}, unsupported=["cap_embedder.0.diff"])
+
+        def reject_whole_files(source, **_kwargs):
+            if isinstance(source, str):
+                raise ValueError("leftover keys")
+
+        pipeline = MagicMock()
+        pipeline.load_lora_weights.side_effect = reject_whole_files
+
+        with pytest.warns(UserWarning, match="diff.safetensors"):
+            self._load(mod, ["/l/diff.safetensors"], None, pipeline)
+
+        assert pipeline.load_lora_weights.call_args.args[0] == {"a": 1}
+        pipeline.set_adapters.assert_called_once_with(["lora_0"], adapter_weights=[1.0])
+
+    def test_a_file_diffusers_loads_nothing_from_adds_no_adapter(self, loras):
+        mod, _, _, _ = loras
+
+        with pytest.warns(UserWarning, match="none of its LoRA tensors"):
+            pipeline = self._load(mod, ["/l/other-model.safetensors"], [1.0], registers=False)
+
+        pipeline.set_adapters.assert_not_called()
+
+    def test_a_rejected_file_with_nothing_to_leave_out_fails(self, loras):
+        mod, parts, _, _ = loras
+        parts["/l/bad.safetensors"] = self._parts(rest={"a": 1}, lora={"a": 1})
+        pipeline = MagicMock()
+        pipeline.load_lora_weights.side_effect = ValueError("not a LoRA for this model")
+
+        with pytest.raises(ValueError):
+            self._load(mod, ["/l/bad.safetensors"], None, pipeline)
+
+    def test_lokr_layers_the_model_lacks_are_skipped_with_a_warning(self, loras):
+        mod, parts, lokr_paths, lokr_module = loras
+        lokr_paths.add("/l/lokr.safetensors")
+        parts["/l/lokr.safetensors"] = self._parts(lokr={"blocks.0": {}, "te.0": {}})
+        lokr_module.apply_lokr.return_value = ("te.0",)
+
+        with pytest.warns(UserWarning, match="lokr.safetensors"):
+            self._load(mod, ["/l/lokr.safetensors"], [1.0])
 
 
 # ---------------------------------------------------------------------------

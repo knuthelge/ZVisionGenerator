@@ -43,6 +43,7 @@ def cast_to_fp8(component: Any, compute_dtype: torch.dtype) -> Any:
     """Store *component*'s layer weights in FP8 and compute in *compute_dtype*, in place; return *component*.
 
     Weights already in FP8 stay as they are, so this also prepares a component loaded from a stored FP8 copy.
+    Each FP8 layer also declares *compute_dtype* (see :func:`_declare_compute_dtype`) so LoRAs load on top of it.
     """
     import torch
 
@@ -53,7 +54,21 @@ def cast_to_fp8(component: Any, compute_dtype: torch.dtype) -> Any:
         from diffusers.hooks import apply_layerwise_casting
 
         apply_layerwise_casting(component, storage_dtype=torch.float8_e4m3fn, compute_dtype=compute_dtype, skip_modules_pattern=_TEXT_ENCODER_SKIP_PATTERNS)
+    _declare_compute_dtype(component, torch.float8_e4m3fn, compute_dtype)
     return component
+
+
+def _declare_compute_dtype(component: Any, storage_dtype: torch.dtype, compute_dtype: torch.dtype) -> None:
+    """Set ``compute_dtype`` on every layer whose weight is stored in *storage_dtype*.
+
+    peft creates a LoRA's adapter layers in the base layer's ``compute_dtype`` when it has one (as bitsandbytes
+    layers do), else in its weight dtype. FP8 adapters could neither run (CUDA has no FP8 matmul) nor hold
+    typical LoRA values, which underflow in FP8.
+    """
+    for module in component.modules():
+        weight = getattr(module, "weight", None)
+        if weight is not None and weight.dtype == storage_dtype:
+            module.compute_dtype = compute_dtype
 
 
 def load_fp8_components(model_path: str, compute_dtype: torch.dtype) -> dict[str, Any]:

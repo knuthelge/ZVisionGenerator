@@ -121,6 +121,92 @@ def _text_encoder_offload_type(text_encoder: Any) -> str:
     return "block_level" if has_block_list else "leaf_level"
 
 
+def _load_loras(pipeline: Any, lora_paths: list[str], lora_weights: list[float] | None) -> None:
+    """Load LoRA files onto *pipeline*: through diffusers, with LoKr layers added as adapter terms.
+
+    A file without LoKr tensors goes to diffusers by path, so its metadata (such as ``lora_alpha``) applies. A file
+    with LoKr tensors is split: the rest goes to diffusers, the LoKr layers to :func:`apply_lokr` once every
+    standard LoRA has loaded, so diffusers always finds the layers it expects. LoKr layers that do not map onto the
+    model are skipped with a warning, as mflux does.
+    """
+    from safetensors.torch import load_file
+
+    from zvisiongenerator.backends.image_win_lokr import apply_lokr, split_lora_tensors
+
+    weights = lora_weights if lora_weights is not None else [1.0] * len(lora_paths)
+    lokr_files: list[tuple[str, Any, float]] = []
+    adapter_names: list[str] = []
+    adapter_weights: list[float] = []
+    for i, (path, weight) in enumerate(zip(lora_paths, weights, strict=True)):
+        parts = split_lora_tensors(load_file(path)) if _has_lokr(path) else None
+        if parts is not None:
+            lokr_files.append((path, parts, weight))
+        if (parts is None or parts.rest) and _load_lora_file(pipeline, path, parts, f"lora_{i}"):
+            adapter_names.append(f"lora_{i}")
+            adapter_weights.append(weight)
+    if adapter_names:
+        pipeline.set_adapters(adapter_names, adapter_weights=adapter_weights)
+    for path, parts, weight in lokr_files:
+        skipped = apply_lokr(pipeline, parts.lokr, weight, pin_memory=True)
+        if skipped:
+            warnings.warn(f"LoRA {Path(path).name}: skipped {len(skipped)} LoKr layers this model does not have (e.g. {skipped[0]}).", stacklevel=2)
+
+
+def _has_lokr(path: str) -> bool:
+    """Return whether the LoRA file at *path* holds LoKr tensors, reading only its tensor names."""
+    if not path.endswith(".safetensors"):
+        return False
+    from safetensors import safe_open
+
+    from zvisiongenerator.backends.image_win_lokr import has_lokr_tensors
+
+    with safe_open(path, framework="pt") as handle:
+        return has_lokr_tensors(handle.keys())
+
+
+def _load_lora_file(pipeline: Any, path: str, parts: Any, adapter_name: str) -> bool:
+    """Load the LoRA at *path* through diffusers, or only its non-LoKr tensors when it was split into *parts*.
+
+    When diffusers rejects tensors it cannot convert (such as LyCORIS ``diff`` deltas next to a LoRA), the file's
+    standard LoRA tensors load on their own and the rest is skipped with a warning, as mflux does. A file is read
+    and split for that only when it was not split already.
+
+    Returns:
+        Whether an adapter loaded.
+
+    Raises:
+        ValueError: When diffusers rejects the file and it has no other tensors to leave out.
+    """
+    from safetensors.torch import load_file
+
+    from zvisiongenerator.backends.image_win_lokr import split_lora_tensors
+
+    try:
+        pipeline.load_lora_weights(path if parts is None else parts.rest, adapter_name=adapter_name)
+        return _has_adapter(pipeline, adapter_name, path)
+    except ValueError:
+        if parts is None and path.endswith(".safetensors"):
+            parts = split_lora_tensors(load_file(path))
+        if parts is None or not parts.unsupported:
+            raise
+    warnings.warn(f"LoRA {Path(path).name}: skipped {len(parts.unsupported)} tensors of an unsupported type (e.g. {parts.unsupported[0]}).", stacklevel=3)
+    if not parts.lora:
+        return False
+    pipeline.load_lora_weights(parts.lora, adapter_name=adapter_name)
+    return _has_adapter(pipeline, adapter_name, path)
+
+
+def _has_adapter(pipeline: Any, adapter_name: str, path: str) -> bool:
+    """Return whether diffusers registered *adapter_name*, warning when it loaded nothing from *path*.
+
+    diffusers skips tensors no component of this model uses without raising, so a file can load no adapter.
+    """
+    if any(adapter_name in names for names in pipeline.get_list_adapters().values()):
+        return True
+    warnings.warn(f"LoRA {Path(path).name}: none of its LoRA tensors match this model; they were not applied.", stacklevel=3)
+    return False
+
+
 def _make_step_callback(skip_signal, *, total_steps: int, step_callback=None, live_preview: LivePreview | None = None):
     """Create a callback_on_step_end that reports progress and interrupts on skip.
 
@@ -234,10 +320,7 @@ class DiffusersBackend:
             _stream_to_gpu(pipeline, torch_dtype)
 
         if lora_paths:
-            for i, path in enumerate(lora_paths):
-                pipeline.load_lora_weights(path, adapter_name=f"lora_{i}")
-            adapter_names = [f"lora_{i}" for i in range(len(lora_paths))]
-            pipeline.set_adapters(adapter_names, adapter_weights=lora_weights)
+            _load_loras(pipeline, lora_paths, lora_weights)
 
         # Decode in slices and tiles to bound VAE memory. Called on the VAE itself: some pipelines (Krea 2) have no
         # enable_vae_tiling wrapper and would otherwise decode the whole frame at once.

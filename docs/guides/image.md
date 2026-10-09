@@ -125,6 +125,8 @@ ziv-image -m my-model --lora style1:0.8,detail:0.5
 
 Bare names are resolved from `~/.ziv/loras/`. Full paths also work.
 
+Standard LoRAs and LyCORIS LoKr files work on every platform and quantize level, and can be combined. Other LyCORIS formats are not supported; those parts of a file are skipped with a warning.
+
 ## Upscaling
 
 The built-in upscale pipeline generates at a reduced size, then refines to target resolution:

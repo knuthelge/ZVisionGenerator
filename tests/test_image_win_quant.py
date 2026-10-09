@@ -58,6 +58,19 @@ class TestCastToFp8:
         model.enable_layerwise_casting.assert_called_once_with(storage_dtype="fp8-sentinel", compute_dtype="bf16")
         libs.diffusers.hooks.apply_layerwise_casting.assert_not_called()
 
+    def test_fp8_layers_declare_the_compute_dtype_for_lora_adapters(self, libs):
+        fp8_layer = SimpleNamespace(weight=SimpleNamespace(dtype="fp8-sentinel"))
+        norm = SimpleNamespace(weight=SimpleNamespace(dtype="bf16"))
+        container = SimpleNamespace()
+        model = MagicMock()
+        model.modules.return_value = [container, fp8_layer, norm]
+
+        quant.cast_to_fp8(model, "bf16")
+
+        assert fp8_layer.compute_dtype == "bf16"
+        assert not hasattr(norm, "compute_dtype")
+        assert not hasattr(container, "compute_dtype")
+
     def test_text_encoders_keep_norms_and_embeddings_in_the_compute_dtype(self, libs):
         text_encoder = MagicMock(spec=["forward", "modules"])
 
