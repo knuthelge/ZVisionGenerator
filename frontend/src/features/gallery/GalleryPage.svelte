@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { router } from '$lib/state/router.svelte';
-  import { addToast } from '$lib/state/toasts.svelte';
+  import { addToast, dismissToast } from '$lib/state/toasts.svelte';
   import { getGallery, deleteAsset } from '$lib/api/gallery';
   import { historyStore } from '$lib/state/history.svelte';
   import { jobStore } from '$lib/state/job.svelte';
@@ -264,6 +264,10 @@
     );
   }
 
+  // Retry acts on this page's selection, so its toast must not outlive the page.
+  let retryToastId: string | null = null;
+  onDestroy(() => { if (retryToastId) dismissToast(retryToastId); });
+
   async function deleteSelected(): Promise<void> {
     const count = deletableSelection().length;
     if (count === 0) return;
@@ -293,14 +297,16 @@
           'success'
         );
       } else if (deletedTargets.length > 0) {
-        addToast(
+        retryToastId = addToast(
           `Deleted ${deletedTargets.length}; ${failedTargets.length} failed and remain selected for retry.`,
-          'warning'
+          'warning',
+          { action: { label: 'Retry', run: () => void deleteSelected() } }
         );
       } else {
-        addToast(
+        retryToastId = addToast(
           `Delete failed for ${failedTargets.length} selected asset${failedTargets.length !== 1 ? 's' : ''}; they remain selected for retry.`,
-          'error'
+          'error',
+          { action: { label: 'Retry', run: () => void deleteSelected() } }
         );
       }
     } finally {

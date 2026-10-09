@@ -13,7 +13,7 @@ export async function startUpscale(asset: GalleryAsset, factor: UpscaleFactor): 
   try {
     job = await submitUpscale(asset.id, factor);
   } catch (error) {
-    addToast(`Upscale failed: ${upscaleErrorText(error)}`, 'error', 8000);
+    addToast(`Upscale failed: ${upscaleErrorText(error)}`, 'error');
     return null;
   }
   jobStore.jobSubmitted(job);

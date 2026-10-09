@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { getConfig, updateConfig } from '$lib/api/config';
-  import { addToast } from '$lib/state/toasts.svelte';
+  import { addToast, dismissToast } from '$lib/state/toasts.svelte';
   import type { AppConfig, WritableConfigField, WritableConfigValue } from '$lib/types';
   import { Button, Icon, Input, Select } from '$lib/components/atoms';
   import { Alert, FormField, KeyValueList, Panel, PathField, type KeyValueItem } from '$lib/components/molecules';
@@ -146,8 +146,13 @@
     return trimmed;
   }
 
+  // Retry resubmits this page's form, so its toast must not outlive the page.
+  let retryToastId: string | null = null;
+  onDestroy(() => { if (retryToastId) dismissToast(retryToastId); });
+
   async function handleSave(e: Event): Promise<void> {
     e.preventDefault();
+    const form = e.currentTarget as HTMLFormElement;
     if (!config) return;
     saving = true;
     saveStatus = null;
@@ -168,7 +173,7 @@
         tone: 'error',
         message: msg
       };
-      addToast('Save failed: ' + msg, 'error');
+      retryToastId = addToast('Save failed: ' + msg, 'error', { action: { label: 'Retry', run: () => form.requestSubmit() } });
     } finally {
       saving = false;
     }
