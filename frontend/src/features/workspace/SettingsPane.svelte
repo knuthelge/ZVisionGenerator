@@ -190,7 +190,7 @@
     <span class="settings-hint" title="Drag a label left or right to change its value; arrow keys nudge (Shift ×10)">Drag labels to scrub</span>
   </div>
 
-  <div class="settings-scroll custom-scrollbar">
+  <div class="settings-scroll">
     {#if caps.showDimensions}
       <InspectorSection id="size" title="Size" summary={sizeSummary}>
         <InspectorRow label="Ratio" changed={changed('ratio')} onreset={() => reset('ratio', 'size', 'dimensionMode')}>
@@ -233,19 +233,19 @@
       {#if caps.showSteps}
         <InspectorRow label="Steps" forId="ws-steps" scrubber={scrubber(s.steps, SPEC.steps, (v) => draft.update('steps', v))} changed={changed('steps')} onreset={() => reset('steps')}>
           <InspectorNumber id="ws-steps" name="steps" value={s.steps} {...SPEC.steps} onchange={(v) => v !== null && draft.update('steps', v)} />
-          <input class="mini-range accent-primary" type="range" tabindex="-1" aria-hidden="true" {...SPEC.steps} value={s.steps} oninput={(e) => draft.update('steps', Number(e.currentTarget.value))}>
+          <input class="mini-range accent-primary-main" type="range" tabindex="-1" aria-hidden="true" {...SPEC.steps} value={s.steps} oninput={(e) => draft.update('steps', Number(e.currentTarget.value))}>
         </InspectorRow>
       {/if}
       {#if caps.showGuidance}
         <InspectorRow label="Guidance" forId="ws-guidance" scrubber={scrubber(s.guidance, SPEC.guidance, (v) => draft.update('guidance', v))} changed={changed('guidance')} onreset={() => reset('guidance')}>
           <InspectorNumber id="ws-guidance" name="guidance" value={s.guidance} {...SPEC.guidance} onchange={(v) => v !== null && draft.update('guidance', v)} />
-          <input class="mini-range accent-primary" type="range" tabindex="-1" aria-hidden="true" {...SPEC.guidance} value={s.guidance} oninput={(e) => draft.update('guidance', Number(e.currentTarget.value))}>
+          <input class="mini-range accent-primary-main" type="range" tabindex="-1" aria-hidden="true" {...SPEC.guidance} value={s.guidance} oninput={(e) => draft.update('guidance', Number(e.currentTarget.value))}>
         </InspectorRow>
       {/if}
       {#if caps.showI2IStrength}
         <InspectorRow label="Img strength" forId="ws-image-strength" scrubber={scrubber(s.referenceImageStrength, SPEC.strength, (v) => draft.update('referenceImageStrength', v))} changed={changed('referenceImageStrength')} onreset={() => reset('referenceImageStrength')}>
           <InspectorNumber id="ws-image-strength" name="image_strength" value={s.referenceImageStrength} {...SPEC.strength} onchange={(v) => v !== null && draft.update('referenceImageStrength', v)} />
-          <input class="mini-range accent-primary" type="range" tabindex="-1" aria-hidden="true" {...SPEC.strength} value={s.referenceImageStrength} oninput={(e) => draft.update('referenceImageStrength', Number(e.currentTarget.value))}>
+          <input class="mini-range accent-primary-main" type="range" tabindex="-1" aria-hidden="true" {...SPEC.strength} value={s.referenceImageStrength} oninput={(e) => draft.update('referenceImageStrength', Number(e.currentTarget.value))}>
         </InspectorRow>
       {/if}
       {#if caps.showSeed}
@@ -460,7 +460,7 @@
     {/if}
   </div>
 
-  <div class="panel-footer settings-footer">
+  <div class="ui-pane-footer settings-footer">
     {#if jobsActive}
       <p id="ws-busy-note" class="ui-alert ui-alert-info footer-note">
         A job is running. New runs join the queue.

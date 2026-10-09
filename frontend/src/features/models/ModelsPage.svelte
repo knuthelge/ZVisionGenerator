@@ -391,7 +391,7 @@
             {/if}
 
             <label class="flex cursor-pointer items-center gap-2 text-ui text-text-secondary" for="convert-copy">
-              <input type="checkbox" name="copy" id="convert-copy" class="accent-primary h-3.5 w-3.5" />
+              <input type="checkbox" name="copy" id="convert-copy" class="accent-primary-main h-3.5 w-3.5" />
               Copy instead of moving
             </label>
 

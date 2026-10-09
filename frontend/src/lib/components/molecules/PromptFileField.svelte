@@ -142,7 +142,7 @@
 </script>
 
 <div class="prompt-file">
-  <div class="prompt-box">
+  <div class="ui-prompt-box">
     <div class="prompt-file-path">
       <PathField
         id="ws-prompts-file"
@@ -183,7 +183,7 @@
       </button>
     {/if}
 
-    <div class="prompt-tools">
+    <div class="ui-prompt-tools">
       {@render tools?.()}
       <button
         type="button"

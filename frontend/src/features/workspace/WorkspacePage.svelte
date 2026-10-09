@@ -642,7 +642,7 @@
   <input type="hidden" name="lora" value={draft.state.loraString}>
 
   <!-- Toolbar bar: model, quantize, loras -->
-  <div class="panel-toolbar z-10 shrink-0">
+  <div class="ui-pane-toolbar z-10 shrink-0">
     <div class="flex flex-wrap items-center px-3 py-2 gap-3">
 
       <!-- Model selector -->
@@ -782,7 +782,7 @@
     />
 
     <section class="workspace-preview relative z-0 flex min-h-0 min-w-0 flex-col bg-bg-base">
-      <div class="panel-header flex h-10 shrink-0 items-center justify-between px-3">
+      <div class="ui-pane-header flex h-10 shrink-0 items-center justify-between px-3">
         <h2 class="ui-area-label">Preview</h2>
         <span class="text-meta text-text-muted">{jobStore.isRunning ? 'Generating…' : hasCompletedOutputs || historyStore.assets.length ? 'Latest output' : 'Ready'}</span>
       </div>

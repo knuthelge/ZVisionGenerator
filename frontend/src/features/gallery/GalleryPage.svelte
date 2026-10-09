@@ -512,7 +512,7 @@
     {/snippet}
   </PageHeader>
 
-  <section id="gallery-scroll-region" class="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-4">
+  <section id="gallery-scroll-region" class="min-h-0 flex-1 overflow-y-auto p-4">
     {#if loading}
       <p class="flex items-center justify-center gap-2 py-24 text-ui text-text-muted" role="status"><Spinner />Loading…</p>
     {:else if error}

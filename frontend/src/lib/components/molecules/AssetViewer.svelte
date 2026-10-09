@@ -344,7 +344,7 @@
       </div>
 
       {#if detailsOpen}
-        <aside id="asset-viewer-details" class="viewer-details custom-scrollbar" aria-label="Asset details">
+        <aside id="asset-viewer-details" class="viewer-details" aria-label="Asset details">
           <section>
             <h4 class="viewer-h ui-area-label">Prompt</h4>
             <p class="viewer-prompt">{asset.prompt || 'No prompt recorded.'}</p>
@@ -389,7 +389,7 @@
     </div>
 
     {#if assets.length > 1}
-      <div class="viewer-film custom-scrollbar" aria-label="Assets in this set" bind:this={filmEl}>
+      <div class="viewer-film" aria-label="Assets in this set" bind:this={filmEl}>
         {#each assets as item, itemIndex (item.id)}
           <button
             type="button"

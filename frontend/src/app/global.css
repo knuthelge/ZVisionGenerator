@@ -147,19 +147,19 @@
 
 @layer components {
   /* Prompt box shared by the inline prompt and the prompt-file box in Compose. */
-  .prompt-box {
+  .ui-prompt-box {
     border: 1px solid var(--color-zinc-700);
     border-radius: var(--radius-md);
     background: var(--color-bg-surface);
   }
 
   /* The one focus ring, drawn on the box rather than the textarea inside it. */
-  .prompt-box:focus-within {
+  .ui-prompt-box:focus-within {
     outline: 2px solid var(--color-primary-main);
     outline-offset: 2px;
   }
 
-  .prompt-tools {
+  .ui-prompt-tools {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -169,82 +169,68 @@
   }
 
 
-  .panel-shell {
+  .ui-pane {
     background-color: var(--color-bg-base);
     border-color: var(--color-border-subtle);
   }
 
-  .panel-shell-left {
+  .ui-pane-left {
     border-right: 1px solid var(--color-border-subtle);
   }
 
-  .panel-toolbar {
+  .ui-pane-toolbar {
     background-color: var(--color-bg-surface);
     border-bottom: 1px solid var(--color-border-subtle);
   }
 
-  .panel-header {
+  .ui-pane-header {
     background-color: color-mix(in srgb, var(--color-bg-base) 94%, transparent);
     border-bottom: 1px solid var(--color-border-subtle);
   }
 
-  .panel-footer {
+  .ui-pane-footer {
     background-color: color-mix(in srgb, var(--color-bg-base) 94%, transparent);
     border-top: 1px solid var(--color-border-subtle);
   }
 
-  .surface-link-muted {
+  .ui-link {
     color: var(--color-text-secondary);
     transition: color 0.12s ease;
   }
 
-  .surface-link-muted:hover {
+  .ui-link:hover {
     color: var(--color-text-primary);
   }
 
-  .accent-primary {
-    accent-color: var(--color-primary-main);
-  }
 
-  .surface-footer-strip {
+  .ui-media-foot {
     background-color: var(--color-bg-raised);
     border-top: 1px solid var(--color-border-subtle);
   }
 
-  .surface-overlay-action {
+  .ui-media-action {
     background-color: color-mix(in srgb, var(--color-bg-base) 90%, transparent);
     color: var(--color-text-primary);
     transition: background-color 0.12s ease, color 0.12s ease;
   }
 
-  .surface-overlay-action:hover {
+  .ui-media-action:hover {
     background-color: var(--color-bg-surface-hover);
     color: var(--color-text-primary);
   }
 
   /* Dark ink on teal: white on teal fails contrast (3:1). */
-  .surface-overlay-action-primary {
+  .ui-media-action-primary {
     background-color: var(--color-primary-main);
     color: var(--color-primary-ink);
   }
 
-  .surface-overlay-action-primary:hover {
+  .ui-media-action-primary:hover {
     background-color: var(--color-primary-hover);
   }
 
-  .custom-scrollbar {
-    scrollbar-width: thin;
-    scrollbar-color: var(--color-zinc-700) transparent;
-  }
 
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 6px;
-  }
 
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: var(--color-zinc-700);
-    border-radius: 9999px;
-  }
 
   /* ——— Design system (proposals/web-design-system.md) ———
      Controls are 28px (22px small) with 6px corners; containers have 10px corners.

@@ -37,7 +37,7 @@
     <button
       type="button"
       id="ws-history-toggle"
-      class="strip-toggle surface-link-muted"
+      class="strip-toggle ui-link"
       aria-expanded={!collapsed}
       aria-controls="ws-history-scroll"
       aria-label="{collapsed ? 'Expand' : 'Collapse'} history"
@@ -58,7 +58,7 @@
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
       id="ws-history-scroll"
-      class="strip-scroll custom-scrollbar"
+      class="strip-scroll"
       role="list"
       aria-label="History, newest first"
       onkeydown={onKeydown}
