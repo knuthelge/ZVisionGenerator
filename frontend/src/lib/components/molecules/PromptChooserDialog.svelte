@@ -173,6 +173,6 @@
   .chooser-set-toggle[aria-expanded='true'] :global(.chooser-chev) { transform: rotate(90deg); }
   .chooser-option { display: flex; align-items: flex-start; gap: 12px; margin: 4px 0; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--radius-sm); }
   .chooser-option:hover { background: var(--color-bg-surface-hover); }
-  .chooser-option[data-selected='true'] { border-color: color-mix(in srgb, var(--color-primary-main) 30%, transparent); background: color-mix(in srgb, var(--color-primary-main) 5%, transparent); }
+  .chooser-option[data-selected='true'] { background: color-mix(in srgb, var(--color-primary-main) 10%, transparent); }
   .chooser-set-toggle:focus-visible, .chooser-link:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
 </style>

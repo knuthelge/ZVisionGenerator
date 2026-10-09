@@ -87,8 +87,8 @@
     <circle class="hand-l" cx="32" cy="132" r="10" fill="#14b8a6" />
 
     <g class="beret">
-      <ellipse cx="100" cy="46" rx="36" ry="10" fill="#f87171" />
-      <circle cx="100" cy="35" r="5" fill="#f87171" />
+      <ellipse cx="100" cy="46" rx="36" ry="10" fill="#fb8f7c" />
+      <circle cx="100" cy="35" r="5" fill="#fb8f7c" />
     </g>
 
     <!-- Open eye -->
@@ -130,7 +130,7 @@
     <g transform="translate(204 58)"><path class="spark s1" d="M0,-9 L2,-2 L9,0 L2,2 L0,9 L-2,2 L-9,0 L-2,-2Z" fill="#fbbf24" /></g>
     <g transform="translate(176 40)"><path class="spark s2" d="M0,-7 L1.6,-1.6 L7,0 L1.6,1.6 L0,7 L-1.6,1.6 L-7,0 L-1.6,-1.6Z" fill="#fff" /></g>
     <g transform="translate(210 96)"><path class="spark s3" d="M0,-6 L1.4,-1.4 L6,0 L1.4,1.4 L0,6 L-1.4,1.4 L-6,0 L-1.4,-1.4Z" fill="#2dd4bf" /></g>
-    <circle class="speck p1" cx="194" cy="70" r="3.5" fill="#f87171" />
+    <circle class="speck p1" cx="194" cy="70" r="3.5" fill="#fb8f7c" />
     <circle class="speck p2" cx="190" cy="76" r="3" fill="#60a5fa" />
     <circle class="speck p3" cx="198" cy="74" r="3" fill="#fbbf24" />
   </g>
@@ -138,13 +138,13 @@
   <!-- Cheerful: confetti -->
   <g class="fx fx-cheerful">
     <rect class="confetti c1" x="20" y="-10" width="7" height="11" rx="1.5" fill="#fbbf24" />
-    <rect class="confetti c2" x="52" y="-18" width="6" height="10" rx="1.5" fill="#f87171" />
+    <rect class="confetti c2" x="52" y="-18" width="6" height="10" rx="1.5" fill="#fb8f7c" />
     <rect class="confetti c3" x="84" y="-6" width="7" height="11" rx="1.5" fill="#60a5fa" />
     <rect class="confetti c4" x="118" y="-16" width="6" height="10" rx="1.5" fill="#2dd4bf" />
     <rect class="confetti c5" x="150" y="-8" width="7" height="11" rx="1.5" fill="#f9a8d4" />
     <rect class="confetti c6" x="178" y="-14" width="6" height="10" rx="1.5" fill="#fbbf24" />
     <rect class="confetti c7" x="0" y="-4" width="6" height="10" rx="1.5" fill="#2dd4bf" />
-    <rect class="confetti c8" x="196" y="-2" width="7" height="11" rx="1.5" fill="#f87171" />
+    <rect class="confetti c8" x="196" y="-2" width="7" height="11" rx="1.5" fill="#fb8f7c" />
   </g>
 </svg>
 

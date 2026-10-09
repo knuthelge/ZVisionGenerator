@@ -95,7 +95,7 @@
   .fields { display: grid; grid-template-columns: max-content minmax(0, 1fr) auto; gap: 0 8px; align-items: start; }
   .field-key { min-width: 6ch; max-width: 18ch; field-sizing: content; height: 22px; margin-top: 2px; padding: 0 4px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
   .field-key::placeholder { color: var(--color-error); opacity: 0.7; }
-  .field-key:hover { border-color: var(--color-border-strong); }
+  .field-key:hover { background: var(--color-bg-surface-hover); }
   .field-key:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-base); color: var(--color-text-primary); }
   .field-remove { opacity: 0; }
   .fields:hover .field-remove, .field-remove:focus-visible { opacity: 1; }

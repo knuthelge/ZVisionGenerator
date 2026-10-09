@@ -80,7 +80,7 @@
 
 <style>
   .history-strip { flex: none; border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-base); }
-  .strip-head { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 12px; border-bottom: 1px solid var(--color-border-subtle); background: var(--color-bg-raised); }
+  .strip-head { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 12px; background: var(--color-bg-raised); }
   .strip-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 4px; }
   .strip-toggle:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
   .strip-toggle :global(.strip-chev) { transition: transform 0.12s ease; }

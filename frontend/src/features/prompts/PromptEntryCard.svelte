@@ -137,7 +137,7 @@
   .entry-inactive .main { color: var(--color-text-muted); }
   .entry-inactive .main :global(.prompt-text-display) { color: var(--color-text-muted); }
   .entry-dragging { opacity: 0.35; }
-  .entry[data-drop='into'] { box-shadow: inset 0 0 0 1px var(--color-accent-blush); }
+  .entry[data-drop='into'] { box-shadow: inset 0 0 0 1px var(--color-accent-coral); }
   .entry[data-drop='before']::before, .entry[data-drop='after']::after { content: ''; position: absolute; left: 4px; right: 4px; height: 2px; border-radius: 2px; background: var(--color-primary-main); pointer-events: none; z-index: 1; }
   .entry[data-drop='before']::before { top: -1px; }
   .entry[data-drop='after']::after { bottom: -1px; }

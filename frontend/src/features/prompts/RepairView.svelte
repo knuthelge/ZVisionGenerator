@@ -51,7 +51,7 @@
   .repair-title { font-size: var(--text-title); font-weight: 800; }
   .repair-problem { padding: 8px 12px; border-radius: var(--radius-md); background: color-mix(in srgb, var(--color-error) 10%, transparent); color: var(--color-error); font-family: var(--font-mono); font-size: var(--text-ui); white-space: pre-wrap; }
   .repair-hint { font-size: var(--text-ui); color: var(--color-text-muted); }
-  .repair-text { min-height: 50vh; padding: 10px 12px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-bg-surface); font-family: var(--font-mono); font-size: var(--text-ui); line-height: 1.6; tab-size: 2; resize: vertical; }
+  .repair-text { min-height: 50vh; padding: 10px 12px; border: 0; border-radius: var(--radius-md); background: var(--color-bg-surface); font-family: var(--font-mono); font-size: var(--text-ui); line-height: 1.6; tab-size: 2; resize: vertical; }
   .repair-text:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
   .repair-error { font-size: var(--text-ui); color: var(--color-error); }
   .repair-actions { display: flex; justify-content: flex-end; gap: 8px; }

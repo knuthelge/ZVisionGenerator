@@ -338,9 +338,9 @@
     padding: 2px 6px;
     margin: 0 -6px;
     width: calc(100% + 12px);
-    border: 1px solid var(--color-border-strong);
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
-    background: var(--color-bg-base);
+    background: var(--color-bg-surface-hover);
     color: var(--color-text-primary);
     font-size: var(--text-content);
     line-height: 1.6;
@@ -350,17 +350,15 @@
     display: inline-flex;
     align-items: center;
     padding: 0 7px;
-    border: 1px solid color-mix(in srgb, var(--color-accent-blush) 30%, transparent);
     border-radius: var(--radius-xs);
-    background: color-mix(in srgb, var(--color-accent-blush) 12%, transparent);
-    color: var(--color-accent-blush);
+    background: color-mix(in srgb, var(--color-accent-coral) 14%, transparent);
+    color: var(--color-accent-coral);
     font-family: var(--font-mono);
     font-size: var(--text-ui);
     line-height: 1.45;
   }
   .tok-undefined {
-    border-color: color-mix(in srgb, var(--color-error) 45%, transparent);
-    background: color-mix(in srgb, var(--color-error) 12%, transparent);
+    background: color-mix(in srgb, var(--color-error) 14%, transparent);
     color: var(--color-error);
     text-decoration: wavy underline;
   }
@@ -368,13 +366,12 @@
     display: inline-flex;
     align-items: center;
     padding: 0 2px;
-    border: 1px solid color-mix(in srgb, var(--color-accent-amber) 30%, transparent);
     border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--color-accent-amber) 10%, transparent);
+    background: color-mix(in srgb, var(--color-accent-amber) 12%, transparent);
     font: inherit;
     line-height: 1.45;
   }
-  .tok-choice:hover { border-color: var(--color-accent-amber); }
+  .tok-choice:hover { background: color-mix(in srgb, var(--color-accent-amber) 20%, transparent); }
   .tok-choice:focus-visible { outline: 2px solid var(--color-accent-amber); outline-offset: 2px; }
   .tok-option { padding: 0 4px; color: var(--color-accent-amber); }
   .tok-option + .tok-option { border-left: 1px solid color-mix(in srgb, var(--color-accent-amber) 30%, transparent); }
@@ -385,11 +382,11 @@
   .snippet-suggestions { z-index: 60; min-width: 220px; max-width: 360px; padding: 4px; }
   .suggestion { display: flex; width: 100%; align-items: baseline; gap: 10px; padding: 5px 8px; border-radius: var(--radius-sm); text-align: left; }
   .suggestion-on, .suggestion:hover { background: var(--color-bg-surface-hover); }
-  .suggestion-name { font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-accent-blush); }
+  .suggestion-name { font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-accent-coral); }
   .suggestion-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-meta); color: var(--color-text-muted); }
   .choice-editor { z-index: 60; width: 300px; padding: 10px; }
   .choice-hint { margin-top: 2px; font-size: var(--text-meta); color: var(--color-text-muted); }
-  .choice-textarea { width: 100%; margin-top: 8px; padding: 6px 8px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-bg-surface); font-size: var(--text-content); resize: vertical; }
+  .choice-textarea { width: 100%; margin-top: 8px; padding: 6px 8px; border: 1px solid transparent; border-radius: var(--radius-sm); background: var(--color-bg-base); font-size: var(--text-content); resize: vertical; }
   .choice-textarea:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
   .choice-hint kbd { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-secondary); }
   .choice-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }

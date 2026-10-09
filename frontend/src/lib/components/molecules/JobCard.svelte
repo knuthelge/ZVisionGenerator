@@ -393,7 +393,7 @@
     .step-pulse::after { animation: none; display: none; }
     .current-step { animation: none; }
   }
-  .job-card { width: 100%; overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-bg-surface); }
+  .job-card { width: 100%; overflow: hidden; border-radius: var(--radius-md); background: var(--color-bg-surface); }
   .job-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--color-border-subtle); }
   h3 { font-size: var(--text-ui); font-weight: 600; }
   .job-status { display: flex; align-items: center; gap: 6px; font-size: var(--text-meta); text-transform: capitalize; color: var(--color-text-secondary); }
@@ -418,7 +418,7 @@
   .job-actions .cancel-button { margin-left: auto; }
   .control-feedback { margin-top: 8px; font-size: var(--text-ui); color: var(--color-primary-main); overflow-wrap: anywhere; }
   .control-feedback.failed { color: var(--color-error); }
-  .live-preview { margin: 0; overflow: hidden; border: 1px solid var(--color-border-subtle); border-radius: 6px; background: var(--color-bg-base); }
+  .live-preview { margin: 0; overflow: hidden; border-radius: 6px; background: var(--color-bg-base); }
   .live-preview img { display: block; width: 100%; max-height: min(40vh, 18rem); object-fit: contain; }
   .job-footer { display: flex; gap: 8px; padding: 7px 14px; font-size: var(--text-meta); color: var(--color-text-muted); background: var(--color-bg-base); border-top: 1px solid var(--color-border-subtle); }
 </style>

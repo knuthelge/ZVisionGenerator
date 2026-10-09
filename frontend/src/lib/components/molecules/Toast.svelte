@@ -17,14 +17,7 @@
     ondismiss
   }: Props = $props();
 
-  // Every toast sits on the raised surface; only the icon (and an error's border) carries the tone.
-  const styles: Record<string, string> = {
-    info:    '',
-    success: '',
-    error:   'border-error-border',
-    warning: 'border-warning-border'
-  };
-
+  // Every toast sits on the overlay surface; only the icon carries the tone.
   const iconColor: Record<string, string> = {
     info:    'text-text-muted',
     success: 'text-success',
@@ -54,7 +47,7 @@
   <div
     role="alert"
     aria-live="polite"
-    class="ui-overlay pointer-events-auto flex max-w-sm items-start gap-2.5 px-3 py-2.5 {styles[type]}"
+    class="ui-overlay pointer-events-auto flex max-w-sm items-start gap-2.5 px-3 py-2.5"
   >
     <!-- Icon -->
     <div class="mt-0.5 shrink-0 {iconColor[type]}">

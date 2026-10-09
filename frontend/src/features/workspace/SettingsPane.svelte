@@ -512,14 +512,14 @@
   .inspector-select, .inspector-text { width: 100%; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: var(--text-ui); color: var(--color-text-primary); }
   .inspector-text { font-family: var(--font-mono); }
   .inspector-select.factor { flex: none; width: 70px; }
-  .inspector-select:hover, .inspector-text:hover { border-color: var(--color-border-strong); background: var(--color-bg-surface); }
+  .inspector-select:hover, .inspector-text:hover { background: var(--color-bg-surface-hover); }
   .inspector-select:focus, .inspector-text:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-surface); }
   .inspector-select option { background: var(--color-bg-surface); }
   .row-hint { padding: 0 12px 6px 116px; font-size: var(--text-meta); color: var(--color-text-muted); }
 
   .reference-drop { border-radius: var(--radius-sm); }
   .reference-drop[data-dragover='true'] { outline: 2px dashed var(--color-primary-main); outline-offset: -2px; }
-  .reference-thumb { display: grid; flex: none; place-items: center; width: 40px; height: 40px; margin: 4px 0; overflow: hidden; border: 1px solid var(--color-border-strong); border-radius: var(--radius-sm); background: var(--color-bg-surface); color: var(--color-text-muted); }
+  .reference-thumb { display: grid; flex: none; place-items: center; width: 40px; height: 40px; margin: 4px 0; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
   .reference-thumb img { width: 100%; height: 100%; object-fit: cover; }
   .reference-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-ui); }
 

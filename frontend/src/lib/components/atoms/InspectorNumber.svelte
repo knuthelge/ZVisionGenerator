@@ -91,7 +91,7 @@
   }
   .inspector-number::-webkit-inner-spin-button,
   .inspector-number::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
-  .inspector-number:hover { border-color: var(--color-border-strong); background: var(--color-bg-surface); }
+  .inspector-number:hover { background: var(--color-bg-surface-hover); }
   .inspector-number:focus { outline: none; border-color: var(--color-primary-main); background: var(--color-bg-surface); }
   .inspector-number:disabled { opacity: 0.4; }
   .inspector-number::placeholder { color: var(--color-zinc-600); }

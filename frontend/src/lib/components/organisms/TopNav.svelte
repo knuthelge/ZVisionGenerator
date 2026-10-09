@@ -66,7 +66,7 @@
 </header>
 
 <style>
-  .app-nav { display: flex; align-items: stretch; justify-content: space-between; gap: 16px; min-height: 48px; padding: 0 16px; flex-shrink: 0; background: var(--color-bg-base); border-bottom: 1px solid var(--color-border-subtle); }
+  .app-nav { display: flex; align-items: stretch; justify-content: space-between; gap: 16px; min-height: 48px; padding: 0 16px; flex-shrink: 0; background: color-mix(in srgb, var(--color-bg-overlay) 70%, black); }
   .nav-workflows { display: flex; align-items: stretch; gap: 24px; min-width: 0; }
   .brand { align-self: center; }
   /* Underline tabs that run the full bar height, so the active line sits on the bar's bottom edge. */
@@ -74,7 +74,7 @@
   .workflow-tabs { overflow-x: auto; }
   .main-tabs { flex-shrink: 0; }
   .brand { color: var(--color-text-primary); font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; letter-spacing: -0.01em; }
-  .nav-tab { display: flex; align-items: center; margin-bottom: -1px; padding: 0 10px; border-bottom: 2px solid transparent; white-space: nowrap; font-size: var(--text-ui); font-weight: 600; color: var(--color-text-muted); transition: color 0.12s ease, border-color 0.12s ease; }
+  .nav-tab { display: flex; align-items: center; padding: 0 10px; border-bottom: 2px solid transparent; white-space: nowrap; font-size: var(--text-ui); font-weight: 600; color: var(--color-text-muted); transition: color 0.12s ease, border-color 0.12s ease; }
   .nav-tab:hover { color: var(--color-text-primary); }
   .nav-tab:focus-visible { outline-offset: -2px; }
   .nav-tab.active { border-color: var(--color-primary-main); color: var(--color-text-primary); }

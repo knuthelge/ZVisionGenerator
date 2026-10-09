@@ -3,43 +3,50 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  /* Neutrals carry a faint teal tint so every surface sits in Blob's palette.
+  /* Graphite: neutral greys with no tint, so the images carry the colour.
      Includes a custom zinc step between zinc-800 and zinc-900. */
-  --color-zinc-950: #101617;
-  --color-zinc-900: #161e20;
-  --color-zinc-850: #1b2527;
-  --color-zinc-800: #232f32;
-  --color-zinc-700: #33434a;
-  --color-zinc-600: #7f9296;
-  --color-zinc-500: #91a3a7;
-  --color-zinc-400: #adbdc0;
-  --color-zinc-300: #cddadc;
-  --color-zinc-200: #e0e9ea;
-  --color-zinc-100: #edf3f3;
+  --color-zinc-950: #111214;
+  --color-zinc-900: #18191c;
+  --color-zinc-850: #1d1f22;
+  --color-zinc-800: #232529;
+  /* Switch tracks and the scrollbar. */
+  --color-zinc-700: #393c42;
+  /* Placeholders: 4.7:1 or better on every field fill. */
+  --color-zinc-600: #8b8f96;
+  --color-zinc-500: #8f939a;
+  --color-zinc-400: #b4b6bc;
+  --color-zinc-300: #d2d4d8;
+  --color-zinc-200: #e2e3e6;
+  --color-zinc-100: #ececee;
 
   /* Semantic color tokens */
-  --color-bg-base: #101617;
-  --color-bg-surface: #161e20;
-  --color-bg-surface-hover: #202b2e;
+  --color-bg-base: #111214;
+  --color-bg-surface: #18191c;
+  /* Hover rows, and the fill of buttons, fields and chips (No borders: controls are filled shapes). */
+  --color-bg-surface-hover: #232529;
+  /* A filled control under the pointer. */
+  --color-bg-control-hover: #2c2e33;
   /* Collapsible section headers. */
-  --color-bg-raised: #1b2527;
+  --color-bg-raised: #1d1f22;
+  /* The prompt box: between base and surface. */
+  --color-bg-fill: #202226;
   /* Every overlay (menu, popover, tooltip, toast, dialog): darker than any page surface, so it stands out. */
-  --color-bg-overlay: #0b1011;
-  --color-border-subtle: #223033;
-  --color-border-strong: #2f4045;
-  --color-text-primary: #edf3f3;
-  --color-text-secondary: #adbdc0;
-  --color-text-muted: #91a3a7;
+  --color-bg-overlay: #0b0c0d;
+  /* Dividers between rows and sections. Containers and controls have no outline. */
+  --color-border-subtle: #26282c;
+  --color-border-strong: #33363b;
+  --color-text-primary: #ececee;
+  --color-text-secondary: #b4b6bc;
+  --color-text-muted: #8f939a;
   --color-primary-main: #2dd4bf;
   --color-primary-hover: #5eead4;
   --color-primary-subtle: #134e4a;
   /* Blob's outline: dark teal ink for text on primary surfaces */
   --color-primary-ink: #0b3b37;
 
-  /* Blob accents: beret, brush, and blush */
-  --color-accent-coral: #f87171;
+  /* Blob accents: the coral beret ($snippets) and the amber brush ({a|b} choices). */
+  --color-accent-coral: #fb8f7c;
   --color-accent-amber: #fbbf24;
-  --color-accent-blush: #f9a8d4;
   --color-success: #34d399;
   --color-error: #f87171;
   --color-warning: #fbbf24;
@@ -153,9 +160,8 @@
 @layer components {
   /* Prompt box shared by the inline prompt and the prompt-file box in Compose. */
   .ui-prompt-box {
-    border: 1px solid var(--color-zinc-700);
     border-radius: var(--radius-md);
-    background: var(--color-bg-surface);
+    background: var(--color-bg-fill);
   }
 
   /* The one focus ring, drawn on the box rather than the textarea inside it. */
@@ -179,8 +185,9 @@
     border-color: var(--color-border-subtle);
   }
 
+  /* The sidebar: a shade between base and surface, no edge line. */
   .ui-pane-left {
-    border-right: 1px solid var(--color-border-subtle);
+    background-color: color-mix(in srgb, var(--color-bg-base) 55%, var(--color-bg-surface));
   }
 
   .ui-pane-toolbar {
@@ -237,9 +244,11 @@
 
 
 
-  /* ——— Design system (proposals/web-design-system.md) ———
+  /* ——— Design system (proposals/web-design-system.md, proposals/web-no-borders-graphite.md) ———
      Controls are 28px (22px small) with 6px corners; containers have 10px corners.
-     Buttons that sit together share one height: an action bar makes all of its buttons 36px. */
+     Buttons that sit together share one height: an action bar makes all of its buttons 36px.
+     No borders: containers are separated by shade and controls are filled shapes. Outlines are kept
+     only where they mean something: focus, an error, the selected tile and dashed drop and add targets. */
   .ui-btn {
     display: inline-flex;
     flex-shrink: 0;
@@ -248,36 +257,37 @@
     gap: 6px;
     height: var(--spacing-control);
     padding: 0 10px;
-    border: 1px solid var(--color-border-strong);
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
-    background: var(--color-bg-base);
+    background: var(--color-bg-surface-hover);
     font-family: var(--font-sans);
     font-size: var(--text-ui);
     font-weight: 600;
     line-height: 1;
     white-space: nowrap;
-    color: var(--color-text-secondary);
+    color: var(--color-text-primary);
     transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
   }
-  .ui-btn:hover:not(:disabled) { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
+  .ui-btn:hover:not(:disabled) { background: var(--color-bg-control-hover); color: var(--color-text-primary); }
   .ui-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .ui-btn[aria-pressed='true'], .ui-btn[aria-expanded='true'], .ui-btn-on { border-color: var(--color-primary-border); color: var(--color-primary-main); }
+  .ui-btn[aria-pressed='true'], .ui-btn[aria-expanded='true'], .ui-btn-on,
+  .ui-btn[aria-pressed='true']:hover:not(:disabled), .ui-btn[aria-expanded='true']:hover:not(:disabled), .ui-btn-on:hover:not(:disabled) { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); }
   .ui-btn kbd { font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 400; opacity: 0.7; }
   /* The main action of a section (a bar, panel, form, dialog or popover): at most one per section. */
-  .ui-btn-primary { border-color: var(--color-primary-main); background: var(--color-primary-main); color: var(--color-primary-ink); font-family: var(--font-heading); font-weight: 800; }
-  .ui-btn-primary:hover:not(:disabled) { border-color: var(--color-primary-hover); background: var(--color-primary-hover); color: var(--color-primary-ink); }
-  .ui-btn-primary:disabled { opacity: 1; border-color: var(--color-border-strong); background: var(--color-bg-base); color: var(--color-text-muted); }
-  .ui-btn-quiet { border-color: transparent; background: transparent; color: var(--color-text-muted); }
-  .ui-btn-danger { border-color: var(--color-error-border); color: var(--color-error); }
-  .ui-btn-danger:hover:not(:disabled) { border-color: var(--color-error); background: var(--color-error-surface); color: var(--color-error); }
-  .ui-btn-add { border-style: dashed; background: transparent; }
+  .ui-btn-primary { background: var(--color-primary-main); color: var(--color-primary-ink); font-family: var(--font-heading); font-weight: 800; }
+  .ui-btn-primary:hover:not(:disabled) { background: var(--color-primary-hover); color: var(--color-primary-ink); }
+  .ui-btn-primary:disabled { opacity: 1; background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
+  .ui-btn-quiet { background: transparent; color: var(--color-text-muted); }
+  .ui-btn-danger { background: color-mix(in srgb, var(--color-error) 14%, transparent); color: var(--color-error); }
+  .ui-btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--color-error) 22%, transparent); color: var(--color-error); }
+  .ui-btn-add { border-style: dashed; border-color: var(--color-border-strong); background: transparent; color: var(--color-text-secondary); }
   .ui-btn-add:hover:not(:disabled) { border-color: var(--color-primary-main); background: transparent; color: var(--color-primary-main); }
   .ui-btn-sm { height: var(--spacing-control-sm); padding: 0 7px; gap: 4px; }
   .ui-btn-icon { width: var(--spacing-control); padding: 0; }
   .ui-btn-sm.ui-btn-icon { width: var(--spacing-control-sm); }
   /* Icon actions inside rows and tables stay quiet; destructive ones turn red on hover. */
-  .ui-btn-row { width: 24px; height: 24px; padding: 0; border-color: transparent; background: transparent; border-radius: var(--radius-xs); color: var(--color-text-muted); }
-  .ui-btn-row:hover:not(:disabled) { background: var(--color-bg-surface); color: var(--color-primary-main); }
+  .ui-btn-row { width: 24px; height: 24px; padding: 0; background: transparent; border-radius: var(--radius-xs); color: var(--color-text-muted); }
+  .ui-btn-row:hover:not(:disabled) { background: var(--color-bg-surface-hover); color: var(--color-primary-main); }
   .ui-btn-row.ui-btn-danger:hover:not(:disabled) { background: var(--color-error-surface); color: var(--color-error); }
   .ui-action-bar { display: flex; align-items: center; gap: 8px; }
   .ui-action-bar .ui-btn { height: var(--spacing-bar); padding: 0 14px; font-size: var(--text-content); }
@@ -290,17 +300,24 @@
     min-width: 0;
     height: var(--spacing-control);
     padding: 0 8px;
-    border: 1px solid var(--color-border-strong);
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
-    background: var(--color-bg-base);
+    background: var(--color-bg-surface-hover);
     font-size: var(--text-ui);
     color: var(--color-text-primary);
   }
+  /* Inside panels and overlays a field takes the base shade, so it still stands apart from its container. */
+  .ui-panel .ui-field, .ui-overlay .ui-field { background: var(--color-bg-base); }
   textarea.ui-field { height: auto; padding: 8px; line-height: 1.5; resize: vertical; }
   select.ui-field { appearance: none; padding-right: 26px; cursor: pointer; }
   .ui-field::placeholder { color: var(--color-zinc-600); }
   .ui-field:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
-  .ui-field[aria-invalid='true'] { border-color: var(--color-error); }
+  .ui-field[aria-invalid='true'] { box-shadow: inset 0 0 0 1px var(--color-error); }
+
+  /* The custom select (ToolbarSelectShell) follows the field fills. */
+  .ui-select-shell { border: 1px solid transparent; background: var(--color-bg-surface-hover); }
+  .ui-panel .ui-select-shell, .ui-overlay .ui-select-shell { background: var(--color-bg-base); }
+  .ui-select-shell[data-hovered='true'] { background: var(--color-bg-control-hover); }
   .ui-field:disabled { opacity: 0.4; cursor: not-allowed; }
   .ui-label { display: block; font-size: var(--text-ui); font-weight: 500; color: var(--color-text-secondary); }
   .ui-help { font-size: var(--text-meta); line-height: 1.45; color: var(--color-text-muted); }
@@ -311,27 +328,24 @@
   /* The one small-caps style, for names of areas: panels, sections, table headers, menu groups. */
   .ui-area-label { font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
 
-  /* Two to five options as one joined group; the chosen one is filled. */
-  .ui-segmented { display: inline-flex; min-width: 0; }
+  /* Two to five options as a recessed well: the track sits darker than its surroundings and the chosen
+     option is a lighter raised pill. The well keeps the control height. */
+  .ui-segmented { display: inline-flex; gap: 2px; min-width: 0; padding: 2px; border-radius: 7px; background: color-mix(in srgb, var(--color-bg-overlay) 70%, black); }
   .ui-segmented > button {
-    height: var(--spacing-control);
+    height: calc(var(--spacing-control) - 4px);
     padding: 0 8px;
-    border: 1px solid var(--color-border-strong);
-    background: var(--color-bg-base);
+    border-radius: 5px;
+    background: transparent;
     font-size: var(--text-ui);
     font-weight: 600;
     white-space: nowrap;
     color: var(--color-text-muted);
     transition: background-color 0.12s ease, color 0.12s ease;
   }
-  .ui-segmented > button + button { border-left: 0; }
-  .ui-segmented > button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
-  .ui-segmented > button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
-  .ui-segmented > button:only-child { border-radius: var(--radius-sm); }
-  .ui-segmented > button:hover:not(:disabled) { color: var(--color-text-primary); }
+  .ui-segmented > button:hover:not(:disabled) { color: var(--color-text-secondary); }
   .ui-segmented > button:disabled { opacity: 0.4; cursor: not-allowed; }
-  .ui-segmented > button[aria-checked='true'], .ui-segmented > button[aria-pressed='true'], .ui-segmented > button[aria-selected='true'] { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
-  .ui-segmented-sm > button { height: var(--spacing-control-sm); padding: 0 6px; }
+  .ui-segmented > button[aria-checked='true'], .ui-segmented > button[aria-pressed='true'], .ui-segmented > button[aria-selected='true'] { background: color-mix(in srgb, var(--color-text-primary) 24%, var(--color-bg-surface)); color: var(--color-text-primary); }
+  .ui-segmented-sm > button { height: calc(var(--spacing-control-sm) - 4px); padding: 0 6px; }
   .ui-segmented-mono > button { min-width: 34px; font-family: var(--font-mono); font-weight: 500; }
 
   .ui-chip {
@@ -341,36 +355,37 @@
     gap: 5px;
     height: var(--spacing-control-sm);
     padding: 0 7px;
-    border: 1px solid var(--color-border-strong);
     border-radius: var(--radius-xs);
-    background: var(--color-bg-base);
+    background: var(--color-bg-surface-hover);
     font-size: var(--text-ui);
     font-weight: 600;
     white-space: nowrap;
     color: var(--color-text-secondary);
   }
   button.ui-chip:hover:not(:disabled) { color: var(--color-text-primary); }
-  .ui-chip[aria-pressed='true'] { border-color: var(--color-primary-border); color: var(--color-primary-main); }
+  .ui-chip[aria-pressed='true'] { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); }
 
-  .ui-badge { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; height: var(--spacing-badge); padding: 0 5px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-xs); font-size: var(--text-meta); font-weight: 600; white-space: nowrap; color: var(--color-text-muted); }
-  .ui-badge-success { border-color: var(--color-success-border); color: var(--color-success); }
-  .ui-badge-warning { border-color: color-mix(in srgb, var(--color-warning) 35%, transparent); color: var(--color-warning); }
-  .ui-badge-error { border-color: var(--color-error-border); color: var(--color-error); }
-  .ui-badge-info { border-color: var(--color-primary-border); color: var(--color-primary-main); }
+  /* Badges are tinted fills; neutral ones use secondary text so they read on every shade. */
+  .ui-badge { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; height: var(--spacing-badge); padding: 0 5px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--color-text-muted) 14%, transparent); font-size: var(--text-meta); font-weight: 600; white-space: nowrap; color: var(--color-text-secondary); }
+  .ui-badge-success { background: color-mix(in srgb, var(--color-success) 14%, transparent); color: var(--color-success); }
+  .ui-badge-warning { background: color-mix(in srgb, var(--color-warning) 14%, transparent); color: var(--color-warning); }
+  .ui-badge-error { background: color-mix(in srgb, var(--color-error) 14%, transparent); color: var(--color-error); }
+  .ui-badge-info { background: color-mix(in srgb, var(--color-primary-main) 14%, transparent); color: var(--color-primary-main); }
 
   /* Containers */
-  .ui-panel { min-width: 0; border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-bg-surface); }
+  .ui-panel { min-width: 0; border-radius: var(--radius-md); background: var(--color-bg-surface); }
   .ui-panel-head { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 12px; border-bottom: 1px solid var(--color-border-subtle); }
   .ui-panel-head > svg { flex-shrink: 0; color: var(--color-primary-main); }
   .ui-panel-body { padding: 12px; }
-  .ui-overlay { border: 1px solid var(--color-zinc-700); border-radius: var(--radius-md); background: var(--color-bg-overlay); color: var(--color-text-primary); }
+  /* A faint ring keeps overlays from vanishing over dark images. */
+  .ui-overlay { border-radius: var(--radius-md); background: var(--color-bg-overlay); box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-text-primary) 6%, transparent); color: var(--color-text-primary); }
 
-  .ui-alert { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid; border-radius: var(--radius-md); font-size: var(--text-ui); line-height: 1.45; }
+  .ui-alert { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: var(--radius-md); font-size: var(--text-ui); line-height: 1.45; }
   .ui-alert > svg { flex-shrink: 0; margin-top: 1px; }
-  .ui-alert-warning { border-color: var(--color-warning-border); background: var(--color-zinc-850); color: var(--color-warning); }
-  .ui-alert-error { border-color: var(--color-error-border); background: var(--color-error-surface); color: var(--color-error); }
-  .ui-alert-success { border-color: var(--color-success-border); background: var(--color-success-surface); color: var(--color-success); }
-  .ui-alert-info { border-color: var(--color-primary-border); background: var(--color-primary-surface); color: var(--color-primary-main); }
+  .ui-alert-warning { background: var(--color-warning-surface); color: var(--color-warning); }
+  .ui-alert-error { background: var(--color-error-surface); color: var(--color-error); }
+  .ui-alert-success { background: var(--color-success-surface); color: var(--color-success); }
+  .ui-alert-info { background: var(--color-primary-surface); color: var(--color-primary-main); }
 
   .ui-table { width: 100%; border-collapse: collapse; font-size: var(--text-ui); font-variant-numeric: tabular-nums; }
   .ui-table th { padding: 6px 8px; border-bottom: 1px solid var(--color-border-strong); text-align: left; white-space: nowrap; font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
@@ -386,7 +401,7 @@
   .ui-empty-title { font-family: var(--font-heading); font-size: var(--text-content); font-weight: 800; color: var(--color-text-primary); }
 
   /* The bar at the top of every page. */
-  .ui-page-bar { display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 44px; padding: 6px 16px; border-bottom: 1px solid var(--color-border-strong); background: var(--color-bg-surface); }
+  .ui-page-bar { display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 44px; padding: 6px 16px; background: var(--color-bg-surface); }
   .ui-page-title { font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; color: var(--color-text-primary); }
   .ui-page-sub { font-size: var(--text-ui); color: var(--color-text-muted); }
 }
