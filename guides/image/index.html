@@ -686,10 +686,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#stored-quants-macos" class="md-nav__link">
+  <a href="#stored-quants" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Stored quants (macOS)
+        Stored quants
       
     </span>
   </a>
@@ -1176,10 +1176,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#stored-quants-macos" class="md-nav__link">
+  <a href="#stored-quants" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Stored quants (macOS)
+        Stored quants
       
     </span>
   </a>
@@ -1353,7 +1353,7 @@ ziv-image -m krea2 -q 4 --prompt &quot;a portrait&quot;
 <p>The weights are large (about 26 GB for the transformer plus a 9 GB text encoder), so run it quantized on smaller machines:</p>
 <ul>
 <li><strong>macOS:</strong> <code>-q 8</code> or <code>-q 4</code>. The text encoder is not quantized, so it adds about 9 GB at any level.</li>
-<li><strong>Windows and Linux:</strong> <code>-q 4</code> fits 10–12 GB GPUs. Without quantization all 35 GB of weights are held in system memory.</li>
+<li><strong>Windows and Linux:</strong> <code>-q 8</code> needs about 18 GB of system memory and <code>-q 4</code> fits 10–12 GB GPUs. Without quantization Krea 2 needs about 35 GB of system memory and is very slow on machines with less.</li>
 </ul>
 <p>Reference images (<code>--image</code>), <code>--upscale</code> and LoRAs trained for Krea 2 (<code>--lora</code>) work on every platform.</p>
 <h3 id="custom-aliases">Custom Aliases</h3>
@@ -1444,6 +1444,7 @@ ziv-image -m my-model --lora myStyle:0.8
 ziv-image -m my-model --lora style1:0.8,detail:0.5
 </code></pre>
 <p>Bare names are resolved from <code>~/.ziv/loras/</code>. Full paths also work.</p>
+<p>Standard LoRAs and LyCORIS LoKr files work on every platform and quantize level, and can be combined. Other LyCORIS formats are not supported; those parts of a file are skipped with a warning.</p>
 <h2 id="upscaling">Upscaling</h2>
 <p>The built-in upscale pipeline generates at a reduced size, then refines to target resolution:</p>
 <ol>
@@ -1532,8 +1533,8 @@ ziv-image -m my-model --prompt &quot;a landscape&quot; --upscale 2 --no-upscale-
 </tr>
 <tr>
 <td>Windows / Linux</td>
-<td>4-bit (NF4), 8-bit (INT8)</td>
-<td>bitsandbytes</td>
+<td>4-bit, 8-bit</td>
+<td>NF4 (bitsandbytes) and FP8</td>
 </tr>
 </tbody>
 </table>
@@ -1541,16 +1542,27 @@ ziv-image -m my-model --prompt &quot;a landscape&quot; --upscale 2 --no-upscale-
 ziv-image -m my-model -q 8    # 8-bit quantization
 </code></pre>
 <p>On macOS, memory is shared between the CPU and GPU, so an unquantized model larger than the machine's recommended GPU memory makes macOS compress or swap other memory, and well beyond it the whole system swaps heavily. On a 16 GB Mac, for example, Z-Image Turbo and FLUX.2 Klein need <code>-q 8</code> or <code>-q 4</code>. The Web UI's memory badge shows which levels fit.</p>
-<p>The <a href="../prompts/#enhancing-prompts">prompt enhancer</a> is unloaded before the model loads, so <strong>Enhance each image</strong> does not add to the model's memory.</p>
-<h3 id="stored-quants-macos">Stored quants (macOS)</h3>
-<p>The first time a model runs at <code>-q 8</code> or <code>-q 4</code> (or <strong>Quant: q8/q4</strong> in the Web UI), its quantized weights are saved in <code>~/.ziv/models/</code> as <code>&lt;name&gt;@q8</code> or <code>&lt;name&gt;@q4</code>, where <code>&lt;name&gt;</code> is the installed model or the alias you picked (for example <code>zit@q8</code>). Later jobs load that copy instead of quantizing again, so they start faster and do not briefly need the unquantized model's memory. The first job shows <em>Saving a q8 copy…</em> and takes about 20–30 seconds longer; the copy needs roughly half (q8) or a quarter (q4) of the model's disk space.</p>
+<p>On Windows and Linux:</p>
 <ul>
-<li>The copy holds the base model only. LoRAs are applied on top of it when a job loads, with the same result as quantizing at load.</li>
-<li>It is replaced automatically when the source model's weights change (including a new download of an alias's Hugging Face repo) or mflux is updated.</li>
+<li><strong>Unquantized and <code>-q 8</code></strong> keep the model in system memory and move it to the GPU piece by piece, so they need only about 4 GB of GPU memory. <code>-q 8</code> halves the system memory a model needs, which makes large models much faster on machines that cannot hold them unquantized.</li>
+<li><strong><code>-q 4</code></strong> keeps the whole model on the GPU, so the GPU must hold the model at 4 bits (Krea 2: about 7 GB).</li>
+</ul>
+<p>The <a href="../prompts/#enhancing-prompts">prompt enhancer</a> is unloaded before the model loads, so <strong>Enhance each image</strong> does not add to the model's memory.</p>
+<h3 id="stored-quants">Stored quants</h3>
+<p>The first time a model runs at <code>-q 8</code> or <code>-q 4</code> (or <strong>Quant: q8/q4</strong> in the Web UI), its quantized weights are saved in <code>~/.ziv/models/</code> as <code>&lt;name&gt;@q8</code> or <code>&lt;name&gt;@q4</code>, where <code>&lt;name&gt;</code> is the installed model or the alias you picked (for example <code>zit@q8</code>). Later jobs load that copy instead of quantizing again, so they start faster and do not briefly need the unquantized model's memory. The first job shows <em>Saving a q8 copy…</em>; the copy needs roughly half (q8) or a quarter (q4) of the model's disk space.</p>
+<ul>
+<li><strong>macOS:</strong> the first job takes about 20–30 seconds longer.</li>
+<li>
+<p><strong>Windows and Linux:</strong> the first job takes a few minutes longer.</p>
+</li>
+<li>
+<p>The copy holds the base model only. LoRAs are applied on top of it when a job loads.</p>
+</li>
+<li>It is replaced automatically when the source model's weights change (including a new download of an alias's Hugging Face repo) or the software that creates it is updated.</li>
 <li>It is listed on the Models page as <em>q8 copy of &lt;name&gt;</em>, where you can delete it to free disk space. It does not appear in the model picker: choose the base model and a quantize level.</li>
 <li>Deleting a model on the Models page, or an alias's Hugging Face download, also deletes its copies.</li>
-<li>Stopping a job while the copy is being saved takes effect once the current write finishes (up to about 30 seconds); the copy is then discarded and the next job tries again.</li>
-<li>An alias whose model is not downloaded yet is downloaded first; the copy is saved once the download is complete.</li>
+<li>Stopping a job while the copy is being saved takes effect once the current save step finishes. The copy is then discarded and the next job tries again.</li>
+<li>An alias whose model is not downloaded yet is downloaded first, and the copy is saved once the download is complete (on Windows and Linux, a q8 copy is saved by the next job).</li>
 <li>A model given as a raw Hugging Face repo id or a folder outside <code>~/.ziv/models/</code> (<code>-m org/repo</code>, <code>-m /path/to/model</code>) is quantized at load each time. Use an alias, or install the model, to get a copy.</li>
 </ul>
 <p>You can also save a quantized copy when converting a checkpoint (<code>ziv-model model … --quantize 8</code>, or <strong>Quantized Copy</strong> on the Models page).</p>

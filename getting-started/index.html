@@ -1198,11 +1198,17 @@ uv run ziv ui --no-browser
 <p>Workspace settings are remembered in the browser between visits and restarts, as long as the Web UI starts on the same port. Choosing a different model applies that model's defaults.</p>
 <p>To run the same job from a terminal, press the terminal button in the <em>Settings</em> header. It copies a <code>ziv image</code> or <code>ziv video</code> command with the current model, prompt, LoRAs and settings, writing to the Web UI's output folder. The CLI has no inline negative prompt and runs every prompt in a prompts file rather than only the selected ones, so a notice says when the copied command differs from what Generate would run; an uploaded reference image is named by its file name, so replace it with the file's path.</p>
 <p>To give the preview more room, collapse the Compose and Settings sidebar with the <strong>«</strong> button next to <em>Compose</em>. It folds into a narrow strip with an expand button and a Generate button, and the choice is remembered in the browser. On phone-width screens the sidebar always shows above the preview. While a job runs, its card shows the progress and controls on the left and the live preview and outputs on the right.</p>
-<p>The workspace model picker and the Models page show whether each model is already downloaded; models that are not yet downloaded download on first use. On macOS they also show whether a downloaded model fits this Mac's memory, compared with the GPU memory Apple recommends for the machine:</p>
+<p>The workspace model picker and the Models page show whether each model is already downloaded; models that are not yet downloaded download on first use. They also show whether a downloaded model fits this machine's memory. On macOS this is compared with the GPU memory Apple recommends for the machine:</p>
 <ul>
 <li><strong>Fits</strong>: the estimate is at most 1.1 times the recommendation.</li>
 <li><strong>Tight</strong>: the estimate is at most 1.5 times the recommendation, which is MLX's default memory limit. The model runs, but macOS compresses or swaps other memory to make room, so the Mac can slow down while generating.</li>
 <li><strong>Too large</strong>: the estimate is above MLX's default memory limit. Expect heavy swapping that can make the whole Mac unresponsive, or an out-of-memory error.</li>
+</ul>
+<p>On Windows and Linux the badges compare an image model with the GPU's memory and the machine's system memory (see <a href="../guides/image/#quantization">Quantization</a>):</p>
+<ul>
+<li><strong>Fits</strong>: the model fits comfortably.</li>
+<li><strong>Tight</strong>: the model runs, but slowly, because it does not fit in system memory or the GPU is nearly full.</li>
+<li><strong>Too large</strong>: the model needs more GPU memory than the GPU has. Try a lower quant.</li>
 </ul>
 <p>The workspace badge follows the selected quantize level, so you can see whether <code>q8</code> or <code>q4</code> brings a large model within reach. Hover the badge for the estimate. After each job the Web UI returns the model's memory to the system.</p>
 <p>Ideogram 4 (<code>ideo</code>) is selectable in the workspace model dropdown. When it is selected, the workspace offers a structured-JSON-caption input and a first-step-sigma control, while reference-image (img2img) and upscale are unavailable, and width and height are constrained to the 256–2048 range in multiples of 16.</p>
