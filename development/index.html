@@ -900,6 +900,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#web-ui-design-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web UI Design System
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#test-strategy" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1138,6 +1149,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#web-ui-design-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Web UI Design System
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#test-strategy" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1258,6 +1280,10 @@ make install
 <td>Run frontend type checks and Vitest tests</td>
 </tr>
 <tr>
+<td><code>make frontend-palette-check</code></td>
+<td>Fail on raw colour classes or literals in Svelte files (<code>PALETTE_STRICT=0</code> only warns)</td>
+</tr>
+<tr>
 <td><code>make build</code></td>
 <td>Build wheel and sdist</td>
 </tr>
@@ -1275,7 +1301,7 @@ make install
 </tr>
 </tbody>
 </table>
-<p><code>make check</code> covers the full verification gate: the Python test suite, frontend type checks and Vitest tests, packaged SPA artifact drift detection, and a strict docs build. The narrower targets (<code>make frontend-test</code>, <code>make frontend-static-check</code>, <code>make docs-check</code>) are available for iterating on a single surface.</p>
+<p><code>make check</code> covers the full verification gate: the Python test suite, frontend type checks and Vitest tests, the raw colour check, packaged SPA artifact drift detection, and a strict docs build. The narrower targets (<code>make frontend-test</code>, <code>make frontend-static-check</code>, <code>make docs-check</code>) are available for iterating on a single surface.</p>
 <h2 id="testing-conventions">Testing Conventions</h2>
 <ul>
 <li>Tests live in <code>tests/</code>. Name files <code>test_&lt;module&gt;.py</code>, functions <code>test_&lt;behavior&gt;</code>.</li>
@@ -1474,6 +1500,19 @@ prompts.yaml                       Default prompt definitions
 <p>Raise <code>ValueError</code>, <code>FileNotFoundError</code>, <code>RuntimeError</code> directly with descriptive f-string messages. Use <code>warnings.warn()</code> with <code>stacklevel=2</code> for non-fatal conditions. Add a custom exception class only when callers must catch it distinctly (for example <code>JobConflictError</code> in <code>web/web_runner.py</code>) or as a private sentinel.</p>
 <h3 id="web-ui-confirmations">Web UI Confirmations</h3>
 <p>Ask the user to approve an action with <code>ConfirmDialog</code> (<code>frontend/src/lib/components/molecules/</code>), never <code>window.confirm</code>. It has no title: it shows the question, an optional line of information, and a cancel button plus a confirm button named after the action (danger-styled for destructive actions). Enter confirms (except on the focused cancel button), Esc cancels, and a held key never confirms; while it is open, no other key reaches the page or a viewer underneath. Call <code>requestConfirm({ question, info, confirmLabel })</code>, which resolves <code>true</code> on confirm, or render <code>&lt;ConfirmDialog&gt;</code> directly when the dialog needs a body or stays open while the action runs (<code>pending</code>).</p>
+<h3 id="web-ui-design-system">Web UI Design System</h3>
+<p>The Web UI has one design system (<a href="https://github.com/knuthelge/ZVisionGenerator/blob/main/proposals/web-design-system.md">proposal</a>; borders and colours in <a href="https://github.com/knuthelge/ZVisionGenerator/blob/main/proposals/web-no-borders-graphite.md">No borders and Graphite</a>). Its tokens live in <code>@theme</code> in <code>frontend/src/app/global.css</code>, and its component classes are the <code>ui-*</code> classes in the same file. Build pages from the shared components in <code>frontend/src/lib/components/</code> (<code>Button</code>, <code>Input</code>, <code>Select</code>, <code>Toggle</code>, <code>Badge</code>, <code>Panel</code>, <code>Segmented</code>, <code>ActionBar</code>, <code>PageHeader</code>, <code>KeyValueList</code>, <code>Alert</code>, <code>EmptyState</code>, <code>InspectorSection</code>, <code>InspectorRow</code>) or, where no component fits, the <code>ui-*</code> classes (for example <code>ui-chip</code>), rather than styling elements by hand.</p>
+<ul>
+<li><strong>Size:</strong> controls are 28px (<code>h-control</code>), small ones 22px, rows 30px. Buttons that sit together share one height; inside an <code>ActionBar</code> every button is 36px and the one marked <code>main</code> takes the remaining width.</li>
+<li><strong>Type:</strong> four sizes only: <code>text-meta</code> (11px), <code>text-ui</code> (12px), <code>text-content</code> (13px), <code>text-title</code> (16px). Nunito (<code>font-heading</code>) is for titles, area names and the main action; monospace is for numbers, paths and shortcuts.</li>
+<li><strong>Labels:</strong> field and row labels are sentence case (<code>ui-label</code>). The one small-caps style (<code>ui-area-label</code>) names areas: panels, sections, table headers and menu groups.</li>
+<li><strong>Shape and surfaces:</strong> corners are 4px for chips and badges, 6px for controls and 10px for containers. Overlays (menus, popovers, tooltips, toasts, dialogs) use <code>bg-overlay</code>, darker than any page surface, with a faint ring and never a drop shadow; <code>bg-raised</code> is for section header bands and <code>bg-fill</code> for the prompt box.</li>
+<li><strong>No borders:</strong> containers are separated by shade, and buttons, fields, chips and badges are filled shapes. Dividers between rows and sections stay. Draw an outline only where it means something: focus, a field with an error, the selected tile, and the dashed edge of drop zones and add buttons. Segmented controls are a recessed well with the chosen option as a lighter pill.</li>
+<li><strong>Main action:</strong> each section (a bar, panel, form, dialog or popover) has at most one main action, a <code>primary</code> button: teal fill and a bold Nunito label. Every other button in the section is secondary.</li>
+<li><strong>Reference pages:</strong> Config and Models centre their content at <code>max-w-page</code> (1200px), with the page bar lined up to it. Settings use label-left rows (<code>FormField layout="row"</code>), and tables use <code>ui-table-comfortable</code>.</li>
+<li><strong>Colour:</strong> neutrals are Graphite greys with no tint. Teal means on, selected or the main action; coral (<code>accent-coral</code>, Blob's beret) marks <code>$snippets</code> and amber <code>{a|b}</code> choices; red is for errors and destructive actions, which always show red text. Info messages stay teal, never coral. Text is at least 4.5:1 on every surface. Use tokens, never raw palette classes or colour literals; <code>make check</code> fails on them.</li>
+<li><strong>Focus:</strong> every control shows the same 2px teal outline with a 2px offset.</li>
+</ul>
 <h3 id="test-strategy">Test Strategy</h3>
 <p>Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.</p>
 <h2 id="proposals">Proposals</h2>
