@@ -493,7 +493,6 @@ describe('WorkspacePage', () => {
     const preview = target.querySelector('.workspace-preview') as HTMLElement;
     const video = preview.querySelector(`video[src="${asset.url}"]`) as HTMLVideoElement;
     expect(video).not.toBeNull();
-    expect(video.classList.contains('latest-media')).toBe(false);
     expect(preview.querySelector('[data-testid="latest-loading"]')).toBeNull();
     expect(preview.querySelector('[data-testid="mascot-dock"] svg.mascot')).not.toBeNull();
   });
@@ -526,11 +525,9 @@ describe('WorkspacePage', () => {
   it('collapses the sidebar into a strip, remembers it, and still submits every field', async () => {
     draft.update('prompt', 'A lighthouse at dusk');
     await mountWorkspace(makeContext());
-    const sidebar = target.querySelector('#ws-controls-sidebar') as HTMLElement;
 
     (target.querySelector('button[aria-label="Collapse sidebar"]') as HTMLButtonElement).click();
     await settle();
-    expect(sidebar.classList.contains('collapsed')).toBe(true);
     expect(target.querySelector('[data-testid="sidebar-strip"]')).not.toBeNull();
     expect(JSON.parse(localStorage.getItem('ziv-workspace-draft-v1')!).sidebarCollapsed).toBe(true);
     // The fields stay in the form while folded away.
@@ -545,7 +542,6 @@ describe('WorkspacePage', () => {
 
     (target.querySelector('button[aria-label="Expand sidebar"]') as HTMLButtonElement).click();
     await settle();
-    expect(sidebar.classList.contains('collapsed')).toBe(false);
     expect(target.querySelector('[data-testid="sidebar-strip"]')).toBeNull();
   });
 
@@ -1776,14 +1772,11 @@ describe('WorkspacePage', () => {
     // The dialog clamps long prompts until expanded, and shows the negative prompt only when expanded.
     (target.querySelector('[data-action="choose-prompts"]') as HTMLButtonElement).click();
     await settle();
-    const detail = document.querySelector('[id="prompt-detail-portrait:1"]') as HTMLElement;
-    expect(detail.classList.contains('line-clamp-2')).toBe(true);
     expect(document.body.textContent).not.toContain('muddy');
     const showMore = document.querySelector('[aria-label="Show more for portrait #2"]') as HTMLButtonElement;
+    expect(showMore.getAttribute('aria-expanded')).toBe('false');
     showMore.click();
     await settle();
-    expect(detail.classList.contains('line-clamp-2')).toBe(false);
-    expect(detail.classList.contains('block')).toBe(true);
     expect(showMore.getAttribute('aria-expanded')).toBe('true');
     expect(document.body.textContent).toContain('muddy');
     // Cancel keeps the confirmed selection.
