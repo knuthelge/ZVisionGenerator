@@ -72,6 +72,7 @@ zvisiongenerator/
 │   ├── image_mac.py               macOS image backend (mflux/MLX)
 │   ├── image_mac_preview.py       Cheap latent → RGB live previews for the mflux backend
 │   ├── image_win.py               Windows/Linux image backend (diffusers/CUDA)
+│   ├── image_win_lokr.py          LyCORIS LoKr adapters for the diffusers backend (applied like mflux)
 │   ├── image_win_preview.py       Cheap latent → RGB live previews for the diffusers backend
 │   ├── image_win_quant.py         NF4 (q4) and FP8 (q8) weights for the diffusers backend, at load and as stored quants
 │   ├── memory_cuda.py             CUDA allocator options and memory release after a job

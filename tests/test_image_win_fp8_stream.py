@@ -55,6 +55,7 @@ class TestStreamFp8Transformer:
         assert model.norm.weight.dtype == torch.bfloat16
         assert torch.equal(model.layer.weight, tensors["layer.weight"].to(torch.float8_e4m3fn))
         assert torch.equal(model.norm.weight, tensors["norm.weight"])
+        assert model.layer.compute_dtype == torch.bfloat16  # LoRA adapters load in bfloat16
 
     def test_streamed_model_runs_in_the_compute_dtype(self, tmp_path):
         _save(tmp_path / "transformer", _source_tensors())
