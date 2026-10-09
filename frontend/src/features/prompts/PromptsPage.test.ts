@@ -108,6 +108,21 @@ describe('PromptsPage', () => {
     expect(target.textContent).toContain('1×');
   });
 
+  it('turns an entry on and off with its Active switch and saves the change', async () => {
+    api.savePromptDocument.mockImplementation(async ({ document }: { document: PromptDocument }) => saved(document));
+    await mountPage();
+
+    const switches = Array.from(target.querySelectorAll<HTMLInputElement>('input[role="switch"][aria-label="Active"]'));
+    expect(switches.map((s) => s.checked)).toEqual([true, false]);
+    switches[1].click();
+    await settle();
+    button('Save').click();
+    await settle();
+
+    const request = api.savePromptDocument.mock.calls[0][0];
+    expect(request.document.sets[0].entries.map((entry: { active: boolean }) => entry.active)).toEqual([true, true]);
+  });
+
   it('saves edits and remaps the Workspace selection for the file', async () => {
     draft.patch({ promptFilePath: PATH, promptFileOptionIds: ['portrait:0'] });
     api.savePromptDocument.mockImplementation(async ({ document }: { document: PromptDocument }) => saved(document, { option_id_map: { 'portrait:0': 'portrait:1' } }));

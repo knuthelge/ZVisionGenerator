@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Toggle } from '$lib/components/atoms';
   import { ActionMenu } from '$lib/components/molecules';
   import type { ActionMenuEntry } from '$lib/components/molecules/ActionMenu.svelte';
   import type { DocumentEntry, DocumentSet } from '$lib/types';
@@ -81,16 +82,12 @@
       ondragend={() => dnd.end()}
     >⠿</span>
     <span class="ordinal">{index + 1}</span>
-    <button
-      type="button"
-      class="switch"
-      class:switch-on={entry.active}
-      role="switch"
-      aria-checked={entry.active}
-      aria-label="Active"
+    <Toggle
+      checked={entry.active}
+      ariaLabel="Active"
       title={entry.active ? 'Active: runs with the file' : 'Inactive: skipped when the file runs'}
-      onclick={() => builder.toggleActive(entry.id)}
-    ></button>
+      onchange={() => builder.toggleActive(entry.id)}
+    />
   </div>
 
   <div class="main">
@@ -149,11 +146,6 @@
   .grip { width: 10px; cursor: grab; font-size: var(--text-ui); line-height: 1; color: var(--color-text-muted); opacity: 0; user-select: none; }
   .entry:hover .grip { opacity: 0.6; }
   .ordinal { width: 14px; text-align: right; font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 700; color: var(--color-text-muted); }
-  .switch { position: relative; flex-shrink: 0; width: 26px; height: 15px; border-radius: 9999px; background: var(--color-zinc-700); transition: background-color 120ms; }
-  .switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--color-zinc-500); transition: transform 120ms, background-color 120ms; }
-  .switch-on { background: var(--color-primary-main); }
-  .switch-on::after { transform: translateX(11px); background: var(--color-primary-ink); }
-  .switch:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
 
   .main { min-width: 0; padding-top: 1px; }
   .negative { display: flex; align-items: baseline; gap: 10px; margin-top: 2px; }

@@ -9,6 +9,8 @@
     label?: string;
     /** Accessible name when there is no visible label. */
     ariaLabel?: string;
+    /** Tooltip on the whole switch, e.g. what on and off mean. */
+    title?: string;
     labelSnippet?: Snippet;
     class?: string;
     onchange?: (event: Event) => void;
@@ -21,13 +23,14 @@
     disabled = false,
     label,
     ariaLabel,
+    title,
     labelSnippet,
     class: extraClass = '',
     onchange
   }: Props = $props();
 </script>
 
-<label class="toggle {extraClass}" class:toggle-disabled={disabled}>
+<label class="toggle {extraClass}" class:toggle-disabled={disabled} {title}>
   <input
     {id}
     {name}
