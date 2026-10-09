@@ -179,7 +179,7 @@
         draft.patch({ promptFileOptionIds: remapOptionIds(draft.state.promptFileOptionIds, saved.option_id_map) });
       }
       for (const warning of saved.warnings) addToast(warning, 'warning');
-      addToast(`Saved ${fileName}.`, 'success', 2500);
+      addToast(`Saved ${fileName}.`, 'success');
       return saved;
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
@@ -233,7 +233,7 @@
     const typing = target?.closest?.('input, textarea, select, [contenteditable="true"]');
     if (isCommandKey(event) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'z' && !typing && phase === 'ready') {
       event.preventDefault();
-      if (!builder.undo()) addToast('Nothing to undo.', 'info', 2000);
+      if (!builder.undo()) addToast('Nothing to undo.', 'info', { timeout: 2000 });
     }
   }
 

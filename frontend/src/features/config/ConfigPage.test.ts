@@ -20,6 +20,7 @@ vi.mock('$lib/api/config', () => ({
 
 vi.mock('$lib/state/toasts.svelte', () => ({
   addToast: toastMocks.addToast,
+  dismissToast: vi.fn(),
 }));
 
 import ConfigPage from './ConfigPage.svelte';

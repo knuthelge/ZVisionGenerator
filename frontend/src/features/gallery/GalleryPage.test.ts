@@ -18,7 +18,8 @@ const routerMocks = vi.hoisted(() => ({
 }));
 
 const toastMocks = vi.hoisted(() => ({
-  addToast: vi.fn<(message: string, tone: 'success' | 'warning' | 'error') => void>(),
+  addToast: vi.fn<(message: string, tone: 'success' | 'warning' | 'error', options?: { action?: { label: string; run: () => void } }) => string | undefined>(),
+  dismissToast: vi.fn<(id: string) => void>(),
 }));
 
 const confirmMocks = vi.hoisted(() => ({
@@ -53,6 +54,7 @@ vi.mock('$lib/state/router.svelte', () => ({
 
 vi.mock('$lib/state/toasts.svelte', () => ({
   addToast: toastMocks.addToast,
+  dismissToast: toastMocks.dismissToast,
 }));
 
 import GalleryPage from './GalleryPage.svelte';
@@ -142,6 +144,7 @@ beforeEach(() => {
   galleryApiMocks.getGallery.mockReset();
   galleryApiMocks.deleteAsset.mockReset();
   toastMocks.addToast.mockReset();
+  toastMocks.dismissToast.mockReset();
   routerMocks.params = {};
   routerMocks.replace.mockReset();
   routerMocks.navigate.mockReset();
@@ -880,7 +883,9 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     // The viewer moves on to the neighbouring asset instead of closing.
     expect(getViewer()?.textContent).toContain('b.png');
     expect(queryButtonByName(target, 'Delete selected')?.disabled).toBe(false);
-    expect(toastMocks.addToast).toHaveBeenCalledWith('Deleted 1; 1 failed and remain selected for retry.', 'warning');
+    expect(toastMocks.addToast).toHaveBeenCalledWith('Deleted 1; 1 failed and remain selected for retry.', 'warning', {
+      action: expect.objectContaining({ label: 'Retry' })
+    });
   });
 
   it('removes only successful originals, moves the viewer past them, and reports a full success', async () => {
@@ -935,7 +940,27 @@ describe('GalleryPage bulk deletion settlement (F06)', () => {
     expect(target.textContent).toContain('2 selected');
     expect(getViewer()?.textContent).toContain('active failed asset');
     expect(queryButtonByName(target, 'Delete selected')?.disabled).toBe(false);
-    expect(toastMocks.addToast).toHaveBeenCalledWith('Delete failed for 2 selected assets; they remain selected for retry.', 'error');
+    expect(toastMocks.addToast).toHaveBeenCalledWith('Delete failed for 2 selected assets; they remain selected for retry.', 'error', {
+      action: expect.objectContaining({ label: 'Retry' })
+    });
+  });
+
+  it('closes its Retry toast when the page unmounts, so Retry cannot act on a page that is gone', async () => {
+    const asset = makeAsset({ id: 'a.png', filename: 'a.png' });
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
+    galleryApiMocks.deleteAsset.mockRejectedValue(new Error('blocked'));
+    toastMocks.addToast.mockReturnValue('toast-7');
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    selectAssetForBatch(target, asset);
+    queryButtonByName(target, 'Delete selected')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+    expect(toastMocks.dismissToast).not.toHaveBeenCalled();
+
+    await unmount(app);
+    app = null;
+    expect(toastMocks.dismissToast).toHaveBeenCalledWith('toast-7');
   });
 });
 

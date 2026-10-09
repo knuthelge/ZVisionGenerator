@@ -577,8 +577,8 @@
 
       const jobCtx = await submitGenerate(formData);
       jobStore.jobSubmitted(jobCtx);
-      if (run) addToast(`Queued ${run.optionId} from the prompt file.`, 'success');
-      if (jobCtx.queue_position) addToast(`Added to the queue as #${jobCtx.queue_position}.`, 'info');
+      if (jobCtx.queue_position) addToast(`${run ? `Queued ${run.optionId}` : 'Added to the queue'} as #${jobCtx.queue_position}.`, 'info');
+      else if (run) addToast(`Queued ${run.optionId} from the prompt file.`, 'success');
     } catch (err) {
       loadError = err instanceof Error ? err.message : 'Generate failed';
       addToast('Generation failed', 'error');
@@ -934,6 +934,11 @@
   .lora-remove:hover { background: var(--color-error-surface); color: var(--color-error); }
   .workspace-layout { display: grid; grid-template-columns: 360px minmax(0, 1fr); }
   .workspace-layout.sidebar-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
+  /* Keep toasts centred on the preview, clear of the sidebar's Generate button. */
+  @media (min-width: 640px) {
+    :global(:root:has(.workspace-layout)) { --toast-inset-left: 360px; }
+    :global(:root:has(.workspace-layout.sidebar-collapsed)) { --toast-inset-left: 56px; }
+  }
   @media (max-width: 639px) {
     .workspace-layout { display: flex; flex-direction: column; overflow-y: auto; }
     .workspace-preview { flex: none; min-height: 420px; }
