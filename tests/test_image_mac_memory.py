@@ -69,7 +69,7 @@ def test_stored_quant_format_tracks_the_mflux_version(image_mac):
     module, _mx = image_mac
     import importlib.metadata
 
-    assert module.MfluxBackend().stored_quant_format() == f"mflux-{importlib.metadata.version('mflux')}"
+    assert module.MfluxBackend().stored_quant_format(8) == f"mflux-{importlib.metadata.version('mflux')}"
 
 
 def test_save_quantized_uses_mflux_saver(image_mac):

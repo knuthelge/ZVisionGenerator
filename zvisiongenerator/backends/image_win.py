@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import importlib.metadata
+import warnings
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -10,7 +14,9 @@ from diffusers import AutoPipelineForText2Image
 
 from zvisiongenerator.backends.image_win_preview import LivePreview, create_live_preview
 from zvisiongenerator.backends.memory_cuda import configure_allocator
+from zvisiongenerator.backends.image_win_quant import load_fp8_components, load_nf4_components, write_fp8_copy
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
+from zvisiongenerator.utils.stored_quant import STORED_QUANT_BITS, stored_quant_bits
 
 # CUDA allocation and kernel tuning hints for the diffusers image backend.
 configure_allocator()
@@ -82,79 +88,26 @@ def _krea2_img2img_latents(pipe: Any, image: Image.Image, sigmas: list[float], w
     return (1.0 - sigma) * clean + sigma * noise
 
 
-def _make_bnb_configs(quantize: int, compute_dtype: torch.dtype):
-    """Create matched BitsAndBytesConfig for transformers and diffusers components."""
-    from diffusers import BitsAndBytesConfig as DiffusersBnBConfig
-    from transformers import BitsAndBytesConfig as TransformersBnBConfig
-
-    if quantize == 4:
-        te_config = TransformersBnBConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=compute_dtype,
-        )
-        tx_config = DiffusersBnBConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=compute_dtype,
-        )
-    else:
-        te_config = TransformersBnBConfig(load_in_8bit=True)
-        tx_config = DiffusersBnBConfig(load_in_8bit=True)
-
-    return te_config, tx_config
-
-
-def _load_quantized(model_path: str, quantize: int, torch_dtype: torch.dtype, family: str):
-    """Load pipeline with bitsandbytes-quantized transformer and text encoder."""
-    from diffusers import AutoModel as DiffusersAutoModel
-    from transformers import AutoModel as HFAutoModel
-
-    te_config, tx_config = _make_bnb_configs(quantize, torch_dtype)
-
-    offload_q4 = quantize == 4 and family in _Q4_CPU_OFFLOAD_FAMILIES
-
-    # Load text encoder (Qwen3Model) with quantization — placed on CUDA by bnb
-    text_encoder = HFAutoModel.from_pretrained(
-        model_path,
-        subfolder="text_encoder",
-        quantization_config=te_config,
-        torch_dtype=torch_dtype,
-    )
-    if offload_q4:
-        # Free the GPU for the transformer load; model CPU offload moves the encoder back when it runs.
-        text_encoder.to("cpu")
-
-    # Load transformer (ZImageTransformer2DModel) with quantization — placed on CUDA by bnb
-    transformer = DiffusersAutoModel.from_pretrained(
-        model_path,
-        subfolder="transformer",
-        quantization_config=tx_config,
-        torch_dtype=torch_dtype,
-    )
-
-    # Build pipeline with pre-quantized components
-    # Pipeline skips loading these from disk since we pass the instances
-    pipeline = AutoPipelineForText2Image.from_pretrained(
-        model_path,
-        text_encoder=text_encoder,
-        transformer=transformer,
-        torch_dtype=torch_dtype,
-    )
-
-    if quantize == 4 and not offload_q4:
-        # NF4: ~5GB total — everything fits on GPU, no offloading needed
-        pipeline.vae.to(device="cuda", dtype=torch_dtype)
-    else:
-        # INT8 (and NF4 for _Q4_CPU_OFFLOAD_FAMILIES): use model CPU offloading via accelerate hooks.
-        # Group offloading is ineffective for INT8 because bitsandbytes
-        # stores quantized weights in state.CB/state.SCB (not parameters/buffers).
+def _load_nf4(model_path: str, torch_dtype: torch.dtype, family: str, *, prequantized: bool):
+    """Load the pipeline with its transformer and text encoder in NF4 on the GPU (q4)."""
+    offload = family in _Q4_CPU_OFFLOAD_FAMILIES
+    components = load_nf4_components(model_path, torch_dtype, prequantized=prequantized, text_encoder_to_cpu=offload)
+    pipeline = AutoPipelineForText2Image.from_pretrained(model_path, torch_dtype=torch_dtype, **components)
+    if offload:
+        # Model CPU offload moves the text encoder and transformer onto the GPU in turn.
         pipeline.enable_model_cpu_offload()
-        pipeline.vae.to(device="cuda", dtype=torch_dtype)
-
+    pipeline.vae.to(device="cuda", dtype=torch_dtype)
     return pipeline
+
+
+def _stream_to_gpu(pipeline: Any, torch_dtype: torch.dtype) -> None:
+    """Keep the transformer and text encoder in system memory and stream their layers to the GPU as they run."""
+    from diffusers.hooks import apply_group_offloading
+
+    options = {"onload_device": torch.device("cuda"), "num_blocks_per_group": 1, "use_stream": True, "record_stream": True, "non_blocking": True, "low_cpu_mem_usage": True}
+    apply_group_offloading(pipeline.transformer, offload_type="block_level", **options)
+    apply_group_offloading(pipeline.text_encoder, offload_type=_text_encoder_offload_type(pipeline.text_encoder), **options)
+    pipeline.vae.to(device="cuda", dtype=torch_dtype)
 
 
 def _text_encoder_offload_type(text_encoder: Any) -> str:
@@ -213,13 +166,34 @@ class DiffusersBackend:
     def __init__(self):
         self._model_info: ImageModelInfo | None = None
 
-    def stored_quant_format(self) -> str | None:
-        """Return ``None``: bitsandbytes quantization happens at load and is not stored."""
-        return None
+    def stored_quant_format(self, bits: int) -> str | None:
+        """Return the format tag of stored quants at *bits*: the versions of the libraries that write and read them.
+
+        FP8 (q8) copies depend on diffusers and transformers; NF4 (q4) copies also on bitsandbytes. Other levels
+        are not quantized on this backend, so they are not stored (``None``).
+        """
+        if bits not in STORED_QUANT_BITS:
+            return None
+        packages = ("diffusers", "transformers", "bitsandbytes") if bits == 4 else ("diffusers", "transformers")
+        return "+".join(f"{package}-{importlib.metadata.version(package)}" for package in packages)
+
+    def quantizes_from_files(self, bits: int) -> bool:
+        """Return whether *bits* is stored from the source files: FP8 (q8) is, NF4 (q4) is saved from a loaded model."""
+        return bits == 8
 
     def save_quantized(self, model: Any, path: str) -> None:
-        """Raise: this backend does not store quantized weights."""
-        raise NotImplementedError("The diffusers backend does not store quantized weights.")
+        """Write a pipeline loaded at q4 (NF4, no LoRAs) to *path* in diffusers' pre-quantized format."""
+        model.save_pretrained(path)
+
+    def write_quantized_files(self, source: str, path: str, bits: int, cancelled: Callable[[], bool] | None = None) -> None:
+        """Write the FP8 (q8) copy of the model at *source* into *path*, one component at a time.
+
+        Raises:
+            ValueError: For a level that is saved from a loaded model instead (q4).
+        """
+        if not self.quantizes_from_files(bits):
+            raise ValueError(f"q{bits} copies are saved from a loaded model, not written from files.")
+        write_fp8_copy(Path(source), Path(path), torch.bfloat16, cancelled)
 
     def load_model(
         self,
@@ -244,44 +218,20 @@ class DiffusersBackend:
         if model_info.family == "ideogram4":
             raise RuntimeError("Ideogram 4 is not supported on this platform (macOS/MLX only).")
 
-        if quantize in (4, 8):
-            pipeline = _load_quantized(model_path, quantize, torch_dtype, model_info.family)
+        stored_bits = stored_quant_bits(Path(model_path))
+        bits = stored_bits if stored_bits is not None else quantize
+        if bits not in (None, 4, 8):
+            warnings.warn(f"Unsupported quantize value {bits!r}; loading at full precision. Use 4 (NF4) or 8 (FP8).", stacklevel=2)
+            bits = None
+
+        if bits == 4:
+            pipeline = _load_nf4(model_path, torch_dtype, model_info.family, prequantized=stored_bits is not None)
         else:
-            if quantize is not None:
-                print(f"Unsupported quantize value {quantize!r}; falling back to full precision. Use 4 (NF4) or 8 (INT8).")
-
-            from diffusers.hooks import apply_group_offloading
-
-            pipeline = AutoPipelineForText2Image.from_pretrained(
-                model_path,
-                torch_dtype=torch_dtype,
-            )
-
-            # Stream transformer blocks to GPU with async prefetch (like safetensors)
-            apply_group_offloading(
-                pipeline.transformer,
-                onload_device=torch.device("cuda"),
-                offload_type="block_level",
-                num_blocks_per_group=1,
-                use_stream=True,
-                record_stream=True,
-                non_blocking=True,
-                low_cpu_mem_usage=True,
-            )
-
-            apply_group_offloading(
-                pipeline.text_encoder,
-                onload_device=torch.device("cuda"),
-                offload_type=_text_encoder_offload_type(pipeline.text_encoder),
-                num_blocks_per_group=1,
-                use_stream=True,
-                record_stream=True,
-                non_blocking=True,
-                low_cpu_mem_usage=True,
-            )
-
-            # VAE is tiny (160MB) — just place on GPU
-            pipeline.vae.to(device="cuda", dtype=torch_dtype)
+            components = {}
+            if bits == 8:
+                components = load_fp8_components(model_path, torch_dtype)
+            pipeline = AutoPipelineForText2Image.from_pretrained(model_path, torch_dtype=torch_dtype, **components)
+            _stream_to_gpu(pipeline, torch_dtype)
 
         if lora_paths:
             for i, path in enumerate(lora_paths):

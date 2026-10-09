@@ -160,8 +160,8 @@ def get_accelerator_memory_budget() -> int | None:
 
 
 def supports_stored_quants() -> bool:
-    """Return whether this platform's image backend saves quantized models for reuse (macOS/mflux only)."""
-    return sys.platform == "darwin"
+    """Return whether this platform's image backend saves quantized models for reuse (every supported platform)."""
+    return sys.platform in _IMAGE_BACKENDS_MAP
 
 
 # --- Prompt enhancer ---

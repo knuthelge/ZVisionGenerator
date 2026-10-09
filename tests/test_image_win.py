@@ -288,48 +288,101 @@ class TestLoadModelFullPrecision:
 
 
 class TestLoadModelQuantized:
-    """load_model with quantize triggers _load_quantized path."""
+    """q4 loads NF4 onto the GPU; q8 stores weights in FP8 and streams them like unquantized ones."""
 
-    def test_quantize_4bit_calls_load_quantized(self, win_backend):
+    def test_q4_loads_nf4(self, win_backend):
         mod, _, _ = win_backend
         fake_pipeline = MagicMock()
 
         with (
             patch.object(mod, "detect_image_model", return_value=_make_model_info()),
-            patch.object(mod, "_load_quantized", return_value=fake_pipeline) as mock_lq,
+            patch.object(mod, "_load_nf4", return_value=fake_pipeline) as mock_nf4,
         ):
-            backend = mod.DiffusersBackend()
-            pipeline, info = backend.load_model("fake-model-path", quantize=4)
+            pipeline, _info = mod.DiffusersBackend().load_model("fake-model-path", quantize=4)
 
-        mock_lq.assert_called_once()
         assert pipeline is fake_pipeline
+        assert mock_nf4.call_args.kwargs["prequantized"] is False
 
-    def test_quantize_8bit_calls_load_quantized(self, win_backend):
-        mod, _, _ = win_backend
-        fake_pipeline = MagicMock()
+    def test_q8_casts_to_fp8_and_streams(self, win_backend):
+        mod, _, diffusers_mod = win_backend
+        components = {"text_encoder": MagicMock(), "transformer": MagicMock()}
 
         with (
             patch.object(mod, "detect_image_model", return_value=_make_model_info()),
-            patch.object(mod, "_load_quantized", return_value=fake_pipeline) as mock_lq,
+            patch.object(mod, "load_fp8_components", return_value=components) as mock_fp8,
+            patch.object(mod, "_load_nf4") as mock_nf4,
         ):
-            backend = mod.DiffusersBackend()
-            backend.load_model("fake-model-path", quantize=8)
+            mod.DiffusersBackend().load_model("fake-model-path", quantize=8)
 
-        mock_lq.assert_called_once()
+        mock_fp8.assert_called_once()
+        mock_nf4.assert_not_called()
+        call_kwargs = mod.AutoPipelineForText2Image.from_pretrained.call_args.kwargs
+        assert call_kwargs["text_encoder"] is components["text_encoder"]
+        assert call_kwargs["transformer"] is components["transformer"]
+        assert diffusers_mod.hooks.apply_group_offloading.call_count == 2
 
-    def test_unsupported_quantize_falls_back(self, win_backend, capsys):
-        """Unsupported quantize value prints a message and falls back."""
+    @pytest.mark.parametrize(("bits", "loader"), [(8, "load_fp8_components"), (4, "_load_nf4")])
+    def test_stored_copy_loads_at_its_recorded_level(self, win_backend, tmp_path, bits, loader):
         mod, _, _ = win_backend
+        stored = tmp_path / f"atlas@q{bits}"
+        stored.mkdir()
+        (stored / "ziv-quant.json").write_text(f'{{"bits": {bits}}}')
+        mock_return = {"text_encoder": MagicMock(), "transformer": MagicMock()} if bits == 8 else MagicMock()
 
-        fake_pipeline = MagicMock()
-        mod.AutoPipelineForText2Image.from_pretrained.return_value = fake_pipeline
+        with (
+            patch.object(mod, "detect_image_model", return_value=_make_model_info()),
+            patch.object(mod, loader, return_value=mock_return) as mock_loader,
+        ):
+            mod.DiffusersBackend().load_model(str(stored), quantize=None)
 
-        with patch.object(mod, "detect_image_model", return_value=_make_model_info()):
+        mock_loader.assert_called_once()
+        if bits == 4:
+            assert mock_loader.call_args.kwargs["prequantized"] is True
+
+    def test_unsupported_quantize_warns_and_loads_at_full_precision(self, win_backend):
+        mod, _, _ = win_backend
+        mod.AutoPipelineForText2Image.from_pretrained.return_value = MagicMock()
+
+        with patch.object(mod, "detect_image_model", return_value=_make_model_info()), pytest.warns(UserWarning):
+            mod.DiffusersBackend().load_model("fake-model-path", quantize=3)
+
+        assert "text_encoder" not in mod.AutoPipelineForText2Image.from_pretrained.call_args.kwargs
+
+
+class TestStoredQuants:
+    def test_format_names_the_libraries_each_level_depends_on(self, win_backend):
+        """A bitsandbytes upgrade must not make FP8 (q8) copies stale."""
+        mod, _, _ = win_backend
+        with patch.object(mod.importlib.metadata, "version", side_effect=lambda package: "1.0"):
             backend = mod.DiffusersBackend()
-            backend.load_model("fake-model-path", quantize=3)
+            assert backend.stored_quant_format(8) == "diffusers-1.0+transformers-1.0"
+            assert backend.stored_quant_format(4) == "diffusers-1.0+transformers-1.0+bitsandbytes-1.0"
+            assert backend.stored_quant_format(6) is None
 
-        captured = capsys.readouterr()
-        assert "Unsupported quantize" in captured.out
+    def test_q8_is_written_from_files_and_q4_saved_from_the_model(self, win_backend):
+        mod, _, _ = win_backend
+        backend = mod.DiffusersBackend()
+        assert backend.quantizes_from_files(8) is True
+        assert backend.quantizes_from_files(4) is False
+
+    def test_save_quantized_saves_the_pipeline(self, win_backend):
+        mod, _, _ = win_backend
+        pipeline = MagicMock()
+        mod.DiffusersBackend().save_quantized(pipeline, "/models/zit@q4")
+        pipeline.save_pretrained.assert_called_once_with("/models/zit@q4")
+
+    def test_write_quantized_files_writes_the_fp8_copy(self, win_backend):
+        mod, _, _ = win_backend
+        cancelled = MagicMock(return_value=False)
+        with patch.object(mod, "write_fp8_copy") as mock_write:
+            mod.DiffusersBackend().write_quantized_files("/models/zit", "/models/.zit@q8.partial", 8, cancelled)
+        source, target, _dtype, passed_cancelled = mock_write.call_args.args
+        assert (str(source), str(target), passed_cancelled) == ("/models/zit", "/models/.zit@q8.partial", cancelled)
+
+    def test_write_quantized_files_rejects_q4(self, win_backend):
+        mod, _, _ = win_backend
+        with pytest.raises(ValueError):
+            mod.DiffusersBackend().write_quantized_files("/models/zit", "/models/.zit@q4.partial", 4)
 
 
 # ---------------------------------------------------------------------------
@@ -763,27 +816,6 @@ class TestGetBackendDiffusersPlatforms:
 
 
 # ---------------------------------------------------------------------------
-# _make_bnb_configs
-# ---------------------------------------------------------------------------
-
-
-class TestMakeBnbConfigs:
-    """_make_bnb_configs returns two configs for 4-bit or 8-bit."""
-
-    def test_4bit_configs(self, win_backend):
-        mod, _, _ = win_backend
-        te_cfg, tx_cfg = mod._make_bnb_configs(4, "bf16-sentinel")
-        assert te_cfg is not None
-        assert tx_cfg is not None
-
-    def test_8bit_configs(self, win_backend):
-        mod, _, _ = win_backend
-        te_cfg, tx_cfg = mod._make_bnb_configs(8, "bf16-sentinel")
-        assert te_cfg is not None
-        assert tx_cfg is not None
-
-
-# ---------------------------------------------------------------------------
 # Krea 2
 # ---------------------------------------------------------------------------
 
@@ -860,33 +892,33 @@ class TestKrea2:
 
         assert len(mod._img2img_sigmas(inflated, strength)) == requested
 
-    def test_load_model_passes_family_to_quantized_loader(self, win_backend):
+    def test_load_model_passes_family_to_nf4_loader(self, win_backend):
         mod, _, _ = win_backend
 
         with (
             patch.object(mod, "detect_image_model", return_value=_make_model_info(family="krea2")),
-            patch.object(mod, "_load_quantized", return_value=MagicMock()) as mock_lq,
+            patch.object(mod, "_load_nf4", return_value=MagicMock()) as mock_nf4,
         ):
             mod.DiffusersBackend().load_model("unsloth/Krea-2-Turbo", quantize=4)
 
-        assert mock_lq.call_args[0][3] == "krea2"
+        assert mock_nf4.call_args.args[2] == "krea2"
 
     def test_nf4_moves_text_encoder_off_gpu_and_uses_model_offload(self, win_backend):
         mod, _, _ = win_backend
-        text_encoder = sys.modules["transformers"].AutoModel.from_pretrained.return_value
         pipeline = mod.AutoPipelineForText2Image.from_pretrained.return_value
 
-        mod._load_quantized("unsloth/Krea-2-Turbo", 4, "bf16-sentinel", "krea2")
+        with patch.object(mod, "load_nf4_components", return_value={}) as mock_components:
+            mod._load_nf4("unsloth/Krea-2-Turbo", "bf16-sentinel", "krea2", prequantized=False)
 
-        text_encoder.to.assert_called_once_with("cpu")
+        assert mock_components.call_args.kwargs["text_encoder_to_cpu"] is True
         pipeline.enable_model_cpu_offload.assert_called_once()
 
     def test_nf4_keeps_other_families_resident(self, win_backend):
         mod, _, _ = win_backend
-        text_encoder = sys.modules["transformers"].AutoModel.from_pretrained.return_value
         pipeline = mod.AutoPipelineForText2Image.from_pretrained.return_value
 
-        mod._load_quantized("Tongyi-MAI/Z-Image-Turbo", 4, "bf16-sentinel", "zimage")
+        with patch.object(mod, "load_nf4_components", return_value={}) as mock_components:
+            mod._load_nf4("Tongyi-MAI/Z-Image-Turbo", "bf16-sentinel", "zimage", prequantized=False)
 
-        text_encoder.to.assert_not_called()
+        assert mock_components.call_args.kwargs["text_encoder_to_cpu"] is False
         pipeline.enable_model_cpu_offload.assert_not_called()

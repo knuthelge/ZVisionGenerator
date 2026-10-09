@@ -11,27 +11,48 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from zvisiongenerator.image_model_loader import SAVING_QUANT_PHASE, LoadPlan, load_image_model, plan_image_model_load, save_stored_quant
+from zvisiongenerator.image_model_loader import LOADING_PHASE, SAVING_QUANT_PHASE, LoadPlan, create_stored_quant, load_image_model, plan_image_model_load, save_stored_quant
 from zvisiongenerator.utils.stored_quant import build_manifest, is_current, write_manifest
 
 FORMAT = "fake-1"
 
 
 class _FakeBackend:
-    """Records loads and writes a minimal stored quant on save."""
+    """Records loads and writes a minimal stored quant on save, or from files for the levels in *files_levels*."""
 
     name = "fake"
 
-    def __init__(self, *, backend_format: str | None = FORMAT, save_error: BaseException | None = None, save_gate: threading.Event | None = None):
+    def __init__(
+        self,
+        *,
+        backend_format: str | None = FORMAT,
+        save_error: BaseException | None = None,
+        save_gate: threading.Event | None = None,
+        files_levels: tuple[int, ...] = (),
+    ):
         self._format = backend_format
         self._save_error = save_error
         self._save_gate = save_gate
+        self._files_levels = files_levels
         self.loads: list[dict] = []
         self.saved: list[str] = []
+        self.written: list[tuple[str, str, int]] = []
         self.save_finished = threading.Event()
 
-    def stored_quant_format(self) -> str | None:
+    def stored_quant_format(self, bits: int) -> str | None:
         return self._format
+
+    def quantizes_from_files(self, bits: int) -> bool:
+        return bits in self._files_levels
+
+    def write_quantized_files(self, source, path, bits, cancelled=None):
+        if self._save_error is not None:
+            raise self._save_error
+        (Path(path) / "transformer").mkdir(parents=True)
+        if cancelled is not None and cancelled():
+            return  # stops early, leaving an incomplete folder
+        (Path(path) / "transformer" / "0.safetensors").write_bytes(b"q")
+        self.written.append((source, path, bits))
 
     def load_model(self, model_path, quantize=None, precision="bfloat16", lora_paths=None, lora_weights=None):
         self.loads.append({"path": model_path, "quantize": quantize, "lora_paths": lora_paths})
@@ -174,9 +195,11 @@ class TestLoad:
         source = _make_source(models_dir)
         backend = _FakeBackend()
         release = MagicMock()
+        phases: list[str] = []
 
-        load_image_model(backend, str(source), quantize=8, models_dir=models_dir, lora_paths=["style.safetensors"], lora_weights=[1.0], release_memory=release)
+        load_image_model(backend, str(source), quantize=8, models_dir=models_dir, lora_paths=["style.safetensors"], lora_weights=[1.0], release_memory=release, on_phase=phases.append)
 
+        assert phases == [SAVING_QUANT_PHASE, LOADING_PHASE]
         assert backend.loads == [
             {"path": str(source), "quantize": 8, "lora_paths": None},
             {"path": str(models_dir / "atlas@q8"), "quantize": None, "lora_paths": ["style.safetensors"]},
@@ -282,15 +305,103 @@ class TestSaveStoredQuant:
         source = _make_source(models_dir)
         stale = models_dir / ".atlas@q8.deadbeef.partial"
         fresh = models_dir / ".atlas@q8.cafebabe.partial"
+        writing = models_dir / ".atlas@q8.f00dcafe.partial"
         other = models_dir / ".other@q8.deadbeef.partial"
-        for folder in (stale, fresh, other):
+        for folder in (stale, fresh, writing, other):
             folder.mkdir()
-        old = time.time() - 3600
-        os.utime(stale, (old, old))
-        os.utime(other, (old, old))
+        (writing / "transformer").mkdir()
+        (writing / "transformer" / "weights.safetensors").write_bytes(b"being written")
+        old = time.time() - 2 * 3600
+        for folder in (stale, writing, writing / "transformer", other):
+            os.utime(folder, (old, old))
 
         assert save_stored_quant(_FakeBackend(), MagicMock(), source=source, target=models_dir / "atlas@q8", bits=8, backend_format=FORMAT)
 
         assert not stale.exists()
         assert fresh.exists()  # may belong to a save still running in another process
+        assert writing.exists()  # an old folder whose files are still being written belongs to a running save
         assert other.exists()
+
+
+class TestWriteFromFiles:
+    """Backends that write a level's stored quant from the source files, before loading anything."""
+
+    def test_first_use_writes_the_copy_then_loads_it_once_with_the_loras(self, models_dir):
+        source = _make_source(models_dir)
+        backend = _FakeBackend(files_levels=(8,))
+        phases: list[str] = []
+
+        load_image_model(backend, str(source), quantize=8, models_dir=models_dir, lora_paths=["style.safetensors"], on_phase=phases.append)
+
+        target = models_dir / "atlas@q8"
+        assert [written[2] for written in backend.written] == [8]
+        assert backend.loads == [{"path": str(target), "quantize": None, "lora_paths": ["style.safetensors"]}]
+        assert phases == [SAVING_QUANT_PHASE, LOADING_PHASE]
+        assert is_current(target, source, 8, FORMAT)
+
+    def test_other_levels_still_save_from_the_loaded_model(self, models_dir):
+        source = _make_source(models_dir)
+        backend = _FakeBackend(files_levels=(8,))
+
+        load_image_model(backend, str(source), quantize=4, models_dir=models_dir)
+
+        assert backend.written == []
+        assert backend.saved
+        assert backend.loads[0] == {"path": str(source), "quantize": 4, "lora_paths": None}
+
+    def test_model_not_downloaded_yet_loads_at_the_level_and_writes_nothing(self, models_dir):
+        backend = _FakeBackend(files_levels=(8,))
+        phases: list[str] = []
+
+        load_image_model(backend, "org/repo", quantize=8, models_dir=models_dir, model_name="zit", on_phase=phases.append, find_local_dir=lambda _ref: None)
+
+        assert backend.written == []
+        assert phases == []
+        assert backend.loads == [{"path": "org/repo", "quantize": 8, "lora_paths": None}]
+        assert not (models_dir / "zit@q8").exists()
+
+    def test_stop_during_the_write_discards_it_and_loads_nothing(self, models_dir, monkeypatch):
+        source = _make_source(models_dir)
+        backend = _FakeBackend(files_levels=(8,))
+        monkeypatch.setattr("zvisiongenerator.image_model_loader.detect_image_model", lambda path: f"info for {Path(path).name}")
+
+        model, info = load_image_model(backend, str(source), quantize=8, models_dir=models_dir, cancelled=lambda: True)
+
+        assert (model, info) == (None, "info for atlas")  # the runners quit before their first image
+        assert backend.loads == []
+        assert not (models_dir / "atlas@q8").exists()
+        assert _partials(models_dir) == []
+
+    def test_failed_write_warns_and_loads_at_the_level(self, models_dir):
+        source = _make_source(models_dir)
+        backend = _FakeBackend(files_levels=(8,), save_error=OSError("disk full"))
+
+        with pytest.warns(UserWarning, match="disk full"):
+            load_image_model(backend, str(source), quantize=8, models_dir=models_dir)
+
+        assert _partials(models_dir) == []
+        assert backend.loads == [{"path": str(source), "quantize": 8, "lora_paths": None}]
+
+
+class TestCreateStoredQuant:
+    def test_files_level_is_written_without_loading(self, models_dir):
+        source = _make_source(models_dir)
+        backend = _FakeBackend(files_levels=(8,))
+
+        assert create_stored_quant(backend, source, models_dir / "atlas@q8", 8)
+
+        assert backend.loads == []
+        assert is_current(models_dir / "atlas@q8", source, 8, FORMAT)
+
+    def test_model_level_is_loaded_then_saved(self, models_dir):
+        source = _make_source(models_dir)
+        backend = _FakeBackend()
+
+        assert create_stored_quant(backend, source, models_dir / "atlas@q4", 4)
+
+        assert backend.loads == [{"path": str(source), "quantize": 4, "lora_paths": None}]
+        assert is_current(models_dir / "atlas@q4", source, 4, FORMAT)
+
+    def test_unsupported_backend_raises(self, models_dir):
+        with pytest.raises(RuntimeError):
+            create_stored_quant(_FakeBackend(backend_format=None), _make_source(models_dir), models_dir / "atlas@q8", 8)

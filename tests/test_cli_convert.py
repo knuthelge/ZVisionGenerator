@@ -119,6 +119,7 @@ class TestModelQuantize:
         (model_dir / "transformer" / "w.safetensors").write_bytes(b"x")
         backend = MagicMock()
         backend.stored_quant_format.return_value = "fmt"
+        backend.quantizes_from_files.return_value = False
         backend.load_model.return_value = (MagicMock(), MagicMock())
         backend.save_quantized.side_effect = lambda _model, path: (Path(path) / "transformer").mkdir(parents=True)
         monkeypatch.setattr(backends_module, "get_backend", lambda: backend)

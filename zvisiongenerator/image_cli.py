@@ -14,7 +14,7 @@ from zvisiongenerator.backends import get_backend, release_accelerator_memory
 from zvisiongenerator.enhance_cli import add_enhance_arguments, parse_enhance_args
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.app_log import setup_logging
-from zvisiongenerator.image_model_loader import load_image_model
+from zvisiongenerator.image_model_loader import SAVING_QUANT_PHASE, load_image_model
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.config import MAX_SHARPEN_AMOUNT, load_config, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
@@ -296,7 +296,7 @@ def main(*, prog: str = "ziv-image") -> None:
                 model_name=picked_model,
                 lora_paths=lora_paths,
                 lora_weights=lora_weights,
-                on_phase=lambda _phase: print(f"Saving a q{args.quantize} copy of the model for faster loading (first use only)...", flush=True),
+                on_phase=lambda phase: print(f"Saving a q{args.quantize} copy of the model for faster loading (first use only)...", flush=True) if phase == SAVING_QUANT_PHASE else None,
                 cancelled=lambda: skip.pending() == "quit",
                 release_memory=release_accelerator_memory,
             )
