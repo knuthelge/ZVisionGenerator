@@ -51,27 +51,34 @@
     return FIELD_LABELS[field.key] ?? humanizeFieldKey(field.key);
   }
 
+  /** What each setting falls back to when it has no value of its own. */
+  const DEFAULT_DESCRIPTIONS: Record<string, string> = {
+    'ui.default_models.image': 'the first available image model',
+    'ui.default_models.video': 'the first available video model',
+    'generation.default_size': "the app's base resolution",
+    'ui.output_dir': 'the outputs folder in the data folder',
+    'prompt_enhancer.user_model': 'the built-in model for this computer',
+  };
+
+  const FIELD_HINTS: Record<string, string> = {
+    'prompt_enhancer.user_model': 'A Hugging Face repo (owner/name, optionally @revision) or a local folder with a chat model.',
+  };
+
+  /** A setting is changed when it has a value of its own; an empty value means "use the default". */
+  function isChanged(field: WritableConfigField): boolean {
+    return field.clearable && formValue(field).trim() !== '';
+  }
+
+  function resetField(field: WritableConfigField): void {
+    formValues[field.key] = '';
+  }
+
   function fieldHelper(field: WritableConfigField): string {
-    const effective = readableEffectiveValue(field);
-    if (field.key === 'ui.default_models.image') {
-      return `Leave empty to use the first available image model. Current model: ${effective}.`;
-    }
-    if (field.key === 'ui.default_models.video') {
-      return `Leave empty to use the first available video model. Current model: ${effective}.`;
-    }
-    if (field.key === 'generation.default_size') {
-      return `Leave empty to use the app default. Current base resolution: ${effective}.`;
-    }
-    if (field.key === 'ui.output_dir') {
-      return `Leave empty to use the default output folder. Current folder: ${effective}.`;
-    }
-    if (field.key === 'prompt_enhancer.user_model') {
-      return `Hugging Face repo (owner/name, optionally @revision) or local folder of a chat LLM. Leave empty for the built-in default. Current model: ${effective}.`;
-    }
-    if (field.clearable) {
-      return `Leave empty to use the default. Current value: ${effective}.`;
-    }
-    return `Current value: ${effective}.`;
+    const hint = FIELD_HINTS[field.key] ? `${FIELD_HINTS[field.key]} ` : '';
+    if (!field.clearable) return `${hint}Current value: ${readableEffectiveValue(field)}.`;
+    if (isChanged(field)) return `${hint}Default: ${DEFAULT_DESCRIPTIONS[field.key] ?? 'the app default'}.`;
+    if (fieldValue(field) !== '') return `${hint}Uses the default once you save.`;
+    return `${hint}Using the default: ${readableEffectiveValue(field)}.`;
   }
 
   function humanizeFieldKey(key: string): string {
@@ -217,6 +224,8 @@
                 label={fieldLabel(field)}
                 value={formValue(field)}
                 helper={fieldHelper(field)}
+                changed={isChanged(field)}
+                resettable={field.clearable}
                 pickerKind="directory"
                 pickerPurpose="output_directory"
                 onresolve={async (candidate) => candidate}
@@ -228,7 +237,7 @@
                 }}
               />
             {:else if options}
-              <FormField label={fieldLabel(field)} for={fieldId(field)} helper={fieldHelper(field)}>
+              <FormField label={fieldLabel(field)} for={fieldId(field)} helper={fieldHelper(field)} changed={isChanged(field)} onreset={field.clearable ? () => resetField(field) : undefined}>
                 <Select
                   id={fieldId(field)}
                   name={field.key}
@@ -237,7 +246,7 @@
                 />
               </FormField>
             {:else}
-              <FormField label={fieldLabel(field)} for={fieldId(field)} helper={fieldHelper(field)}>
+              <FormField label={fieldLabel(field)} for={fieldId(field)} helper={fieldHelper(field)} changed={isChanged(field)} onreset={field.clearable ? () => resetField(field) : undefined}>
                 <Input
                   id={fieldId(field)}
                   name={field.key}
