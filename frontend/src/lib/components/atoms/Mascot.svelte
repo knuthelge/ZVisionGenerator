@@ -7,11 +7,14 @@
     | 'waving'
     | 'curious'
     | 'sleeping'
+    | 'paused'
     | 'sad'
     | 'surprised';
 </script>
 
 <script lang="ts">
+  import { untrack } from 'svelte';
+
   interface Props {
     mood?: MascotMood;
     size?: number | string;
@@ -32,12 +35,78 @@
     waving: 'Z-Vision mascot is waving hello',
     curious: 'Z-Vision mascot is watching you type',
     sleeping: 'Z-Vision mascot is sleeping',
+    paused: 'Z-Vision mascot is waiting for you to resume',
     sad: 'Z-Vision mascot is sad',
     surprised: 'Z-Vision mascot is surprised'
   };
+
+  interface Pose {
+    transform: string;
+    opacity: string;
+  }
+
+  const BLEND_MS = 280;
+
+  let svg = $state<SVGSVGElement | null>(null);
+  let fromPoses: Map<Element, Pose> | null = null;
+  let blends: Animation[] = [];
+  let blendRun = 0;
+
+  /** Read the rendered pose of every styled part, including any running animation. */
+  function readPoses(root: SVGSVGElement): Map<Element, Pose> {
+    const poses = new Map<Element, Pose>();
+    root.querySelectorAll('[class]').forEach((el) => {
+      const style = getComputedStyle(el);
+      poses.set(el, { transform: style.transform, opacity: style.opacity });
+    });
+    return poses;
+  }
+
+  /** Blend each part from its old pose into the new mood, then let the new loops play. */
+  function blendInto(root: SVGSVGElement, from: Map<Element, Pose>): void {
+    const run = ++blendRun;
+    for (const [el, to] of readPoses(root)) {
+      const start = from.get(el);
+      if (!start) continue;
+      const first: Keyframe = {};
+      const last: Keyframe = {};
+      if (start.transform !== to.transform) { first.transform = start.transform; last.transform = to.transform; }
+      if (start.opacity !== to.opacity) { first.opacity = start.opacity; last.opacity = to.opacity; }
+      if (Object.keys(first).length > 0) {
+        blends.push(el.animate([first, last], { duration: BLEND_MS, easing: 'ease-in-out' }));
+      }
+    }
+    void Promise.allSettled(blends.map((blend) => blend.finished)).then(() => {
+      if (run !== blendRun) return;
+      blends = [];
+      delete root.dataset.settling;
+    });
+  }
+
+  // Snapshot the pose before the mood changes, and hold the new mood's loops at their first frame.
+  $effect.pre(() => {
+    void mood;
+    untrack(() => {
+      if (!svg || typeof svg.animate !== 'function') return;
+      fromPoses = readPoses(svg);
+      blends.forEach((blend) => blend.cancel());
+      blends = [];
+      svg.dataset.settling = '';
+    });
+  });
+
+  $effect(() => {
+    void mood;
+    untrack(() => {
+      const from = fromPoses;
+      fromPoses = null;
+      if (svg && from) blendInto(svg, from);
+    });
+  });
 </script>
 
 <svg
+  bind:this={svg}
   class="mascot {extraClass}"
   data-mood={mood}
   width={size}
@@ -60,6 +129,14 @@
     <text class="z z1" x="146" y="40" font-size="16">z</text>
     <text class="z z2" x="160" y="22" font-size="22">z</text>
     <text class="z z3" x="178" y="0" font-size="28">Z</text>
+  </g>
+
+  <!-- Paused: pause badge -->
+  <g class="fx fx-paused">
+    <g class="pause-badge" fill="#b0b5ba">
+      <rect x="158" y="2" width="8" height="26" rx="4" />
+      <rect x="172" y="2" width="8" height="26" rx="4" />
+    </g>
   </g>
 
   <!-- Surprised: exclamation mark -->
@@ -119,6 +196,7 @@
     <path class="mouth m-sad" d="M88,138 Q100,128 112,138" stroke="#134e4a" stroke-width="3.5" stroke-linecap="round" fill="none" />
     <ellipse class="mouth m-surprised" cx="100" cy="136" rx="7" ry="9" fill="#134e4a" />
     <ellipse class="mouth m-sleeping" cx="100" cy="135" rx="4" ry="3" fill="#134e4a" />
+    <path class="mouth m-paused" d="M92,133 Q100,136 108,133" stroke="#134e4a" stroke-width="3.5" stroke-linecap="round" fill="none" />
     <g class="mouth m-cheerful">
       <path d="M84,126 Q100,152 116,126 Z" fill="#134e4a" stroke="#134e4a" stroke-width="3" stroke-linejoin="round" />
       <ellipse cx="100" cy="140" rx="7" ry="4" fill="#f472b6" />
@@ -158,21 +236,21 @@
   .root { transform-origin: 100px 182px; }
   .shadow { transform-origin: 100px 190px; }
   .eye { transform-origin: 100px 100px; }
-  .brush { transform-origin: 162px 132px; transition: transform 300ms ease; }
+  .brush { transform-origin: 162px 132px; }
   .beret { transform-origin: 100px 50px; }
-  .iris { transform-origin: 100px 100px; transition: transform 300ms ease; }
+  .iris { transform-origin: 100px 100px; }
   .exclaim { transform-origin: 164px 30px; }
-  .blush { opacity: 0.7; transition: opacity 300ms ease; }
-  .hand-l { transition: transform 300ms ease; }
-  .beret { transition: transform 300ms ease; }
-  .eye { transition: opacity 250ms ease, transform 250ms ease; }
+  .blush { opacity: 0.7; }
+
+  /* While a mood change blends in (see blendInto), the new loops wait on their first frame. */
+  .mascot:global([data-settling]) * { animation-play-state: paused !important; }
 
   /* Mood-dependent visibility */
   .mouth,
   .eye-happy,
   .eye-closed,
   .tear,
-  .fx { opacity: 0; transition: opacity 250ms ease; }
+  .fx { opacity: 0; }
 
   [data-mood='idle'] .m-idle,
   [data-mood='thinking'] .m-thinking,
@@ -187,6 +265,8 @@
   [data-mood='sleeping'] .m-sleeping,
   [data-mood='sleeping'] .eye-closed,
   [data-mood='sleeping'] .fx-sleeping,
+  [data-mood='paused'] .m-paused,
+  [data-mood='paused'] .fx-paused,
   [data-mood='sad'] .m-sad,
   [data-mood='surprised'] .m-surprised,
   [data-mood='surprised'] .fx-surprised { opacity: 1; }
@@ -195,6 +275,7 @@
   [data-mood='sleeping'] .eye { opacity: 0; }
   [data-mood='sleeping'] .blush,
   [data-mood='sad'] .blush { opacity: 0.3; }
+  [data-mood='paused'] .blush { opacity: 0.5; }
   [data-mood='cheerful'] .blush { opacity: 1; }
 
   /* Idle: gentle float and blink */
@@ -257,6 +338,12 @@
   [data-mood='sleeping'] .z { animation: drift 3.6s ease-in infinite; }
   [data-mood='sleeping'] .z2 { animation-delay: 1.2s; }
   [data-mood='sleeping'] .z3 { animation-delay: 2.4s; }
+
+  /* Paused: still and patient, heavy-lidded, brush resting, a pulsing pause badge */
+  [data-mood='paused'] .root { animation: breathe 4.4s ease-in-out infinite; }
+  [data-mood='paused'] .eye { transform: scaleY(0.55); }
+  [data-mood='paused'] .brush { transform: rotate(30deg); }
+  [data-mood='paused'] .pause-badge { animation: pulse 2.4s ease-in-out infinite; }
 
   /* Sad: droop, look down, a single tear */
   [data-mood='sad'] .root { animation: droop 4s ease-in-out infinite; }
@@ -367,6 +454,7 @@
     30% { opacity: 1; }
     100% { transform: translate(10px, -14px); opacity: 0; }
   }
+  @keyframes pulse { 50% { opacity: 0.45; } }
   @keyframes droop {
     0%, 100% { transform: scale(1.03, 0.96); }
     50% { transform: scale(1.04, 0.94); }

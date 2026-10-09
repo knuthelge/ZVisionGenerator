@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { ActiveJobState, JobStatus } from '$lib/types';
 import { mascotMood } from './mascot';
 
-function job(status: JobStatus, currentStep = 0, totalSteps = 0): ActiveJobState {
-  return { status, currentStep, totalSteps } as ActiveJobState;
+function job(status: JobStatus, currentStep = 0, totalSteps = 0, overrides: Partial<ActiveJobState> = {}): ActiveJobState {
+  return { status, currentStep, totalSteps, stageName: '', outputs: [], ...overrides } as ActiveJobState;
 }
 
 describe('mascotMood', () => {
@@ -22,14 +22,29 @@ describe('mascotMood', () => {
     expect(mascotMood({ job: job('running', 3, 20) })).toBe('creating');
   });
 
-  it('sleeps while a job is paused', () => {
-    expect(mascotMood({ job: job('paused', 3, 20) })).toBe('sleeping');
+  it('keeps creating between the images of a batch', () => {
+    const output = { id: 'a' } as ActiveJobState['outputs'][number];
+    expect(mascotMood({ job: job('running', 0, 0, { outputs: [output] }) })).toBe('creating');
+    expect(mascotMood({ job: job('running', 0, 0, { promptNumber: 2, promptCount: 3 }) })).toBe('creating');
   });
 
-  it('lets reactions override everything else', () => {
+  it('thinks while prompts are being enhanced', () => {
+    expect(mascotMood({ job: job('running', 2, 4, { stageName: 'enhancing_prompts' }) })).toBe('thinking');
+  });
+
+  it('waits with its own mood while a job is paused', () => {
+    expect(mascotMood({ job: job('paused', 3, 20), drowsy: true })).toBe('paused');
+  });
+
+  it('lets reactions override everything but a painting job', () => {
     expect(mascotMood({ job: job('completed'), reaction: 'cheerful' })).toBe('cheerful');
     expect(mascotMood({ job: job('failed'), reaction: 'sad' })).toBe('sad');
-    expect(mascotMood({ job: job('running', 3, 20), reaction: 'surprised', typing: true })).toBe('surprised');
+    expect(mascotMood({ job: job('queued'), reaction: 'surprised', typing: true })).toBe('surprised');
+    expect(mascotMood({ job: job('running', 0, 0), reaction: 'cheerful' })).toBe('cheerful');
+  });
+
+  it('cuts a reaction short once the next job starts painting', () => {
+    expect(mascotMood({ job: job('running', 3, 20), reaction: 'cheerful' })).toBe('creating');
   });
 
   it('keeps the active job ahead of user activity', () => {

@@ -56,6 +56,8 @@
   let deletingIds = $state<Set<string>>(new Set());
   let reactionTimer: ReturnType<typeof setTimeout> | undefined;
   let typingTimer: ReturnType<typeof setTimeout> | undefined;
+  // When the user (or a job reaction) last caught the mascot's attention.
+  let lastActivity = Date.now();
 
   const CLI_CAVEAT_NOTES: Record<CliCaveat, string> = {
     negative_prompt: 'The CLI takes negative prompts only from a prompts file, so it was left out.',
@@ -180,8 +182,15 @@
   }
 
 
+  function markActive(): void {
+    lastActivity = Date.now();
+    if (drowsy) drowsy = false;
+  }
+
   function react(next: MascotReaction): void {
     clearTimeout(reactionTimer);
+    // Restart the drowsy clock, so the mascot does not doze off right after reacting to a long job.
+    markActive();
     reaction = next;
     reactionTimer = setTimeout(() => { reaction = null; }, REACTION_DURATION_MS[next]);
   }
@@ -219,6 +228,7 @@
   }
 
   async function handleJobLost(): Promise<void> {
+    react('surprised');
     refreshModelStatus();
     addToast('Lost track of the job. Refreshed the gallery with any results.', 'info');
     await historyStore.refreshHistory();
@@ -507,13 +517,8 @@
 
     // Mascot: wave hello, then doze off after a quiet minute.
     const greetingTimer = setTimeout(() => { greeting = false; }, GREETING_DURATION_MS);
-    let lastActivity = Date.now();
-    function handleActivity(): void {
-      lastActivity = Date.now();
-      if (drowsy) drowsy = false;
-    }
     const activityEvents = ['pointerdown', 'pointermove', 'keydown', 'wheel'] as const;
-    activityEvents.forEach((type) => document.addEventListener(type, handleActivity, { passive: true }));
+    activityEvents.forEach((type) => document.addEventListener(type, markActive, { passive: true }));
     const drowsyTimer = setInterval(() => {
       drowsy = Date.now() - lastActivity > DROWSY_AFTER_MS;
     }, 5000);
@@ -523,7 +528,7 @@
       clearTimeout(reactionTimer);
       clearTimeout(typingTimer);
       clearInterval(drowsyTimer);
-      activityEvents.forEach((type) => document.removeEventListener(type, handleActivity));
+      activityEvents.forEach((type) => document.removeEventListener(type, markActive));
       cancelled = true;
       stopJobSync();
       unsubscribeLifecycle();

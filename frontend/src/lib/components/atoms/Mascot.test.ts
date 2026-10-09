@@ -38,6 +38,7 @@ describe('Mascot', () => {
     ['waving', 'Z-Vision mascot is waving hello'],
     ['curious', 'Z-Vision mascot is watching you type'],
     ['sleeping', 'Z-Vision mascot is sleeping'],
+    ['paused', 'Z-Vision mascot is waiting for you to resume'],
     ['sad', 'Z-Vision mascot is sad'],
     ['surprised', 'Z-Vision mascot is surprised'],
   ] as const)('exposes the %s mood', (mood, label) => {
