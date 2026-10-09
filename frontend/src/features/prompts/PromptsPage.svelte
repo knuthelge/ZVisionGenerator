@@ -339,7 +339,7 @@
 <style>
   .prompts-page { display: flex; flex: 1; flex-direction: column; min-height: 0; }
   .file-bar { flex-wrap: nowrap; gap: 6px; padding-inline: 12px; }
-  .file-button { min-width: 0; gap: 6px; color: var(--color-text-primary); }
+  .file-button { flex-shrink: 1; min-width: 0; gap: 6px; color: var(--color-text-primary); }
   .dirty-dot { display: none; width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--color-warning); }
   .file-dirty .dirty-dot { display: inline-block; }
   .file-folder { overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: var(--text-ui); font-weight: 400; color: var(--color-text-muted); direction: rtl; }

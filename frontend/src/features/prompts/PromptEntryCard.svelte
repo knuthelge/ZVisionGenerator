@@ -48,7 +48,7 @@
   ]);
 
   function onRowClick(event: MouseEvent): void {
-    if ((event.target as HTMLElement).closest('button, input, textarea, [role="textbox"]')) return;
+    if ((event.target as HTMLElement).closest('button, input, textarea, label, [role="textbox"]')) return;
     builder.select(entry.id);
   }
 </script>
