@@ -1,6 +1,6 @@
 <script lang="ts">
   import { inspectPromptFile } from '$lib/api/promptFiles';
-  import type { Snippet } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
   import { Icon } from '$lib/components/atoms';
   import { router } from '$lib/state/router.svelte';
   import type { PromptFileContract, PromptFileInspection, PromptFileOption, PromptSource, WorkflowMode } from '$lib/types';
@@ -17,6 +17,8 @@
     disabled?: boolean;
     onPathChange: (path: string | null) => void;
     onOptionChange: (optionIds: string[]) => void;
+    /** Report the loaded file and its prompt count, or null while no file is loaded. */
+    onOptionsLoaded?: (loaded: { path: string; count: number } | null) => void;
     /** Extra tools rendered first in the box's tool row (e.g. the Enhance popover trigger). */
     tools?: Snippet;
   }
@@ -31,6 +33,7 @@
     disabled = false,
     onPathChange,
     onOptionChange,
+    onOptionsLoaded,
     tools,
   }: Props = $props();
 
@@ -58,6 +61,7 @@
       options = [];
       loadedPath = null;
       optionsError = null;
+      untrack(() => onOptionsLoaded?.(null));
       return;
     }
 
@@ -72,6 +76,7 @@
 
     options = inspection.options;
     loadedPath = inspection.path;
+    onOptionsLoaded?.({ path: inspection.path, count: inspection.options.length });
     manualPath = null;
     optionsError = null;
     optionsStatus = successMessage;
@@ -112,6 +117,7 @@
   function clear(): void {
     options = [];
     loadedPath = null;
+    onOptionsLoaded?.(null);
     manualPath = null;
     optionsError = null;
     optionsStatus = null;
@@ -130,6 +136,7 @@
       optionsStatus = null;
       optionsStatusTone = 'muted';
       loadedPath = null;
+      onOptionsLoaded?.(null);
       onOptionChange([]);
     }
     onPathChange(nextPath);

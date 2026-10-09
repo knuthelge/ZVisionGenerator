@@ -10,22 +10,25 @@ export interface JobSettingsPrefill {
   patch: Partial<DraftState>;
 }
 
-function values(settings: JobSettings, key: string): string[] {
+/** Return every value submitted for a field. */
+export function values(settings: JobSettings, key: string): string[] {
   const value = settings[key];
   if (value === undefined) return [];
   return Array.isArray(value) ? value : [value];
 }
 
-function first(settings: JobSettings, key: string): string | undefined {
+/** Return the first value submitted for a field. */
+export function first(settings: JobSettings, key: string): string | undefined {
   return values(settings, key)[0];
 }
 
 /** A checkbox sent with a hidden "false" fallback is on when any other value came with it. */
-function checked(settings: JobSettings, key: string): boolean {
+export function checked(settings: JobSettings, key: string): boolean {
   return values(settings, key).some((value) => value !== 'false');
 }
 
-function numberOrNull(value: string | undefined): number | null {
+/** Parse a submitted number; blank, `null`, and non-numeric values become null. */
+export function numberOrNull(value: string | undefined): number | null {
   if (value === undefined || value.trim() === '' || value === 'null') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;

@@ -23,6 +23,7 @@ const DEFAULT_DRAFT: DraftState = {
   negativePrompt: '',
   promptFilePath: null,
   promptFileOptionIds: [],
+  promptFileLoaded: null,
   model: '',
   ratio: '',
   dimensionMode: 'ratio',
@@ -419,6 +420,7 @@ export const draft = {
       negativePrompt: s.negativePrompt,
       promptFilePath: s.promptFilePath,
       promptFileOptionIds: s.promptFileOptionIds,
+      promptFileLoaded: s.promptFileLoaded,
       enhancedPrompt: s.enhancedPrompt,
       enhancedFrom: s.enhancedFrom,
     };

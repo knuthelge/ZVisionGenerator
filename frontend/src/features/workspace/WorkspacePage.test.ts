@@ -8,6 +8,7 @@ import { historyStore } from '$lib/state/history.svelte';
 import { jobStore } from '$lib/state/job.svelte';
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { router } from '$lib/state/router.svelte';
+import { toasts } from '$lib/state/toasts.svelte';
 import type { ImageModelDefaults, JobContext, JobSnapshot, VideoModelDefaults, WorkspaceContext, GalleryAsset, GalleryPage } from '$lib/types';
 
 const workspaceApiMocks = vi.hoisted(() => ({
@@ -797,6 +798,37 @@ describe('WorkspacePage', () => {
     expect(submitted.get('prompt')).toBe('a fox');
     expect(submitted.get('enhance_auto')).toBe('true');
     expect(JSON.parse(String(submitted.get('enhance_settings')))).toEqual({ style: 'photo', mood: 'keep', details: [], length: 'longer' });
+  });
+
+  it('copies the CLI command for what Generate would submit, without submitting', async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    draft.update('prompt', 'a fox');
+    draft.update('enhancedPrompt', 'A red fox in deep snow.');
+    draft.update('enhancedFrom', { prompt: 'a fox', mode: 'image' });
+    await mountWorkspace(withEnhancer(makeContext()));
+
+    (target.querySelector('#ws-copy-cli') as HTMLButtonElement).click();
+    await settle();
+
+    expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
+    expect(writeText).toHaveBeenCalledTimes(1);
+    const command = writeText.mock.calls[0]?.[0] ?? '';
+    expect(command).toMatch(/^ziv image --model zit /);
+    expect(command).toContain("--prompt 'A red fox in deep snow.'");
+    expect(command).toContain('--steps 28');
+    expect(command).toMatch(/--output \/tmp\/output$/);
+  });
+
+  it('copies nothing while the prompt is empty', async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    await mountWorkspace(makeContext());
+
+    (target.querySelector('#ws-copy-cli') as HTMLButtonElement).click();
+    await settle();
+
+    expect(writeText).not.toHaveBeenCalled();
   });
 
   it('warns inline when auto-enhance would change nothing', async () => {
@@ -1848,6 +1880,49 @@ describe('WorkspacePage', () => {
     expect(draft.state.promptFileOptionIds).toEqual([]);
     expect(target.querySelectorAll('input[name="prompt_option_id"]')).toHaveLength(0);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('copies a prompts-file command from the loaded file, reporting only a partial prompt choice', async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    promptFileApiMocks.inspectPromptFile.mockResolvedValue({
+      path: '/server/prompts.yaml',
+      options: [0, 1].map((index) => ({
+        id: `portrait:${index}`, set_name: 'portrait', source_index: index,
+        label: `Prompt ${index + 1}`, prompt_preview: `Prompt ${index + 1}`, negative_preview: null,
+      })),
+    });
+    await mountWorkspace(makeContext());
+    draft.update('promptSource', 'file');
+    draft.update('promptFilePath', '/server/prompts.yaml');
+    await settle();
+    const inspections = promptFileApiMocks.inspectPromptFile.mock.calls.length;
+    // Each copy starts from an empty toast queue, so toasts[0] is the toast it raised.
+    const copy = async (): Promise<void> => {
+      toasts.splice(0, toasts.length);
+      (target.querySelector('#ws-copy-cli') as HTMLButtonElement).click();
+      await settle();
+    };
+
+    // Nothing chosen: Generate would refuse, so nothing is copied.
+    draft.update('promptFileOptionIds', []);
+    await settle();
+    await copy();
+    expect(writeText).not.toHaveBeenCalled();
+    expect(toasts[0]?.type).toBe('error');
+
+    draft.update('promptFileOptionIds', ['portrait:0', 'portrait:1']);
+    await settle();
+    await copy();
+    expect(writeText).toHaveBeenLastCalledWith(expect.stringContaining('--prompts-file /server/prompts.yaml'));
+    expect(toasts[0]?.type).toBe('success');
+
+    draft.update('promptFileOptionIds', ['portrait:0']);
+    await settle();
+    await copy();
+    expect(toasts[0]?.type).toBe('info');
+    // The count comes from the file the field already loaded, so the clipboard write stays inside the click.
+    expect(promptFileApiMocks.inspectPromptFile).toHaveBeenCalledTimes(inspections);
   });
 
   it('filters the prompt chooser by prompt text', async () => {
