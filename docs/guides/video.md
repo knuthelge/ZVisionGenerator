@@ -106,6 +106,7 @@ LTX-2.3 has specific alignment requirements that are auto-corrected with a warni
 - **Resolution**: width and height must be divisible by 32 (64 when using `--upscale`)
 - **Frames**: must follow 8k+1 pattern (9, 17, 25, 33, 41, 49, ..., 97, 121)
 - **macOS MLX Q4 baseline**: `ltx-4`, 704×448, ≤49 frames with `--low-memory`
+- **macOS low memory**: `--low-memory` (the default) frees each model component once it has run. On Macs with 24 GB of memory or less it also streams the transformer from disk during generation, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. `--no-low-memory` (or **Low memory** off in the Web UI) turns off both, keeping every component loaded
 
 Windows and Linux use the configurable diffusers repository behind `ltx-2.3` instead of shipped Q4/Q8 aliases.
 

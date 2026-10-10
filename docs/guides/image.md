@@ -208,7 +208,7 @@ The first time a model runs at `-q 8` or `-q 4` (or **Quant: q8/q4** in the Web 
 - **Windows and Linux:** the first job takes a few minutes longer.
 
 - The copy holds the base model only. LoRAs are applied on top of it when a job loads.
-- It is replaced automatically when the source model's weights change (including a new download of an alias's Hugging Face repo) or the software that creates it is updated.
+- It is replaced automatically when the source model's weights change (including a new download of an alias's Hugging Face repo) or the software that creates it is updated. After an update that changes the quantization code (for example a new mflux version on macOS), the next q8 or q4 job of each model rebuilds its copy once, which takes the extra time and disk space of a first run.
 - It is listed on the Models page as *q8 copy of &lt;name&gt;*, where you can delete it to free disk space. It does not appear in the model picker: choose the base model and a quantize level.
 - Deleting a model on the Models page, or an alias's Hugging Face download, also deletes its copies.
 - Stopping a job while the copy is being saved takes effect once the current save step finishes. The copy is then discarded and the next job tries again.

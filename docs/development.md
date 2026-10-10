@@ -78,7 +78,7 @@ zvisiongenerator/
 │   ├── image_win_quant.py         NF4 (q4) and FP8 (q8) weights for the diffusers backend, at load and as stored quants
 │   ├── lora_peft.py               Detect and report LoRA files that match no module (peft)
 │   ├── memory_cuda.py             CUDA memory release after a job, and GPU and system memory sizes
-│   ├── memory_mac.py              MLX memory release and recommended GPU memory budget
+│   ├── memory_mac.py              MLX memory release, recommended GPU memory budget, machine memory size and scoped cache limit
 │   ├── prompt_enhancer_mac.py     macOS prompt-enhancer LLM (mlx-lm)
 │   ├── prompt_enhancer_win.py     Windows/Linux prompt-enhancer LLM (transformers)
 │   ├── prompt_enhancer_session.py Single resident prompt-enhancer model: exclusive use and idle release
@@ -252,6 +252,22 @@ The Web UI has one design system ([proposal](https://github.com/knuthelge/ZVisio
 ### Test Strategy
 
 Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.
+
+## Vendored LTX
+
+`packages/ltx_core_mlx` and `packages/ltx_pipelines_mlx` are vendored from [`dgrauet/ltx-2-mlx`](https://github.com/dgrauet/ltx-2-mlx). They are not published to PyPI, and PyPI rejects direct-URL dependencies, so they live in the repository. Never edit them by hand.
+
+- **Pin.** `LTX_COMMIT` in the `Makefile` must be the commit of a release tag; the comment above it names the tag.
+- **Update.** `make update-ltx` replaces both packages with the pinned commit. It does not carry their dependencies: mirror the `dependencies` of upstream's `packages/*/pyproject.toml` into ours by hand, macOS-only and capped at the minor version that upstream's `uv.lock` tests (for example `mlx-arsenal>=0.2.4,<0.3`).
+- **Internals we rely on.** `backends/video_mac.py` uses upstream attributes and call shapes that are not public API. Re-check each on every bump. `tests/test_ltx_mlx_contract.py` pins their names and signatures by introspection, and the mocked tests in `tests/test_video_upscale.py` cover our calls:
+    - `_pending_loras` on the pipeline (LoRAs applied at load)
+    - the duck-typed `stepwise` slot and its `bind(..., stage=)` contract, which returns the stage's `on_step` callable
+    - `_pre_denoise_flush(video_state, audio_state)` (guards against the Metal watchdog) and `_decode_and_save_video(frame_rate=, seed=)`
+    - `dit`, `load()`, `prompt_encoder`, and `image_conditioner` (`__call__(fn, free_after=)` and `resolve_crf`)
+    - `utils._orchestration.combined_image_conditionings`, `utils.args.ImageConditioningInput`, and `utils.helpers.create_noised_state(legacy_scalar_blend=True)`
+    - `scheduler.shorten_schedule` and `DISTILLED_SIGMAS`, and `utils.samplers.denoise_loop` with its `on_step(step_idx, total, video_x0, sigma)` signature
+    - `DistilledPipeline.generate_and_save` for upscale, and `BasePipeline`'s `gemma_model_id` default, the transformer-file preference order and the `low_memory` and `low_ram_streaming` constructor arguments
+- **Cache limit.** `low_ram_streaming` makes the pipeline set the MLX buffer-cache limit to 0 for the whole process. `backends/memory_mac.mlx_cache_limit` scopes that to model construction and each generation, then restores the previous limit.
 
 ## Proposals
 
