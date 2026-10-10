@@ -160,7 +160,7 @@ The `negative` field supports the same structured format as `prompt` (strings, d
 
 ## Enhancing Prompts
 
-A small local LLM can rewrite a prompt with more visual detail before it is generated. It runs on your machine, and its default model is decensored, so it does not water down your prompt.
+A small local LLM can rewrite a prompt with more visual detail before it is generated. It runs on your machine. The default model is an uncensored variant of Qwen3.5-4B, because small instruction-tuned models often refuse or tone down ordinary creative prompts, such as a battle scene, a horror shot or a villain's portrait. The uncensored variant rewrites them faithfully instead.
 
 | Platform | Default model | First-use download |
 |---|---|---|

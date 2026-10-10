@@ -43,7 +43,7 @@ ziv-image -m ideo --json-prompt '{"high_level_description": "a portrait"}'
 
 When neither `--steps` nor `--guidance` is given, Ideogram 4 uses its built-in tuned quality schedule. Supplying `--steps` and/or `--guidance` overrides that schedule with the explicit values.
 
-Ideogram 4 applies an automatic first-step adjustment to its denoising schedule that reduces spurious "Image blocked by safety filter" grey results at no change to the prompt, seed, or resolution. This mitigation is best-effort and not guaranteed to recover every refused generation. The adjustment defaults to a first-step sigma of `1.004` and can be overridden per run with `--first-sigma` (for example `--first-sigma 1.005` or `--first-sigma 1.006`) when a benign prompt is still blocked.
+Ideogram 4 sometimes returns a grey "Image blocked by safety filter" frame for harmless prompts. ZVisionGenerator adjusts the first denoising step slightly, which reduces these false positives without changing the prompt, seed or resolution. This is best-effort and not a way around the filter: prompts the filter actually objects to are still blocked. The adjustment defaults to a first-step sigma of `1.004` and can be overridden per run with `--first-sigma` (for example `--first-sigma 1.005` or `--first-sigma 1.006`) when a harmless prompt is still blocked.
 
 #### In the Web UI
 
