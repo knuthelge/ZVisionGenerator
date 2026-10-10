@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 - Web server and shared libraries updated (FastAPI 0.143, uvicorn 0.54, python-multipart 0.0.32, Pillow 12.3, huggingface-hub ≥1.32)
+- Building the web frontend from source needs Node.js 22.22.2+, 24.15+ or 26+ (contributors only; the packaged app is unaffected)
 
 ### Removed
 - Windows/Linux: `hf-transfer` is no longer installed; downloads use Xet. Set `HF_XET_HIGH_PERFORMANCE=1` instead of `HF_HUB_ENABLE_HF_TRANSFER` for faster downloads

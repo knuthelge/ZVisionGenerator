@@ -12,17 +12,17 @@ export default defineConfig({
   build: {
     outDir: '../zvisiongenerator/web/static/app',
     emptyOutDir: true,
-    rollupOptions: {
+    rolldownOptions: {
       input: {
-        main: resolve(__dirname, 'index.html')
+        main: resolve(import.meta.dirname, 'index.html')
       }
     }
   },
   resolve: {
     alias: {
-      '$lib': resolve(__dirname, 'src/lib'),
-      '$features': resolve(__dirname, 'src/features'),
-      '$app': resolve(__dirname, 'src/app')
+      '$lib': resolve(import.meta.dirname, 'src/lib'),
+      '$features': resolve(import.meta.dirname, 'src/features'),
+      '$app': resolve(import.meta.dirname, 'src/app')
     }
   },
   server: {

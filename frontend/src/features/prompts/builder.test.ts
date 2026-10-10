@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import type { PromptDocument, PromptDocumentLoad, PromptDocumentPreview } from '$lib/types';
-import { PromptBuilder } from './builder.svelte';
+import { PromptBuilder, type PreviewFn } from './builder.svelte';
 
 function loadPayload(document: PromptDocument): PromptDocumentLoad & { document: PromptDocument } {
   return {
@@ -30,12 +30,12 @@ function sample(): PromptDocument {
 const EMPTY_PREVIEW: PromptDocumentPreview = { entries: {}, problems: [], snippet_uses: {}, rolled: null };
 
 describe('PromptBuilder', () => {
-  let preview: ReturnType<typeof vi.fn>;
+  let preview: Mock<PreviewFn>;
   let builder: PromptBuilder;
 
   beforeEach(() => {
     vi.useFakeTimers();
-    preview = vi.fn().mockResolvedValue(EMPTY_PREVIEW);
+    preview = vi.fn<PreviewFn>().mockResolvedValue(EMPTY_PREVIEW);
     builder = new PromptBuilder(preview);
     builder.load(loadPayload(sample()));
   });
