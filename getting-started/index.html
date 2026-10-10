@@ -585,6 +585,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#download-speed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Download speed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#ziv_data_dir-override" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1065,6 +1076,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#download-speed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Download speed
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#ziv_data_dir-override" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1117,8 +1139,8 @@
 <li>Python 3.14+</li>
 <li><a href="https://docs.astral.sh/uv/">uv</a> package manager (<strong>required</strong> — pip is not supported)</li>
 <li><strong>macOS:</strong> Apple Silicon (M1+) — mflux requires MLX</li>
-<li><strong>Windows:</strong> NVIDIA GPU with CUDA support</li>
-<li><strong>Linux:</strong> NVIDIA GPU with CUDA support</li>
+<li><strong>Windows:</strong> NVIDIA GPU, RTX 20-series (Turing) or newer including RTX 50-series, with NVIDIA driver 580 or newer</li>
+<li><strong>Linux:</strong> NVIDIA GPU, RTX 20-series (Turing) or newer including RTX 50-series, with NVIDIA driver 580 or newer</li>
 <li><strong>Video:</strong> ffmpeg</li>
 </ul>
 <h2 id="installation">Installation</h2>
@@ -1134,7 +1156,7 @@ uv sync
 </code></pre>
 <blockquote>
 <p><strong>uv is required.</strong> This package cannot be installed with pip — some dependencies require uv-specific resolution that pip does not support.</p>
-<p><strong>Note:</strong> Video generation requires ffmpeg. On Windows and Linux, image and video generation use diffusers/CUDA and fail fast when PyTorch cannot see an NVIDIA CUDA device.</p>
+<p><strong>Note:</strong> Video generation requires ffmpeg. On Windows and Linux, image and video generation use diffusers/CUDA and fail fast when PyTorch cannot see an NVIDIA CUDA device. If the error mentions the driver, update the NVIDIA driver to 580 or newer.</p>
 </blockquote>
 <h2 id="quick-start">Quick Start</h2>
 <h3 id="image-generation">Image Generation</h3>
@@ -1437,6 +1459,11 @@ uv run ziv ui --no-browser
 <p><strong>Note:</strong> A local model directory at <code>~/.ziv/models/&lt;name&gt;/</code> takes priority over an alias with the same name.</p>
 </blockquote>
 <p>LoRA generation inputs are local paths or bare names from <code>~/.ziv/loras/</code>. To use a HuggingFace LoRA, import it first with <code>ziv-model lora --hf ...</code>, then reference the local LoRA name or path during generation.</p>
+<h3 id="download-speed">Download speed</h3>
+<p>Model downloads from HuggingFace use Xet. Set <code>HF_XET_HIGH_PERFORMANCE=1</code> to let downloads try to saturate the network bandwidth and use all CPU cores. The variable is read when the program starts, so set it before launching <code>ziv</code>:</p>
+<pre><code class="language-bash">export HF_XET_HIGH_PERFORMANCE=1
+ziv-image -m my-model --prompt &quot;a landscape&quot;
+</code></pre>
 <h3 id="ziv_data_dir-override"><code>ZIV_DATA_DIR</code> Override</h3>
 <p>Set the <code>ZIV_DATA_DIR</code> environment variable to use a custom location instead of <code>~/.ziv/</code>:</p>
 <pre><code class="language-bash">export ZIV_DATA_DIR=/mnt/fast-ssd/ziv

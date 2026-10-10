@@ -1360,12 +1360,14 @@ make install
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/
+│   ├── cuda_driver.py             NVIDIA driver hint when a CUDA build of PyTorch cannot start
 │   ├── image_mac.py               macOS image backend (mflux/MLX)
 │   ├── image_mac_preview.py       Cheap latent → RGB live previews for the mflux backend
 │   ├── image_win.py               Windows/Linux image backend (diffusers/CUDA)
 │   ├── image_win_lokr.py          LyCORIS LoKr adapters for the diffusers backend (applied like mflux)
 │   ├── image_win_preview.py       Cheap latent → RGB live previews for the diffusers backend
 │   ├── image_win_quant.py         NF4 (q4) and FP8 (q8) weights for the diffusers backend, at load and as stored quants
+│   ├── lora_peft.py               Detect and report LoRA files that match no module (peft)
 │   ├── memory_cuda.py             CUDA memory release after a job, and GPU and system memory sizes
 │   ├── memory_mac.py              MLX memory release and recommended GPU memory budget
 │   ├── prompt_enhancer_mac.py     macOS prompt-enhancer LLM (mlx-lm)
