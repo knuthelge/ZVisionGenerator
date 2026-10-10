@@ -50,6 +50,8 @@ When no image model is downloaded and none is installed in `~/.ziv/models`, the 
 
 Downloads become something you can see and control, not a side effect of the first generation.
 
+The ensure-downloaded step, the progress event and the job-card display are written up separately in [Show model download progress in Web UI jobs](model-download-progress.md). The download lane below builds on that helper.
+
 - `POST /api/models/download {name}` runs `huggingface_hub.snapshot_download` with the allow-patterns the backend needs: the diffusers component folders listed in `model_index.json`, the tokenizer files, and no top-level single-file checkpoints. Without that filter, `klein9b` would also fetch the 18 GB `flux-2-klein-9b.safetensors`, and `krea2` the 26 GB `turbo.safetensors`. When the snapshot is complete, `find_local_dir` sees it and the backends load from the cache as they already do.
 - Progress is reported through `tqdm_class` (supported by huggingface_hub 1.33) as SSE events: bytes done and total, speed, and ETA. If hf_xet's transfers don't report through tqdm, the fallback is to poll the size of the repo's blob folder against the known total.
 - **Its own lane, beside the job queue.** Downloads use the network, not the GPU, so you can download one model while generating with another. Downloads run one at a time, can be cancelled (partial blobs resume next time), and show in a slim bar under the top nav and on the model's row on the Models page.
