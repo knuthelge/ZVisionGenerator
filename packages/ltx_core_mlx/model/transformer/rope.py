@@ -23,6 +23,7 @@ def generate_freq_grid(
     theta: float,
     num_pos_dims: int,
     inner_dim: int,
+    double_precision: bool = False,
 ) -> mx.array:
     """Generate log-spaced frequency indices for RoPE.
 
@@ -32,20 +33,49 @@ def generate_freq_grid(
         theta: Base frequency (default 10000.0).
         num_pos_dims: Number of position dimensions (3 for video, 1 for audio).
         inner_dim: Total attention dimension (heads * head_dim).
+        double_precision: If True, compute the intermediate table in float64
+            on the CPU stream (mirrors upstream's ``frequencies_precision:
+            float64``), then cast back to float32 before returning. mx.float64
+            is CPU-only in MLX, so the f64 computation is confined to
+            ``mx.stream(mx.cpu)`` and never re-enters the GPU graph.
 
     Returns:
-        Frequency indices of shape (inner_dim // (2 * num_pos_dims),).
+        Frequency indices of shape (inner_dim // (2 * num_pos_dims),), always
+        float32.
     """
     n_elem = 2 * num_pos_dims
     num_freqs = inner_dim // n_elem
 
-    indices = theta ** mx.linspace(
-        math.log(1.0) / math.log(theta),
-        math.log(theta) / math.log(theta),
-        num_freqs,
-    ).astype(mx.float32)
+    if not double_precision:
+        # NOTE: kept as a duplicated branch rather than a shared
+        # `_compute(dtype)` helper as hardening — an added graph node (even
+        # a value-identical no-op cast) can change mx.compile's kernel
+        # fusion / reduction order enough to move a bit-exact render's
+        # output hash. The shipped 2.3/2.5 packs both set
+        # frequencies_precision=float64, so production traffic actually
+        # runs the branch below; this one exists for callers that pass
+        # double_precision=False explicitly (tests, future non-f64 packs).
+        indices = theta ** mx.linspace(
+            math.log(1.0) / math.log(theta),
+            math.log(theta) / math.log(theta),
+            num_freqs,
+        ).astype(mx.float32)
 
-    return indices * (math.pi / 2.0)
+        return indices * (math.pi / 2.0)
+
+    # float64 is CPU-only in MLX: compute the table on the CPU stream, cast
+    # to float32 before it re-enters the GPU graph. Mirrors upstream's
+    # generate_freq_grid_np (double_precision_rope / frequencies_precision:
+    # float64) — upstream computes this grid in f64 but returns float32.
+    with mx.stream(mx.cpu):
+        indices = theta ** mx.linspace(
+            math.log(1.0) / math.log(theta),
+            math.log(theta) / math.log(theta),
+            num_freqs,
+        ).astype(mx.float64)
+
+        result = (indices * (math.pi / 2.0)).astype(mx.float32)
+    return result
 
 
 def compute_freqs(
@@ -56,6 +86,12 @@ def compute_freqs(
     """Compute RoPE frequency angles from positions and freq grid.
 
     Reference: ltx-core rope.py generate_freqs + get_fractional_positions
+
+    Upstream's ``double_precision_rope`` only switches the frequency-grid
+    generator (:func:`generate_freq_grid`); ``generate_freqs`` (this
+    function's upstream analog) always runs the fractional-position math in
+    float32 regardless of that flag. No ``double_precision`` parameter here
+    — matching upstream exactly, not "going further" than it.
 
     Args:
         freq_indices: (num_freqs,) from generate_freq_grid.
@@ -88,7 +124,8 @@ def precompute_rope_freqs(
     num_heads: int,
     theta: float = 10000.0,
     max_pos: list[int] | None = None,
-    rope_type: str = "interleaved",
+    rope_type: str = "split",
+    double_precision: bool = False,
 ) -> tuple[mx.array, mx.array, str]:
     """Precompute per-head RoPE cos/sin frequencies.
 
@@ -100,7 +137,15 @@ def precompute_rope_freqs(
         num_heads: Number of attention heads.
         theta: Base frequency.
         max_pos: Maximum positions per axis. Defaults to [20, 2048, 2048].
-        rope_type: "interleaved" (default, main transformer) or "split" (connector).
+        rope_type: ``"split"`` (default, LTX-2.3 main transformer + connector)
+            or ``"interleaved"`` (legacy mode, kept for completeness).
+            Upstream switched the default from ``"interleaved"`` to ``"split"``
+            in PR #212 since all production checkpoints use SPLIT.
+        double_precision: Compute the frequency grid (only) in float64 on
+            the CPU stream (mirrors upstream's ``frequencies_precision:
+            float64``, which switches only the grid generator, not the
+            per-position fractional math); output is always cast back to
+            float32.
 
     Returns:
         Tuple of (cos_freqs, sin_freqs, rope_type).
@@ -109,7 +154,7 @@ def precompute_rope_freqs(
     if max_pos is None:
         max_pos = [20, 2048, 2048][:num_pos_dims]
 
-    freq_indices = generate_freq_grid(theta, num_pos_dims, inner_dim)
+    freq_indices = generate_freq_grid(theta, num_pos_dims, inner_dim, double_precision=double_precision)
     freqs = compute_freqs(freq_indices, positions, max_pos)
     B, N, num_freqs = freqs.shape
 

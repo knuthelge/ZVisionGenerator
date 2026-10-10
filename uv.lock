@@ -731,6 +731,19 @@ wheels = [
 ]
 
 [[package]]
+name = "mlx-arsenal"
+version = "0.2.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "mlx" },
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9a/d0/cf67111a4e1385feb95cc2cb24e9045320ec9562a9cf516281752dd7a9dd/mlx_arsenal-0.2.5.tar.gz", hash = "sha256:ae9c07fe21cf16542b31fd5c9e10e858271993a95798aced562ac26128275273", size = 39230, upload-time = "2026-05-14T12:17:13.096Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/38/9b/c9082499c10585817712318e8d6b2841447d734cbdb68a6986b2dea3c524/mlx_arsenal-0.2.5-py3-none-any.whl", hash = "sha256:ab5999d3c9e4e53be2599368674e8f5c4718c7b953402bfc8081209ec831950c", size = 34634, upload-time = "2026-05-14T12:17:11.628Z" },
+]
+
+[[package]]
 name = "mlx-lm"
 version = "0.32.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1813,6 +1826,7 @@ dependencies = [
     { name = "huggingface-hub" },
     { name = "mflux", marker = "sys_platform == 'darwin'" },
     { name = "mlx", marker = "sys_platform == 'darwin'" },
+    { name = "mlx-arsenal", marker = "sys_platform == 'darwin'" },
     { name = "mlx-lm", marker = "sys_platform == 'darwin'" },
     { name = "numpy" },
     { name = "peft", marker = "sys_platform != 'darwin'" },
@@ -1846,6 +1860,7 @@ requires-dist = [
     { name = "huggingface-hub", specifier = ">=1.32.0,<2.0" },
     { name = "mflux", marker = "sys_platform == 'darwin'", specifier = ">=0.22.0,<0.23" },
     { name = "mlx", marker = "sys_platform == 'darwin'", specifier = ">=0.32.2" },
+    { name = "mlx-arsenal", marker = "sys_platform == 'darwin'", specifier = ">=0.2.4,<0.3" },
     { name = "mlx-lm", marker = "sys_platform == 'darwin'", specifier = ">=0.32.0" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "peft", marker = "sys_platform != 'darwin'", specifier = ">=0.21.2" },

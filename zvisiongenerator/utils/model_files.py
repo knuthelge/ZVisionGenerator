@@ -12,7 +12,9 @@ from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 # Used only when ltx-pipelines-mlx cannot be imported to read its own ``gemma_model_id`` default.
 _LTX_MLX_TEXT_ENCODER_FALLBACK = "mlx-community/gemma-3-12b-it-4bit"
 _LTX_MLX_MARKER = "connector.safetensors"
-_LTX_MLX_TRANSFORMERS = ("transformer.safetensors", "transformer-distilled.safetensors")
+_LTX_MLX_TRANSFORMER = "transformer.safetensors"
+_LTX_MLX_DISTILLED_GLOB = "transformer-distilled-*.safetensors"
+_LTX_MLX_DISTILLED_UNVERSIONED = "transformer-distilled.safetensors"
 _WEIGHTLESS_CLASS_HINTS = ("Tokenizer", "Scheduler", "Processor", "FeatureExtractor")
 _TRANSFORMER_COMPONENT = "transformer"
 _SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d+)-of-(?P<total>\d+)\.safetensors$")
@@ -30,9 +32,9 @@ def ltx_mlx_text_encoder_repo() -> str:
     global _ltx_mlx_text_encoder_repo
     if _ltx_mlx_text_encoder_repo is None:
         try:
-            from ltx_pipelines_mlx import TextToVideoPipeline
+            from ltx_pipelines_mlx import BasePipeline
 
-            default = inspect.signature(TextToVideoPipeline.__init__).parameters["gemma_model_id"].default
+            default = inspect.signature(BasePipeline.__init__).parameters["gemma_model_id"].default
         except Exception:  # noqa: BLE001 - the MLX pipeline is unavailable off macOS; fall back to the known default
             return _LTX_MLX_TEXT_ENCODER_FALLBACK
         if not isinstance(default, str) or not default:
@@ -47,12 +49,20 @@ def is_ltx_mlx_layout(model_dir: Path) -> bool:
 
 
 def ltx_mlx_transformer_file(model_dir: Path) -> Path | None:
-    """Return the transformer file ltx-pipelines-mlx loads from *model_dir*, if present."""
-    for name in _LTX_MLX_TRANSFORMERS:
-        candidate = model_dir / name
-        if candidate.is_file():
-            return candidate
-    return None
+    """Return the transformer file ltx-pipelines-mlx loads from *model_dir*, if present.
+
+    Mirrors the pipeline's own choice: ``transformer.safetensors``, else the lexicographically last
+    versioned ``transformer-distilled-*.safetensors`` (the newest release), else the unversioned
+    ``transformer-distilled.safetensors``.
+    """
+    plain = model_dir / _LTX_MLX_TRANSFORMER
+    if plain.is_file():
+        return plain
+    versioned = sorted(path for path in model_dir.glob(_LTX_MLX_DISTILLED_GLOB) if path.is_file())
+    if versioned:
+        return versioned[-1]
+    unversioned = model_dir / _LTX_MLX_DISTILLED_UNVERSIONED
+    return unversioned if unversioned.is_file() else None
 
 
 def find_local_model_dir(reference: str) -> Path | None:

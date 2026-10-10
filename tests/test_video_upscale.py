@@ -1,18 +1,23 @@
-"""Tests for video upscale feature — CLI parsing, pipeline selection, stage kwargs, workflow assembly."""
+"""Tests for video upscale feature — CLI parsing, stage kwargs, workflow assembly, and the macOS LTX backend."""
 
 from __future__ import annotations
 
 from conftest import _make_plan
 
+import sys
 from argparse import Namespace
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from typing import NamedTuple
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from tests.conftest import _make_video_args
 from zvisiongenerator.core.types import StageOutcome
+from zvisiongenerator.backends.video_mac import LtxVideoBackend, _LtxModel, _TwoStageProgress
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_cli import _build_video_parser, _resolve_upscale_steps
 from zvisiongenerator.workflows import build_video_workflow
 from zvisiongenerator.workflows.video_stages import (
@@ -98,6 +103,13 @@ class TestUpscaleCLIParsing:
         assert args.steps == 8
         assert args.upscale_steps is None
 
+    def test_i2v_upscale_allowed_in_cli(self):
+        """--upscale 2 --image path.png should NOT cause a parser error at parse time."""
+        parser = _build_video_parser()
+        args = parser.parse_args(["-m", "model", "--upscale", "2", "--image", "photo.png"])
+        assert args.upscale == 2
+        assert args.image_path == "photo.png"
+
     def test_audio_flag_defaults_enabled(self):
         """--audio defaults to True (BooleanOptionalAction)."""
         parser = _build_video_parser()
@@ -115,60 +127,6 @@ class TestUpscaleCLIParsing:
         parser = _build_video_parser()
         args = parser.parse_args(["-m", "model", "--audio"])
         assert args.audio is True
-
-
-# ---------------------------------------------------------------------------
-# Backend Pipeline Selection
-# ---------------------------------------------------------------------------
-
-
-class TestPipelineSelection:
-    """Verify correct pipeline class is loaded based on upscale flag."""
-
-    @patch("zvisiongenerator.backends.video_mac.detect_video_model")
-    def test_upscale_loads_text_to_video_pipeline(self, mock_detect):
-        """When upscale=True in load_model(), TextToVideoPipeline is loaded (distilled two-stage)."""
-        from zvisiongenerator.backends.video_mac import LtxVideoBackend
-        from zvisiongenerator.utils.video_model_detect import VideoModelInfo
-
-        mock_detect.return_value = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
-        mock_t2v_cls = MagicMock()
-
-        backend = LtxVideoBackend()
-        with patch.dict("sys.modules", {"ltx_pipelines_mlx": MagicMock(TextToVideoPipeline=mock_t2v_cls)}):
-            pipeline, info = backend.load_model("model/path", upscale=True)
-
-        mock_t2v_cls.assert_called_once_with(model_dir="model/path", low_memory=True)
-
-    @patch("zvisiongenerator.backends.video_mac.detect_video_model")
-    def test_no_upscale_loads_text_to_video_pipeline(self, mock_detect):
-        """When upscale is absent, TextToVideoPipeline is loaded for t2v mode."""
-        from zvisiongenerator.backends.video_mac import LtxVideoBackend
-        from zvisiongenerator.utils.video_model_detect import VideoModelInfo
-
-        mock_detect.return_value = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
-        mock_t2v_cls = MagicMock()
-
-        backend = LtxVideoBackend()
-        with patch.dict("sys.modules", {"ltx_pipelines_mlx": MagicMock(TextToVideoPipeline=mock_t2v_cls)}):
-            pipeline, info = backend.load_model("model/path", mode="t2v")
-
-        mock_t2v_cls.assert_called_once_with(model_dir="model/path", low_memory=True)
-
-    @patch("zvisiongenerator.backends.video_mac.detect_video_model")
-    def test_no_upscale_i2v_loads_image_to_video_pipeline(self, mock_detect):
-        """When upscale=False and mode=i2v, ImageToVideoPipeline is loaded."""
-        from zvisiongenerator.backends.video_mac import LtxVideoBackend
-        from zvisiongenerator.utils.video_model_detect import VideoModelInfo
-
-        mock_detect.return_value = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
-        mock_i2v_cls = MagicMock()
-
-        backend = LtxVideoBackend()
-        with patch.dict("sys.modules", {"ltx_pipelines_mlx": MagicMock(ImageToVideoPipeline=mock_i2v_cls)}):
-            pipeline, info = backend.load_model("model/path", mode="i2v")
-
-        mock_i2v_cls.assert_called_once_with(model_dir="model/path", low_memory=True)
 
 
 # ---------------------------------------------------------------------------
@@ -357,203 +315,528 @@ class TestRunnerUpscaleFieldPropagation:
 
 
 # ---------------------------------------------------------------------------
-# Distilled Two-Stage Backend — method dispatch
+# macOS LTX backend — LTX modules are mocked, no model is ever loaded
 # ---------------------------------------------------------------------------
 
+_FPS = 24.0
+_LATENT_SHAPE = (3, 7, 11)  # (F, H, W)
+_AUDIO_TOKENS = 16
+_FAKE_DISTILLED_SIGMAS = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.2, 0.0]
+_FAKE_STAGE_2_SIGMAS = [0.909375, 0.725, 0.421875, 0.0]
 
-class TestDistilledTwoStageBackend:
-    """Verify LtxVideoBackend dispatches to _generate_upscaled when upscaling."""
 
-    def test_image_to_video_upscale_calls_generate_upscaled_with_image_path(self):
-        """image_to_video() with stage1_steps dispatches to _generate_upscaled."""
-        from zvisiongenerator.backends.video_mac import LtxVideoBackend
+class _ImageConditioningInput(NamedTuple):
+    """Stand-in with the fields of the upstream conditioning input."""
 
+    path: str
+    frame_idx: int = 0
+    strength: float = 1.0
+    crf: int | None = None
+
+
+def _model_info(default_fps: int = 24) -> VideoModelInfo:
+    return VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=default_fps, frame_alignment=8, resolution_alignment=32)
+
+
+@pytest.fixture
+def ltx(monkeypatch):
+    """Replace every LTX/MLX module the backend imports lazily with mocks sharing one call recorder.
+
+    ``h.calls`` is the shared parent: ``h.calls.method_calls`` lists, in order, the module functions and
+    pipeline methods the backend invoked.
+    """
+    h = SimpleNamespace(calls=MagicMock())
+
+    h.mx = MagicMock()
+    mlx = MagicMock()
+    mlx.core = h.mx
+    patchifiers = MagicMock()
+    patchifiers.compute_video_latent_shape.return_value = _LATENT_SHAPE
+    patchifiers.snap_output_dimensions.side_effect = lambda height, width, **_: (height, width)
+    h.patchifiers = patchifiers
+    positions = MagicMock()
+    positions.compute_audio_token_count.return_value = _AUDIO_TOKENS
+    positions.compute_video_positions.return_value = "video_positions"
+    positions.compute_audio_positions.return_value = "audio_positions"
+    h.positions = positions
+    h.memory = MagicMock()
+    h.x0_model = MagicMock()
+    transformer = MagicMock(X0Model=h.x0_model)
+
+    h.scheduler = MagicMock(DISTILLED_SIGMAS=_FAKE_DISTILLED_SIGMAS, STAGE_2_SIGMAS=_FAKE_STAGE_2_SIGMAS)
+    h.scheduler.shorten_schedule.return_value = ["shortened"]
+    h.orchestration = MagicMock()
+    h.orchestration.combined_image_conditionings.side_effect = lambda *a, **k: [MagicMock(clean_latent="clean_a"), MagicMock(clean_latent="clean_b")]
+    args = MagicMock(ImageConditioningInput=_ImageConditioningInput)
+    h.video_state = MagicMock(name="video_state")
+    h.audio_state = MagicMock(name="audio_state")
+    helpers = MagicMock()
+    helpers.create_noised_state.side_effect = [h.video_state, h.audio_state]
+    h.output = MagicMock()
+    samplers = MagicMock()
+    samplers.denoise_loop.return_value = h.output
+
+    h.calls.attach_mock(h.mx.eval, "mx_eval")
+    h.calls.attach_mock(h.memory.aggressive_cleanup, "aggressive_cleanup")
+    h.calls.attach_mock(h.orchestration.combined_image_conditionings, "combined_image_conditionings")
+    h.calls.attach_mock(h.scheduler.shorten_schedule, "shorten_schedule")
+    h.calls.attach_mock(helpers.create_noised_state, "create_noised_state")
+    h.calls.attach_mock(samplers.denoise_loop, "denoise_loop")
+    h.helpers = helpers
+    h.samplers = samplers
+
+    modules = {
+        "mlx": mlx,
+        "mlx.core": h.mx,
+        "ltx_core_mlx": MagicMock(),
+        "ltx_core_mlx.components": MagicMock(),
+        "ltx_core_mlx.components.patchifiers": patchifiers,
+        "ltx_core_mlx.model": MagicMock(),
+        "ltx_core_mlx.model.transformer": MagicMock(),
+        "ltx_core_mlx.model.transformer.model": transformer,
+        "ltx_core_mlx.utils": MagicMock(),
+        "ltx_core_mlx.utils.memory": h.memory,
+        "ltx_core_mlx.utils.positions": positions,
+        "ltx_pipelines_mlx": MagicMock(),
+        "ltx_pipelines_mlx.scheduler": h.scheduler,
+        "ltx_pipelines_mlx.utils": MagicMock(),
+        "ltx_pipelines_mlx.utils._orchestration": h.orchestration,
+        "ltx_pipelines_mlx.utils.args": args,
+        "ltx_pipelines_mlx.utils.helpers": helpers,
+        "ltx_pipelines_mlx.utils.samplers": samplers,
+    }
+    for name, module in modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    return h
+
+
+def _pipeline(h, *, low_memory: bool = False) -> MagicMock:
+    """Build a mock one-stage pipeline whose method calls are recorded on ``h.calls``."""
+    pipe = MagicMock()
+    pipe.low_memory = low_memory
+    pipe.prompt_encoder.return_value = ("video_embeds", "audio_embeds")
+    pipe.image_conditioner.resolve_crf.side_effect = lambda images: list(images)
+    h.encoder = MagicMock(name="vae_encoder")
+
+    def _run_conditioner(fn, free_after):
+        result = fn(h.encoder)
+        h.calls.conditioner_returned()
+        return result
+
+    pipe.image_conditioner.side_effect = _run_conditioner
+    h.calls.attach_mock(pipe.prompt_encoder, "prompt_encoder")
+    h.calls.attach_mock(pipe.load, "load")
+    h.calls.attach_mock(pipe._pre_denoise_flush, "_pre_denoise_flush")
+    h.calls.attach_mock(pipe._decode_and_save_video, "_decode_and_save_video")
+    return pipe
+
+
+def _call_names(h) -> list[str]:
+    return [c[0] for c in h.calls.method_calls if "." not in c[0]]
+
+
+def _handle(pipe, *, upscale: bool = False, frame_rate: float = _FPS) -> _LtxModel:
+    return _LtxModel(pipeline=pipe, frame_rate=frame_rate, upscale=upscale)
+
+
+def _run_one_stage(pipe, *, image_path: str | None = None, step_callback=None, steps: int = 8):
+    backend = LtxVideoBackend()
+    kwargs = dict(
+        model=_handle(pipe),
+        prompt="a prompt",
+        width=704,
+        height=480,
+        num_frames=49,
+        seed=42,
+        steps=steps,
+        output_path="/tmp/out.mp4",
+        step_callback=step_callback,
+    )
+    if image_path is None:
+        return backend.text_to_video(**kwargs)
+    return backend.image_to_video(image_path=image_path, **kwargs)
+
+
+class TestLoadModel:
+    """Verify load_model builds the pipeline that matches the upscale flag and carries the frame rate."""
+
+    @pytest.fixture
+    def classes(self, monkeypatch):
+        base, distilled = MagicMock(name="BasePipeline"), MagicMock(name="DistilledPipeline")
+        base.return_value = SimpleNamespace(kind="base")
+        distilled.return_value = SimpleNamespace(kind="distilled")
+        monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", MagicMock(BasePipeline=base, DistilledPipeline=distilled))
+        return SimpleNamespace(base=base, distilled=distilled)
+
+    @pytest.mark.parametrize("mode", ["t2v", "i2v"])
+    def test_without_upscale_builds_base_pipeline_for_either_mode(self, classes, mode):
+        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+            handle, info = LtxVideoBackend().load_model("model/path", mode=mode)
+
+        classes.base.assert_called_once_with(model_dir="model/path", low_memory=True)
+        classes.distilled.assert_not_called()
+        assert handle.pipeline.kind == "base"
+        assert handle.upscale is False
+
+    def test_upscale_builds_distilled_pipeline(self, classes):
+        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+            handle, _ = LtxVideoBackend().load_model("model/path", mode="i2v", upscale=True, low_memory=False)
+
+        classes.distilled.assert_called_once_with(model_dir="model/path", low_memory=False)
+        classes.base.assert_not_called()
+        assert handle.pipeline.kind == "distilled"
+        assert handle.upscale is True
+
+    @pytest.mark.parametrize("upscale", [False, True])
+    def test_loras_are_set_before_load(self, classes, upscale):
+        loras = [("lora.safetensors", 0.7)]
+        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+            handle, _ = LtxVideoBackend().load_model("model/path", upscale=upscale, loras=loras)
+
+        assert handle.pipeline._pending_loras == loras
+
+    def test_no_loras_leaves_pending_loras_unset(self, classes):
+        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+            handle, _ = LtxVideoBackend().load_model("model/path")
+
+        assert not hasattr(handle.pipeline, "_pending_loras")
+
+    @pytest.mark.parametrize("default_fps", [24, 30])
+    def test_frame_rate_is_the_detected_default_fps(self, classes, default_fps):
+        info = _model_info(default_fps)
+        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=info):
+            handle, returned_info = LtxVideoBackend().load_model("model/path")
+
+        assert handle.frame_rate == float(default_fps)
+        assert isinstance(handle.frame_rate, float)
+        assert returned_info is info
+
+    def test_missing_package_raises_runtime_error(self, monkeypatch):
+        monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", None)  # makes the import raise ImportError
+
+        with pytest.raises(RuntimeError, match="ltx-pipelines-mlx"):
+            LtxVideoBackend().load_model("model/path")
+
+
+class TestOneStageGeneration:
+    """Verify the BasePipeline composition used when upscale is off."""
+
+    def test_call_order(self, ltx):
+        pipe = _pipeline(ltx)
+
+        _run_one_stage(pipe)
+
+        assert _call_names(ltx) == [
+            "prompt_encoder",
+            "load",
+            "create_noised_state",
+            "create_noised_state",
+            "_pre_denoise_flush",
+            "shorten_schedule",
+            "denoise_loop",
+            "_decode_and_save_video",
+        ]
+
+    def test_low_memory_cleanup_follows_flush_and_encoder_is_freed(self, ltx):
+        pipe = _pipeline(ltx, low_memory=True)
+
+        _run_one_stage(pipe)
+
+        names = _call_names(ltx)
+        assert names[names.index("_pre_denoise_flush") + 1] == "aggressive_cleanup"
+        assert pipe.prompt_encoder.call_args == call("a prompt", free_after=True)
+
+    def test_no_cleanup_without_low_memory(self, ltx):
+        pipe = _pipeline(ltx, low_memory=False)
+
+        _run_one_stage(pipe)
+
+        assert "aggressive_cleanup" not in _call_names(ltx)
+        assert pipe.prompt_encoder.call_args == call("a prompt", free_after=False)
+
+    def test_flush_receives_the_noised_states(self, ltx):
+        pipe = _pipeline(ltx)
+
+        _run_one_stage(pipe)
+
+        pipe._pre_denoise_flush.assert_called_once_with(ltx.video_state, ltx.audio_state)
+        loop_kwargs = ltx.samplers.denoise_loop.call_args.kwargs
+        assert loop_kwargs["video_state"] is ltx.video_state
+        assert loop_kwargs["audio_state"] is ltx.audio_state
+        assert loop_kwargs["video_text_embeds"] == "video_embeds"
+        assert loop_kwargs["audio_text_embeds"] == "audio_embeds"
+
+    def test_sigmas_come_from_shorten_schedule(self, ltx):
+        pipe = _pipeline(ltx)
+
+        _run_one_stage(pipe, steps=6)
+
+        ltx.scheduler.shorten_schedule.assert_called_once_with(_FAKE_DISTILLED_SIGMAS, 6, keep="start")
+        assert ltx.samplers.denoise_loop.call_args.kwargs["sigmas"] is ltx.scheduler.shorten_schedule.return_value
+
+    def test_decode_uses_frame_rate_and_seed(self, ltx):
+        pipe = _pipeline(ltx)
+
+        result = _run_one_stage(pipe)
+
+        pipe._decode_and_save_video.assert_called_once_with(
+            pipe.video_patchifier.unpatchify.return_value,
+            pipe.audio_patchifier.unpatchify.return_value,
+            "/tmp/out.mp4",
+            frame_rate=_FPS,
+            seed=42,
+        )
+        assert result == Path("/tmp/out.mp4")
+
+    def test_noised_states_use_frame_rate_positions_and_offset_audio_seed(self, ltx):
+        pipe = _pipeline(ltx)
+
+        _run_one_stage(pipe)
+
+        ltx.positions.compute_video_positions.assert_called_once_with(*_LATENT_SHAPE, frame_rate=_FPS)
+        ltx.positions.compute_audio_token_count.assert_called_once_with(49, frame_rate=_FPS)
+        video_call, audio_call = ltx.helpers.create_noised_state.call_args_list
+        F, H, W = _LATENT_SHAPE
+        assert video_call.kwargs["base_shape"] == (1, F * H * W, 128)
+        assert video_call.kwargs["positions"] == "video_positions"
+        assert video_call.kwargs["seed"] == 42
+        assert audio_call.kwargs["base_shape"] == (1, _AUDIO_TOKENS, 128)
+        assert audio_call.kwargs["positions"] == "audio_positions"
+        assert audio_call.kwargs["seed"] == 43
+        assert audio_call.kwargs["conditionings"] == []
+
+    def test_noised_states_start_from_pure_noise_with_legacy_blend(self, ltx):
+        pipe = _pipeline(ltx)
+
+        _run_one_stage(pipe)
+
+        for state_call in ltx.helpers.create_noised_state.call_args_list:
+            assert state_call.kwargs["legacy_scalar_blend"] is True
+            assert state_call.kwargs["sigma"] == 1.0
+            assert state_call.kwargs["initial_latent"] is None
+
+    def test_denoise_loop_runs_the_pipeline_transformer(self, ltx):
+        pipe = _pipeline(ltx)
+
+        _run_one_stage(pipe)
+
+        ltx.x0_model.assert_called_once_with(pipe.dit)
+        assert ltx.samplers.denoise_loop.call_args.kwargs["model"] is ltx.x0_model.return_value
+
+    def test_unpatchify_receives_only_the_generated_tokens(self, ltx):
+        pipe = _pipeline(ltx)
+
+        _run_one_stage(pipe)
+
+        F, H, W = _LATENT_SHAPE
+        sliced = ltx.output.video_latent.__getitem__
+        sliced.assert_called_once_with((slice(None), slice(None, F * H * W), slice(None)))
+        pipe.video_patchifier.unpatchify.assert_called_once_with(sliced.return_value, _LATENT_SHAPE)
+        pipe.audio_patchifier.unpatchify.assert_called_once_with(ltx.output.audio_latent)
+
+    def test_low_memory_frees_the_decoders_after_decoding(self, ltx):
+        pipe = _pipeline(ltx, low_memory=True)
+
+        _run_one_stage(pipe)
+
+        assert pipe.vae_decoder is None
+        assert pipe.audio_decoder is None
+        assert pipe.vocoder is None
+
+    def test_decoders_stay_loaded_without_low_memory(self, ltx):
+        pipe = _pipeline(ltx, low_memory=False)
+
+        _run_one_stage(pipe)
+
+        assert pipe.vae_decoder is not None
+        assert pipe.audio_decoder is not None
+        assert pipe.vocoder is not None
+
+    def test_t2v_has_no_conditionings(self, ltx):
+        pipe = _pipeline(ltx)
+
+        _run_one_stage(pipe)
+
+        pipe.image_conditioner.assert_not_called()
+        assert ltx.helpers.create_noised_state.call_args_list[0].kwargs["conditionings"] == []
+
+    def test_i2v_conditions_the_image_at_frame_zero(self, ltx):
+        pipe = _pipeline(ltx)
+        input_image = _ImageConditioningInput(path="/tmp/in.png", frame_idx=0, strength=1.0)
+
+        _run_one_stage(pipe, image_path="/tmp/in.png")
+
+        pipe.image_conditioner.resolve_crf.assert_called_once_with([input_image])
+        F, H, W = _LATENT_SHAPE
+        ltx.orchestration.combined_image_conditionings.assert_called_once_with(
+            [input_image],
+            enc_h=H * 32,
+            enc_w=W * 32,
+            spatial_dims=_LATENT_SHAPE,
+            video_encoder=ltx.encoder,
+            frame_rate=_FPS,
+        )
+        assert pipe.image_conditioner.call_args.kwargs == {"free_after": False}
+
+    def test_i2v_materializes_clean_latents_before_the_encoder_is_freed(self, ltx):
+        pipe = _pipeline(ltx)
+
+        _run_one_stage(pipe, image_path="/tmp/in.png")
+
+        names = [c[0] for c in ltx.calls.method_calls if c[0] in {"combined_image_conditionings", "mx_eval", "conditioner_returned"}]
+        assert names == ["combined_image_conditionings", "mx_eval", "conditioner_returned"]
+        assert ltx.mx.eval.call_args.args == ("clean_a", "clean_b")
+
+    def test_i2v_conditionings_reach_the_video_state(self, ltx):
+        pipe = _pipeline(ltx)
+        produced = [MagicMock(clean_latent="x")]
+        ltx.orchestration.combined_image_conditionings.side_effect = lambda *a, **k: produced
+
+        _run_one_stage(pipe, image_path="/tmp/in.png")
+
+        assert ltx.helpers.create_noised_state.call_args_list[0].kwargs["conditionings"] is produced
+
+    def test_i2v_frees_the_encoder_under_low_memory(self, ltx):
+        pipe = _pipeline(ltx, low_memory=True)
+
+        _run_one_stage(pipe, image_path="/tmp/in.png")
+
+        assert pipe.image_conditioner.call_args.kwargs == {"free_after": True}
+
+    def test_progress_is_one_based_video_generate(self, ltx):
+        pipe = _pipeline(ltx)
+        events: list[dict] = []
+
+        _run_one_stage(pipe, step_callback=events.append)
+
+        on_step = ltx.samplers.denoise_loop.call_args.kwargs["on_step"]
+        on_step(0, 8, MagicMock(), 1.0)
+        on_step(7, 8, MagicMock(), 0.1)
+        assert events == [
+            {"phase": "video_generate", "current_step": 1, "total_steps": 8},
+            {"phase": "video_generate", "current_step": 8, "total_steps": 8},
+        ]
+
+    def test_no_callback_passes_no_on_step(self, ltx):
+        pipe = _pipeline(ltx)
+
+        _run_one_stage(pipe)
+
+        assert ltx.samplers.denoise_loop.call_args.kwargs["on_step"] is None
+
+    def test_stage1_steps_without_upscale_model_raises(self, ltx):
+        pipe = _pipeline(ltx)
+
+        with pytest.raises(ValueError, match="stage1_steps"):
+            LtxVideoBackend().text_to_video(model=_handle(pipe, upscale=False), prompt="p", width=704, height=480, num_frames=49, seed=1, steps=8, output_path="/tmp/o.mp4", stage1_steps=8)
+
+        pipe.load.assert_not_called()
+
+
+class TestTwoStageGeneration:
+    """Verify upscale runs through DistilledPipeline.generate_and_save with a progress adapter."""
+
+    @pytest.mark.parametrize("image_path", [None, "/tmp/in.png"])
+    def test_generate_and_save_receives_exactly_the_supported_kwargs(self, ltx, image_path):
+        pipe = MagicMock()
         backend = LtxVideoBackend()
-        backend._generate_upscaled = MagicMock(return_value=Path("/tmp/upscaled.mp4"))
+        kwargs = dict(model=_handle(pipe, upscale=True), prompt="p", width=704, height=480, num_frames=49, seed=7, steps=8, output_path="/tmp/o.mp4", stage1_steps=6)
 
-        result = backend.image_to_video(
-            model=MagicMock(),
-            image_path="/tmp/reference.png",
-            prompt="test prompt",
+        result = backend.text_to_video(**kwargs) if image_path is None else backend.image_to_video(image_path=image_path, **kwargs)
+
+        pipe.generate_and_save.assert_called_once()
+        assert pipe.generate_and_save.call_args.args == ()
+        assert pipe.generate_and_save.call_args.kwargs == {
+            "prompt": "p",
+            "output_path": "/tmp/o.mp4",
+            "height": 480,
+            "width": 704,
+            "num_frames": 49,
+            "frame_rate": _FPS,
+            "seed": 7,
+            "stage1_steps": 6,
+            "image": image_path,
+        }
+        assert result == Path("/tmp/o.mp4")
+
+    def test_frame_rate_comes_from_the_handle(self, ltx):
+        pipe = MagicMock()
+
+        LtxVideoBackend().text_to_video(model=_handle(pipe, upscale=True, frame_rate=30.0), prompt="p", width=704, height=480, num_frames=49, seed=7, steps=8, output_path="/tmp/o.mp4", stage1_steps=8)
+
+        assert pipe.generate_and_save.call_args.kwargs["frame_rate"] == 30.0
+
+    def test_missing_stage1_steps_with_upscale_model_raises(self, ltx):
+        pipe = MagicMock()
+
+        with pytest.raises(ValueError, match="stage1_steps"):
+            LtxVideoBackend().text_to_video(model=_handle(pipe, upscale=True), prompt="p", width=704, height=480, num_frames=49, seed=1, steps=8, output_path="/tmp/o.mp4")
+
+        pipe.generate_and_save.assert_not_called()
+
+    def test_no_callback_leaves_stepwise_unset(self, ltx):
+        pipe = MagicMock()
+        pipe.stepwise = "stale"
+
+        LtxVideoBackend().text_to_video(model=_handle(pipe, upscale=True), prompt="p", width=704, height=480, num_frames=49, seed=7, steps=8, output_path="/tmp/o.mp4", stage1_steps=8)
+
+        assert pipe.stepwise is None
+
+    def test_callback_receives_cumulative_stage_events(self, ltx):
+        pipe = MagicMock()
+        events: list[dict] = []
+
+        def _fake_generate_and_save(**_):
+            for stage, total in ((1, 8), (2, 3)):
+                on_step = pipe.stepwise.bind(latent_frames=3, latent_height=7, latent_width=11, decoder_block=None, patchifier=None, stage=stage)
+                for i in range(total):
+                    on_step(i, total, MagicMock(), 0.5)
+
+        pipe.generate_and_save.side_effect = _fake_generate_and_save
+
+        LtxVideoBackend().text_to_video(
+            model=_handle(pipe, upscale=True),
+            prompt="p",
             width=704,
             height=480,
             num_frames=49,
-            seed=42,
+            seed=7,
             steps=8,
-            output_path="/tmp/out.mp4",
+            output_path="/tmp/o.mp4",
+            step_callback=events.append,
             stage1_steps=8,
         )
 
-        backend._generate_upscaled.assert_called_once()
-        call_args = backend._generate_upscaled.call_args
-        assert call_args[0][1] == "test prompt"  # prompt
-        assert call_args[0][2] == 704  # width
-        assert call_args[0][3] == 480  # height
-        assert call_args[0][6] == 8  # stage1_steps
-        assert call_args.kwargs["image_path"] == "/tmp/reference.png"
-        assert result == Path("/tmp/upscaled.mp4")
-
-    def test_text_to_video_no_upscale_calls_generate_and_save(self):
-        """text_to_video() without stage1_steps calls model.generate_and_save()."""
-        from zvisiongenerator.backends.video_mac import LtxVideoBackend
-
-        backend = LtxVideoBackend()
-        mock_model = MagicMock()
-
-        result = backend.text_to_video(
-            model=mock_model,
-            prompt="test prompt",
-            width=704,
-            height=480,
-            num_frames=49,
-            seed=42,
-            steps=8,
-            output_path="/tmp/out.mp4",
-        )
-
-        mock_model.generate_and_save.assert_called_once()
-        assert result == Path("/tmp/out.mp4")
+        assert [e["current_step"] for e in events] == list(range(1, 12))
+        assert {e["total_steps"] for e in events} == {11}
+        assert [e["phase"] for e in events] == ["video_upscale_stage_1"] * 8 + ["video_upscale_stage_2"] * 3
 
 
-# ---------------------------------------------------------------------------
-# Distilled Two-Stage Internals — formulas, sigmas, behavior
-# ---------------------------------------------------------------------------
+class TestTwoStageProgress:
+    """Verify the adapter sitting in the pipeline's stepwise slot."""
 
+    def test_stage_one_total_includes_stage_two(self):
+        events: list[dict] = []
+        progress = _TwoStageProgress(events.append, stage2_total=3)
 
-class TestDistilledTwoStageInternals:
-    """Unit tests for distilled two-stage upscale behavior."""
+        progress.bind(stage=1)(0, 5, None, 1.0)
 
-    @pytest.mark.parametrize(
-        "dim, expected_half",
-        [
-            (704, 352),  # 704 % 64 == 0: exact
-            (480, 224),  # 480 % 64 == 32: floor from 240 to 224
-            (512, 256),  # 512 % 64 == 0: exact
-            (288, 128),  # 288 % 64 == 32: floor from 144 to 128
-            (384, 192),  # 384 % 64 == 0: exact
-        ],
-    )
-    def test_half_resolution_floor_alignment(self, dim, expected_half):
-        """Floor-alignment formula (dim // 2 // 32) * 32 produces correct half-resolution."""
-        half = (dim // 2 // 32) * 32
-        assert half == expected_half
+        assert events == [{"phase": "video_upscale_stage_1", "current_step": 1, "total_steps": 8}]
 
-    @pytest.mark.parametrize(
-        "dim, expect_warning",
-        [
-            (704, False),  # 352 * 2 == 704
-            (480, True),  # 224 * 2 == 448 != 480
-            (512, False),  # 256 * 2 == 512
-            (288, True),  # 128 * 2 == 256 != 288
-            (384, False),  # 192 * 2 == 384
-        ],
-    )
-    def test_half_resolution_triggers_warning(self, dim, expect_warning):
-        """Warning condition fires when half * 2 != original dimension."""
-        half = (dim // 2 // 32) * 32
-        assert (half * 2 != dim) == expect_warning
+    def test_stage_two_continues_after_stage_one(self):
+        events: list[dict] = []
+        progress = _TwoStageProgress(events.append, stage2_total=3)
+        progress.bind(stage=1)(4, 5, None, 0.1)
 
-    def test_sigma_schedule_values(self):
-        """Sigma schedules have correct lengths and Stage 2 starts at 0.909375."""
-        scheduler = pytest.importorskip("ltx_pipelines_mlx.scheduler")
-        distilled = scheduler.DISTILLED_SIGMAS
-        stage2 = scheduler.STAGE_2_SIGMAS
+        progress.bind(stage=2)(2, 3, None, 0.0)
 
-        assert len(distilled) == 9, f"DISTILLED_SIGMAS should have 9 values (8 steps), got {len(distilled)}"
-        assert len(stage2) == 4, f"STAGE_2_SIGMAS should have 4 values (3 steps), got {len(stage2)}"
-        assert stage2[0] == pytest.approx(0.909375), f"STAGE_2_SIGMAS[0] should be 0.909375, got {stage2[0]}"
+        assert events[-1] == {"phase": "video_upscale_stage_2", "current_step": 8, "total_steps": 8}
 
-    def test_i2v_upscale_allowed_in_cli(self):
-        """--upscale 2 --image path.png should NOT cause a parser error at parse time."""
-        parser = _build_video_parser()
-        args = parser.parse_args(["-m", "model", "--upscale", "2", "--image", "photo.png"])
-        assert args.upscale == 2
-        assert args.image_path == "photo.png"
+    def test_missing_stage_is_stage_one(self):
+        events: list[dict] = []
+        progress = _TwoStageProgress(events.append, stage2_total=3)
 
-    @pytest.mark.parametrize("stage1_steps", [4, 8])
-    def test_two_stage_upscale_handoff_contracts(self, stage1_steps):
-        """Two-stage upscaling passes scheduler, audio, model, and decode contracts."""
-        from zvisiongenerator.backends.video_mac import LtxVideoBackend
+        progress.bind(latent_frames=3, latent_height=7, latent_width=11, decoder_block=object(), patchifier=object())(0, 8, None, 1.0)
 
-        # Known sigma schedule (9 values for up to 8 steps)
-        fake_distilled_sigmas = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.2, 0.0]
-        fake_stage2_sigmas = [0.909375, 0.725, 0.421875, 0.0]
-
-        mock_denoise_loop = MagicMock()
-        mock_denoise_loop.return_value = MagicMock()
-
-        # Build mock module tree for all heavy local imports
-        mock_mx = MagicMock()
-        mock_patchifiers = MagicMock()
-        mock_patchifiers.compute_video_latent_shape.return_value = (3, 7, 11)
-        mock_latent_cond = MagicMock()
-        mock_latent_cond.LatentState.side_effect = lambda **kwargs: MagicMock(**kwargs)
-        mock_transformer_model = MagicMock()
-        mock_memory = MagicMock()
-        mock_positions = MagicMock()
-        mock_positions.compute_audio_token_count.return_value = 16
-        mock_weights = MagicMock()
-        mock_scheduler = MagicMock()
-        mock_scheduler.DISTILLED_SIGMAS = fake_distilled_sigmas
-        mock_scheduler.STAGE_2_SIGMAS = fake_stage2_sigmas
-        mock_samplers = MagicMock()
-        mock_samplers.denoise_loop = mock_denoise_loop
-
-        modules = {
-            "mlx": MagicMock(),
-            "mlx.core": mock_mx,
-            "ltx_core_mlx": MagicMock(),
-            "ltx_core_mlx.components": MagicMock(),
-            "ltx_core_mlx.components.patchifiers": mock_patchifiers,
-            "ltx_core_mlx.conditioning": MagicMock(),
-            "ltx_core_mlx.conditioning.types": MagicMock(),
-            "ltx_core_mlx.conditioning.types.latent_cond": mock_latent_cond,
-            "ltx_core_mlx.model": MagicMock(),
-            "ltx_core_mlx.model.transformer": MagicMock(),
-            "ltx_core_mlx.model.transformer.model": mock_transformer_model,
-            "ltx_core_mlx.model.upsampler": MagicMock(),
-            "ltx_core_mlx.utils": MagicMock(),
-            "ltx_core_mlx.utils.memory": mock_memory,
-            "ltx_core_mlx.utils.positions": mock_positions,
-            "ltx_core_mlx.utils.weights": mock_weights,
-            "ltx_pipelines_mlx": MagicMock(),
-            "ltx_pipelines_mlx.scheduler": mock_scheduler,
-            "ltx_pipelines_mlx.utils": MagicMock(),
-            "ltx_pipelines_mlx.utils.samplers": mock_samplers,
-        }
-
-        pipeline = MagicMock()
-        pipeline.model_dir = "/fake/model"
-        pipeline.dit = MagicMock()  # skip transformer loading
-        pipeline.low_memory = False
-        pipeline._encode_text.return_value = (MagicMock(), MagicMock())
-        video_tokens = MagicMock()
-        pipeline.video_patchifier.patchify.return_value = (video_tokens, MagicMock())
-        decoded_video_latent = MagicMock()
-        decoded_audio_latent = MagicMock()
-        pipeline.video_patchifier.unpatchify.side_effect = [MagicMock(), decoded_video_latent]
-        pipeline.audio_patchifier.unpatchify.return_value = decoded_audio_latent
-
-        backend = LtxVideoBackend()
-
-        with patch.dict("sys.modules", modules), patch("zvisiongenerator.backends.video_mac._load_upsampler", return_value=MagicMock()):
-            backend._generate_upscaled(
-                pipeline=pipeline,
-                prompt="test",
-                width=704,
-                height=480,
-                num_frames=49,
-                seed=42,
-                stage1_steps=stage1_steps,
-                output_path="/tmp/out.mp4",
-            )
-
-        expected_sigmas = fake_distilled_sigmas[: stage1_steps + 1]
-        first_call_kwargs = mock_denoise_loop.call_args_list[0].kwargs
-        assert first_call_kwargs["sigmas"] == expected_sigmas, f"Stage 1 sigmas should be DISTILLED_SIGMAS[:{stage1_steps + 1}] = {expected_sigmas}, got {first_call_kwargs['sigmas']}"
-        second_call_kwargs = mock_denoise_loop.call_args_list[1].kwargs
-        assert second_call_kwargs["sigmas"] == fake_stage2_sigmas
-        assert second_call_kwargs["model"] is first_call_kwargs["model"]
-        mock_latent_cond.noise_latent_state.assert_called_once()
-        assert mock_latent_cond.noise_latent_state.call_args.kwargs == {"sigma": fake_stage2_sigmas[0], "seed": 44}
-        pipeline._decode_and_save_video.assert_called_once_with(decoded_video_latent, decoded_audio_latent, "/tmp/out.mp4")
+        assert events[0]["phase"] == "video_upscale_stage_1"
+        assert events[0]["total_steps"] == 11

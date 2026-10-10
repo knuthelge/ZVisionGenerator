@@ -92,7 +92,11 @@ class HannSincResampler:
         #    output length = (T_padded - 1) * ratio + 1
         zi_len = (T_padded - 1) * ratio + 1
         upsampled = mx.zeros((B, zi_len))
-        upsampled = upsampled.at[:, ::ratio].add(x_padded)
+        # .at[<strided>].add() mis-indexes the source on Metal in mlx 0.31.2
+        # (ml-explore/mlx#3477, fixed upstream by #3483 but unreleased). The
+        # destination is freshly zeroed, so assignment is equivalent to add and
+        # is correct on all backends/versions. See issue #34.
+        upsampled[:, ::ratio] = x_padded
 
         # 3. Full convolution via zero-pad + valid conv1d
         #    Full conv output = zi_len + K - 1
@@ -217,6 +221,11 @@ class VocoderWithBWE(nn.Module):
     Combines base vocoder, 3x Kaiser-sinc resampler, and BWE generator.
     BWE output = clamp(resampled_base + bwe_residual, -1, 1).
 
+    The forward pass must run in fp32: bfloat16 accumulation errors compound
+    through 108 sequential convolutions (BigVGAN v2) and degrade spectral
+    metrics (mel_l1, MRSTFT) by 40-90%. Call ``upcast_weights_to_fp32()`` once
+    after ``load_weights()`` to promote all parameters to fp32.
+
     Weight key hierarchy (all under vocoder.* prefix):
         conv_pre, ups, resblocks, act_post, conv_post — base vocoder
         bwe_generator.*                                — BWE BigVGAN
@@ -296,6 +305,19 @@ class VocoderWithBWE(nn.Module):
         # --- Resampler (no weights) ---
         self._resampler = HannSincResampler(upsample_factor=3)
 
+    def upcast_weights_to_fp32(self) -> None:
+        """Promote all parameters to fp32 in-place.
+
+        Required after ``load_weights()`` — running the forward in bf16/fp16
+        compounds accumulation errors through 108 sequential convolutions and
+        degrades spectral metrics (mel_l1, MRSTFT) by 40-90%. MLX has no
+        autocast; the weights themselves must be fp32 for the conv kernels to
+        run in fp32.
+        """
+        from mlx.utils import tree_map
+
+        self.update(tree_map(lambda p: p.astype(mx.float32), self.parameters()))
+
     def _run_base_vocoder(self, mel: mx.array) -> mx.array:
         """Run base vocoder: mel (B, T, 64) -> waveform (B, T_audio, 2)."""
         x = self.conv_pre(mel)
@@ -330,6 +352,9 @@ class VocoderWithBWE(nn.Module):
         Returns:
             (B, 2, T_audio) waveform at 48kHz.
         """
+        input_dtype = mel.dtype
+        mel = mel.astype(mx.float32)
+
         B, C, T, M = mel.shape  # (B, 2, T, 64)
 
         # 1. Run base vocoder: concatenate stereo channels for input
@@ -376,4 +401,5 @@ class VocoderWithBWE(nn.Module):
         # 5. Add residual and clip
         min_len = min(skip.shape[-1], residual.shape[-1])
         output = skip[:, :, :min_len] + residual[:, :, :min_len]
-        return mx.clip(output, -1.0, 1.0)[:, :, :output_length]
+        output = mx.clip(output, -1.0, 1.0)[:, :, :output_length]
+        return output.astype(input_dtype)

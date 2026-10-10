@@ -5,14 +5,17 @@ Ported from ltx-pipelines denoising loop.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
 import mlx.core as mx
+from mlx_arsenal.diffusion import euler_step
 from tqdm import tqdm
 
+from ltx_core_mlx.components.diffusion_steps import EulerAncestralDiffusionStep
 from ltx_core_mlx.components.guiders import MultiModalGuiderFactory
 from ltx_core_mlx.conditioning.types.latent_cond import LatentState, apply_denoise_mask
+from ltx_core_mlx.guidance.nag import NAGGuidance
 from ltx_core_mlx.guidance.perturbations import (
     BatchedPerturbationConfig,
     Perturbation,
@@ -22,7 +25,13 @@ from ltx_core_mlx.guidance.perturbations import (
 from ltx_core_mlx.model.transformer.model import X0Model
 from ltx_core_mlx.utils.memory import aggressive_cleanup
 from ltx_pipelines_mlx.scheduler import DISTILLED_SIGMAS
+from ltx_pipelines_mlx.utils.estimate import StepEstimator, describe_work
 from ltx_pipelines_mlx.utils.res2s import get_res2s_coefficients, phi
+
+# Per-step preview hook: ``on_step(step_idx, num_steps, video_x0, sigma)``.
+OnStepFn = Callable[[int, int, mx.array, float], None]
+# TeaCache calibration hook: ``tap(step_idx, gate_signal, video_residual, audio_residual)``.
+TapFn = Callable[[int, mx.array | None, mx.array, mx.array], None]
 
 
 def _channelwise_normalize(x: mx.array) -> mx.array:
@@ -44,30 +53,7 @@ class DenoiseOutput:
     """Output of the denoising loop."""
 
     video_latent: mx.array  # (B, N_video, C)
-    audio_latent: mx.array  # (B, N_audio, C)
-
-
-def euler_step(
-    x: mx.array,
-    x0: mx.array,
-    sigma: float,
-    sigma_next: float,
-) -> mx.array:
-    """Single Euler step: x_{t-1} = x_t + (sigma_next - sigma) * (x_t - x0) / sigma.
-
-    Args:
-        x: Current noisy sample.
-        x0: Predicted clean sample.
-        sigma: Current noise level.
-        sigma_next: Next noise level.
-
-    Returns:
-        Updated sample at sigma_next.
-    """
-    if sigma == 0:
-        return x0
-    d = (x - x0) / sigma
-    return x + (sigma_next - sigma) * d
+    audio_latent: mx.array | None  # (B, N_audio, C); None for a video-only run
 
 
 def _is_uniform_mask(mask: mx.array) -> bool:
@@ -94,26 +80,78 @@ def _compute_per_token_timesteps(
     return (denoise_mask * sigma).squeeze(-1)
 
 
+def _frozen_sigma_kwargs(video_state: LatentState, audio_state: LatentState, batch_size: int) -> dict:
+    """Per-modality sigma kwargs for frozen streams (upstream ``modality_from_latent_state``).
+
+    A frozen state conditions the model on sigma 0: its prompt AdaLN and the other
+    modality's cross-attention gate. Non-frozen streams add nothing, so the model
+    falls back to the global step sigma exactly as before.
+
+    Args:
+        video_state: Video latent state.
+        audio_state: Audio latent state.
+        batch_size: Batch size of the model call.
+
+    Returns:
+        ``{"video_sigma": zeros(B)}`` and/or ``{"audio_sigma": zeros(B)}``, or ``{}``.
+    """
+    kwargs: dict = {}
+    if video_state.frozen:
+        kwargs["video_sigma"] = mx.zeros((batch_size,), dtype=mx.bfloat16)
+    if audio_state.frozen:
+        kwargs["audio_sigma"] = mx.zeros((batch_size,), dtype=mx.bfloat16)
+    return kwargs
+
+
+def _nag_for_states(nag: NAGGuidance | None, audio_state: LatentState | None) -> NAGGuidance | None:
+    """The NAG input a loop should pass: the audio negative is dropped for an absent or frozen audio stream.
+
+    A frozen stream is conditioning, not generated (its x0 is replaced by the clean latent), so
+    guiding its cross-attention would only perturb what the video reads from it through A->V.
+
+    Args:
+        nag: NAG input from the pipeline, or ``None``.
+        audio_state: Audio latent state, or ``None`` for a video-only run.
+
+    Returns:
+        ``nag``, without its audio context when the audio stream is not generated.
+    """
+    if nag is None or nag.audio_text_embeds is None:
+        return nag
+    if audio_state is None or audio_state.frozen:
+        return nag._replace(audio_text_embeds=None)
+    return nag
+
+
+def _step_timed(estimator: StepEstimator, step_idx: int, video_x: mx.array, audio_x: mx.array | None) -> None:
+    """Feed one completed step to the estimator, syncing only for the step it times."""
+    if estimator.wants_sync:
+        mx.eval(video_x) if audio_x is None else mx.eval(video_x, audio_x)
+    estimator.step_done(step_idx)
+
+
 def denoise_loop(
     model: X0Model,
     video_state: LatentState,
-    audio_state: LatentState,
+    audio_state: LatentState | None,
     video_text_embeds: mx.array,
-    audio_text_embeds: mx.array,
+    audio_text_embeds: mx.array | None,
     sigmas: list[float] | None = None,
     video_positions: mx.array | None = None,
     audio_positions: mx.array | None = None,
     video_attention_mask: mx.array | None = None,
     audio_attention_mask: mx.array | None = None,
+    video_cross_attention_mask: mx.array | None = None,
     show_progress: bool = True,
-    step_callback: Any | None = None,
+    on_step: OnStepFn | None = None,
+    nag: NAGGuidance | None = None,
 ) -> DenoiseOutput:
     """Run the Euler denoising loop for joint audio+video.
 
     Args:
         model: X0Model wrapping the LTXModel.
         video_state: Video latent state.
-        audio_state: Audio latent state.
+        audio_state: Audio latent state, or ``None`` for a video-only run.
         video_text_embeds: Text embeddings for video conditioning.
         audio_text_embeds: Text embeddings for audio conditioning.
         sigmas: Sigma schedule (defaults to DISTILLED_SIGMAS).
@@ -124,6 +162,172 @@ def denoise_loop(
         video_attention_mask: Attention mask for video.
         audio_attention_mask: Attention mask for audio.
         show_progress: Whether to show tqdm progress bar.
+        on_step: Optional per-step preview hook called as
+            ``on_step(step_idx, num_steps, video_x0, sigma)`` with the
+            mask-blended x0 prediction. Used for stepwise previews. Has no
+            effect on control flow.
+        nag: Optional Normalized Attention Guidance (distilled negative prompt), passed to
+            every forward; its audio context is dropped when the audio state is frozen.
+
+    Returns:
+        DenoiseOutput with final video and audio latents.
+    """
+    if sigmas is None:
+        sigmas = DISTILLED_SIGMAS
+
+    # Resolve positions: explicit params override, then fall back to state
+    if video_positions is None and video_state.positions is not None:
+        video_positions = video_state.positions
+    has_audio = audio_state is not None
+    if has_audio and audio_positions is None and audio_state.positions is not None:
+        audio_positions = audio_state.positions
+
+    # Resolve attention masks from state
+    if video_attention_mask is None and video_state.attention_mask is not None:
+        video_attention_mask = video_state.attention_mask
+    if has_audio and audio_attention_mask is None and audio_state.attention_mask is not None:
+        audio_attention_mask = audio_state.attention_mask
+
+    video_x = video_state.latent
+    audio_x = audio_state.latent if has_audio else None
+
+    # sigmas already includes the terminal value (e.g. 0.0), so iterate
+    # consecutive pairs directly — no extra phantom step.
+    steps = list(zip(sigmas[:-1], sigmas[1:]))
+    estimator = StepEstimator(
+        describe_work(video_state=video_state, audio_state=audio_state, sigmas=sigmas),
+        show=show_progress,
+        label="denoising",
+    )
+    estimator.announce()
+    iterator = tqdm(steps, desc="Denoising", disable=not show_progress)
+
+    # Determine whether we need per-token timesteps (for conditioning masks).
+    nag = _nag_for_states(nag, audio_state)
+    video_uniform = _is_uniform_mask(video_state.denoise_mask)
+    audio_uniform = _is_uniform_mask(audio_state.denoise_mask) if has_audio else True
+
+    for step_idx, (sigma, sigma_next) in enumerate(iterator):
+        # Build sigma / per-token timesteps
+        sigma_arr = mx.array([sigma], dtype=mx.bfloat16)
+        B = video_x.shape[0]
+
+        call_kwargs: dict = dict(
+            video_latent=video_x,
+            audio_latent=audio_x,
+            sigma=mx.broadcast_to(sigma_arr, (B,)),
+            video_text_embeds=video_text_embeds,
+            audio_text_embeds=audio_text_embeds,
+            video_positions=video_positions,
+            audio_positions=audio_positions,
+            video_attention_mask=video_attention_mask,
+            video_keyframes_mask=video_state.keyframes_mask,
+            audio_attention_mask=audio_attention_mask,
+        )
+        if video_cross_attention_mask is not None:
+            call_kwargs["video_cross_attention_mask"] = video_cross_attention_mask
+        if nag is not None:
+            call_kwargs["nag"] = nag
+
+        # Pass per-token timesteps when mask is not uniform
+        if not video_uniform:
+            call_kwargs["video_timesteps"] = _compute_per_token_timesteps(sigma, video_state.denoise_mask)
+        if has_audio and not audio_uniform:
+            call_kwargs["audio_timesteps"] = _compute_per_token_timesteps(sigma, audio_state.denoise_mask)
+        if has_audio:
+            call_kwargs.update(_frozen_sigma_kwargs(video_state, audio_state, B))
+        else:
+            call_kwargs.update(audio_timesteps=None, audio_sigma=None)
+
+        # Predict x0
+        video_x0, audio_x0 = model(**call_kwargs)
+
+        # Apply denoise mask: blend with clean latent
+        video_x0 = apply_denoise_mask(video_x0, video_state.clean_latent, video_state.denoise_mask)
+        if has_audio:
+            audio_x0 = apply_denoise_mask(audio_x0, audio_state.clean_latent, audio_state.denoise_mask)
+
+        if on_step is not None:
+            on_step(step_idx, len(steps), video_x0, sigma)
+
+        # Euler step
+        video_x = euler_step(video_x, video_x0, sigma, sigma_next)
+        if has_audio:
+            audio_x = euler_step(audio_x, audio_x0, sigma, sigma_next)
+
+        # Force computation for memory efficiency
+        mx.async_eval(video_x) if audio_x is None else mx.async_eval(video_x, audio_x)
+        _step_timed(estimator, step_idx, video_x, audio_x)
+
+    aggressive_cleanup()
+
+    return DenoiseOutput(video_latent=video_x, audio_latent=audio_x)
+
+
+# --- Ancestral (SDE) Euler sampler ---
+
+
+def euler_ancestral_denoising_loop(
+    sigmas: list[float] | None,
+    video_state: LatentState,
+    audio_state: LatentState,
+    stepper: EulerAncestralDiffusionStep,
+    transformer: X0Model,
+    video_text_embeds: mx.array,
+    audio_text_embeds: mx.array,
+    *,
+    noise_seed: int,
+    video_positions: mx.array | None = None,
+    audio_positions: mx.array | None = None,
+    video_attention_mask: mx.array | None = None,
+    audio_attention_mask: mx.array | None = None,
+    video_cross_attention_mask: mx.array | None = None,
+    show_progress: bool = True,
+    on_step: OnStepFn | None = None,
+    nag: NAGGuidance | None = None,
+) -> DenoiseOutput:
+    """Run the ancestral (SDE) Euler denoising loop for joint audio+video.
+
+    Structurally identical to :func:`denoise_loop` (per-token timesteps,
+    ``X0Model`` call contract, ``apply_denoise_mask`` blending) but advances
+    the sample with :class:`EulerAncestralDiffusionStep` instead of a plain
+    Euler step. Mirrors upstream ``ltx_pipelines.utils.samplers.
+    euler_ancestral_denoising_loop`` / ``_ancestral_euler_denoising_loop``.
+
+    Noise semantics (upstream-iso):
+      - ``mx.random.seed(noise_seed)`` is set once before the loop (MLX
+        translation of the single upstream generator); each step draws the
+        video noise first, then the audio noise, so the random sequence
+        stays consistent across modalities.
+      - Noise is drawn raw: ``mx.random.normal(shape).astype(mx.float32)`` —
+        no channel-wise normalization (that variant is reserved for res2s).
+      - ``draw_noise = stepper.eta > 0``.
+      - Stepping happens in float32. On a terminal sigma (``sigma_next ==
+        0``) the latent short-circuits to the (already mask-blended) x0
+        prediction. Otherwise the stepper advances the sample and, only when
+        ``draw_noise``, the conditioning mask is re-applied *after* the
+        noise injection (``apply_denoise_mask(x_next, clean_latent,
+        denoise_mask)``) before casting back to the model dtype.
+
+    Args:
+        sigmas: Sigma schedule (defaults to ``DISTILLED_SIGMAS``). Already
+            includes the terminal ``0.0``.
+        video_state: Video latent state.
+        audio_state: Audio latent state.
+        stepper: ``EulerAncestralDiffusionStep`` instance carrying ``eta``
+            and ``s_noise``.
+        transformer: ``X0Model`` wrapping the LTX transformer.
+        video_text_embeds: Text embeddings for video conditioning.
+        audio_text_embeds: Text embeddings for audio conditioning.
+        noise_seed: Seed for the ancestral noise draws.
+        video_positions: Positional embeddings for video.
+        audio_positions: Positional embeddings for audio.
+        video_attention_mask: Attention mask for video.
+        audio_attention_mask: Attention mask for audio.
+        video_cross_attention_mask: Optional video->text cross-attention mask.
+        show_progress: Whether to show tqdm progress bar.
+        on_step: Optional per-step preview hook, see :func:`denoise_loop`.
+        nag: Optional Normalized Attention Guidance, see :func:`denoise_loop`.
 
     Returns:
         DenoiseOutput with final video and audio latents.
@@ -145,19 +349,26 @@ def denoise_loop(
 
     video_x = video_state.latent
     audio_x = audio_state.latent
+    video_dtype = video_x.dtype
+    audio_dtype = audio_x.dtype
 
-    # sigmas already includes the terminal value (e.g. 0.0), so iterate
-    # consecutive pairs directly — no extra phantom step.
     steps = list(zip(sigmas[:-1], sigmas[1:]))
-    iterator = tqdm(steps, desc="Denoising", disable=not show_progress)
+    estimator = StepEstimator(
+        describe_work(video_state=video_state, audio_state=audio_state, sigmas=sigmas),
+        show=show_progress,
+        label="denoising (ancestral)",
+    )
+    estimator.announce()
+    iterator = tqdm(steps, desc="Denoising (ancestral)", disable=not show_progress)
 
-    # Determine whether we need per-token timesteps (for conditioning masks).
+    nag = _nag_for_states(nag, audio_state)
     video_uniform = _is_uniform_mask(video_state.denoise_mask)
     audio_uniform = _is_uniform_mask(audio_state.denoise_mask)
 
-    total_steps = len(steps)
-    for step_index, (sigma, sigma_next) in enumerate(iterator, start=1):
-        # Build sigma / per-token timesteps
+    draw_noise = stepper.eta > 0
+    mx.random.seed(noise_seed)
+
+    for step_idx, (sigma, sigma_next) in enumerate(iterator):
         sigma_arr = mx.array([sigma], dtype=mx.bfloat16)
         B = video_x.shape[0]
 
@@ -170,30 +381,71 @@ def denoise_loop(
             video_positions=video_positions,
             audio_positions=audio_positions,
             video_attention_mask=video_attention_mask,
+            video_keyframes_mask=video_state.keyframes_mask,
             audio_attention_mask=audio_attention_mask,
         )
+        if video_cross_attention_mask is not None:
+            call_kwargs["video_cross_attention_mask"] = video_cross_attention_mask
+        if nag is not None:
+            call_kwargs["nag"] = nag
 
         # Pass per-token timesteps when mask is not uniform
         if not video_uniform:
             call_kwargs["video_timesteps"] = _compute_per_token_timesteps(sigma, video_state.denoise_mask)
         if not audio_uniform:
             call_kwargs["audio_timesteps"] = _compute_per_token_timesteps(sigma, audio_state.denoise_mask)
+        call_kwargs.update(_frozen_sigma_kwargs(video_state, audio_state, B))
 
         # Predict x0
-        video_x0, audio_x0 = model(**call_kwargs)
+        video_x0, audio_x0 = transformer(**call_kwargs)
 
         # Apply denoise mask: blend with clean latent
         video_x0 = apply_denoise_mask(video_x0, video_state.clean_latent, video_state.denoise_mask)
         audio_x0 = apply_denoise_mask(audio_x0, audio_state.clean_latent, audio_state.denoise_mask)
 
-        # Euler step
-        video_x = euler_step(video_x, video_x0, sigma, sigma_next)
-        audio_x = euler_step(audio_x, audio_x0, sigma, sigma_next)
+        if on_step is not None:
+            on_step(step_idx, len(steps), video_x0, sigma)
+
+        terminal_step = sigma_next == 0
+        if terminal_step:
+            # Terminal step: short-circuit to the (already mask-blended) x0 prediction.
+            video_x = video_x0.astype(video_dtype)
+            audio_x = audio_x0.astype(audio_dtype)
+        else:
+            # Video draw first, then audio, from the same seeded generator.
+            video_noise = mx.random.normal(video_x.shape).astype(mx.float32) if draw_noise else None
+            audio_noise = mx.random.normal(audio_x.shape).astype(mx.float32) if draw_noise else None
+
+            video_x_next = stepper.step(
+                sample=video_x.astype(mx.float32),
+                denoised_sample=video_x0,
+                sigmas=sigmas,
+                step_index=step_idx,
+                noise=video_noise,
+            )
+            audio_x_next = stepper.step(
+                sample=audio_x.astype(mx.float32),
+                denoised_sample=audio_x0,
+                sigmas=sigmas,
+                step_index=step_idx,
+                noise=audio_noise,
+            )
+
+            if draw_noise:
+                # Re-apply the conditioning mask AFTER noise injection: the point
+                # that breaks I2V if forgotten (preserved tokens must not get renoised).
+                video_x_next = apply_denoise_mask(video_x_next, video_state.clean_latent, video_state.denoise_mask)
+                audio_x_next = apply_denoise_mask(audio_x_next, audio_state.clean_latent, audio_state.denoise_mask)
+
+            video_x = video_x_next.astype(video_dtype)
+            audio_x = audio_x_next.astype(audio_dtype)
 
         # Force computation for memory efficiency
         mx.async_eval(video_x, audio_x)
-        if step_callback is not None:
-            step_callback({"current_step": step_index, "total_steps": total_steps})
+        _step_timed(estimator, step_idx, video_x, audio_x)
+
+        if terminal_step:
+            break
 
     aggressive_cleanup()
 
@@ -234,15 +486,24 @@ def _sde_step(
     sigma: float,
     sigma_next: float,
     noise: mx.array,
+    eta: float = 0.5,
 ) -> mx.array:
     """Apply Res2s SDE noise injection step.
 
     Ported from Res2sDiffusionStep.step() in ltx-core.
+
+    Args:
+        sample: Current noisy sample.
+        denoised: Denoised prediction from the model.
+        sigma: Current sigma.
+        sigma_next: Next sigma in the schedule.
+        noise: Random noise for stochastic injection.
+        eta: Stochastic noise injection strength (0=deterministic, 1=maximum).
     """
     if sigma_next == 0:
         return denoised.astype(mx.bfloat16)
 
-    sigma_up = min(sigma_next * 0.5, sigma_next * 0.9999)
+    sigma_up = min(sigma_next * eta, sigma_next * 0.9999)
     sigma_signal = 1.0 - sigma_next
     sigma_residual = max(0.0, sigma_next**2 - sigma_up**2) ** 0.5
     alpha_ratio = sigma_signal + sigma_residual
@@ -268,11 +529,15 @@ def res2s_denoise_loop(
     audio_positions: mx.array | None = None,
     video_attention_mask: mx.array | None = None,
     audio_attention_mask: mx.array | None = None,
+    video_cross_attention_mask: mx.array | None = None,
     show_progress: bool = True,
     bongmath: bool = True,
     bongmath_max_iter: int = 100,
     video_guider_factory: MultiModalGuiderFactory | None = None,
     audio_guider_factory: MultiModalGuiderFactory | None = None,
+    tap: TapFn | None = None,
+    teacache=None,
+    on_step: OnStepFn | None = None,
 ) -> DenoiseOutput:
     """Run the res_2s second-order denoising loop for joint audio+video.
 
@@ -281,14 +546,14 @@ def res2s_denoise_loop(
     substep and step levels, plus optional iterative anchor refinement.
 
     The algorithm:
-    1. Evaluate model at current sigma → x0 prediction
+    1. Evaluate model at current sigma -> x0 prediction
     2. Compute epsilon = x0 - x_anchor (denoised direction)
     3. Compute substep x_mid = x_anchor + h * a21 * epsilon
-    4. Inject SDE noise at substep (sigma → sub_sigma)
+    4. Inject SDE noise at substep (sigma -> sub_sigma)
     5. Optionally refine anchor via bong iteration
-    6. Evaluate model at sub_sigma → second x0 prediction
+    6. Evaluate model at sub_sigma -> second x0 prediction
     7. Combine: x_next = x_anchor + h * (b1 * eps1 + b2 * eps2)
-    8. Inject SDE noise at step level (sigma → sigma_next)
+    8. Inject SDE noise at step level (sigma -> sigma_next)
 
     Args:
         model: X0Model wrapping the LTXModel.
@@ -304,6 +569,10 @@ def res2s_denoise_loop(
         show_progress: Whether to show tqdm progress bar.
         bongmath: Enable iterative anchor refinement for small steps.
         bongmath_max_iter: Max iterations for bong refinement.
+        on_step: Optional per-step preview hook called as
+            ``on_step(step_idx, num_steps, video_x0, sigma)`` with the
+            second-order (stage 2) x0 prediction, plus once more for the
+            terminal denoise. Has no effect on control flow.
 
     Returns:
         DenoiseOutput with final video and audio latents.
@@ -333,6 +602,19 @@ def res2s_denoise_loop(
 
     n_full_steps = len(sigmas) - 1
 
+    estimator = StepEstimator(
+        describe_work(
+            video_state=video_state,
+            audio_state=audio_state,
+            sigmas=sigmas,
+            video_guider_factory=video_guider_factory,
+            evals_per_step=2,  # substep + step
+            extra_forwards=1 if sigmas[-1] == 0 else 0,  # terminal predict below
+        ),
+        show=show_progress,
+        label="denoising (res2s guided)" if video_guider_factory is not None else "denoising (res2s)",
+    )
+
     # Inject minimal sigma to avoid division by zero (matching reference)
     if sigmas[-1] == 0:
         sigmas = sigmas[:-1] + [0.0011, 0.0]
@@ -341,6 +623,9 @@ def res2s_denoise_loop(
     # Only compute for the n_full_steps pairs used in the loop (skip the
     # terminal 0.0 pair which is handled separately at the end).
     hs = [-math.log(sigmas[i + 1] / sigmas[i]) for i in range(n_full_steps)]
+
+    # The terminal denoise below is an extra preview-visible step.
+    total_steps = n_full_steps + (1 if sigmas[-1] == 0 else 0)
 
     phi_cache: dict = {}
     c2 = 0.5
@@ -352,8 +637,25 @@ def res2s_denoise_loop(
             _params_by_sigma=video_guider_factory._params_by_sigma,
         )
 
-    def _predict(v_x: mx.array, a_x: mx.array, sig: float) -> tuple[mx.array, mx.array]:
-        """Run model prediction with optional guidance, then apply denoise mask."""
+    def _predict(
+        v_x: mx.array,
+        a_x: mx.array,
+        sig: float,
+        run_pass: Callable[[str, dict], tuple[mx.array, mx.array]] | None = None,
+    ) -> tuple[mx.array, mx.array]:
+        """Run model prediction with optional guidance, then apply denoise mask.
+
+        ``run_pass`` is an optional indirection used to plumb TeaCache (capture
+        residuals on the compute path, replace the block stack on skip). Default
+        invokes ``model(**kwargs)`` directly. When provided, called as
+        ``run_pass(label, kwargs)`` for each guidance pass and returns
+        ``(video_x0, audio_x0)``.
+        """
+        if run_pass is None:
+
+            def run_pass(_label, kwargs):
+                return model(**kwargs)
+
         sig_arr = mx.array([sig], dtype=mx.bfloat16)
         B = v_x.shape[0]
         base_kwargs: dict = dict(
@@ -363,17 +665,22 @@ def res2s_denoise_loop(
             video_positions=video_positions,
             audio_positions=audio_positions,
             video_attention_mask=video_attention_mask,
+            video_keyframes_mask=video_state.keyframes_mask,
             audio_attention_mask=audio_attention_mask,
         )
+        # Prompt Relay: positive-context passes only; overridden to None on uncond.
+        if video_cross_attention_mask is not None:
+            base_kwargs["video_cross_attention_mask"] = video_cross_attention_mask
         if not video_uniform:
             base_kwargs["video_timesteps"] = _compute_per_token_timesteps(sig, video_state.denoise_mask)
         if not audio_uniform:
             base_kwargs["audio_timesteps"] = _compute_per_token_timesteps(sig, audio_state.denoise_mask)
+        base_kwargs.update(_frozen_sigma_kwargs(video_state, audio_state, B))
 
         if video_guider_factory is None:
             # Simple prediction (no guidance)
             kw = {**base_kwargs, "video_text_embeds": video_text_embeds, "audio_text_embeds": audio_text_embeds}
-            v_x0, a_x0 = model(**kw)
+            v_x0, a_x0 = run_pass("cond", kw)
         else:
             # Guided prediction (CFG/STG/modality)
             video_guider = video_guider_factory.build_from_sigma(sig)
@@ -381,7 +688,7 @@ def res2s_denoise_loop(
 
             # 1. Conditioned prediction
             cond_kw = {**base_kwargs, "video_text_embeds": video_text_embeds, "audio_text_embeds": audio_text_embeds}
-            cond_v, cond_a = model(**cond_kw)
+            cond_v, cond_a = run_pass("cond", cond_kw)
 
             # 2. Unconditional prediction for CFG
             neg_v: mx.array | float = 0.0
@@ -393,8 +700,13 @@ def res2s_denoise_loop(
                 neg_a_embeds = (
                     audio_guider.negative_context if audio_guider.negative_context is not None else audio_text_embeds
                 )
-                neg_kw = {**base_kwargs, "video_text_embeds": neg_v_embeds, "audio_text_embeds": neg_a_embeds}
-                neg_v, neg_a = model(**neg_kw)
+                neg_kw = {
+                    **base_kwargs,
+                    "video_text_embeds": neg_v_embeds,
+                    "audio_text_embeds": neg_a_embeds,
+                    "video_cross_attention_mask": None,  # never mask the negative prompt
+                }
+                neg_v, neg_a = run_pass("uncond", neg_kw)
 
             # 3. Perturbed prediction for STG
             ptb_v: mx.array | float = 0.0
@@ -416,7 +728,7 @@ def res2s_denoise_loop(
                     "audio_text_embeds": audio_text_embeds,
                     "perturbations": BatchedPerturbationConfig(perturbations=[ptb_config] * B),
                 }
-                ptb_v, ptb_a = model(**ptb_kw)
+                ptb_v, ptb_a = run_pass("ptb", ptb_kw)
 
             # 4. Isolated modality prediction
             mod_v: mx.array | float = 0.0
@@ -434,7 +746,7 @@ def res2s_denoise_loop(
                         perturbations=[PerturbationConfig(perturbations=mod_perturbations)] * B
                     ),
                 }
-                mod_v, mod_a = model(**mod_kw)
+                mod_v, mod_a = run_pass("mod", mod_kw)
 
             # 5. Apply guiders
             v_x0 = video_guider.calculate(cond_v, neg_v, ptb_v, mod_v)
@@ -445,6 +757,7 @@ def res2s_denoise_loop(
         return v_x0.astype(mx.float32), a_x0.astype(mx.float32)
 
     desc = "Denoising (res2s guided)" if video_guider_factory is not None else "Denoising (res2s)"
+    estimator.announce()
     iterator = tqdm(range(n_full_steps), desc=desc, disable=not show_progress)
 
     for step_idx in iterator:
@@ -455,8 +768,62 @@ def res2s_denoise_loop(
         x_anchor_v = video_x
         x_anchor_a = audio_x
 
+        # --- TeaCache decision (per outer step, gated on stage-1 input) ---
+        gate_signal = None
+        if tap is not None or teacache is not None:
+            B_v = video_x.shape[0]
+            sig_arr = mx.array([sigma], dtype=mx.bfloat16)
+            stage1_video_timesteps = (
+                _compute_per_token_timesteps(sigma, video_state.denoise_mask) if not video_uniform else None
+            )
+            gate_signal = model.model.compute_gate_signal(
+                video_latent=video_x.astype(mx.bfloat16),
+                audio_latent=audio_x.astype(mx.bfloat16),
+                timestep=mx.broadcast_to(sig_arr, (B_v,)),
+                video_timesteps=stage1_video_timesteps,
+                video_keyframes_mask=video_state.keyframes_mask,
+            )
+
+        should_compute_full = True
+        if teacache is not None:
+            should_compute_full = teacache.should_compute(step_idx, gate_signal)
+
+        captured_residuals: dict = {"stage1": {}, "stage2": {}}
+        cached_residuals = teacache.previous_residual if (teacache is not None and not should_compute_full) else None
+
+        def _make_capture_tap(stage: str, label: str):
+            def _t(v_res, a_res):
+                captured_residuals[stage][label] = (v_res, a_res)  # noqa: B023
+
+            return _t
+
+        def _make_override(stage: str, label: str):
+            v_res, a_res = cached_residuals[stage][label]  # noqa: B023
+
+            def _o(v_hidden, a_hidden):
+                return v_hidden + v_res, a_hidden + a_res
+
+            return _o
+
+        def _stage_run_pass(stage: str):
+            if should_compute_full:  # noqa: B023
+
+                def _rp(label: str, kwargs: dict):
+                    pass_tap = _make_capture_tap(stage, label) if (tap is not None or teacache is not None) else None
+                    return model(**kwargs, tap=pass_tap)
+            else:
+
+                def _rp(label: str, kwargs: dict):
+                    return model(**kwargs, block_stack_override=_make_override(stage, label))
+
+            return _rp
+
         # Stage 1: evaluate at current point
-        denoised_v1, denoised_a1 = _predict(video_x, audio_x, sigma)
+        denoised_v1, denoised_a1 = _predict(video_x, audio_x, sigma, run_pass=_stage_run_pass("stage1"))
+
+        if tap is not None and "cond" in captured_residuals["stage1"]:
+            v_res, a_res = captured_residuals["stage1"]["cond"]
+            tap(step_idx, gate_signal, v_res, a_res)
 
         a21, b1, b2 = get_res2s_coefficients(h, phi_cache, c2)
 
@@ -477,6 +844,13 @@ def res2s_denoise_loop(
         sub_noise_a = _channelwise_normalize(mx.random.normal(audio_x.shape).astype(mx.float32))
         x_mid_v = _sde_step(x_anchor_v, x_mid_v, sigma, sub_sigma, sub_noise_v).astype(mx.float32)
         x_mid_a = _sde_step(x_anchor_a, x_mid_a, sigma, sub_sigma, sub_noise_a).astype(mx.float32)
+        # Re-apply the conditioning mask AFTER each noise injection: preserved tokens
+        # (image anchors, keyframe slots, denoise_mask=0) must never be renoised, or
+        # the model is handed noise at positions its per-token timesteps call clean.
+        # Same guard as euler_ancestral_denoising_loop; without it anchored I2V/fl2v
+        # drifts away from the anchor.
+        x_mid_v = apply_denoise_mask(x_mid_v, video_state.clean_latent, video_state.denoise_mask)
+        x_mid_a = apply_denoise_mask(x_mid_a, audio_state.clean_latent, audio_state.denoise_mask)
 
         # Bong iteration: refine anchor for stability at small step sizes
         if bongmath and h < 0.5 and sigma > 0.03:
@@ -487,7 +861,13 @@ def res2s_denoise_loop(
                 eps_1_a = denoised_a1 - x_anchor_a
 
         # Stage 2: evaluate at substep
-        denoised_v2, denoised_a2 = _predict(x_mid_v, x_mid_a, sub_sigma)
+        denoised_v2, denoised_a2 = _predict(x_mid_v, x_mid_a, sub_sigma, run_pass=_stage_run_pass("stage2"))
+
+        if teacache is not None and should_compute_full:
+            teacache.cache_residual(captured_residuals)
+
+        if on_step is not None:
+            on_step(step_idx, total_steps, denoised_v2, sigma)
 
         eps_2_v = denoised_v2 - x_anchor_v
         eps_2_a = denoised_a2 - x_anchor_a
@@ -502,12 +882,19 @@ def res2s_denoise_loop(
         step_noise_a = _channelwise_normalize(mx.random.normal(audio_x.shape).astype(mx.float32))
         video_x = _sde_step(x_anchor_v, x_next_v, sigma, sigma_next, step_noise_v).astype(mx.float32)
         audio_x = _sde_step(x_anchor_a, x_next_a, sigma, sigma_next, step_noise_a).astype(mx.float32)
+        video_x = apply_denoise_mask(video_x, video_state.clean_latent, video_state.denoise_mask)
+        audio_x = apply_denoise_mask(audio_x, audio_state.clean_latent, audio_state.denoise_mask)
 
         mx.async_eval(video_x, audio_x)
+        _step_timed(estimator, step_idx, video_x, audio_x)
 
-    # Final cleanup: if original schedule ended at 0, do one last denoise
+    # Final cleanup: if original schedule ended at 0, do one last denoise.
+    # TeaCache is bypassed for this terminal step — it's a one-shot denoise
+    # outside the controller's num_steps range.
     if sigmas[-1] == 0:
         video_x0, audio_x0 = _predict(video_x, audio_x, sigmas[n_full_steps])
+        if on_step is not None:
+            on_step(n_full_steps, total_steps, video_x0, sigmas[n_full_steps])
         video_x = video_x0
         audio_x = audio_x0
         mx.async_eval(video_x, audio_x)
@@ -535,7 +922,11 @@ def guided_denoise_loop(
     audio_positions: mx.array | None = None,
     video_attention_mask: mx.array | None = None,
     audio_attention_mask: mx.array | None = None,
+    video_cross_attention_mask: mx.array | None = None,
     show_progress: bool = True,
+    tap: TapFn | None = None,
+    teacache=None,  # mlx_arsenal.diffusion.TeaCacheController-compatible
+    on_step: OnStepFn | None = None,
 ) -> DenoiseOutput:
     """Run the Euler denoising loop with multi-modal guidance (CFG/STG).
 
@@ -565,6 +956,25 @@ def guided_denoise_loop(
         video_attention_mask: Attention mask for video.
         audio_attention_mask: Attention mask for audio.
         show_progress: Whether to show tqdm progress bar.
+        tap: Optional per-step instrumentation hook called as
+            ``tap(step_idx, gate_signal, video_block_residual,
+            audio_block_residual)`` after the conditioned-pass forward.
+            Used by the TeaCache calibration script. Has no effect on
+            control flow.
+        teacache: Optional TeaCache controller. When provided, the loop
+            calls ``teacache.should_compute(step_idx, gate_signal)`` once
+            per step using block 0's modulated input from the conditioned
+            pass; on True, all guidance passes run normally and their
+            block residuals are cached as a dict keyed by pass label
+            (``cond``, ``uncond``, ``ptb``, ``mod``); on False, the
+            previous step's cached residuals replace the block stack via
+            ``block_stack_override``. The transformer head still runs
+            on every pass.
+        on_step: Optional per-step preview hook called as
+            ``on_step(step_idx, num_steps, video_x0, sigma)`` with the
+            guided, mask-blended x0 prediction. Not called on steps the
+            guiders skip, since nothing new is computed there. Has no
+            effect on control flow.
 
     Returns:
         DenoiseOutput with final video and audio latents.
@@ -597,6 +1007,14 @@ def guided_denoise_loop(
     audio_x = audio_state.latent
 
     steps = list(zip(sigmas[:-1], sigmas[1:]))
+    estimator = StepEstimator(
+        describe_work(
+            video_state=video_state, audio_state=audio_state, sigmas=sigmas, video_guider_factory=video_guider_factory
+        ),
+        show=show_progress,
+        label="denoising (guided)",
+    )
+    estimator.announce()
     iterator = tqdm(steps, desc="Denoising (guided)", disable=not show_progress)
 
     # Determine whether we need per-token timesteps (for conditioning masks).
@@ -635,14 +1053,71 @@ def guided_denoise_loop(
             video_positions=video_positions,
             audio_positions=audio_positions,
             video_attention_mask=video_attention_mask,
+            video_keyframes_mask=video_state.keyframes_mask,
             audio_attention_mask=audio_attention_mask,
         )
+        # Prompt Relay gates the video->text cross-attention. Applied to every
+        # positive-context pass (cond/ptb/mod) via base_kwargs, but overridden to
+        # None on the unconditional (negative) pass below — matching the reference,
+        # which never masks the negative prompt.
+        if video_cross_attention_mask is not None:
+            base_kwargs["video_cross_attention_mask"] = video_cross_attention_mask
 
         # Per-token timesteps for conditioning
         if not video_uniform:
             base_kwargs["video_timesteps"] = _compute_per_token_timesteps(sigma, video_state.denoise_mask)
         if not audio_uniform:
             base_kwargs["audio_timesteps"] = _compute_per_token_timesteps(sigma, audio_state.denoise_mask)
+        base_kwargs.update(_frozen_sigma_kwargs(video_state, audio_state, B))
+
+        # --- Compute the gate signal once per step (cheap, runs prelude only).
+        # Used both by tap and by teacache decisions. None when neither hook needs it.
+        gate_signal = None
+        if tap is not None or teacache is not None:
+            gate_signal = model.model.compute_gate_signal(
+                video_latent=video_x,
+                audio_latent=audio_x,
+                timestep=mx.broadcast_to(sigma_arr, (B,)),
+                video_timesteps=base_kwargs.get("video_timesteps"),
+                video_keyframes_mask=video_state.keyframes_mask,
+            )
+
+        should_compute_full = True
+        if teacache is not None:
+            should_compute_full = teacache.should_compute(step_idx, gate_signal)
+
+        # Pass-level helpers: capture residual on compute path, override on skip.
+        # Each loop iteration creates fresh dicts so no state leaks across steps.
+        captured_residuals: dict = {}
+        cached_residuals = teacache.previous_residual if (teacache is not None and not should_compute_full) else None
+
+        def _make_capture_tap(label: str):
+            """Return a tap callback that stores (v_res, a_res) under label."""
+
+            # Closures are constructed and consumed within the same loop iteration — safe.
+            def _capture(v_res: mx.array, a_res: mx.array) -> None:
+                captured_residuals[label] = (v_res, a_res)  # noqa: B023
+
+            return _capture
+
+        def _make_override(label: str):
+            """Return a block_stack_override that adds the cached residual."""
+            # cached_residuals is bound at definition time (read from previous step).
+            v_res, a_res = cached_residuals[label]  # noqa: B023
+
+            def _override(v_hidden: mx.array, a_hidden: mx.array) -> tuple[mx.array, mx.array]:
+                return v_hidden + v_res, a_hidden + a_res
+
+            return _override
+
+        def _run_pass(label: str, kwargs: dict) -> tuple[mx.array, mx.array]:
+            """Run one guidance pass, capturing or replaying residuals."""
+            if should_compute_full:  # noqa: B023
+                # Always capture residuals on compute path so teacache (or tap) can use them.
+                pass_tap = _make_capture_tap(label) if (tap is not None or teacache is not None) else None
+                return model(**kwargs, tap=pass_tap)
+            else:
+                return model(**kwargs, block_stack_override=_make_override(label))
 
         # --- 1. Conditioned prediction (positive context) ---
         cond_kwargs = {
@@ -650,14 +1125,17 @@ def guided_denoise_loop(
             "video_text_embeds": video_text_embeds,
             "audio_text_embeds": audio_text_embeds,
         }
-        cond_video_x0, cond_audio_x0 = model(**cond_kwargs)
+        cond_video_x0, cond_audio_x0 = _run_pass("cond", cond_kwargs)
+
+        if tap is not None and "cond" in captured_residuals:
+            v_res, a_res = captured_residuals["cond"]
+            tap(step_idx, gate_signal, v_res, a_res)
 
         # --- 2. Unconditional prediction for CFG ---
         neg_video_x0: mx.array | float = 0.0
         neg_audio_x0: mx.array | float = 0.0
 
         if video_guider.do_unconditional_generation() or audio_guider.do_unconditional_generation():
-            # Use negative context from guiders, or fall back to positive
             neg_video_embeds = (
                 video_guider.negative_context if video_guider.negative_context is not None else video_text_embeds
             )
@@ -669,8 +1147,9 @@ def guided_denoise_loop(
                 **base_kwargs,
                 "video_text_embeds": neg_video_embeds,
                 "audio_text_embeds": neg_audio_embeds,
+                "video_cross_attention_mask": None,  # never mask the negative prompt
             }
-            neg_video_x0, neg_audio_x0 = model(**neg_kwargs)
+            neg_video_x0, neg_audio_x0 = _run_pass("uncond", neg_kwargs)
 
         # --- 3. Perturbed prediction for STG ---
         ptb_video_x0: mx.array | float = 0.0
@@ -701,7 +1180,7 @@ def guided_denoise_loop(
                 "audio_text_embeds": audio_text_embeds,
                 "perturbations": batched_perturbations,
             }
-            ptb_video_x0, ptb_audio_x0 = model(**ptb_kwargs)
+            ptb_video_x0, ptb_audio_x0 = _run_pass("ptb", ptb_kwargs)
 
         # --- 4. Isolated modality prediction ---
         mod_video_x0: mx.array | float = 0.0
@@ -721,7 +1200,10 @@ def guided_denoise_loop(
                 "audio_text_embeds": audio_text_embeds,
                 "perturbations": mod_batched_perturbations,
             }
-            mod_video_x0, mod_audio_x0 = model(**mod_kwargs)
+            mod_video_x0, mod_audio_x0 = _run_pass("mod", mod_kwargs)
+
+        if teacache is not None and should_compute_full:
+            teacache.cache_residual(captured_residuals)
 
         # --- 5. Apply guiders ---
         if video_guider.should_skip_step(step_idx) and last_video_x0 is not None:
@@ -742,12 +1224,16 @@ def guided_denoise_loop(
         last_video_x0 = video_x0
         last_audio_x0 = audio_x0
 
+        if on_step is not None:
+            on_step(step_idx, len(steps), video_x0, sigma)
+
         # Euler step
         video_x = euler_step(video_x, video_x0, sigma, sigma_next)
         audio_x = euler_step(audio_x, audio_x0, sigma, sigma_next)
 
         # Force computation for memory efficiency
         mx.async_eval(video_x, audio_x)
+        _step_timed(estimator, step_idx, video_x, audio_x)
 
     aggressive_cleanup()
 

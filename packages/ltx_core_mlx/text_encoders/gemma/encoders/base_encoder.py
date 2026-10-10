@@ -6,6 +6,7 @@ Ported from ltx-core/src/ltx_core/text_encoders/gemma/encoders/base_encoder.py
 from __future__ import annotations
 
 import functools
+import os
 from pathlib import Path
 
 import mlx.core as mx
@@ -76,10 +77,21 @@ class GemmaLanguageModel(nn.Module):
 
     @staticmethod
     def _ensure_metal_headroom() -> None:
-        """Set Metal cache limit to leave headroom for the GPU watchdog."""
+        """Cap the Metal cache limit to leave headroom (min semantics).
+
+        This is a CAP below the default, never a raise: a stricter limit
+        already configured (e.g. ``mx.set_cache_limit(0)`` by low-ram
+        streaming) is a deliberate setting and must survive prompt encoding
+        (#79 — the unconditional set used to clobber low-ram's 0 for the
+        whole rest of the run, retaining 8-21 GB of cache through decode).
+        ``mx.set_cache_limit`` returns the previous value, which is the only
+        way to read the current limit.
+        """
         try:
-            mem_limit = mx.device_info()["memory_size"]
-            mx.set_cache_limit(int(mem_limit * 0.9))
+            cap = int(mx.device_info()["memory_size"] * 0.9)
+            previous = mx.set_cache_limit(cap)
+            if previous < cap:
+                mx.set_cache_limit(previous)
         except Exception:
             pass
 
@@ -139,19 +151,24 @@ class GemmaLanguageModel(nn.Module):
         else:
             combined_mask = causal_mask[None, None, :, :]  # (1, 1, T, T)
 
-        # Run layers with combined mask.
-        # Periodically evaluate to prevent the lazy computation graph from
-        # growing unbounded. Without this, all 48 layers accumulate into a
-        # single massive Metal command buffer that can exceed the macOS GPU
-        # watchdog timeout (kIOGPUCommandBufferCallbackErrorImpactingInteractivity),
-        # especially under thermal throttling after a prior long run.
-        eval_every = 1
+        # Per-layer eval is necessary on <=48 GB Macs to keep each Metal
+        # command buffer below the macOS GPU watchdog deadline. The
+        # downstream feature_extractor projection materializes its inputs
+        # in one buffer; without per-layer eval, that buffer pulls all 48
+        # Gemma layers into a single dispatch that exceeds the macOS GPU
+        # watchdog limit (~10 s) under sustained system contention.
+        # Originally gated on <=48 GB, but M2 Max 64 GB also crashes
+        # (MTLCommandBufferErrorInternal code 14) at production resolutions
+        # — the prior 48 GB threshold was validated only at 384x256x9 where
+        # the lazy graph fits the watchdog window. Default is now 1 (per-layer)
+        # for all devices. LTX2_GEMMA_EVAL_EVERY=0 disables (full lazy graph).
+        eval_every = int(os.environ.get("LTX2_GEMMA_EVAL_EVERY", "1"))
         for i, layer in enumerate(inner.layers):
             h = layer(h, mask=combined_mask, cache=None)
             if isinstance(h, tuple):
                 h = h[0]
             all_hidden_states.append(h)
-            if (i + 1) % eval_every == 0:
+            if eval_every and (i + 1) % eval_every == 0:
                 mx.eval(h)
 
         return all_hidden_states

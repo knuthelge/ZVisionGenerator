@@ -11,64 +11,115 @@ Ported from ltx-pipelines/src/ltx_pipelines/ti2vid_two_stages.py
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from pathlib import Path
+
 import mlx.core as mx
+from mlx_arsenal.diffusion import TeaCacheController
 
 from ltx_core_mlx.components.guiders import (
     MultiModalGuiderParams,
     create_multimodal_guider_factory,
 )
-from ltx_core_mlx.components.patchifiers import compute_video_latent_shape
-from ltx_core_mlx.conditioning.types.latent_cond import (
-    LatentState,
-    VideoConditionByLatentIndex,
-    apply_conditioning,
-    create_initial_state,
-    noise_latent_state,
+from ltx_core_mlx.components.patchifiers import (
+    compute_video_latent_shape,
+    snap_output_dimensions,
 )
+from ltx_core_mlx.conditioning.types.keyframe_slots import extract_generated_keyframes
+from ltx_core_mlx.guidance.nag import NAGConfig
 from ltx_core_mlx.loader.fuse_loras import apply_loras
 from ltx_core_mlx.loader.primitives import LoraStateDictWithStrength, StateDict
 from ltx_core_mlx.loader.sd_ops import LTXV_LORA_COMFY_RENAMING_MAP
 from ltx_core_mlx.model.transformer.model import LTXModel, X0Model
 from ltx_core_mlx.model.upsampler import LatentUpsampler
-from ltx_core_mlx.utils.image import prepare_image_for_encoding
 from ltx_core_mlx.utils.memory import aggressive_cleanup
 from ltx_core_mlx.utils.positions import compute_audio_positions, compute_audio_token_count, compute_video_positions
 from ltx_core_mlx.utils.weights import load_split_safetensors
-from ltx_pipelines_mlx.scheduler import STAGE_2_SIGMAS, ltx2_schedule
-from ltx_pipelines_mlx.ti2vid_one_stage import TextToVideoPipeline
+from ltx_pipelines_mlx._base import BasePipeline
+from ltx_pipelines_mlx.scheduler import STAGE_2_SIGMAS, ltx2_schedule, shorten_schedule
+from ltx_pipelines_mlx.utils.generation import is_ltx25_pack
+from ltx_pipelines_mlx.utils.helpers import (
+    create_noised_state,
+    generated_keyframe_conditionings,
+    has_generated_keyframes,
+)
 from ltx_pipelines_mlx.utils.samplers import denoise_loop, guided_denoise_loop
+from ltx_pipelines_mlx.utils.types import DEFAULT_AUTO_DURATION, AutoDuration
 
 # Reference defaults
 DEFAULT_CFG_SCALE = 3.0
 
 
+# TeaCache calibration constants for LTX-2 stage 1 (dev model, 30 Euler steps,
+# 480x704x97 reference shape, MLX bf16 q8). Calibrated 2026-04-27 from a
+# 5-prompt x 30-step run (145 deltas) on a fresh host. The robust fitter
+# (scripts/fit_teacache_poly.py) picked degree 1 — higher degrees were
+# non-monotone on the observed delta range and only marginally better in RMSE.
+#
+# Per-step input/output drift correlation in LTX-2 stage 1 is moderate
+# (Pearson 0.41), and average output L1 ~ 0.56 — much higher than upstream
+# DiTs (HunyuanVideo, Flux) where TeaCache typically uses thresh 0.15-0.4.
+# Threshold 0.5 here yields ~22% skip rate per generation (~1.2x speedup);
+# tune via `teacache_thresh=` for more aggressive caching at the cost of
+# quality drift (1.0 ≈ 55% skip / ~2x, 1.5 ≈ 69% / ~3x).
+LTX2_TEACACHE_COEFFICIENTS: list[float] = [
+    1.3641334114092996,
+    0.40915524073366694,
+]
+LTX2_TEACACHE_THRESH: float = 0.5
+
+
+def _build_teacache_controller(num_steps: int, thresh: float | None) -> TeaCacheController:
+    """Construct a TeaCacheController for LTX-2 stage 1.
+
+    Args:
+        num_steps: Number of denoising steps for stage 1.
+        thresh: Optional override for the default ``rel_l1_thresh``.
+
+    Returns:
+        Configured ``TeaCacheController``.
+
+    Raises:
+        RuntimeError: If ``LTX2_TEACACHE_COEFFICIENTS`` is empty — calibration
+            not yet run.
+    """
+    if not LTX2_TEACACHE_COEFFICIENTS:
+        raise RuntimeError(
+            "TeaCache coefficients for LTX-2 are not calibrated yet — run "
+            "scripts/calibrate_teacache.py to generate them, then paste the "
+            "values into LTX2_TEACACHE_COEFFICIENTS in this file."
+        )
+    return TeaCacheController(
+        num_steps=num_steps,
+        rel_l1_thresh=thresh if thresh is not None else LTX2_TEACACHE_THRESH,
+        coefficients=LTX2_TEACACHE_COEFFICIENTS,
+    )
+
+
 def _remap_lora_keys(lora_sd: dict[str, mx.array]) -> dict[str, mx.array]:
     """Remap LoRA keys from ComfyUI/diffusion_model format to MLX model format."""
-    remapped: dict[str, mx.array] = {}
-    for key, value in lora_sd.items():
-        new_key = LTXV_LORA_COMFY_RENAMING_MAP.apply_to_key(key)
-        new_key = new_key.replace(".linear_1.", ".linear1.").replace(".linear_2.", ".linear2.")
-        new_key = new_key.replace("audio_ff.net.0.proj.", "audio_ff.proj_in.")
-        new_key = new_key.replace("audio_ff.net.2.", "audio_ff.proj_out.")
-        remapped[new_key] = value
-    return remapped
+    return {LTXV_LORA_COMFY_RENAMING_MAP.apply_to_key(k): v for k, v in lora_sd.items()}
 
 
-class TwoStagePipeline(TextToVideoPipeline):
+class TI2VidTwoStagesPipeline(BasePipeline):
     """Two-stage generation: dev model + CFG at half-res, upscale, distilled LoRA refine.
 
     Stage 1: Dev model + CFG guidance at half resolution (Euler sampler).
     Stage 2: Dev + distilled LoRA fused, simple denoising at full resolution.
 
-    Requires ``dev_transformer`` and ``distilled_lora`` — the two-stage pipeline
-    needs the dev model for quality generation at half resolution with CFG.
+    Needs the dev model for quality generation at half resolution with CFG;
+    the distilled LoRA is auto-resolved from the pack when not given
+    explicitly (see ``distilled_lora`` below).
 
     Args:
         model_dir: Path to model weights or HuggingFace repo ID.
         gemma_model_id: Gemma model for text encoding.
         low_memory: Aggressive memory management.
         dev_transformer: Dev transformer filename (e.g. ``transformer-dev.safetensors``).
-        distilled_lora: Distilled LoRA filename for Stage 2.
+        distilled_lora: Distilled LoRA filename for Stage 2. When ``None`` (default),
+            auto-resolved based on pack version:
+            ``ltx-2.5-22b-distilled-lora-450-bf16.safetensors`` for LTX-2.5 packs,
+            ``ltx-2.3-22b-distilled-lora-384.safetensors`` for LTX-2.3 packs.
         distilled_lora_strength: LoRA fusion strength (default 1.0).
     """
 
@@ -77,19 +128,68 @@ class TwoStagePipeline(TextToVideoPipeline):
         model_dir: str,
         gemma_model_id: str = "mlx-community/gemma-3-12b-it-4bit",
         low_memory: bool = True,
+        low_ram_streaming: bool = False,
         dev_transformer: str = "transformer-dev.safetensors",
-        distilled_lora: str = "ltx-2.3-22b-distilled-lora-384.safetensors",
+        distilled_lora: str | None = None,
         distilled_lora_strength: float = 1.0,
-    ):
-        super().__init__(model_dir, gemma_model_id=gemma_model_id, low_memory=low_memory)
+        tile_count=None,
+    ) -> None:
+        """Initialize the two-stage pipeline.
+
+        Args:
+            model_dir: Path to model weights or HuggingFace repo ID.
+            gemma_model_id: Gemma model for text encoding.
+            low_memory: Aggressive memory management.
+            low_ram_streaming: Stream transformer blocks from disk.
+            dev_transformer: Dev transformer filename.
+            distilled_lora: Distilled LoRA filename for Stage 2. When ``None``
+                (default), auto-resolved based on pack version:
+                ``ltx-2.5-22b-distilled-lora-450-bf16.safetensors`` for LTX-2.5
+                packs, ``ltx-2.3-22b-distilled-lora-384.safetensors`` for
+                LTX-2.3 packs.
+            distilled_lora_strength: LoRA fusion strength (default 1.0).
+            tile_count: Optional tiling configuration.
+        """
+        super().__init__(
+            model_dir,
+            gemma_model_id=gemma_model_id,
+            low_memory=low_memory,
+            low_ram_streaming=low_ram_streaming,
+        )
         self._dev_transformer = dev_transformer
+        self._is_25 = is_ltx25_pack(self.model_dir)
+        if distilled_lora is None:
+            distilled_lora = (
+                "ltx-2.5-22b-distilled-lora-450-bf16.safetensors"
+                if self._is_25
+                else "ltx-2.3-22b-distilled-lora-384.safetensors"
+            )
         self._distilled_lora = distilled_lora
         self._distilled_lora_strength = distilled_lora_strength
+        self._tile_count = tile_count
         self.upsampler: LatentUpsampler | None = None
 
     def _fuse_distilled_lora(self, dit: LTXModel) -> None:
-        """Fuse distilled LoRA weights into a loaded transformer in-place."""
-        lora_path = self.model_dir / self._distilled_lora
+        """Fuse distilled LoRA weights into a loaded transformer in-place.
+
+        In ``low_ram_streaming`` mode, in-place LoRA fusion would
+        materialize the full transformer (defeating streaming). Instead
+        we swap to the pre-fused ``transformer-distilled.safetensors``
+        produced by mlx-forge — equivalent at default LoRA strength.
+
+        Always fused, also with ``LTX2_LORA_MODE=unfused``: the distilled LoRA has
+        rank 384 (2.3) / 450 (2.5) on every block linear (plus, on 2.5, the AdaLN
+        and projection layers), so as adapters it would stay resident and add work
+        to every stage-2 forward. LoRAs already attached as adapters (``--lora``
+        under ``unfused``) keep the weight names, so this fusion still reaches the
+        layers they wrap.
+        """
+        if self.low_ram_streaming:
+            self._swap_to_distilled_streamer()
+            return
+
+        lora_stem = Path(self._distilled_lora).stem
+        lora_path = self._resolve_safetensors(self.model_dir, lora_stem)
         if not lora_path.exists():
             raise FileNotFoundError(
                 f"Distilled LoRA not found: {lora_path}\n"
@@ -110,43 +210,187 @@ class TwoStagePipeline(TextToVideoPipeline):
 
         fused = apply_loras(model_sd, [lora_with_strength])
         dit.load_weights(list(fused.sd.items()))
+        # Drop every reference to the pre-fusion weights and the LoRA before the recast below
+        # evaluates the fused graph block by block, so each block's originals are freed as it goes.
+        del fused, model_sd, flat_model, flat_params, lora_sd, lora_with_strength, lora_remapped, lora_raw
+        aggressive_cleanup()
+        # Fused scales keep their pre-fusion dtype (#186); re-apply the compute dtype anyway as a
+        # safety net so stage 2 can never run float32 scales.
+        self._recast_after_inplace_fusion(dit)
+
+    def _swap_to_distilled_streamer(self) -> None:
+        """Switch the streamer to a distilled-LoRA-fused dev model.
+
+        Used in ``low_ram_streaming`` mode at the stage 1 → stage 2
+        transition. Two strategies depending on requested LoRA
+        strength:
+
+        - **strength == 1.0**: swap to the pre-fused
+          ``transformer-distilled.safetensors`` (mlx-forge produces it
+          at LoRA strength 1.0). Cheaper — just opens a different
+          mmap'd file, no per-block fusion at bind time.
+
+        - **strength != 1.0**: keep streaming the dev model and
+          attach a ``BlockLoraSource`` to the wrapper. Each bind() now
+          dequantizes block weights, adds the LoRA delta at custom
+          strength, and re-quantizes (handled by
+          ``apply_loras`` already used by the non-streaming path).
+          Slower per bind but supports arbitrary LoRA strength.
+        """
+        from ltx_core_mlx.loader.block_streaming import BlockLoraSource, BlockStreamer
+        from ltx_core_mlx.loader.sd_ops import (
+            LTXV_LORA_BLOCK_PREFIX,
+            LTXV_LORA_COMFY_RENAMING_MAP,
+        )
+
+        if abs(self._distilled_lora_strength - 1.0) <= 1e-6:
+            distilled_path = self._resolve_safetensors(self.model_dir, "transformer-distilled")
+            if not distilled_path.exists():
+                raise FileNotFoundError(
+                    f"Pre-fused distilled transformer not found in {self.model_dir} "
+                    "(expected transformer-distilled*.safetensors). "
+                    "low_ram_streaming for two-stage at LoRA strength 1.0 requires "
+                    "the distilled file. Use: --model dgrauet/ltx-2.3-mlx-q8"
+                )
+            new_streamer = BlockStreamer(distilled_path, block_prefix="transformer.transformer_blocks.")
+            old_streamer = object.__getattribute__(self.dit, "_streamer")
+            object.__setattr__(self.dit, "_streamer", new_streamer)
+            old_streamer.close()
+            aggressive_cleanup()
+            return
+
+        # Custom strength → bind-time LoRA fusion.
+        lora_path = self.model_dir / self._distilled_lora
+        if not lora_path.exists():
+            raise FileNotFoundError(
+                f"Distilled LoRA not found at {lora_path}. "
+                "low_ram_streaming with a non-default LoRA strength requires "
+                "the LoRA safetensors. Use: --model dgrauet/ltx-2.3-mlx-q8"
+            )
+        lora_source = BlockLoraSource(
+            lora_path,
+            block_prefix=LTXV_LORA_BLOCK_PREFIX,
+            strength=self._distilled_lora_strength,
+            sd_ops=LTXV_LORA_COMFY_RENAMING_MAP,
+        )
+        existing = list(object.__getattribute__(self.dit, "_lora_sources"))
+        existing.append(lora_source)
+        object.__setattr__(self.dit, "_lora_sources", existing)
         aggressive_cleanup()
 
-    def _load_upsampler(self, name: str = "spatial_upscaler_x2_v1_1") -> None:
-        """Load upsampler from config and weights."""
+    def _resolve_upsampler_path(self) -> Path:
+        """Return the spatial-upscaler weights file to load for stage 2.
+
+        LTX-2.5 packs ship ``spatial_upscaler_x2_v1_0.safetensors``; the 2.3
+        packs ship ``spatial_upscaler_x2_v1_1.safetensors`` (or the older
+        ``ltx-2.3-spatial-upscaler-x2`` name). The 2.5 name is only consulted
+        on 2.5 packs, so the 2.3 resolution order is untouched.
+
+        Raises:
+            FileNotFoundError: when no upsampler weights file is present in the
+                model dir. Stage 2 upscales the latent through this module
+                unconditionally; with a randomly-initialised ``LatentUpsampler``
+                the output decodes into a periodic pixel-shuffle grid ("mosaic")
+                with no other error. A missing file must therefore fail loud
+                rather than silently degrade.
+        """
+        stems = ["ltx-2.3-spatial-upscaler-x2", "spatial_upscaler_x2_v1_1"]
+        if self._is_25:
+            stems.insert(0, "spatial_upscaler_x2_v1_0")
+
+        # Try new v1.1+ naming, then old naming
+        weights_path = self.model_dir / "spatial_upscaler_x2_v1_1.safetensors"
+        for stem in stems:
+            resolved = self._resolve_safetensors(self.model_dir, stem)
+            if resolved.exists():
+                weights_path = resolved
+                break
+
+        if not weights_path.exists():
+            expected = "spatial_upscaler_x2_v1_0.safetensors" if self._is_25 else "spatial_upscaler_x2_v1_1.safetensors"
+            raise FileNotFoundError(
+                f"Spatial upsampler weights not found in {self.model_dir} "
+                f"(looked for {', '.join(f'{s}*.safetensors' for s in stems)}). "
+                "The two-stage and "
+                "distilled pipelines require it for stage-2 upscaling; without "
+                "it the latent is upscaled by an untrained module and the "
+                "output degrades into a periodic 'mosaic' grid. Download it, "
+                "e.g.: hf download dgrauet/ltx-2.3-mlx-q8 "
+                f"{expected} --local-dir {self.model_dir}"
+            )
+        return weights_path
+
+    def _make_stage1_teacache(
+        self, enable_teacache: bool, stage1_steps: int, teacache_thresh: float | None
+    ) -> TeaCacheController | None:
+        """Build a fresh stage-1 TeaCacheController, or ``None`` when TeaCache is off.
+
+        Uses the coefficients calibrated on the Euler sampler (``guided_denoise_loop``);
+        the HQ pipeline overrides this with its res_2s calibration. Callers run
+        :meth:`_check_teacache_supported` up front, before any model load.
+
+        Args:
+            enable_teacache: Whether TeaCache was requested.
+            stage1_steps: Number of stage-1 denoising steps.
+            teacache_thresh: Optional ``rel_l1_thresh`` override.
+
+        Returns:
+            A reset controller, or ``None`` when ``enable_teacache`` is False.
+        """
+        if not enable_teacache:
+            return None
+        controller = _build_teacache_controller(stage1_steps, teacache_thresh)
+        controller.reset()
+        return controller
+
+    def _build_upsampler(self, weights_path: Path) -> LatentUpsampler:
+        """Build a :class:`LatentUpsampler` from ``<stem>_config.json`` and load ``weights_path``."""
         import json
 
-        config_path = self.model_dir / f"{name}_config.json"
-        weights_path = self.model_dir / f"{name}.safetensors"
-
+        config_path = weights_path.parent / f"{weights_path.stem}_config.json"
         if config_path.exists():
-            config = json.loads(config_path.read_text()).get("config", {})
-            self.upsampler = LatentUpsampler.from_config(config)
+            raw_config = json.loads(config_path.read_text())
+            # Old format nests fields under a "config" key; newer conversions
+            # (e.g. LTX-2.5) emit the fields flat at the top level.
+            config = raw_config.get("config", raw_config)
+            upsampler = LatentUpsampler.from_config(config)
         else:
-            self.upsampler = LatentUpsampler()
+            upsampler = LatentUpsampler()
 
-        if weights_path.exists():
-            weights = load_split_safetensors(weights_path, prefix=f"{name}.")
-            self.upsampler.load_weights(list(weights.items()))
+        raw = load_split_safetensors(weights_path)
+        # Old format keys are prefixed with the stem; new format uses bare keys.
+        stem_prefix = weights_path.stem + "."
+        if raw and all(k.startswith(stem_prefix) for k in raw):
+            raw = {k[len(stem_prefix) :]: v for k, v in raw.items()}
+        upsampler.load_weights(list(raw.items()))
+        return upsampler
+
+    def _load_upsampler(self) -> None:
+        """Load the spatial upsampler from config and weights.
+
+        Raises:
+            FileNotFoundError: propagated from :meth:`_resolve_upsampler_path`
+                when no upsampler weights file is present in the model dir.
+        """
+        self.upsampler = self._build_upsampler(self._resolve_upsampler_path())
         aggressive_cleanup()
 
     def load(self) -> None:
         """Load DiT + VAE encoder + upsampler (skip decoders for memory).
 
         Decoders are loaded on-demand in ``generate_and_save()``.
+
+        Skips reloading the text encoder: ``generate_two_stage`` encodes
+        the prompt and frees Gemma BEFORE calling :meth:`load`. Loading
+        Gemma again here would thrash the Metal heap (7.5 GB load/mmap +
+        free) right before the 10 GB DiT — a documented cause of macOS
+        GPU watchdog crashes under sustained system contention.
         """
         if self._loaded:
             return
 
-        # Text encoder + connector
-        self._load_text_encoder()
-
         # DiT (dev model)
         if self.dit is None:
-            if self.low_memory:
-                self.text_encoder = None
-                aggressive_cleanup()
-
             self.dit = self._load_dev_transformer()
 
         # VAE encoder (for denorm/renorm + optional I2V)
@@ -163,15 +407,24 @@ class TwoStagePipeline(TextToVideoPipeline):
         prompt: str,
         height: int = 480,
         width: int = 704,
-        num_frames: int = 97,
+        num_frames: int | AutoDuration = DEFAULT_AUTO_DURATION,
+        *,
+        frame_rate: float,
         seed: int = 42,
         stage1_steps: int = 30,
         stage2_steps: int | None = None,
         cfg_scale: float = DEFAULT_CFG_SCALE,
-        stg_scale: float = 0.0,
+        stg_scale: float = 1.0,
         image: str | None = None,
+        images=None,
+        prompt_relay=None,
+        negative_prompt: str | None = None,
+        generated_keyframes: int | Sequence[int] = 0,
         video_guider_params: MultiModalGuiderParams | None = None,
         audio_guider_params: MultiModalGuiderParams | None = None,
+        enable_teacache: bool = False,
+        teacache_thresh: float | None = None,
+        tap: callable | None = None,
     ) -> tuple[mx.array, mx.array]:
         """Generate video using two-stage pipeline.
 
@@ -179,21 +432,52 @@ class TwoStagePipeline(TextToVideoPipeline):
             prompt: Text prompt.
             height: Final video height.
             width: Final video width.
-            num_frames: Number of frames.
+            num_frames: Number of frames, or an :class:`AutoDuration` request to
+                predict it from the prompt (requires a DurationHead-equipped
+                checkpoint; see :meth:`_base.BasePipeline._require_num_frames_source`).
+            generated_keyframes: ``0`` (off), an ``int`` for that many evenly spaced interior
+                generated keyframe slots, or explicit pixel-frame indices. Stage 1 only;
+                requires a pack with ``use_keyframes_abs_pos_embedding`` (LTX 2.5).
             seed: Random seed.
             stage1_steps: Denoising steps for stage 1 (default: 20).
             stage2_steps: Denoising steps for stage 2.
             cfg_scale: CFG guidance scale for stage 1 (default: 3.0).
-            stg_scale: STG guidance scale for stage 1 (default: 0.0).
+            stg_scale: STG guidance scale for stage 1 (default: 1.0, upstream LTX_2_3_PARAMS).
             image: Optional reference image for I2V conditioning.
+            negative_prompt: Negative prompt for CFG. ``None`` (default) uses
+                ``DEFAULT_NEGATIVE_PROMPT``; any string (including ``""``) is
+                encoded verbatim. Always a single global prompt, even with
+                Prompt Relay.
             video_guider_params: Optional full guider params for video.
             audio_guider_params: Optional full guider params for audio.
+            enable_teacache: When True, instantiate a TeaCacheController
+                from the 'ltx2' arsenal preset and use it to skip stage 1
+                transformer forwards whose modulated input is sufficiently
+                close to the previous step's. Default False (no caching).
+            teacache_thresh: Optional override for the preset's default
+                ``rel_l1_thresh``. Higher = more skipping = faster but
+                lossier. Ignored when ``enable_teacache=False``.
+            tap: Optional per-step instrumentation hook forwarded to
+                ``guided_denoise_loop``. Used by the calibration script.
 
         Returns:
             Tuple of (video_latent, audio_latent) at full resolution.
         """
-        # --- Text encoding ---
-        video_embeds, audio_embeds, neg_video_embeds, neg_audio_embeds = self._encode_text_with_negative(prompt)
+        self._require_num_frames_source(num_frames)
+        self._require_generated_keyframes_support(generated_keyframes)
+        self._check_teacache_supported(enable_teacache)
+
+        # --- Text encoding (Prompt Relay: encode the combined prompt; the negative
+        # prompt is a single global prompt, unaffected by the local prompts) ---
+        encode_prompt, relay_token_ranges = self._prompt_relay_setup(prompt, prompt_relay)
+        video_embeds, audio_embeds, neg_video_embeds, neg_audio_embeds = self._encode_text_with_negative(
+            encode_prompt, negative_prompt
+        )
+        num_frames = self._resolve_num_frames(
+            num_frames, video_encoding=video_embeds, audio_encoding=audio_embeds, frame_rate=frame_rate
+        )
+        num_text_tokens = video_embeds.shape[1]
+        relay_mask = self._prompt_relay_mask_builder(prompt_relay, relay_token_ranges, num_text_tokens)
 
         # --- Load DiT + VAE encoder + upsampler ---
         if self.dit is None:
@@ -208,44 +492,87 @@ class TwoStagePipeline(TextToVideoPipeline):
         assert self.upsampler is not None
 
         # --- Stage 1: Half resolution with CFG ---
+        # Snap to the two-stage grid (multiples of 64) and report if it changed.
+        height, width = snap_output_dimensions(height, width, two_stage=True)
         half_h, half_w = height // 2, width // 2
         F, H_half, W_half = compute_video_latent_shape(num_frames, half_h, half_w)
         video_shape = (1, F * H_half * W_half, 128)
-        audio_T = compute_audio_token_count(num_frames)
+        audio_T = compute_audio_token_count(num_frames, frame_rate=frame_rate)
         audio_shape = (1, audio_T, 128)
 
-        video_positions_1 = compute_video_positions(F, H_half, W_half)
+        video_positions_1 = compute_video_positions(F, H_half, W_half, frame_rate=frame_rate)
         audio_positions = compute_audio_positions(audio_T)
 
-        video_state = create_initial_state(video_shape, seed, positions=video_positions_1)
-        audio_state = create_initial_state(audio_shape, seed + 1, positions=audio_positions)
+        # I2V conditioning at half resolution. ``images`` is the upstream-iso
+        # multi-anchor list; ``image`` is the legacy single-image shorthand
+        # (frame_idx=0, strength=1.0).
+        from ltx_pipelines_mlx.utils._orchestration import combined_image_conditionings
+        from ltx_pipelines_mlx.utils.args import ImageConditioningInput, resolve_frame_indices
 
-        # I2V conditioning at half resolution
         enc_h_half = H_half * 32
         enc_w_half = W_half * 32
-        conditionings_1: list[VideoConditionByLatentIndex] = []
-        if image is not None:
-            img_tensor = prepare_image_for_encoding(image, enc_h_half, enc_w_half)
-            img_tensor = img_tensor[:, :, None, :, :]
-            ref_latent = self.vae_encoder.encode(img_tensor)
-            ref_tokens = ref_latent.transpose(0, 2, 3, 4, 1).reshape(1, -1, 128)
-            conditionings_1.append(
-                VideoConditionByLatentIndex(
-                    frame_indices=[0],
-                    clean_latent=ref_tokens,
-                    strength=1.0,
-                )
+        resolved_images = list(images) if images else []
+        if image is not None and not resolved_images:
+            resolved_images = [ImageConditioningInput(path=image, frame_idx=0, strength=1.0)]
+        resolved_images = resolve_frame_indices(resolved_images, num_frames)
+        # Unset CRFs take the checkpoint generation's value (upstream ``resolve_crf``).
+        resolved_images = self.image_conditioner.resolve_crf(resolved_images)
+        conditionings_1: list = []
+        if resolved_images:
+            conditionings_1 = combined_image_conditionings(
+                resolved_images,
+                enc_h=enc_h_half,
+                enc_w=enc_w_half,
+                spatial_dims=(F, H_half, W_half),
+                video_encoder=self.vae_encoder,
+                frame_rate=frame_rate,
             )
+        conditionings_1 = [
+            *conditionings_1,
+            *generated_keyframe_conditionings(generated_keyframes, num_frames, frame_rate=frame_rate),
+        ]
 
-        if conditionings_1:
-            video_state = apply_conditioning(video_state, conditionings_1, (F, H_half, W_half))
-            video_state = noise_latent_state(video_state, sigma=1.0, seed=seed)
-            audio_state = noise_latent_state(audio_state, sigma=1.0, seed=seed + 1)
+        # Stage 1: scalar-blend-then-cond for video matches legacy create_initial_state
+        # → apply_conditioning → noise_latent_state(sigma=1) flow bit-exact for both T2V
+        # and I2V (sigma=1 makes scaled_mask quantization a no-op anyway, but the scalar
+        # path is consistent with stage 2 and avoids any future drift). Audio Stage 1
+        # has no conditioning and clean=zeros so either flow gives identical noise.
+        video_state = create_noised_state(
+            base_shape=video_shape,
+            conditionings=conditionings_1,
+            spatial_dims=(F, H_half, W_half),
+            positions=video_positions_1,
+            seed=seed,
+            sigma=1.0,
+            initial_latent=None,
+            legacy_scalar_blend=True,
+        )
+        audio_state = create_noised_state(
+            base_shape=audio_shape,
+            conditionings=[],
+            spatial_dims=(F, H_half, W_half),  # unused
+            positions=audio_positions,
+            seed=seed + 1,
+            sigma=1.0,
+            initial_latent=None,
+            legacy_scalar_blend=True,
+        )
 
         # Stage 1 sigma schedule (dynamic for dev model)
         num_tokens = F * H_half * W_half
         sigmas_1 = ltx2_schedule(stage1_steps, num_tokens=num_tokens)
-        x0_model = X0Model(self.dit)
+
+        # Optional modality tiling: split video tokens into spatial/temporal
+        # tiles for memory savings on long videos. Audio is replicated
+        # across tiles. Composes with low_ram_streaming.
+        stage1_dit = self.dit
+        if self._tile_count is not None:
+            from ltx_core_mlx.components.modality_tiling import TiledLTXModel, VideoModalityTiler
+
+            tiler_1 = VideoModalityTiler(self._tile_count, latent_shape=(F, H_half, W_half))
+            stage1_dit = TiledLTXModel(self.dit, tiler_1)
+
+        x0_model = X0Model(stage1_dit)
 
         # Build guider params
         if video_guider_params is None:
@@ -268,6 +595,9 @@ class TwoStagePipeline(TextToVideoPipeline):
         video_factory = create_multimodal_guider_factory(video_guider_params, negative_context=neg_video_embeds)
         audio_factory = create_multimodal_guider_factory(audio_guider_params, negative_context=neg_audio_embeds)
 
+        teacache_controller = self._make_stage1_teacache(enable_teacache, stage1_steps, teacache_thresh)
+
+        self._pre_denoise_flush(video_state, audio_state)
         output_1 = guided_denoise_loop(
             model=x0_model,
             video_state=video_state,
@@ -277,6 +607,10 @@ class TwoStagePipeline(TextToVideoPipeline):
             video_guider_factory=video_factory,
             audio_guider_factory=audio_factory,
             sigmas=sigmas_1,
+            video_cross_attention_mask=relay_mask(F, H_half, W_half, video_state.latent.shape[1]),
+            teacache=teacache_controller,
+            tap=tap,
+            on_step=self._stepwise_hook(F, H_half, W_half, stage=1),
         )
         if self.low_memory:
             aggressive_cleanup()
@@ -285,7 +619,12 @@ class TwoStagePipeline(TextToVideoPipeline):
         self._fuse_distilled_lora(self.dit)
 
         # --- Upscale with denormalize/renormalize ---
-        video_half = self.video_patchifier.unpatchify(output_1.video_latent, (F, H_half, W_half))
+        # Strip appended keyframe tokens (multi-anchor with frame_idx>0).
+        self.generated_keyframes = extract_generated_keyframes(
+            output_1.video_latent, video_state.generated_keyframe_layout, self.video_patchifier, (H_half, W_half)
+        )
+        gen_tokens_1 = output_1.video_latent[:, : F * H_half * W_half, :]
+        video_half = self.video_patchifier.unpatchify(gen_tokens_1, (F, H_half, W_half))
 
         video_mlx = video_half.transpose(0, 2, 3, 4, 1)  # (B,C,F,H,W) -> (B,F,H,W,C)
         video_denorm = self.vae_encoder.denormalize_latent(video_mlx)
@@ -300,73 +639,96 @@ class TwoStagePipeline(TextToVideoPipeline):
         H_full = H_half * 2
         W_full = W_half * 2
 
-        # I2V conditioning at full resolution for Stage 2
-        conditionings_2: list[VideoConditionByLatentIndex] = []
-        if image is not None:
+        # I2V conditioning at full resolution for Stage 2 (re-encode at upscaled dims)
+        conditionings_2: list = []
+        if resolved_images:
             enc_h_full = H_full * 32
             enc_w_full = W_full * 32
-            img_tensor = prepare_image_for_encoding(image, enc_h_full, enc_w_full)
-            img_tensor = img_tensor[:, :, None, :, :]
-            ref_latent = self.vae_encoder.encode(img_tensor)
-            ref_tokens = ref_latent.transpose(0, 2, 3, 4, 1).reshape(1, -1, 128)
-            conditionings_2.append(
-                VideoConditionByLatentIndex(
-                    frame_indices=[0],
-                    clean_latent=ref_tokens,
-                    strength=1.0,
-                )
+            conditionings_2 = combined_image_conditionings(
+                resolved_images,
+                enc_h=enc_h_full,
+                enc_w=enc_w_full,
+                spatial_dims=(F, H_full, W_full),
+                video_encoder=self.vae_encoder,
+                frame_rate=frame_rate,
             )
 
         # Free VAE encoder + upsampler before Stage 2 denoising
         if self.low_memory:
-            self.vae_encoder = None
+            self.image_conditioner.free()
             self.upsampler = None
             aggressive_cleanup()
 
         # --- Stage 2: Refine at full resolution (no CFG) ---
         video_tokens, _ = self.video_patchifier.patchify(video_upscaled)
 
-        sigmas_2 = STAGE_2_SIGMAS[: stage2_steps + 1] if stage2_steps else STAGE_2_SIGMAS
+        sigmas_2 = shorten_schedule(STAGE_2_SIGMAS, stage2_steps, keep="tail")
         start_sigma = sigmas_2[0]
 
-        mx.random.seed(seed + 2)
-        noise = mx.random.normal(video_tokens.shape).astype(mx.bfloat16)
-        noisy_tokens = noise * start_sigma + video_tokens * (1.0 - start_sigma)
+        video_positions_2 = compute_video_positions(F, H_full, W_full, frame_rate=frame_rate)
 
-        video_positions_2 = compute_video_positions(F, H_full, W_full)
-
-        video_state_2 = LatentState(
-            latent=noisy_tokens,
-            clean_latent=video_tokens,
-            denoise_mask=mx.ones((1, video_tokens.shape[1], 1), dtype=mx.bfloat16),
+        # Stage 2 video: scalar blend BEFORE conditionings to bit-match legacy
+        # ``noise * 0.05 + video_tokens * 0.95`` Python-scalar arithmetic. Without
+        # the flag, noise_latent_state's bf16 ``mask * sigma`` blend quantizes 0.05
+        # to ~0.05005 → ~3e-3 input error → 27 dB G1 PSNR drift after VAE decode.
+        video_state_2 = create_noised_state(
+            base_shape=video_tokens.shape,
+            conditionings=conditionings_2,
+            spatial_dims=(F, H_full, W_full),
             positions=video_positions_2,
+            seed=seed + 2,
+            sigma=start_sigma,
+            initial_latent=video_tokens,
+            legacy_scalar_blend=True,
         )
 
-        if conditionings_2:
-            video_state_2 = apply_conditioning(video_state_2, conditionings_2, (F, H_full, W_full))
-
+        # Stage 2 audio: frozen conditioning, as upstream v1.4.0
+        # (``denoise_chunks(..., freeze_audio=True)``). The model sees stage 1's
+        # audio clean (sigma 0 for the audio prompt AdaLN and the A->V gate)
+        # instead of a copy re-noised at ``start_sigma``; ``frozen=True`` forces
+        # the zero noise scale and the all-zero denoise mask.
         audio_tokens_1 = output_1.audio_latent
-        audio_state_2 = LatentState(
-            latent=audio_tokens_1,
-            clean_latent=audio_tokens_1,
-            denoise_mask=mx.ones((1, audio_tokens_1.shape[1], 1), dtype=audio_tokens_1.dtype),
+        audio_state_2 = create_noised_state(
+            base_shape=audio_tokens_1.shape,
+            conditionings=[],
+            spatial_dims=(F, H_full, W_full),  # unused
             positions=audio_positions,
+            seed=seed + 2,
+            sigma=start_sigma,
+            initial_latent=audio_tokens_1,
+            frozen=True,
         )
-        audio_state_2 = noise_latent_state(audio_state_2, sigma=start_sigma, seed=seed + 2)
 
+        # Stage 2 reuses the same x0_model as stage 1 by default. With
+        # modality tiling enabled, stage 2 has a different latent shape
+        # (full resolution) so we need a fresh tiler+wrapper.
+        stage2_x0_model = x0_model
+        if self._tile_count is not None:
+            from ltx_core_mlx.components.modality_tiling import TiledLTXModel, VideoModalityTiler
+
+            tiler_2 = VideoModalityTiler(self._tile_count, latent_shape=(F, H_full, W_full))
+            stage2_x0_model = X0Model(TiledLTXModel(self.dit, tiler_2))
+
+        self._pre_denoise_flush(video_state_2, audio_state_2)
         output_2 = denoise_loop(
-            model=x0_model,
+            model=stage2_x0_model,
             video_state=video_state_2,
             audio_state=audio_state_2,
             video_text_embeds=video_embeds,
             audio_text_embeds=audio_embeds,
             sigmas=sigmas_2,
+            video_cross_attention_mask=relay_mask(F, H_full, W_full, video_state_2.latent.shape[1]),
+            on_step=self._stepwise_hook(F, H_full, W_full, stage=2),
         )
         if self.low_memory:
             aggressive_cleanup()
 
-        video_latent = self.video_patchifier.unpatchify(output_2.video_latent, (F, H_full, W_full))
-        audio_latent = self.audio_patchifier.unpatchify(output_2.audio_latent)
+        gen_tokens_2 = output_2.video_latent[:, : F * H_full * W_full, :]
+        video_latent = self.video_patchifier.unpatchify(gen_tokens_2, (F, H_full, W_full))
+        # Stage 2 refines video only; its audio is frozen context, so keep
+        # stage 1's latent rather than the loop's copy of it (upstream keeps
+        # ``chunk.audio`` for a frozen modality).
+        audio_latent = self.audio_patchifier.unpatchify(audio_tokens_1)
 
         return video_latent, audio_latent
 
@@ -376,38 +738,75 @@ class TwoStagePipeline(TextToVideoPipeline):
         output_path: str,
         height: int = 480,
         width: int = 704,
-        num_frames: int = 97,
+        num_frames: int | AutoDuration = DEFAULT_AUTO_DURATION,
+        *,
+        frame_rate: float,
         seed: int = 42,
-        stage1_steps: int = 30,
+        stage1_steps: int | None = None,
         stage2_steps: int | None = None,
         cfg_scale: float = DEFAULT_CFG_SCALE,
-        stg_scale: float = 0.0,
+        stg_scale: float = 1.0,
         image: str | None = None,
+        images=None,
         video_guider_params: MultiModalGuiderParams | None = None,
         audio_guider_params: MultiModalGuiderParams | None = None,
+        enable_teacache: bool = False,
+        teacache_thresh: float | None = None,
+        prompt_relay=None,
+        generated_keyframes: int | Sequence[int] = 0,
+        negative_prompt: str | None = None,
+        nag: NAGConfig | None = None,
     ) -> str:
-        """Generate two-stage video+audio and save to file."""
-        video_latent, audio_latent = self.generate_two_stage(
+        """Generate two-stage video+audio and save to file.
+
+        ``stage1_steps`` defaults to ``None`` so subclasses can apply
+        their own default (Euler: 30, HQ res_2s: 15) without being
+        overridden by this parent method's signature.
+
+        ``prompt_relay`` (a ``PromptRelayInput``) is forwarded only when set;
+        ``generate_two_stage`` wires the mask into both of its denoise loops.
+
+        ``negative_prompt`` is likewise forwarded only when set, so subclasses
+        whose ``generate_two_stage`` lacks the kwarg keep working. CFG-less
+        subclasses (distilled, DFR) raise ``ValueError`` when it is set without ``nag``.
+
+        ``nag`` (Normalized Attention Guidance, the CFG-less subclasses only) is forwarded
+        only when set, too.
+        """
+        gen_kwargs: dict = dict(
             prompt=prompt,
             height=height,
             width=width,
             num_frames=num_frames,
+            frame_rate=frame_rate,
             seed=seed,
-            stage1_steps=stage1_steps,
             stage2_steps=stage2_steps,
             cfg_scale=cfg_scale,
             stg_scale=stg_scale,
             image=image,
+            images=images,
             video_guider_params=video_guider_params,
             audio_guider_params=audio_guider_params,
+            enable_teacache=enable_teacache,
+            teacache_thresh=teacache_thresh,
         )
+        if stage1_steps is not None:
+            gen_kwargs["stage1_steps"] = stage1_steps
+        if prompt_relay is not None:
+            gen_kwargs["prompt_relay"] = prompt_relay
+        if negative_prompt is not None:
+            gen_kwargs["negative_prompt"] = negative_prompt
+        if nag is not None:
+            gen_kwargs["nag"] = nag
+        if has_generated_keyframes(generated_keyframes):
+            gen_kwargs["generated_keyframes"] = generated_keyframes
+        video_latent, audio_latent = self.generate_two_stage(**gen_kwargs)
 
         # Free transformer + encoder to make room for decoders
         if self.low_memory:
             self.dit = None
-            self.text_encoder = None
-            self.feature_extractor = None
-            self.vae_encoder = None
+            self.prompt_encoder.free()
+            self.image_conditioner.free()
             self.upsampler = None
             self._loaded = False
             aggressive_cleanup()
@@ -415,4 +814,15 @@ class TwoStagePipeline(TextToVideoPipeline):
         # Load decoders on-demand
         self._load_decoders()
 
-        return self._decode_and_save_video(video_latent, audio_latent, output_path)
+        result = self._decode_and_save_video(video_latent, audio_latent, output_path, frame_rate=frame_rate, seed=seed)
+
+        # Free decoders so a subsequent generate_and_save call on the same
+        # pipeline instance doesn't stack DiT (~26 GB q8) on top of decoders
+        # and OOM the 32 GB envelope.
+        if self.low_memory:
+            self.vae_decoder = None
+            self.audio_decoder = None
+            self.vocoder = None
+            aggressive_cleanup()
+
+        return result

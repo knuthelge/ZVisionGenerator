@@ -17,6 +17,8 @@ Weight keys (under ``video_embeddings_connector`` or ``audio_embeddings_connecto
 
 from __future__ import annotations
 
+import os
+
 import mlx.core as mx
 import mlx.nn as nn
 
@@ -242,6 +244,13 @@ class Embeddings1DConnector(nn.Module):
         ff_mult: Feed-forward inner dimension multiplier.
         max_pos: Maximum position for RoPE.
         norm_output: Whether to apply affine-free layer norm to the output.
+        double_precision_rope: Compute this connector's own RoPE frequency
+            grid in float64 on the CPU stream (mirrors upstream's
+            ``frequencies_precision: float64``, applied identically by
+            upstream's video/audio connector configurators); output is
+            always cast back to float32. Wired from
+            ``LTXModelConfig.from_checkpoint_dir(...).double_precision_rope``
+            at ``PromptEncoder.load()`` (utils/blocks.py).
     """
 
     def __init__(
@@ -255,6 +264,7 @@ class Embeddings1DConnector(nn.Module):
         max_pos: int = 4096,
         norm_output: bool = True,
         apply_gated_attention: bool = True,
+        double_precision_rope: bool = False,
     ):
         super().__init__()
         self.dim = dim
@@ -262,6 +272,11 @@ class Embeddings1DConnector(nn.Module):
         self.max_pos = max_pos
         self.norm_output = norm_output
         self.head_dim = head_dim
+        # Read from checkpoint config (transformer_config["frequencies_precision"]
+        # == "float64") and passed down from GemmaFeaturesExtractorV2 by
+        # PromptEncoder.load() (utils/blocks.py), mirroring upstream's
+        # video/audio connector configurators which read the same key.
+        self.double_precision_rope = double_precision_rope
 
         # Learnable register tokens — (num_registers, dim)
         self.learnable_registers = mx.zeros((num_registers, dim))
@@ -319,14 +334,27 @@ class Embeddings1DConnector(nn.Module):
             theta=10000.0,
             max_pos=[self.max_pos],
             rope_type="split",
+            double_precision=self.double_precision_rope,
         )
 
         # No attention mask for self-attention (all positions valid after register replacement)
         attn_mask = None
 
-        # Run transformer blocks
+        # Run transformer blocks. On <=48 GB Macs we materialize per
+        # block to keep each block's Metal command buffer below the
+        # macOS GPU watchdog: 8 blocks of MHA + GEGLU FF at seq_len 640
+        # otherwise concatenate into a single dispatch that exceeds the
+        # 10 s threshold under sustained system contention.
+        # Originally gated on <=48 GB, but M2 Max 64 GB also crashes at
+        # production resolutions — eval every block for all devices.
+        # LTX2_GEMMA_EVAL_EVERY=0 in env disables this (full lazy graph).
+        _connector_eval = int(os.environ.get("LTX2_GEMMA_EVAL_EVERY", "1")) > 0
+        _mx_eval = getattr(mx, "eval")  # noqa: B009 -- security hook flags mx.eval pattern
+
         for block in self.transformer_1d_blocks:
             hidden_states = block(hidden_states, rope_freqs=rope_freqs, attention_mask=attn_mask)
+            if _connector_eval:
+                _mx_eval(hidden_states)
 
         # Optional output normalization (affine-free)
         if self.norm_output:

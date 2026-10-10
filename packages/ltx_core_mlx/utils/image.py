@@ -1,8 +1,20 @@
-"""Image and video preparation utilities for VAE encoding."""
+"""Image and video preparation utilities for VAE encoding.
+
+Image-side helpers (CRF round-trip, resize+crop, normalize) live upstream-iso
+in :mod:`ltx_pipelines_mlx.utils.media_io`. The two thin shims here keep the
+historic ``prepare_image_for_encoding`` import path working — they delegate
+to ``media_io.load_image_and_preprocess`` so the actual logic isn't
+duplicated. Pipelines and new code should import from
+:mod:`ltx_pipelines_mlx.utils.media_io` directly to match upstream paths.
+
+This module also keeps :func:`load_video_frames`, the multi-frame ffmpeg
+loader for video conditioning. Audio-side decode is in
+:mod:`ltx_core_mlx.utils.audio`; ffmpeg discovery in
+:mod:`ltx_core_mlx.utils.ffmpeg`.
+"""
 
 from __future__ import annotations
 
-import math
 import subprocess
 
 import mlx.core as mx
@@ -16,40 +28,52 @@ def prepare_image_for_encoding(
     image: Image.Image | str,
     height: int,
     width: int,
+    crf: int | None = 33,
 ) -> mx.array:
-    """Load and prepare an image for VAE encoding.
+    """Legacy alias for :func:`ltx_pipelines_mlx.utils.media_io.load_image_and_preprocess`.
 
-    Resizes to (height, width), normalizes to [-1, 1], returns as (1, 3, H, W).
+    Kept as a thin import-stable shim. New call sites should import from
+    ``ltx_pipelines_mlx.utils.media_io`` directly to match upstream's
+    ``ltx_pipelines.utils.media_io.load_image_and_preprocess`` path.
 
-    Args:
-        image: PIL Image or path to image file.
-        height: Target height.
-        width: Target width.
+    Behavior identical to the upstream pipeline:
+
+    1. (str path) decode → uint8 RGB array.
+       (PIL.Image input) bypass decode, use directly.
+    2. H.264 round-trip at ``crf`` (pass ``crf=0`` to skip). The default 33
+       is the pre-2.4 value and is kept only for import-stable callers that
+       have no checkpoint to resolve against; the pipelines and the trainer's
+       validation sampler pass the CRF resolved from the checkpoint
+       (``ImageConditioner.resolve_crf`` / ``default_image_crf``). ``None``
+       raises, as upstream.
+    3. Aspect-preserving bilinear resize (on floats) + center crop to ``(height, width)``.
+    4. Normalize ``x / 127.5 - 1`` (``[-1, 1]``), ``HWC → BCHW``, bfloat16.
 
     Returns:
-        mx.array of shape (1, 3, H, W) in [-1, 1] range, bfloat16.
+        mx.array of shape ``(1, 3, H, W)`` in ``[-1, 1]``, bfloat16.
     """
+    # Imported lazily to avoid circular: media_io lives in ltx-pipelines-mlx.
+    from ltx_pipelines_mlx.utils.media_io import (
+        load_image_and_preprocess,
+        preprocess,
+        resize_and_center_crop,
+    )
+
     if isinstance(image, str):
-        image = Image.open(image)
+        return load_image_and_preprocess(image, height, width, crf=crf)
 
-    image = image.convert("RGB")
-    # Aspect-ratio-preserving resize + center crop (matches reference)
-    src_w, src_h = image.size
-    scale = max(height / src_h, width / src_w)
-    new_h = math.ceil(src_h * scale)
-    new_w = math.ceil(src_w * scale)
-    image = image.resize((new_w, new_h), Image.LANCZOS)
-    # Center crop to target size
-    crop_left = (new_w - width) // 2
-    crop_top = (new_h - height) // 2
-    image = image.crop((crop_left, crop_top, crop_left + width, crop_top + height))
+    # PIL.Image was passed directly — replicate the same pipeline manually
+    # since load_image_and_preprocess takes a path. This branch is mostly
+    # used by tests and a few internal call sites that already have a PIL
+    # object in hand.
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    arr = np.asarray(image, dtype=np.uint8)
+    arr = preprocess(arr, crf=crf)
+    cropped = resize_and_center_crop(arr, height, width)
 
-    # HWC uint8 -> float32 -> [-1, 1]
-    arr = np.array(image, dtype=np.float32) / 255.0
-    arr = arr * 2.0 - 1.0
-
-    # HWC -> CHW -> BCHW
-    tensor = mx.array(arr).transpose(2, 0, 1)[None, ...]
+    f = cropped / np.float32(127.5) - np.float32(1.0)
+    tensor = mx.array(f).transpose(2, 0, 1)[None, ...]
     return tensor.astype(mx.bfloat16)
 
 

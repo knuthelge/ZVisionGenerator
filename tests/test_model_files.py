@@ -185,8 +185,30 @@ def test_ltx_text_encoder_repo_comes_from_the_pipeline_default(monkeypatch):
     monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", None)  # import fails: fall back, but do not cache it
     assert model_files.ltx_mlx_text_encoder_repo() == model_files._LTX_MLX_TEXT_ENCODER_FALLBACK
 
-    monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", types.SimpleNamespace(TextToVideoPipeline=_Pipeline))
+    monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", types.SimpleNamespace(BasePipeline=_Pipeline))
     assert model_files.ltx_mlx_text_encoder_repo() == "org/gemma-new"
+
+
+@pytest.mark.parametrize(
+    ("present", "expected"),
+    [
+        (["transformer-distilled.safetensors"], "transformer-distilled.safetensors"),
+        (["transformer-distilled.safetensors", "transformer-distilled-1.1.safetensors"], "transformer-distilled-1.1.safetensors"),
+        (["transformer-distilled-1.0.safetensors", "transformer-distilled-1.1.safetensors"], "transformer-distilled-1.1.safetensors"),
+        (
+            ["transformer.safetensors", "transformer-distilled.safetensors", "transformer-distilled-1.1.safetensors"],
+            "transformer.safetensors",
+        ),
+        ([], None),
+    ],
+)
+def test_ltx_transformer_file_follows_the_pipeline_choice(tmp_path, present, expected):
+    for name in present:
+        _touch(tmp_path / name)
+
+    found = model_files.ltx_mlx_transformer_file(tmp_path)
+
+    assert (found.name if found else None) == expected
 
 
 def test_precision_variants_are_ignored_next_to_plain_weights(tmp_path):

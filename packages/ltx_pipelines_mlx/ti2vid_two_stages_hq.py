@@ -1,6 +1,6 @@
 """HQ two-stage pipeline — res_2s second-order sampler for Stage 1.
 
-Same architecture as TwoStagePipeline but uses the res_2s second-order sampler
+Same architecture as TI2VidTwoStagesPipeline but uses the res_2s second-order sampler
 instead of Euler for Stage 1 denoising, producing higher quality at fewer steps.
 Supports guidance (CFG/STG) with the res_2s sampler.
 
@@ -9,33 +9,74 @@ Ported from ltx-pipelines/src/ltx_pipelines/ti2vid_two_stages_hq.py
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import mlx.core as mx
+from mlx_arsenal.diffusion import TeaCacheController
 
 from ltx_core_mlx.components.guiders import (
     MultiModalGuiderParams,
     create_multimodal_guider_factory,
 )
-from ltx_core_mlx.components.patchifiers import compute_video_latent_shape
-from ltx_core_mlx.conditioning.types.latent_cond import (
-    LatentState,
-    VideoConditionByLatentIndex,
-    apply_conditioning,
-    create_initial_state,
-    noise_latent_state,
+from ltx_core_mlx.components.patchifiers import (
+    compute_video_latent_shape,
+    snap_output_dimensions,
 )
+from ltx_core_mlx.conditioning.types.keyframe_slots import extract_generated_keyframes
 from ltx_core_mlx.model.transformer.model import X0Model
-from ltx_core_mlx.utils.image import prepare_image_for_encoding
 from ltx_core_mlx.utils.memory import aggressive_cleanup
 from ltx_core_mlx.utils.positions import compute_audio_positions, compute_audio_token_count, compute_video_positions
-from ltx_pipelines_mlx.scheduler import STAGE_2_SIGMAS, ltx2_schedule
-from ltx_pipelines_mlx.ti2vid_two_stages import DEFAULT_CFG_SCALE, TwoStagePipeline
-from ltx_pipelines_mlx.utils.samplers import denoise_loop, res2s_denoise_loop
+from ltx_pipelines_mlx.scheduler import STAGE_2_SIGMAS, ltx2_schedule, shorten_schedule
+from ltx_pipelines_mlx.ti2vid_two_stages import DEFAULT_CFG_SCALE, TI2VidTwoStagesPipeline
+from ltx_pipelines_mlx.utils.helpers import create_noised_state, generated_keyframe_conditionings
+from ltx_pipelines_mlx.utils.samplers import res2s_denoise_loop
+from ltx_pipelines_mlx.utils.types import DEFAULT_AUTO_DURATION, AutoDuration
+
+# TeaCache calibration constants for the HQ res_2s path (LTX-2 stage 1, 30
+# steps, 384x576x65 reference shape, MLX bf16 q8). Calibrated 2026-04-27 from
+# a 5-prompt run (145 deltas) via scripts/calibrate_teacache.py --hq. The
+# robust fitter (scripts/fit_teacache_poly.py) picked degree 1.
+#
+# res_2s has fundamentally different per-step dynamics from Euler:
+# - SDE noise injection between stage 1 and stage 2 inflates delta_in
+#   (HQ median 0.66 vs Euler median 0.08).
+# - Pearson(delta_in, delta_out) is 0.62 here vs Euler's 0.41 — the polynomial
+#   is more predictive, justifying a more aggressive default threshold.
+# - The pol(delta) values cluster around 0.8 because delta_in is large and
+#   the slope is ~1.27, which produces a "cliff" in skip-rate vs threshold:
+#   below ~0.8 nothing skips; at ~1.0 most steps skip. Default 1.0 lands at
+#   the sweet spot (~52% skip per simulation, ~2x speedup expected).
+LTX2_HQ_TEACACHE_COEFFICIENTS: list[float] = [
+    1.2692083808655041,
+    -0.033401134092491416,
+]
+LTX2_HQ_TEACACHE_THRESH: float = 1.0  # tune per use case
 
 
-class TwoStageHQPipeline(TwoStagePipeline):
+def _build_hq_teacache_controller(num_steps: int, thresh: float | None) -> TeaCacheController:
+    """Construct an HQ-specific TeaCacheController.
+
+    Mirrors :func:`ltx_pipelines_mlx.ti2vid_two_stages._build_teacache_controller`
+    but uses ``LTX2_HQ_TEACACHE_COEFFICIENTS`` / ``LTX2_HQ_TEACACHE_THRESH``
+    so res_2s gets coefficients fit on its own dynamics.
+    """
+    if not LTX2_HQ_TEACACHE_COEFFICIENTS:
+        raise RuntimeError(
+            "TeaCache coefficients for the LTX-2 HQ path are not calibrated yet — "
+            "run scripts/calibrate_teacache.py --hq to generate them, then paste "
+            "the values into LTX2_HQ_TEACACHE_COEFFICIENTS in this file."
+        )
+    return TeaCacheController(
+        num_steps=num_steps,
+        rel_l1_thresh=thresh if thresh is not None else LTX2_HQ_TEACACHE_THRESH,
+        coefficients=LTX2_HQ_TEACACHE_COEFFICIENTS,
+    )
+
+
+class TI2VidTwoStagesHQPipeline(TI2VidTwoStagesPipeline):
     """HQ two-stage generation with res_2s second-order sampler.
 
-    Inherits from TwoStagePipeline and overrides Stage 1 to use the res_2s
+    Inherits from TI2VidTwoStagesPipeline and overrides Stage 1 to use the res_2s
     sampler for higher quality at fewer steps. Stage 2 is identical.
 
     Args:
@@ -47,28 +88,64 @@ class TwoStageHQPipeline(TwoStagePipeline):
         distilled_lora_strength: LoRA fusion strength.
     """
 
+    def _make_stage1_teacache(
+        self, enable_teacache: bool, stage1_steps: int, teacache_thresh: float | None
+    ) -> TeaCacheController | None:
+        """Same as the Euler base, with the coefficients calibrated on res_2s."""
+        if not enable_teacache:
+            return None
+        controller = _build_hq_teacache_controller(stage1_steps, teacache_thresh)
+        controller.reset()
+        return controller
+
     def generate_two_stage(
         self,
         prompt: str,
         height: int = 480,
         width: int = 704,
-        num_frames: int = 97,
+        num_frames: int | AutoDuration = DEFAULT_AUTO_DURATION,
+        *,
+        frame_rate: float,
         seed: int = 42,
         stage1_steps: int = 15,
         stage2_steps: int | None = None,
         cfg_scale: float = DEFAULT_CFG_SCALE,
         stg_scale: float = 0.0,
         image: str | None = None,
+        images=None,
+        prompt_relay=None,
+        negative_prompt: str | None = None,
+        generated_keyframes: int | Sequence[int] = 0,
         video_guider_params: MultiModalGuiderParams | None = None,
         audio_guider_params: MultiModalGuiderParams | None = None,
+        enable_teacache: bool = False,
+        teacache_thresh: float | None = None,
+        tap: callable | None = None,
     ) -> tuple[mx.array, mx.array]:
         """Generate video using HQ two-stage pipeline with res_2s sampler.
 
-        Same as TwoStagePipeline.generate_two_stage but uses res_2s sampler
-        for Stage 1 instead of Euler.
+        Same as TI2VidTwoStagesPipeline.generate_two_stage but uses res_2s sampler
+        for Stage 1 instead of Euler. ``enable_teacache`` / ``teacache_thresh``
+        / ``tap`` are forwarded to ``res2s_denoise_loop`` exactly as in the
+        Euler path. ``num_frames`` may be an :class:`AutoDuration` request,
+        resolved after prompt encoding (see :meth:`TI2VidTwoStagesPipeline.generate_two_stage`).
+        ``negative_prompt`` has the same semantics as in the parent (``None`` =
+        ``DEFAULT_NEGATIVE_PROMPT``).
         """
-        # --- Text encoding ---
-        video_embeds, audio_embeds, neg_video_embeds, neg_audio_embeds = self._encode_text_with_negative(prompt)
+        self._require_num_frames_source(num_frames)
+        self._require_generated_keyframes_support(generated_keyframes)
+        self._check_teacache_supported(enable_teacache)
+
+        # --- Text encoding (Prompt Relay: encode the combined prompt) ---
+        encode_prompt, relay_token_ranges = self._prompt_relay_setup(prompt, prompt_relay)
+        video_embeds, audio_embeds, neg_video_embeds, neg_audio_embeds = self._encode_text_with_negative(
+            encode_prompt, negative_prompt
+        )
+        num_frames = self._resolve_num_frames(
+            num_frames, video_encoding=video_embeds, audio_encoding=audio_embeds, frame_rate=frame_rate
+        )
+        num_text_tokens = video_embeds.shape[1]
+        relay_mask = self._prompt_relay_mask_builder(prompt_relay, relay_token_ranges, num_text_tokens)
 
         # --- Load DiT + VAE encoder + upsampler ---
         if self.dit is None:
@@ -83,39 +160,68 @@ class TwoStageHQPipeline(TwoStagePipeline):
         assert self.upsampler is not None
 
         # --- Stage 1: Half resolution with res_2s sampler + guidance ---
+        # Snap to the two-stage grid (multiples of 64) and report if it changed.
+        height, width = snap_output_dimensions(height, width, two_stage=True)
         half_h, half_w = height // 2, width // 2
         F, H_half, W_half = compute_video_latent_shape(num_frames, half_h, half_w)
         video_shape = (1, F * H_half * W_half, 128)
-        audio_T = compute_audio_token_count(num_frames)
+        audio_T = compute_audio_token_count(num_frames, frame_rate=frame_rate)
         audio_shape = (1, audio_T, 128)
 
-        video_positions_1 = compute_video_positions(F, H_half, W_half)
+        video_positions_1 = compute_video_positions(F, H_half, W_half, frame_rate=frame_rate)
         audio_positions = compute_audio_positions(audio_T)
 
-        video_state = create_initial_state(video_shape, seed, positions=video_positions_1)
-        audio_state = create_initial_state(audio_shape, seed + 1, positions=audio_positions)
+        # I2V conditioning at half resolution. ``images`` is the upstream-iso
+        # multi-anchor list; ``image`` is the legacy single-image shorthand
+        # (frame_idx=0, strength=1.0).
+        from ltx_pipelines_mlx.utils._orchestration import combined_image_conditionings
+        from ltx_pipelines_mlx.utils.args import ImageConditioningInput, resolve_frame_indices
 
-        # I2V conditioning at half resolution
         enc_h_half = H_half * 32
         enc_w_half = W_half * 32
-        conditionings_1: list[VideoConditionByLatentIndex] = []
-        if image is not None:
-            img_tensor = prepare_image_for_encoding(image, enc_h_half, enc_w_half)
-            img_tensor = img_tensor[:, :, None, :, :]
-            ref_latent = self.vae_encoder.encode(img_tensor)
-            ref_tokens = ref_latent.transpose(0, 2, 3, 4, 1).reshape(1, -1, 128)
-            conditionings_1.append(
-                VideoConditionByLatentIndex(
-                    frame_indices=[0],
-                    clean_latent=ref_tokens,
-                    strength=1.0,
-                )
+        resolved_images = list(images) if images else []
+        if image is not None and not resolved_images:
+            resolved_images = [ImageConditioningInput(path=image, frame_idx=0, strength=1.0)]
+        resolved_images = resolve_frame_indices(resolved_images, num_frames)
+        # Unset CRFs take the checkpoint generation's value (upstream ``resolve_crf``).
+        resolved_images = self.image_conditioner.resolve_crf(resolved_images)
+        conditionings_1: list = []
+        if resolved_images:
+            conditionings_1 = combined_image_conditionings(
+                resolved_images,
+                enc_h=enc_h_half,
+                enc_w=enc_w_half,
+                spatial_dims=(F, H_half, W_half),
+                video_encoder=self.vae_encoder,
+                frame_rate=frame_rate,
             )
+        conditionings_1 = [
+            *conditionings_1,
+            *generated_keyframe_conditionings(generated_keyframes, num_frames, frame_rate=frame_rate),
+        ]
 
-        if conditionings_1:
-            video_state = apply_conditioning(video_state, conditionings_1, (F, H_half, W_half))
-            video_state = noise_latent_state(video_state, sigma=1.0, seed=seed)
-            audio_state = noise_latent_state(audio_state, sigma=1.0, seed=seed + 1)
+        # Stage 1 video/audio: legacy_scalar_blend=True for bit-exact match
+        # (see ti2vid_two_stages.py for rationale).
+        video_state = create_noised_state(
+            base_shape=video_shape,
+            conditionings=conditionings_1,
+            spatial_dims=(F, H_half, W_half),
+            positions=video_positions_1,
+            seed=seed,
+            sigma=1.0,
+            initial_latent=None,
+            legacy_scalar_blend=True,
+        )
+        audio_state = create_noised_state(
+            base_shape=audio_shape,
+            conditionings=[],
+            spatial_dims=(F, H_half, W_half),  # unused
+            positions=audio_positions,
+            seed=seed + 1,
+            sigma=1.0,
+            initial_latent=None,
+            legacy_scalar_blend=True,
+        )
 
         # Stage 1 sigma schedule (dynamic for dev model)
         num_tokens = F * H_half * W_half
@@ -144,6 +250,8 @@ class TwoStageHQPipeline(TwoStagePipeline):
         audio_factory = create_multimodal_guider_factory(audio_guider_params, negative_context=neg_audio_embeds)
 
         # Stage 1: res_2s with guidance
+        teacache_controller = self._make_stage1_teacache(enable_teacache, stage1_steps, teacache_thresh)
+        self._pre_denoise_flush(video_state, audio_state)
         output_1 = res2s_denoise_loop(
             model=x0_model,
             video_state=video_state,
@@ -153,6 +261,10 @@ class TwoStageHQPipeline(TwoStagePipeline):
             sigmas=sigmas_1,
             video_guider_factory=video_factory,
             audio_guider_factory=audio_factory,
+            video_cross_attention_mask=relay_mask(F, H_half, W_half, video_state.latent.shape[1]),
+            teacache=teacache_controller,
+            tap=tap,
+            on_step=self._stepwise_hook(F, H_half, W_half, stage=1),
         )
         if self.low_memory:
             aggressive_cleanup()
@@ -161,7 +273,14 @@ class TwoStageHQPipeline(TwoStagePipeline):
         self._fuse_distilled_lora(self.dit)
 
         # --- Upscale with denormalize/renormalize ---
-        video_half = self.video_patchifier.unpatchify(output_1.video_latent, (F, H_half, W_half))
+        # Strip any appended keyframe tokens (multi-anchor with frame_idx>0
+        # appends via VideoConditionByKeyframeIndex; only the base
+        # F*H*W tokens are spatial latent we need to unpatchify).
+        self.generated_keyframes = extract_generated_keyframes(
+            output_1.video_latent, video_state.generated_keyframe_layout, self.video_patchifier, (H_half, W_half)
+        )
+        gen_tokens_1 = output_1.video_latent[:, : F * H_half * W_half, :]
+        video_half = self.video_patchifier.unpatchify(gen_tokens_1, (F, H_half, W_half))
 
         video_mlx = video_half.transpose(0, 2, 3, 4, 1)
         video_denorm = self.vae_encoder.denormalize_latent(video_mlx)
@@ -176,72 +295,81 @@ class TwoStageHQPipeline(TwoStagePipeline):
         H_full = H_half * 2
         W_full = W_half * 2
 
-        # I2V conditioning at full resolution for Stage 2
-        conditionings_2: list[VideoConditionByLatentIndex] = []
-        if image is not None:
+        # I2V conditioning at full resolution for Stage 2 (re-encode at upscaled dims)
+        conditionings_2: list = []
+        if resolved_images:
             enc_h_full = H_full * 32
             enc_w_full = W_full * 32
-            img_tensor = prepare_image_for_encoding(image, enc_h_full, enc_w_full)
-            img_tensor = img_tensor[:, :, None, :, :]
-            ref_latent = self.vae_encoder.encode(img_tensor)
-            ref_tokens = ref_latent.transpose(0, 2, 3, 4, 1).reshape(1, -1, 128)
-            conditionings_2.append(
-                VideoConditionByLatentIndex(
-                    frame_indices=[0],
-                    clean_latent=ref_tokens,
-                    strength=1.0,
-                )
+            conditionings_2 = combined_image_conditionings(
+                resolved_images,
+                enc_h=enc_h_full,
+                enc_w=enc_w_full,
+                spatial_dims=(F, H_full, W_full),
+                video_encoder=self.vae_encoder,
+                frame_rate=frame_rate,
             )
 
         if self.low_memory:
-            self.vae_encoder = None
+            self.image_conditioner.free()
             self.upsampler = None
             aggressive_cleanup()
 
         # --- Stage 2: Refine at full resolution (no CFG) ---
         video_tokens, _ = self.video_patchifier.patchify(video_upscaled)
 
-        sigmas_2 = STAGE_2_SIGMAS[: stage2_steps + 1] if stage2_steps else STAGE_2_SIGMAS
+        sigmas_2 = shorten_schedule(STAGE_2_SIGMAS, stage2_steps, keep="tail")
         start_sigma = sigmas_2[0]
 
-        mx.random.seed(seed + 2)
-        noise = mx.random.normal(video_tokens.shape).astype(mx.bfloat16)
-        noisy_tokens = noise * start_sigma + video_tokens * (1.0 - start_sigma)
+        video_positions_2 = compute_video_positions(F, H_full, W_full, frame_rate=frame_rate)
 
-        video_positions_2 = compute_video_positions(F, H_full, W_full)
-
-        video_state_2 = LatentState(
-            latent=noisy_tokens,
-            clean_latent=video_tokens,
-            denoise_mask=mx.ones((1, video_tokens.shape[1], 1), dtype=mx.bfloat16),
+        # Stage 2 video: legacy_scalar_blend=True bit-matches the legacy inline
+        # ``noise * sigma + video_tokens * (1 - sigma)`` arithmetic.
+        video_state_2 = create_noised_state(
+            base_shape=video_tokens.shape,
+            conditionings=conditionings_2,
+            spatial_dims=(F, H_full, W_full),
             positions=video_positions_2,
+            seed=seed + 2,
+            sigma=start_sigma,
+            initial_latent=video_tokens,
+            legacy_scalar_blend=True,
         )
 
-        if conditionings_2:
-            video_state_2 = apply_conditioning(video_state_2, conditionings_2, (F, H_full, W_full))
-
+        # Stage 2 audio: default (mask path) matches legacy noise_latent_state.
         audio_tokens_1 = output_1.audio_latent
-        audio_state_2 = LatentState(
-            latent=audio_tokens_1,
-            clean_latent=audio_tokens_1,
-            denoise_mask=mx.ones((1, audio_tokens_1.shape[1], 1), dtype=audio_tokens_1.dtype),
+        audio_state_2 = create_noised_state(
+            base_shape=audio_tokens_1.shape,
+            conditionings=[],
+            spatial_dims=(F, H_full, W_full),  # unused
             positions=audio_positions,
+            seed=seed + 2,
+            sigma=start_sigma,
+            initial_latent=audio_tokens_1,
         )
-        audio_state_2 = noise_latent_state(audio_state_2, sigma=start_sigma, seed=seed + 2)
 
-        # Stage 2: simple denoising (no CFG)
-        output_2 = denoise_loop(
+        # Stage 2: res_2s without guidance, as upstream (``SimpleDenoiser`` +
+        # ``res2s_audio_video_denoising_loop`` on the stage-2 distilled sigmas).
+        self._pre_denoise_flush(video_state_2, audio_state_2)
+        output_2 = res2s_denoise_loop(
             model=x0_model,
             video_state=video_state_2,
             audio_state=audio_state_2,
             video_text_embeds=video_embeds,
             audio_text_embeds=audio_embeds,
             sigmas=sigmas_2,
+            video_cross_attention_mask=relay_mask(F, H_full, W_full, video_state_2.latent.shape[1]),
+            on_step=self._stepwise_hook(F, H_full, W_full, stage=2),
         )
         if self.low_memory:
             aggressive_cleanup()
 
-        video_latent = self.video_patchifier.unpatchify(output_2.video_latent, (F, H_full, W_full))
-        audio_latent = self.audio_patchifier.unpatchify(output_2.audio_latent)
+        # Strip appended keyframe tokens before unpatchify (see stage 1).
+        gen_tokens_2 = output_2.video_latent[:, : F * H_full * W_full, :]
+        video_latent = self.video_patchifier.unpatchify(gen_tokens_2, (F, H_full, W_full))
+        # Stage 2 refines video only; discard its audio and keep stage 1's
+        # (upstream ti2vid_two_stages.py: ``video_state, _ = self.stage_2(...)``
+        # then decodes the stage-1 ``audio_state``). Stage 2 still runs the
+        # audio modality as model context for the joint forward.
+        audio_latent = self.audio_patchifier.unpatchify(audio_tokens_1)
 
         return video_latent, audio_latent

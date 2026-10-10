@@ -114,6 +114,10 @@ class TextEncoderConnector(nn.Module):
         ff_mult: Feed-forward multiplier.
         max_pos: Maximum position for RoPE.
         norm_output: Whether to normalize connector output.
+        double_precision_rope: Compute both connectors' RoPE frequency grids
+            in float64 (mirrors upstream's ``frequencies_precision:
+            float64``, applied identically to video and audio connector
+            configurators upstream).
     """
 
     def __init__(
@@ -130,6 +134,7 @@ class TextEncoderConnector(nn.Module):
         ff_mult: float = 4.0,
         max_pos: int = 4096,
         norm_output: bool = True,
+        double_precision_rope: bool = False,
     ):
         super().__init__()
 
@@ -150,6 +155,7 @@ class TextEncoderConnector(nn.Module):
             ff_mult=ff_mult,
             max_pos=max_pos,
             norm_output=norm_output,
+            double_precision_rope=double_precision_rope,
         )
 
         self.audio_embeddings_connector = Embeddings1DConnector(
@@ -161,6 +167,7 @@ class TextEncoderConnector(nn.Module):
             ff_mult=ff_mult,
             max_pos=max_pos,
             norm_output=norm_output,
+            double_precision_rope=double_precision_rope,
         )
 
     def __call__(
@@ -178,12 +185,14 @@ class TextEncoderConnector(nn.Module):
         Returns:
             Tuple of (video_embeds, audio_embeds).
         """
-        # Project to separate video/audio dimensions
+        # Project to separate video/audio dimensions. The TextEmbeddingProjection's
+        # built-in _materialize splits the giant 188160→4096 matmul into
+        # video and audio dispatches on <=48 GB Macs.
         video_embeds, audio_embeds = self.text_embedding_projection(hidden_states)
 
-        # Refine through transformer connectors
+        # Refine through transformer connectors. Embeddings1DConnector
+        # materializes per-block on <=48 GB Macs (see embeddings_connector.py).
         video_embeds = self.video_embeddings_connector(video_embeds, attention_mask=attention_mask)
-        _materialize(video_embeds)
         audio_embeds = self.audio_embeddings_connector(audio_embeds, attention_mask=attention_mask)
 
         return video_embeds, audio_embeds
@@ -210,6 +219,14 @@ class GemmaFeaturesExtractorV2(nn.Module):
         num_connector_layers: Connector transformer layers.
         num_registers: Number of learnable registers.
         norm_type: Normalization type for hidden states.
+        double_precision_rope: Compute the video/audio connectors' RoPE
+            frequency grids in float64 (mirrors upstream's
+            ``frequencies_precision: float64``). Wired from
+            ``LTXModelConfig.from_checkpoint_dir(model_dir).double_precision_rope``
+            by ``PromptEncoder.load()`` (ltx_pipelines_mlx/utils/blocks.py) —
+            same checkpoint field the DiT reads, applied to the connector too
+            since upstream's video AND audio connector configurators read it
+            independently.
     """
 
     def __init__(
@@ -224,6 +241,7 @@ class GemmaFeaturesExtractorV2(nn.Module):
         num_connector_layers: int = 8,
         num_registers: int = 128,
         norm_type: str = "per_token_rms",
+        double_precision_rope: bool = False,
     ):
         super().__init__()
         self.norm_type = norm_type
@@ -240,6 +258,7 @@ class GemmaFeaturesExtractorV2(nn.Module):
             audio_head_dim=audio_head_dim,
             num_layers=num_connector_layers,
             num_registers=num_registers,
+            double_precision_rope=double_precision_rope,
         )
 
     def __call__(

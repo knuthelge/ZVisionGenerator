@@ -59,6 +59,7 @@ class SDOps:
 
     name: str
     mapping: tuple[ContentReplacement | ContentMatching | SDKeyValueOperation, ...] = ()
+    allowed_keys: frozenset[str] | None = None
 
     def with_replacement(self, content: str, replacement: str) -> SDOps:
         """Create a new SDOps with an additional key replacement."""
@@ -69,6 +70,14 @@ class SDOps:
         """Create a new SDOps with an additional prefix/suffix filter."""
         new_mapping = (*self.mapping, ContentMatching(prefix, suffix))
         return replace(self, mapping=new_mapping)
+
+    def with_additional_allowed_keys(self, keys: frozenset[str]) -> SDOps:
+        """Create a new SDOps that only passes keys in *keys* (post-replacement).
+
+        If allowed_keys is already set, the sets are merged via union.
+        """
+        merged = frozenset(keys) | self.allowed_keys if self.allowed_keys is not None else frozenset(keys)
+        return replace(self, allowed_keys=merged)
 
     def with_kv_operation(
         self,
@@ -94,6 +103,10 @@ class SDOps:
                 continue
             if replacement.content in key:
                 key = key.replace(replacement.content, replacement.replacement)
+
+        if self.allowed_keys is not None and key not in self.allowed_keys:
+            return None
+
         return key
 
     def apply_to_key_value(self, key: str, value: mx.array) -> list[KeyValueOperationResult]:
@@ -124,7 +137,26 @@ LTXV_LORA_COMFY_RENAMING_MAP = (
     .with_replacement(".to_out.0.", ".to_out.")
     .with_replacement(".ff.net.0.proj.", ".ff.proj_in.")
     .with_replacement(".ff.net.2.", ".ff.proj_out.")
+    # Audio/joint-block keys: moved here from _remap_lora_keys in ti2vid_two_stages.py
+    # so the BlockLoraSource streaming path (which uses this map directly) gets the
+    # same remappings as the non-streaming path.
+    .with_replacement(".linear_1.", ".linear1.")
+    .with_replacement(".linear_2.", ".linear2.")
+    .with_replacement("audio_ff.net.0.proj.", "audio_ff.proj_in.")
+    .with_replacement("audio_ff.net.2.", "audio_ff.proj_out.")
 )
+
+# Block-key prefix that ``LTXV_LORA_COMFY_RENAMING_MAP`` produces.
+#
+# The map strips ``diffusion_model.`` but never adds ``transformer.``, so a
+# renamed key is ``transformer_blocks.N.<param>.lora_{A,B}.weight``. The
+# streaming LoRA path (``BlockLoraSource``) keeps a delta only if its renamed
+# key starts with the ``block_prefix`` it is given — so every streaming call
+# site MUST pass this constant, not the ``transformer.``-prefixed model-weight
+# prefix used by ``BlockStreamer`` (whose keys come from ``transformer.safetensors``
+# and genuinely carry the ``transformer.`` prefix). Mixing the two silently
+# drops every delta, making the LoRA a no-op (#52).
+LTXV_LORA_BLOCK_PREFIX = "transformer_blocks."
 
 LTXV_LORA_COMFY_TARGET_MAP = (
     SDOps("LTXV_LORA_COMFY_TARGET_MAP")

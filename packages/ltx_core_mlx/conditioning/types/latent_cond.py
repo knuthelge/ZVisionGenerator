@@ -5,9 +5,40 @@ Ported from ltx-core/src/ltx_core/conditioning/latent.py
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import mlx.core as mx
+
+
+@dataclass(frozen=True)
+class GeneratedKeyframeLayout:
+    """Where a state's generated-keyframe slot tokens live, and what they represent.
+
+    Recorded by :class:`~ltx_core_mlx.conditioning.types.keyframe_slots.VideoGeneratedKeyframeSlots`
+    when it appends the slots, so they can later be located *exactly* rather than assumed to be
+    the trailing tokens (items are applied in list order and each appends to the end).
+
+    Attributes:
+        pixel_frame_indices: Target pixel-frame index of each slot, in token order.
+        tokens_per_keyframe: Tokens one slot occupies (one latent frame's worth).
+        first_token: Index of the first slot token in the token sequence.
+    """
+
+    pixel_frame_indices: tuple[int, ...]
+    tokens_per_keyframe: int
+    first_token: int
+
+    @property
+    def num_keyframes(self) -> int:
+        return len(self.pixel_frame_indices)
+
+    @property
+    def num_tokens(self) -> int:
+        return self.num_keyframes * self.tokens_per_keyframe
+
+    @property
+    def token_slice(self) -> slice:
+        return slice(self.first_token, self.first_token + self.num_tokens)
 
 
 @dataclass
@@ -20,6 +51,20 @@ class LatentState:
         denoise_mask: Per-token mask: 1.0 = denoise (generate), 0.0 = preserve.
         positions: Positional indices (B, N, num_axes) or None.
         attention_mask: Self-attention mask (B, N, N) with values in [0,1], or None.
+        keyframes_mask: Optional per-token marker (B, N, 1), same layout as ``denoise_mask``,
+            non-zero on tokens whose latent encodes a *single standalone pixel frame*: the
+            target's first latent frame (the video encoder is causal, so it covers 1 pixel
+            frame while every later one covers 8) plus any generated keyframe slots. Selects
+            the tokens that receive the model's learned keyframe absolute-position embedding;
+            ignored entirely by models built without ``use_keyframes_abs_pos_embedding``.
+        generated_keyframe_layout: Set when generated keyframe slots were appended; locates them.
+        generated_keyframes: Denoised slot content as an unpatchified ``(B, C, K, H, W)``
+            latent once extracted, one latent frame per keyframe. Decode each as a standalone
+            one-frame clip, never as a K-frame video.
+        frozen: The whole stream is conditioning, not generated (upstream ``LatentState.frozen``):
+            the samplers then condition the model on sigma 0 for this modality -- its prompt
+            AdaLN and the other modality's cross-attention gate -- while its tokens are already
+            preserved by ``denoise_mask``. Conditionings that rebuild the state carry it through.
     """
 
     latent: mx.array
@@ -27,6 +72,10 @@ class LatentState:
     denoise_mask: mx.array
     positions: mx.array | None = None
     attention_mask: mx.array | None = None
+    keyframes_mask: mx.array | None = None
+    generated_keyframe_layout: GeneratedKeyframeLayout | None = None
+    generated_keyframes: mx.array | None = None
+    frozen: bool = False
 
 
 class VideoConditionByLatentIndex:
@@ -79,13 +128,11 @@ class VideoConditionByLatentIndex:
             frame_mask = mx.full((state.denoise_mask.shape[0], tokens_per_frame, 1), mask_value)
             new_mask = mx.concatenate([new_mask[:, :start, :], frame_mask, new_mask[:, end:, :]], axis=1)
 
-        return LatentState(
-            latent=new_latent,
-            clean_latent=new_clean,
-            denoise_mask=new_mask,
-            positions=state.positions,
-            attention_mask=state.attention_mask,
-        )
+        # Token count is unchanged (frames are replaced in place), so every field this
+        # item does not own stays valid: ``keyframes_mask`` (incl. the first-frame marker
+        # every 2.5 state carries), ``generated_keyframe_layout`` and ``generated_keyframes``.
+        # Upstream gets this for free by mutating ``latent_state.clone()`` in place.
+        return replace(state, latent=new_latent, clean_latent=new_clean, denoise_mask=new_mask)
 
 
 class TemporalRegionMask:
@@ -126,17 +173,33 @@ def create_initial_state(
     seed: int,
     clean_latent: mx.array | None = None,
     positions: mx.array | None = None,
+    tokens_per_frame: int | None = None,
 ) -> LatentState:
     """Create initial latent state with pure noise.
+
+    .. note::
+        Pipelines should prefer
+        :func:`ltx_pipelines_mlx.utils.helpers.create_noised_state`
+        with ``initial_latent=None`` and ``legacy_scalar_blend=True`` —
+        it produces a bit-equivalent state and aligns with the upstream
+        ``init → cond → noise`` orchestration. This primitive is kept
+        for low-level testing and for ``retake`` / ``extend`` pipelines
+        that bypass the canonical helper.
 
     Args:
         shape: (B, N, C) shape for the latent.
         seed: Random seed.
         clean_latent: Optional clean latent for conditioning.
+        positions: Optional (B, N, num_axes) positions.
+        tokens_per_frame: For a video state, the token count of one latent frame; marks the
+            first latent frame in ``keyframes_mask`` (see :class:`LatentState`). ``None`` leaves
+            the mask unset (audio states).
 
     Returns:
         Initial LatentState with noise and full denoise mask.
     """
+    from ltx_core_mlx.conditioning.mask_utils import first_frame_keyframes_mask
+
     mx.random.seed(seed)
     noise = mx.random.normal(shape).astype(mx.bfloat16)
 
@@ -144,8 +207,15 @@ def create_initial_state(
         clean_latent = mx.zeros(shape, dtype=mx.bfloat16)
 
     denoise_mask = mx.ones((shape[0], shape[1], 1), dtype=mx.bfloat16)
+    keyframes_mask = first_frame_keyframes_mask(denoise_mask, tokens_per_frame) if tokens_per_frame else None
 
-    return LatentState(latent=noise, clean_latent=clean_latent, denoise_mask=denoise_mask, positions=positions)
+    return LatentState(
+        latent=noise,
+        clean_latent=clean_latent,
+        denoise_mask=denoise_mask,
+        positions=positions,
+        keyframes_mask=keyframes_mask,
+    )
 
 
 def apply_conditioning(
@@ -154,6 +224,13 @@ def apply_conditioning(
     spatial_dims: tuple[int, int, int],
 ) -> LatentState:
     """Apply a list of conditioning items to the state.
+
+    .. note::
+        Pipelines should prefer
+        :func:`ltx_pipelines_mlx.utils.helpers.state_with_conditionings`,
+        which is identical in semantics and lives next to the rest of
+        the upstream-isomorphic orchestration helpers. This primitive
+        is kept for low-level testing.
 
     Args:
         state: Current latent state.
@@ -214,13 +291,7 @@ def noise_latent_state(
     noise = mx.random.normal(state.clean_latent.shape).astype(state.clean_latent.dtype)
     scaled_mask = state.denoise_mask * sigma
     latent = noise * scaled_mask + state.clean_latent * (1.0 - scaled_mask)
-    return LatentState(
-        latent=latent,
-        clean_latent=state.clean_latent,
-        denoise_mask=state.denoise_mask,
-        positions=state.positions,
-        attention_mask=state.attention_mask,
-    )
+    return replace(state, latent=latent)
 
 
 def add_noise_with_state(

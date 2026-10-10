@@ -40,6 +40,7 @@ dependencies = [
     "transformers>=5.19.0",
     "uvicorn>=0.54.0",
     "mlx>=0.32.2; sys_platform == 'darwin'",
+    "mlx-arsenal>=0.2.4,<0.3; sys_platform == 'darwin'",
     "mlx-lm>=0.32.0; sys_platform == 'darwin'",
     "safetensors>=0.8.0",
     "tqdm>=4.66.0",

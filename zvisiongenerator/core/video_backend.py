@@ -32,10 +32,12 @@ class VideoBackend(Protocol):
         """Load a video model. Returns (model_handle, video_model_info).
 
         The model_handle type varies by backend:
-        - LTX: Actual pipeline object, reusable across generate calls.
+        - LTX: Backend-private handle (pipeline plus frame rate and upscale mode),
+          reusable across generate calls. Callers pass it back unchanged.
 
         Backend-specific keyword arguments:
-        - LTX: mode ("t2v"|"i2v"), low_memory (bool), loras (list[tuple[str, float]]).
+        - LTX: low_memory (bool), loras (list[tuple[str, float]]), upscale (bool).
+          ``mode`` is accepted and ignored.
         """
         ...
 
