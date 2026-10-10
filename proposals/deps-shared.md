@@ -1,6 +1,6 @@
 # Dependency refresh: shared packages and the frontend
 
-**Status:** Proposed (2026-10-09)
+**Status:** Done (2026-10-10, unreleased). Shipped in `8b5daa3` (shared Python packages), `4e0c936` (frontend minors), `a477fe7` (Vite 8 and Vitest 5) and `f3a03a2` (mflux test skip). The CUDA changes are in [deps-cuda.md](deps-cuda.md).
 
 This is the first of three dependency proposals. It covers what every platform installs and runs the same way: the web server, the general Python libraries, the Hugging Face hub client, the dev tools and the frontend toolchain. The platform-specific engines are in [macOS: mflux 0.22 and a fresh LTX](deps-macos.md) and [Windows and Linux: torch 2.14, CUDA 13 and diffusers 0.41](deps-cuda.md).
 
@@ -20,7 +20,7 @@ Output of `uv tree --outdated --depth 1` (Linux and `--python-platform aarch64-a
 
 | Package | Floor in `pyproject.toml` | Locked | Latest | Notes |
 |---|---|---|---|---|
-| `hf-transfer` | `>=0.1.9` | 0.1.9 | 0.1.9 | Unused. Remove. |
+| `hf-transfer` | `>=0.1.9` | 0.1.9 | 0.1.9 | Unused. Remove. Not installed on Windows and Linux afterwards. macOS keeps it, because mflux 0.20 and 0.22 depend on it. |
 | `huggingface-hub` | `>=1.23.0` | 1.33.0 | 2.2.0 | 2.x is blocked: diffusers 0.41 and mflux 0.22 both require `<2.0`. |
 | `fastapi` | `>=0.116.0` | 0.136.1 | 0.143.0 | |
 | `uvicorn` | `>=0.35.0` | 0.46.0 | 0.54.0 | |
@@ -30,7 +30,7 @@ Output of `uv tree --outdated --depth 1` (Linux and `--python-platform aarch64-a
 | `Pillow` | `>=12.0.0` | 12.2.0 | 12.3.0 | mflux 0.22 needs `>=12.3.0`. |
 | `tqdm` | `>=4.66.0` | 4.67.3 | 4.70.1 | |
 | `pyyaml`, `ruamel-yaml`, `safetensors` | | current | | No change. |
-| `ruff` (dev) | `>=0.11.0` | 0.15.12 | 0.16.10 | A new minor can enable new default rules. |
+| `ruff` (dev) | `>=0.11.0` | 0.15.12 | 0.17.0 | A new minor can enable new default rules. The lint rule set is pinned to the pre-0.16 defaults, so the refresh doesn't change what gets checked. |
 | `pytest` (dev) | `>=9.0.2` | 9.0.3 | 9.1.1 | |
 | `mkdocs-material` (dev) | `>=9.6` | 9.7.6 | 9.7.7 | |
 
@@ -59,7 +59,7 @@ Output of `uv tree --outdated --depth 1` (Linux and `--python-platform aarch64-a
 - Raise floors to what we test against: `huggingface-hub>=1.32.0,<2.0`, `Pillow>=12.3.0`, `fastapi>=0.143.0`, `uvicorn>=0.54.0`, `python-multipart>=0.0.32`. Other floors stay as they are. They describe the oldest version that works, and the lock decides what gets installed.
 - Cap `huggingface-hub` at `<2.0` explicitly. Two of our engines already cap it, so the cap documents a fact rather than adding a restriction. It also turns a future resolver conflict into a clear pin to revisit.
 - `uv lock --upgrade-package` for each package above, plus the dev group. Don't run a blanket `uv lock --upgrade`: that would also move torch, transformers and mflux, which belong to the platform proposals and need hardware to verify.
-- Run `make lint-fix && make format` under ruff 0.16 and commit any rule fixes separately (`style:` or `chore(lint):`), so the dependency commit stays readable.
+- Run `make lint-fix && make format` under ruff 0.17 and commit any rule fixes separately (`style:` or `chore(lint):`), so the dependency commit stays readable.
 
 ### 2. Frontend, step 1: minor updates
 
@@ -72,7 +72,15 @@ A separate PR, because the bundler changes:
 - Vite 8 replaces the esbuild and Rollup pair with Rolldown. Chunk names and file hashes in the packaged SPA will change, so the drift check in `make check` will flag the whole `static/app/` folder once. That is expected.
 - `@sveltejs/vite-plugin-svelte` 7 goes with it. Review `frontend/vite.config.ts` against the Vite 8 migration guide, in particular `build.rollupOptions.input`, which Vite 8 deprecates in favour of `build.rolldownOptions`.
 - Vitest 5 and jsdom 30 together. Review `frontend/vitest.config.ts`, which relies on `globals: true`, the `browser` resolve condition and `svelte({ hot: false })`, and also `src/test-setup.ts`.
+- jsdom 30 raises the Node floor, so `engines.node` becomes `^22.22.2 || ^24.15.0 || >=26.0.0`.
 - Compare the packaged bundle size before and after and note it in the PR.
+
+What the migration needed:
+
+- `svelte({ hot: false })` is removed, because `@sveltejs/vite-plugin-svelte` 7 no longer has the option.
+- The esbuild build allowance and `pnpm-workspace.yaml` are removed, because Vite 8 no longer uses esbuild.
+- The config files use `import.meta.dirname`.
+- One test mock is typed for Vitest 5.
 
 ### 4. Not now
 
@@ -83,7 +91,22 @@ A separate PR, because the bundler changes:
 ### Docs and changelog
 
 - `CHANGELOG.md` under `[Unreleased]`: "hf-transfer is no longer installed. Downloads use Xet. Set `HF_XET_HIGH_PERFORMANCE=1` instead of `HF_HUB_ENABLE_HF_TRANSFER`."
-- Mention `HF_XET_HIGH_PERFORMANCE` wherever the docs talk about download speed. There is currently no such section, and adding one is optional.
+- Mention `HF_XET_HIGH_PERFORMANCE` wherever the docs talk about download speed. There is currently no such section, and adding one is optional. The setting saturates the network bandwidth and uses all CPU cores.
+
+## Result
+
+Bundle sizes of the packaged SPA (`static/app/`):
+
+| Stage | JavaScript | CSS |
+|---|---|---|
+| Before (`main--d-phU3s.js`, `main-CZhupi0m.css`) | 369,946 B | 113,727 B |
+| After the minors | 371,662 B | 113,597 B |
+| After Vite 8 | 359,841 B | 113,622 B |
+
+Notes from the lock refresh:
+
+- `huggingface-hub` stays at 1.33.0, the newest 1.x release.
+- `fastapi` 0.143 adds `opentelemetry-api` to the lock.
 
 ## Order across the three proposals
 
@@ -102,4 +125,4 @@ The lock is shared, so every proposal moves packages for all platforms. CI runs 
 
 ## Open questions
 
-- Whether the first-run download proposal ([first-run.md](first-run.md)) should set `HF_XET_HIGH_PERFORMANCE` for its downloads. It uses more connections and memory, and it may help most on fast links.
+- Whether the first-run download proposal ([first-run.md](first-run.md)) should set `HF_XET_HIGH_PERFORMANCE` for its downloads. It saturates the network bandwidth and uses all CPU cores, so it may help most on fast links. Whether it also raises connection counts or memory use isn't documented.

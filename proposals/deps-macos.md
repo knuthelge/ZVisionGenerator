@@ -17,7 +17,7 @@ This is one of three dependency proposals. It covers the Apple Silicon engines: 
 
 ### mflux 0.22.0 (PyPI metadata and release notes, 2026-10-09)
 
-- Requirements: `mlx>=0.32.0,<0.33`, `torch>=2.13.0,<3`, `transformers>=5.5.0,<6`, `huggingface-hub>=1.1.6,<2.0`, `pillow>=12.3.0`, `numpy>=2.0.1,<3`. torch and Pillow are raised by the other two proposals. mlx 0.32.3 is already locked.
+- Requirements: `mlx>=0.32.0,<0.33`, `torch>=2.13.0,<3`, `transformers>=5.5.0,<6`, `huggingface-hub>=1.1.6,<2.0`, `pillow>=12.3.0`, `numpy>=2.0.1,<3`. torch and Pillow are raised by the other two proposals. mlx 0.32.3 is already locked, and so are torch 2.14 and transformers 5.19 (from [deps-cuda.md](deps-cuda.md)).
 - **Every mflux internal we import still exists** in the 0.22.0 wheel:
   - model classes: `ZImageTurbo`, `Flux2Klein`, `Krea2`, `Ideogram4`
   - latent creators: Z-Image, FLUX.2, Ideogram 4
@@ -49,7 +49,7 @@ New runtime dependency: `ltx-core-mlx` and `ltx-pipelines-mlx` now require `mlx-
 
 New capabilities we would get:
 
-- **LTX-2.5** checkpoints: `dgrauet/ltx-2.5-mlx-q4` (about 51 GB) and `dgrauet/ltx-2.5-mlx-q8` (about 75 GB). Both are gated with automatic approval.
+- **LTX-2.5** checkpoints: `dgrauet/ltx-2.5-mlx-q4` (about 51 GB) and `dgrauet/ltx-2.5-mlx-q8` (about 75 GB). Both are gated with automatic approval. Decided 2026-10-10: LTX-2.5 not planned.
 - Low-RAM DiT block streaming (`low_ram_streaming=`) and unfused LoRAs that work with it.
 - Opt-in float16 DiT compute (`LTX2_COMPUTE_DTYPE`) and block-sparse stage-2 attention (`LTX2_SOL_TAU`).
 - Distilled variants of retake, extend and audio-to-video, NAG guidance, keyframe interpolation, and auto-predicted duration on 2.5.
@@ -87,7 +87,7 @@ Two PRs, mflux first because it's smaller and independent of LTX.
 
 ### Not in this proposal (follow-ups)
 
-- **LTX-2.5 aliases** (`ltx25-4`, `ltx25-8`). Re-vendoring makes them possible, and they're the most visible gain, but they need their own defaults (steps, sizes, auto duration), memory checks and docs. They're also gated, so they depend on the token handling in [first-run.md](first-run.md).
+- **LTX-2.5 aliases** (`ltx25-4`, `ltx25-8`). Re-vendoring makes them possible, and they're the most visible gain, but they need their own defaults (steps, sizes, auto duration), memory checks and docs. They're also gated, so they depend on the token handling in [first-run.md](first-run.md). Decided 2026-10-10: LTX-2.5 not planned.
 - Retake, extend, audio-to-video, keyframe interpolation and HDR in the Web UI.
 - Float16 LTX compute (`LTX2_COMPUTE_DTYPE`) and block-sparse attention as user options.
 
