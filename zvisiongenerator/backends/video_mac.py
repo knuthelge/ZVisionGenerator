@@ -2,17 +2,38 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.backends.memory_mac import memory_size_bytes, mlx_cache_limit
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 
 # Pixels per latent cell of the video VAE encoder.
 _LATENT_PIXELS = 32
 # Channel count of the LTX video and audio token streams.
 _LATENT_CHANNELS = 128
+# Macs reporting at most this much unified memory stream the transformer blocks under ``--low-memory``.
+# A Mac sold as "24 GB" reports exactly 24 GiB (25769803776 bytes), so the comparison is inclusive.
+# Larger Macs do not stream: streaming lowers the memory held while denoising but not the peak, which is set
+# while the text encoder loads, and it slows LoRA runs.
+_LOW_RAM_THRESHOLD_BYTES = 24 * 1024**3
+
+
+def _use_low_ram_streaming(low_memory: bool, memory_bytes: int | None, threshold_bytes: int = _LOW_RAM_THRESHOLD_BYTES) -> bool:
+    """Return whether the transformer should be streamed from disk.
+
+    Args:
+        low_memory: Whether the low-memory mode is requested.
+        memory_bytes: Total unified memory in bytes, or ``None`` when unknown.
+        threshold_bytes: Largest memory size, inclusive, that still streams.
+
+    Returns:
+        True only when ``low_memory`` is set and ``memory_bytes`` is known and within the threshold.
+    """
+    return low_memory and memory_bytes is not None and memory_bytes <= threshold_bytes
 
 
 @dataclass(frozen=True)
@@ -23,11 +44,14 @@ class _LtxModel:
         pipeline: ``BasePipeline`` (one-stage) or ``DistilledPipeline`` (two-stage upscale).
         frame_rate: Frames per second used for positions, audio length and the muxed output.
         upscale: Whether ``pipeline`` is the two-stage upscale pipeline.
+        low_ram_streaming: Whether the pipeline streams the transformer blocks, which also needs
+            the MLX buffer cache disabled for the duration of each generation.
     """
 
     pipeline: Any
     frame_rate: float
     upscale: bool
+    low_ram_streaming: bool
 
 
 class _TwoStageProgress:
@@ -251,10 +275,11 @@ def _generate(
     """
     if (stage1_steps is not None) != model.upscale:
         raise ValueError(f"stage1_steps must be set exactly when the model is loaded for upscale (upscale={model.upscale}, stage1_steps={stage1_steps})")
-    if stage1_steps is not None:
-        _generate_two_stage(model, prompt, width, height, num_frames, seed, stage1_steps, output_path, image_path, step_callback)
-    else:
-        _generate_one_stage(model, prompt, width, height, num_frames, seed, steps, output_path, image_path, step_callback)
+    with mlx_cache_limit(0) if model.low_ram_streaming else contextlib.nullcontext():
+        if stage1_steps is not None:
+            _generate_two_stage(model, prompt, width, height, num_frames, seed, stage1_steps, output_path, image_path, step_callback)
+        else:
+            _generate_one_stage(model, prompt, width, height, num_frames, seed, steps, output_path, image_path, step_callback)
     return Path(output_path)
 
 
@@ -284,16 +309,19 @@ class LtxVideoBackend:
         low_memory: bool = kwargs.get("low_memory", True)
         loras: list[tuple[str, float]] | None = kwargs.get("loras")
         upscale: bool = bool(kwargs.get("upscale"))
+        streaming = _use_low_ram_streaming(low_memory, memory_size_bytes())
 
         try:
-            if upscale:
-                from ltx_pipelines_mlx import DistilledPipeline
+            # The constructor sets the MLX cache limit to 0 process-wide when streaming; scope it.
+            with mlx_cache_limit(0) if streaming else contextlib.nullcontext():
+                if upscale:
+                    from ltx_pipelines_mlx import DistilledPipeline
 
-                pipeline = DistilledPipeline(model_dir=model_path, low_memory=low_memory)
-            else:
-                from ltx_pipelines_mlx import BasePipeline
+                    pipeline = DistilledPipeline(model_dir=model_path, low_memory=low_memory, low_ram_streaming=streaming)
+                else:
+                    from ltx_pipelines_mlx import BasePipeline
 
-                pipeline = BasePipeline(model_dir=model_path, low_memory=low_memory)
+                    pipeline = BasePipeline(model_dir=model_path, low_memory=low_memory, low_ram_streaming=streaming)
         except ImportError as exc:
             raise RuntimeError("Video dependency ltx-pipelines-mlx not found. Reinstall with: uv sync") from exc
 
@@ -302,7 +330,7 @@ class LtxVideoBackend:
             pipeline._pending_loras = loras  # noqa: SLF001
 
         model_info = detect_video_model(model_path)
-        return _LtxModel(pipeline=pipeline, frame_rate=float(model_info.default_fps), upscale=upscale), model_info
+        return _LtxModel(pipeline=pipeline, frame_rate=float(model_info.default_fps), upscale=upscale, low_ram_streaming=streaming), model_info
 
     def text_to_video(
         self,

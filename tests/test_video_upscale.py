@@ -15,7 +15,7 @@ import pytest
 
 from tests.conftest import _make_video_args
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.backends.video_mac import LtxVideoBackend, _LtxModel, _TwoStageProgress
+from zvisiongenerator.backends.video_mac import LtxVideoBackend, _LOW_RAM_THRESHOLD_BYTES, _LtxModel, _TwoStageProgress, _use_low_ram_streaming
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_cli import _build_video_parser, _resolve_upscale_steps
@@ -435,8 +435,8 @@ def _call_names(h) -> list[str]:
     return [c[0] for c in h.calls.method_calls if "." not in c[0]]
 
 
-def _handle(pipe, *, upscale: bool = False, frame_rate: float = _FPS) -> _LtxModel:
-    return _LtxModel(pipeline=pipe, frame_rate=frame_rate, upscale=upscale)
+def _handle(pipe, *, upscale: bool = False, frame_rate: float = _FPS, low_ram_streaming: bool = False) -> _LtxModel:
+    return _LtxModel(pipeline=pipe, frame_rate=frame_rate, upscale=upscale, low_ram_streaming=low_ram_streaming)
 
 
 def _run_one_stage(pipe, *, image_path: str | None = None, step_callback=None, steps: int = 8):
@@ -466,6 +466,8 @@ class TestLoadModel:
         base.return_value = SimpleNamespace(kind="base")
         distilled.return_value = SimpleNamespace(kind="distilled")
         monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", MagicMock(BasePipeline=base, DistilledPipeline=distilled))
+        # A large Mac: no streaming, and the real MLX cache limit is never touched.
+        monkeypatch.setattr("zvisiongenerator.backends.video_mac.memory_size_bytes", lambda: 64 * 1024**3)
         return SimpleNamespace(base=base, distilled=distilled)
 
     @pytest.mark.parametrize("mode", ["t2v", "i2v"])
@@ -473,7 +475,7 @@ class TestLoadModel:
         with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
             handle, info = LtxVideoBackend().load_model("model/path", mode=mode)
 
-        classes.base.assert_called_once_with(model_dir="model/path", low_memory=True)
+        classes.base.assert_called_once_with(model_dir="model/path", low_memory=True, low_ram_streaming=False)
         classes.distilled.assert_not_called()
         assert handle.pipeline.kind == "base"
         assert handle.upscale is False
@@ -482,7 +484,7 @@ class TestLoadModel:
         with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
             handle, _ = LtxVideoBackend().load_model("model/path", mode="i2v", upscale=True, low_memory=False)
 
-        classes.distilled.assert_called_once_with(model_dir="model/path", low_memory=False)
+        classes.distilled.assert_called_once_with(model_dir="model/path", low_memory=False, low_ram_streaming=False)
         classes.base.assert_not_called()
         assert handle.pipeline.kind == "distilled"
         assert handle.upscale is True
@@ -511,11 +513,116 @@ class TestLoadModel:
         assert isinstance(handle.frame_rate, float)
         assert returned_info is info
 
+    @pytest.mark.parametrize(
+        ("upscale", "memory_bytes", "low_memory", "expected"),
+        [
+            (False, _LOW_RAM_THRESHOLD_BYTES, True, True),
+            (True, _LOW_RAM_THRESHOLD_BYTES, True, True),
+            (False, _LOW_RAM_THRESHOLD_BYTES + 1, True, False),
+            (False, 32 * 1024**3, True, False),
+            (True, 16 * 1024**3, False, False),
+            (False, None, True, False),
+        ],
+    )
+    def test_low_ram_streaming_reaches_the_constructor_and_the_handle(self, classes, monkeypatch, upscale, memory_bytes, low_memory, expected):
+        monkeypatch.setattr("zvisiongenerator.backends.video_mac.memory_size_bytes", lambda: memory_bytes)
+        monkeypatch.setattr("zvisiongenerator.backends.video_mac.mlx_cache_limit", MagicMock())
+        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+            handle, _ = LtxVideoBackend().load_model("model/path", upscale=upscale, low_memory=low_memory)
+
+        ctor = classes.distilled if upscale else classes.base
+        ctor.assert_called_once_with(model_dir="model/path", low_memory=low_memory, low_ram_streaming=expected)
+        assert handle.low_ram_streaming is expected
+
+    def test_streaming_construction_runs_inside_the_cache_limit_scope(self, classes, monkeypatch):
+        events: list[str] = []
+        scope = MagicMock()
+        scope.return_value.__enter__.side_effect = lambda: events.append("enter")
+        scope.return_value.__exit__.side_effect = lambda *a: events.append("exit")
+        classes.base.side_effect = lambda **_: events.append("construct") or SimpleNamespace()
+        monkeypatch.setattr("zvisiongenerator.backends.video_mac.memory_size_bytes", lambda: _LOW_RAM_THRESHOLD_BYTES)
+        monkeypatch.setattr("zvisiongenerator.backends.video_mac.mlx_cache_limit", scope)
+        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+            LtxVideoBackend().load_model("model/path")
+
+        scope.assert_called_once_with(0)
+        assert events == ["enter", "construct", "exit"]
+
+    def test_non_streaming_construction_leaves_the_cache_limit_alone(self, classes, monkeypatch):
+        scope = MagicMock()
+        monkeypatch.setattr("zvisiongenerator.backends.video_mac.mlx_cache_limit", scope)
+        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+            LtxVideoBackend().load_model("model/path")
+
+        scope.assert_not_called()
+
     def test_missing_package_raises_runtime_error(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", None)  # makes the import raise ImportError
 
         with pytest.raises(RuntimeError, match="ltx-pipelines-mlx"):
             LtxVideoBackend().load_model("model/path")
+
+
+class TestLowRamStreamingGate:
+    """Verify the pure memory-size gate for transformer streaming."""
+
+    @pytest.mark.parametrize(
+        ("low_memory", "memory_bytes", "expected"),
+        [
+            (True, 24 * 1024**3, True),
+            (True, 24 * 1024**3 + 1, False),
+            (True, 32 * 1024**3, False),
+            (True, 16 * 1024**3, True),
+            (False, 16 * 1024**3, False),
+            (True, None, False),
+        ],
+    )
+    def test_gate_table(self, low_memory, memory_bytes, expected):
+        assert _use_low_ram_streaming(low_memory, memory_bytes) is expected
+
+    def test_explicit_threshold_overrides_the_default(self):
+        assert _use_low_ram_streaming(True, 24 * 1024**3, threshold_bytes=16 * 1024**3) is False
+        assert _use_low_ram_streaming(True, 32 * 1024**3, threshold_bytes=32 * 1024**3) is True
+
+
+class TestGenerationCacheLimit:
+    """Verify generation scopes the MLX cache limit only when the handle streams."""
+
+    @pytest.fixture
+    def set_limit(self, ltx):
+        ltx.mx.set_cache_limit.return_value = "previous"
+        return ltx.mx.set_cache_limit
+
+    @pytest.mark.parametrize("upscale", [False, True])
+    def test_streaming_generation_sets_zero_then_restores(self, ltx, set_limit, upscale):
+        pipe = _pipeline(ltx) if not upscale else MagicMock()
+        stage1 = 8 if upscale else None
+
+        LtxVideoBackend().text_to_video(
+            model=_handle(pipe, upscale=upscale, low_ram_streaming=True), prompt="p", width=704, height=480, num_frames=49, seed=1, steps=8, output_path="/tmp/o.mp4", stage1_steps=stage1
+        )
+
+        assert set_limit.call_args_list == [call(0), call("previous")]
+
+    @pytest.mark.parametrize("upscale", [False, True])
+    def test_non_streaming_generation_does_not_touch_the_cache_limit(self, ltx, set_limit, upscale):
+        pipe = _pipeline(ltx) if not upscale else MagicMock()
+        stage1 = 8 if upscale else None
+
+        LtxVideoBackend().text_to_video(model=_handle(pipe, upscale=upscale), prompt="p", width=704, height=480, num_frames=49, seed=1, steps=8, output_path="/tmp/o.mp4", stage1_steps=stage1)
+
+        set_limit.assert_not_called()
+
+    def test_streaming_generation_restores_when_the_pipeline_raises(self, ltx, set_limit):
+        pipe = MagicMock()
+        pipe.generate_and_save.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            LtxVideoBackend().text_to_video(
+                model=_handle(pipe, upscale=True, low_ram_streaming=True), prompt="p", width=704, height=480, num_frames=49, seed=1, steps=8, output_path="/tmp/o.mp4", stage1_steps=8
+            )
+
+        assert set_limit.call_args_list == [call(0), call("previous")]
 
 
 class TestOneStageGeneration:
