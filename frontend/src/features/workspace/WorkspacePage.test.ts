@@ -629,6 +629,39 @@ describe('WorkspacePage', () => {
     expect(document.activeElement?.closest('.settings-pane')).not.toBeNull();
   });
 
+  it('expands a collapsed sidebar with Alt+1 and Alt+2 before focusing', async () => {
+    await mountWorkspace(makeContext());
+    draft.update('sidebarCollapsed', true);
+    pressKey('1', { altKey: true, code: 'Digit1' });
+    await settle();
+    expect(draft.state.sidebarCollapsed).toBe(false);
+    expect(document.activeElement?.id).toBe('ws-prompt');
+
+    draft.update('sidebarCollapsed', true);
+    pressKey('2', { altKey: true, code: 'Digit2' });
+    await settle();
+    expect(draft.state.sidebarCollapsed).toBe(false);
+    expect(document.activeElement?.closest('.settings-pane')).not.toBeNull();
+  });
+
+  it('toggles the sidebar with Alt+Shift+1 or Alt+Shift+2, focusing the pane when it opens', async () => {
+    await mountWorkspace(makeContext());
+    expect(pressKey('!', { altKey: true, shiftKey: true, code: 'Digit1' }).defaultPrevented).toBe(true);
+    expect(draft.state.sidebarCollapsed).toBe(true);
+    pressKey('!', { altKey: true, shiftKey: true, code: 'Digit1' });
+    await settle();
+    expect(draft.state.sidebarCollapsed).toBe(false);
+    expect(document.activeElement?.id).toBe('ws-prompt');
+
+    pressKey('@', { altKey: true, shiftKey: true, code: 'Digit2' });
+    expect(draft.state.sidebarCollapsed).toBe(true);
+    pressKey('@', { altKey: true, shiftKey: true, code: 'Digit2' });
+    await settle();
+    expect(draft.state.sidebarCollapsed).toBe(false);
+    expect(document.activeElement?.closest('.settings-pane')).not.toBeNull();
+    expect(draft.state.historyCollapsed).toBe(false);
+  });
+
   function jobSnap(jobId: string, status: JobSnapshot['status'], extra: Partial<JobSnapshot> = {}): JobSnapshot {
     return {
       id: jobId, job_id: jobId, workflow: 'txt2img', job_type: 'Text to Image', status, created_at: '2026-10-04T10:00:00Z', completed_at: null,
@@ -2425,6 +2458,21 @@ describe('WorkspacePage asset actions and settings', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(draft.state.historyCollapsed).toBe(false);
     expect(document.activeElement?.getAttribute('aria-label')).toBe(`View ${newest.filename}`);
+  });
+
+  it('toggles the history strip with Alt+Shift+3, focusing the newest tile when it opens', async () => {
+    const newest = makeAsset({ id: 'out/newest.png', url: '/media/out/newest.png', filename: 'newest.png' });
+    await mountWithHistory([newest]);
+    const press = (): void => { document.dispatchEvent(new KeyboardEvent('keydown', { key: '#', code: 'Digit3', altKey: true, shiftKey: true, bubbles: true, cancelable: true })); };
+
+    press();
+    await settle();
+    expect(draft.state.historyCollapsed).toBe(true);
+    press();
+    await settle();
+    expect(draft.state.historyCollapsed).toBe(false);
+    expect(document.activeElement?.getAttribute('aria-label')).toBe(`View ${newest.filename}`);
+    expect(draft.state.sidebarCollapsed).toBe(false);
   });
 
   it('focuses the history toggle with Alt+3 when there is no history', async () => {

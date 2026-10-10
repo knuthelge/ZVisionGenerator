@@ -8,8 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 - Web UI: new Blob animations. Blob reads the prompt from a scroll while it is enhanced, paints faster with extra sparkles over the last steps of an image, nods with a check badge when a job joins the queue, holds a clapperboard instead of a brush for video, follows the pointer with its eye while idle, and bounces when clicked
+- Web UI: `Alt+⇧+1` / `Alt+⇧+2` show or hide the Workspace sidebar and `Alt+⇧+3` shows or hides the history strip, focusing the pane when it opens
 
 ### Changed
+- Web UI: `Alt+1` / `Alt+2` expand a collapsed Workspace sidebar before focusing the prompt or settings
 - Web UI: Blob blends smoothly from one mood to the next instead of snapping mid-move, keeps painting between the images of a batch instead of flickering back to thinking, and thinks rather than paints while prompts are enhanced. A paused job gets its own waiting pose with a pause badge, so it no longer looks like Blob dozing off. Blob stops cheering once the next queued job starts painting, stays awake for a minute after reacting to a finished job, and is surprised when the Workspace loses track of a job
 
 ## [0.13.0b17] - 2026-10-09

@@ -344,7 +344,12 @@
   const SETTINGS_FOCUS = ['.settings-pane :is(input, select, textarea, button):not([disabled]):not([type="hidden"])'];
   // The newest history tile, else the strip's toggle when there is no history yet.
   const HISTORY_FOCUS = ['#ws-history-scroll .asset-tile-media', '#ws-history-toggle'];
-  const PANE_FOCUS: Readonly<Record<string, readonly string[]>> = { Digit1: COMPOSE_FOCUS, Digit2: SETTINGS_FOCUS, Digit3: HISTORY_FOCUS };
+  // Each Alt+digit pane: the draft flag that collapses it (Compose and Settings share the sidebar) and its focus targets.
+  const PANES: Readonly<Record<string, { collapsedKey: 'sidebarCollapsed' | 'historyCollapsed'; focus: readonly string[] }>> = {
+    Digit1: { collapsedKey: 'sidebarCollapsed', focus: COMPOSE_FOCUS },
+    Digit2: { collapsedKey: 'sidebarCollapsed', focus: SETTINGS_FOCUS },
+    Digit3: { collapsedKey: 'historyCollapsed', focus: HISTORY_FOCUS },
+  };
 
   function focusFirst(selectors: readonly string[]): void {
     for (const selector of selectors) {
@@ -353,12 +358,19 @@
     }
   }
 
-  async function focusHistory(): Promise<void> {
-    if (draft.state.historyCollapsed) {
-      draft.update('historyCollapsed', false);
+  async function focusPane(code: string): Promise<void> {
+    const { collapsedKey, focus } = PANES[code];
+    if (draft.state[collapsedKey]) {
+      draft.update(collapsedKey, false);
       await tick();
     }
-    focusFirst(HISTORY_FOCUS);
+    focusFirst(focus);
+  }
+
+  function togglePane(code: string): void {
+    const { collapsedKey } = PANES[code];
+    if (draft.state[collapsedKey]) void focusPane(code);
+    else draft.update(collapsedKey, true);
   }
 
   async function deleteWorkspaceAsset(asset: GalleryAsset, options: DeleteOptions = {}): Promise<void> {
@@ -499,7 +511,8 @@
         loadError = e instanceof Error ? e.message : 'Failed to load workspace context';
       });
 
-    // ⌘↵ / Ctrl↵ generates; with ⇧ a locked seed is re-rolled first. Alt+1 / 2 / 3 jump to Compose / Settings / History.
+    // ⌘↵ / Ctrl↵ generates; with ⇧ a locked seed is re-rolled first. Alt+1 / 2 / 3 open and focus Compose / Settings / History;
+    // with ⇧ they toggle that pane instead, focusing it when it opens.
     function handleKeydown(e: KeyboardEvent): void {
       // The full-screen viewer covers the form; generating behind it would be a surprise.
       if (e.defaultPrevented || lightboxOpen || hasOpenModal()) return;
@@ -511,11 +524,11 @@
         (document.activeElement as HTMLElement | null)?.blur?.();
         if (e.shiftKey && draft.state.seed !== null) draft.update('seed', randomSeed());
         void tick().then(() => formEl?.requestSubmit());
-      } else if (e.altKey && !isCommandKey(e) && !e.shiftKey && e.code in PANE_FOCUS) {
+      } else if (e.altKey && !isCommandKey(e) && e.code in PANES) {
         // `code`, not `key`: Alt+1 types "¡" on a Mac keyboard.
         e.preventDefault();
-        if (e.code === 'Digit3') void focusHistory();
-        else focusFirst(PANE_FOCUS[e.code]);
+        if (e.shiftKey) togglePane(e.code);
+        else void focusPane(e.code);
       }
     }
     document.addEventListener('keydown', handleKeydown);

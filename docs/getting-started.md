@@ -148,8 +148,10 @@ Workspace:
 | `⌘↵` | Generate |
 | `⌘⇧↵` | Generate with a new seed (re-rolls a locked seed) |
 | `⌘E` | Enhance the prompt |
-| `Alt+1` / `Alt+2` | Focus the prompt / the settings |
+| `Alt+1` / `Alt+2` | Focus the prompt / the settings (expands the sidebar) |
 | `Alt+3` | Focus the newest history tile (expands the strip; `←` / `→` move between tiles) |
+| `Alt+⇧+1` / `Alt+⇧+2` | Show or hide the sidebar (focuses the prompt / the settings when shown) |
+| `Alt+⇧+3` | Show or hide the history strip (focuses the newest tile when shown) |
 | `Esc` | Stop the running job |
 | `P` | Pause or resume the running job |
 | `N` | Skip to the next image |
