@@ -110,6 +110,8 @@ export const APP_SHORTCUTS: readonly ShortcutGroup[] = [
       { keys: ['Alt+1'], label: 'Focus the prompt' },
       { keys: ['Alt+2'], label: 'Focus the settings' },
       { keys: ['Alt+3'], label: 'Focus the history' },
+      { keys: ['Alt+⇧+1', 'Alt+⇧+2'], label: 'Show or hide the sidebar' },
+      { keys: ['Alt+⇧+3'], label: 'Show or hide the history' },
       { keys: ['Esc'], label: 'Stop the running job' },
       { keys: ['P'], label: 'Pause or resume the running job' },
       { keys: ['N'], label: 'Skip to the next image' },
