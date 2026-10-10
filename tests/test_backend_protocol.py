@@ -188,6 +188,7 @@ class TestLoadModelGuard:
     """Backends must raise RuntimeError if generation is called without load_model()."""
 
     def test_mflux_text_to_image_without_load_model(self):
+        pytest.importorskip("mflux")
         from zvisiongenerator.backends.image_mac import MfluxBackend
 
         backend = MfluxBackend()
@@ -203,6 +204,7 @@ class TestLoadModelGuard:
             )
 
     def test_mflux_image_to_image_without_load_model(self):
+        pytest.importorskip("mflux")
         from zvisiongenerator.backends.image_mac import MfluxBackend
 
         backend = MfluxBackend()
