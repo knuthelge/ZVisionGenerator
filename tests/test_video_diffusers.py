@@ -181,6 +181,22 @@ def test_load_model_rejects_missing_cuda(monkeypatch):
         backend.load_model("dg845/LTX-2.3-Diffusers", mode="t2v")
 
 
+@pytest.mark.parametrize(("cuda_version", "expects_hint"), [("13.0", True), ("12.6", False), (None, False)])
+def test_missing_cuda_error_asks_for_a_driver_update_only_for_cuda_13_builds(monkeypatch, cuda_version, expects_hint):
+    from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
+
+    backend = DiffusersVideoBackend()
+    monkeypatch.setattr(
+        "zvisiongenerator.backends.video_diffusers._load_runtime_dependencies",
+        lambda: _make_runtime(torch=_FakeTorch(cuda_available=False, cuda_version=cuda_version)),
+    )
+
+    with pytest.raises(RuntimeError, match="CUDA is not available") as excinfo:
+        backend.load_model("dg845/LTX-2.3-Diffusers", mode="t2v")
+
+    assert (cuda_driver_hint(False, "13.0") in str(excinfo.value)) is expects_hint
+
+
 def test_load_model_prefers_runtime_classes_and_configures_pipeline(monkeypatch):
     backend = DiffusersVideoBackend()
     runtime = _make_runtime()
@@ -344,6 +360,71 @@ def test_load_model_applies_lora_weights(monkeypatch, tmp_path):
 
     assert model.text_to_video.loaded_loras == [(str(lora_path), "lora_0")]
     assert model.text_to_video.adapter_calls == [(["lora_0"], [0.75])]
+
+
+class _LoraNoMatchPipeline(_FakeTextPipeline):
+    """A pipeline whose LoRA loads raise *error* for the paths in *unmatched* and drop its offload hook when they do."""
+
+    unmatched: tuple[str, ...] = ()
+    error: type[Exception] = ValueError
+
+    def __init__(self):
+        super().__init__()
+        self.transformer = SimpleNamespace(_hf_hook=object())
+
+    def load_lora_weights(self, path: str, adapter_name: str | None = None) -> None:
+        self.transformer._hf_hook = None
+        if path in self.unmatched:
+            raise self.error("no module matches")
+        super().load_lora_weights(path, adapter_name=adapter_name)
+
+
+def _write_loras(tmp_path, *names):
+    paths = []
+    for name in names:
+        path = tmp_path / name
+        path.write_text("weights", encoding="utf-8")
+        paths.append(str(path))
+    return paths
+
+
+def test_a_lora_matching_no_layer_is_skipped_with_a_warning(monkeypatch, tmp_path, fake_peft_no_match):
+    first, second = _write_loras(tmp_path, "other-model.safetensors", "style.safetensors")
+    _LoraNoMatchPipeline.unmatched = (first,)
+    _LoraNoMatchPipeline.error = fake_peft_no_match
+    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: _make_runtime(text_pipeline=_LoraNoMatchPipeline))
+
+    with pytest.warns(UserWarning, match="other-model.safetensors: none of its LoRA tensors match"):
+        model, _ = DiffusersVideoBackend().load_model("dg845/LTX-2.3-Diffusers", mode="t2v", loras=[(first, 1.0), (second, 0.5)])
+
+    assert model.text_to_video.loaded_loras == [(second, "lora_1")]
+    assert model.text_to_video.adapter_calls == [(["lora_1"], [0.5])]
+
+
+@pytest.mark.parametrize(("low_memory", "restored"), [(True, True), (False, False)])
+def test_offload_hooks_are_restored_after_loras_load_only_in_low_memory_mode(monkeypatch, tmp_path, fake_peft_no_match, low_memory, restored):
+    (path,) = _write_loras(tmp_path, "other-model.safetensors")
+    _LoraNoMatchPipeline.unmatched = (path,)
+    _LoraNoMatchPipeline.error = fake_peft_no_match
+    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: _make_runtime(text_pipeline=_LoraNoMatchPipeline))
+    enable_calls: list[bool] = []
+    monkeypatch.setattr(_LoraNoMatchPipeline, "enable_model_cpu_offload", lambda self: enable_calls.append(True))
+
+    with pytest.warns(UserWarning):
+        DiffusersVideoBackend().load_model("dg845/LTX-2.3-Diffusers", mode="t2v", low_memory=low_memory, loras=[(path, 1.0)])
+
+    # low_memory enables offload once while configuring the pipeline; the restore adds a second call.
+    assert len(enable_calls) == (2 if restored else 0)
+
+
+def test_other_lora_load_errors_still_fail_the_load(monkeypatch, tmp_path, fake_peft_no_match):
+    (path,) = _write_loras(tmp_path, "bad.safetensors")
+    _LoraNoMatchPipeline.unmatched = (path,)
+    _LoraNoMatchPipeline.error = ValueError
+    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: _make_runtime(text_pipeline=_LoraNoMatchPipeline))
+
+    with pytest.raises(RuntimeError, match="Failed to load LoRA"):
+        DiffusersVideoBackend().load_model("dg845/LTX-2.3-Diffusers", mode="t2v", loras=[(path, 1.0)])
 
 
 def test_load_model_rejects_missing_or_unsupported_lora(monkeypatch, tmp_path):

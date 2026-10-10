@@ -5,8 +5,8 @@
 - Python 3.14+
 - [uv](https://docs.astral.sh/uv/) package manager (**required** — pip is not supported)
 - **macOS:** Apple Silicon (M1+) — mflux requires MLX
-- **Windows:** NVIDIA GPU with CUDA support
-- **Linux:** NVIDIA GPU with CUDA support
+- **Windows:** NVIDIA GPU, RTX 20-series (Turing) or newer including RTX 50-series, with NVIDIA driver 580 or newer
+- **Linux:** NVIDIA GPU, RTX 20-series (Turing) or newer including RTX 50-series, with NVIDIA driver 580 or newer
 - **Video:** ffmpeg
 
 ## Installation
@@ -25,7 +25,7 @@ uv sync
 
 > **uv is required.** This package cannot be installed with pip — some dependencies require uv-specific resolution that pip does not support.
 
-> **Note:** Video generation requires ffmpeg. On Windows and Linux, image and video generation use diffusers/CUDA and fail fast when PyTorch cannot see an NVIDIA CUDA device.
+> **Note:** Video generation requires ffmpeg. On Windows and Linux, image and video generation use diffusers/CUDA and fail fast when PyTorch cannot see an NVIDIA CUDA device. If the error mentions the driver, update the NVIDIA driver to 580 or newer.
 
 ## Quick Start
 

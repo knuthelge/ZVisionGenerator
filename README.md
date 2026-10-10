@@ -54,7 +54,7 @@ git clone https://github.com/knuthelge/ZVisionGenerator && cd ZVisionGenerator
 uv sync
 ```
 
-> Video generation requires [ffmpeg](https://ffmpeg.org/). On Windows and Linux, image and video generation require an NVIDIA GPU with CUDA available to PyTorch.
+> Video generation requires [ffmpeg](https://ffmpeg.org/). On Windows and Linux, image and video generation require an RTX 20-series (Turing) or newer NVIDIA GPU, including RTX 50-series, with NVIDIA driver 580 or newer, so that CUDA is available to PyTorch.
 
 > The packaged Windows/Linux `ltx-2.3` alias defaults to the configurable diffusers-converted repository `dg845/LTX-2.3-Diffusers`. This is the diffusers-compatible layout required by the Windows/Linux video backend, not an official Lightricks alias. Override it in `~/.ziv/config.yaml` if you want to point `ltx-2.3` at a different compatible diffusers repository.
 

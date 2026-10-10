@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
+from zvisiongenerator.backends.lora_peft import is_unmatched_adapter_error, restore_cpu_offload, warn_unmatched_lora
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 
 _MINIMUM_DIFFUSERS_VERSION = (0, 37, 1)
@@ -128,7 +130,9 @@ def _validate_cuda(runtime: _RuntimeDependencies) -> None:
 
     torch = runtime.torch
     if not torch.cuda.is_available() or getattr(getattr(torch, "version", None), "cuda", None) is None:
-        raise RuntimeError(f"CUDA is not available. The {_platform_label()} diffusers video backend requires an NVIDIA GPU with CUDA support.")
+        message = f"CUDA is not available. The {_platform_label()} diffusers video backend requires an NVIDIA GPU with CUDA support."
+        hint = cuda_driver_hint(False, getattr(getattr(torch, "version", None), "cuda", None))
+        raise RuntimeError(f"{message} {hint}" if hint else message)
 
 
 def _configure_torch_runtime(torch: Any) -> None:
@@ -258,8 +262,12 @@ def _export_video(model: _LoadedVideoModel, frames: list[Any], output_path: str)
     return Path(output_path)
 
 
-def _apply_loras(pipeline: Any, loras: list[tuple[str, float]]) -> None:
-    """Load diffusers-compatible LoRA adapters onto the active generation pipeline."""
+def _apply_loras(pipeline: Any, loras: list[tuple[str, float]], *, cpu_offload: bool = False) -> None:
+    """Load diffusers-compatible LoRA adapters onto the active generation pipeline.
+
+    A LoRA none of whose tensors match the pipeline is skipped with a warning. When *cpu_offload* is set, model CPU
+    offload is turned back on if loading a LoRA left it off.
+    """
 
     if not hasattr(pipeline, "load_lora_weights"):
         raise RuntimeError("The installed diffusers LTX pipeline does not support LoRA adapters.")
@@ -283,11 +291,15 @@ def _apply_loras(pipeline: Any, loras: list[tuple[str, float]]) -> None:
         except TypeError as exc:
             raise RuntimeError(f"The installed diffusers LoRA API is incompatible with '{path}'.") from exc
         except Exception as exc:
+            if is_unmatched_adapter_error(exc):
+                warn_unmatched_lora(path)
+                continue
             raise RuntimeError(f"Failed to load LoRA '{path}': {exc}") from exc
 
         adapter_names.append(adapter_name)
         adapter_weights.append(weight)
 
+    restore_cpu_offload(pipeline, enabled=cpu_offload)
     if not adapter_names:
         return
 
@@ -394,7 +406,7 @@ class DiffusersVideoBackend:
 
         active_pipeline = text_pipeline or image_pipeline
         if loras:
-            _apply_loras(active_pipeline, loras)
+            _apply_loras(active_pipeline, loras, cpu_offload=low_memory)
 
         latent_upscaler = None
         if upscale:

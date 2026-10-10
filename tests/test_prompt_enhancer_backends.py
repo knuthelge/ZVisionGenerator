@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import types
+import warnings
 from unittest.mock import MagicMock
 
 import pytest
@@ -150,6 +151,37 @@ class TestTransformersAdapter:
             TransformersPromptEnhancer("owner/repo", None)
 
         assert "expandable_segments:True" in (seen["conf"] or "")
+
+    @pytest.mark.parametrize(("cuda_version", "expects_hint"), [("13.0", True), ("12.6", False), (None, False)])
+    def test_cpu_fallback_asks_for_a_driver_update_only_for_cuda_13_builds(self, monkeypatch, cuda_version, expects_hint):
+        torch = pytest.importorskip("torch")
+        transformers = pytest.importorskip("transformers")
+        from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
+        from zvisiongenerator.backends.prompt_enhancer_win import TransformersPromptEnhancer
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+        monkeypatch.setattr(torch.version, "cuda", cuda_version)
+        monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", MagicMock(side_effect=OSError("offline")))
+        with warnings.catch_warnings(record=True) as caught, pytest.raises(RuntimeError):
+            warnings.simplefilter("always")
+            TransformersPromptEnhancer("owner/repo", None)
+
+        messages = [str(w.message) for w in caught]
+        assert (f"The prompt enhancer runs on the CPU. {cuda_driver_hint(False, '13.0')}" in messages) is expects_hint
+
+    def test_cuda_load_does_not_warn_about_the_driver(self, monkeypatch):
+        torch = pytest.importorskip("torch")
+        transformers = pytest.importorskip("transformers")
+        from zvisiongenerator.backends.prompt_enhancer_win import TransformersPromptEnhancer
+
+        monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+        monkeypatch.setattr(torch.version, "cuda", "13.0")
+        monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", MagicMock(side_effect=OSError("offline")))
+        with warnings.catch_warnings(record=True) as caught, pytest.raises(RuntimeError):
+            warnings.simplefilter("always")
+            TransformersPromptEnhancer("owner/repo", None)
+
+        assert not [w for w in caught if "prompt enhancer runs on the CPU" in str(w.message)]
 
     def test_cpu_load_has_no_quantization(self, monkeypatch):
         torch = pytest.importorskip("torch")

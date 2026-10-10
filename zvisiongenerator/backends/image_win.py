@@ -12,7 +12,9 @@ import torch
 from PIL import Image
 from diffusers import AutoPipelineForText2Image
 
+from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
 from zvisiongenerator.backends.image_win_preview import LivePreview, create_live_preview
+from zvisiongenerator.backends.lora_peft import is_unmatched_adapter_error, restore_cpu_offload, warn_unmatched_lora
 from zvisiongenerator.backends.memory_cuda import configure_allocator
 from zvisiongenerator.backends.image_win_quant import load_fp8_components, load_nf4_components, write_fp8_copy
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
@@ -37,7 +39,7 @@ def _krea2_guidance_scale(guidance: float) -> float:
     return max(guidance - 1.0, 0.0)
 
 
-# Krea2Pipeline's fixed timestep shift for Krea 2 Turbo. Copied from diffusers 0.40's Krea2Pipeline.__call__,
+# Krea2Pipeline's fixed timestep shift for Krea 2 Turbo. Copied from diffusers 0.41's Krea2Pipeline.__call__,
 # which does not expose it: recheck it when upgrading diffusers.
 _KREA2_TURBO_MU = 1.15
 
@@ -121,13 +123,14 @@ def _text_encoder_offload_type(text_encoder: Any) -> str:
     return "block_level" if has_block_list else "leaf_level"
 
 
-def _load_loras(pipeline: Any, lora_paths: list[str], lora_weights: list[float] | None) -> None:
+def _load_loras(pipeline: Any, lora_paths: list[str], lora_weights: list[float] | None, *, cpu_offload: bool = False) -> None:
     """Load LoRA files onto *pipeline*: through diffusers, with LoKr layers added as adapter terms.
 
     A file without LoKr tensors goes to diffusers by path, so its metadata (such as ``lora_alpha``) applies. A file
     with LoKr tensors is split: the rest goes to diffusers, the LoKr layers to :func:`apply_lokr` once every
     standard LoRA has loaded, so diffusers always finds the layers it expects. LoKr layers that do not map onto the
-    model are skipped with a warning, as mflux does.
+    model are skipped with a warning, as mflux does. A file none of whose tensors match the model is skipped with a warning. When *cpu_offload*
+    is set, model CPU offload is turned back on if loading a LoRA left it off.
     """
     from safetensors.torch import load_file
 
@@ -146,6 +149,7 @@ def _load_loras(pipeline: Any, lora_paths: list[str], lora_weights: list[float] 
             adapter_weights.append(weight)
     if adapter_names:
         pipeline.set_adapters(adapter_names, adapter_weights=adapter_weights)
+    restore_cpu_offload(pipeline, enabled=cpu_offload)
     for path, parts, weight in lokr_files:
         skipped = apply_lokr(pipeline, parts.lokr, weight, pin_memory=True)
         if skipped:
@@ -184,7 +188,10 @@ def _load_lora_file(pipeline: Any, path: str, parts: Any, adapter_name: str) -> 
     try:
         pipeline.load_lora_weights(path if parts is None else parts.rest, adapter_name=adapter_name)
         return _has_adapter(pipeline, adapter_name, path)
-    except ValueError:
+    except ValueError as exc:
+        if is_unmatched_adapter_error(exc):
+            warn_unmatched_lora(path)
+            return False
         if parts is None and path.endswith(".safetensors"):
             parts = split_lora_tensors(load_file(path))
         if parts is None or not parts.unsupported:
@@ -192,7 +199,13 @@ def _load_lora_file(pipeline: Any, path: str, parts: Any, adapter_name: str) -> 
     warnings.warn(f"LoRA {Path(path).name}: skipped {len(parts.unsupported)} tensors of an unsupported type (e.g. {parts.unsupported[0]}).", stacklevel=3)
     if not parts.lora:
         return False
-    pipeline.load_lora_weights(parts.lora, adapter_name=adapter_name)
+    try:
+        pipeline.load_lora_weights(parts.lora, adapter_name=adapter_name)
+    except ValueError as exc:
+        if not is_unmatched_adapter_error(exc):
+            raise
+        warn_unmatched_lora(path)
+        return False
     return _has_adapter(pipeline, adapter_name, path)
 
 
@@ -203,7 +216,7 @@ def _has_adapter(pipeline: Any, adapter_name: str, path: str) -> bool:
     """
     if any(adapter_name in names for names in pipeline.get_list_adapters().values()):
         return True
-    warnings.warn(f"LoRA {Path(path).name}: none of its LoRA tensors match this model; they were not applied.", stacklevel=3)
+    warn_unmatched_lora(path)
     return False
 
 
@@ -290,7 +303,9 @@ class DiffusersBackend:
         lora_weights: list[float] | None = None,
     ) -> tuple[Any, "ImageModelInfo"]:
         if not torch.cuda.is_available():
-            raise RuntimeError("CUDA is not available. The diffusers/CUDA image backend requires an NVIDIA GPU with CUDA support on Windows and Linux.")
+            message = "CUDA is not available. The diffusers/CUDA image backend requires an NVIDIA GPU with CUDA support on Windows and Linux."
+            hint = cuda_driver_hint(False, getattr(torch.version, "cuda", None))
+            raise RuntimeError(f"{message} {hint}" if hint else message)
         dtype_map = {
             "bfloat16": torch.bfloat16,
             "float16": torch.float16,
@@ -320,7 +335,7 @@ class DiffusersBackend:
             _stream_to_gpu(pipeline, torch_dtype)
 
         if lora_paths:
-            _load_loras(pipeline, lora_paths, lora_weights)
+            _load_loras(pipeline, lora_paths, lora_weights, cpu_offload=bits == 4 and model_info.family in _Q4_CPU_OFFLOAD_FAMILIES)
 
         # Decode in slices and tiles to bound VAE memory. Called on the VAE itself: some pipelines (Krea 2) have no
         # enable_vae_tiling wrapper and would otherwise decode the whole frame at once.

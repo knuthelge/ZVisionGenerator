@@ -6,12 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Windows/Linux: RTX 50-series (Blackwell) GPUs are supported
+
 ### Changed
 - Web server and shared libraries updated (FastAPI 0.143, uvicorn 0.54, python-multipart 0.0.32, Pillow 12.3, huggingface-hub ≥1.32)
 - Building the web frontend from source needs Node.js 22.22.2+, 24.15+ or 26+ (contributors only; the packaged app is unaffected)
+- Windows/Linux: torch 2.14 with CUDA 13.0, diffusers 0.41.0, transformers 5.19, accelerate 1.15, bitsandbytes 0.50, peft 0.21; images can differ slightly for the same seed
+- Windows/Linux: NVIDIA driver 580+ and an RTX 20-series or newer GPU are required (GTX 900/10-series, Titan V and V100 are no longer supported); the CUDA error and the prompt enhancer's CPU fallback say to update the driver
+- Windows/Linux: stored q4/q8 copies are rebuilt once after updating
 
 ### Removed
 - Windows/Linux: `hf-transfer` is no longer installed; downloads use Xet. Set `HF_XET_HIGH_PERFORMANCE=1` instead of `HF_HUB_ENABLE_HF_TRANSFER` for faster downloads
+
+### Fixed
+- Windows/Linux: LTX-2.3 video failed to load (`cannot import name 'Gemma4UnifiedForConditionalGeneration'`) because the installed transformers was too old
+- Windows/Linux: a LoRA that matches none of the model's layers is skipped with a warning instead of failing the job
 
 ## [0.13.0b18] - 2026-10-10
 
