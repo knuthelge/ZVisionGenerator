@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 resolution-markers = [
     "sys_platform != 'darwin'",
@@ -47,12 +47,30 @@ wheels = [
 name = "anyio"
 version = "4.13.0"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "sys_platform != 'darwin'",
+]
 dependencies = [
     { name = "idna" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/19/14/2c5dd9f512b66549ae92767a9c7b330ae88e1932ca57876909410251fe13/anyio-4.13.0.tar.gz", hash = "sha256:334b70e641fd2221c1505b3890c69882fe4a2df910cba14d97019b90b24439dc", size = 231622, upload-time = "2026-03-24T12:59:09.671Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/da/42/e921fccf5015463e32a3cf6ee7f980a6ed0f395ceeaa45060b61d86486c2/anyio-4.13.0-py3-none-any.whl", hash = "sha256:08b310f9e24a9594186fd75b4f73f4a4152069e3853f1ed8bfbf58369f4ad708", size = 114353, upload-time = "2026-03-24T12:59:08.246Z" },
+]
+
+[[package]]
+name = "anyio"
+version = "4.14.2"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "sys_platform == 'darwin'",
+]
+dependencies = [
+    { name = "idna" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/61/cc/a381afa6efea9f496eff839d4a6a1aed3bfafc7b3ab4b0d1b243a12573dd/anyio-4.14.2.tar.gz", hash = "sha256:cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f", size = 260176, upload-time = "2026-07-12T20:29:07.082Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/da/35/f2287558c17e29fafc8ef3daf819bb9834061cfa43bff8014f7df7f63bdc/anyio-4.14.2-py3-none-any.whl", hash = "sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494", size = 125813, upload-time = "2026-07-12T20:29:05.763Z" },
 ]
 
 [[package]]
@@ -318,9 +336,24 @@ wheels = [
 name = "fsspec"
 version = "2026.4.0"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "sys_platform != 'darwin'",
+]
 sdist = { url = "https://files.pythonhosted.org/packages/d5/8d/1c51c094345df128ca4a990d633fe1a0ff28726c9e6b3c41ba65087bba1d/fsspec-2026.4.0.tar.gz", hash = "sha256:301d8ac70ae90ef3ad05dcf94d6c3754a097f9b5fe4667d2787aa359ec7df7e4", size = 312760, upload-time = "2026-04-29T20:42:38.635Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d5/0c/043d5e551459da400957a1395e0febbf771446ff34291afcbe3d8be2a279/fsspec-2026.4.0-py3-none-any.whl", hash = "sha256:11ef7bb35dab8a394fde6e608221d5cf3e8499401c249bebaeaad760a1a8dec2", size = 203402, upload-time = "2026-04-29T20:42:36.842Z" },
+]
+
+[[package]]
+name = "fsspec"
+version = "2026.9.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "sys_platform == 'darwin'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/77/cd/9be253869fc42e764de7f3dedd6969af7d44ff9c3375214a3442a6f3fc08/fsspec-2026.9.0.tar.gz", hash = "sha256:0f08147951c8cb31d844c3547d631053b127863b60be04cf06e121333ee0e2fe", size = 333545, upload-time = "2026-09-18T17:50:42.825Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6c/c0/a98505f18594f1bce828bb159cec0fcf9860562f1a2c85913409fc8f3d9e/fsspec-2026.9.0-py3-none-any.whl", hash = "sha256:8dd6e646e99ea382bd85f97a45e6b526a442d79423a7dc673f1e2756d05fcb5f", size = 221738, upload-time = "2026-09-18T17:50:41.341Z" },
 ]
 
 [[package]]
@@ -396,7 +429,8 @@ name = "httpx"
 version = "0.28.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio" },
+    { name = "anyio", version = "4.13.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin'" },
+    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "certifi" },
     { name = "httpcore" },
     { name = "idna" },
@@ -413,7 +447,8 @@ source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "filelock" },
-    { name = "fsspec" },
+    { name = "fsspec", version = "2026.4.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin'" },
+    { name = "fsspec", version = "2026.9.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
     { name = "hf-xet", marker = "platform_machine == 'AMD64' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'arm64' or platform_machine == 'x86_64'" },
     { name = "httpx" },
     { name = "packaging" },
@@ -576,11 +611,13 @@ wheels = [
 
 [[package]]
 name = "mflux"
-version = "0.20.0"
+version = "0.22.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" } },
     { name = "filelock" },
     { name = "fonttools" },
+    { name = "fsspec", version = "2026.9.0", source = { registry = "https://pypi.org/simple" } },
     { name = "hf-transfer" },
     { name = "huggingface-hub" },
     { name = "matplotlib" },
@@ -601,11 +638,11 @@ dependencies = [
     { name = "torch", version = "2.14.1", source = { registry = "https://pypi.org/simple" } },
     { name = "tqdm" },
     { name = "transformers" },
-    { name = "urllib3" },
+    { name = "urllib3", version = "2.8.0", source = { registry = "https://pypi.org/simple" } },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7f/08/33ff2acce0f84e51f6c86b6a8d33b4e6703ef485a5d9c40a9e1ebe9af797/mflux-0.20.0.tar.gz", hash = "sha256:8fec3407bbc821cfba9cebd8ae55e35450b9429ec9b5445c9557aaeb78087de0", size = 998374, upload-time = "2026-09-21T17:32:05.081Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/14/eb/4b735bf57dfcf0aea6ff0ad95d81852759b76f64a0b641422d279e36b74c/mflux-0.22.0.tar.gz", hash = "sha256:8a9a9c92c47ed4a35d8e7e962ca684ef6c81c1350b943044962aa0b9cd4e5790", size = 1104393, upload-time = "2026-10-08T11:03:59.509Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c4/a8/c281e949682c317e6c551931bd536c495e2ac88d7b7eae2c306f9de45821/mflux-0.20.0-py3-none-any.whl", hash = "sha256:5d60a278d67289be0da2e4ba0e8dcf938dd3c676a01c9064f64e3fb10e30767d", size = 1351276, upload-time = "2026-09-21T17:32:03.425Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/32/0f6d908fa4c0baa2c40ef883b5d9b9519718338c82660d7444b3b9c59cb8/mflux-0.22.0-py3-none-any.whl", hash = "sha256:b3c863f1e64718f1fed657448307d00a5702870b9e8fce18c547f5a16f9851dd", size = 1487763, upload-time = "2026-10-08T11:03:57.988Z" },
 ]
 
 [[package]]
@@ -695,7 +732,7 @@ wheels = [
 
 [[package]]
 name = "mlx-lm"
-version = "0.31.3"
+version = "0.32.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jinja2" },
@@ -706,9 +743,9 @@ dependencies = [
     { name = "sentencepiece" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/84/94/9a38d6b0c6fcca995b9136c94eb7da1e9c5165652edf228b96b29960fa7a/mlx_lm-0.31.3.tar.gz", hash = "sha256:61eb0e3ba09444f77f874aff295401d7ccd20b39495cbbce0c782a15474ce733", size = 304318, upload-time = "2026-04-22T07:37:27.922Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/96/6f/c87a4e092194c77b39e65de7979147314e4486d9451e873b4124ba2d6dcd/mlx_lm-0.32.0.tar.gz", hash = "sha256:035ca44b08c3476630a205d2c9bdea26825a6a8359f974944d4985230e41859f", size = 412082, upload-time = "2026-10-01T04:44:42.681Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/90/02/9a67b8e4f87e3e2e5cd7b1ad79304b93c09a0db6af34bee75e6551c06c60/mlx_lm-0.31.3-py3-none-any.whl", hash = "sha256:758cfddf1180053b7613db76fad3d246a331a2a905808e1164a275621fc983b8", size = 408890, upload-time = "2026-04-22T07:37:25.965Z" },
+    { url = "https://files.pythonhosted.org/packages/88/ed/99cd7d36a1671851b41df06b59b73825bb95b8ab8b388ac871ddf9ae1523/mlx_lm-0.32.0-py3-none-any.whl", hash = "sha256:9a0f3843135fd88d36ad791f0d82210cdc4130c5c1cb5416f5f0c4b56a135778", size = 513667, upload-time = "2026-10-01T04:44:40.74Z" },
 ]
 
 [[package]]
@@ -1333,7 +1370,8 @@ dependencies = [
     { name = "certifi" },
     { name = "charset-normalizer" },
     { name = "idna" },
-    { name = "urllib3" },
+    { name = "urllib3", version = "2.7.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin'" },
+    { name = "urllib3", version = "2.8.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5f/a4/98b9c7c6428a668bf7e42ebb7c79d576a1c3c1e3ae2d47e674b468388871/requests-2.33.1.tar.gz", hash = "sha256:18817f8c57c6263968bc123d237e3b8b08ac046f5456bd1e307ee8f4250d3517", size = 134120, upload-time = "2026-03-30T16:09:15.531Z" }
 wheels = [
@@ -1508,7 +1546,8 @@ name = "starlette"
 version = "1.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio" },
+    { name = "anyio", version = "4.13.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin'" },
+    { name = "anyio", version = "4.14.2", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'darwin'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/81/69/17425771797c36cded50b7fe44e850315d039f28b15901ab44839e70b593/starlette-1.0.0.tar.gz", hash = "sha256:6a4beaf1f81bb472fd19ea9b918b50dc3a77a6f2e190a12954b25e6ed5eea149", size = 2655289, upload-time = "2026-03-22T18:29:46.779Z" }
 wheels = [
@@ -1579,7 +1618,7 @@ resolution-markers = [
 ]
 dependencies = [
     { name = "filelock" },
-    { name = "fsspec" },
+    { name = "fsspec", version = "2026.9.0", source = { registry = "https://pypi.org/simple" } },
     { name = "jinja2" },
     { name = "networkx" },
     { name = "setuptools" },
@@ -1602,7 +1641,7 @@ dependencies = [
     { name = "cuda-bindings", marker = "python_full_version < '3.15' and sys_platform == 'linux'" },
     { name = "cuda-toolkit", extra = ["cublas", "cudart", "cufft", "cufile", "cupti", "curand", "cusolver", "cusparse", "nvjitlink", "nvrtc", "nvtx"], marker = "sys_platform == 'linux'" },
     { name = "filelock" },
-    { name = "fsspec" },
+    { name = "fsspec", version = "2026.4.0", source = { registry = "https://pypi.org/simple" } },
     { name = "jinja2" },
     { name = "networkx" },
     { name = "nvidia-cudnn-cu13", marker = "sys_platform == 'linux'" },
@@ -1712,9 +1751,24 @@ wheels = [
 name = "urllib3"
 version = "2.7.0"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "sys_platform != 'darwin'",
+]
 sdist = { url = "https://files.pythonhosted.org/packages/53/0c/06f8b233b8fd13b9e5ee11424ef85419ba0d8ba0b3138bf360be2ff56953/urllib3-2.7.0.tar.gz", hash = "sha256:231e0ec3b63ceb14667c67be60f2f2c40a518cb38b03af60abc813da26505f4c", size = 433602, upload-time = "2026-05-07T16:13:18.596Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7f/3e/5db95bcf282c52709639744ca2a8b149baccf648e39c8cc87553df9eae0c/urllib3-2.7.0-py3-none-any.whl", hash = "sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897", size = 131087, upload-time = "2026-05-07T16:13:17.151Z" },
+]
+
+[[package]]
+name = "urllib3"
+version = "2.8.0"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "sys_platform == 'darwin'",
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e3/05/b17359e1cefb4f909b5e40b1b90a496d987258916dbbf88e842c729f510e/urllib3-2.8.0.tar.gz", hash = "sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63", size = 458972, upload-time = "2026-09-15T19:29:36.253Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl", hash = "sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3", size = 135717, upload-time = "2026-09-15T19:29:34.577Z" },
 ]
 
 [[package]]
@@ -1790,9 +1844,9 @@ requires-dist = [
     { name = "diffusers", specifier = "==0.41.0" },
     { name = "fastapi", specifier = ">=0.143.0" },
     { name = "huggingface-hub", specifier = ">=1.32.0,<2.0" },
-    { name = "mflux", marker = "sys_platform == 'darwin'", specifier = ">=0.20.0,<0.21" },
-    { name = "mlx", marker = "sys_platform == 'darwin'", specifier = ">=0.31.0" },
-    { name = "mlx-lm", marker = "sys_platform == 'darwin'", specifier = ">=0.31.2" },
+    { name = "mflux", marker = "sys_platform == 'darwin'", specifier = ">=0.22.0,<0.23" },
+    { name = "mlx", marker = "sys_platform == 'darwin'", specifier = ">=0.32.2" },
+    { name = "mlx-lm", marker = "sys_platform == 'darwin'", specifier = ">=0.32.0" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "peft", marker = "sys_platform != 'darwin'", specifier = ">=0.21.2" },
     { name = "pillow", specifier = ">=12.3.0" },
