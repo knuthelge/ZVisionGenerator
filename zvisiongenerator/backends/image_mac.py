@@ -30,7 +30,8 @@ from zvisiongenerator.core.progress_events import preview_milestone_steps
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 
 # First-step sigma override applied to every Ideogram 4 generation to reduce
-# safety-filter false refusals (the grey "Image blocked by safety filter" frame).
+# false positives from the safety filter on harmless prompts (the grey
+# "Image blocked by safety filter" frame).
 # Overrides only the first denoising step's timestep: t_values[-1] = 1.0 - value.
 # Best-effort mitigation (not guaranteed); retune or set to None to disable.
 IDEOGRAM4_INITIAL_SIGMA: float | None = 1.004
