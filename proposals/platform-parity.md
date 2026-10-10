@@ -29,7 +29,7 @@ Different defaults or behaviour for the same feature:
 - **Ideogram 4** is mflux-only, and diffusers has no Ideogram 4 pipeline. It stays macOS-only, as `model_aliases.ideo` already says.
 - **FLUX.1 and FLUX.2-dev** aren't supported models. The diffusers backend happens to load them through `AutoPipeline`, but that isn't a feature to match on macOS.
 - **The GPU floor from `deps-cuda`** (RTX 20-series and newer, driver R580 or newer) is a deliberate trade-off, not a gap.
-- **LTX-2.5** is a follow-up in both platform proposals. On CUDA it depends on quantized video (step 5): its transformer alone is about 76 GB in bfloat16.
+- **LTX-2.5** was a follow-up in both platform proposals. Decided 2026-10-10: LTX-2.5 not planned.
 
 ## Evidence
 
@@ -88,7 +88,7 @@ Match the macOS flow (half-res stage 1, 2× latent upsample, refine at full res)
 - Store the quantized copy with the existing stored-quant flow (`<name>@q4` / `<name>@q8`), so the second run loads without quantizing.
 - Expose the levels in the Web UI's video settings the way image models do.
 - Sizes and quality need measuring: run t2v and i2v at q8 and q4 against bfloat16 with the same seed before turning it on.
-- This is the prerequisite for LTX-2.5 on CUDA.
+- This was the prerequisite for LTX-2.5 on CUDA. Decided 2026-10-10: LTX-2.5 not planned.
 
 ### 6. Low-RAM video streaming on CUDA
 
