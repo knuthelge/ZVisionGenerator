@@ -218,6 +218,22 @@ class TestLoadModelCudaCheck:
             backend.load_model("fake-model-path")
 
 
+class TestLoadModelDriverHint:
+    """The CUDA error asks for a newer driver only when this PyTorch build uses CUDA 13 or newer."""
+
+    @pytest.mark.parametrize(("cuda_version", "expects_hint"), [("13.0", True), ("12.6", False), (None, False)])
+    def test_hint_follows_the_cuda_version_of_the_build(self, win_backend_no_cuda, cuda_version, expects_hint):
+        from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
+
+        mod, torch_mod, _ = win_backend_no_cuda
+        torch_mod.version.cuda = cuda_version
+
+        with pytest.raises(RuntimeError, match="CUDA is not available") as excinfo:
+            mod.DiffusersBackend().load_model("fake-model-path")
+
+        assert (cuda_driver_hint(False, "13.0") in str(excinfo.value)) is expects_hint
+
+
 class TestIdeogram4PlatformGuard:
     def test_ideogram4_unsupported_on_this_platform(self, win_backend):
         mod, _, _ = win_backend
@@ -413,13 +429,17 @@ class TestLoadModelLoRA:
         return SimpleNamespace(rest=rest or {}, lora=lora or {}, lokr=lokr or {}, unsupported=tuple(unsupported))
 
     @staticmethod
-    def _load(mod, paths, weights, pipeline=None, registers=True):
+    def _load(mod, paths, weights, pipeline=None, registers=True, *, quantize=None, family="zimage"):
         pipeline = pipeline or MagicMock()
         # diffusers registers each adapter it loads tensors for (unless *registers* is off).
         pipeline.get_list_adapters.side_effect = lambda: {"transformer": [call.kwargs["adapter_name"] for call in pipeline.load_lora_weights.call_args_list] if registers else []}
         mod.AutoPipelineForText2Image.from_pretrained.return_value = pipeline
-        with patch.object(mod, "detect_image_model", return_value=_make_model_info()):
-            mod.DiffusersBackend().load_model("fake-model-path", lora_paths=paths, lora_weights=weights)
+        with (
+            patch.object(mod, "detect_image_model", return_value=_make_model_info(family=family)),
+            patch.object(mod, "_load_nf4", return_value=pipeline),
+            patch.object(mod, "load_fp8_components", return_value={}),
+        ):
+            mod.DiffusersBackend().load_model("fake-model-path", quantize=quantize, lora_paths=paths, lora_weights=weights)
         return pipeline
 
     def test_files_without_lokr_load_by_path(self, loras):
@@ -490,6 +510,103 @@ class TestLoadModelLoRA:
 
         with pytest.raises(ValueError):
             self._load(mod, ["/l/bad.safetensors"], None, pipeline)
+
+    @staticmethod
+    def _unmatched_for(error, *rejected):
+        """Return a ``load_lora_weights`` stand-in that raises *error* for the sources named in *rejected*."""
+
+        def load(source, **_kwargs):
+            if source in rejected:
+                raise error("no module matches")
+
+        return load
+
+    def test_a_file_none_of_whose_tensors_match_is_skipped_with_a_warning(self, loras, fake_peft_no_match):
+        mod, _, _, _ = loras
+        pipeline = MagicMock()
+        pipeline.load_lora_weights.side_effect = self._unmatched_for(fake_peft_no_match, "/l/other-model.safetensors")
+
+        with pytest.warns(UserWarning, match="other-model.safetensors: none of its LoRA tensors match"):
+            self._load(mod, ["/l/other-model.safetensors", "/l/good.safetensors"], [1.0, 0.5], pipeline)
+
+        pipeline.set_adapters.assert_called_once_with(["lora_1"], adapter_weights=[0.5])
+
+    def test_the_split_part_none_of_whose_tensors_match_is_skipped_but_its_lokr_layers_apply(self, loras, fake_peft_no_match):
+        mod, parts, lokr_paths, lokr_module = loras
+        lokr_paths.add("/l/mixed.safetensors")
+        parts["/l/mixed.safetensors"] = self._parts(rest={"b": 1}, lora={"b": 1}, lokr={"blocks.0": {}})
+        pipeline = MagicMock()
+        pipeline.load_lora_weights.side_effect = lambda source, **_k: (_ for _ in ()).throw(fake_peft_no_match("no module matches"))
+
+        with pytest.warns(UserWarning, match="mixed.safetensors: none of its LoRA tensors match"):
+            self._load(mod, ["/l/mixed.safetensors"], [1.0], pipeline)
+
+        pipeline.set_adapters.assert_not_called()
+        lokr_module.apply_lokr.assert_called_once()
+
+    def test_the_retry_without_unsupported_tensors_may_match_nothing_too(self, loras, fake_peft_no_match):
+        mod, parts, _, _ = loras
+        parts["/l/diff.safetensors"] = self._parts(rest={"a": 1, "d": 2}, lora={"a": 1}, unsupported=["cap_embedder.0.diff"])
+
+        def load(source, **_kwargs):
+            raise ValueError("leftover keys") if isinstance(source, str) else fake_peft_no_match("no module matches")
+
+        pipeline = MagicMock()
+        pipeline.load_lora_weights.side_effect = load
+
+        with pytest.warns(UserWarning) as caught:
+            self._load(mod, ["/l/diff.safetensors"], None, pipeline)
+
+        assert any("none of its LoRA tensors match" in str(w.message) for w in caught)
+        pipeline.set_adapters.assert_not_called()
+
+    def test_a_plain_value_error_still_fails_when_peft_is_loaded(self, loras, fake_peft_no_match):
+        mod, parts, _, _ = loras
+        parts["/l/bad.safetensors"] = self._parts(rest={"a": 1}, lora={"a": 1})
+        pipeline = MagicMock()
+        pipeline.load_lora_weights.side_effect = ValueError("not a LoRA for this model")
+
+        with pytest.raises(ValueError, match="not a LoRA"):
+            self._load(mod, ["/l/bad.safetensors"], None, pipeline)
+
+    @pytest.mark.parametrize(
+        ("hook", "quantize", "family", "restored"),
+        [
+            (None, 4, "krea2", True),
+            (object(), 4, "krea2", False),
+            (None, None, "krea2", False),
+            (None, 8, "krea2", False),
+            (None, 4, "zimage", False),
+        ],
+    )
+    def test_cpu_offload_is_restored_only_for_an_offloaded_pipeline_that_lost_its_hooks(self, loras, fake_peft_no_match, hook, quantize, family, restored):
+        mod, _, _, _ = loras
+        pipeline = MagicMock()
+        pipeline.transformer._hf_hook = hook
+        pipeline.load_lora_weights.side_effect = self._unmatched_for(fake_peft_no_match, "/l/other-model.safetensors")
+
+        with pytest.warns(UserWarning):
+            self._load(mod, ["/l/other-model.safetensors"], [1.0], pipeline, quantize=quantize, family=family)
+
+        assert pipeline.enable_model_cpu_offload.call_count == int(restored)
+
+    def test_cpu_offload_is_restored_after_the_split_retry_loads(self, loras):
+        mod, parts, _, _ = loras
+        parts["/l/diff.safetensors"] = self._parts(rest={"a": 1, "d": 2}, lora={"a": 1}, unsupported=["cap_embedder.0.diff"])
+
+        def reject_whole_files(source, **_kwargs):
+            if isinstance(source, str):
+                raise ValueError("leftover keys")
+
+        pipeline = MagicMock()
+        pipeline.transformer._hf_hook = None
+        pipeline.load_lora_weights.side_effect = reject_whole_files
+
+        with pytest.warns(UserWarning, match="diff.safetensors"):
+            self._load(mod, ["/l/diff.safetensors"], None, pipeline, quantize=4, family="krea2")
+
+        pipeline.set_adapters.assert_called_once_with(["lora_0"], adapter_weights=[1.0])
+        pipeline.enable_model_cpu_offload.assert_called_once_with()
 
     def test_lokr_layers_the_model_lacks_are_skipped_with_a_warning(self, loras):
         mod, parts, lokr_paths, lokr_module = loras

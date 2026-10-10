@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import warnings
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -28,6 +29,7 @@ class TransformersPromptEnhancer:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
+        from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
         from zvisiongenerator.backends.memory_cuda import configure_allocator
 
         # Preflight enhancement can be the first thing in the process to start CUDA.
@@ -35,6 +37,9 @@ class TransformersPromptEnhancer:
         self.repo = repo
         self.revision = revision
         self.on_cuda = torch.cuda.is_available()
+        hint = cuda_driver_hint(self.on_cuda, getattr(torch.version, "cuda", None))
+        if hint:
+            warnings.warn(f"The prompt enhancer runs on the CPU. {hint}", stacklevel=2)
         try:
             self._tokenizer = AutoTokenizer.from_pretrained(repo, revision=revision)
             kwargs: dict[str, Any] = {"revision": revision, "dtype": torch.bfloat16}

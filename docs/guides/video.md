@@ -125,7 +125,7 @@ Runtime `--lora` values must be local LoRA files or bare LoRA names that resolve
 
 - `Alias 'ltx-4' is macOS-only...` or `Alias 'ltx-8' is macOS-only...`: use `ltx-2.3` on Windows or Linux.
 - `Alias 'ltx-2.3' is available on Windows and Linux only...`: use `ltx-4` or `ltx-8` on macOS.
-- `CUDA is not available...`: the diffusers video backend requires an NVIDIA CUDA device on Windows and Linux.
+- `CUDA is not available...`: the diffusers video backend requires an NVIDIA CUDA device on Windows and Linux. When the message says to update the driver, install NVIDIA driver 580 or newer.
 - `Could not detect video model family...`: use the platform alias (`ltx-4`/`ltx-8` on macOS or `ltx-2.3` on Windows/Linux), a known/configured LTX repo ID, or a local path containing `ltx`.
 
 ## Related Guides

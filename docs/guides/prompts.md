@@ -167,7 +167,7 @@ A small local LLM can rewrite a prompt with more visual detail before it is gene
 | macOS | `McG-221/Qwen3.5-4B-heretic-mlx-4Bit` (mlx-lm, 4-bit) | ≈2.4 GB |
 | Windows / Linux | `coder3101/Qwen3.5-4B-heretic` (transformers, 4-bit on CUDA) | ≈9 GB |
 
-Without a CUDA GPU, Windows and Linux run the enhancer on the CPU: it works, but each rewrite can take a few minutes and about 10 GB of RAM. The status line says so when this happens.
+Without a CUDA GPU, Windows and Linux run the enhancer on the CPU: it works, but each rewrite can take a few minutes and about 10 GB of RAM. The status line says so when this happens. If the machine has an NVIDIA GPU, a warning also suggests updating its driver to 580 or newer, the usual reason CUDA is missing.
 
 Both defaults are pinned to a revision. To use another chat model, set **Prompt Enhancer Model** on the Config page to a Hugging Face `owner/name` (optionally `owner/name@revision`) or a local folder, or pass `--enhance-model REPO[@REVISION]`. Thinking-tuned or heavily merged models are slower and follow the length and style options less reliably.
 

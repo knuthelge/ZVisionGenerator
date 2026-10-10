@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import os
+import sys
 from argparse import Namespace
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import MagicMock
+
+import pytest
 
 from zvisiongenerator.core.job_plan import JobPlan
 from zvisiongenerator.preflight import plan_iterations
@@ -108,3 +112,16 @@ def _make_mock_video_backend(name="ltx"):
         VideoModelInfo(family=name, backend=name, supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32),
     )
     return mock
+
+
+@pytest.fixture()
+def fake_peft_no_match(monkeypatch):
+    """Install a fake ``peft`` module and return its ``NoMatchingPeftModuleError`` (a ``ValueError``, as in peft 0.21)."""
+
+    class NoMatchingPeftModuleError(ValueError):
+        pass
+
+    peft = ModuleType("peft")
+    peft.NoMatchingPeftModuleError = NoMatchingPeftModuleError
+    monkeypatch.setitem(sys.modules, "peft", peft)
+    return NoMatchingPeftModuleError
