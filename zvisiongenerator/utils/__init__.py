@@ -12,8 +12,10 @@ from .interactive import SkipSignal
 from .lora import parse_lora_arg
 from .paths import (
     HuggingFaceRepoReference,
+    collapse_home,
     display_basename,
     display_stem,
+    expand_home,
     get_ziv_data_dir,
     is_explicit_local_path,
     is_huggingface_repo_id,
@@ -63,8 +65,10 @@ __all__ = [
     "build_video_config_payload",
     "detect_image_model",
     "detect_video_model",
+    "collapse_home",
     "display_basename",
     "display_stem",
+    "expand_home",
     "embed_mp4_config",
     "embed_png_config",
     "enhance_prompt",

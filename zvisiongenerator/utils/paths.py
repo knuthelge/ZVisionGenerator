@@ -124,6 +124,32 @@ def is_remote_lora_reference(value: str) -> bool:
     return parse_huggingface_repo_reference(value) is not None
 
 
+def collapse_home(path: str, home: str | None = None) -> str:
+    """Replace a leading home directory in *path* with ``~``, leaving other values unchanged.
+
+    Args:
+        path: A path or other reference, such as a Hugging Face repo ID.
+        home: The home directory to collapse; defaults to the current user's.
+
+    Returns:
+        ``~`` followed by the rest of the path when *path* is inside *home*, else *path* as given.
+    """
+    home_text = (home if home is not None else str(Path.home())).rstrip("/\\")
+    if not home_text or not path.startswith(home_text):
+        return path
+    rest = path[len(home_text) :]
+    if rest and rest[0] not in "/\\":
+        return path
+    return "~" + rest
+
+
+def expand_home(path: str) -> str:
+    """Expand a leading ``~`` written by :func:`collapse_home`, leaving other values unchanged."""
+    if path == "~" or path.startswith(("~/", "~\\")):
+        return str(Path.home()) + path[1:]
+    return path
+
+
 def display_basename(value: str) -> str:
     """Return the final path/repo component across POSIX and Windows separators."""
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from PIL import Image
@@ -463,3 +464,60 @@ class TestRecordedSettings:
 
         assert settings.generation == {}
         assert settings.source is None
+
+
+class TestHomePathsArePortable:
+    @staticmethod
+    def _home(monkeypatch):
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/home/me")))
+
+    def test_image_payload_records_home_paths_with_tilde(self, monkeypatch):
+        self._home(monkeypatch)
+        request = _make_image_request(
+            model_name="/home/me/.ziv/models/zit",
+            image_path="/home/me/out/ref.png",
+            lora_paths=["/home/me/.ziv/loras/style.safetensors"],
+            lora_weights=[0.7],
+            upscale_source="/home/me/out/p.png",
+            upscale_factor=2,
+        )
+        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (8, 8)), metadata={"upscale_source": {"path": "/home/me/out/p.png", "width": 8, "height": 8}})
+
+        payload = build_image_config_payload(request, artifacts)
+
+        assert "/home/me" not in json.dumps(payload)
+        assert payload["model"] == "~/.ziv/models/zit"
+        assert payload["image_path"] == "~/out/ref.png"
+        assert payload["lora"] == "~/.ziv/loras/style.safetensors:0.7"
+        assert payload["source"]["path"] == "~/out/p.png"
+
+    def test_video_payload_records_home_paths_with_tilde(self, monkeypatch):
+        self._home(monkeypatch)
+        request = VideoGenerationRequest(
+            backend=MagicMock(),
+            model=MagicMock(),
+            prompt="p",
+            model_name="/home/me/.ziv/models/ltx",
+            image_path="/home/me/ref.png",
+            lora_paths=["/home/me/.ziv/loras/motion.safetensors"],
+        )
+
+        payload = build_video_config_payload(request, VideoWorkingArtifacts())
+
+        assert "/home/me" not in json.dumps(payload)
+
+    def test_recorded_settings_expand_tilde_paths(self, monkeypatch):
+        self._home(monkeypatch)
+        settings = recorded_settings(
+            {
+                "model": "~/.ziv/models/zit",
+                "image_path": "~/out/ref.png",
+                "lora": "~/.ziv/loras/a.safetensors:0.7,~/.ziv/loras/b.safetensors:1",
+                "source": {"path": "~/out/p.png"},
+            }
+        )
+
+        assert settings.model == str(Path("/home/me")) + "/.ziv/models/zit"
+        assert settings.image_path == str(Path("/home/me")) + "/out/ref.png"
+        assert settings.lora == f"{Path('/home/me')}/.ziv/loras/a.safetensors:0.7,{Path('/home/me')}/.ziv/loras/b.safetensors:1"
+        assert settings.source is not None and settings.source["path"] == str(Path("/home/me")) + "/out/p.png"

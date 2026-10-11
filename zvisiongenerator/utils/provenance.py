@@ -12,7 +12,7 @@ from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
-from zvisiongenerator.utils.paths import display_stem
+from zvisiongenerator.utils.paths import collapse_home, display_stem, expand_home
 
 IMAGE_CONFIG_SCHEMA = "zvisiongenerator.config.v1"
 VIDEO_CONFIG_SCHEMA = IMAGE_CONFIG_SCHEMA
@@ -38,7 +38,7 @@ def build_image_config_payload(request: ImageGenerationRequest, artifacts: Image
         "workflow": _image_workflow(request),
         "prompt": artifacts.metadata.get("enhanced_prompt") or request.prompt,
         "negative_prompt": negative_prompt or None,
-        "model": request.model_name,
+        "model": _portable_path(request.model_name),
         "model_family": request.model_family,
         "seed": request.seed,
         "steps": request.steps,
@@ -48,7 +48,7 @@ def build_image_config_payload(request: ImageGenerationRequest, artifacts: Image
         "height": height,
         "ratio": request.ratio,
         "size": request.size,
-        "image_path": request.image_path,
+        "image_path": _portable_path(request.image_path),
         "lora": _format_loras(request.lora_paths, request.lora_weights),
         "generation": _image_generation_details(request, artifacts),
     }
@@ -57,7 +57,7 @@ def build_image_config_payload(request: ImageGenerationRequest, artifacts: Image
     source = artifacts.metadata.get("upscale_source")
     if source:
         # The workflow that made the original, so Reuse settings regenerates it (img2img keeps its reference).
-        payload["source"] = {**source, "workflow": "img2img" if request.image_path else "txt2img"}
+        payload["source"] = {**source, "path": _portable_path(source.get("path")), "workflow": "img2img" if request.image_path else "txt2img"}
     return _drop_unserializable(payload)
 
 
@@ -74,7 +74,7 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
             "schema": VIDEO_CONFIG_SCHEMA,
             "workflow": "img2vid" if request.image_path else "txt2vid",
             "prompt": artifacts.metadata.get("enhanced_prompt") or request.prompt,
-            "model": request.model_name,
+            "model": _portable_path(request.model_name),
             "model_family": request.model_family,
             "seed": request.seed,
             "steps": request.steps,
@@ -83,7 +83,7 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
             "ratio": None,
             "size": None,
             "frame_count": request.num_frames,
-            "image_path": request.image_path,
+            "image_path": _portable_path(request.image_path),
             "lora": _format_loras(request.lora_paths, request.lora_weights),
             "generation": _drop_empty(
                 {
@@ -186,7 +186,7 @@ def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
         workflow=optional_text(config.get("workflow")),
         prompt=optional_text(config.get("prompt")),
         negative_prompt=optional_text(config.get("negative_prompt")),
-        model=optional_text(config.get("model")),
+        model=_local_path(optional_text(config.get("model"))),
         model_family=optional_text(config.get("model_family")),
         seed=optional_int(config.get("seed")),
         steps=optional_int(config.get("steps")),
@@ -197,7 +197,7 @@ def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
         ratio=optional_text(config.get("ratio")),
         size=optional_text(config.get("size")),
         frame_count=optional_int(config.get("frame_count")),
-        image_path=optional_text(config.get("image_path")),
+        image_path=_local_path(optional_text(config.get("image_path"))),
         image_strength=optional_float(config.get("image_strength")),
         lora=_lora_string(config.get("lora")),
         generation=_generation_block(config.get("generation")),
@@ -210,7 +210,7 @@ def _lora_string(value: Any) -> str | None:
     if value in (None, "", [], {}):
         return None
     if isinstance(value, str):
-        return value.strip() or None
+        return _expand_lora_entries(value.strip()) or None
     items = value if isinstance(value, list) else [value]
     entries: list[str] = []
     for item in items:
@@ -219,7 +219,12 @@ def _lora_string(value: Any) -> str | None:
         elif isinstance(item, dict) and isinstance(item.get("name"), str) and item["name"].strip():
             weight = item.get("weight")
             entries.append(item["name"].strip() if weight in (None, "") else f"{item['name'].strip()}:{weight}")
-    return ",".join(entries) or None
+    return _expand_lora_entries(",".join(entries)) or None
+
+
+def _expand_lora_entries(text: str) -> str:
+    """Expand a leading ``~`` in each comma-separated LoRA entry."""
+    return ",".join(expand_home(entry) for entry in text.split(",")) if text else text
 
 
 def _generation_block(value: Any) -> dict[str, Any]:
@@ -262,7 +267,7 @@ def _source_block(value: Any) -> dict[str, Any] | None:
     if path is None:
         return None
     return {
-        "path": path,
+        "path": expand_home(path),
         "width": optional_int(value.get("width")),
         "height": optional_int(value.get("height")),
         "workflow": optional_text(value.get("workflow")),
@@ -308,11 +313,21 @@ def _build_loras(paths: list[str] | None, weights: list[float] | None) -> list[d
     return [
         {
             "name": display_stem(path),
-            "path": path,
+            "path": collapse_home(path),
             "weight": weights[index] if weights is not None and index < len(weights) else 1.0,
         }
         for index, path in enumerate(paths)
     ]
+
+
+def _portable_path(path: Any) -> Any:
+    """Write a recorded path with the home directory as ``~``, so shared files do not reveal the username."""
+    return collapse_home(path) if isinstance(path, str) else path
+
+
+def _local_path(path: str | None) -> str | None:
+    """Read a recorded path back with ``~`` expanded to this user's home directory."""
+    return expand_home(path) if path is not None else None
 
 
 def _format_loras(paths: list[str] | None, weights: list[float] | None) -> str | None:

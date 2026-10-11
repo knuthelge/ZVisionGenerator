@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.paths import (
+    collapse_home,
     display_basename,
     display_stem,
+    expand_home,
     get_ziv_data_dir,
     is_explicit_local_path,
     is_huggingface_repo_id,
@@ -369,3 +373,28 @@ class TestResolveLoraPath:
         (tmp_path / "loras").mkdir(parents=True, exist_ok=True)
         result = resolve_lora_path("missing")
         assert result == "missing"
+
+
+class TestHomeCollapse:
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("/home/me/.ziv/loras/style.safetensors", "~/.ziv/loras/style.safetensors"),
+            ("/home/me", "~"),
+            ("/home/meadow/ref.png", "/home/meadow/ref.png"),
+            ("/srv/ref.png", "/srv/ref.png"),
+            ("org/repo", "org/repo"),
+        ],
+    )
+    def test_collapses_only_paths_inside_home(self, value, expected):
+        assert collapse_home(value, home="/home/me/") == expected
+
+    def test_collapses_windows_home(self):
+        assert collapse_home("C:\\Users\\me\\ref.png", home="C:\\Users\\me") == "~\\ref.png"
+
+    def test_expand_reverses_collapse(self, monkeypatch):
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: Path("/home/me")))
+
+        assert expand_home(collapse_home("/home/me/ref.png")) == "/home/me/ref.png"
+        assert expand_home("/srv/ref.png") == "/srv/ref.png"
+        assert expand_home("~user/ref.png") == "~user/ref.png"
