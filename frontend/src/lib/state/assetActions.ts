@@ -65,9 +65,11 @@ export function canUseAsReference(asset: GalleryAsset): boolean {
   return asset.media_type === 'image' && Boolean(asset.file_path);
 }
 
-/** Return the workspace prefill params that make an asset the reference image. */
+/** Return the workspace prefill params that make an asset the reference image, carrying its prompt. */
 export function referenceParams(asset: GalleryAsset, target: ReferenceTarget): Record<string, string> {
-  return { workflow: REFERENCE_WORKFLOWS[target], image_path: asset.file_path ?? '' };
+  const params: Record<string, string> = { workflow: REFERENCE_WORKFLOWS[target], image_path: asset.file_path ?? '' };
+  if (asset.prompt) params.prompt = asset.prompt;
+  return params;
 }
 
 /** Ask the user to approve deleting one asset; resolves true when they confirm. */

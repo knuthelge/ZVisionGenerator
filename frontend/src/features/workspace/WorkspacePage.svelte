@@ -332,8 +332,10 @@
   function useAsReference(asset: GalleryAsset, target: ReferenceTarget): void {
     if (!asset.file_path || referenceUnavailable[target]) return;
     const params = referenceParams(asset, target);
-    if (draft.state.workflow === params.workflow) draft.update('referenceImagePath', params.image_path);
-    else applyPrefill(params, { keepSettings: true });
+    if (draft.state.workflow === params.workflow) {
+      draft.loadFromUrl(params, context);
+      draft.saveDraft();
+    } else applyPrefill(params, { keepSettings: true });
     imageFile = null;
     closeLightbox();
     addToast(`${asset.filename} is now the reference image`, 'success');

@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - macOS: stored q4/q8 copies are rebuilt once after updating, which adds time and temporary disk use to the first q4/q8 job of each model
 - macOS: video uses LTX MLX v0.16.3, so clips change for the same seed. It uses the `transformer-distilled-1.1` weights (downloaded once if missing), short step counts end on the final sigma instead of leaving noise, and image-to-video preprocesses the start image differently
 - macOS: `--low-memory` (on by default) streams the LTX transformer from disk on Macs with 24 GB of memory or less, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. Turn it off with `--no-low-memory` (or **Low memory** in the Web UI), which also turns off the rest of low-memory mode
+- Web UI: "Use as reference" also loads the image's prompt into the prompt box
 
 ### Removed
 - Windows/Linux: `hf-transfer` is no longer installed; downloads use Xet. Set `HF_XET_HIGH_PERFORMANCE=1` instead of `HF_HUB_ENABLE_HF_TRANSFER` for faster downloads

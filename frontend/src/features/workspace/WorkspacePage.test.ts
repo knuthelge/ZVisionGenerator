@@ -2691,6 +2691,21 @@ describe('WorkspacePage asset actions and settings', () => {
     expect(submitted.get('image_path')).toBe('/outputs/out/first.png');
   });
 
+  it('carries the asset prompt when Use as reference keeps the workflow', async () => {
+    const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png', prompt: 'a red fox' });
+    await mountWithHistory([asset]);
+    draft.update('workflow', 'img2img');
+    draft.patch({ prompt: 'old prompt', enhancedPrompt: 'old enhanced', steps: 9 });
+    await settle();
+
+    openTileMenu(asset);
+    (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
+    await settle();
+
+    expect(draft.state).toMatchObject({ workflow: 'img2img', prompt: 'a red fox', enhancedPrompt: '', steps: 9, referenceImagePath: '/outputs/out/first.png' });
+    expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('a red fox');
+  });
+
   it('keeps settings when Use as reference switches the workflow', async () => {
     const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
     await mountWithHistory([asset]);
@@ -2701,7 +2716,7 @@ describe('WorkspacePage asset actions and settings', () => {
     (document.querySelector('[role="menu"] [data-action="reference-image"]') as HTMLButtonElement).click();
     await settle();
 
-    expect(draft.state).toMatchObject({ workflow: 'img2img', steps: 9, runs: 40, referenceImagePath: '/outputs/out/first.png' });
+    expect(draft.state).toMatchObject({ workflow: 'img2img', prompt: asset.prompt, steps: 9, runs: 40, referenceImagePath: '/outputs/out/first.png' });
   });
 
   it('resets W × H after a reused custom size back to a submittable preset', async () => {
