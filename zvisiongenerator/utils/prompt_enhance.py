@@ -167,8 +167,32 @@ MOTION_AXIS = EnhanceAxis(
     ),
     default=("action",),
 )
-ENHANCE_AXES: tuple[EnhanceAxis, ...] = (STYLE_AXIS, MOOD_AXIS, DETAILS_AXIS, LENGTH_AXIS, MOTION_AXIS)
+SOUND_AXIS = EnhanceAxis(
+    key="sound",
+    label="Sound",
+    multi=True,
+    video_only=True,
+    options=(
+        EnhanceOption("ambient", "Ambience", "the ambient soundscape of the setting"),
+        EnhanceOption("effects", "Sound effects", "sound effects synced to the visible action"),
+        EnhanceOption(
+            "dialogue",
+            "Dialogue",
+            "speech: keep any quoted lines word for word, or write short lines that fit the scene when there are none, and say who speaks and in what voice",
+        ),
+        EnhanceOption("music", "Music", "music: whether it plays in the scene or as a score, its genre and tempo"),
+    ),
+    default=(),
+)
+# Display order in the Web UI: Length comes last, next to the Direction field.
+ENHANCE_AXES: tuple[EnhanceAxis, ...] = (STYLE_AXIS, MOOD_AXIS, DETAILS_AXIS, MOTION_AXIS, SOUND_AXIS, LENGTH_AXIS)
 _AXES_BY_KEY = {axis.key: axis for axis in ENHANCE_AXES}
+# Axes that only apply when the video has an audio track.
+AUDIO_AXES = frozenset({SOUND_AXIS.key})
+NOTE_KEY = "note"
+NOTE_MAX_CHARS = 300
+_SETTING_KEYS = (*_AXES_BY_KEY, NOTE_KEY)
+_DURATION_BEATS = ((5.0, "one continuous action"), (10.0, "two or three beats at most"))
 
 
 @dataclass(frozen=True)
@@ -180,6 +204,18 @@ class EnhanceSettings:
     details: tuple[str, ...] = DETAILS_AXIS.default
     length: str = LENGTH_AXIS.default[0]
     motion: tuple[str, ...] = MOTION_AXIS.default
+    sound: tuple[str, ...] = SOUND_AXIS.default
+    note: str = ""
+
+
+@dataclass(frozen=True)
+class EnhanceContext:
+    """Facts about the job that shape a rewrite: audio track, clip length, frame shape and reference image."""
+
+    audio: bool = False
+    seconds: float | None = None
+    orientation: str | None = None
+    reference_image: bool = False
 
 
 @dataclass(frozen=True)
@@ -210,6 +246,7 @@ def matrix_contract() -> dict[str, Any]:
                 "label": axis.label,
                 "multi": axis.multi,
                 "video_only": axis.video_only,
+                "audio_only": axis.key in AUDIO_AXES,
                 "options": [{"slug": option.slug, "label": option.label} for option in axis.options],
                 "default": list(axis.default),
             }
@@ -227,7 +264,45 @@ def settings_to_mapping(settings: EnhanceSettings) -> dict[str, Any]:
         "details": list(settings.details),
         "length": settings.length,
         "motion": list(settings.motion),
+        "sound": list(settings.sound),
+        "note": settings.note,
     }
+
+
+def enhance_context(
+    *,
+    mode: str,
+    width: int | None = None,
+    height: int | None = None,
+    ratio: str | None = None,
+    frames: int | None = None,
+    fps: float | None = None,
+    audio: bool = False,
+    reference_image: bool = False,
+) -> EnhanceContext:
+    """Build the rewrite context from a job's shape; audio and duration apply to video only.
+
+    The orientation comes from *width* and *height* when both are set, else from a ``W:H`` *ratio*.
+    """
+    _check_mode(mode)
+    video = mode == "video"
+    seconds = frames / fps if video and frames and fps else None
+    return EnhanceContext(audio=video and audio, seconds=seconds, orientation=_orientation(width, height, ratio), reference_image=reference_image)
+
+
+def _orientation(width: float | None, height: float | None, ratio: str | None) -> str | None:
+    """Return ``portrait``, ``landscape`` or ``square`` for the frame, or None when its shape is unknown."""
+    if not (width and height) and ratio:
+        w_text, _sep, h_text = ratio.partition(":")
+        try:
+            width, height = float(w_text), float(h_text)
+        except ValueError:
+            return None
+    if not width or not height or width <= 0 or height <= 0:
+        return None
+    if width == height:
+        return "square"
+    return "portrait" if height > width else "landscape"
 
 
 def _check_mode(mode: str) -> None:
@@ -253,25 +328,41 @@ def _parse_axis_value(axis: EnhanceAxis, raw: Any) -> str | tuple[str, ...]:
     return axis.option(raw.strip()).slug
 
 
+def _parse_note(raw: Any) -> str:
+    """Return the direction note as one trimmed line."""
+    if raw is None:
+        return ""
+    if not isinstance(raw, str):
+        raise ValueError(f"Direction must be text, got {type(raw).__name__}.")
+    note = " ".join(raw.split())
+    if len(note) > NOTE_MAX_CHARS:
+        raise ValueError(f"Direction is too long ({len(note)} characters); keep it to {NOTE_MAX_CHARS}.")
+    return note
+
+
 def settings_from_mapping(data: dict[str, Any], *, mode: str, motion_in_image: str = "error") -> EnhanceSettings:
-    """Build settings from a mapping; omitted axes keep their defaults.
+    """Build settings from a mapping; omitted keys keep their defaults.
 
     Args:
-        data: Mapping with any of ``style``, ``mood``, ``details``, ``length``, ``motion``.
+        data: Mapping with any of ``style``, ``mood``, ``details``, ``length``, ``motion``, ``sound``, ``note``.
         mode: ``"image"`` or ``"video"``.
-        motion_in_image: ``"error"`` to reject ``motion`` in image mode, ``"warn"`` to warn and ignore it.
+        motion_in_image: ``"error"`` to reject the video-only axes (``motion``, ``sound``) in image mode,
+            ``"warn"`` to warn and ignore them.
 
     Raises:
-        ValueError: On unknown keys or values, or ``motion`` in image mode with ``motion_in_image="error"``.
+        ValueError: On unknown keys or values, or a video-only axis in image mode with ``motion_in_image="error"``.
     """
     _check_mode(mode)
     if not isinstance(data, dict):
         raise ValueError(f"Enhancement settings must be a mapping, got {type(data).__name__}.")
-    unknown = sorted(set(data) - set(_AXES_BY_KEY))
+    unknown = sorted(set(data) - set(_SETTING_KEYS))
     if unknown:
-        raise ValueError(f"Unknown enhancement setting(s): {', '.join(unknown)}. Valid keys: {', '.join(_AXES_BY_KEY)}.")
+        raise ValueError(f"Unknown enhancement setting(s): {', '.join(unknown)}. Valid keys: {', '.join(_SETTING_KEYS)}.")
     values: dict[str, Any] = {}
     for key, raw in data.items():
+        if key == NOTE_KEY:
+            values[key] = _parse_note(raw)
+            continue
         axis = _AXES_BY_KEY[key]
         if axis.video_only and mode != "video":
             if motion_in_image == "warn":
@@ -285,7 +376,8 @@ def settings_from_mapping(data: dict[str, Any], *, mode: str, motion_in_image: s
 def parse_enhance_spec(spec: str | None, *, mode: str) -> EnhanceSettings:
     """Parse a CLI spec such as ``style=cinematic,details=lighting+camera,length=longer``.
 
-    An empty or ``None`` spec returns the defaults.
+    An empty or ``None`` spec returns the defaults. The free-text ``note`` is not part of the
+    grammar (it may contain commas); the CLIs take it from ``--enhance-note``.
     """
     _check_mode(mode)
     if spec is None or not spec.strip():
@@ -298,15 +390,19 @@ def parse_enhance_spec(spec: str | None, *, mode: str) -> EnhanceSettings:
         key, sep, value = part.partition("=")
         if not sep:
             raise ValueError(f"Invalid enhancement setting '{part}'. Use key=value, e.g. style=cinematic,details=lighting+camera,length=longer.")
+        if key.strip() == NOTE_KEY:
+            raise ValueError("Set the direction with --enhance-note, not in the --enhance spec.")
         data[key.strip()] = value.strip()
     return settings_from_mapping(data, mode=mode)
 
 
 def format_enhance_spec(settings: EnhanceSettings, *, mode: str = "video") -> str:
-    """Serialize *settings* to the CLI spec grammar (``motion`` only for video)."""
+    """Serialize *settings* to the CLI spec grammar (``motion`` and a non-empty ``sound`` only for video; ``note`` is left out)."""
     parts = [f"style={settings.style}", f"mood={settings.mood}", f"details={'+'.join(settings.details)}", f"length={settings.length}"]
     if mode == "video":
         parts.append(f"motion={'+'.join(settings.motion)}")
+        if settings.sound:
+            parts.append(f"sound={'+'.join(settings.sound)}")
     return ",".join(parts)
 
 
@@ -329,7 +425,7 @@ def parse_enhance_entry(value: Any, *, mode: str, where: str) -> EnhanceSettings
 
 
 def validate_settings(settings: EnhanceSettings, *, mode: str) -> None:
-    """Reject unknown slugs and the no-op combination (keep style and mood, no details, same length, no motion)."""
+    """Reject unknown slugs and the no-op combination (keep style and mood, no details, same length, no motion, sound or direction)."""
     _check_mode(mode)
     STYLE_AXIS.option(settings.style)
     MOOD_AXIS.option(settings.mood)
@@ -338,8 +434,10 @@ def validate_settings(settings: EnhanceSettings, *, mode: str) -> None:
         DETAILS_AXIS.option(slug)
     for slug in settings.motion:
         MOTION_AXIS.option(slug)
+    for slug in settings.sound:
+        SOUND_AXIS.option(slug)
     if is_noop(settings, mode=mode):
-        raise ValueError("Nothing to enhance: pick a style, a mood, a detail, or a length.")
+        raise ValueError("Nothing to enhance: pick a style, a mood, a detail, a length, or write a direction.")
 
 
 def resolve_enhance_ceiling(config: dict[str, Any], *, family: str | None, mode: str) -> int:
@@ -389,9 +487,9 @@ def entry_enhance(enhance_by_set: dict[str, list[EnhanceSettings | None]] | None
 
 
 def is_noop(settings: EnhanceSettings, *, mode: str) -> bool:
-    """Return whether *settings* ask for no change in *mode* (keep style and mood, no details, same length, no video motion)."""
-    has_motion = mode == "video" and bool(settings.motion)
-    return settings.style == "keep" and settings.mood == "keep" and not settings.details and settings.length == "same" and not has_motion
+    """Return whether *settings* ask for no change in *mode* (keep style and mood, no details, same length, no direction, no video motion or sound)."""
+    has_video_axes = mode == "video" and bool(settings.motion or settings.sound)
+    return settings.style == "keep" and settings.mood == "keep" and not settings.details and settings.length == "same" and not settings.note and not has_video_axes
 
 
 def enhance_by_set_for_mode(enhance_by_set: dict[str, list[EnhanceSettings | None]] | None, *, mode: str) -> dict[str, list[EnhanceSettings | None]] | None:
@@ -410,7 +508,7 @@ def enhance_by_set_for_mode(enhance_by_set: dict[str, list[EnhanceSettings | Non
         result[set_name] = kept
     if dropped:
         noun = "entry asks" if dropped == 1 else "entries ask"
-        warnings.warn(f"{dropped} prompt-file 'enhance:' {noun} for no change in images (keep style and mood, no details, same length); not enhanced.", stacklevel=2)
+        warnings.warn(f"{dropped} prompt-file 'enhance:' {noun} for no change in images (keep style and mood, no details, same length, no direction); not enhanced.", stacklevel=2)
     return result
 
 
@@ -484,17 +582,49 @@ def is_unusable(output: str, original: str) -> bool:
     return bool(_REFUSAL_RE.match(output))
 
 
-def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: LengthPlan) -> list[dict[str, str]]:
-    """Build the system + user chat messages for one enhancement."""
-    _check_mode(mode)
-    kind = "text-to-video" if mode == "video" else "text-to-image"
+def _perception_rule(mode: str, context: EnhanceContext) -> str:
+    """Return the rule on which senses the rewrite may describe (sound only for video with audio)."""
+    if mode == "video" and context.audio:
+        return (
+            "Describe only what is seen and heard (visible motion, camera movement and sounds, in time order): "
+            "no smells, temperatures felt, thoughts, backstory or narrative commentary. "
+            "Keep every sound and every line of quoted speech the user wrote, word for word."
+        )
     visible = "Describe only what is visible"
     if mode == "video":
         visible += " (and for video: visible motion and camera movement, in time order)"
+    return f"{visible}: no sounds, smells, temperatures felt, thoughts, backstory or narrative commentary."
+
+
+def _context_rules(mode: str, context: EnhanceContext) -> list[str]:
+    """Return the rules for the reference image, frame shape and clip length."""
+    rules: list[str] = []
+    if context.reference_image:
+        if mode == "video":
+            rules.append(
+                "The first frame is supplied as an image. Describe the motion, camera movement and changes over time; "
+                "refer to the subject briefly and don't add appearance details the image already shows."
+            )
+        else:
+            rules.append("A reference image supplies the subject and layout. Refer to the subject briefly; apply the style and mood without re-describing its appearance.")
+    if context.orientation is not None:
+        rules.append(f"Frame: {context.orientation}; compose for that shape.")
+    if mode == "video" and context.seconds is not None:
+        beats = next((text for limit, text in _DURATION_BEATS if context.seconds <= limit), "a short sequence of beats")
+        rules.append(f"Duration: about {max(1, round(context.seconds))} seconds; fit the action to it: {beats}.")
+    return rules
+
+
+def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: LengthPlan, context: EnhanceContext | None = None) -> list[dict[str, str]]:
+    """Build the system + user chat messages for one enhancement."""
+    _check_mode(mode)
+    context = context or EnhanceContext()
+    kind = "text-to-video" if mode == "video" else "text-to-image"
     rules = [
         "EVERY DETAIL IS IMPORTANT: keep the user's subject, intent and every element they mention.",
         "Never add new people, animals, characters or major objects.",
-        f"{visible}: no sounds, smells, temperatures felt, thoughts, backstory or narrative commentary.",
+        _perception_rule(mode, context),
+        *_context_rules(mode, context),
     ]
     rules.append(STYLE_AXIS.option(settings.style).instruction)
     rules.append(MOOD_AXIS.option(settings.mood).instruction)
@@ -503,6 +633,11 @@ def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: L
         rules.append(f"Keep these aspects while cutting: {aspects}." if plan.length == "shorter" and not plan.clamped else f"Add detail on: {aspects}.")
     if mode == "video" and settings.motion:
         rules.append(f"Motion: describe {', '.join(MOTION_AXIS.option(slug).instruction for slug in settings.motion)}.")
+    if mode == "video" and context.audio and settings.sound:
+        sounds = "; ".join(SOUND_AXIS.option(slug).instruction for slug in settings.sound)
+        rules.append(f"Sound: describe {sounds}. Put spoken lines in double quotes; only people already in the scene speak.")
+    if settings.note:
+        rules.append(f"Direction from the user (follow it): {settings.note}")
     rules.append(_length_instruction(plan))
     if plan.length == "same" or plan.clamped:
         rules.append("Apply the style, mood and details; don't return the input unchanged.")
@@ -519,6 +654,7 @@ def enhance_prompt(
     mode: str,
     seed: int,
     ceiling: int,
+    context: EnhanceContext | None = None,
     length_cfg: dict[str, Any] | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
     max_tokens: int = DEFAULT_MAX_NEW_TOKENS,
@@ -530,6 +666,7 @@ def enhance_prompt(
     Expand ``{a|b}`` choices before calling: the model rewrites one concrete prompt.
 
     Args:
+        context: Job facts (audio track, clip length, frame shape, reference image).
         on_text: Receives the full in-progress text at most every
             ``TEXT_UPDATE_INTERVAL_SECONDS``, then the final text; a retry starts over from an empty string.
         cancelled: Polled per token; when it returns True generation stops and ``RuntimeError`` is raised.
@@ -542,7 +679,7 @@ def enhance_prompt(
         raise ValueError("Enter a prompt to enhance.")
     validate_settings(settings, mode=mode)
     plan = plan_length(_word_count(prompt), settings.length, ceiling=ceiling, length_cfg=length_cfg)
-    messages = build_messages(prompt, settings, mode=mode, plan=plan)
+    messages = build_messages(prompt, settings, mode=mode, plan=plan, context=context)
     for attempt in range(2):
         raw = ""
         last_update = float("-inf")

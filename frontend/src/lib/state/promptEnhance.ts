@@ -1,26 +1,51 @@
-import type { DraftState, EnhanceSettings, PromptEnhancerContract, Workflow, WorkflowMode } from '$lib/types';
+import type { DraftState, EnhanceContext, EnhanceSettings, PromptEnhancerContract, Workflow, WorkflowMode } from '$lib/types';
 
 /** Media mode of a canonical workflow. */
 export function workflowMode(workflow: Workflow): WorkflowMode {
   return workflow === 'txt2vid' || workflow === 'img2vid' ? 'video' : 'image';
 }
 
+const FALLBACK_SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', details: ['lighting', 'composition'], length: 'same', motion: ['action'], sound: [], note: '' };
+
 /** The user's last-used options, with axes they never set (e.g. saved before an axis existed) taken from the backend matrix defaults. */
 export function effectiveEnhanceSettings(state: DraftState, contract: PromptEnhancerContract | undefined): EnhanceSettings {
-  const defaults = contract?.matrix.defaults ?? { style: 'keep', mood: 'keep', details: ['lighting', 'composition'], length: 'same', motion: ['action'] };
-  return { ...defaults, details: [...defaults.details], motion: [...defaults.motion], ...state.enhanceSettings };
+  const defaults = { ...FALLBACK_SETTINGS, ...contract?.matrix.defaults };
+  return { ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...defaults.sound], ...state.enhanceSettings };
 }
 
-/** Whether *settings* would ask for no change at all (keep style and mood, no details, same length, no motion). */
-export function isNoOpSettings(settings: EnhanceSettings, mode: WorkflowMode): boolean {
+/** Whether the job's video has an audio track, so the Sound axis applies. */
+export function hasAudio(state: DraftState): boolean {
+  return workflowMode(state.workflow) === 'video' && state.audio;
+}
+
+/** Whether *settings* would ask for no change at all (keep style and mood, no details, same length, no direction, no video motion or sound). */
+export function isNoOpSettings(settings: EnhanceSettings, mode: WorkflowMode, audio = false): boolean {
   const hasMotion = mode === 'video' && settings.motion.length > 0;
-  return settings.style === 'keep' && settings.mood === 'keep' && settings.details.length === 0 && settings.length === 'same' && !hasMotion;
+  const hasSound = mode === 'video' && audio && settings.sound.length > 0;
+  return settings.style === 'keep' && settings.mood === 'keep' && settings.details.length === 0 && settings.length === 'same' && !settings.note.trim() && !hasMotion && !hasSound;
 }
 
-/** Settings as sent to the backend; `motion` only applies to video. */
-export function settingsPayload(settings: EnhanceSettings, mode: WorkflowMode): Partial<EnhanceSettings> {
-  const { motion, ...rest } = settings;
-  return mode === 'video' ? { ...rest, motion } : rest;
+/** Settings as sent to the backend; `motion` only applies to video, `sound` only to video with audio, and a blank `note` is left out. */
+export function settingsPayload(settings: EnhanceSettings, mode: WorkflowMode, audio = false): Partial<EnhanceSettings> {
+  const { motion, sound, note, ...rest } = settings;
+  const base: Partial<EnhanceSettings> = note.trim() ? { ...rest, note } : rest;
+  if (mode !== 'video') return base;
+  return audio ? { ...base, motion, sound } : { ...base, motion };
+}
+
+/** The job facts an on-demand enhancement needs: frame shape, clip length, audio and reference image. */
+export function enhanceContext(state: DraftState): EnhanceContext {
+  const video = workflowMode(state.workflow) === 'video';
+  const custom = state.dimensionMode === 'custom';
+  return {
+    ratio: state.ratio || null,
+    width: custom ? state.width : null,
+    height: custom ? state.height : null,
+    frames: video ? state.frameCount : null,
+    fps: video ? state.fps : null,
+    audio: hasAudio(state),
+    reference_image: state.workflow === 'img2img' || state.workflow === 'img2vid',
+  };
 }
 
 /** Whether the Enhanced box replaces the inline prompt on submit. */

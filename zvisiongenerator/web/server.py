@@ -37,7 +37,16 @@ from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
-from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhance_by_set_for_mode, enhance_options, enhance_prompt, settings_from_mapping, validate_settings
+from zvisiongenerator.utils.prompt_enhance import (
+    EnhanceContext,
+    EnhanceSettings,
+    enhance_by_set_for_mode,
+    enhance_context,
+    enhance_options,
+    enhance_prompt,
+    settings_from_mapping,
+    validate_settings,
+)
 from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
 from zvisiongenerator.upscale_runner import read_upscale_source
 from zvisiongenerator.utils.video_model_detect import detect_video_model
@@ -365,12 +374,43 @@ def _validate_enhance_body(body: Any) -> dict[str, Any]:
         "prompt": prompt,
         "mode": mode,
         "settings": settings,
+        "context": _enhance_context_from_body(body.get("context"), mode=mode),
         "ceiling": max_words,
         "repo": repo,
         "revision": revision,
         "options": options,
         "idle_seconds": options["idle_release_seconds"],
     }
+
+
+def _enhance_context_from_body(raw: Any, *, mode: str) -> EnhanceContext:
+    """Validate the enhance request's job facts (frame size or ratio, frames, fps, audio, reference image)."""
+    if raw is None:
+        return EnhanceContext()
+    if not isinstance(raw, dict):
+        raise ValueError("context must be a JSON object.")
+
+    def _positive(key: str) -> int | float | None:
+        value = raw.get(key)
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            raise ValueError(f"context.{key} must be a positive number.")
+        return value
+
+    ratio = raw.get("ratio")
+    if ratio is not None and not isinstance(ratio, str):
+        raise ValueError("context.ratio must be a string such as '16:9'.")
+    return enhance_context(
+        mode=mode,
+        width=_positive("width"),
+        height=_positive("height"),
+        ratio=ratio,
+        frames=_positive("frames"),
+        fps=_positive("fps"),
+        audio=raw.get("audio") is True,
+        reference_image=raw.get("reference_image") is True,
+    )
 
 
 def _run_enhancement(job: dict[str, Any], frames: queue.Queue[dict[str, Any]], cancelled: threading.Event, reservation: object | None = None) -> None:
@@ -388,6 +428,7 @@ def _run_enhancement(job: dict[str, Any], frames: queue.Queue[dict[str, Any]], c
                     mode=job["mode"],
                     seed=random.randint(0, 2**31 - 1),
                     ceiling=job["ceiling"],
+                    context=job.get("context"),
                     length_cfg=options["length"],
                     temperature=options["temperature"],
                     max_tokens=options["max_new_tokens"],
@@ -928,6 +969,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     args.width = defaults["width"]
     args.height = defaults["height"]
     args.num_frames = defaults["num_frames"]
+    args.fps = model_info.default_fps
     _normalize_video_args(args, app_config, model_info)
 
     request = VideoGenerationRequest(

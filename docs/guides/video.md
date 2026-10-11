@@ -46,7 +46,7 @@ ziv-video -m MODEL --ratio 1:1 --size s --prompt "Abstract art"
 
 ## Prompt Enhancement
 
-Video prompts can be rewritten by the local [prompt enhancer](prompts.md#enhancing-prompts), which adds visible motion and camera movement in time order. Use `--enhance style=cinematic,motion=action+camera-move`, or the Enhance options in the Web UI. Image-to-video enhancement does not look at the starting image. Prompts are rewritten before the video model loads, and the enhancer is unloaded first, so it adds no memory during generation. In the Web UI, **Cancel** (or `Esc` twice) stops a video job at any point, including while prompts are rewritten. Pause, Skip and Repeat are not available for video.
+Video prompts can be rewritten by the local [prompt enhancer](prompts.md#enhancing-prompts), which adds visible motion and camera movement in time order and fits the action to the clip length. With audio on, the **Sound** options add ambience, sound effects, dialogue or music, and sounds you wrote are always kept. Use `--enhance style=cinematic,motion=action+camera-move,sound=ambient+effects`, or the Enhance options in the Web UI. For image-to-video, the rewrite describes motion and change rather than appearance; the enhancer does not see the starting image itself. Prompts are rewritten before the video model loads, and the enhancer is unloaded first, so it adds no memory during generation. In the Web UI, **Cancel** (or `Esc` twice) stops a video job at any point, including while prompts are rewritten. Pause, Skip and Repeat are not available for video.
 
 ## Video Upscale & Audio
 

@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   clampedNote,
   effectiveEnhanceSettings,
+  enhanceContext,
   enhancePhaseMessage,
   enhancedOverrideActive,
+  hasAudio,
   isEnhancedStale,
   isNoOpSettings,
   settingsPayload,
@@ -27,7 +29,7 @@ function state(overrides: Partial<DraftState> = {}): DraftState {
   } as DraftState;
 }
 
-const SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [] };
+const SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
 
 describe('submission rule', () => {
   it.each([
@@ -65,6 +67,41 @@ describe('isEnhancedStale', () => {
   });
 });
 
+describe('sound, direction and context', () => {
+  it('counts sound only for video with audio, and a direction everywhere', () => {
+    expect(isNoOpSettings({ ...SETTINGS, sound: ['ambient'] }, 'video', true)).toBe(false);
+    expect(isNoOpSettings({ ...SETTINGS, sound: ['ambient'] }, 'video', false)).toBe(true);
+    expect(isNoOpSettings({ ...SETTINGS, sound: ['ambient'] }, 'image', true)).toBe(true);
+    expect(isNoOpSettings({ ...SETTINGS, note: 'at night' }, 'image')).toBe(false);
+    expect(isNoOpSettings({ ...SETTINGS, note: '   ' }, 'image')).toBe(true);
+  });
+
+  it('sends sound only for video with audio', () => {
+    const settings = { ...SETTINGS, motion: ['action'], sound: ['music'], note: 'at dusk' };
+    expect(settingsPayload(settings, 'video', true)).toMatchObject({ motion: ['action'], sound: ['music'], note: 'at dusk' });
+    expect(settingsPayload(settings, 'video', false)).not.toHaveProperty('sound');
+    expect(settingsPayload(settings, 'image', true)).not.toHaveProperty('sound');
+    expect(settingsPayload(settings, 'image').note).toBe('at dusk');
+  });
+
+  it('fills sound and note for settings saved before they existed', () => {
+    const saved = { style: 'anime', mood: 'keep', details: [], length: 'same', motion: [] } as unknown as EnhanceSettings;
+    const result = effectiveEnhanceSettings(state({ enhanceSettings: saved }), undefined);
+    expect(result).toMatchObject({ style: 'anime', sound: [], note: '' });
+  });
+
+  it('describes the video job', () => {
+    const video = state({ workflow: 'img2vid', ratio: '9:16', dimensionMode: 'ratio', width: 704, height: 448, frameCount: 97, fps: 24, audio: true });
+    expect(enhanceContext(video)).toEqual({ ratio: '9:16', width: null, height: null, frames: 97, fps: 24, audio: true, reference_image: true });
+    expect(hasAudio(video)).toBe(true);
+  });
+
+  it('describes the image job without video facts', () => {
+    const image = state({ workflow: 'txt2img', ratio: '2:3', dimensionMode: 'custom', width: 1024, height: 576, frameCount: 97, fps: 24, audio: true });
+    expect(enhanceContext(image)).toEqual({ ratio: '2:3', width: 1024, height: 576, frames: null, fps: null, audio: false, reference_image: false });
+  });
+});
+
 describe('settings helpers', () => {
   it('detects the no-op combination per mode', () => {
     expect(isNoOpSettings(SETTINGS, 'image')).toBe(true);
@@ -79,7 +116,7 @@ describe('settings helpers', () => {
   });
 
   it('falls back to contract defaults without sharing arrays', () => {
-    const contract = { matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'] } } } as unknown as PromptEnhancerContract;
+    const contract = { matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' } } } as unknown as PromptEnhancerContract;
     const settings = effectiveEnhanceSettings(state(), contract);
     expect(settings.details).toEqual(['lighting']);
     expect(settings.details).not.toBe(contract.matrix.defaults.details);
@@ -87,8 +124,8 @@ describe('settings helpers', () => {
   });
 
   it('fills axes missing from saved settings with contract defaults', () => {
-    const contract = { matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'] } } } as unknown as PromptEnhancerContract;
-    const saved = { style: 'photo', details: [], length: 'longer', motion: [] } as unknown as EnhanceSettings;
+    const contract = { matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' } } } as unknown as PromptEnhancerContract;
+    const saved = { style: 'photo', details: [], length: 'longer', motion: [], sound: [], note: '' } as unknown as EnhanceSettings;
     expect(effectiveEnhanceSettings(state({ enhanceSettings: saved }), contract)).toEqual({ ...saved, mood: 'keep' });
   });
 

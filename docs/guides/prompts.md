@@ -178,14 +178,30 @@ Both defaults are pinned to a revision. To use another chat model, set **Prompt 
 | Style | one | Keep, Photographic, Candid, Street photography, Analog film, Black & white, Studio portrait, Product shot, Cinematic, Illustration, Anime, Comic, 3D render, Painterly |
 | Mood | one | Keep, Serene, Joyful, Romantic, Melancholic, Mysterious, Eerie, Dramatic, Epic, Whimsical, Nostalgic |
 | Details | any | Lighting, Composition, Camera & lens, Materials & textures, Color & mood, Environment, Subject |
-| Length | one | Shorter (≈50 %), Same, Longer (≈200 %), Extra long (≈300 %) |
 | Motion (video only) | any | Action / sequence, Camera movement, Pacing |
+| Sound (video with audio on) | any | Ambience, Sound effects, Dialogue, Music |
+| Length | one | Shorter (≈50 %), Same, Longer (≈200 %), Extra long (≈300 %) |
+| Direction | free text | e.g. *at night, in the rain* or *focus on the dog* (up to 300 characters) |
 
 Mood sets the feeling of the scene. The enhancer conveys it through light, color, setting and expression instead of naming it. The **Color & mood** detail only adds more description of color and mood; it does not pick one.
 
 Length is a target, not a guarantee. Longer aims for at least 40 words and Extra long for at least 80, so short prompts still grow; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length. On short prompts, Same is approximate.
 
-The enhancer keeps your subject and every detail you describe. It adds only things that can be seen: no sounds, smells, or story. It never adds new people, animals, or major objects.
+The enhancer keeps your subject and every detail you describe. It adds only things that can be seen, no smells or story, and never adds new people, animals, or major objects. Sound is the exception for video with audio on:
+
+- The enhancer keeps every sound and every quoted line of speech you wrote, word for word, whether or not a Sound option is picked.
+- With no Sound option picked, it adds no new sounds.
+- **Ambience** and **Sound effects** describe the setting's soundscape and sounds that match the action. **Music** describes music in the scene or a score.
+- **Dialogue** keeps your quoted lines. If you wrote none, it writes short lines that fit the scene. Only people already in the scene speak.
+- With audio off, and for images, the enhancer describes no sounds and Sound is ignored.
+
+**Direction** is a short instruction the enhancer follows, such as a time of day, weather, or what to focus on. A direction alone is enough to enhance, without picking other options.
+
+The enhancer also knows the job's shape:
+
+- **Frame:** portrait, landscape or square, from the ratio or size, so the composition fits the frame.
+- **Clip length (video):** one continuous action for clips up to 5 seconds, two or three beats up to 10 seconds, so the action fits the clip.
+- **Starting image:** for image-to-video, the rewrite describes motion and change instead of appearance, which the first frame already shows. For img2img it mentions the subject only briefly. The enhancer does not see the image itself.
 
 ### In the Web UI
 
@@ -207,8 +223,12 @@ woman:
       mood: mysterious
       details: [lighting, camera]
       length: longer
+      note: rain on the pavement
   - prompt: a quiet street at dawn
     enhance: true        # default options
+  - prompt: two friends talking at a cafe table
+    enhance:
+      sound: [ambient, dialogue]   # video with audio on
 ```
 
 From the command line, `--enhance` enhances every prompt and overrides entries' `enhance:` settings; `--no-enhance` turns all enhancement off:
@@ -216,11 +236,14 @@ From the command line, `--enhance` enhances every prompt and overrides entries' 
 ```bash
 ziv-image -m klein9b --prompt "a fox in snow" --enhance
 ziv-image -m klein9b -p prompts.yaml --enhance style=photo,mood=serene,details=lighting+camera,length=longer
-ziv-video -m ltx-8 --prompt "a fox runs" --enhance style=cinematic,motion=action+camera-move
+ziv-video -m ltx-8 --prompt "a fox runs" --enhance style=cinematic,motion=action+camera-move,sound=ambient+effects
+ziv-image -m klein9b --prompt "a lighthouse" --enhance-note "in a storm, at night"
 ziv-image -m klein9b -p prompts.yaml --no-enhance
 ```
 
-`motion` only applies to video. Prompt files shared between image and video may include it; images ignore it.
+`--enhance-note` sets the direction and turns on enhancement by itself.
+
+`motion` and `sound` only apply to video, and `sound` only with audio on. Prompt files shared between image and video may include them; images ignore them.
 
 The enhanced prompt is printed while prompts are enhanced and again before each generation, and stored in the image or video metadata, so Gallery shows and reuses the prompt that actually rendered.
 

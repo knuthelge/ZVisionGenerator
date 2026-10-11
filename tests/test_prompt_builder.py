@@ -47,7 +47,7 @@ class TestLoadRoute:
         assert payload["revision"] == file_revision(SAMPLE.encode())
         assert payload["raw_text"] == SAMPLE
         assert "problem" not in payload
-        assert [axis["key"] for axis in payload["enhance_matrix"]["axes"]] == ["style", "mood", "details", "length", "motion"]
+        assert [axis["key"] for axis in payload["enhance_matrix"]["axes"]] == ["style", "mood", "details", "motion", "sound", "length"]
         document = payload["document"]
         assert document["snippets"] == [{"id": "n0", "name": "light", "value": {"kind": "text", "text": "soft light"}}]
         assert [entry["id"] for entry in document["sets"][0]["entries"]] == ["s0.e0", "s0.e1"]

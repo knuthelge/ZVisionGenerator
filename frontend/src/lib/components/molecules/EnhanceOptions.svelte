@@ -5,14 +5,19 @@
     axes: EnhanceAxis[];
     settings: EnhanceSettings;
     mode: WorkflowMode;
+    /** The video has an audio track; audio-only axes (Sound) are hidden without it. */
+    audio?: boolean;
     disabled?: boolean;
     idPrefix?: string;
     onchange: (settings: EnhanceSettings) => void;
   }
 
-  let { axes, settings, mode, disabled = false, idPrefix = 'enhance', onchange }: Props = $props();
+  let { axes, settings, mode, audio = false, disabled = false, idPrefix = 'enhance', onchange }: Props = $props();
 
-  const visibleAxes = $derived(axes.filter((axis) => !axis.video_only || mode === 'video'));
+  /** Matches the server's limit on a direction. */
+  const NOTE_MAX_CHARS = 300;
+
+  const visibleAxes =$derived(axes.filter((axis) => (!axis.video_only || mode === 'video') && (!axis.audio_only || audio)));
 
   function selected(axis: EnhanceAxis, slug: string): boolean {
     const value = settings[axis.key];
@@ -78,6 +83,17 @@
       </div>
     </fieldset>
   {/each}
+  <input
+    id={`${idPrefix}-note`}
+    type="text"
+    class="ui-field w-full"
+    maxlength={NOTE_MAX_CHARS}
+    placeholder="Direction (optional), e.g. at night, focus on the dog"
+    aria-label="Direction for the enhancer"
+    value={settings.note}
+    {disabled}
+    oninput={(e) => onchange({ ...settings, note: (e.currentTarget as HTMLInputElement).value })}
+  />
 </div>
 
 <style>

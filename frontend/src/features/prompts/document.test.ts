@@ -26,13 +26,13 @@ import {
 } from './document';
 
 const AXES: EnhanceAxis[] = [
-  { key: 'style', label: 'Style', multi: false, video_only: false, options: [{ slug: 'keep', label: 'Keep' }, { slug: 'cinematic', label: 'Cinematic' }], default: ['keep'] },
-  { key: 'mood', label: 'Mood', multi: false, video_only: false, options: [{ slug: 'keep', label: 'Keep' }, { slug: 'eerie', label: 'Eerie' }], default: ['keep'] },
-  { key: 'details', label: 'Details', multi: true, video_only: false, options: [{ slug: 'lighting', label: 'Lighting' }, { slug: 'camera', label: 'Camera & lens' }], default: ['lighting'] },
-  { key: 'length', label: 'Length', multi: false, video_only: false, options: [{ slug: 'same', label: 'Same' }, { slug: 'longer', label: 'Longer' }], default: ['same'] },
-  { key: 'motion', label: 'Motion', multi: true, video_only: true, options: [{ slug: 'action', label: 'Action / sequence' }], default: ['action'] },
+  { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep' }, { slug: 'cinematic', label: 'Cinematic' }], default: ['keep'] },
+  { key: 'mood', label: 'Mood', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep' }, { slug: 'eerie', label: 'Eerie' }], default: ['keep'] },
+  { key: 'details', label: 'Details', multi: true, video_only: false, audio_only: false, options: [{ slug: 'lighting', label: 'Lighting' }, { slug: 'camera', label: 'Camera & lens' }], default: ['lighting'] },
+  { key: 'length', label: 'Length', multi: false, video_only: false, audio_only: false, options: [{ slug: 'same', label: 'Same' }, { slug: 'longer', label: 'Longer' }], default: ['same'] },
+  { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action / sequence' }], default: ['action'] },
 ];
-const DEFAULTS = { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'] };
+const DEFAULTS = { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' };
 
 describe('tokenizePrompt', () => {
   it('splits text, snippet references and choices', () => {
@@ -182,14 +182,25 @@ describe('prompt ids', () => {
 describe('enhance', () => {
   it('fills the picker from an entry mapping, ignoring unknown values', () => {
     expect(enhanceSettingsFor({ style: 'cinematic', details: ['camera', 'nope'], mood: 'nope' }, AXES, DEFAULTS)).toEqual({
-      style: 'cinematic', mood: 'keep', details: ['camera'], length: 'same', motion: ['action'],
+      style: 'cinematic', mood: 'keep', details: ['camera'], length: 'same', motion: ['action'], sound: [], note: '',
     });
     expect(enhanceSettingsFor(true, AXES, DEFAULTS)).toEqual(DEFAULTS);
   });
 
+  it('reads an entry direction', () => {
+    expect(enhanceSettingsFor({ note: 'at dusk' }, AXES, DEFAULTS).note).toBe('at dusk');
+  });
+
   it('detects settings that change nothing', () => {
-    expect(isNoOpEnhance({ style: 'keep', mood: 'keep', details: [], length: 'same', motion: [] })).toBe(true);
-    expect(isNoOpEnhance({ style: 'keep', mood: 'keep', details: [], length: 'same', motion: ['action'] })).toBe(false);
+    const none = { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
+    expect(isNoOpEnhance(none)).toBe(true);
+    expect(isNoOpEnhance({ ...none, motion: ['action'] })).toBe(false);
+    expect(isNoOpEnhance({ ...none, sound: ['ambient'] })).toBe(false);
+    expect(isNoOpEnhance({ ...none, note: 'at dusk' })).toBe(false);
+  });
+
+  it('summarizes sound and a direction', () => {
+    expect(enhanceSummary({ sound: ['ambient', 'music'], note: 'at dusk' }, AXES)).toBe('2 sound · Direction');
   });
 
   it('summarizes an entry for its chip', () => {

@@ -307,6 +307,22 @@ class TestCliFlags:
     def test_video_motion(self):
         assert _cli(["--enhance", "motion=pacing"], mode="video").enhance.motion == ("pacing",)
 
+    def test_video_sound(self):
+        assert _cli(["--enhance", "sound=ambient+dialogue"], mode="video").enhance.sound == ("ambient", "dialogue")
+
+    def test_note_implies_enhance(self):
+        assert _cli(["--enhance-note", "at night,  in the rain"]).enhance == EnhanceSettings(note="at night, in the rain")
+
+    def test_note_with_spec(self):
+        assert _cli(["--enhance", "style=anime", "--enhance-note", "at dusk"]).enhance == EnhanceSettings(style="anime", note="at dusk")
+
+    def test_note_alone_counts_as_a_change(self):
+        assert _cli(["--enhance", "details=,length=same", "--enhance-note", "at dusk"]).enhance.note == "at dusk"
+
+    def test_note_with_no_enhance_exits(self):
+        with pytest.raises(SystemExit):
+            _cli(["--enhance-note", "x", "--no-enhance"])
+
 
 class _CliEnhancer:
     def __init__(self, order: list[str]):

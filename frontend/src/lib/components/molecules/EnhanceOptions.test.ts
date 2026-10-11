@@ -7,8 +7,8 @@ import type { EnhanceAxis, EnhanceSettings } from '$lib/types';
 import EnhanceOptions from './EnhanceOptions.svelte';
 
 const axes: EnhanceAxis[] = [
-  { key: 'style', label: 'Style', multi: false, video_only: false, options: [{ slug: 'keep', label: 'Keep' }, { slug: 'photo', label: 'Photo' }], default: ['keep'] },
-  { key: 'details', label: 'Details', multi: true, video_only: false, options: [{ slug: 'lighting', label: 'Lighting' }, { slug: 'composition', label: 'Composition' }], default: [] },
+  { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep' }, { slug: 'photo', label: 'Photo' }], default: ['keep'] },
+  { key: 'details', label: 'Details', multi: true, video_only: false, audio_only: false, options: [{ slug: 'lighting', label: 'Lighting' }, { slug: 'composition', label: 'Composition' }], default: [] },
 ];
 
 describe('EnhanceOptions', () => {
@@ -20,14 +20,40 @@ describe('EnhanceOptions', () => {
     target.innerHTML = '';
   });
 
-  function mountOptions(settings: EnhanceSettings, onchange = vi.fn()): typeof onchange {
+  function mountOptions(settings: EnhanceSettings, onchange = vi.fn(), extra: Record<string, unknown> = {}): typeof onchange {
     document.body.appendChild(target);
-    app = flushSync(() => mount(EnhanceOptions, { target, props: { axes, settings, mode: 'image', onchange } }));
+    app = flushSync(() => mount(EnhanceOptions, { target, props: { axes, settings, mode: 'image', onchange, ...extra } }));
     return onchange;
   }
 
+  const BASE: EnhanceSettings = { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
+  const videoAxes: EnhanceAxis[] = [
+    ...axes,
+    { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action' }], default: [] },
+    { key: 'sound', label: 'Sound', multi: true, video_only: true, audio_only: true, options: [{ slug: 'ambient', label: 'Ambience' }], default: [] },
+  ];
+
+  it.each([
+    ['image', false, false, false],
+    ['video', false, true, false],
+    ['video', true, true, true],
+  ])('mode %s with audio %s shows motion %s and sound %s', (mode, audio, motion, sound) => {
+    mountOptions(BASE, vi.fn(), { axes: videoAxes, mode, audio });
+    expect(target.querySelector('[data-toggle-all="motion"]') !== null).toBe(motion);
+    expect(target.querySelector('[data-toggle-all="sound"]') !== null).toBe(sound);
+  });
+
+  it('reports a typed direction', () => {
+    const onchange = mountOptions({ ...BASE, note: 'at' }, vi.fn(), { idPrefix: 't' });
+    const input = target.querySelector('#t-note') as HTMLInputElement;
+    expect(input.value).toBe('at');
+    input.value = 'at night';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(onchange).toHaveBeenCalledWith(expect.objectContaining({ note: 'at night' }));
+  });
+
   it('offers select-all only on multi-pick axes and selects every option', () => {
-    const onchange = mountOptions({ style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: [] });
+    const onchange = mountOptions({ style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: [], sound: [], note: '' });
     expect(target.querySelector('[data-toggle-all="style"]')).toBeNull();
     const toggle = target.querySelector('[data-toggle-all="details"]') as HTMLButtonElement;
     expect(toggle.dataset.allSelected).toBe('false');
@@ -36,7 +62,7 @@ describe('EnhanceOptions', () => {
   });
 
   it('clears every option once all are selected', () => {
-    const onchange = mountOptions({ style: 'keep', mood: 'keep', details: ['lighting', 'composition'], length: 'same', motion: [] });
+    const onchange = mountOptions({ style: 'keep', mood: 'keep', details: ['lighting', 'composition'], length: 'same', motion: [], sound: [], note: '' });
     const toggle = target.querySelector('[data-toggle-all="details"]') as HTMLButtonElement;
     expect(toggle.dataset.allSelected).toBe('true');
     toggle.click();

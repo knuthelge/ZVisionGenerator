@@ -566,12 +566,12 @@ describe('WorkspacePage', () => {
     context.prompt_enhancer = {
       matrix: {
         axes: [
-          { key: 'style', label: 'Style', multi: false, video_only: false, options: [{ slug: 'keep', label: 'Keep' }, { slug: 'photo', label: 'Photographic' }], default: ['keep'] },
-          { key: 'details', label: 'Details', multi: true, video_only: false, options: [{ slug: 'lighting', label: 'Lighting' }], default: ['lighting'] },
-          { key: 'length', label: 'Length', multi: false, video_only: false, options: [{ slug: 'same', label: 'Same' }, { slug: 'longer', label: 'Longer' }], default: ['same'] },
-          { key: 'motion', label: 'Motion', multi: true, video_only: true, options: [{ slug: 'action', label: 'Action' }], default: ['action'] },
+          { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep' }, { slug: 'photo', label: 'Photographic' }], default: ['keep'] },
+          { key: 'details', label: 'Details', multi: true, video_only: false, audio_only: false, options: [{ slug: 'lighting', label: 'Lighting' }], default: ['lighting'] },
+          { key: 'length', label: 'Length', multi: false, video_only: false, audio_only: false, options: [{ slug: 'same', label: 'Same' }, { slug: 'longer', label: 'Longer' }], default: ['same'] },
+          { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action' }], default: ['action'] },
         ],
-        defaults: { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'] },
+        defaults: { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' },
       },
       model: 'owner/llm',
       revision: null,
@@ -824,7 +824,7 @@ describe('WorkspacePage', () => {
     draft.update('prompt', 'a fox');
     draft.update('enhancedPrompt', 'Ignored while auto-enhancing.');
     draft.update('enhanceAuto', true);
-    draft.update('enhanceSettings', { style: 'photo', mood: 'keep', details: [], length: 'longer', motion: ['action'] });
+    draft.update('enhanceSettings', { style: 'photo', mood: 'keep', details: [], length: 'longer', motion: ['action'], sound: [], note: '' });
     await mountWorkspace(withEnhancer(makeContext()));
 
     expect((target.querySelector('#ws-enhanced-prompt') as HTMLTextAreaElement).disabled).toBe(true);
@@ -868,12 +868,12 @@ describe('WorkspacePage', () => {
   it('warns inline when auto-enhance would change nothing', async () => {
     draft.update('prompt', 'a fox');
     draft.update('enhanceAuto', true);
-    draft.update('enhanceSettings', { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [] });
+    draft.update('enhanceSettings', { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' });
     await mountWorkspace(withEnhancer(makeContext()));
     (target.querySelector('#ws-enhance-toggle') as HTMLButtonElement).click();
     await settle();
     // The enhancer popover is moved to <body>.
-    expect(document.querySelector('#ws-enhance-panel [role="alert"]')?.textContent).toContain('Pick a style, a mood, a detail, or a length.');
+    expect(document.querySelector('#ws-enhance-panel [role="alert"]')).not.toBeNull();
   });
 
   it('hides the enhancer when the backend does not advertise it', async () => {

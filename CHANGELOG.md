@@ -9,10 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 - Web UI: video jobs can be cancelled with Cancel or `Esc` twice, also while their prompts are rewritten
 - Windows/Linux: RTX 50-series (Blackwell) GPUs are supported
+- Prompt enhancer: a **Sound** option for video with audio on (Ambience, Sound effects, Dialogue, Music), also `sound=` in `--enhance` and prompt files. Sounds and quoted speech in the prompt are kept
+- Prompt enhancer: a free-text **Direction** (`--enhance-note`, `note:` in prompt files), such as "at night, in the rain"
 
 ### Changed
 - Web UI: redesigned job card with a progress bar for the whole job, how long queueing, prompt enhancement and model loading took, a larger live preview, the step percentage, and a separate bar for the upscale pass. It says when a pause or skip is waiting to take effect and when a file is being written after the last step
 - Web UI: `Esc` stops the running job only when pressed twice; the Cancel button still stops it at once
+- Prompt enhancer: rewrites take the frame shape into account, and for video the clip length. Image-to-video and img2img rewrites describe change instead of re-describing the starting image
 - Web server and shared libraries updated (FastAPI 0.143, uvicorn 0.54, python-multipart 0.0.32, Pillow 12.3, huggingface-hub ≥1.32)
 - Building the web frontend from source needs Node.js 22.22.2+, 24.15+ or 26+ (contributors only; the packaged app is unaffected)
 - Windows/Linux: torch 2.14 with CUDA 13.0, diffusers 0.41.0, transformers 5.19, accelerate 1.15, bitsandbytes 0.50, peft 0.21; images can differ slightly for the same seed

@@ -19,7 +19,16 @@ from zvisiongenerator.backends import prompt_enhancer_session, release_accelerat
 from zvisiongenerator.core.job_plan import EnhanceStatus, IterationPlan, JobPlan
 from zvisiongenerator.core.progress_events import ProgressCallback, emit_progress
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
-from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhance_options, enhance_prompt, entry_enhance, resolve_enhance_ceiling, resolve_item_enhance
+from zvisiongenerator.utils.prompt_enhance import (
+    EnhanceContext,
+    EnhanceSettings,
+    enhance_context,
+    enhance_options,
+    enhance_prompt,
+    entry_enhance,
+    resolve_enhance_ceiling,
+    resolve_item_enhance,
+)
 
 if TYPE_CHECKING:
     from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
@@ -152,7 +161,7 @@ def run_preflight(
     if reference is None:
         raise RuntimeError("Prompt enhancement was requested but no enhancer model could be planned.")
     pause = _make_pause(control, mode=mode, total_iterations=total_iterations, progress_callback=progress_callback)
-    rewrite = _make_rewriter(config, mode=mode, model_family=model_family)
+    rewrite = _make_rewriter(config, mode=mode, model_family=model_family, context=_job_context(args, mode=mode))
 
     def _on_phase(phase: str) -> None:
         _print_enhancer_phase(phase)
@@ -215,8 +224,24 @@ def _rewrite_all(
     return tuple(planned), False
 
 
-def _make_rewriter(config: dict[str, Any], *, mode: str, model_family: str | None) -> Callable[[PromptEnhancer, IterationPlan, Callable[[], bool] | None], tuple[IterationPlan, str | None]]:
-    """Bind the job's word ceiling and enhancer options into a single-iteration rewrite function."""
+def _job_context(args: argparse.Namespace, *, mode: str) -> EnhanceContext:
+    """Return the rewrite context for a job from its arguments (frame size or ratio, frames, fps, audio, reference image)."""
+    return enhance_context(
+        mode=mode,
+        width=getattr(args, "width", None),
+        height=getattr(args, "height", None),
+        ratio=getattr(args, "ratio", None),
+        frames=getattr(args, "num_frames", None),
+        fps=getattr(args, "fps", None),
+        audio=not getattr(args, "no_audio", True),
+        reference_image=bool(getattr(args, "image_path", None)),
+    )
+
+
+def _make_rewriter(
+    config: dict[str, Any], *, mode: str, model_family: str | None, context: EnhanceContext
+) -> Callable[[PromptEnhancer, IterationPlan, Callable[[], bool] | None], tuple[IterationPlan, str | None]]:
+    """Bind the job's word ceiling, context and enhancer options into a single-iteration rewrite function."""
     ceiling = resolve_enhance_ceiling(config, family=model_family, mode=mode)
     options = enhance_options(config)
 
@@ -230,6 +255,7 @@ def _make_rewriter(config: dict[str, Any], *, mode: str, model_family: str | Non
                 mode=mode,
                 seed=iteration.seed,
                 ceiling=ceiling,
+                context=context,
                 length_cfg=options["length"],
                 temperature=options["temperature"],
                 max_tokens=options["max_new_tokens"],

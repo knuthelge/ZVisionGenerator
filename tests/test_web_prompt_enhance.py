@@ -17,7 +17,7 @@ from conftest import _make_args
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
+from zvisiongenerator.utils.prompt_enhance import EnhanceContext, EnhanceSettings
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import web_runner as web_runner_module
 from zvisiongenerator.web import workspace_api as workspace_api_module
@@ -145,6 +145,9 @@ class TestEnhanceEndpoint:
             ({"prompt": "a fox", "mode": "audio"}, "mode must be"),
             ({"prompt": "a fox", "max_words": 0}, "max_words"),
             ([1, 2], "JSON object"),
+            ({"prompt": "a fox", "context": "video"}, "context must be"),
+            ({"prompt": "a fox", "context": {"frames": -1}}, "context.frames"),
+            ({"prompt": "a fox", "context": {"ratio": 16}}, "context.ratio"),
         ],
     )
     def test_validation(self, body, message, no_active_job):
@@ -156,6 +159,20 @@ class TestEnhanceEndpoint:
     def test_max_words_is_used(self, monkeypatch):
         job = web_server._validate_enhance_body({"prompt": "a fox", "settings": {"length": "extra"}, "max_words": 180})
         assert job["ceiling"] == 180 and job["settings"].length == "extra"
+
+    def test_context_is_parsed(self):
+        body = {
+            "prompt": "a fox",
+            "mode": "video",
+            "settings": {"sound": ["ambient"], "note": "at dusk"},
+            "context": {"width": 448, "height": 704, "frames": 97, "fps": 24, "audio": True, "reference_image": True},
+        }
+        job = web_server._validate_enhance_body(body)
+        assert job["context"] == EnhanceContext(audio=True, seconds=97 / 24, orientation="portrait", reference_image=True)
+        assert (job["settings"].sound, job["settings"].note) == (("ambient",), "at dusk")
+
+    def test_missing_context_is_empty(self):
+        assert web_server._validate_enhance_body({"prompt": "a fox"})["context"] == EnhanceContext()
 
     def test_cancel_reports_error_and_stops(self):
         frames: queue.Queue = queue.Queue()

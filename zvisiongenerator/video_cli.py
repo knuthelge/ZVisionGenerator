@@ -213,6 +213,7 @@ def main(*, prog: str = "ziv-video") -> None:
 
     # Audio flag normalization
     args.no_audio = not getattr(args, "audio", True)
+    args.fps = model_info.default_fps
 
     # Alignment corrections using model metadata
     # When upscaling, use 64-alignment so half-res (dim//2) stays 32-aligned

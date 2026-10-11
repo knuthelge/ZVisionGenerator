@@ -38,7 +38,7 @@ function enhanceSettings(value: string | undefined): EnhanceSettings | null {
   if (!value) return null;
   try {
     const parsed = JSON.parse(value) as Partial<EnhanceSettings>;
-    return { style: parsed.style ?? 'keep', mood: parsed.mood ?? 'keep', details: parsed.details ?? [], length: parsed.length ?? 'same', motion: parsed.motion ?? [] };
+    return { style: parsed.style ?? 'keep', mood: parsed.mood ?? 'keep', details: parsed.details ?? [], length: parsed.length ?? 'same', motion: parsed.motion ?? [], sound: parsed.sound ?? [], note: parsed.note ?? '' };
   } catch {
     return null;
   }

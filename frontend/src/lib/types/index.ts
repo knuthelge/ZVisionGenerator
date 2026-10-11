@@ -166,7 +166,7 @@ export interface WorkspaceContext {
 
 // ── Prompt enhancer ────────────────────────────────────────────────────────────
 
-export type EnhanceAxisKey = 'style' | 'mood' | 'details' | 'length' | 'motion';
+export type EnhanceAxisKey = 'style' | 'mood' | 'details' | 'length' | 'motion' | 'sound';
 
 export interface EnhanceSettings {
   style: string;
@@ -174,6 +174,20 @@ export interface EnhanceSettings {
   details: string[];
   length: string;
   motion: string[];
+  sound: string[];
+  /** Free-text direction for the enhancer; empty for none. */
+  note: string;
+}
+
+/** Facts about the job that shape a rewrite, sent with an on-demand enhancement. */
+export interface EnhanceContext {
+  ratio: string | null;
+  width: number | null;
+  height: number | null;
+  frames: number | null;
+  fps: number | null;
+  audio: boolean;
+  reference_image: boolean;
 }
 
 export interface EnhanceAxis {
@@ -181,6 +195,8 @@ export interface EnhanceAxis {
   label: string;
   multi: boolean;
   video_only: boolean;
+  /** Shown only for video with audio on. */
+  audio_only: boolean;
   options: { slug: string; label: string }[];
   default: string[];
 }
@@ -244,7 +260,7 @@ export interface PromptField {
 }
 
 /** An entry's `enhance:` value: off, default options, or the mapping as written. */
-export type EntryEnhance = null | true | Partial<Record<EnhanceAxisKey, string | string[]>>;
+export type EntryEnhance = null | true | Partial<Record<EnhanceAxisKey | 'note', string | string[]>>;
 
 export interface DocumentEntry {
   id: string;

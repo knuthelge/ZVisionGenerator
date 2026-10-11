@@ -995,7 +995,7 @@ def test_video_submission_missing_ffmpeg_returns_422_before_job_registration(mon
     monkeypatch.setattr(
         web_server,
         "detect_video_model",
-        lambda _model: SimpleNamespace(family="ltx", supports_i2v=True, resolution_alignment=64, frame_alignment=8),
+        lambda _model: SimpleNamespace(family="ltx", supports_i2v=True, resolution_alignment=64, frame_alignment=8, default_fps=24),
     )
     monkeypatch.setattr(web_server, "resolve_video_defaults", lambda *_args: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
     monkeypatch.setattr(web_server, "_normalize_video_args", lambda *_args: None)

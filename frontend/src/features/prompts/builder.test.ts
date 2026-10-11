@@ -8,7 +8,7 @@ function loadPayload(document: PromptDocument): PromptDocumentLoad & { document:
     revision: 'r1',
     raw_text: 'text',
     document,
-    enhance_matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [] } },
+    enhance_matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } },
   };
 }
 

@@ -7,7 +7,9 @@
   import {
     clampedNote,
     effectiveEnhanceSettings,
+    enhanceContext,
     enhancePhaseMessage,
+    hasAudio,
     isNoOpSettings,
     settingsPayload,
     workflowMode,
@@ -50,7 +52,8 @@
 
   const mode = $derived(workflowMode(draft.state.workflow));
   const settings = $derived(effectiveEnhanceSettings(draft.state, contract));
-  const noOp = $derived(isNoOpSettings(settings, mode));
+  const audio = $derived(hasAudio(draft.state));
+  const noOp = $derived(isNoOpSettings(settings, mode, audio));
   const available = $derived(contract.model !== null);
 
   let panelOpen = $state(false);
@@ -65,7 +68,7 @@
     !available ? (contract.error ?? 'No prompt enhancer model is configured.')
       : jobsActive ? 'Available when all jobs have finished.'
       : busy ? 'Available once the job is submitted.'
-      : noOp ? 'Pick a style, a mood, a detail, or a length.'
+      : noOp ? 'Pick a style, a mood, a detail, a length, or write a direction.'
       : draft.state.prompt.trim() === '' ? 'Write a prompt first.'
       : null
   );
@@ -88,7 +91,7 @@
     abort = new AbortController();
     try {
       await enhancePrompt(
-        { prompt: source.prompt, mode, settings: settingsPayload(requested, mode), max_words: maxWords },
+        { prompt: source.prompt, mode, settings: settingsPayload(requested, mode, audio), max_words: maxWords, context: enhanceContext(draft.state) },
         (frame) => {
           if (frame.type === 'status') {
             phase = frame.phase;
@@ -138,7 +141,7 @@
 </script>
 
 {#snippet options()}
-  <EnhanceOptions axes={contract.matrix.axes} {settings} {mode} disabled={enhancing} idPrefix={`ws-enhance-${variant}`} onchange={updateSettings} />
+  <EnhanceOptions axes={contract.matrix.axes} {settings} {mode} {audio} disabled={enhancing} idPrefix={`ws-enhance-${variant}`} onchange={updateSettings} />
 
   <Toggle
     id={`ws-enhance-auto-${variant}`}
@@ -195,7 +198,7 @@
         {/if}
       </div>
     {:else if draft.state.enhanceAuto && noOp}
-      <p class="ui-help ui-help-warning" role="alert">Pick a style, a mood, a detail, or a length.</p>
+      <p class="ui-help ui-help-warning" role="alert">Pick a style, a mood, a detail, a length, or write a direction.</p>
     {/if}
     {#if variant === 'file'}
       <p class="ui-help">Off: entries with their own <span class="font-mono">enhance:</span> setting (✨) are still enhanced.</p>
@@ -205,7 +208,7 @@
 
 {#if draft.state.enhanceAuto && ((variant === 'inline' && draft.state.promptSource === 'inline') || (variant === 'file' && draft.state.promptSource === 'file'))}
   <input type="hidden" name="enhance_auto" value="true" />
-  <input type="hidden" name="enhance_settings" value={JSON.stringify(settingsPayload(settings, mode))} />
+  <input type="hidden" name="enhance_settings" value={JSON.stringify(settingsPayload(settings, mode, audio))} />
 {/if}
 
 <style>

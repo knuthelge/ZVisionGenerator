@@ -5,9 +5,11 @@ from __future__ import annotations
 import pytest
 
 from zvisiongenerator.utils.prompt_enhance import (
+    EnhanceContext,
     EnhanceSettings,
     build_messages,
     clean_output,
+    enhance_context,
     enhance_prompt,
     format_enhance_spec,
     is_unusable,
@@ -49,11 +51,32 @@ class _FakeEnhancer:
 class TestMatrix:
     def test_contract_lists_axes_and_defaults(self):
         contract = matrix_contract()
-        assert [axis["key"] for axis in contract["axes"]] == ["style", "mood", "details", "length", "motion"]
-        assert contract["defaults"] == {"style": "keep", "mood": "keep", "details": ["lighting", "composition"], "length": "same", "motion": ["action"]}
-        motion = contract["axes"][4]
-        assert motion["video_only"] is True
-        assert [option["slug"] for option in contract["axes"][3]["options"]] == ["shorter", "same", "longer", "extra"]
+        assert [axis["key"] for axis in contract["axes"]] == ["style", "mood", "details", "motion", "sound", "length"]
+        assert contract["defaults"] == {
+            "style": "keep",
+            "mood": "keep",
+            "details": ["lighting", "composition"],
+            "length": "same",
+            "motion": ["action"],
+            "sound": [],
+            "note": "",
+        }
+        motion, sound, length = contract["axes"][3], contract["axes"][4], contract["axes"][5]
+        assert (motion["video_only"], motion["audio_only"]) == (True, False)
+        assert (sound["video_only"], sound["audio_only"], sound["multi"]) == (True, True, True)
+        assert [option["slug"] for option in sound["options"]] == ["ambient", "effects", "dialogue", "music"]
+        assert [option["slug"] for option in length["options"]] == ["shorter", "same", "longer", "extra"]
+
+    def test_sound_alone_is_not_no_op_for_video(self):
+        validate_settings(EnhanceSettings(details=(), motion=(), sound=("ambient",)), mode="video")
+
+    def test_sound_does_not_count_for_image(self):
+        with pytest.raises(ValueError, match="Nothing to enhance"):
+            validate_settings(EnhanceSettings(details=(), sound=("ambient",)), mode="image")
+
+    @pytest.mark.parametrize("mode", ["image", "video"])
+    def test_note_alone_is_not_no_op(self, mode):
+        validate_settings(EnhanceSettings(details=(), motion=(), note="at night"), mode=mode)
 
     def test_no_op_combination_rejected(self):
         with pytest.raises(ValueError, match="Nothing to enhance"):
@@ -91,12 +114,31 @@ class TestSpec:
     def test_empty_multi_value(self):
         assert parse_enhance_spec("details=,style=anime", mode="image").details == ()
 
-    @pytest.mark.parametrize("settings", [EnhanceSettings(), EnhanceSettings(style="3d", mood="nostalgic", details=(), length="shorter", motion=("pacing",))])
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            EnhanceSettings(),
+            EnhanceSettings(style="3d", mood="nostalgic", details=(), length="shorter", motion=("pacing",)),
+            EnhanceSettings(sound=("ambient", "dialogue")),
+        ],
+    )
     def test_round_trip(self, settings):
         assert parse_enhance_spec(format_enhance_spec(settings), mode="video") == settings
 
-    def test_image_spec_omits_motion(self):
-        assert "motion" not in format_enhance_spec(EnhanceSettings(), mode="image")
+    def test_image_spec_omits_video_axes(self):
+        spec = format_enhance_spec(EnhanceSettings(sound=("music",)), mode="image")
+        assert "motion" not in spec and "sound" not in spec
+
+    def test_sound_spec(self):
+        assert parse_enhance_spec("sound=effects+music", mode="video").sound == ("effects", "music")
+
+    def test_sound_rejected_for_image_spec(self):
+        with pytest.raises(ValueError, match="only applies to video"):
+            parse_enhance_spec("sound=music", mode="image")
+
+    def test_note_not_in_spec(self):
+        with pytest.raises(ValueError, match="--enhance-note"):
+            parse_enhance_spec("note=night", mode="image")
 
     @pytest.mark.parametrize(
         ("spec", "message"),
@@ -105,7 +147,7 @@ class TestSpec:
             ("mood=angry", "keep, serene, joyful, romantic, melancholic, mysterious, eerie, dramatic, epic, whimsical, nostalgic"),
             ("details=lighting+smell", "lighting, composition, camera, materials, color, environment, subject"),
             ("length=huge", "shorter, same, longer, extra"),
-            ("colour=red", "Valid keys: style, mood, details, length, motion"),
+            ("colour=red", "Valid keys: style, mood, details, motion, sound, length, note"),
             ("cinematic", "Use key=value"),
         ],
     )
@@ -148,6 +190,48 @@ class TestEntry:
 
     def test_mapping_from_json(self):
         assert settings_from_mapping({"details": "lighting+color"}, mode="image").details == ("lighting", "color")
+
+    def test_note_is_one_trimmed_line(self):
+        assert parse_enhance_entry({"note": "  at night,\n in the rain "}, mode="image", where="x").note == "at night, in the rain"
+
+    @pytest.mark.parametrize("value", [42, "x" * 301])
+    def test_invalid_note(self, value):
+        with pytest.raises(ValueError, match="Direction"):
+            settings_from_mapping({"note": value}, mode="image")
+
+    def test_sound_in_image_yaml_warns_and_is_ignored(self):
+        with pytest.warns(UserWarning, match="only applies to video"):
+            settings = parse_enhance_entry({"style": "photo", "sound": ["music"]}, mode="image", where="x")
+        assert settings.sound == ()
+
+
+class TestContext:
+    @pytest.mark.parametrize(
+        ("kwargs", "orientation"),
+        [
+            ({"width": 704, "height": 448}, "landscape"),
+            ({"width": 448, "height": 704}, "portrait"),
+            ({"width": 512, "height": 512}, "square"),
+            ({"ratio": "9:16"}, "portrait"),
+            ({"ratio": "1:1"}, "square"),
+            ({"width": 1024, "height": 576, "ratio": "9:16"}, "landscape"),  # explicit size wins over ratio
+            ({"ratio": "wide"}, None),
+            ({}, None),
+        ],
+    )
+    def test_orientation(self, kwargs, orientation):
+        assert enhance_context(mode="image", **kwargs).orientation == orientation
+
+    def test_video_duration_and_audio(self):
+        context = enhance_context(mode="video", frames=97, fps=24, audio=True, reference_image=True)
+        assert context == EnhanceContext(audio=True, seconds=97 / 24, orientation=None, reference_image=True)
+
+    def test_image_has_no_audio_or_duration(self):
+        context = enhance_context(mode="image", frames=97, fps=24, audio=True)
+        assert (context.audio, context.seconds) == (False, None)
+
+    def test_duration_needs_fps(self):
+        assert enhance_context(mode="video", frames=97).seconds is None
 
 
 # ── Length math ─────────────────────────────────────────────────────────────
@@ -204,9 +288,17 @@ class TestLength:
 # ── Messages ────────────────────────────────────────────────────────────────
 
 
-def _system(settings: EnhanceSettings, *, mode: str = "image", in_words: int = 10) -> str:
+def _system(settings: EnhanceSettings, *, mode: str = "image", in_words: int = 10, context: EnhanceContext | None = None) -> str:
     plan = plan_length(in_words, settings.length, ceiling=300)
-    return build_messages("p", settings, mode=mode, plan=plan)[0]["content"]
+    return build_messages("p", settings, mode=mode, plan=plan, context=context)[0]["content"]
+
+
+def _rule(system: str, prefix: str) -> str | None:
+    """Return the rule line that starts with *prefix*, or None."""
+    return next((line[2:] for line in system.splitlines() if line.startswith(f"- {prefix}")), None)
+
+
+_AUDIO = EnhanceContext(audio=True)
 
 
 class TestMessages:
@@ -253,6 +345,50 @@ class TestMessages:
     def test_clamped_uses_same_wording(self):
         system = _system(EnhanceSettings(length="longer"), in_words=400)
         assert "Do not exceed" in system
+
+    def test_video_with_audio_allows_and_keeps_sounds(self):
+        system = _system(EnhanceSettings(), mode="video", context=_AUDIO)
+        assert "seen and heard" in system and "no sounds" not in system
+        assert "Keep every sound and every line of quoted speech" in system
+
+    @pytest.mark.parametrize(("mode", "context"), [("video", EnhanceContext(audio=False)), ("image", _AUDIO), ("video", None)])
+    def test_no_audio_forbids_sounds(self, mode, context):
+        assert "no sounds" in _system(EnhanceSettings(), mode=mode, context=context)
+
+    def test_sound_rule_lists_choices(self):
+        rule = _rule(_system(EnhanceSettings(sound=("ambient", "dialogue")), mode="video", context=_AUDIO), "Sound:")
+        assert rule is not None
+        assert "ambient soundscape" in rule and "write short lines" in rule and "double quotes" in rule
+
+    @pytest.mark.parametrize(("mode", "context"), [("video", EnhanceContext(audio=False)), ("image", _AUDIO)])
+    def test_sound_rule_needs_video_with_audio(self, mode, context):
+        assert _rule(_system(EnhanceSettings(sound=("music",)), mode=mode, context=context), "Sound:") is None
+
+    def test_no_sound_choice_no_sound_rule(self):
+        assert _rule(_system(EnhanceSettings(), mode="video", context=_AUDIO), "Sound:") is None
+
+    def test_direction_rule(self):
+        assert _rule(_system(EnhanceSettings(note="at night, in the rain")), "Direction from the user") == "Direction from the user (follow it): at night, in the rain"
+        assert _rule(_system(EnhanceSettings()), "Direction") is None
+
+    @pytest.mark.parametrize(("seconds", "beats"), [(2.0, "one continuous action"), (5.0, "one continuous action"), (8.0, "two or three beats"), (20.0, "short sequence")])
+    def test_duration_rule(self, seconds, beats):
+        rule = _rule(_system(EnhanceSettings(), mode="video", context=EnhanceContext(seconds=seconds)), "Duration:")
+        assert rule is not None and f"about {round(seconds)} seconds" in rule and beats in rule
+
+    def test_duration_only_for_video(self):
+        assert _rule(_system(EnhanceSettings(), context=EnhanceContext(seconds=4.0)), "Duration:") is None
+
+    def test_frame_rule(self):
+        assert _rule(_system(EnhanceSettings(), context=EnhanceContext(orientation="portrait")), "Frame:") == "Frame: portrait; compose for that shape."
+        assert _rule(_system(EnhanceSettings()), "Frame:") is None
+
+    def test_reference_image_rules(self):
+        video = _system(EnhanceSettings(), mode="video", context=EnhanceContext(reference_image=True))
+        image = _system(EnhanceSettings(), context=EnhanceContext(reference_image=True))
+        assert _rule(video, "The first frame is supplied as an image") is not None
+        assert _rule(image, "A reference image supplies the subject and layout") is not None
+        assert "reference image" not in _system(EnhanceSettings()) and "first frame" not in _system(EnhanceSettings(), mode="video")
 
 
 # ── Hygiene ─────────────────────────────────────────────────────────────────

@@ -17,7 +17,7 @@
   let open = $state(false);
   let anchor = $state<HTMLButtonElement | null>(null);
   let useDefaults = $state(false);
-  let settings = $state<EnhanceSettings>({ style: 'keep', mood: 'keep', details: [], length: 'same', motion: [] });
+  let settings = $state<EnhanceSettings>({ style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' });
 
   const noop = $derived(!useDefaults && isNoOpEnhance(settings));
 
@@ -63,11 +63,11 @@
     {#if useDefaults}
       <p class="enhance-hint">Uses the enhancer's default options (<code>enhance: true</code>).</p>
     {:else}
-      <EnhanceOptions {axes} {settings} mode="video" {idPrefix} onchange={(next) => { settings = next; }} />
-      <p class="enhance-hint">Motion only applies to video; image runs ignore it.</p>
+      <EnhanceOptions {axes} {settings} mode="video" audio {idPrefix} onchange={(next) => { settings = next; }} />
+      <p class="enhance-hint">Motion and Sound only apply to video (Sound only with audio on); image runs ignore them.</p>
     {/if}
     {#if noop}
-      <p class="enhance-warning" role="status">Nothing to enhance: pick a style, a mood, a detail or a length.</p>
+      <p class="enhance-warning" role="status">Nothing to enhance: pick a style, a mood, a detail, a length or write a direction.</p>
     {/if}
     <div class="enhance-actions">
       {#if enhance !== null}

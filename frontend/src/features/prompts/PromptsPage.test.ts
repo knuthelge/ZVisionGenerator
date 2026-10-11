@@ -42,7 +42,7 @@ function loaded(document: PromptDocument | null = sample(), extra: Partial<Promp
     revision: 'r1',
     raw_text: 'portrait: …',
     ...(document ? { document } : {}),
-    enhance_matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [] } },
+    enhance_matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } },
     ...extra,
   };
 }

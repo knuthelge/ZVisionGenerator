@@ -61,7 +61,7 @@ export class PromptBuilder {
   preview = $state<PromptDocumentPreview | null>(null);
   rolled = $state<{ entryId: string; base: string; prompt: string } | null>(null);
   axes = $state<EnhanceAxis[]>([]);
-  defaults = $state<EnhanceSettings>({ style: 'keep', mood: 'keep', details: [], length: 'same', motion: [] });
+  defaults = $state<EnhanceSettings>({ style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' });
 
   readonly #history = new UndoHistory<string>(100);
   readonly #previewFn: PreviewFn;

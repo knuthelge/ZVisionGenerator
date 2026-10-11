@@ -1,10 +1,11 @@
-import type { EnhanceFrame, EnhanceSettings, WorkflowMode } from '$lib/types';
+import type { EnhanceContext, EnhanceFrame, EnhanceSettings, WorkflowMode } from '$lib/types';
 
 export interface EnhanceRequest {
   prompt: string;
   mode: WorkflowMode;
   settings: Partial<EnhanceSettings>;
   max_words?: number;
+  context?: EnhanceContext;
 }
 
 /** Incrementally split an NDJSON byte stream (decoded to text) into frames, tolerating chunk boundaries. */

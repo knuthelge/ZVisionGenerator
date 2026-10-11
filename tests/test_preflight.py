@@ -253,6 +253,27 @@ class TestRunPreflight:
         _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video")
         assert "text-to-video" in enhancer.systems[0]
 
+    def test_video_job_shape_reaches_the_prompt(self):
+        enhancer = _FakeEnhancer([])
+        args = _args(enhance=EnhanceSettings(sound=("ambient",)), width=704, height=448, num_frames=97, fps=24, no_audio=False, image_path="first.png")
+        _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video", args=args)
+        lines = enhancer.systems[0].splitlines()
+        assert any(line.startswith("- Sound:") for line in lines)
+        assert any(line.startswith("- Duration: about 4 seconds") for line in lines)
+        assert "- Frame: landscape; compose for that shape." in lines
+        assert any(line.startswith("- The first frame is supplied as an image") for line in lines)
+
+    def test_video_without_audio_has_no_sound_rule(self):
+        enhancer = _FakeEnhancer([])
+        args = _args(enhance=EnhanceSettings(sound=("ambient",)), no_audio=True)
+        _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video", args=args)
+        assert not any(line.startswith("- Sound:") for line in enhancer.systems[0].splitlines())
+
+    def test_image_ratio_sets_frame(self):
+        enhancer = _FakeEnhancer([])
+        _run({"a": [("a fox", None)]}, enhancer=enhancer, args=_args(ratio="9:16", width=None, height=None))
+        assert "- Frame: portrait; compose for that shape." in enhancer.systems[0].splitlines()
+
     def test_json_captions_are_not_enhanced(self):
         session = MagicMock()
         plan, *_ = _run({"prompt": [('{"a": 1}', None)]}, args=_args(json_prompt_enabled=True), session=session)

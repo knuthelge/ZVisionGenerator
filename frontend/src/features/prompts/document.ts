@@ -227,7 +227,7 @@ export function remapOptionIds(ids: string[], map: Record<string, string>): stri
 
 /** Full settings for the enhance picker: an entry's mapping over the defaults, ignoring unknown values. */
 export function enhanceSettingsFor(enhance: EntryEnhance, axes: EnhanceAxis[], defaults: EnhanceSettings): EnhanceSettings {
-  const settings: EnhanceSettings = { ...defaults, details: [...defaults.details], motion: [...defaults.motion] };
+  const settings: EnhanceSettings = { ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...(defaults.sound ?? [])], note: defaults.note ?? '' };
   if (enhance === null || enhance === true) return settings;
   for (const axis of axes) {
     const raw = enhance[axis.key];
@@ -235,12 +235,16 @@ export function enhanceSettingsFor(enhance: EntryEnhance, axes: EnhanceAxis[], d
     if (axis.multi && Array.isArray(raw)) (settings[axis.key] as string[]) = raw.filter((slug) => slugs.includes(slug));
     else if (!axis.multi && typeof raw === 'string' && slugs.includes(raw)) (settings[axis.key] as string) = raw;
   }
+  if (typeof enhance.note === 'string') settings.note = enhance.note;
   return settings;
 }
 
 /** Whether `settings` ask for no change at all (the server refuses that). */
 export function isNoOpEnhance(settings: EnhanceSettings): boolean {
-  return settings.style === 'keep' && settings.mood === 'keep' && settings.details.length === 0 && settings.length === 'same' && settings.motion.length === 0;
+  return (
+    settings.style === 'keep' && settings.mood === 'keep' && settings.details.length === 0 && settings.length === 'same'
+    && settings.motion.length === 0 && settings.sound.length === 0 && !settings.note.trim()
+  );
 }
 
 /** Every chosen enhance option in words, e.g. "Cinematic · Mysterious · +2 details". */
@@ -269,5 +273,8 @@ function enhanceParts(enhance: Exclude<EntryEnhance, null | true>, axes: Enhance
   if (details) parts.push(`+${details} detail${details > 1 ? 's' : ''}`);
   const motion = Array.isArray(enhance.motion) ? enhance.motion.length : 0;
   if (motion) parts.push(`${motion} motion`);
+  const sound = Array.isArray(enhance.sound) ? enhance.sound.length : 0;
+  if (sound) parts.push(`${sound} sound`);
+  if (typeof enhance.note === 'string' && enhance.note.trim()) parts.push('Direction');
   return parts;
 }
