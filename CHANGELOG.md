@@ -25,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Windows/Linux: `hf-transfer` is no longer installed; downloads use Xet. Set `HF_XET_HIGH_PERFORMANCE=1` instead of `HF_HUB_ENABLE_HF_TRANSFER` for faster downloads
 
 ### Fixed
+- Videos keep their recorded settings, so the gallery shows their model, size and seed
 - macOS: video clips have the requested number of frames
 - Windows/Linux: LTX-2.3 video failed to load (`cannot import name 'Gemma4UnifiedForConditionalGeneration'`) because the installed transformers was too old
 - Windows/Linux: a LoRA that matches none of the model's layers is skipped with a warning instead of failing the job

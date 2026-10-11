@@ -330,6 +330,20 @@ class TestEmbedMp4Config:
         embedded = json.loads(meta_val[len("zvisiongenerator.config=") :])
         assert embedded["prompt"] == "test prompt"
 
+    def test_keeps_custom_metadata_key_in_mp4_header(self, tmp_path):
+        video_path = tmp_path / "out.mp4"
+        video_path.write_bytes(b"fake-mp4")
+
+        def _side_effect(cmd, **kwargs):
+            video_path.with_suffix(".tmp.mp4").write_bytes(b"processed")
+            return MagicMock(returncode=0)
+
+        with patch("zvisiongenerator.utils.provenance.subprocess.run", side_effect=_side_effect) as mock_run:
+            embed_mp4_config(video_path, {"schema": VIDEO_CONFIG_SCHEMA})
+
+        cmd = mock_run.call_args[0][0]
+        assert cmd[cmd.index("-movflags") + 1] == "use_metadata_tags"
+
     def test_does_not_create_adjacent_sidecars(self, tmp_path):
         video_path = tmp_path / "out.mp4"
         video_path.write_bytes(b"fake-mp4")
