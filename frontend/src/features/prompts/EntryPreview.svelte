@@ -55,6 +55,13 @@
       <span class="preview-code">{selected.entry.active ? `${selected.setName}:${selected.index}` : 'inactive, no prompt id'}</span>
     </p>
 
+    {#if preview?.scene}
+      <section class="box" aria-label="Scene">
+        <div class="box-head"><span class="ui-area-label" title="Video jobs send the scene before the prompt">Scene</span></div>
+        <div class="box-body">{preview.scene}</div>
+      </section>
+    {/if}
+
     <section class="box" aria-label="Prompt">
       <div class="box-head">
         <span class="ui-area-label" title="What the model receives: snippets resolved, fields flattened">Prompt</span>

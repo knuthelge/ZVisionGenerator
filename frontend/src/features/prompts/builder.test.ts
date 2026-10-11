@@ -17,11 +17,11 @@ function sample(): PromptDocument {
     snippets: [{ id: 'n0', name: 'light', value: { kind: 'text', text: 'soft light' } }],
     sets: [
       { id: 's0', name: 'portrait', entries: [
-        { id: 's0.e0', prompt: { kind: 'text', text: 'a woman, $light' }, negative: null, active: true, enhance: null },
-        { id: 's0.e1', prompt: { kind: 'text', text: 'a man' }, negative: null, active: false, enhance: null },
+        { id: 's0.e0', prompt: { kind: 'text', text: 'a woman, $light' }, scene: null, negative: null, active: true, enhance: null },
+        { id: 's0.e1', prompt: { kind: 'text', text: 'a man' }, scene: null, negative: null, active: false, enhance: null },
       ] },
       { id: 's1', name: 'scene', entries: [
-        { id: 's1.e0', prompt: { kind: 'structured', data: { A: ['$light'] } }, negative: null, active: true, enhance: true },
+        { id: 's1.e0', prompt: { kind: 'structured', data: { A: ['$light'] } }, scene: null, negative: null, active: true, enhance: true },
       ] },
     ],
   };
@@ -155,6 +155,37 @@ describe('PromptBuilder', () => {
     builder.undo();
     expect(builder.renameSnippet('n0', 'glow')).not.toBeNull();
     expect(builder.renameSnippet('n0', '2x')).not.toBeNull();
+  });
+
+  it('adds and removes an entry scene as one undoable step each', () => {
+    builder.setScene('s0.e0', true);
+    expect(builder.doc.sets[0].entries[0].scene).toEqual({ kind: 'text', text: '' });
+    expect(builder.dirty).toBe(true);
+
+    builder.setScene('s0.e0', false);
+    expect(builder.doc.sets[0].entries[0].scene).toBeNull();
+
+    builder.undo();
+    expect(builder.doc.sets[0].entries[0].scene).toEqual({ kind: 'text', text: '' });
+    builder.undo();
+    expect(builder.doc.sets[0].entries[0].scene).toBeNull();
+  });
+
+  it('switches a scene between text and fields like a prompt', () => {
+    builder.setScene('s0.e0', true);
+    builder.setValueMode('s0.e0', 'scene', 'fields');
+    expect(builder.doc.sets[0].entries[0].scene?.kind).toBe('fields');
+    builder.addField('s0.e0', 'scene');
+    expect(builder.doc.sets[0].entries[0].scene).toMatchObject({ kind: 'fields', fields: [{ key: '', value: '' }, { key: '', value: '' }] });
+  });
+
+  it('renames snippet references inside scenes', () => {
+    builder.edit((document) => {
+      document.sets[1].entries = [];
+      document.sets[0].entries[0].scene = { kind: 'text', text: 'a street, $light' };
+    });
+    expect(builder.renameSnippet('n0', 'glow')).toBeNull();
+    expect(builder.doc.sets[0].entries[0].scene).toEqual({ kind: 'text', text: 'a street, $glow' });
   });
 
   it('duplicates sets with unique names and fresh ids', () => {

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from conftest import _make_plan
 
+from dataclasses import replace
 from unittest.mock import MagicMock
 
 from tests.conftest import _make_mock_video_backend, _make_video_args
+from zvisiongenerator.core.job_plan import EnhanceStatus, JobPlan
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.utils.interactive import SkipSignal
+from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_runner import run_video_batch
 
@@ -212,6 +215,100 @@ class TestRunVideoBatch:
         assert finished_events[0]["filename"] == "clip.mp4"
         assert finished_events[0]["output_path"] == "/tmp/clip.mp4"
         assert finished_events[0]["generation_time"] == 0.25
+
+
+class TestVideoSceneRequests:
+    """The runner hands each iteration's planned scene (and the job's recorded inputs) to its request."""
+
+    def _requests(self, prompts, *, plan_scene=None, scene_by_set=None, plan_transform=None, **arg_overrides):
+        captured: list = []
+        workflow = MagicMock()
+        workflow.run.side_effect = lambda request, artifacts: captured.append(request) or StageOutcome.success
+        args = _make_video_args(runs=1, **arg_overrides)
+        plan = _make_plan(prompts, args, config={}, scene=plan_scene, scene_by_set=scene_by_set)
+        if plan_transform is not None:
+            plan = plan_transform(plan)
+        run_video_batch(_make_mock_video_backend(), MagicMock(), _ltx_model_info(), workflow, prompts, {}, args, plan=plan)
+        return captured
+
+    def test_plain_job_has_no_scene_fields(self):
+        (request,) = self._requests({"s": [("a sunset", None)]})
+        assert (request.scene, request.resolved_scene, request.enhanced_scene, request.scene_input, request.prompt_input) == (None,) * 5
+
+    def test_job_scene_reaches_every_request(self):
+        requests = self._requests({"s": [("a", None), ("b", None)]}, plan_scene="A {castle|castle}.")
+        assert [(r.scene, r.resolved_scene) for r in requests] == [("A {castle|castle}.", "A castle.")] * 2
+
+    def test_entry_scene_beats_the_job_scene(self):
+        requests = self._requests({"s": [("a", None), ("b", None)]}, plan_scene="Job.", scene_by_set={"s": ["Entry.", None]})
+        assert [r.scene for r in requests] == ["Entry.", "Job."]
+
+    def test_scene_only_job_runs_with_an_empty_prompt(self):
+        (request,) = self._requests({"prompt": [("", None)]}, plan_scene="A castle at dusk.")
+        assert request.prompt == "" and request.resolved_prompt == "" and request.resolved_scene == "A castle at dusk."
+
+    def test_enhanced_pair_reaches_the_request(self):
+        def _enhance(plan):
+            return JobPlan(
+                iterations=tuple(
+                    replace(it, enhance=EnhanceSettings(), enhanced_prompt="A knight rides in.", enhanced_scene="A grey castle.", enhance_status=EnhanceStatus.ENHANCED) for it in plan.iterations
+                )
+            )
+
+        (request,) = self._requests({"s": [("a knight", None)]}, plan_scene="A castle.", plan_transform=_enhance)
+        assert (request.enhanced_prompt, request.enhanced_scene) == ("A knight rides in.", "A grey castle.")
+        assert request.scene == "A castle." and request.prompt == "a knight"
+
+    def test_recorded_inputs_come_from_args(self):
+        (request,) = self._requests({"s": [("A knight rides in.", None)]}, scene_input="A castle.", prompt_input="a knight rides in")
+        assert request.scene_input == "A castle." and request.prompt_input == "a knight rides in"
+
+
+class TestVideoSceneEndToEnd:
+    """Run the real stages behind ``run_video_batch`` and check the one composed prompt sent and the config recorded."""
+
+    def _run(self, tmp_path, prompts, *, enhance=False, plan_transform=None, scene=None, scene_by_set=None):
+        from argparse import Namespace
+        from unittest.mock import patch
+
+        from zvisiongenerator.workflows import build_video_workflow
+
+        backend = _make_mock_video_backend()
+        backend.text_to_video.return_value = tmp_path / "out.mp4"
+        args = _make_video_args(runs=1, output=str(tmp_path))
+        plan = _make_plan(prompts, args, config={}, scene=scene, scene_by_set=scene_by_set)
+        if plan_transform is not None:
+            plan = plan_transform(plan)
+        workflow = build_video_workflow(Namespace(image_path=None, no_audio=False), enhance=enhance)
+        with patch("zvisiongenerator.workflows.video_stages.embed_mp4_config") as embed:
+            run_video_batch(backend, MagicMock(), _ltx_model_info(), workflow, prompts, {}, args, plan=plan)
+        sent = [call.kwargs["prompt"] for call in backend.text_to_video.call_args_list]
+        return sent, [call.args[1] for call in embed.call_args_list]
+
+    def test_entry_scene_beats_job_scene_and_is_sent_once(self, tmp_path):
+        sent, payloads = self._run(tmp_path, {"s": [("a knight rides in", None), ("a dog runs", None)]}, scene="Job.", scene_by_set={"s": ["Entry.", None]})
+        assert sent == ["Entry. a knight rides in", "Job. a dog runs"]
+        assert [p["scene"] for p in payloads] == ["Entry.", "Job."]
+        assert [p["prompt"] for p in payloads] == ["a knight rides in", "a dog runs"]
+
+    def test_enhanced_pair_is_sent_once_and_recorded_apart(self, tmp_path):
+        def _enhance(plan):
+            return JobPlan(
+                iterations=tuple(
+                    replace(it, enhance=EnhanceSettings(), enhanced_prompt="A knight gallops in.", enhanced_scene="A grey castle.", enhance_status=EnhanceStatus.ENHANCED) for it in plan.iterations
+                )
+            )
+
+        sent, (payload,) = self._run(tmp_path, {"s": [("a knight", None)]}, enhance=True, plan_transform=_enhance, scene="A castle.")
+        assert sent == ["A grey castle. A knight gallops in."]
+        assert sent[0].count("A grey castle.") == 1 and "A castle." not in sent[0]
+        assert (payload["scene"], payload["prompt"]) == ("A grey castle.", "A knight gallops in.")
+        assert (payload["scene_input"], payload["prompt_input"]) == ("A castle.", "a knight")
+
+    def test_plain_run_records_no_scene_keys(self, tmp_path):
+        sent, (payload,) = self._run(tmp_path, {"s": [("a sunset", None)]})
+        assert sent == ["a sunset"]
+        assert not {"scene", "scene_input", "prompt_input"} & payload.keys()
 
 
 class TestVideoQuit:

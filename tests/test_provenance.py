@@ -306,6 +306,87 @@ class TestBuildVideoConfigPayload:
         payload = build_video_config_payload(request, VideoWorkingArtifacts())
         json.dumps(payload)
 
+    def test_plain_txt2vid_payload_is_unchanged_by_scene_support(self):
+        """Golden: a video without a scene or enhancement embeds exactly the keys it did before scenes existed."""
+        payload = build_video_config_payload(_make_video_request(), VideoWorkingArtifacts(generation_time=12.5))
+        assert payload == {
+            "schema": VIDEO_CONFIG_SCHEMA,
+            "workflow": "txt2vid",
+            "prompt": "A sweeping landscape",
+            "model": "ltx-8",
+            "model_family": "ltx",
+            "seed": 42,
+            "steps": 8,
+            "width": 704,
+            "height": 448,
+            "ratio": None,
+            "size": None,
+            "frame_count": 49,
+            "image_path": None,
+            "lora": None,
+            "generation": {"time": 12.5, "audio": True, "output_format": "mp4"},
+        }
+
+    def test_plain_img2vid_payload_is_unchanged_by_scene_support(self):
+        """Golden: the same holds for image-to-video."""
+        payload = build_video_config_payload(_make_video_request(image_path="/tmp/ref.png"), VideoWorkingArtifacts())
+        assert payload["workflow"] == "img2vid" and payload["image_path"] == "/tmp/ref.png"
+        assert set(payload) == {"schema", "workflow", "prompt", "model", "model_family", "seed", "steps", "width", "height", "ratio", "size", "frame_count", "image_path", "lora", "generation"}
+
+    def test_enhanced_pair_payload_records_inputs_and_the_scene_apart_from_the_prompt(self):
+        """Changed on purpose: an enhanced video records the user's input beside the enhanced scene so Reuse can offer both."""
+        request = _make_video_request(prompt="a knight rides in", scene="A castle.")
+        artifacts = VideoWorkingArtifacts(metadata={"scene": "A castle.", "enhanced_prompt": "A knight rides in at a gallop.", "enhanced_scene": "A grey castle at dusk."})
+        payload = build_video_config_payload(request, artifacts)
+        assert payload["prompt"] == "A knight rides in at a gallop."
+        assert payload["scene"] == "A grey castle at dusk."
+        assert payload["prompt_input"] == "a knight rides in"
+        assert payload["scene_input"] == "A castle."
+        assert "castle" not in payload["prompt"]
+
+    def test_scene_key_present_only_with_a_scene(self):
+        request = _make_video_request()
+        assert "scene" not in build_video_config_payload(request, VideoWorkingArtifacts(metadata={"scene": "   "}))
+        assert build_video_config_payload(request, VideoWorkingArtifacts(metadata={"scene": "A castle."}))["scene"] == "A castle."
+
+    def test_plain_scene_run_records_no_inputs(self):
+        request = _make_video_request(scene="A castle.")
+        payload = build_video_config_payload(request, VideoWorkingArtifacts(metadata={"scene": "A castle."}))
+        assert payload["scene"] == "A castle."
+        assert "scene_input" not in payload and "prompt_input" not in payload
+
+    def test_enhanced_without_input_text_omits_blank_inputs(self):
+        """A scene-only run that is enhanced has no prompt input, and an unscened one has no scene input."""
+        scene_only = build_video_config_payload(
+            _make_video_request(prompt="", scene="A castle."),
+            VideoWorkingArtifacts(metadata={"enhanced_prompt": "A knight rides in.", "enhanced_scene": "A grey castle."}),
+        )
+        assert scene_only["scene_input"] == "A castle." and "prompt_input" not in scene_only
+        unscened = build_video_config_payload(
+            _make_video_request(prompt="a knight rides in a castle"),
+            VideoWorkingArtifacts(metadata={"enhanced_prompt": "A knight rides in.", "enhanced_scene": "A grey castle."}),
+        )
+        assert unscened["prompt_input"] == "a knight rides in a castle" and "scene_input" not in unscened
+        assert unscened["scene"] == "A grey castle."
+
+    def test_inputs_given_with_the_request_are_recorded_without_enhancement(self):
+        """The Web UI enhances before submit: prompt and scene already hold the rewrite, the request carries the user's text."""
+        request = _make_video_request(prompt="A knight rides in.", scene="A grey castle.", scene_input="A castle.", prompt_input="a knight rides in")
+        payload = build_video_config_payload(request, VideoWorkingArtifacts(metadata={"scene": "A grey castle."}))
+        assert payload["prompt"] == "A knight rides in." and payload["scene"] == "A grey castle."
+        assert payload["scene_input"] == "A castle." and payload["prompt_input"] == "a knight rides in"
+
+    def test_recorded_settings_round_trip(self):
+        request = _make_video_request(prompt="a knight rides in", scene="A castle.")
+        artifacts = VideoWorkingArtifacts(metadata={"enhanced_prompt": "A knight rides in at a gallop.", "enhanced_scene": "A grey castle at dusk."})
+        settings = recorded_settings(json.loads(json.dumps(build_video_config_payload(request, artifacts))))
+        assert (settings.prompt, settings.scene) == ("A knight rides in at a gallop.", "A grey castle at dusk.")
+        assert (settings.prompt_input, settings.scene_input) == ("a knight rides in", "A castle.")
+
+    def test_recorded_settings_without_scene_keys_are_none(self):
+        settings = recorded_settings({"schema": VIDEO_CONFIG_SCHEMA, "prompt": "a sunset"})
+        assert settings.scene is None and settings.scene_input is None and settings.prompt_input is None
+
 
 class TestEmbedMp4Config:
     def test_calls_ffmpeg_with_metadata_arg(self, tmp_path):

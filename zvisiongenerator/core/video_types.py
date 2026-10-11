@@ -56,6 +56,14 @@ class VideoGenerationRequest:
     enhanced_prompt: str | None = None
     on_prompt_enhanced: Callable[[str], None] | None = None
 
+    # Scene (who and where, look, style, camera) sent before the prompt, as written / with choices made / as rewritten by the enhancer
+    scene: str | None = None
+    resolved_scene: str | None = None
+    enhanced_scene: str | None = None
+    # The user's own text, recorded when ``prompt``/``scene`` already hold an enhanced rewrite made before the job (e.g. in the Web UI)
+    scene_input: str | None = None
+    prompt_input: str | None = None
+
 
 @dataclass
 class VideoWorkingArtifacts:

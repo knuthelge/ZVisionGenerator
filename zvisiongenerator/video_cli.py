@@ -28,6 +28,8 @@ from zvisiongenerator.workflows import build_video_workflow
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_PROMPTS_FILE = "prompts.yaml"
+
 
 def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
     """Build the argument parser for ziv-video."""
@@ -37,9 +39,15 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
         epilog=f"Example usage: {prog} -m models/ltx-mlx --ratio 16:9 --size m --prompt 'a sunset'",
     )
     parser.add_argument("-m", "--model", type=str, default=None, help="Model alias, local path, or supported/configured HuggingFace repo ID.")
-    parser.add_argument("-p", "--prompts-file", type=str, default="prompts.yaml", help="Path to YAML prompts file.")
+    parser.add_argument("-p", "--prompts-file", type=str, default=None, help=f"Path to YAML prompts file (default: {_DEFAULT_PROMPTS_FILE}).")
     parser.add_argument("-r", "--runs", type=int, default=1, help="Number of batch runs.")
-    parser.add_argument("--prompt", type=str, default=None, help="Inline prompt (overrides --prompts-file).")
+    parser.add_argument("--prompt", type=str, default=None, help="Inline prompt: what happens (overrides --prompts-file). May be empty when --scene is given.")
+    parser.add_argument(
+        "--scene",
+        type=str,
+        default=None,
+        help="Scene: who and where, look, style, camera. Sent before the prompt. Alone it makes a scene-only run; with --prompts-file it fills entries without their own 'scene:'.",
+    )
     parser.add_argument("--image", dest="image_path", type=str, default=None, help="Input image for image-to-video.")
     parser.add_argument("--ratio", type=str, default=None, help="Aspect ratio for generated video (e.g. 16:9, 9:16, 1:1).")
     parser.add_argument("-s", "--size", type=str, default=None, help="Resolution scale (e.g. s, m, l). Default from config.")
@@ -126,7 +134,10 @@ def main(*, prog: str = "ziv-video") -> None:
     if args.image_path:
         args.image_path = str(Path(args.image_path).expanduser())
     args.output = str(Path(args.output).expanduser())
-    args.prompts_file = str(Path(args.prompts_file).expanduser())
+    args.scene = (args.scene or "").strip() or None
+    args.scene_input = args.prompt_input = None
+    scene_only = args.prompt is None and args.prompts_file is None and args.scene is not None
+    args.prompts_file = str(Path(args.prompts_file or _DEFAULT_PROMPTS_FILE).expanduser())
 
     # Load config early so aliases are available for model resolution
     try:
@@ -141,9 +152,9 @@ def main(*, prog: str = "ziv-video") -> None:
         parser.error(str(e))
 
     # Validate prompt source BEFORE heavy operations (model loading, ffmpeg check)
-    if args.prompt is not None and not args.prompt.strip():
+    if args.prompt is not None and not args.prompt.strip() and args.scene is None:
         parser.error("--prompt must not be empty")
-    if args.prompt is None:
+    if args.prompt is None and not scene_only:
         prompts_path = Path(args.prompts_file)
         if not prompts_path.is_file():
             parser.error(f"Prompts file not found: {args.prompts_file}. Provide --prompt or a valid --prompts-file.")
@@ -260,17 +271,19 @@ def main(*, prog: str = "ziv-video") -> None:
         loras = list(zip(lora_paths, lora_weights, strict=False))
 
     # Load prompts and run preflight before the model: prompt-file and enhancer errors fail fast, and the enhancer is unloaded first
-    enhance_by_set = None
-    if args.prompt is not None:
-        prompts_data: dict[str, list[tuple[str, str | None]]] = {"prompt": [(args.prompt, None)]}
+    enhance_by_set = scene_by_set = None
+    if args.prompt is not None or scene_only:
+        prompts_data: dict[str, list[tuple[str, str | None]]] = {"prompt": [(args.prompt or "", None)]}
     else:
         try:
             inspection = inspect_prompts_file(args.prompts_file)
         except (FileNotFoundError, ValueError) as e:
             parser.error(str(e))
-        prompts_data, enhance_by_set = inspection.prompts_data, enhance_by_set_for_mode(inspection.enhance_by_set, mode="video")
+        scene_by_set = inspection.scene_by_set
+        prompts_data = inspection.prompts_data
+        enhance_by_set = enhance_by_set_for_mode(inspection.enhance_by_set, mode="video", scene_by_set=scene_by_set, job_scene=args.scene)
     try:
-        plan = run_preflight(prompts_data, config, args, mode="video", model_family=model_info.family, enhance_by_set=enhance_by_set)
+        plan = run_preflight(prompts_data, config, args, mode="video", model_family=model_info.family, enhance_by_set=enhance_by_set, scene=args.scene, scene_by_set=scene_by_set)
     except (ValueError, RuntimeError) as e:
         logger.exception("Prompt preflight failed")
         parser.error(str(e))

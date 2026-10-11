@@ -54,6 +54,27 @@ describe('jobSettingsPrefill', () => {
     expect(patch).not.toHaveProperty('upscaleEnabled');
   });
 
+  it('restores a video scene and prompt into the boxes', () => {
+    const { patch } = jobSettingsPrefill({ mode: 'video', workflow: 'txt2vid', scene: 'A castle.', prompt: 'a knight' });
+
+    expect(patch).toMatchObject({ scene: 'A castle.', prompt: 'a knight', enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
+  });
+
+  it('restores the user text and the Enhanced pair of a video that ran enhanced', () => {
+    const { patch } = jobSettingsPrefill({
+      mode: 'video', workflow: 'txt2vid', scene: 'A castle at dusk.', prompt: 'A knight rides in.', scene_input: 'A castle.', prompt_input: 'a knight',
+    });
+
+    expect(patch).toMatchObject({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.' });
+    expect(patch.enhancedFrom).toEqual({ scene: 'A castle.', prompt: 'a knight', mode: 'video' });
+  });
+
+  it('keeps a typed scene when an image job is loaded', () => {
+    const { patch } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', prompt: 'a fox' });
+
+    expect(patch).not.toHaveProperty('scene');
+  });
+
   it('restores a JSON caption', () => {
     const { patch } = jobSettingsPrefill({ mode: 'image', json_prompt: '{"high_level_description":"x"}' });
     expect(patch).toMatchObject({ jsonPromptEnabled: true, jsonPrompt: '{"high_level_description":"x"}' });

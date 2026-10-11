@@ -11,7 +11,7 @@ from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSess
 from zvisiongenerator.core.job_plan import EnhanceStatus
 from zvisiongenerator.preflight import plan_iterations, run_preflight
 from zvisiongenerator.utils.interactive import SkipSignal
-from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
+from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhance_by_set_for_mode, entry_scene
 
 
 def _plan(prompts_data, **overrides):
@@ -61,6 +61,63 @@ class TestPlanIterations:
     def test_starts_unenhanced(self):
         (iteration,) = _plan({"a": [("x", None)]}, override=EnhanceSettings())
         assert iteration.enhance_status is EnhanceStatus.OFF and iteration.enhanced_prompt is None
+
+    def test_scene_defaults_to_none(self):
+        (iteration,) = _plan({"a": [("x", None)]})
+        assert iteration.scene is None and iteration.resolved_scene is None and iteration.enhanced_scene is None
+
+    def test_job_scene_applies_to_every_entry(self):
+        plan = _plan({"a": [("x", None), ("y", None)]}, scene="  A castle at dusk.  ")
+        assert [(it.scene, it.resolved_scene) for it in plan] == [("A castle at dusk.", "A castle at dusk.")] * 2
+
+    def test_entry_scene_beats_job_scene(self):
+        plan = _plan({"a": [("x", None), ("y", None), ("z", None)]}, scene="Job scene.", scene_by_set={"a": [None, "Entry scene.", "  "]})
+        assert [it.scene for it in plan] == ["Job scene.", "Entry scene.", "Job scene."]
+
+    def test_scene_lookup_is_aligned_per_set_and_index(self):
+        plan = _plan({"a": [("x", None)], "b": [("y", None)]}, runs=2, scene_by_set={"b": ["Scene B."]})
+        assert [(it.run_index, it.set_name, it.scene) for it in plan] == [(0, "a", None), (0, "b", "Scene B."), (1, "a", None), (1, "b", "Scene B.")]
+
+    @pytest.mark.filterwarnings("ignore:.*not enhanced")
+    def test_whitespace_entry_scene_falls_back_to_the_job_scene_in_plan_and_noop_split(self):
+        """The plan and the no-op split read the same scene: a blank entry scene never hides the job scene."""
+        scene_by_set = {"a": ["   ", None, "Own."]}
+        data = {"a": [("x", None), ("y", None), ("z", None)]}
+        keep = EnhanceSettings(details=(), motion=(), sound=())
+        by_set = {"a": [keep, keep, keep]}
+        plan = _plan(data, scene="Job", scene_by_set=scene_by_set, enhance_by_set=by_set)
+        assert [it.scene for it in plan] == ["Job", "Job", "Own."]
+        # Every entry has a scene, so none splits; all-keep settings are no-ops and are dropped.
+        assert enhance_by_set_for_mode(by_set, mode="video", scene_by_set=scene_by_set, job_scene="Job") == {"a": [None, None, None]}
+        # Without a job scene the blank entry has none: it splits and stays enhanced, matching the plan.
+        kept = enhance_by_set_for_mode(by_set, mode="video", scene_by_set=scene_by_set, job_scene=None)
+        assert [entry is not None for entry in kept["a"]] == [True, True, False]
+        assert [it.scene for it in _plan(data, scene_by_set=scene_by_set)] == [None, None, "Own."]
+
+    @pytest.mark.parametrize(
+        ("own", "job", "expected"),
+        [(None, None, None), ("  ", " ", None), (" Own ", "Job", "Own"), ("", " Job ", "Job"), ("  ", "Job", "Job")],
+    )
+    def test_entry_scene_trims_and_skips_blanks(self, own, job, expected):
+        assert entry_scene({"a": [own]}, "a", 0, job) == expected
+
+    def test_entry_scene_out_of_range_or_unknown_set_uses_the_job_scene(self):
+        assert entry_scene({"a": ["x"]}, "a", 5, "Job") == "Job"
+        assert entry_scene({"a": ["x"]}, "b", 0, None) is None
+        assert entry_scene(None, "a", 0, "Job") == "Job"
+
+    def test_scene_choices_are_resolved_apart_from_the_prompt(self):
+        (iteration,) = _plan({"a": [("a {red|red} fox", None)]}, scene="A {night|night} street.")
+        assert iteration.scene == "A {night|night} street." and iteration.resolved_scene == "A night street."
+        assert iteration.prompt == "a {red|red} fox" and iteration.resolved_prompt == "a red fox"
+
+    def test_scene_only_entry_plans_with_an_empty_prompt(self):
+        (iteration,) = _plan({"prompt": [("", None)]}, scene="Night.")
+        assert iteration.resolved_prompt == "" and iteration.resolved_scene == "Night."
+
+    def test_json_caption_has_no_scene(self):
+        (iteration,) = _plan({"prompt": [('{"a": 1}', None)]}, json_prompt=True, scene="Night.", scene_by_set={"prompt": ["Own."]})
+        assert iteration.scene is None and iteration.resolved_scene is None
 
     def test_empty_input(self):
         assert _plan({}) == ()
@@ -151,6 +208,9 @@ def _run(prompts=None, *, enhancer=None, order=None, args=None, control=None, fa
         **kwargs,
     )
     return plan, events, release, enhancer
+
+
+_PAIR_TEXT = "SCENE: A snowy field at dusk, soft light.\nACTION: A red fox runs across it."
 
 
 def _types(events):
@@ -249,25 +309,25 @@ class TestRunPreflight:
         assert "153-180 words" in enhancer.systems[0]
 
     def test_video_mode_prompt(self):
-        enhancer = _FakeEnhancer([])
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
         _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video")
         assert "text-to-video" in enhancer.systems[0]
 
     def test_video_job_shape_reaches_the_prompt(self):
-        enhancer = _FakeEnhancer([])
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
         args = _args(enhance=EnhanceSettings(sound=("ambient",)), width=704, height=448, num_frames=97, fps=24, no_audio=False, image_path="first.png")
         _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video", args=args)
         lines = enhancer.systems[0].splitlines()
-        assert any(line.startswith("- Sound:") for line in lines)
+        assert any("ambient soundscape" in line for line in lines)
         assert any(line.startswith("- Duration: about 4 seconds") for line in lines)
         assert "- Frame: landscape; compose for that shape." in lines
         assert any(line.startswith("- The first frame is supplied as an image") for line in lines)
 
     def test_video_without_audio_has_no_sound_rule(self):
-        enhancer = _FakeEnhancer([])
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
         args = _args(enhance=EnhanceSettings(sound=("ambient",)), no_audio=True)
         _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video", args=args)
-        assert not any(line.startswith("- Sound:") for line in enhancer.systems[0].splitlines())
+        assert "ambient soundscape" not in enhancer.systems[0]
 
     def test_image_ratio_sets_frame(self):
         enhancer = _FakeEnhancer([])
@@ -295,6 +355,70 @@ class TestRunPreflight:
         with pytest.warns(UserWarning, match="metal gone"):
             plan = run_preflight({"a": [("x", None)]}, _CONFIG, _args(), mode="image", model_family=None, session=_session(_FakeEnhancer([])))
         assert plan.has_rewrites
+
+
+# ── Video scene ─────────────────────────────────────────────────────────────
+
+
+class TestVideoScene:
+    def test_pair_lands_in_the_plan_with_action_only_in_enhanced_prompt(self):
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
+        plan, *_ = _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video", scene="A snowy field.")
+        (iteration,) = plan.iterations
+        assert iteration.enhance_status is EnhanceStatus.ENHANCED
+        assert iteration.enhanced_prompt == "A red fox runs across it."
+        assert iteration.enhanced_scene == "A snowy field at dusk, soft light."
+        assert "snowy" not in iteration.enhanced_prompt
+
+    def test_enhancer_receives_the_scene_and_prompt_with_choices_resolved(self):
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
+        _run({"v": [("a {fox|fox} runs", None)]}, enhancer=enhancer, mode="video", scene="A {snowy|snowy} field.")
+        assert enhancer.prompts[0] == "Scene: A snowy field.\nPrompt: a fox runs"
+
+    def test_entry_scene_beats_the_job_scene_in_the_rewrite(self):
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT, _PAIR_TEXT])
+        _run({"v": [("a fox runs", None), ("a wolf runs", None)]}, enhancer=enhancer, mode="video", scene="Job scene.", scene_by_set={"v": ["Entry scene.", None]})
+        assert [p.splitlines()[0] for p in enhancer.prompts] == ["Scene: Entry scene.", "Scene: Job scene."]
+
+    def test_blank_scene_splits_the_prompt(self):
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
+        plan, *_ = _run({"v": [("a fox runs in a snowy field", None)]}, enhancer=enhancer, mode="video")
+        assert enhancer.prompts[0].splitlines()[0] == "Scene: (none)"
+        assert plan.iterations[0].enhanced_scene == "A snowy field at dusk, soft light."
+
+    def test_scene_only_run_is_enhanced(self):
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
+        plan, *_ = _run({"prompt": [("", None)]}, enhancer=enhancer, mode="video", scene="A snowy field.")
+        assert enhancer.prompts[0] == "Scene: A snowy field.\nPrompt: (none)"
+        assert plan.iterations[0].enhanced_prompt == "A red fox runs across it."
+
+    def test_unformatted_reply_keeps_the_scene_and_warns(self):
+        reply = "A fox sprints across the snow and the camera follows."
+        enhancer = _FakeEnhancer([], texts=[reply, reply])
+        with pytest.warns(UserWarning, match="did not return a scene and an action"):
+            plan, *_ = _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video", scene="A snowy field.")
+        assert plan.iterations[0].enhanced_scene == "A snowy field."
+        assert plan.iterations[0].enhanced_prompt == reply
+
+    def test_failed_rewrite_leaves_the_scene_unenhanced(self):
+        enhancer = _FakeEnhancer([], texts=[TypeError("template rejected")])
+        with pytest.warns(UserWarning, match="Prompt enhancement failed"):
+            plan, *_ = _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video", scene="A snowy field.")
+        (iteration,) = plan.iterations
+        assert iteration.enhance_status is EnhanceStatus.FAILED and iteration.enhanced_scene is None
+        assert iteration.scene == "A snowy field." and iteration.resolved_scene == "A snowy field."
+
+    def test_no_enhancement_still_plans_the_scene(self):
+        plan, *_ = _run({"v": [("a fox runs", None)]}, args=_args(enhance=None), mode="video", scene="A snowy field.", session=MagicMock())
+        (iteration,) = plan.iterations
+        assert iteration.scene == "A snowy field." and iteration.enhance_status is EnhanceStatus.OFF
+
+    def test_image_jobs_ignore_the_scene(self):
+        enhancer = _FakeEnhancer([])
+        plan, *_ = _run({"a": [("a red fox", None)]}, enhancer=enhancer, scene="A snowy field.", scene_by_set={"a": ["Own."]})
+        (iteration,) = plan.iterations
+        assert iteration.scene is None and iteration.enhanced_scene is None
+        assert "snowy" not in enhancer.prompts[0] and "Own." not in enhancer.prompts[0]
 
 
 # ── Controls ────────────────────────────────────────────────────────────────
@@ -442,7 +566,8 @@ class TestPreflightEvents:
 
     def test_counts_only_rewrites(self):
         prompts = {"a": [("x", None), ("y", None), ("z", None)]}
-        _plan, events, *_ = _run(prompts, args=_args(enhance=None), enhance_by_set={"a": [None, EnhanceSettings(), None]}, mode="video")
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
+        _plan, events, *_ = _run(prompts, enhancer=enhancer, args=_args(enhance=None), enhance_by_set={"a": [None, EnhanceSettings(), None]}, mode="video")
         assert events[0] == {"type": "preflight_started", "mode": "video", "total_iterations": 3, "total_rewrites": 1}
         assert [e for e in events if e["type"] == "prompts_enhancing"] == [{"type": "prompts_enhancing", "mode": "video", "index": 1, "total": 1}]
 

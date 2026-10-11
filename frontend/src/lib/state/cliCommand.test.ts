@@ -109,6 +109,32 @@ describe('cliCommand', () => {
     expect(cliCommand({ mode: 'image', prompt: 'a', enhance_auto: 'true' }).command).toBe('ziv image --prompt a --enhance');
   });
 
+  describe('scene', () => {
+    it('adds --scene for video beside the prompt', () => {
+      expect(cliCommand({ mode: 'video', prompt: 'a knight rides in', scene: 'A castle at dusk.' }).command)
+        .toBe("ziv video --prompt 'a knight rides in' --scene 'A castle at dusk.'");
+    });
+
+    it('runs a scene alone without a --prompt', () => {
+      expect(cliCommand({ mode: 'video', prompt: '', scene: 'A castle at dusk.' }).command).toBe("ziv video --scene 'A castle at dusk.'");
+    });
+
+    it('needs a scene or a prompt for video', () => {
+      expect(() => cliCommand({ mode: 'video', prompt: ' ', scene: ' ' })).toThrow(Error);
+    });
+
+    it('passes the default scene beside a prompts file, but never without a file', () => {
+      expect(cliCommand({ mode: 'video', prompt_source: 'file', prompts_file: '/p/city.yaml', scene: 'A rainy city.' }).command)
+        .toBe("ziv video --prompts-file /p/city.yaml --scene 'A rainy city.'");
+      expect(() => cliCommand({ mode: 'video', prompt_source: 'file', prompts_file: '', scene: 'A rainy city.' })).toThrow(Error);
+    });
+
+    it('leaves a blank scene out, and ignores a scene for images', () => {
+      expect(cliCommand({ mode: 'video', prompt: 'a', scene: '  ' }).command).toBe('ziv video --prompt a');
+      expect(cliCommand({ mode: 'image', prompt: 'a', scene: 'A castle.' }).command).toBe('ziv image --prompt a');
+    });
+  });
+
   it('builds a video command with frames, toggles, and upscale', () => {
     const { command } = cliCommand({
       mode: 'video', workflow: 'img2vid', model: 'ltx', prompt: 'waves', ratio: '16:9', size: 'm', frames: '97', steps: '8',

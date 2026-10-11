@@ -22,6 +22,7 @@ class PromptFileOption:
     prompt: str
     negative_prompt: str | None
     enhance: EnhanceSettings | None = None
+    scene: str | None = None
 
     @property
     def id(self) -> str:
@@ -41,12 +42,25 @@ class PromptFileInspection:
         """Return each active entry's ``enhance:`` settings, aligned with :attr:`prompts_data`."""
         return enhance_by_set(self.options)
 
+    @property
+    def scene_by_set(self) -> dict[str, list[str | None]]:
+        """Return each active entry's ``scene:`` text (``{a|b}`` choices unpicked), aligned with :attr:`prompts_data`."""
+        return scene_by_set(self.options)
+
 
 def enhance_by_set(options: list[PromptFileOption]) -> dict[str, list[EnhanceSettings | None]]:
     """Group option ``enhance:`` settings by set, in option order (aligned with the prompt pairs)."""
     grouped: dict[str, list[EnhanceSettings | None]] = {}
     for option in options:
         grouped.setdefault(option.set_name, []).append(option.enhance)
+    return grouped
+
+
+def scene_by_set(options: list[PromptFileOption]) -> dict[str, list[str | None]]:
+    """Group option ``scene:`` texts by set, in option order (aligned with the prompt pairs); ``None`` where an entry has no scene."""
+    grouped: dict[str, list[str | None]] = {}
+    for option in options:
+        grouped.setdefault(option.set_name, []).append(option.scene)
     return grouped
 
 
@@ -115,6 +129,7 @@ def inspect_prompts_text(raw_text: str, *, source_name: str) -> PromptFileInspec
                     prompt=prompt_text,
                     negative_prompt=negative_prompt,
                     enhance=_parse_entry_enhance(entry, source_name=source_name, set_name=set_name, index=source_index),
+                    scene=_resolve_entry_scene(entry, snippets),
                 )
             )
         if pairs:
@@ -166,6 +181,11 @@ def _resolve_prompt_entry(
         raise ValueError(f"Entry in prompt set '{set_name}' in {source_name} has an empty prompt after snippet resolution.")
     negative_prompt = flatten_value(resolve_snippets(raw_negative, snippets)) or None
     return prompt_text, negative_prompt
+
+
+def _resolve_entry_scene(entry: dict[str, Any], snippets: dict[str, Any]) -> str | None:
+    """Resolve an entry's optional ``scene:`` like its negative prompt; a missing or blank scene is ``None``."""
+    return flatten_value(resolve_snippets(entry.get("scene"), snippets)) or None
 
 
 def _parse_entry_enhance(entry: dict[str, Any], *, source_name: str, set_name: str, index: int) -> EnhanceSettings | None:

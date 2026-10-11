@@ -214,3 +214,102 @@ class TestCreateRoute:
             nested = client.post("/api/prompt-files/create", json={"directory": str(tmp_path), "name": "a/b"})
 
         assert [existing.status_code, missing.status_code, nested.status_code] == [422, 422, 422]
+
+
+SCENE_SAMPLE = """\
+snippets:
+  castle: A castle at dusk.
+
+knights:
+  - prompt: A knight rides in.
+    scene: $castle
+  - prompt: A dog barks.
+"""
+
+
+class TestScene:
+    def test_load_returns_scene_or_null_per_entry(self, tmp_path):
+        path = _write(tmp_path, SCENE_SAMPLE)
+
+        with TestClient(web_server.app) as client:
+            entries = _load(client, path)["document"]["sets"][0]["entries"]
+
+        assert entries[0]["scene"] == {"kind": "text", "text": "$castle"}
+        assert entries[1]["scene"] is None
+
+    def test_save_writes_scene_before_prompt_and_reloads_it(self, tmp_path):
+        path = _write(tmp_path, SCENE_SAMPLE)
+        scene = {"kind": "text", "text": "A barn at dawn."}
+
+        with TestClient(web_server.app) as client:
+            loaded = _load(client, path)
+            document = loaded["document"]
+            document["sets"][0]["entries"][1]["scene"] = scene
+            response = _save(client, path, loaded, document)
+            reloaded = _load(client, path)
+
+        assert response.status_code == 200
+        assert "  - scene: A barn at dawn.\n    prompt: A dog barks.\n" in path.read_text(encoding="utf-8")
+        assert reloaded["document"]["sets"][0]["entries"][1]["scene"] == scene
+        assert response.json()["document"]["sets"][0]["entries"][1]["scene"] == scene
+
+    def test_save_with_null_scene_removes_the_key(self, tmp_path):
+        path = _write(tmp_path, SCENE_SAMPLE)
+
+        with TestClient(web_server.app) as client:
+            loaded = _load(client, path)
+            document = loaded["document"]
+            document["sets"][0]["entries"][0]["scene"] = None
+            response = _save(client, path, loaded, document)
+
+        assert response.status_code == 200
+        assert "scene:" not in path.read_text(encoding="utf-8")
+
+    def test_payload_without_a_scene_key_means_no_scene(self, tmp_path):
+        path = _write(tmp_path, SCENE_SAMPLE)
+
+        with TestClient(web_server.app) as client:
+            loaded = _load(client, path)
+            document = loaded["document"]
+            for entry in document["sets"][0]["entries"]:
+                entry.pop("scene")
+            response = _save(client, path, loaded, document)
+
+        assert response.status_code == 200
+        assert "scene:" not in path.read_text(encoding="utf-8")
+
+    def test_malformed_scene_payload_is_rejected(self, tmp_path):
+        path = _write(tmp_path, SCENE_SAMPLE)
+
+        with TestClient(web_server.app) as client:
+            loaded = _load(client, path)
+            document = loaded["document"]
+            document["sets"][0]["entries"][0]["scene"] = {"kind": "nope"}
+            response = _save(client, path, loaded, document)
+
+        assert response.status_code == 422
+
+    def test_undefined_snippet_in_scene_blocks_the_save(self, tmp_path):
+        path = _write(tmp_path, SCENE_SAMPLE)
+
+        with TestClient(web_server.app) as client:
+            loaded = _load(client, path)
+            document = loaded["document"]
+            document["sets"][0]["entries"][0]["scene"] = {"kind": "text", "text": "$missing"}
+            response = _save(client, path, loaded, document)
+
+        assert response.status_code == 422
+        assert path.read_text(encoding="utf-8") == SCENE_SAMPLE
+
+    def test_preview_carries_scene_only_when_present_and_counts_snippet_use(self, tmp_path):
+        path = _write(tmp_path, SCENE_SAMPLE)
+
+        with TestClient(web_server.app) as client:
+            document = _load(client, path)["document"]
+            response = client.post("/api/prompt-files/preview", json={"document": document})
+
+        payload = response.json()
+        assert payload["entries"]["s0.e0"] == {"prompt": "A knight rides in.", "negative": None, "scene": "A castle at dusk."}
+        assert payload["entries"]["s0.e1"] == {"prompt": "A dog barks.", "negative": None}
+        assert payload["snippet_uses"] == {"n0": 1}
+        assert payload["problems"] == []

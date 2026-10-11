@@ -270,6 +270,11 @@ def run_video_batch(
                     output_format=getattr(args, "format", "mp4"),
                     resolved_prompt=planned.resolved_prompt,
                     enhanced_prompt=planned.enhanced_prompt,
+                    scene=planned.scene,
+                    resolved_scene=planned.resolved_scene,
+                    enhanced_scene=planned.enhanced_scene,
+                    scene_input=getattr(args, "scene_input", None),
+                    prompt_input=getattr(args, "prompt_input", None),
                     on_prompt_enhanced=_make_prompt_enhanced_callback(
                         progress_callback,
                         mode="video",

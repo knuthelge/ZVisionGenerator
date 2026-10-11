@@ -26,9 +26,11 @@ from zvisiongenerator.utils.prompt_enhance import (
     enhance_options,
     enhance_prompt,
     entry_enhance,
+    entry_scene,
     resolve_enhance_ceiling,
     resolve_item_enhance,
 )
+from zvisiongenerator.utils.prompt_enhance_video import PAIR_FALLBACK_WARNING, enhance_video_prompt
 
 if TYPE_CHECKING:
     from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
@@ -57,6 +59,8 @@ def plan_iterations(
     disabled: bool,
     override: EnhanceSettings | None,
     enhance_by_set: dict[str, list[EnhanceSettings | None]] | None,
+    scene: str | None = None,
+    scene_by_set: dict[str, list[str | None]] | None = None,
 ) -> tuple[IterationPlan, ...]:
     """Enumerate the job's iterations with seeds, resolved prompts and enhancement settings (no model I/O).
 
@@ -72,12 +76,15 @@ def plan_iterations(
         disabled: ``--no-enhance`` was given.
         override: Job-wide enhancement settings (``--enhance``).
         enhance_by_set: Per-entry prompt-file ``enhance:`` settings aligned with *prompts_data*.
+        scene: Job-wide video scene, used by entries without a scene of their own.
+        scene_by_set: Per-entry prompt-file ``scene:`` texts aligned with *prompts_data*; an entry's scene beats *scene*.
     """
     iterations: list[IterationPlan] = []
     for run_index in range(runs):
         for set_name, prompts in prompts_data.items():
             for prompt_index, (prompt, _negative) in enumerate(prompts):
                 enhance = None if json_prompt else resolve_item_enhance(disabled=disabled, override=override, entry=entry_enhance(enhance_by_set, set_name, prompt_index))
+                item_scene = None if json_prompt else entry_scene(scene_by_set, set_name, prompt_index, scene)
                 iterations.append(
                     IterationPlan(
                         run_index=run_index,
@@ -87,6 +94,8 @@ def plan_iterations(
                         seed=seed if seed is not None else random.randint(seed_min, seed_max),
                         resolved_prompt=prompt if json_prompt else expand_random_choices(prompt),
                         enhance=enhance,
+                        scene=item_scene,
+                        resolved_scene=expand_random_choices(item_scene) if item_scene else None,
                     )
                 )
     return tuple(iterations)
@@ -100,6 +109,8 @@ def run_preflight(
     mode: str,
     model_family: str | None,
     enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
+    scene: str | None = None,
+    scene_by_set: dict[str, list[str | None]] | None = None,
     control: SkipSignal | None = None,
     progress_callback: ProgressCallback | None = None,
     session: PromptEnhancerSession | None = None,
@@ -116,6 +127,8 @@ def run_preflight(
         mode: ``"image"`` or ``"video"``.
         model_family: Generation model family, for the enhanced-prompt word ceiling.
         enhance_by_set: Per-entry prompt-file ``enhance:`` settings aligned with *prompts_data*.
+        scene: Job-wide video scene, used by entries without a scene of their own; ignored for images.
+        scene_by_set: Per-entry prompt-file ``scene:`` texts aligned with *prompts_data*; ignored for images.
         control: The job's control signal; Next skips a rewrite, Pause waits, Quit cancels.
         progress_callback: Receives the preflight events.
         session: Enhancer session (defaults to the process-wide one).
@@ -134,6 +147,7 @@ def run_preflight(
     generation = config.get("generation", {})
     disabled = bool(getattr(args, "no_enhance", False))
     override = getattr(args, "enhance", None)
+    video = mode == "video"
     iterations = plan_iterations(
         prompts_data,
         runs=args.runs,
@@ -144,6 +158,8 @@ def run_preflight(
         disabled=disabled,
         override=override,
         enhance_by_set=enhance_by_set,
+        scene=scene if video else None,
+        scene_by_set=scene_by_set if video else None,
     )
     positions = tuple(index for index, iteration in enumerate(iterations) if iteration.enhance is not None)
     total_iterations = len(iterations)
@@ -248,20 +264,22 @@ def _make_rewriter(
 
     def _rewrite(enhancer: PromptEnhancer, iteration: IterationPlan, cancelled: Callable[[], bool] | None) -> tuple[IterationPlan, str | None]:
         """Return the enhanced iteration, or the unchanged one plus the failure message (never the exception)."""
+        shared = dict(
+            seed=iteration.seed,
+            ceiling=ceiling,
+            context=context,
+            length_cfg=options["length"],
+            temperature=options["temperature"],
+            max_tokens=options["max_new_tokens"],
+            cancelled=cancelled,
+        )
         try:
-            result = enhance_prompt(
-                enhancer,
-                iteration.resolved_prompt,
-                iteration.enhance,
-                mode=mode,
-                seed=iteration.seed,
-                ceiling=ceiling,
-                context=context,
-                length_cfg=options["length"],
-                temperature=options["temperature"],
-                max_tokens=options["max_new_tokens"],
-                cancelled=cancelled,
-            )
+            if mode == "video":
+                pair = enhance_video_prompt(enhancer, iteration.resolved_scene, iteration.resolved_prompt, iteration.enhance, **shared)
+                if pair.format_fallback:
+                    warnings.warn(PAIR_FALLBACK_WARNING, stacklevel=2)
+                return replace(iteration, enhanced_prompt=pair.prompt, enhanced_scene=pair.scene or None, enhance_status=EnhanceStatus.ENHANCED), None
+            result = enhance_prompt(enhancer, iteration.resolved_prompt, iteration.enhance, mode=mode, **shared)
         except Exception as exc:  # noqa: BLE001 - enhancement is optional: any adapter/template failure falls back to the prompt
             return iteration, str(exc) or type(exc).__name__
         return replace(iteration, enhanced_prompt=result.prompt, enhance_status=EnhanceStatus.ENHANCED), None

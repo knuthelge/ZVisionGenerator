@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
+import pytest
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.utils.provenance import embed_png_config
+from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.gallery import (
     GalleryAsset,
     delete_gallery_assets,
+    gallery_asset_to_json,
     list_gallery_assets,
 )
 
@@ -404,3 +409,94 @@ def test_embedded_config_read_error_lists_plain_asset_without_sidecar_metadata(t
     assert asset.prompt == "broken meta"
     assert asset.model_label == "Unavailable"
     assert asset.seed is None
+
+
+# ---------------------------------------------------------------------------
+# Scene in the gallery JSON and Reuse params
+# ---------------------------------------------------------------------------
+
+
+def _reuse_web_config() -> SimpleNamespace:
+    return SimpleNamespace(
+        image_model_options=("zit",),
+        video_model_options=("ltx-8",),
+        default_models=WebUiDefaultModels(image="zit", video="ltx-8"),
+    )
+
+
+def _reuse_params(payload: dict) -> dict[str, str]:
+    query = urlsplit(payload["reuse_workspace_url"].removeprefix("#")).query
+    return {key: values[0] for key, values in parse_qs(query).items()}
+
+
+def _video_reuse(tmp_path, config_overrides: dict) -> tuple[dict, dict[str, str]]:
+    """Return a video asset's gallery JSON and parsed Reuse query params for an embedded config with *config_overrides*."""
+    config = {"schema": "zvisiongenerator.config.v1", "workflow": "txt2vid", "model": "ltx-8", "seed": 1, "steps": 8, "frame_count": 49, **config_overrides}
+    (tmp_path / "clip.mp4").write_bytes(b"\x00" * 8)
+    with patch("zvisiongenerator.web.gallery.read_mp4_config", return_value=config):
+        asset = _find_asset(list_gallery_assets(str(tmp_path)), "clip.mp4")
+    payload = gallery_asset_to_json(asset, _reuse_web_config())
+    return payload, _reuse_params(payload)
+
+
+@pytest.mark.parametrize("scene", [None, "A castle at dusk."])
+def test_reuse_of_a_video_fills_the_recorded_scene_and_prompt_only(tmp_path, scene):
+    payload, params = _video_reuse(tmp_path, {"prompt": "A knight rides in.", **({"scene": scene} if scene else {})})
+
+    assert (params.get("scene"), params["prompt"]) == (scene, "A knight rides in.")
+    assert not {"enhanced_scene", "enhanced_prompt"} & set(params)
+    assert (payload["scene"], payload["prompt"]) == (scene, "A knight rides in.")
+
+
+def test_reuse_of_an_enhanced_video_offers_inputs_and_the_generated_pair_without_scene_in_the_prompt(tmp_path):
+    """The user's inputs go to Your text, the generated pair to Enhanced, and no prompt value carries scene text."""
+    payload, params = _video_reuse(
+        tmp_path,
+        {
+            "prompt": "A knight in plate armour rides across the drawbridge as the gates open.",
+            "scene": "A grey stone castle at dusk, cold light, wide static shot.",
+            "scene_input": "A castle at dusk.",
+            "prompt_input": "A knight rides in.",
+        },
+    )
+
+    assert params["scene"] == "A castle at dusk."
+    assert params["prompt"] == "A knight rides in."
+    assert params["enhanced_scene"] == "A grey stone castle at dusk, cold light, wide static shot."
+    assert params["enhanced_prompt"] == "A knight in plate armour rides across the drawbridge as the gates open."
+    assert "castle" not in params["enhanced_prompt"]
+    assert payload["prompt"] == params["enhanced_prompt"]
+    assert payload["scene"] == params["enhanced_scene"]
+
+
+def test_reuse_of_an_enhanced_video_without_a_user_scene_omits_the_scene_input(tmp_path):
+    _payload, params = _video_reuse(
+        tmp_path,
+        {"prompt": "A knight rides in, armour clanking.", "scene": "A castle at dusk.", "prompt_input": "A knight rides in."},
+    )
+
+    assert "scene" not in params
+    assert params["prompt"] == "A knight rides in."
+    assert (params["enhanced_scene"], params["enhanced_prompt"]) == ("A castle at dusk.", "A knight rides in, armour clanking.")
+
+
+def test_reuse_of_a_scene_only_video_carries_no_prompt_and_not_the_file_name(tmp_path):
+    payload, params = _video_reuse(tmp_path, {"scene": "A castle at dusk."})
+
+    assert params["scene"] == "A castle at dusk."
+    assert "prompt" not in params
+    assert payload["prompt"] == "A castle at dusk."
+
+
+def test_reuse_of_an_image_keeps_only_the_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
+    _make_png_with_config(
+        tmp_path / "pic.png",
+        {"schema": "zvisiongenerator.config.v1", "workflow": "txt2img", "prompt": "A castle.", "model": "zit", "seed": 1, "steps": 8},
+    )
+
+    asset = _find_asset(list_gallery_assets(str(tmp_path)), "pic.png")
+    params = _reuse_params(gallery_asset_to_json(asset, _reuse_web_config()))
+
+    assert params["prompt"] == "A castle."
+    assert not {"scene", "enhanced_scene", "enhanced_prompt"} & set(params)

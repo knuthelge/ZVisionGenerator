@@ -128,7 +128,8 @@ zvisiongenerator/
 │   ├── prompt_compose.py          Structured prompt flattening & snippets
 │   ├── prompt_document.py         Prompt file ↔ editable document for the Web UI builder (comment-preserving, ruamel.yaml)
 │   ├── prompt_document_check.py   Builder document previews and problems, with the prompt loader's rules
-│   ├── prompt_enhance.py          Prompt-enhancement build, run, and post-processing (no model I/O)
+│   ├── prompt_enhance.py          Prompt-enhancement settings, length plans, chat messages, run, and post-processing (no model I/O)
+│   ├── prompt_enhance_video.py    Video prompts as a scene and an action: word plans, chat messages, output parsing and the run (no model I/O)
 │   ├── prompts.py                 Prompt file loading
 │   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
 │   ├── stored_quant.py            Stored-quant naming, manifests and folder handling

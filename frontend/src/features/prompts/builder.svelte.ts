@@ -32,7 +32,7 @@ import { UndoHistory } from './history';
 export type PreviewFn = (document: PromptDocument, rollEntryId: string | null) => Promise<PromptDocumentPreview>;
 export type DropPosition = 'before' | 'after';
 /** Which value of an entry a text field edits. */
-export type EntryValueKey = 'prompt' | 'negative';
+export type EntryValueKey = 'prompt' | 'negative' | 'scene';
 
 const PREVIEW_DELAY_MS = 250;
 
@@ -56,7 +56,7 @@ export class PromptBuilder {
   doc = $state<PromptDocument>({ snippets: [], sets: [] });
   dirty = $state(false);
   selectedId = $state<string | null>(null);
-  /** The text field being edited (`<entry id>:prompt`, `<entry id>:negative`, `<entry id>:field:<n>`, `snippet:<id>`). */
+  /** The text field being edited (`<entry id>:prompt`, `<entry id>:scene`, `<entry id>:negative`, `<entry id>:field:<n>`, `snippet:<id>`). */
   editingKey = $state<string | null>(null);
   preview = $state<PromptDocumentPreview | null>(null);
   rolled = $state<{ entryId: string; base: string; prompt: string } | null>(null);
@@ -331,6 +331,13 @@ export class PromptBuilder {
     this.edit(() => { entry.negative = shown ? { kind: 'text', text: '' } : null; });
   }
 
+  /** Show or remove an entry's scene (who and where, look, camera; used by video jobs). */
+  setScene(entryId: string, shown: boolean): void {
+    const entry = findEntry(this.doc, entryId)?.entry;
+    if (!entry) return;
+    this.edit(() => { entry.scene = shown ? { kind: 'text', text: '' } : null; });
+  }
+
   /** Switch a value between text and fields (structured values become text). */
   setValueMode(entryId: string, key: EntryValueKey, mode: 'text' | 'fields'): void {
     const entry = findEntry(this.doc, entryId)?.entry;
@@ -381,6 +388,7 @@ export class PromptBuilder {
       for (const set of document.sets) {
         for (const entry of set.entries) {
           entry.prompt = renameRefsInValue(entry.prompt, from, name);
+          if (entry.scene) entry.scene = renameRefsInValue(entry.scene, from, name);
           if (entry.negative) entry.negative = renameRefsInValue(entry.negative, from, name);
         }
       }

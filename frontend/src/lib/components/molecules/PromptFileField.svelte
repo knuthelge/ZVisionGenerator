@@ -183,7 +183,7 @@
           <span class="prompt-file-line text-warning">No prompts selected. Choose the prompts to run.</span>
         {/if}
         {#each selectedOptions.slice(0, SUMMARY_LIMIT) as option (option.id)}
-          <span class="prompt-file-line"><b>{option.set_name} #{option.source_index + 1}</b> {option.prompt_preview}</span>
+          <span class="prompt-file-line"><b>{option.set_name} #{option.source_index + 1}</b>{#if workflowMode === 'video' && option.has_scene} <span class="ui-badge" data-testid="scene-badge" title={option.scene_preview ?? undefined}>scene</span>{/if} {option.prompt_preview}</span>
         {/each}
         {#if selectedOptions.length > SUMMARY_LIMIT}
           <span class="prompt-file-more">+{selectedOptions.length - SUMMARY_LIMIT} more</span>
@@ -216,6 +216,9 @@
     <p class="prompt-file-status text-error" role="alert">{optionsError}</p>
   {:else if optionsStatus}
     <p class="prompt-file-status" data-tone={optionsStatusTone} role="status">{optionsStatus}</p>
+  {/if}
+  {#if workflowMode === 'image' && contract.help.ignored_scene_image && selectedOptions.some((option) => option.has_scene)}
+    <p class="prompt-file-status text-warning">{contract.help.ignored_scene_image}</p>
   {/if}
   {#if selectedOptions.some((option) => option.negative_preview) && (workflowMode === 'video' || !negativePromptSupported)}
     <p class="prompt-file-status text-warning">

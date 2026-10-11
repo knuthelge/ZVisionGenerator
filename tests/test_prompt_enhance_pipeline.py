@@ -91,6 +91,28 @@ class TestEnhanceStage:
         video_enhance_prompt_stage(request, artifacts)
         assert artifacts.resolved_prompt == "A fox sprints." and artifacts.metadata["enhanced_prompt"] == "A fox sprints." and seen == ["A fox sprints."]
 
+    def test_video_stages_with_a_scene_compose_only_the_resolved_prompt(self):
+        seen: list[str] = []
+        request = VideoGenerationRequest(
+            backend=None,
+            model=None,
+            prompt="a {fox|fox} runs",
+            resolved_prompt="a fox runs",
+            scene="A {snowy|snowy} field.",
+            resolved_scene="A snowy field.",
+            enhanced_prompt="A fox sprints.",
+            enhanced_scene="A snowy field at dusk.",
+            on_prompt_enhanced=seen.append,
+        )
+        artifacts = VideoWorkingArtifacts()
+        video_resolve_prompt_stage(request, artifacts)
+        assert artifacts.resolved_prompt == "A snowy field. a fox runs"
+        video_enhance_prompt_stage(request, artifacts)
+        assert artifacts.resolved_prompt == "A snowy field at dusk. A fox sprints."
+        assert artifacts.metadata["enhanced_prompt"] == "A fox sprints."
+        assert artifacts.metadata["enhanced_scene"] == "A snowy field at dusk."
+        assert seen == ["A snowy field at dusk. A fox sprints."]
+
 
 # ── Provenance (REQ-10) ─────────────────────────────────────────────────────
 
@@ -107,6 +129,13 @@ class TestProvenance:
         request = VideoGenerationRequest(backend=None, model=None, prompt="a fox runs")
         artifacts = VideoWorkingArtifacts(metadata={"enhanced_prompt": "A fox sprints."})
         assert build_video_config_payload(request, artifacts)["prompt"] == "A fox sprints."
+
+    def test_video_payload_prompt_excludes_the_enhanced_scene(self):
+        request = VideoGenerationRequest(backend=None, model=None, prompt="a fox runs", scene="A snowy field.")
+        artifacts = VideoWorkingArtifacts(metadata={"enhanced_prompt": "A fox sprints.", "enhanced_scene": "A snowy field at dusk."})
+        payload = build_video_config_payload(request, artifacts)
+        assert payload["prompt"] == "A fox sprints." and payload["scene"] == "A snowy field at dusk."
+        assert (payload["prompt_input"], payload["scene_input"]) == ("a fox runs", "A snowy field.")
 
 
 # ── Precedence ──────────────────────────────────────────────────────────────

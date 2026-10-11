@@ -239,6 +239,62 @@ class TestWebRunner:
         finally:
             runner.shutdown()
 
+    def test_submit_video_job_passes_scene_and_scene_by_set_to_preflight(self, monkeypatch):
+        """The job scene and the per-entry prompt-file scenes reach run_preflight."""
+        seen: dict[str, dict] = {}
+
+        def _fake_run_video_batch(*, progress_callback, **_kw):
+            progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
+
+        def _recording_preflight(prompts_data, config, args, **kwargs):
+            seen["video"] = kwargs
+            return _make_plan(prompts_data, args, config=config)
+
+        monkeypatch.setattr(web_runner_module, "run_video_batch", _fake_run_video_batch)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        scene_by_set = {"default": ["A castle at dusk.", None]}
+        try:
+            _stub_request_job(monkeypatch, run_preflight=_recording_preflight)
+            request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx")
+            job_id = runner.submit_video_request_job(
+                request=request,
+                prompts_data={"default": [("one", None), ("two", None)]},
+                config={},
+                args=_make_video_args(scene="Night."),
+                model_ref="model",
+                scene_by_set=scene_by_set,
+            )
+            _wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        assert seen["video"]["scene"] == "Night."
+        assert seen["video"]["scene_by_set"] == scene_by_set
+
+    def test_submit_video_job_without_scene_passes_none_to_preflight(self, monkeypatch):
+        """A job submitted without a scene keeps run_preflight's scene arguments empty."""
+        seen: dict[str, dict] = {}
+
+        def _fake_run_video_batch(*, progress_callback, **_kw):
+            progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
+
+        def _recording_preflight(prompts_data, config, args, **kwargs):
+            seen["video"] = kwargs
+            return _make_plan(prompts_data, args, config=config)
+
+        monkeypatch.setattr(web_runner_module, "run_video_batch", _fake_run_video_batch)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            _stub_request_job(monkeypatch, run_preflight=_recording_preflight)
+            request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx")
+            job_id = runner.submit_video_request_job(request=request, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args(), model_ref="model")
+            _wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        assert seen["video"]["scene"] is None
+        assert seen["video"]["scene_by_set"] is None
+
     def test_upscale_job_loads_model_and_runs_workflow_once(self, tmp_path, monkeypatch):
         """Upscale jobs load the recorded model (with its quant and LoRAs), run once, and accept only quit."""
         loader_calls: dict = {}

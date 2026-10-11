@@ -294,6 +294,7 @@ def test_phase_a_routes_share_config_and_path_authority(monkeypatch):
         "loaded",
         "ignored_negative_video",
         "ignored_negative_unsupported",
+        "ignored_scene_image",
     }
     assert all(isinstance(value, str) and value for value in prompt_file["help"].values())
 
@@ -1046,6 +1047,132 @@ def test_video_submission_missing_ffmpeg_returns_422_before_job_registration(mon
     assert submitted == []
 
 
+def _stub_video_submission(monkeypatch, tmp_path) -> list[dict[str, object]]:
+    """Stub model detection and the runner so a video submission reaches ``submit_video_request_job`` and records its kwargs."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(
+        web_server,
+        "detect_video_model",
+        lambda _model: SimpleNamespace(family="ltx", supports_i2v=True, resolution_alignment=64, frame_alignment=8, default_fps=24),
+    )
+    monkeypatch.setattr(web_server, "resolve_video_defaults", lambda *_args: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
+    monkeypatch.setattr(web_server, "_normalize_video_args", lambda *_args: None)
+    monkeypatch.setattr(web_server, "require_ffmpeg", lambda: None)
+    monkeypatch.setattr(web_server.web_runner, "submit_video_request_job", lambda **kwargs: submitted.append(kwargs) or "job-123")
+    return submitted
+
+
+def _post_video(data: dict[str, object]):
+    with TestClient(web_server.app) as client:
+        return client.post("/api/generate", data={"mode": "video", "model": "ltx-8", **data})
+
+
+def test_video_submission_threads_scene_into_args_and_prompts(monkeypatch, tmp_path):
+    """A scene and prompt reach the job args, with the user's inputs recorded when sent."""
+    submitted = _stub_video_submission(monkeypatch, tmp_path)
+
+    response = _post_video({"scene": " A castle at dusk. ", "prompt": "A knight rides in.", "scene_input": "castle", "prompt_input": "knight"})
+
+    assert response.status_code == 200
+    (job,) = submitted
+    args = job["args"]
+    assert (args.scene, args.prompt, args.scene_input, args.prompt_input) == ("A castle at dusk.", "A knight rides in.", "castle", "knight")
+    assert job["prompts_data"] == {"web": [("A knight rides in.", None)]}
+    assert job["scene_by_set"] is None
+
+
+def test_text_to_video_submission_without_scene_keeps_the_scene_and_extend_args_empty(monkeypatch, tmp_path):
+    submitted = _stub_video_submission(monkeypatch, tmp_path)
+
+    response = _post_video({"prompt": "A knight rides in."})
+
+    assert response.status_code == 200
+    args = submitted[0]["args"]
+    assert (args.scene, args.scene_input, args.prompt_input) == (None, None, None)
+
+
+def test_video_submission_accepts_a_scene_without_a_prompt(monkeypatch, tmp_path):
+    """Scene OR prompt is enough: a scene-only inline submission plans one empty-prompt entry."""
+    submitted = _stub_video_submission(monkeypatch, tmp_path)
+
+    response = _post_video({"scene": "A castle at dusk."})
+
+    assert response.status_code == 200
+    (job,) = submitted
+    assert job["args"].scene == "A castle at dusk."
+    assert job["args"].prompt == ""
+    assert job["prompts_data"] == {"web": [("", None)]}
+    assert job["context"]["prompt"] == "A castle at dusk."
+
+
+@pytest.mark.parametrize("data", [{}, {"scene": "   ", "prompt": ""}, {"prompt": "  "}])
+def test_video_submission_refuses_when_scene_and_prompt_are_both_empty(monkeypatch, tmp_path, data):
+    submitted = _stub_video_submission(monkeypatch, tmp_path)
+
+    response = _post_video(data)
+
+    assert response.status_code == 422
+    assert set(response.json()) == {"detail"}
+    assert "prompt" in response.json()["detail"]
+    assert submitted == []
+
+
+def test_image_submission_ignores_the_scene_field(monkeypatch, tmp_path):
+    """Images keep the prompt requirement and never read a scene."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(web_server, "detect_image_model", lambda _model: ImageModelInfo(family="zimage", is_distilled=False, size="xl"))
+    monkeypatch.setattr(web_server, "get_backend_name", lambda: "registry-owned")
+    monkeypatch.setattr(web_server, "validate_scheduler", lambda _scheduler, _config: None)
+    monkeypatch.setattr(web_server, "resolve_defaults", lambda *_args: {"steps": 11, "guidance": 4.0, "scheduler": None, "supports_negative_prompt": True})
+    monkeypatch.setattr(web_server.web_runner, "submit_image_request_job", lambda **kwargs: submitted.append(kwargs) or "job-123")
+
+    with pytest.raises(ValueError, match="prompt"):
+        web_server._submit_image_job({"scene": "A castle at dusk."}, web_config)
+    web_server._submit_image_job({"prompt": "hello", "scene": "A castle at dusk."}, web_config)
+
+    (job,) = submitted
+    assert not hasattr(job["args"], "scene")
+    assert job["prompts_data"] == {"web": [("hello", None)]}
+
+
+def test_prompt_file_video_submission_returns_scene_by_set_and_job_scene_default(monkeypatch, tmp_path):
+    """File entries keep their own ``scene:``; the form scene is the default for the others."""
+    submitted = _stub_video_submission(monkeypatch, tmp_path)
+    path = tmp_path / "prompts.yaml"
+    path.write_text("shots:\n  - scene: A castle.\n    prompt: first\n  - prompt: second\n", encoding="utf-8")
+
+    response = _post_video({"prompt_source": "file", "prompts_file": str(path), "prompt_option_id": ["shots:0", "shots:1"], "scene": "Night."})
+
+    assert response.status_code == 200
+    (job,) = submitted
+    assert job["scene_by_set"] == {"shots": ["A castle.", None]}
+    assert job["args"].scene == "Night."
+    assert job["prompts_data"] == {"shots": [("first", None), ("second", None)]}
+
+
+def test_prompt_file_options_payload_carries_scene_preview_and_flag(tmp_path):
+    """The options payload adds ``scene_preview`` and ``has_scene`` per option and keeps its existing keys."""
+    path = tmp_path / "prompts.yaml"
+    path.write_text("shots:\n  - scene: A castle.\n    prompt: first\n  - prompt: second\n", encoding="utf-8")
+
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/prompt-files/inspect", json={"path": str(path)})
+
+    assert response.status_code == 200
+    with_scene, without_scene = response.json()["options"]
+    assert (with_scene["scene_preview"], with_scene["has_scene"]) == ("A castle.", True)
+    assert (without_scene["scene_preview"], without_scene["has_scene"]) == (None, False)
+    assert {"id", "set_name", "source_index", "label", "prompt_preview", "negative_preview", "enhance"} <= set(with_scene)
+    assert with_scene["prompt_preview"] == "first"
+
+
 def test_image_submission_does_not_require_ffmpeg(monkeypatch):
     """Image submissions retain their existing path when the video prerequisite is unavailable."""
     monkeypatch.setattr(web_server, "load_web_config", _make_web_config)
@@ -1504,7 +1631,7 @@ def test_prompt_file_submission_batches_checked_prompts_in_file_order(tmp_path, 
     path = tmp_path / "prompts.yaml"
     path.write_text("portrait:\n  - prompt: first\n    negative: blur\n  - prompt: second\nlandscape:\n  - prompt: third\n  - prompt: unchecked\n", encoding="utf-8")
     form = FormData([("prompt_source", "file"), ("prompts_file", str(path)), *[("prompt_option_id", option_id) for option_id in selected]])
-    source, prompt, negative, batch, _enhance = web_server._resolve_prompt_submission_with_enhance(form)
+    source, prompt, negative, batch, _enhance, _scenes = web_server._resolve_prompt_submission_with_enhance(form)
     assert source == "file"
     assert prompt == "first"
     assert negative == "blur"

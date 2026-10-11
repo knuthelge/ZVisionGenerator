@@ -9,6 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+
 if TYPE_CHECKING:
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
 
@@ -29,6 +30,7 @@ _LABEL_RE = re.compile(r"^\s*(?:rewritten prompt|enhanced prompt|prompt)\s*:\s*"
 _REFUSAL_RE = re.compile(r"^\s*(?:I can['’]t|I cannot|I won['’]t|I'm sorry|I’m sorry|I am sorry|As an AI)\b", re.I)
 # Only double quotes: single quotes double as apostrophes ("Moe's"), so stripping them would cut real text.
 _QUOTE_PAIRS = {'"': '"', "“": "”"}
+NO_USABLE_MESSAGE = "The enhancer returned no usable rewrite (empty, unchanged, or a refusal). Try different settings."
 
 
 @dataclass(frozen=True)
@@ -210,12 +212,23 @@ class EnhanceSettings:
 
 @dataclass(frozen=True)
 class EnhanceContext:
-    """Facts about the job that shape a rewrite: audio track, clip length, frame shape and reference image."""
+    """Facts about the job that shape a rewrite: audio track, clip length, frame shape and reference image.
+
+    The last five fields describe extending an existing clip. ``seconds`` is then the whole window (the carried
+    frames plus the new ones) and ``new_seconds`` the part the new action fills. ``previous`` is the source's
+    recorded prompt ("what just happened"); ``extract_from`` is set for a source recorded without a scene;
+    ``prompt_is_original`` says the user's prompt still equals that old prompt.
+    """
 
     audio: bool = False
     seconds: float | None = None
     orientation: str | None = None
     reference_image: bool = False
+    extends: bool = False
+    previous: str | None = None
+    extract_from: str | None = None
+    prompt_is_original: bool = False
+    new_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -279,15 +292,39 @@ def enhance_context(
     fps: float | None = None,
     audio: bool = False,
     reference_image: bool = False,
+    extends: bool = False,
+    previous: str | None = None,
+    extract_from: str | None = None,
+    prompt_is_original: bool = False,
+    new_frames: int | None = None,
 ) -> EnhanceContext:
     """Build the rewrite context from a job's shape; audio and duration apply to video only.
 
     The orientation comes from *width* and *height* when both are set, else from a ``W:H`` *ratio*.
+
+    Args:
+        frames: The clip's frame count; when *extends*, the whole window (carried plus new frames).
+        extends: Whether the job extends an existing video (video only); the fields below apply only then.
+        previous: The source video's recorded prompt, "what just happened".
+        extract_from: The source's prompt when it was recorded without a scene.
+        prompt_is_original: Whether the user's prompt still equals the source's recorded prompt.
+        new_frames: The frames the new action fills; with *fps* it gives ``new_seconds``.
     """
     _check_mode(mode)
     video = mode == "video"
     seconds = frames / fps if video and frames and fps else None
-    return EnhanceContext(audio=video and audio, seconds=seconds, orientation=_orientation(width, height, ratio), reference_image=reference_image)
+    extending = video and extends
+    return EnhanceContext(
+        audio=video and audio,
+        seconds=seconds,
+        orientation=_orientation(width, height, ratio),
+        reference_image=reference_image,
+        extends=extending,
+        previous=previous if extending else None,
+        extract_from=extract_from if extending else None,
+        prompt_is_original=extending and prompt_is_original,
+        new_seconds=new_frames / fps if extending and new_frames and fps else None,
+    )
 
 
 def _orientation(width: float | None, height: float | None, ratio: str | None) -> str | None:
@@ -424,8 +461,12 @@ def parse_enhance_entry(value: Any, *, mode: str, where: str) -> EnhanceSettings
     raise ValueError(f"Invalid 'enhance' in {where}: expected true, false, or a mapping, got {type(value).__name__}.")
 
 
-def validate_settings(settings: EnhanceSettings, *, mode: str) -> None:
-    """Reject unknown slugs and the no-op combination (keep style and mood, no details, same length, no motion, sound or direction)."""
+def validate_settings(settings: EnhanceSettings, *, mode: str, split: bool = False) -> None:
+    """Reject unknown slugs and the no-op combination (keep style and mood, no details, same length, no motion, sound or direction).
+
+    Args:
+        split: Whether a video prompt has no scene, so the rewrite splits it into scene and action (never a no-op).
+    """
     _check_mode(mode)
     STYLE_AXIS.option(settings.style)
     MOOD_AXIS.option(settings.mood)
@@ -436,7 +477,7 @@ def validate_settings(settings: EnhanceSettings, *, mode: str) -> None:
         MOTION_AXIS.option(slug)
     for slug in settings.sound:
         SOUND_AXIS.option(slug)
-    if is_noop(settings, mode=mode):
+    if is_noop(settings, mode=mode, split=split):
         raise ValueError("Nothing to enhance: pick a style, a mood, a detail, a length, or write a direction.")
 
 
@@ -486,29 +527,57 @@ def entry_enhance(enhance_by_set: dict[str, list[EnhanceSettings | None]] | None
     return entries[index] if 0 <= index < len(entries) else None
 
 
-def is_noop(settings: EnhanceSettings, *, mode: str) -> bool:
-    """Return whether *settings* ask for no change in *mode* (keep style and mood, no details, same length, no direction, no video motion or sound)."""
+def entry_scene(scene_by_set: dict[str, list[str | None]] | None, set_name: str, index: int, job_scene: str | None) -> str | None:
+    """Return the trimmed ``scene:`` for prompt *index* of *set_name*, else the trimmed *job_scene*, else ``None``; blank texts are skipped."""
+    scenes = (scene_by_set or {}).get(set_name) or []
+    own = scenes[index] if 0 <= index < len(scenes) else None
+    for candidate in (own, job_scene):
+        if candidate and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def is_noop(settings: EnhanceSettings, *, mode: str, split: bool = False) -> bool:
+    """Return whether *settings* ask for no change in *mode* (keep style and mood, no details, same length, no direction, no video motion or sound).
+
+    A video prompt that *split* into scene and action (blank scene, non-blank prompt) is always a change.
+    """
+    if mode == "video" and split:
+        return False
     has_video_axes = mode == "video" and bool(settings.motion or settings.sound)
     return settings.style == "keep" and settings.mood == "keep" and not settings.details and settings.length == "same" and not settings.note and not has_video_axes
 
 
-def enhance_by_set_for_mode(enhance_by_set: dict[str, list[EnhanceSettings | None]] | None, *, mode: str) -> dict[str, list[EnhanceSettings | None]] | None:
-    """Drop prompt-file entries that change nothing in *mode* (e.g. motion-only entries in an image run), warning once."""
+def enhance_by_set_for_mode(
+    enhance_by_set: dict[str, list[EnhanceSettings | None]] | None,
+    *,
+    mode: str,
+    scene_by_set: dict[str, list[str | None]] | None = None,
+    job_scene: str | None = None,
+) -> dict[str, list[EnhanceSettings | None]] | None:
+    """Drop prompt-file entries that change nothing in *mode* (e.g. motion-only entries in an image run), warning once.
+
+    Args:
+        scene_by_set: Each entry's scene, aligned with *enhance_by_set*; video entries without a scene split their prompt into scene and action.
+        job_scene: The scene used by entries that have none of their own.
+    """
     if not enhance_by_set:
         return enhance_by_set
     dropped = 0
     result: dict[str, list[EnhanceSettings | None]] = {}
     for set_name, entries in enhance_by_set.items():
         kept: list[EnhanceSettings | None] = []
-        for entry in entries:
-            if entry is not None and is_noop(entry, mode=mode):
+        for index, entry in enumerate(entries):
+            split = entry_scene(scene_by_set, set_name, index, job_scene) is None
+            if entry is not None and is_noop(entry, mode=mode, split=split):
                 dropped += 1
                 entry = None
             kept.append(entry)
         result[set_name] = kept
     if dropped:
         noun = "entry asks" if dropped == 1 else "entries ask"
-        warnings.warn(f"{dropped} prompt-file 'enhance:' {noun} for no change in images (keep style and mood, no details, same length, no direction); not enhanced.", stacklevel=2)
+        media = "images" if mode == "image" else "videos"
+        warnings.warn(f"{dropped} prompt-file 'enhance:' {noun} for no change in {media} (keep style and mood, no details, same length, no direction); not enhanced.", stacklevel=2)
     return result
 
 
@@ -539,22 +608,32 @@ def plan_length(in_words: int, length: str, *, ceiling: int, length_cfg: dict[st
     return LengthPlan(length=length, target=target, lo=max(1, target - span), hi=min(target + span, max(ceiling, target)), clamped=clamped)
 
 
-def _length_instruction(plan: LengthPlan) -> str:
+def length_instruction(plan: LengthPlan, label: str = "Length") -> str:
     if plan.length == "shorter" and not plan.clamped:
-        return f"Length: at most {plan.hi} words (aim for {plan.target}). Cut only redundancy and filler, never an element the user named."
+        return f"{label}: at most {plan.hi} words (aim for {plan.target}). Cut only redundancy and filler, never an element the user named."
     if plan.length == "same" or plan.clamped:
-        return f"Length: {plan.lo}-{plan.hi} words. Do not exceed {plan.hi} words."
-    return f"Length: {plan.lo}-{plan.hi} words."
+        return f"{label}: {plan.lo}-{plan.hi} words. Do not exceed {plan.hi} words."
+    return f"{label}: {plan.lo}-{plan.hi} words."
 
 
-def _word_count(text: str) -> int:
+def word_count(text: str) -> int:
     """Count whitespace-separated tokens that contain a letter or digit (stray punctuation is not a word)."""
     return sum(1 for token in text.split() if any(char.isalnum() for char in token))
 
 
+def strip_reasoning(text: str) -> str:
+    """Return *text* without ``<think>`` reasoning blocks, including one that is still open."""
+    return _THINK_RE.sub("", text)
+
+
+def duration_beats(seconds: float) -> str:
+    """Return how many beats of action fit *seconds*: one continuous action, two or three beats, or a short sequence."""
+    return next((text for limit, text in _DURATION_BEATS if seconds <= limit), "a short sequence of beats")
+
+
 def clean_output(text: str) -> str:
     """Strip reasoning blocks, special tokens, leading labels, and wrapping quotes from model output."""
-    text = _THINK_RE.sub("", text)
+    text = strip_reasoning(text)
     text = _SPECIAL_TOKEN_RE.sub("", text)
     text = _LABEL_RE.sub("", text.strip())
     text = text.strip()
@@ -569,7 +648,7 @@ def _has_inner_quote(text: str) -> bool:
     return text[0] in inner or text[-1] in inner
 
 
-def _normalized(text: str) -> str:
+def normalize_text(text: str) -> str:
     return " ".join(text.lower().split())
 
 
@@ -577,12 +656,12 @@ def is_unusable(output: str, original: str) -> bool:
     """Return whether *output* is empty, an echo of *original*, or starts with a refusal."""
     if not output.strip():
         return True
-    if _normalized(output) == _normalized(original):
+    if normalize_text(output) == normalize_text(original):
         return True
     return bool(_REFUSAL_RE.match(output))
 
 
-def _perception_rule(mode: str, context: EnhanceContext) -> str:
+def perception_rule(mode: str, context: EnhanceContext) -> str:
     """Return the rule on which senses the rewrite may describe (sound only for video with audio)."""
     if mode == "video" and context.audio:
         return (
@@ -596,7 +675,7 @@ def _perception_rule(mode: str, context: EnhanceContext) -> str:
     return f"{visible}: no sounds, smells, temperatures felt, thoughts, backstory or narrative commentary."
 
 
-def _context_rules(mode: str, context: EnhanceContext) -> list[str]:
+def context_rules(mode: str, context: EnhanceContext) -> list[str]:
     """Return the rules for the reference image, frame shape and clip length."""
     rules: list[str] = []
     if context.reference_image:
@@ -610,9 +689,31 @@ def _context_rules(mode: str, context: EnhanceContext) -> list[str]:
     if context.orientation is not None:
         rules.append(f"Frame: {context.orientation}; compose for that shape.")
     if mode == "video" and context.seconds is not None:
-        beats = next((text for limit, text in _DURATION_BEATS if context.seconds <= limit), "a short sequence of beats")
+        beats = duration_beats(context.seconds)
         rules.append(f"Duration: about {max(1, round(context.seconds))} seconds; fit the action to it: {beats}.")
     return rules
+
+
+def action_rules(settings: EnhanceSettings, context: EnhanceContext, *, for_pair: bool = False) -> list[str]:
+    """Return the motion and sound rules of a video rewrite; sound only when the job has an audio track.
+
+    They open with their own names ("Motion: describe ..."), or with "For the ACTION" in a scene-and-action rewrite.
+    """
+    motion_lead, sound_lead = ("For the ACTION", "For the ACTION") if for_pair else ("Motion", "Sound")
+    rules = []
+    if settings.motion:
+        rules.append(f"{motion_lead}: describe {', '.join(MOTION_AXIS.option(slug).instruction for slug in settings.motion)}.")
+    if context.audio and settings.sound:
+        sounds = "; ".join(SOUND_AXIS.option(slug).instruction for slug in settings.sound)
+        rules.append(f"{sound_lead}: describe {sounds}. Put spoken lines in double quotes; only people already in the scene speak.")
+    return rules
+
+
+def direction_rules(settings: EnhanceSettings, *, both_parts: bool = False) -> list[str]:
+    """Return the rule that carries the user's free-text direction, or none when there is no direction."""
+    if not settings.note:
+        return []
+    return [f"Direction from the user (follow it{' in both parts' if both_parts else ''}): {settings.note}"]
 
 
 def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: LengthPlan, context: EnhanceContext | None = None) -> list[dict[str, str]]:
@@ -623,22 +724,18 @@ def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: L
     rules = [
         "EVERY DETAIL IS IMPORTANT: keep the user's subject, intent and every element they mention.",
         "Never add new people, animals, characters or major objects.",
-        _perception_rule(mode, context),
-        *_context_rules(mode, context),
+        perception_rule(mode, context),
+        *context_rules(mode, context),
     ]
     rules.append(STYLE_AXIS.option(settings.style).instruction)
     rules.append(MOOD_AXIS.option(settings.mood).instruction)
     if settings.details:
         aspects = ", ".join(DETAILS_AXIS.option(slug).instruction for slug in settings.details)
         rules.append(f"Keep these aspects while cutting: {aspects}." if plan.length == "shorter" and not plan.clamped else f"Add detail on: {aspects}.")
-    if mode == "video" and settings.motion:
-        rules.append(f"Motion: describe {', '.join(MOTION_AXIS.option(slug).instruction for slug in settings.motion)}.")
-    if mode == "video" and context.audio and settings.sound:
-        sounds = "; ".join(SOUND_AXIS.option(slug).instruction for slug in settings.sound)
-        rules.append(f"Sound: describe {sounds}. Put spoken lines in double quotes; only people already in the scene speak.")
-    if settings.note:
-        rules.append(f"Direction from the user (follow it): {settings.note}")
-    rules.append(_length_instruction(plan))
+    if mode == "video":
+        rules.extend(action_rules(settings, context))
+    rules.extend(direction_rules(settings))
+    rules.append(length_instruction(plan))
     if plan.length == "same" or plan.clamped:
         rules.append("Apply the style, mood and details; don't return the input unchanged.")
     system = f"You rewrite prompts for a {kind} model.\nRules:\n" + "\n".join(f"- {rule}" for rule in rules)
@@ -678,24 +775,43 @@ def enhance_prompt(
     if not prompt.strip():
         raise ValueError("Enter a prompt to enhance.")
     validate_settings(settings, mode=mode)
-    plan = plan_length(_word_count(prompt), settings.length, ceiling=ceiling, length_cfg=length_cfg)
+    plan = plan_length(word_count(prompt), settings.length, ceiling=ceiling, length_cfg=length_cfg)
     messages = build_messages(prompt, settings, mode=mode, plan=plan, context=context)
     for attempt in range(2):
-        raw = ""
-        last_update = float("-inf")
-        if on_text is not None:
-            on_text("")
-        for delta in enhancer.generate(messages, seed=seed + attempt, max_tokens=max_tokens, temperature=temperature, cancelled=cancelled):
-            raw += delta
-            now = time.monotonic()
-            if on_text is not None and now - last_update >= TEXT_UPDATE_INTERVAL_SECONDS:
-                last_update = now
-                on_text(clean_output(raw))
-        if cancelled is not None and cancelled():
-            raise RuntimeError("Prompt enhancement was cancelled.")
+        raw = generate_raw(enhancer, messages, seed=seed + attempt, max_tokens=max_tokens, temperature=temperature, on_text=on_text, cancelled=cancelled)
         output = clean_output(raw)
         if not is_unusable(output, prompt):
             if on_text is not None:
                 on_text(output)
             return EnhanceResult(prompt=output, clamped=plan.clamped)
-    raise RuntimeError("The enhancer returned no usable rewrite (empty, unchanged, or a refusal). Try different settings.")
+    raise RuntimeError(NO_USABLE_MESSAGE)
+
+
+def generate_raw(
+    enhancer: PromptEnhancer,
+    messages: list[dict[str, str]],
+    *,
+    seed: int,
+    max_tokens: int,
+    temperature: float,
+    on_text: Callable[[str], None] | None,
+    cancelled: Callable[[], bool] | None,
+) -> str:
+    """Stream one generation, reporting throttled cleaned text to *on_text*, and return the raw text.
+
+    Raises:
+        RuntimeError: When *cancelled* returns True.
+    """
+    raw = ""
+    last_update = float("-inf")
+    if on_text is not None:
+        on_text("")
+    for delta in enhancer.generate(messages, seed=seed, max_tokens=max_tokens, temperature=temperature, cancelled=cancelled):
+        raw += delta
+        now = time.monotonic()
+        if on_text is not None and now - last_update >= TEXT_UPDATE_INTERVAL_SECONDS:
+            last_update = now
+            on_text(clean_output(raw))
+    if cancelled is not None and cancelled():
+        raise RuntimeError("Prompt enhancement was cancelled.")
+    return raw

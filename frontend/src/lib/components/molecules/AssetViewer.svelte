@@ -103,6 +103,9 @@
 
   const sections = $derived(asset ? assetDetailSections(asset) : null);
   const source = $derived(asset?.details?.source ?? null);
+  // A scene-only video carries its scene as its prompt; show it once, and a separate Scene section only when it differs.
+  const sceneOnly = $derived(Boolean(asset?.scene) && asset?.scene === asset?.prompt);
+  const separateScene = $derived(asset?.scene && asset.scene !== asset.prompt ? asset.scene : null);
   const sourceIndex = $derived(source?.id ? assets.findIndex((item) => item.id === source.id) : -1);
 
   /** Upscale the shown image by *factor* from the keyboard; a disallowed factor explains why instead. */
@@ -345,8 +348,14 @@
 
       {#if detailsOpen}
         <aside id="asset-viewer-details" class="viewer-details" aria-label="Asset details">
+          {#if separateScene}
+            <section data-testid="viewer-scene">
+              <h4 class="viewer-h ui-area-label">Scene</h4>
+              <p class="viewer-prompt">{separateScene}</p>
+            </section>
+          {/if}
           <section>
-            <h4 class="viewer-h ui-area-label">Prompt</h4>
+            <h4 class="viewer-h ui-area-label">{sceneOnly ? 'Scene' : 'Prompt'}</h4>
             <p class="viewer-prompt">{asset.prompt || 'No prompt recorded.'}</p>
           </section>
           {#if sections?.negativePrompt}

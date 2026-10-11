@@ -25,6 +25,8 @@ These files are not part of the published docs site, and the docs don't link to 
 | [Show model download progress in Web UI jobs](model-download-progress.md) | Proposed | Download a missing model as its own step before loading, and show bytes, speed and ETA on the job card, with Stop and resume |
 | [Faster generation on macOS](macos-speed.md) | Proposed | Ranked speed opportunities on Apple Silicon (Ideogram quants, model reuse across Web UI jobs, LTX dtype and streaming, Klein text encoder), with a measurement plan to size them first |
 | [Show memory use while a job runs](live-memory-usage.md) | Proposed | Feasibility study: live memory use during generation is readable on macOS, Windows and Linux; Windows VRAM spill into shared memory is the one part still to verify |
+| [Extend a video](video-extend.md) | Accepted | Continue a clip from its last 25 frames in the one-stage loop and splice the new part onto the untouched original, with audio; macOS first, then video-only on Windows/Linux |
+| [A scene for video prompts](video-scene.md) | In progress | An optional Scene beside the video prompt (CLI, prompt files, Web UI), sent first, and an enhancer that writes both a scene and an action in one call |
 
 ## Archive
 

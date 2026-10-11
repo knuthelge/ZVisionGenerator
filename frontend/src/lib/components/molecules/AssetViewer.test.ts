@@ -92,6 +92,35 @@ describe('AssetViewer', () => {
     expect(document.querySelector('#asset-viewer-details')).not.toBeNull();
   });
 
+  describe('scene in the details', () => {
+    function openDetails(asset: GalleryAsset): HTMLElement {
+      mountViewer({ assets: [asset] });
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'i', bubbles: true }));
+      flushSync();
+      return document.querySelector('#asset-viewer-details') as HTMLElement;
+    }
+
+    const video = { media_type: 'video', workflow: 'txt2vid', filename: 'clip.mp4' } as const;
+
+    it('shows the scene beside a prompt that differs from it', () => {
+      const details = openDetails(makeAsset({ ...video, scene: 'A castle at dusk.', prompt: 'A knight rides in.' }));
+      expect(details.querySelector('[data-testid="viewer-scene"]')?.textContent).toContain('A castle at dusk.');
+      expect(details.textContent).toContain('A knight rides in.');
+    });
+
+    it('shows a scene-only video once', () => {
+      // The gallery reports the scene as the prompt of a video made without one.
+      const details = openDetails(makeAsset({ ...video, scene: 'A castle at dusk.', prompt: 'A castle at dusk.' }));
+      expect(details.querySelector('[data-testid="viewer-scene"]')).toBeNull();
+      expect(details.textContent?.match(/A castle at dusk\./g)).toHaveLength(1);
+    });
+
+    it('shows no scene section for an asset without one', () => {
+      const details = openDetails(makeAsset({ prompt: 'A fox.' }));
+      expect(details.querySelector('[data-testid="viewer-scene"]')).toBeNull();
+    });
+  });
+
   it('runs reuse, reference and delete on the shown asset', () => {
     const onreuse = vi.fn();
     const onreference = vi.fn();

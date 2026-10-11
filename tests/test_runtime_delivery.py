@@ -137,6 +137,17 @@ def test_workflow_contract_hides_audio_when_video_has_no_audio_track() -> None:
         assert "low_memory" in without_audio[workflow]["visible_controls"]
 
 
+def test_workflow_contract_offers_the_scene_control_for_video_workflows_only() -> None:
+    definitions = build_workflow_contract()["definitions"]
+
+    for workflow in ("txt2vid", "img2vid"):
+        controls = definitions[workflow]["visible_controls"]
+        assert "prompt_scene" in controls
+        assert controls.index("prompt_scene") < controls.index("prompt_inline")
+    for workflow in ("txt2img", "img2img"):
+        assert "prompt_scene" not in definitions[workflow]["visible_controls"]
+
+
 def test_workflow_contract_accepts_only_canonical_values() -> None:
     assert canonicalize_workflow("txt2img") == "txt2img"
     assert canonicalize_workflow("img2img") == "img2img"

@@ -55,18 +55,26 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
   const promptSource = (first(settings, 'prompt_source') ?? 'inline') as PromptSource;
   const isVideo = first(settings, 'mode') === 'video';
   const jsonPrompt = first(settings, 'json_prompt');
+  // A video run that used the Enhanced pair also recorded the user's own text; it becomes the boxes, and the pair that ran the Enhanced tab.
+  const ranEnhanced = isVideo && (settings.scene_input !== undefined || settings.prompt_input !== undefined);
+  const ranScene = first(settings, 'scene') ?? '';
+  const ranPrompt = first(settings, 'prompt') ?? '';
+  const ownScene = ranEnhanced ? first(settings, 'scene_input') ?? '' : ranScene;
+  const ownPrompt = ranEnhanced ? first(settings, 'prompt_input') ?? '' : ranPrompt;
   const patch: Partial<DraftState> = {
     promptSource,
-    // The submitted prompt is the text that ran (an Enhanced override included), so it becomes the prompt.
-    prompt: first(settings, 'prompt') ?? '',
-    enhancedPrompt: '',
-    enhancedFrom: null,
+    // Without recorded inputs the submitted text is what ran (an Enhanced override included), so it becomes the text.
+    prompt: ownPrompt,
+    enhancedPrompt: ranEnhanced ? ranPrompt : '',
+    enhancedScene: ranEnhanced ? ranScene : '',
+    enhancedFrom: ranEnhanced ? { prompt: ownPrompt, scene: ownScene, mode: 'video' } : null,
     jsonPromptEnabled: jsonPrompt !== undefined,
     negativePrompt: first(settings, 'negative_prompt') ?? '',
     seed: numberOrNull(first(settings, 'seed')),
     dimensionMode: settings.width !== undefined ? 'custom' : 'ratio',
     enhanceAuto: settings.enhance_auto !== undefined,
   };
+  if (isVideo) patch.scene = ownScene;
   if (jsonPrompt !== undefined) patch.jsonPrompt = jsonPrompt;
   if (promptSource === 'file') {
     patch.promptFilePath = first(settings, 'prompts_file') ?? null;

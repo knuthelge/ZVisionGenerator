@@ -4,6 +4,7 @@ import {
   canMakeChoice,
   choiceAt,
   choiceOptions,
+  copyEntry,
   dropPosition,
   enhanceSettingsFor,
   enhanceShortLabel,
@@ -11,6 +12,7 @@ import {
   flattenValue,
   isNoOpEnhance,
   moveItem,
+  newEntry,
   optionId,
   remapOptionIds,
   renameRefs,
@@ -137,10 +139,24 @@ describe('renaming references', () => {
   it('finds references in structured values', () => {
     const document: PromptDocument = {
       snippets: [],
-      sets: [{ id: 's0', name: 's', entries: [{ id: 'e', prompt: { kind: 'structured', data: { A: ['$light'] } }, negative: null, active: true, enhance: null }] }],
+      sets: [{ id: 's0', name: 's', entries: [{ id: 'e', prompt: { kind: 'structured', data: { A: ['$light'] } }, scene: null, negative: null, active: true, enhance: null }] }],
     };
     expect(structuredUses(document, 'light')).toBe(true);
     expect(structuredUses(document, 'lig')).toBe(false);
+  });
+
+  it('finds references in a structured scene', () => {
+    const document: PromptDocument = {
+      snippets: [],
+      sets: [{ id: 's0', name: 's', entries: [{ id: 'e', scene: { kind: 'structured', data: ['$castle'] }, prompt: { kind: 'text', text: 'x' }, negative: null, active: true, enhance: null }] }],
+    };
+    expect(structuredUses(document, 'castle')).toBe(true);
+  });
+
+  it('starts a new entry without a scene, and a copy keeps the scene', () => {
+    expect(newEntry().scene).toBeNull();
+    const copy = copyEntry({ ...newEntry(), scene: { kind: 'text', text: 'A castle.' } });
+    expect(copy.scene).toEqual({ kind: 'text', text: 'A castle.' });
   });
 });
 
@@ -164,8 +180,8 @@ describe('prompt ids', () => {
   const document: PromptDocument = {
     snippets: [],
     sets: [{ id: 's0', name: 'portrait', entries: [
-      { id: 'a', prompt: { kind: 'text', text: 'x' }, negative: null, active: false, enhance: null },
-      { id: 'b', prompt: { kind: 'text', text: 'y' }, negative: null, active: true, enhance: null },
+      { id: 'a', prompt: { kind: 'text', text: 'x' }, scene: null, negative: null, active: false, enhance: null },
+      { id: 'b', prompt: { kind: 'text', text: 'y' }, scene: null, negative: null, active: true, enhance: null },
     ] }],
   };
 

@@ -9,9 +9,11 @@
     effectiveEnhanceSettings,
     enhanceContext,
     enhancePhaseMessage,
+    canSubmitText,
     hasAudio,
     isNoOpSettings,
     settingsPayload,
+    splitsPrompt,
     workflowMode,
   } from '$lib/state/promptEnhance';
   import type { EnhanceSettings, PromptEnhancerContract } from '$lib/types';
@@ -28,7 +30,10 @@
     maxWords: number;
     /** Live state the prompt box shows in its Enhanced tab. */
     enhancing?: boolean;
+    /** The prompt part of the stream (the whole text for images). */
     streamingText?: string;
+    /** The scene part of a video stream, as split by the server. */
+    streamingScene?: string;
     errorText?: string | null;
     noteText?: string | null;
     statusText?: string | null;
@@ -44,6 +49,7 @@
     maxWords,
     enhancing = $bindable(false),
     streamingText = $bindable(''),
+    streamingScene = $bindable(''),
     errorText = $bindable(null),
     noteText = $bindable(null),
     statusText = $bindable(null),
@@ -54,7 +60,10 @@
   const settings = $derived(effectiveEnhanceSettings(draft.state, contract));
   const audioSupported = $derived(contract.video_audio ?? true);
   const audio = $derived(hasAudio(draft.state, audioSupported));
-  const noOp = $derived(isNoOpSettings(settings, mode, audio));
+  // A video prompt without a scene is split into scene and action, so it is never a no-op. On demand that needs a prompt;
+  // auto-enhance (also in file mode, where the prompt box is blank) only needs the default scene to be blank.
+  const autoNoOp = $derived(isNoOpSettings(settings, mode, audio, mode === 'video' && draft.state.scene.trim() === ''));
+  const noOp = $derived(isNoOpSettings(settings, mode, audio, splitsPrompt(draft.state)));
   const available = $derived(contract.model !== null);
 
   let panelOpen = $state(false);
@@ -64,13 +73,13 @@
   let abort: AbortController | null = null;
 
   const downloadSize = $derived(downloadedThisSession ? null : contract.download_size_label);
-  const enhanceDisabled = $derived(busy || jobsActive || enhancing || noOp || !available || draft.state.prompt.trim() === '');
+  const enhanceDisabled = $derived(busy || jobsActive || enhancing || noOp || !available || !canSubmitText(draft.state));
   const disabledHint = $derived(
     !available ? (contract.error ?? 'No prompt enhancer model is configured.')
       : jobsActive ? 'Available when all jobs have finished.'
       : busy ? 'Available once the job is submitted.'
       : noOp ? 'Pick a style, a mood, a detail, a length, or write a direction.'
-      : draft.state.prompt.trim() === '' ? 'Write a prompt first.'
+      : !canSubmitText(draft.state) ? (mode === 'video' ? 'Write a scene or a prompt first.' : 'Write a prompt first.')
       : null
   );
 
@@ -82,27 +91,30 @@
   export async function runEnhance(): Promise<void> {
     if (enhanceDisabled) return;
     onstart?.();
-    const source = { prompt: draft.state.prompt, mode };
+    const source = { prompt: draft.state.prompt, scene: mode === 'video' ? draft.state.scene : '', mode };
     const requested = settings;
     enhancing = true;
     streamingText = '';
+    streamingScene = '';
     errorText = null;
     noteText = null;
     statusText = enhancePhaseMessage('generating', null);
     abort = new AbortController();
     try {
       await enhancePrompt(
-        { prompt: source.prompt, mode, settings: settingsPayload(requested, mode, audio), max_words: maxWords, context: enhanceContext(draft.state, audioSupported) },
+        { prompt: source.prompt, ...(mode === 'video' ? { scene: source.scene } : {}), mode, settings: settingsPayload(requested, mode, audio), max_words: maxWords, context: enhanceContext(draft.state, audioSupported) },
         (frame) => {
           if (frame.type === 'status') {
             phase = frame.phase;
             statusText = enhancePhaseMessage(frame.phase, downloadSize);
           } else if (frame.type === 'text') {
-            streamingText = frame.text;
+            // Video frames carry the server's split; images stream their whole text into the prompt.
+            streamingText = frame.prompt ?? frame.text;
+            streamingScene = frame.scene ?? '';
           } else if (frame.type === 'done') {
-            draft.update('enhancedPrompt', frame.prompt);
-            draft.update('enhancedFrom', source);
-            noteText = frame.clamped ? clampedNote(requested.length) : null;
+            draft.patch({ enhancedPrompt: frame.prompt, enhancedScene: source.mode === 'video' ? frame.scene ?? '' : '', enhancedFrom: source });
+            const notes = [frame.clamped ? clampedNote(requested.length) : null, frame.warning ?? null].filter((note) => note !== null);
+            noteText = notes.length > 0 ? notes.join(' ') : null;
             downloadedThisSession = true;
           } else if (frame.type === 'error') {
             errorText = frame.detail;
@@ -117,6 +129,7 @@
       phase = null;
       statusText = null;
       streamingText = '';
+      streamingScene = '';
       abort = null;
     }
   }
@@ -137,6 +150,7 @@
     abort?.abort();
     enhancing = false;
     streamingText = '';
+    streamingScene = '';
     statusText = null;
   });
 </script>
@@ -187,7 +201,7 @@
             disabled={enhanceDisabled}
             onclick={runEnhance}
           >
-            {draft.state.enhancedPrompt.trim() ? 'Enhance again' : 'Enhance prompt'}
+            {draft.state.enhancedPrompt.trim() || draft.state.enhancedScene.trim() ? 'Enhance again' : 'Enhance prompt'}
           </button>
         {/if}
         {#if disabledHint && !enhancing}
@@ -198,7 +212,7 @@
           <span class="ui-help">First use downloads the model.</span>
         {/if}
       </div>
-    {:else if draft.state.enhanceAuto && noOp}
+    {:else if draft.state.enhanceAuto && autoNoOp}
       <p class="ui-help ui-help-warning" role="alert">Pick a style, a mood, a detail, a length, or write a direction.</p>
     {/if}
     {#if variant === 'file'}

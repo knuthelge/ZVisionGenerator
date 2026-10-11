@@ -18,8 +18,14 @@ export function hasAudio(state: DraftState, supported = true): boolean {
   return supported && workflowMode(state.workflow) === 'video' && state.audio;
 }
 
-/** Whether *settings* would ask for no change at all (keep style and mood, no details, same length, no direction, no video motion or sound). */
-export function isNoOpSettings(settings: EnhanceSettings, mode: WorkflowMode, audio = false): boolean {
+/**
+ * Whether *settings* would ask for no change at all (keep style and mood, no details, same length, no direction, no video motion or sound).
+ *
+ * @param split The job is a video whose scene is blank and whose prompt is not, so the rewrite splits it.
+ */
+export function isNoOpSettings(settings: EnhanceSettings, mode: WorkflowMode, audio = false, split = false): boolean {
+  // A video prompt written without a scene is split into scene and action, which is always a change.
+  if (mode === 'video' && split) return false;
   const hasMotion = mode === 'video' && settings.motion.length > 0;
   const hasSound = mode === 'video' && audio && settings.sound.length > 0;
   return settings.style === 'keep' && settings.mood === 'keep' && settings.details.length === 0 && settings.length === 'same' && !settings.note.trim() && !hasMotion && !hasSound;
@@ -48,21 +54,43 @@ export function enhanceContext(state: DraftState, audioSupported = true): Enhanc
   };
 }
 
-/** Whether the Enhanced box replaces the inline prompt on submit. */
+/** Whether *state* is a video prompt with no scene but with a prompt, so an enhancement splits it into scene and action. */
+export function splitsPrompt(state: DraftState): boolean {
+  return workflowMode(state.workflow) === 'video' && state.scene.trim() === '' && state.prompt.trim() !== '';
+}
+
+/** Whether there is text to run: a scene or a prompt for video, a prompt for images. */
+export function canSubmitText(state: DraftState): boolean {
+  if (state.prompt.trim() !== '') return true;
+  return workflowMode(state.workflow) === 'video' && state.scene.trim() !== '';
+}
+
+/** Whether the Enhanced text replaces the inline text on submit; for video, text in either Enhanced box counts. */
 export function enhancedOverrideActive(state: DraftState): boolean {
-  return state.promptSource === 'inline' && !state.jsonPromptEnabled && !state.enhanceAuto && state.enhancedPrompt.trim() !== '';
+  if (state.promptSource !== 'inline' || state.jsonPromptEnabled || state.enhanceAuto) return false;
+  if (state.enhancedPrompt.trim() !== '') return true;
+  return workflowMode(state.workflow) === 'video' && state.enhancedScene.trim() !== '';
+}
+
+/** The scene and prompt to submit: the Enhanced pair when it applies, otherwise the boxes. Images never carry a scene. */
+export function submittedPair(state: DraftState): { scene: string; prompt: string } {
+  const video = workflowMode(state.workflow) === 'video';
+  if (enhancedOverrideActive(state)) return { scene: video ? state.enhancedScene : '', prompt: state.enhancedPrompt };
+  return { scene: video ? state.scene : '', prompt: state.prompt };
 }
 
 /** The `prompt` form value to submit: the Enhanced text when it applies, otherwise the prompt box. */
 export function submittedPrompt(state: DraftState): string {
-  return enhancedOverrideActive(state) ? state.enhancedPrompt : state.prompt;
+  return submittedPair(state).prompt;
 }
 
-/** Whether the Enhanced text was produced from a different prompt or workflow mode than the current one. */
+/** Whether the Enhanced text was produced from a different scene, prompt or workflow mode than the current one. */
 export function isEnhancedStale(state: DraftState): boolean {
   const source = state.enhancedFrom;
-  if (source === null || state.enhancedPrompt.trim() === '') return false;
-  return source.prompt !== state.prompt || source.mode !== workflowMode(state.workflow);
+  if (source === null) return false;
+  const mode = workflowMode(state.workflow);
+  if (state.enhancedPrompt.trim() === '' && (mode !== 'video' || state.enhancedScene.trim() === '')) return false;
+  return source.prompt !== state.prompt || source.mode !== mode || (mode === 'video' && (source.scene ?? '') !== state.scene);
 }
 
 /** Status line for an enhancement phase. */

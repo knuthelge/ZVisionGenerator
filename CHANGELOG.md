@@ -8,9 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 - Review before upscaling: approve or discard each small render before the full-size pass, for images and video (video on macOS). In the Web UI, turn on **Review** under Upscale; on the command line, use `--review` with `--upscale`
+- Video: an optional **Scene** (who and where, look, style, camera) beside the prompt, which stays the action. The Web UI has a Scene box on Text to Video and Image to Video. The CLI has `--scene`, and prompt-file entries take `scene:` (use a `$snippet` to share one). The model receives the scene first. A scene alone is enough to generate, and without one nothing changes. The prompt enhancer writes both parts in one rewrite: style, mood and details shape the scene, motion and sound shape the action, and the direction applies to both
 - Docs: a Linux troubleshooting note for when `systemd-oomd` closes the terminal or editor while a large model loads, with an optional drop-in that relaxes its limit
 
 ### Changed
+- Web UI: the video prompt box suggests the action ("What happens: action, camera moves, sound, dialogue.") now that the setting goes in Scene
+- Web UI: for video, the **Prompt** and **Enhanced** tabs are **Your text** and **Enhanced** and switch the Scene and Prompt boxes together
 - Web UI: video length is set in seconds (**Duration (s)**) instead of frames. It snaps to a frame count the model accepts (8k+1 for LTX), shows that count, and is no longer capped at 256 frames
 - Web UI: stopping the server (Ctrl-C on `ziv ui`) cancels the running job instead of waiting for it
 

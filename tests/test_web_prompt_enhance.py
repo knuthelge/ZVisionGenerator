@@ -18,6 +18,7 @@ from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.prompt_enhance import EnhanceContext, EnhanceSettings
+from zvisiongenerator.utils.prompt_enhance_video import split_scene_action
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import web_runner as web_runner_module
 from zvisiongenerator.web import workspace_api as workspace_api_module
@@ -99,6 +100,51 @@ class TestEnhanceEndpoint:
         assert enhancer.messages[0][1]["content"] in ("a red fox", "a grey fox")  # choices are picked before the model sees the prompt
         assert session.acquired[0][2] == 120
 
+    def test_video_pair_frames(self, monkeypatch, no_active_job):
+        enhancer = _FakeEnhancer(["SCENE: A castle at dusk.\nACTION: A knight rides in."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = {"scene": "A castle at dusk.", "prompt": "a knight", "mode": "video", "settings": {"style": "cinematic"}}
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+        texts = [frame for frame in frames if frame["type"] == "text"]
+        assert texts and all({"text", "scene", "prompt"} <= set(frame) for frame in texts)
+        assert all((frame["scene"], frame["prompt"]) == split_scene_action(frame["text"]) for frame in texts)  # the server splits; the client renders the parts
+        assert (texts[-1]["scene"], texts[-1]["prompt"]) == ("A castle at dusk.", "A knight rides in.")
+        assert frames[-1] == {"type": "done", "scene": "A castle at dusk.", "prompt": "A knight rides in.", "clamped": False}
+        assert "A castle at dusk." in enhancer.messages[0][1]["content"] and "a knight" in enhancer.messages[0][1]["content"]
+
+    def test_video_prompt_only_is_split(self, monkeypatch, no_active_job):
+        enhancer = _FakeEnhancer(["SCENE: A rainy street at night.\nACTION: A woman walks past a neon sign."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json={"prompt": "a woman walks in the rain", "mode": "video", "settings": {"length": "same"}}))
+        assert frames[-1]["type"] == "done"
+        assert (frames[-1]["scene"], frames[-1]["prompt"]) == ("A rainy street at night.", "A woman walks past a neon sign.")
+
+    def test_video_scene_only_is_accepted(self, monkeypatch, no_active_job):
+        enhancer = _FakeEnhancer(["SCENE: A castle at dusk, banners in the wind.\nACTION: Wind moves the banners."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = {"scene": "A castle at dusk.", "prompt": "", "mode": "video", "settings": {"style": "cinematic"}}
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+        assert frames[-1]["type"] == "done" and frames[-1]["prompt"] == "Wind moves the banners."
+
+    def test_video_fallback_warning_is_in_done_frame(self, monkeypatch, no_active_job):
+        enhancer = _FakeEnhancer(["A knight rides in at dawn.", "A knight rides in at dawn, slowly."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = {"scene": "A castle.", "prompt": "a knight", "mode": "video", "settings": {"style": "cinematic"}}
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+        done = frames[-1]
+        assert done["type"] == "done" and done["scene"] == "A castle." and done["warning"]
+
+    def test_image_done_frame_has_no_scene(self, monkeypatch, no_active_job):
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(_FakeEnhancer(["A grey fox in snow."])))
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json={"prompt": "a fox", "scene": "ignored", "mode": "image", "settings": {"style": "photo"}}))
+        assert all("scene" not in frame for frame in frames)
+        assert frames[-1] == {"type": "done", "prompt": "A grey fox in snow.", "clamped": False}
+
     def test_cpu_fallback_is_reported(self, monkeypatch, no_active_job):
         enhancer = _FakeEnhancer(["A red fox in snow, golden light."])
         enhancer.on_cuda = False
@@ -140,6 +186,9 @@ class TestEnhanceEndpoint:
         ("body", "message"),
         [
             ({"prompt": " ", "settings": {}}, "Enter a prompt"),
+            ({"prompt": " ", "scene": " ", "mode": "video", "settings": {}}, "Enter a scene or a prompt"),
+            ({"prompt": "a fox", "scene": 3, "mode": "video", "settings": {}}, "scene must be a string"),
+            ({"prompt": "", "scene": "A castle.", "mode": "video", "settings": {"style": "keep", "details": [], "length": "same", "motion": [], "sound": []}}, "Nothing to enhance"),
             ({"prompt": "a fox", "settings": {"style": "keep", "details": [], "length": "same"}}, "Nothing to enhance"),
             ({"prompt": "a fox", "settings": {"style": "nope"}}, "Unknown style"),
             ({"prompt": "a fox", "mode": "audio"}, "mode must be"),
@@ -176,6 +225,33 @@ class TestEnhanceEndpoint:
         body = {"prompt": "a fox", "mode": "video", "context": {"frames": 97, "fps": 24, "audio": True}}
 
         assert web_server._validate_enhance_body(body)["context"].audio is False
+
+    def test_video_split_makes_default_settings_valid(self):
+        job = web_server._validate_enhance_body({"prompt": "a fox", "mode": "video", "settings": {"style": "keep", "details": [], "length": "same"}})
+        assert job["scene"] == ""
+
+    def test_video_scene_without_prompt_field_is_accepted(self):
+        job = web_server._validate_enhance_body({"scene": "A castle.", "mode": "video", "settings": {"style": "cinematic"}})
+        assert (job["scene"], job["prompt"]) == ("A castle.", "")
+
+    def test_video_prompt_must_be_a_string(self, no_active_job):
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json={"prompt": 5, "mode": "video", "settings": {"style": "cinematic"}})
+        assert response.status_code == 422
+
+    def test_image_ignores_a_scene_of_any_type(self):
+        job = web_server._validate_enhance_body({"prompt": "a fox", "scene": 3, "mode": "image", "settings": {"style": "photo"}})
+        assert job["scene"] == ""
+
+    def test_extending_with_a_scene_streams_the_text_as_action_only(self):
+        """The server keeps the scene and the enhancer writes the action, so every partial goes to ``prompt``."""
+        job = web_server._validate_enhance_body({"scene": "A castle at dusk.", "prompt": "the knight leaves", "mode": "video", "settings": {"style": "cinematic"}})
+        job["context"] = EnhanceContext(extends=True, previous="A knight rides in.")
+        frames: queue.Queue[dict] = queue.Queue()
+        result = web_server._enhance_for_job(job, _FakeEnhancer(["The knight turns his horse and rides away."]), frames, threading.Event())
+        texts = [frames.get_nowait() for _ in range(frames.qsize())]
+        assert texts and all(frame["scene"] == "" and frame["prompt"] == frame["text"] for frame in texts)
+        assert result.scene == "A castle at dusk." and result.prompt == "The knight turns his horse and rides away."
 
     def test_missing_context_is_empty(self):
         assert web_server._validate_enhance_body({"prompt": "a fox"})["context"] == EnhanceContext()
@@ -221,7 +297,22 @@ class TestGenerateFields:
     @pytest.mark.parametrize(("raw", "message"), [("{bad", "JSON object"), ('{"style": "keep", "details": [], "length": "same", "motion": []}', "Nothing to enhance")])
     def test_invalid(self, raw, message):
         with pytest.raises(ValueError, match=message):
-            web_server._apply_enhance_submission(SimpleNamespace(), {"enhance_auto": "true", "enhance_settings": raw}, mode="video", json_caption=False)
+            web_server._apply_enhance_submission(SimpleNamespace(), {"enhance_auto": "true", "enhance_settings": raw}, mode="video", json_caption=False, split=False)
+
+    _KEEP_ALL = json.dumps({"style": "keep", "details": [], "length": "same", "motion": []})
+
+    def test_keep_all_auto_enhance_is_valid_for_a_video_with_a_blank_scene(self):
+        args = SimpleNamespace()
+        web_server._apply_enhance_submission(args, {"enhance_auto": "true", "enhance_settings": self._KEEP_ALL}, mode="video", json_caption=False, split=True)
+        assert args.enhance is not None
+
+    def test_keep_all_auto_enhance_is_rejected_when_a_scene_is_set(self):
+        with pytest.raises(ValueError, match="Nothing to enhance"):
+            web_server._apply_enhance_submission(SimpleNamespace(), {"enhance_auto": "true", "enhance_settings": self._KEEP_ALL}, mode="video", json_caption=False, split=False)
+
+    def test_split_never_relaxes_the_image_rule(self):
+        with pytest.raises(ValueError, match="Nothing to enhance"):
+            web_server._apply_enhance_submission(SimpleNamespace(), {"enhance_auto": "true", "enhance_settings": self._KEEP_ALL}, mode="image", json_caption=False, split=True)
 
     def test_image_submit_threads_settings_and_file_entries(self, monkeypatch, tmp_path):
         from test_web_server import _make_web_config, _patch_image_submit_dependencies

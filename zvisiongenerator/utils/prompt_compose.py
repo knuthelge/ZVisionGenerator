@@ -103,3 +103,122 @@ def expand_random_choices(text: str) -> str:
             text,
         )
     return text.strip()
+
+
+def compose_video_prompt(scene: str | None, prompt: str) -> str:
+    """Return the text a video model receives: the scene, then the prompt.
+
+    A blank *scene* returns *prompt* untouched (byte-identical), so runs that do not use a scene send exactly
+    what they always did. Otherwise both parts are stripped and joined by one space; a blank part is dropped,
+    so a scene-only run sends the scene alone.
+
+    Args:
+        scene: Who and where, look, style and camera; may be ``None`` or blank.
+        prompt: What happens; may be blank when *scene* is not.
+    """
+    if not scene or not scene.strip():
+        return prompt
+    return " ".join(part.strip() for part in (scene, prompt) if part and part.strip())
+
+
+_SENTENCE_END = frozenset(".!?…")
+_CLOSING_QUOTES = frozenset('"”')
+_QUOTE_CHARS = frozenset('"“”')
+# Abbreviations whose period does not end a sentence.
+_ABBREVIATIONS = frozenset({"mr.", "mrs.", "ms.", "dr.", "st.", "prof.", "jr.", "sr.", "vs.", "e.g.", "i.e."})
+
+
+def normalize_prompt_text(text: str) -> str:
+    """Return *text* with every whitespace run collapsed to one space and the ends trimmed.
+
+    This is the one normalisation behind ``is_original_prompt``; the Web UI mirrors it by splitting on
+    whitespace runs, dropping empty parts and joining with one space.
+    """
+    return " ".join(text.split())
+
+
+def is_original_prompt(prompt_template: str, recorded_prompt: str) -> bool:
+    """Return whether *prompt_template* still equals *recorded_prompt* once whitespace is normalised.
+
+    Compare the user's template (before ``{a|b}`` expansion) with the prompt recorded in the source video.
+    """
+    return normalize_prompt_text(prompt_template) == normalize_prompt_text(recorded_prompt)
+
+
+def strip_quoted_lines(text: str) -> str:
+    """Drop every sentence of *text* that contains a double quote, and join the rest with single spaces.
+
+    Sentences end at ``.``, ``!``, ``?`` or ``…`` followed by whitespace or the end, outside quotes. A terminator
+    inside a quote ends the sentence too when the closing quote follows it and the next word does not start in
+    lowercase (``"Hello." She waves.`` splits; ``"Run!" and sprints off.`` does not). ``"`` toggles the quote
+    state, ``“`` opens and ``”`` closes it; apostrophes are ignored. Text without any double quote is returned as is.
+
+    Args:
+        text: A prompt that may contain quoted speech.
+    """
+    if not any(char in _QUOTE_CHARS for char in text):
+        return text
+    kept = [sentence for sentence, quoted in _split_sentences(text) if sentence and not quoted]
+    return " ".join(kept)
+
+
+def _split_sentences(text: str) -> list[tuple[str, bool]]:
+    """Split *text* into stripped sentences, each with whether it contains a double quote."""
+    sentences: list[tuple[str, bool]] = []
+    buffer: list[str] = []
+    quoted = False
+    in_quote = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        buffer.append(char)
+        if char in _QUOTE_CHARS:
+            quoted = True
+            in_quote = (not in_quote) if char == '"' else char == "“"
+        elif char in _SENTENCE_END and _ends_sentence(text, index, in_quote):
+            if in_quote:
+                index += 1
+                buffer.append(text[index])
+                in_quote = False
+            sentences.append(("".join(buffer).strip(), quoted))
+            buffer, quoted = [], False
+        index += 1
+    sentences.append(("".join(buffer).strip(), quoted))
+    return sentences
+
+
+def _ends_sentence(text: str, index: int, in_quote: bool) -> bool:
+    """Return whether the terminator at *index* ends a sentence, given the current quote state."""
+    if text[index] == "." and _ends_with_abbreviation(text[: index + 1]):
+        return False
+    after = index + 1
+    if not in_quote:
+        return after >= len(text) or text[after].isspace()
+    if after >= len(text) or text[after] not in _CLOSING_QUOTES:
+        return False
+    rest = text[after + 1 :]
+    if rest and not rest[0].isspace():
+        return False
+    following = rest.lstrip()
+    return not following or not following[0].islower()
+
+
+def _ends_with_abbreviation(text: str) -> bool:
+    """Return whether the last word of *text* (which ends in a period) is a common abbreviation such as ``Dr.``."""
+    word = text.rsplit(None, 1)[-1].lower().lstrip("\"“'([")
+    return word in _ABBREVIATIONS
+
+
+def strip_quotes_while_original(resolved_prompt: str, *, template: str, recorded_prompt: str) -> str:
+    """Return *resolved_prompt* without quoted sentences while *template* still equals *recorded_prompt*, else unchanged.
+
+    Used when extending a clip recorded with a single prompt and no scene: re-sending its old dialogue would repeat the speech.
+
+    Args:
+        resolved_prompt: The prompt after snippet and ``{a|b}`` expansion.
+        template: The user's prompt before expansion.
+        recorded_prompt: The prompt recorded in the source video.
+    """
+    if is_original_prompt(template, recorded_prompt):
+        return strip_quoted_lines(resolved_prompt)
+    return resolved_prompt

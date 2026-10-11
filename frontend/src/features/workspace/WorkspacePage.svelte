@@ -2,7 +2,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import { api, errorText } from '$lib/api/client';
   import { draft } from '$lib/state/draft.svelte';
-  import { enhancedOverrideActive, submittedPrompt } from '$lib/state/promptEnhance';
+  import { enhancedOverrideActive, submittedPair } from '$lib/state/promptEnhance';
   import { jobStore } from '$lib/state/job.svelte';
   import { historyStore } from '$lib/state/history.svelte';
   import { router } from '$lib/state/router.svelte';
@@ -346,8 +346,12 @@
     addToast(`${asset.filename} is now the reference image`, 'success');
   }
 
-  // Tried in order: the visible prompt field first, else any control in the pane.
-  const COMPOSE_FOCUS = ['.compose-pane textarea:not([hidden]):not([disabled])', '.compose-pane button:not([disabled])'];
+  // Tried in order: the visible prompt field (the Scene box sits above it), else any text field, else any control in the pane.
+  const COMPOSE_FOCUS = [
+    '.compose-pane #ws-prompt:not([hidden]), .compose-pane #ws-enhanced-prompt:not([hidden]):not([disabled])',
+    '.compose-pane textarea:not([hidden]):not([disabled])',
+    '.compose-pane button:not([disabled])',
+  ];
   const SETTINGS_FOCUS = ['.settings-pane :is(input, select, textarea, button):not([disabled]):not([type="hidden"])'];
   // The newest history tile, else the strip's toggle when there is no history yet.
   const HISTORY_FOCUS = ['#ws-history-scroll .asset-tile-media', '#ws-history-toggle'];
@@ -594,8 +598,17 @@
     if (run) {
       applyPromptRun(formData, run);
     } else if (enhancedOverrideActive(draft.state) && formData.has('prompt')) {
-      formData.set('prompt', submittedPrompt(draft.state));
+      // The Enhanced text runs; the user's own text is recorded beside it so Reuse can offer either.
+      const pair = submittedPair(draft.state);
+      formData.set('prompt', pair.prompt);
+      if (formData.has('scene')) {
+        formData.set('scene_input', draft.state.scene);
+        formData.set('prompt_input', draft.state.prompt);
+        formData.set('scene', pair.scene);
+      }
     }
+    // A blank scene is no scene: today's form data, without the field.
+    if (String(formData.get('scene') ?? '').trim() === '') formData.delete('scene');
     return formData;
   }
 

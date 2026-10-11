@@ -323,3 +323,107 @@ class TestOptionIdMap:
         after = replace(before, sets=(replace(portrait, entries=(replace(portrait.entries[0], active=False),)),))
 
         assert option_id_map(before, after) == {}
+
+
+SCENE_SAMPLE = """\
+snippets:
+  castle: A castle at dusk.
+
+# Knight section
+knights:
+  - prompt: A knight rides in.  # the action
+    scene: $castle  # shared look
+    negative: blurry
+    custom_key: kept
+  - active: false
+    prompt: Second
+"""
+
+
+def _with_entries(document: PromptDocument, *entries: DocumentEntry) -> PromptDocument:
+    return replace(document, sets=(replace(document.sets[0], entries=entries), *document.sets[1:]))
+
+
+class TestScene:
+    def test_load_reads_scene_like_negative(self):
+        document = load_prompt_document(SCENE_SAMPLE)
+        with_scene, without = document.sets[0].entries
+
+        assert with_scene.scene == _text("$castle")
+        assert without.scene is None
+
+    def test_null_or_missing_scene_loads_as_none(self):
+        document = load_prompt_document("s:\n  - prompt: a\n    scene:\n  - prompt: b\n")
+
+        assert [entry.scene for entry in document.sets[0].entries] == [None, None]
+
+    def test_unchanged_document_round_trips_exactly(self):
+        assert render_prompt_document(SCENE_SAMPLE, load_prompt_document(SCENE_SAMPLE)) == SCENE_SAMPLE
+
+    def test_editing_a_scene_keeps_comments_order_and_other_keys(self):
+        document = load_prompt_document(SCENE_SAMPLE)
+        first, second = document.sets[0].entries
+
+        rendered = render_prompt_document(SCENE_SAMPLE, _with_entries(document, replace(first, scene=_text("A harbour at night.")), second))
+
+        assert "scene: A harbour at night." in rendered
+        assert "# shared look" in rendered
+        assert rendered.index("prompt:") < rendered.index("scene:") < rendered.index("negative:") < rendered.index("custom_key:")
+        assert "# Knight section" in rendered
+        assert "# the action" in rendered
+
+    def test_adding_a_scene_puts_it_before_the_prompt_and_after_active(self):
+        text = "s:\n  - active: false\n    prompt: a\n    negative: b\n"
+        document = load_prompt_document(text)
+
+        rendered = render_prompt_document(text, _with_entries(document, replace(document.sets[0].entries[0], scene=_text("A castle."))))
+
+        assert rendered == "s:\n  - active: false\n    scene: A castle.\n    prompt: a\n    negative: b\n"
+
+    def test_adding_a_scene_keeps_a_trailing_comment_last(self):
+        text = "s:\n  - prompt: a\n    negative: b\n    # note\n"
+        document = load_prompt_document(text)
+
+        rendered = render_prompt_document(text, _with_entries(document, replace(document.sets[0].entries[0], scene=_text("A castle."))))
+
+        assert rendered == "s:\n  - scene: A castle.\n    prompt: a\n    negative: b\n    # note\n"
+
+    def test_removing_a_scene_deletes_the_key(self):
+        document = load_prompt_document(SCENE_SAMPLE)
+        first, second = document.sets[0].entries
+
+        rendered = render_prompt_document(SCENE_SAMPLE, _with_entries(document, replace(first, scene=None), second))
+
+        assert "scene:" not in rendered
+        assert "negative: blurry" in rendered
+        assert load_prompt_document(rendered).sets[0].entries[0].scene is None
+
+    def test_new_entry_with_a_scene_writes_scene_before_prompt(self):
+        text = "s:\n  - prompt: a\n"
+        document = load_prompt_document(text)
+        new = DocumentEntry(id="new-1", prompt=_text("fresh"), scene=_text("A castle."))
+
+        rendered = render_prompt_document(text, _with_entries(document, *document.sets[0].entries, new))
+
+        assert rendered.endswith("  - scene: A castle.\n    prompt: fresh\n")
+
+    def test_fields_scene_round_trips_through_both_loaders(self):
+        text = "s:\n  - prompt: a\n"
+        document = load_prompt_document(text)
+        scene = PromptValue(kind="fields", fields=(("Place", "a harbour"), ("Look", "noir")))
+
+        rendered = render_prompt_document(text, _with_entries(document, replace(document.sets[0].entries[0], scene=scene)))
+
+        assert load_prompt_document(rendered).sets[0].entries[0].scene == scene
+        assert inspect_prompts_text(rendered, source_name="t").options[0].scene == "Place: a harbour. Look: noir"
+
+    def test_existing_scene_in_an_unusual_position_keeps_its_place_when_edited_or_removed(self):
+        text = "# top\ns:\n  - negative: n  # nn\n    scene: old  # keep\n    prompt: p\n    active: true\n\n  - prompt: q\n"
+        document = load_prompt_document(text)
+        first, second = document.sets[0].entries
+
+        edited = render_prompt_document(text, _with_entries(document, replace(first, scene=_text("new")), second))
+        removed = render_prompt_document(text, _with_entries(document, replace(first, scene=None), second))
+
+        assert edited == text.replace("scene: old", "scene: new")
+        assert removed == "# top\ns:\n  - negative: n  # nn\n    prompt: p\n    active: true\n\n  - prompt: q\n"

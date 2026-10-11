@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { enhancedOverrideActive } from './promptEnhance';
 import { draft, offeredSizes, settingDefaultsFor, videoTimingFor } from './draft.svelte';
 import type { WorkspaceContext, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
@@ -118,7 +119,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         txt2vid: {
           mode: 'video',
           model_kind: 'video',
-          visible_controls: ['workflow', 'model', 'prompt_inline', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
+          visible_controls: ['workflow', 'model', 'prompt_inline', 'prompt_scene', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
           supports_reference_image: false,
           requires_reference_image: false,
           clear_fields: ['negative_prompt', 'guidance', 'image_path', 'image_strength', 'quantize'],
@@ -126,7 +127,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         img2vid: {
           mode: 'video',
           model_kind: 'video',
-          visible_controls: ['workflow', 'model', 'prompt_inline', 'reference_image', 'reference_image_path', 'reference_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
+          visible_controls: ['workflow', 'model', 'prompt_inline', 'prompt_scene', 'reference_image', 'reference_image_path', 'reference_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
           supports_reference_image: true,
           requires_reference_image: true,
           clear_fields: ['negative_prompt', 'guidance', 'quantize'],
@@ -637,6 +638,56 @@ describe('draft store – prompt enhancer fields', () => {
     expect(draft.state.prompt).toBe('reused prompt');
     expect(draft.state.enhancedPrompt).toBe('');
     expect(draft.state.enhancedFrom).toBeNull();
+  });
+
+  describe('reusing a video scene and prompt', () => {
+    beforeEach(() => draft.update('workflow', 'txt2vid'));
+
+    it('fills the scene and the prompt', () => {
+      draft.loadFromUrl({ scene: 'A castle at dusk.', prompt: 'A knight rides in.' }, makeContext());
+      expect(draft.state).toMatchObject({ scene: 'A castle at dusk.', prompt: 'A knight rides in.', enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
+    });
+
+    it('fills a scene-only asset and empties the prompt box', () => {
+      draft.update('prompt', 'left over');
+      draft.loadFromUrl({ scene: 'A castle at dusk.' }, makeContext());
+      expect(draft.state).toMatchObject({ scene: 'A castle at dusk.', prompt: '' });
+    });
+
+    it('fills both tabs and keeps the enhanced pair current for the reused inputs', () => {
+      draft.loadFromUrl({ scene: 'A castle.', prompt: 'a knight', enhanced_scene: 'A castle at dusk.', enhanced_prompt: 'A knight rides in.' }, makeContext());
+      expect(draft.state).toMatchObject({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.' });
+      expect(draft.state.enhancedFrom).toEqual({ scene: 'A castle.', prompt: 'a knight', mode: 'video' });
+    });
+
+    it('clears an earlier Enhanced pair when the reused text has none', () => {
+      draft.patch({ enhancedScene: 'Old.', enhancedPrompt: 'Old.', enhancedFrom: { scene: 'x', prompt: 'y', mode: 'video' } });
+      draft.loadFromUrl({ scene: 'A castle.', prompt: 'a knight' }, makeContext());
+      expect(draft.state).toMatchObject({ enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
+    });
+
+    it('leaves the scene alone when an image is reused', () => {
+      draft.patch({ workflow: 'txt2img', scene: 'kept' });
+      draft.loadFromUrl({ prompt: 'a fox' }, makeContext());
+      expect(draft.state).toMatchObject({ scene: 'kept', prompt: 'a fox' });
+    });
+
+    it('does not leave an Enhanced scene behind when an image is reused', () => {
+      draft.patch({ enhancedScene: 'A castle at dusk.', enhancedPrompt: 'Old.', enhancedFrom: { scene: 'A castle.', prompt: 'x', mode: 'video' } });
+      draft.patch({ workflow: 'txt2img' });
+      draft.loadFromUrl({ prompt: 'a fox' }, makeContext());
+      draft.update('workflow', 'txt2vid');
+      expect(draft.state).toMatchObject({ prompt: 'a fox', enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
+      expect(enhancedOverrideActive(draft.state)).toBe(false);
+    });
+
+    it('survives a reset of the selections', () => {
+      const ctx = makeContext();
+      draft.hydrateFromContext(ctx, null);
+      draft.patch({ scene: 'A castle.', enhancedScene: 'A castle at dusk.' });
+      draft.resetSelections(ctx);
+      expect(draft.state).toMatchObject({ scene: 'A castle.', enhancedScene: 'A castle at dusk.' });
+    });
   });
 
   it('keeps the Enhanced box when the URL has no prompt', () => {

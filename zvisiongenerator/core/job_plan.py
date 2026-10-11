@@ -33,6 +33,9 @@ class IterationPlan:
         enhance: Enhancement settings that applied, or ``None`` when not requested.
         enhanced_prompt: The rewrite, set only when ``enhance_status`` is ``enhanced``.
         enhance_status: Outcome of the rewrite.
+        scene: The video scene template as written (entry scene, else the job scene); ``None`` for images and unscened videos.
+        resolved_scene: The scene with ``{a|b}`` choices expanded.
+        enhanced_scene: The rewritten scene of a video, set only when ``enhance_status`` is ``enhanced``.
     """
 
     run_index: int
@@ -44,11 +47,16 @@ class IterationPlan:
     enhance: EnhanceSettings | None
     enhanced_prompt: str | None = None
     enhance_status: EnhanceStatus = EnhanceStatus.OFF
+    scene: str | None = None
+    resolved_scene: str | None = None
+    enhanced_scene: str | None = None
 
     def __post_init__(self) -> None:
         """Reject a status that contradicts the stored rewrite or settings."""
         if (self.enhanced_prompt is not None) != (self.enhance_status is EnhanceStatus.ENHANCED):
             raise ValueError(f"IterationPlan: enhanced_prompt must be set exactly when enhance_status is 'enhanced' (got status '{self.enhance_status}').")
+        if self.enhanced_scene is not None and self.enhance_status is not EnhanceStatus.ENHANCED:
+            raise ValueError(f"IterationPlan: enhanced_scene must be set only when enhance_status is 'enhanced' (got status '{self.enhance_status}').")
         if self.enhance is None and self.enhance_status is not EnhanceStatus.OFF:
             raise ValueError(f"IterationPlan: enhance_status must be 'off' when no enhancement was requested (got '{self.enhance_status}').")
 

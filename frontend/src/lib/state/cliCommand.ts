@@ -98,15 +98,18 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
   if (!isVideo) flag('--quantize', text(settings, 'quantize'));
 
   // Prompt: inline text, a structured JSON caption (sent only in caption mode, even when blank), or a prompts file.
+  // A video's scene may stand in for a blank inline prompt; in prompt-file mode it is the default scene for entries without one.
   const isJson = settings.json_prompt !== undefined;
   const isFile = !isJson && first(settings, 'prompt_source') === 'file';
+  const scene = isVideo && !isJson ? text(settings, 'scene') : undefined;
   const [promptFlag, promptValue] = isJson ? ['--json-prompt', text(settings, 'json_prompt')]
     : isFile ? ['--prompts-file', text(settings, 'prompts_file')]
     : ['--prompt', text(settings, 'prompt')];
-  if (promptValue === undefined) {
-    throw new Error(isJson ? 'Write a JSON caption first.' : isFile ? 'Choose a prompts file first.' : 'Write a prompt first.');
+  if (promptValue === undefined && (isFile || scene === undefined)) {
+    throw new Error(isJson ? 'Write a JSON caption first.' : isFile ? 'Choose a prompts file first.' : isVideo ? 'Write a scene or a prompt first.' : 'Write a prompt first.');
   }
-  args.push(promptFlag, promptValue);
+  if (promptValue !== undefined) args.push(promptFlag, promptValue);
+  flag('--scene', scene);
   if (isFile && values(settings, 'prompt_option_id').length < (options.promptFileOptionCount ?? Infinity)) caveats.push('prompt_options');
   if (!isJson && !isFile && text(settings, 'negative_prompt') !== undefined) caveats.push('negative_prompt');
 

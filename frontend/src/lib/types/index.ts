@@ -29,6 +29,8 @@ export interface GalleryAsset {
   created_at: string;
   workflow: Workflow;
   prompt: string;
+  /** A video's recorded scene (who and where, look, camera); null for images and videos made without one. */
+  scene?: string | null;
   model: string;
   width?: number;
   height?: number;
@@ -215,16 +217,22 @@ export interface PromptEnhancerContract {
   error: string | null;
 }
 
-/** What an Enhanced prompt was produced from; null for hand-typed text (never out of date). */
+/** What an Enhanced prompt (or Enhanced scene and prompt) was produced from; null for hand-typed text (never out of date). */
 export interface EnhancedSource {
   prompt: string;
+  /** The scene it was produced beside; missing in drafts saved before scenes existed. */
+  scene?: string;
   mode: WorkflowMode;
 }
 
+/**
+ * One line of the enhance stream. Video frames carry the server's split `scene` and `prompt`;
+ * image frames carry only `prompt` on `done` (and neither part on `text`).
+ */
 export type EnhanceFrame =
   | { type: 'status'; phase: 'downloading' | 'loading' | 'generating' | 'generating_cpu' }
-  | { type: 'text'; text: string }
-  | { type: 'done'; prompt: string; clamped: boolean }
+  | { type: 'text'; text: string; scene?: string; prompt?: string }
+  | { type: 'done'; prompt: string; scene?: string; clamped: boolean; warning?: string }
   | { type: 'error'; detail: string };
 
 export interface PromptFileContract {
@@ -246,6 +254,7 @@ export interface PromptFileContract {
     loaded: string;
     ignored_negative_video: string;
     ignored_negative_unsupported: string;
+    ignored_scene_image?: string;
   };
 }
 
@@ -266,6 +275,8 @@ export type EntryEnhance = null | true | Partial<Record<EnhanceAxisKey | 'note',
 
 export interface DocumentEntry {
   id: string;
+  /** The entry's `scene:` (video only), or null when it has none. */
+  scene: PromptValue | null;
   prompt: PromptValue;
   negative: PromptValue | null;
   active: boolean;
@@ -319,7 +330,7 @@ export interface DocumentProblem {
 }
 
 export interface PromptDocumentPreview {
-  entries: Record<string, { prompt: string; negative: string | null }>;
+  entries: Record<string, { prompt: string; negative: string | null; scene?: string | null }>;
   problems: DocumentProblem[];
   snippet_uses: Record<string, number>;
   rolled: { entry_id: string; prompt: string } | null;
@@ -332,6 +343,10 @@ export interface PromptFileOption {
   label: string;
   prompt_preview: string;
   negative_preview: string | null;
+  /** The entry's own scene, or null when it has none. */
+  scene_preview?: string | null;
+  /** Whether the entry has its own `scene:`. */
+  has_scene?: boolean;
   /** Prompt-file `enhance:` settings as an `--enhance` spec, or null. */
   enhance?: string | null;
 }
@@ -483,6 +498,8 @@ export interface DraftState {
   workflow: Workflow;
   promptSource: PromptSource;
   prompt: string;
+  /** Video scene (who and where, look, camera); the default scene in prompt-file mode. Image workflows ignore it. */
+  scene: string;
   jsonPromptEnabled: boolean;
   jsonPrompt: string;
   firstSigma: number | null;
@@ -537,6 +554,8 @@ export interface DraftState {
   videoUpscaleReview: boolean;
   /** Text from the Enhance button (or typed); when non-blank it is the inline prompt that gets generated. */
   enhancedPrompt: string;
+  /** The Enhanced scene of a video; used together with the Enhanced prompt. */
+  enhancedScene: string;
   enhancedFrom: EnhancedSource | null;
   /** Last-used enhancement options; null until the user picks any (backend defaults apply). */
   enhanceSettings: EnhanceSettings | null;

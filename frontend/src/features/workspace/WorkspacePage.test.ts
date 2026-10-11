@@ -10,7 +10,7 @@ import { jobStore } from '$lib/state/job.svelte';
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { router } from '$lib/state/router.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
-import type { ImageModelDefaults, JobContext, JobSnapshot, VideoModelDefaults, WorkspaceContext, GalleryAsset, GalleryPage } from '$lib/types';
+import type { EnhanceFrame, ImageModelDefaults, JobContext, JobSnapshot, VideoModelDefaults, WorkspaceContext, GalleryAsset, GalleryPage } from '$lib/types';
 
 const workspaceApiMocks = vi.hoisted(() => ({
   getWorkspaceContext: vi.fn<() => Promise<WorkspaceContext>>(),
@@ -46,13 +46,6 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
   };
 });
 
-// Every test starts with an empty server-side queue.
-beforeEach(() => {
-  workspaceApiMocks.listJobs.mockReset();
-  workspaceApiMocks.listJobs.mockResolvedValue({ active_job: null, queued_jobs: [] });
-  workspaceApiMocks.clearQueue.mockClear();
-  workspaceApiMocks.cancelJob.mockClear();
-});
 
 const galleryApiMocks = vi.hoisted(() => ({
   deleteAsset: vi.fn<(assetId: string) => Promise<void>>(),
@@ -80,6 +73,39 @@ vi.mock('$lib/api/promptFiles', () => ({
 
 import WorkspacePage from './WorkspacePage.svelte';
 import ControlsSidebar from './ControlsSidebar.svelte';
+
+let target: HTMLDivElement;
+let app: Record<string, unknown> | null = null;
+
+// Every test starts from empty stores, reset API mocks, an empty server-side queue and a fresh host element.
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+  draft.reset();
+  historyStore.seedHistory([]);
+  jobStore.clearJob();
+  toasts.splice(0, toasts.length);
+  for (const mock of [
+    workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.getJobSnapshot,
+    workspaceApiMocks.getHistory, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.listJobs, promptFileApiMocks.openPathPicker,
+    promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, enhanceApiMocks.enhancePrompt,
+    galleryApiMocks.deleteAsset,
+  ]) mock.mockReset();
+  workspaceApiMocks.clearQueue.mockClear();
+  workspaceApiMocks.cancelJob.mockClear();
+  workspaceApiMocks.listJobs.mockResolvedValue({ active_job: null, queued_jobs: [] });
+  workspaceApiMocks.parseUrlPrefill.mockReturnValue({});
+  workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage());
+  target = document.createElement('div');
+  document.body.appendChild(target);
+});
+
+afterEach(async () => {
+  if (app) { await unmount(app); app = null; }
+  target.remove();
+  document.body.innerHTML = '';
+  vi.restoreAllMocks();
+});
 
 function makeImageDefaults(overrides: Partial<ImageModelDefaults> = {}): ImageModelDefaults {
   return {
@@ -246,7 +272,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
           mode: 'video',
           model_kind: 'video',
           visible_controls: [
-            'workflow', 'model', 'loras', 'prompt_source', 'prompt_inline',
+            'workflow', 'model', 'loras', 'prompt_source', 'prompt_inline', 'prompt_scene',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
             'video_upscale_enabled', 'video_upscale_factor', 'video_upscale_review'
@@ -259,7 +285,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
           mode: 'video',
           model_kind: 'video',
           visible_controls: [
-            'workflow', 'model', 'loras', 'prompt_source', 'prompt_inline',
+            'workflow', 'model', 'loras', 'prompt_source', 'prompt_inline', 'prompt_scene',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'reference_image', 'reference_image_path', 'reference_image_clear',
             'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
@@ -296,6 +322,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
         loaded: 'Prompt file loaded.',
         ignored_negative_video: 'Negative prompt entries are ignored for video workflows.',
         ignored_negative_unsupported: 'The current image model ignores negative prompt entries.',
+        ignored_scene_image: 'Scene entries are ignored for image workflows.',
       },
     },
     ...overrides,
@@ -351,27 +378,38 @@ function expectRenderedLabelsToResolveControls(container: ParentNode): void {
 }
 
 
-describe('WorkspacePage', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
+/** Mount the Workspace page on the host element and let it settle. */
+async function mountWorkspace(context: WorkspaceContext): Promise<void> {
+  workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
+  app = flushSync(() => mount(WorkspacePage, { target }));
+  await settle();
+}
 
+const field = (id: string) => document.querySelector(`#${id}`) as HTMLTextAreaElement;
+
+function type(id: string, value: string): void {
+  const el = field(id);
+  el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+/** Open the Enhance popover and return its Enhance button. */
+async function openEnhanceRun(): Promise<HTMLButtonElement> {
+  (document.querySelector('#ws-enhance-toggle') as HTMLButtonElement).click();
+  await settle();
+  return document.querySelector('#ws-enhance-run') as HTMLButtonElement;
+}
+
+/** Replace the clipboard with a spy and return it. */
+function mockClipboard(): ReturnType<typeof vi.fn<(text: string) => Promise<void>>> {
+  const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
+  Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+  return writeText;
+}
+
+
+describe('WorkspacePage', () => {
   beforeEach(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-    draft.reset();
-    historyStore.seedHistory([]);
-    jobStore.clearJob();
-    workspaceApiMocks.getWorkspaceContext.mockReset();
-    workspaceApiMocks.getWorkspaceCoreContext.mockReset();
-    workspaceApiMocks.submitGenerate.mockReset();
-    workspaceApiMocks.getJobSnapshot.mockReset();
-    workspaceApiMocks.getHistory.mockReset();
-    workspaceApiMocks.parseUrlPrefill.mockReset();
-    promptFileApiMocks.openPathPicker.mockReset();
-    promptFileApiMocks.inspectPromptFile.mockReset();
-    promptFileApiMocks.writePromptFile.mockReset();
-    // Default: no URL prefill params (plain workspace navigation)
-    workspaceApiMocks.parseUrlPrefill.mockReturnValue({});
     workspaceApiMocks.submitGenerate.mockResolvedValue({
       job_id: 'job-123',
       workflow: 'txt2img',
@@ -380,7 +418,6 @@ describe('WorkspacePage', () => {
       runs: 1,
       created_at: '2026-04-23T10:00:00Z',
     });
-    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage());
     promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'cancelled', path: null, message: null });
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
@@ -392,24 +429,7 @@ describe('WorkspacePage', () => {
     });
     window.location.hash = '#/workspace';
     window.history.replaceState({}, '', '/');
-    target = document.createElement('div');
-    document.body.appendChild(target);
   });
-
-  afterEach(async () => {
-    if (app) {
-      await unmount(app);
-      app = null;
-    }
-    target.remove();
-    document.body.innerHTML = '';
-  });
-
-  async function mountWorkspace(context: WorkspaceContext): Promise<void> {
-    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
-    app = flushSync(() => mount(WorkspacePage, { target }));
-    await settle();
-  }
 
   it('renders a loading-safe shell before workspace authority resolves', async () => {
     draft.update('model', 'stale-model');
@@ -735,8 +755,7 @@ describe('WorkspacePage', () => {
     it('disables manual enhancement while jobs are active', async () => {
       draft.update('prompt', 'a fox');
       await mountWorkspace(withEnhancer(queueContext([])));
-      (target.querySelector('#ws-enhance-toggle') as HTMLButtonElement).click();
-      await settle();
+      await openEnhanceRun();
       expect((document.querySelector('#ws-enhance-run') as HTMLButtonElement).disabled).toBe(true);
       expect(document.querySelector('#ws-enhance-panel')?.textContent).toContain('Available when all jobs have finished.');
       pressKey('e', { ctrlKey: true }, target.querySelector('#ws-prompt') as HTMLTextAreaElement);
@@ -1160,8 +1179,7 @@ describe('WorkspacePage', () => {
   });
 
   it('copies the CLI command for what Generate would submit, without submitting', async () => {
-    const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const writeText = mockClipboard();
     draft.update('prompt', 'a fox');
     draft.update('enhancedPrompt', 'A red fox in deep snow.');
     draft.update('enhancedFrom', { prompt: 'a fox', mode: 'image' });
@@ -1180,8 +1198,7 @@ describe('WorkspacePage', () => {
   });
 
   it('copies nothing while the prompt is empty', async () => {
-    const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const writeText = mockClipboard();
     await mountWorkspace(makeContext());
 
     (target.querySelector('#ws-copy-cli') as HTMLButtonElement).click();
@@ -1195,10 +1212,297 @@ describe('WorkspacePage', () => {
     draft.update('enhanceAuto', true);
     draft.update('enhanceSettings', { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' });
     await mountWorkspace(withEnhancer(makeContext()));
-    (target.querySelector('#ws-enhance-toggle') as HTMLButtonElement).click();
-    await settle();
+    await openEnhanceRun();
     // The enhancer popover is moved to <body>.
     expect(document.querySelector('#ws-enhance-panel [role="alert"]')).not.toBeNull();
+  });
+
+  describe('scene and prompt pair (video)', () => {
+    function withVideoEnhancer(context: WorkspaceContext): WorkspaceContext {
+      withEnhancer(context);
+      for (const workflow of ['txt2vid', 'img2vid'] as const) {
+        context.workflow_contract.definitions[workflow].visible_controls.push('prompt_enhance', 'prompt_enhance_auto');
+      }
+      return context;
+    }
+
+    const isShown = (id: string) => target.querySelector(`#${id}`)?.closest('[hidden]') == null && !(target.querySelector(`#${id}`) as HTMLElement).hidden;
+
+    it('shows the Scene box in the video workflows and not in the image workflows', async () => {
+      draft.update('workflow', 'txt2vid');
+      await mountWorkspace(makeContext());
+      expect(field('ws-scene')).not.toBeNull();
+      expect(field('ws-scene').getAttribute('name')).toBe('scene');
+      expect(target.querySelector('label[for="ws-scene"]')?.textContent?.trim()).toBe('Scene');
+
+      draft.update('workflow', 'img2vid');
+      await settle();
+      expect(field('ws-scene')).not.toBeNull();
+
+      for (const workflow of ['txt2img', 'img2img'] as const) {
+        draft.update('workflow', workflow);
+        await settle();
+        expect(target.querySelector('#ws-scene')).toBeNull();
+        expect(new FormData(target.querySelector('form')!).has('scene')).toBe(false);
+      }
+    });
+
+    it('switches Scene and Prompt together with the Your text and Enhanced tabs', async () => {
+      draft.update('workflow', 'txt2vid');
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+
+      expect(target.querySelector('[role="tablist"]')?.getAttribute('aria-label')).toBe('Text version');
+      expect(Array.from(target.querySelectorAll('[role="tab"]')).map((tab) => tab.id)).toEqual(['ws-tab-prompt', 'ws-tab-enhanced']);
+      expect(isShown('ws-scene') && isShown('ws-prompt')).toBe(true);
+      expect(isShown('ws-enhanced-scene') || isShown('ws-enhanced-prompt')).toBe(false);
+
+      (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
+      await settle();
+      expect(isShown('ws-enhanced-scene') && isShown('ws-enhanced-prompt')).toBe(true);
+      expect(isShown('ws-scene') || isShown('ws-prompt')).toBe(false);
+      expect(target.querySelector('#ws-tab-enhanced')?.getAttribute('aria-selected')).toBe('true');
+
+      // Left and Right switch back, as for the single prompt box.
+      pressKey('ArrowLeft', {}, target.querySelector('#ws-tab-enhanced')!);
+      await settle();
+      expect(isShown('ws-scene') && isShown('ws-prompt')).toBe(true);
+    });
+
+    it('lets a scene alone generate, and refuses with a message on the Action box when both boxes are empty', async () => {
+      draft.update('workflow', 'txt2vid');
+      await mountWorkspace(makeContext());
+
+      target.querySelector('form')!.requestSubmit();
+      await settle();
+      expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
+      expect(field('ws-prompt').validationMessage).not.toBe('');
+
+      type('ws-scene', 'A castle at dusk.');
+      await settle();
+      const submitted = await submitForm();
+      expect(submitted.get('scene')).toBe('A castle at dusk.');
+      expect(submitted.get('prompt')).toBe('');
+    });
+
+    it('enables Enhance with a scene alone and disables it with both boxes empty', async () => {
+      draft.update('workflow', 'txt2vid');
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+      expect((await openEnhanceRun()).disabled).toBe(true);
+
+      type('ws-scene', 'A castle at dusk.');
+      await settle();
+      expect((document.querySelector('#ws-enhance-run') as HTMLButtonElement).disabled).toBe(false);
+
+      type('ws-scene', '');
+      type('ws-prompt', 'a knight rides in');
+      await settle();
+      expect((document.querySelector('#ws-enhance-run') as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('explains the disabled Enhance button only while both boxes are empty', async () => {
+      draft.update('workflow', 'txt2vid');
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+      await openEnhanceRun();
+      expect(document.querySelector('#ws-enhance-panel')?.textContent).toContain('Write a scene or a prompt first.');
+
+      type('ws-scene', 'A castle at dusk.');
+      await settle();
+      expect(document.querySelector('#ws-enhance-panel')?.textContent).not.toContain('Write a scene or a prompt first.');
+    });
+
+    it('lets a video prompt without a scene be enhanced with the default settings, because the split is the change', async () => {
+      draft.update('workflow', 'txt2vid');
+      draft.patch({ prompt: 'a knight rides in', enhanceSettings: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } });
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+      expect((await openEnhanceRun()).disabled).toBe(false);
+
+      // With a scene of its own the same settings change nothing.
+      type('ws-scene', 'A castle at dusk.');
+      await settle();
+      expect((document.querySelector('#ws-enhance-run') as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it('sends the scene to the enhancer, renders the streamed parts as they are, and keeps the finished pair', async () => {
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+        const onFrame = rest[0] as (frame: EnhanceFrame) => void;
+        onFrame({ type: 'text', text: 'SCENE: A castle.\nACTION: A kni', scene: 'A castle.', prompt: 'A kni' });
+        await gate;
+        onFrame({ type: 'done', scene: 'A castle at dusk.', prompt: 'A knight rides in.', clamped: false, warning: 'The enhancer did not follow the format.' });
+      });
+      draft.update('workflow', 'txt2vid');
+      draft.patch({ scene: 'A castle.', prompt: 'a knight' });
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+
+      const run = openEnhanceRun();
+      (await run).click();
+      await settle();
+      const body = enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0] as { scene?: string; prompt: string; mode: string };
+      expect(body).toMatchObject({ scene: 'A castle.', prompt: 'a knight', mode: 'video' });
+      // The tab comes forward and shows the server's split without parsing it again.
+      expect(isShown('ws-enhanced-scene')).toBe(true);
+      expect(field('ws-enhanced-scene').value).toBe('A castle.');
+      expect(field('ws-enhanced-prompt').value).toBe('A kni');
+      expect(field('ws-enhanced-scene').readOnly && field('ws-enhanced-prompt').readOnly).toBe(true);
+
+      release();
+      await settle();
+      expect(draft.state).toMatchObject({ enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.' });
+      expect(draft.state.enhancedFrom).toEqual({ scene: 'A castle.', prompt: 'a knight', mode: 'video' });
+      expect(field('ws-enhanced-scene').value).toBe('A castle at dusk.');
+      expect(field('ws-enhanced-prompt').value).toBe('A knight rides in.');
+      expect(target.textContent).toContain('The enhancer did not follow the format.');
+      expect(target.textContent).not.toContain('Out of date');
+    });
+
+    it('sends no scene when an image prompt is enhanced', async () => {
+      enhanceApiMocks.enhancePrompt.mockResolvedValue();
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+      pressKey('e', { ctrlKey: true }, field('ws-prompt'));
+      await settle();
+      expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).not.toHaveProperty('scene');
+    });
+
+    it('submits the Enhanced pair and records the user text beside it', async () => {
+      draft.update('workflow', 'txt2vid');
+      draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+
+      const submitted = await submitForm();
+      expect(submitted.get('scene')).toBe('A castle at dusk.');
+      expect(submitted.get('prompt')).toBe('A knight rides in.');
+      expect(submitted.get('scene_input')).toBe('A castle.');
+      expect(submitted.get('prompt_input')).toBe('a knight');
+    });
+
+    it('runs with no scene when the Enhanced pair has none, still recording the user scene', async () => {
+      draft.update('workflow', 'txt2vid');
+      draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedPrompt: 'A knight rides in.', enhancedFrom: null });
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+
+      const submitted = await submitForm();
+      expect(submitted.has('scene')).toBe(false);
+      expect(submitted.get('prompt')).toBe('A knight rides in.');
+      expect(submitted.get('scene_input')).toBe('A castle.');
+    });
+
+    it('submits plain fields without the user-text records when nothing is enhanced, and leaves an empty scene out', async () => {
+      draft.update('workflow', 'txt2vid');
+      draft.update('prompt', 'a knight rides in');
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+
+      const submitted = await submitForm();
+      expect(submitted.get('prompt')).toBe('a knight rides in');
+      expect(submitted.has('scene')).toBe(false);
+      expect(submitted.has('scene_input')).toBe(false);
+      expect(submitted.has('prompt_input')).toBe(false);
+    });
+
+    it('fills both tabs from the Reuse params without marking them out of date', async () => {
+      workspaceApiMocks.parseUrlPrefill.mockReturnValue({
+        workflow: 'txt2vid', scene: 'A castle.', prompt: 'a knight', enhanced_scene: 'A castle at dusk.', enhanced_prompt: 'A knight rides in.',
+      });
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+
+      expect(field('ws-scene').value).toBe('A castle.');
+      expect(field('ws-prompt').value).toBe('a knight');
+      expect(field('ws-enhanced-scene').value).toBe('A castle at dusk.');
+      expect(field('ws-enhanced-prompt').value).toBe('A knight rides in.');
+      expect(target.textContent).not.toContain('Out of date');
+    });
+
+    it('copies a scene alone as --scene without --prompt', async () => {
+      const writeText = mockClipboard();
+      draft.update('workflow', 'txt2vid');
+      draft.patch({ scene: 'A castle.', prompt: '' });
+      await mountWorkspace(makeContext());
+
+      (target.querySelector('#ws-copy-cli') as HTMLButtonElement).click();
+      await settle();
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText.mock.calls[0]?.[0]).toContain("--scene 'A castle.'");
+      expect(writeText.mock.calls[0]?.[0]).not.toContain('--prompt');
+    });
+
+    it('focuses the Prompt box, not the Scene box, with Alt+1', async () => {
+      draft.update('workflow', 'txt2vid');
+      await mountWorkspace(makeContext());
+      pressKey('1', { altKey: true, code: 'Digit1' });
+      await settle();
+      expect(document.activeElement).toBe(field('ws-prompt'));
+    });
+
+    it('does not warn that auto-enhance changes nothing for a video with a blank scene, but does once a scene is set', async () => {
+      draft.update('workflow', 'txt2vid');
+      draft.patch({ prompt: 'a knight', enhanceAuto: true, enhanceSettings: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } });
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+      await openEnhanceRun();
+      expect(document.querySelector('#ws-enhance-panel [role="alert"]')).toBeNull();
+
+      type('ws-scene', 'A castle.');
+      await settle();
+      expect(document.querySelector('#ws-enhance-panel [role="alert"]')).not.toBeNull();
+    });
+
+    describe('prompt-file mode', () => {
+      const fileOptions = [
+        { id: 'rain:0', set_name: 'rain', source_index: 0, label: 'rain #1', prompt_preview: 'She opens an umbrella', negative_preview: null, scene_preview: 'A rainy street at night.', has_scene: true },
+        { id: 'rain:1', set_name: 'rain', source_index: 1, label: 'rain #2', prompt_preview: 'She runs for the tram', negative_preview: null, scene_preview: null, has_scene: false },
+      ];
+
+      async function loadFile(): Promise<void> {
+        promptFileApiMocks.inspectPromptFile.mockResolvedValue({ path: '/server/rain.yaml', options: fileOptions });
+        draft.patch({ promptSource: 'file', promptFilePath: '/server/rain.yaml', promptFileOptionIds: ['rain:0', 'rain:1'] });
+        await settle();
+      }
+
+      it('shows an editable Default scene that is submitted with the file', async () => {
+        draft.update('workflow', 'txt2vid');
+        await mountWorkspace(makeContext());
+        await loadFile();
+
+        expect(target.querySelector('#ws-prompt')).toBeNull();
+        expect(target.querySelector('label[for="ws-scene"]')?.textContent?.trim()).toBe('Default scene');
+        type('ws-scene', 'A city in the rain.');
+        await settle();
+        expect(draft.state.scene).toBe('A city in the rain.');
+
+        const submitted = await submitForm();
+        expect(submitted.get('prompt_source')).toBe('file');
+        expect(submitted.get('scene')).toBe('A city in the rain.');
+        expect(submitted.has('prompt')).toBe(false);
+      });
+
+      it('keeps the Default scene text when switching between inline and prompt file', async () => {
+        draft.update('workflow', 'txt2vid');
+        draft.update('scene', 'A city in the rain.');
+        await mountWorkspace(makeContext());
+        expect(field('ws-scene').value).toBe('A city in the rain.');
+        draft.update('promptSource', 'file');
+        await settle();
+        expect(field('ws-scene').value).toBe('A city in the rain.');
+      });
+
+      it('marks the entries that bring their own scene', async () => {
+        draft.update('workflow', 'txt2vid');
+        await mountWorkspace(makeContext());
+        await loadFile();
+
+        const badges = Array.from(target.querySelectorAll('[data-testid="scene-badge"]'));
+        expect(badges).toHaveLength(1);
+        expect(badges[0]?.getAttribute('title')).toBe('A rainy street at night.');
+      });
+
+      it('shows no Default scene and no badge for image workflows', async () => {
+        await mountWorkspace(makeContext());
+        await loadFile();
+
+        expect(target.querySelector('#ws-scene')).toBeNull();
+        expect(target.querySelector('[data-testid="scene-badge"]')).toBeNull();
+      });
+    });
   });
 
   it('hides the enhancer when the backend does not advertise it', async () => {
@@ -2333,8 +2637,7 @@ describe('WorkspacePage', () => {
   });
 
   it('copies a prompts-file command from the loaded file, reporting only a partial prompt choice', async () => {
-    const writeText = vi.fn<(text: string) => Promise<void>>(async () => undefined);
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const writeText = mockClipboard();
     promptFileApiMocks.inspectPromptFile.mockResolvedValue({
       path: '/server/prompts.yaml',
       options: [0, 1].map((index) => ({
@@ -2609,21 +2912,7 @@ function makeGalleryPage(assets: GalleryAsset[] = []): GalleryPage {
 }
 
 describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
-
   beforeEach(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-    draft.reset();
-    historyStore.seedHistory([]);
-    jobStore.clearJob();
-    workspaceApiMocks.getWorkspaceContext.mockReset();
-    workspaceApiMocks.getWorkspaceCoreContext.mockReset();
-    workspaceApiMocks.submitGenerate.mockReset();
-    workspaceApiMocks.getHistory.mockReset();
-    workspaceApiMocks.parseUrlPrefill.mockReturnValue({});
-    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage());
     workspaceApiMocks.submitGenerate.mockResolvedValue({
       job_id: 'job-promo',
       workflow: 'txt2img',
@@ -2632,21 +2921,7 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
       runs: 1,
       created_at: '2026-04-30T10:00:00Z',
     });
-    target = document.createElement('div');
-    document.body.appendChild(target);
   });
-
-  afterEach(async () => {
-    if (app) { await unmount(app); app = null; }
-    target.remove();
-    document.body.innerHTML = '';
-  });
-
-  async function mountWorkspace(context: WorkspaceContext): Promise<void> {
-    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
-    app = flushSync(() => mount(WorkspacePage, { target }));
-    await settle();
-  }
 
   it('renders the full authoritative completed output grid and hides the JobCard', async () => {
     const context = makeContext();
@@ -2760,35 +3035,6 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
 });
 
 describe('WorkspacePage history viewer (REC-UX-002)', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
-
-  beforeEach(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-    draft.reset();
-    historyStore.seedHistory([]);
-    jobStore.clearJob();
-    workspaceApiMocks.getWorkspaceContext.mockReset();
-    workspaceApiMocks.getWorkspaceCoreContext.mockReset();
-    workspaceApiMocks.getHistory.mockReset();
-    workspaceApiMocks.parseUrlPrefill.mockReturnValue({});
-    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage());
-    target = document.createElement('div');
-    document.body.appendChild(target);
-  });
-
-  afterEach(async () => {
-    if (app) { await unmount(app); app = null; }
-    target.remove();
-    document.body.innerHTML = '';
-  });
-
-  async function mountWorkspace(context: WorkspaceContext): Promise<void> {
-    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
-    app = flushSync(() => mount(WorkspacePage, { target }));
-    await settle();
-  }
 
   it('clicking a history row opens the workspace viewer lightbox', async () => {
     const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png' });
@@ -2807,30 +3053,6 @@ describe('WorkspacePage history viewer (REC-UX-002)', () => {
 });
 
 describe('WorkspacePage asset actions and settings', () => {
-  let target: HTMLDivElement;
-  let app: Record<string, unknown> | null = null;
-
-  beforeEach(() => {
-    localStorage.clear();
-    sessionStorage.clear();
-    draft.reset();
-    historyStore.seedHistory([]);
-    jobStore.clearJob();
-    workspaceApiMocks.getWorkspaceCoreContext.mockReset();
-    workspaceApiMocks.getHistory.mockReset();
-    workspaceApiMocks.parseUrlPrefill.mockReturnValue({});
-    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage());
-    galleryApiMocks.deleteAsset.mockReset();
-    target = document.createElement('div');
-    document.body.appendChild(target);
-  });
-
-  afterEach(async () => {
-    if (app) { await unmount(app); app = null; }
-    target.remove();
-    document.body.innerHTML = '';
-    vi.restoreAllMocks();
-  });
 
   async function mountWithHistory(assets: GalleryAsset[]): Promise<void> {
     workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage(assets));

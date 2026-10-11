@@ -3,6 +3,8 @@ import type { EnhanceContext, EnhanceFrame, EnhanceSettings, WorkflowMode } from
 
 export interface EnhanceRequest {
   prompt: string;
+  /** A video's scene; the server then answers with a scene and a prompt. */
+  scene?: string;
   mode: WorkflowMode;
   settings: Partial<EnhanceSettings>;
   max_words?: number;

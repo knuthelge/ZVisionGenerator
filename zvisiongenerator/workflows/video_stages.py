@@ -18,8 +18,7 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.ffmpeg import strip_audio
 from zvisiongenerator.utils.provenance import build_video_config_payload, embed_mp4_config
-from zvisiongenerator.utils.prompt_compose import expand_random_choices
-from zvisiongenerator.workflows.enhance_stage import apply_planned_enhancement
+from zvisiongenerator.utils.prompt_compose import compose_video_prompt, expand_random_choices
 
 
 def _upscale_kwargs(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> dict[str, object]:
@@ -55,14 +54,37 @@ def _timed_review(review: Callable[[Path], None], artifacts: VideoWorkingArtifac
 
 
 def resolve_prompt_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:
-    """Replace {a|b|c} random choice blocks in video prompt, supporting nesting; a planned ``request.resolved_prompt`` wins."""
-    artifacts.resolved_prompt = request.resolved_prompt if request.resolved_prompt is not None else expand_random_choices(request.prompt)
+    """Resolve the video's scene and prompt to the text sent to the model; planned ``request.resolved_*`` values win.
+
+    ``{a|b|c}`` choice blocks are expanded in each part, supporting nesting. ``artifacts.resolved_prompt`` is the
+    scene and prompt composed; the scene alone is recorded as ``metadata["scene"]`` when there is one.
+    """
+    prompt = request.resolved_prompt if request.resolved_prompt is not None else expand_random_choices(request.prompt)
+    scene = request.resolved_scene if request.resolved_scene is not None else expand_random_choices(request.scene or "")
+    artifacts.resolved_prompt = compose_video_prompt(scene, prompt)
+    if scene.strip():
+        artifacts.metadata["scene"] = scene
     return StageOutcome.success
 
 
 def enhance_prompt_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:
-    """Apply the video prompt rewrite planned during preflight; never fails the generation."""
-    apply_planned_enhancement(request, artifacts)
+    """Apply the video scene and action rewrite planned during preflight; never fails the generation.
+
+    The action alone is stored as ``metadata["enhanced_prompt"]`` and the scene alone as ``metadata["enhanced_scene"]``;
+    only ``artifacts.resolved_prompt`` (and the ``on_prompt_enhanced`` text) holds them composed. No LLM runs here.
+    """
+    action = request.enhanced_prompt
+    if action is None:
+        return StageOutcome.success
+    scene = request.enhanced_scene
+    composed = compose_video_prompt(scene, action)
+    artifacts.resolved_prompt = composed
+    artifacts.metadata["enhanced_prompt"] = action
+    if scene and scene.strip():
+        artifacts.metadata["enhanced_scene"] = scene
+    print(f"Enhanced prompt:\n{' '.join(composed.split())}\n")
+    if request.on_prompt_enhanced is not None:
+        request.on_prompt_enhanced(composed)
     return StageOutcome.success
 
 

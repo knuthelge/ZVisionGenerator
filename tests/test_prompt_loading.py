@@ -6,7 +6,7 @@ import textwrap
 
 import pytest
 
-from zvisiongenerator.utils.prompts import inspect_prompts_file, load_prompts_file
+from zvisiongenerator.utils.prompts import inspect_prompts_file, inspect_prompts_text, load_prompts_file, scene_by_set
 
 
 def test_load_prompts_filters_inactive(tmp_path):
@@ -171,3 +171,72 @@ def test_empty_set_name_raises(tmp_path):
     f.write_text('"":\n  - prompt: "a"\n')
     with pytest.raises(ValueError, match="Prompt set name .* is empty"):
         load_prompts_file(str(f))
+
+
+class TestScene:
+    """Entry ``scene:`` loading."""
+
+    def test_entry_scene_is_exposed_per_entry_aligned_with_prompts(self):
+        text = textwrap.dedent("""\
+            s:
+              - prompt: "a knight rides in"
+                scene: "A castle at dusk."
+              - prompt: "a dog barks"
+              - prompt: "skipped"
+                active: false
+                scene: "never loaded"
+              - prompt: "a cat sleeps"
+                scene: "A tidy room."
+        """)
+
+        inspection = inspect_prompts_text(text, source_name="t")
+
+        assert inspection.scene_by_set == {"s": ["A castle at dusk.", None, "A tidy room."]}
+        assert [option.scene for option in inspection.options] == ["A castle at dusk.", None, "A tidy room."]
+        assert len(inspection.scene_by_set["s"]) == len(inspection.prompts_data["s"])
+
+    def test_scene_does_not_change_prompt_pairs(self):
+        with_scene = inspect_prompts_text("s:\n  - prompt: a\n    negative: b\n    scene: c\n", source_name="t")
+        without = inspect_prompts_text("s:\n  - prompt: a\n    negative: b\n", source_name="t")
+
+        assert with_scene.prompts_data == without.prompts_data == {"s": [("a", "b")]}
+
+    def test_file_without_scene_has_none_for_every_entry(self):
+        inspection = inspect_prompts_text("s:\n  - prompt: a\n  - prompt: b\nt:\n  - prompt: c\n", source_name="t")
+
+        assert inspection.scene_by_set == {"s": [None, None], "t": [None]}
+
+    def test_scene_resolves_snippets_and_keeps_choices(self):
+        text = "snippets:\n  place: a {harbor|market}\n  look:\n    Style: noir\ns:\n  - prompt: p\n    scene: 'Set in $place. $look'\n"
+
+        scene = inspect_prompts_text(text, source_name="t").options[0].scene
+
+        assert scene == "Set in a {harbor|market}. Style: noir"
+
+    def test_one_snippet_scene_is_shared_by_entries(self):
+        text = "snippets:\n  castle: A castle at dusk.\ns:\n  - prompt: one\n    scene: $castle\n  - prompt: two\n    scene: $castle\n"
+
+        assert inspect_prompts_text(text, source_name="t").scene_by_set == {"s": ["A castle at dusk.", "A castle at dusk."]}
+
+    @pytest.mark.parametrize("scene", ['""', '"   "', "null"])
+    def test_blank_scene_means_no_scene(self, scene):
+        inspection = inspect_prompts_text(f"s:\n  - prompt: a\n    scene: {scene}\n", source_name="t")
+
+        assert inspection.scene_by_set == {"s": [None]}
+
+    def test_undefined_snippet_in_scene_raises(self):
+        with pytest.raises(ValueError):
+            inspect_prompts_text("s:\n  - prompt: a\n    scene: $missing\n", source_name="t")
+
+    def test_entry_still_needs_a_prompt(self):
+        with pytest.raises(ValueError, match="prompt"):
+            inspect_prompts_text("s:\n  - scene: only a scene\n", source_name="t")
+
+    def test_scene_by_set_groups_options_in_order(self):
+        options = inspect_prompts_text("a:\n  - prompt: x\n    scene: one\nb:\n  - prompt: y\n", source_name="t").options
+
+        assert scene_by_set(options) == {"a": ["one"], "b": [None]}
+
+    def test_circular_snippet_in_scene_raises(self):
+        with pytest.raises(ValueError, match="Circular"):
+            inspect_prompts_text("snippets:\n  a: $b\n  b: $a\ns:\n  - prompt: p\n    scene: $a\n", source_name="t")

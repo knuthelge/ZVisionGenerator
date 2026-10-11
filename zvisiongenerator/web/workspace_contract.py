@@ -27,6 +27,7 @@ PROMPT_FILE_CONTRACT = {
         "loaded": "Prompt file loaded.",
         "ignored_negative_video": "Negative prompt entries are ignored for video workflows.",
         "ignored_negative_unsupported": "The current image model ignores negative prompt entries.",
+        "ignored_scene_image": "Scene entries are ignored for image workflows.",
     },
 }
 WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
@@ -122,6 +123,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "model",
             "loras",
             "prompt_source",
+            "prompt_scene",
             "prompt_inline",
             "prompt_enhance",
             "prompt_enhance_auto",
@@ -172,6 +174,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "model",
             "loras",
             "prompt_source",
+            "prompt_scene",
             "prompt_inline",
             "prompt_enhance",
             "prompt_enhance_auto",

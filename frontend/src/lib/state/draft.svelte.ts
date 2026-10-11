@@ -18,6 +18,7 @@ const DEFAULT_DRAFT: DraftState = {
   workflow: 'txt2img',
   promptSource: 'inline',
   prompt: '',
+  scene: '',
   jsonPromptEnabled: false,
   jsonPrompt: '',
   firstSigma: null,
@@ -65,6 +66,7 @@ const DEFAULT_DRAFT: DraftState = {
   videoUpscaleFactor: 2,
   videoUpscaleReview: false,
   enhancedPrompt: '',
+  enhancedScene: '',
   enhancedFrom: null,
   enhanceSettings: null,
   enhanceAuto: false,
@@ -72,6 +74,9 @@ const DEFAULT_DRAFT: DraftState = {
 
 const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
   prompt: 'prompt_inline',
+  scene: 'prompt_scene',
+  enhanced_scene: 'prompt_scene',
+  enhanced_prompt: 'prompt_inline',
   model: 'model',
   steps: 'steps',
   guidance: 'guidance',
@@ -304,7 +309,19 @@ export const draft = {
       return !controlId || visibleControls === null || visibleControls.has(controlId);
     };
 
-    if (params.prompt && canApply('prompt')) prefill.prompt = params.prompt;
+    // Reusing text fills both boxes of the pair (a missing part is blank), and the Enhanced pair when the asset kept one.
+    const reusesText = ['prompt', 'scene', 'enhanced_prompt', 'enhanced_scene'].some((key) => params[key]);
+    if (reusesText && canApply('prompt')) {
+      prefill.prompt = params.prompt ?? '';
+      prefill.enhancedPrompt = canApply('enhanced_prompt') ? params.enhanced_prompt ?? '' : '';
+      const video = workflowMode(workflow) === 'video';
+      // An image never carries a scene; a stale Enhanced scene would silently win once the workflow turns to video.
+      if (video && canApply('scene')) prefill.scene = params.scene ?? '';
+      prefill.enhancedScene = video && canApply('enhanced_scene') ? params.enhanced_scene ?? '' : '';
+      // The reused Enhanced pair came from the reused inputs, so it is not out of date; with none, a stale Enhanced box would silently win.
+      const enhanced = `${prefill.enhancedPrompt}${prefill.enhancedScene}`.trim() !== '';
+      prefill.enhancedFrom = enhanced ? { prompt: prefill.prompt, scene: prefill.scene ?? '', mode: workflowMode(workflow) } : null;
+    }
     if (params.model && canApply('model')) prefill.model = params.model;
     if (params.steps && canApply('steps')) prefill.steps = Number(params.steps);
     if (params.guidance && canApply('guidance')) prefill.guidance = Number(params.guidance);
@@ -331,11 +348,6 @@ export const draft = {
     // Reused assets carry both their preset and their pixel size; a "custom" size means width/height rule.
     if (prefill.ratio !== undefined || prefill.size !== undefined) prefill.dimensionMode = prefill.size === 'custom' ? 'custom' : 'ratio';
     else if (prefill.width !== undefined || prefill.height !== undefined) prefill.dimensionMode = 'custom';
-    // A reused prompt replaces whatever was enhanced before; a stale Enhanced box would silently win.
-    if (prefill.prompt !== undefined) {
-      prefill.enhancedPrompt = '';
-      prefill.enhancedFrom = null;
-    }
     _draft = { ..._draft, ...prefill };
   },
 
@@ -433,6 +445,7 @@ export const draft = {
       ..._draft,
       promptSource: s.promptSource,
       prompt: s.prompt,
+      scene: s.scene,
       jsonPromptEnabled: s.jsonPromptEnabled,
       jsonPrompt: s.jsonPrompt,
       negativePrompt: s.negativePrompt,
@@ -440,6 +453,7 @@ export const draft = {
       promptFileOptionIds: s.promptFileOptionIds,
       promptFileLoaded: s.promptFileLoaded,
       enhancedPrompt: s.enhancedPrompt,
+      enhancedScene: s.enhancedScene,
       enhancedFrom: s.enhancedFrom,
     };
     this.saveDraft();

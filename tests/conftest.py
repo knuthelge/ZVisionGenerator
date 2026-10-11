@@ -54,7 +54,7 @@ def _make_args(**overrides):
     return Namespace(**defaults)
 
 
-def _make_plan(prompts_data, args, *, config=None, enhance_by_set=None) -> JobPlan:
+def _make_plan(prompts_data, args, *, config=None, enhance_by_set=None, scene=None, scene_by_set=None) -> JobPlan:
     """Return the preflight plan of a job without enhancement rewrites (statuses stay ``off``)."""
     generation = (config or {}).get("generation", {})
     return JobPlan(
@@ -68,6 +68,8 @@ def _make_plan(prompts_data, args, *, config=None, enhance_by_set=None) -> JobPl
             disabled=bool(getattr(args, "no_enhance", False)),
             override=getattr(args, "enhance", None),
             enhance_by_set=enhance_by_set,
+            scene=scene,
+            scene_by_set=scene_by_set,
         )
     )
 

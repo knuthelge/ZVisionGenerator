@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.workflows.video_stages import (
+    enhance_prompt_stage,
     generate_filename_stage,
     image_to_video_stage,
     log_video_stage,
@@ -69,6 +70,71 @@ class TestResolvePromptStage:
         arts = VideoWorkingArtifacts()
         resolve_prompt_stage(req, arts)
         assert arts.resolved_prompt == "hello world"
+
+    def test_blank_scene_sends_the_prompt_byte_identical(self):
+        for scene in (None, "", "   "):
+            req = _req(prompt="a sunset", resolved_prompt="a sunset", scene=scene, resolved_scene=None if scene is None else scene)
+            arts = VideoWorkingArtifacts()
+            resolve_prompt_stage(req, arts)
+            assert arts.resolved_prompt == "a sunset"
+            assert "scene" not in arts.metadata
+
+    def test_scene_comes_before_the_prompt(self):
+        req = _req(prompt="a knight rides in", resolved_prompt="a knight rides in", scene="A castle.", resolved_scene="A castle.")
+        arts = VideoWorkingArtifacts()
+        resolve_prompt_stage(req, arts)
+        assert arts.resolved_prompt == "A castle. a knight rides in"
+        assert arts.metadata["scene"] == "A castle."
+
+    def test_scene_only_run_sends_the_scene(self):
+        req = _req(prompt="", resolved_prompt="", scene="A castle at dusk.", resolved_scene="A castle at dusk.")
+        arts = VideoWorkingArtifacts()
+        resolve_prompt_stage(req, arts)
+        assert arts.resolved_prompt == "A castle at dusk."
+
+    def test_choices_expand_in_each_part_without_a_plan(self):
+        req = _req(prompt="a {fox|fox} runs", scene="A {snowy|snowy} field.")
+        arts = VideoWorkingArtifacts()
+        resolve_prompt_stage(req, arts)
+        assert arts.resolved_prompt == "A snowy field. a fox runs"
+        assert arts.metadata["scene"] == "A snowy field."
+
+    def test_planned_resolved_scene_wins_over_the_template(self):
+        req = _req(prompt="p", resolved_prompt="p", scene="{a|b}", resolved_scene="b")
+        arts = VideoWorkingArtifacts()
+        resolve_prompt_stage(req, arts)
+        assert arts.resolved_prompt == "b p" and arts.metadata["scene"] == "b"
+
+
+# ---------------------------------------------------------------------------
+# enhance_prompt_stage
+# ---------------------------------------------------------------------------
+
+
+class TestEnhancePromptStage:
+    """Verify the planned scene and action rewrite is applied without leaking the scene into the action."""
+
+    def test_not_enhanced_is_a_no_op(self):
+        seen: list[str] = []
+        arts = VideoWorkingArtifacts(resolved_prompt="A castle. a knight")
+        assert enhance_prompt_stage(_req(on_prompt_enhanced=seen.append), arts) is StageOutcome.success
+        assert arts.resolved_prompt == "A castle. a knight" and "enhanced_prompt" not in arts.metadata and seen == []
+
+    def test_pair_is_composed_into_resolved_prompt_only(self):
+        seen: list[str] = []
+        req = _req(enhanced_prompt="A knight rides in.", enhanced_scene="A castle at dusk.", on_prompt_enhanced=seen.append)
+        arts = VideoWorkingArtifacts(resolved_prompt="A castle. a knight")
+        enhance_prompt_stage(req, arts)
+        assert arts.resolved_prompt == "A castle at dusk. A knight rides in."
+        assert arts.metadata["enhanced_prompt"] == "A knight rides in."
+        assert arts.metadata["enhanced_scene"] == "A castle at dusk."
+        assert seen == ["A castle at dusk. A knight rides in."]
+
+    def test_action_without_a_scene_behaves_like_a_plain_rewrite(self):
+        req = _req(enhanced_prompt="A fox sprints.")
+        arts = VideoWorkingArtifacts()
+        enhance_prompt_stage(req, arts)
+        assert arts.resolved_prompt == "A fox sprints." and arts.metadata == {"enhanced_prompt": "A fox sprints."}
 
 
 # ---------------------------------------------------------------------------

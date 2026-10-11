@@ -29,6 +29,7 @@
   const mode = $derived(entry.prompt.kind);
 
   const menuItems = $derived<ActionMenuEntry[]>([
+    { kind: 'item', id: 'scene', label: entry.scene ? 'Remove scene' : 'Add scene', onselect: () => builder.setScene(entry.id, !entry.scene) },
     { kind: 'item', id: 'negative', label: entry.negative ? 'Remove negative prompt' : 'Add negative prompt', onselect: () => builder.setNegative(entry.id, entry.negative === null) },
     { kind: 'separator' },
     { kind: 'item', id: 'duplicate', label: 'Duplicate', onselect: () => builder.duplicateEntry(entry.id) },
@@ -91,11 +92,17 @@
   </div>
 
   <div class="main">
+    {#if entry.scene}
+      <div class="labelled" data-testid="entry-scene">
+        <span class="labelled-label">Scene</span>
+        <div class="labelled-value"><PromptValueEditor {builder} {entry} valueKey="scene" label="Scene" placeholder="Who and where, look, style, camera." /></div>
+      </div>
+    {/if}
     <PromptValueEditor {builder} {entry} valueKey="prompt" label="Prompt" placeholder="Describe the image…" />
     {#if entry.negative}
-      <div class="negative">
-        <span class="negative-label">Negative</span>
-        <div class="negative-value"><PromptValueEditor {builder} {entry} valueKey="negative" label="Negative prompt" placeholder="What to avoid…" /></div>
+      <div class="labelled">
+        <span class="labelled-label">Negative</span>
+        <div class="labelled-value"><PromptValueEditor {builder} {entry} valueKey="negative" label="Negative prompt" placeholder="What to avoid…" /></div>
       </div>
     {/if}
     {#each problems as problem, problemIndex (problemIndex)}
@@ -148,9 +155,9 @@
   .ordinal { width: 14px; text-align: right; font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 700; color: var(--color-text-muted); }
 
   .main { min-width: 0; padding-top: 1px; }
-  .negative { display: flex; align-items: baseline; gap: 10px; margin-top: 2px; }
-  .negative-label { flex-shrink: 0; font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
-  .negative-value { flex: 1; min-width: 0; font-size: var(--text-ui); }
+  .labelled { display: flex; align-items: baseline; gap: 10px; margin-top: 2px; }
+  .labelled-label { flex-shrink: 0; font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
+  .labelled-value { flex: 1; min-width: 0; font-size: var(--text-ui); }
   .problem { margin-top: 2px; font-size: var(--text-meta); }
   .problem[data-severity='error'] { color: var(--color-error); }
   .problem[data-severity='warning'] { color: var(--color-warning); }

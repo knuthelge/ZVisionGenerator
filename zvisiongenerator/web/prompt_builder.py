@@ -19,7 +19,7 @@ from zvisiongenerator.utils.prompt_document import (
     render_prompt_document,
 )
 from zvisiongenerator.utils.prompt_enhance import matrix_contract
-from zvisiongenerator.utils.prompt_document_check import has_errors, preview_document, roll_prompt, snippet_uses
+from zvisiongenerator.utils.prompt_document_check import EntryPreview, has_errors, preview_document, roll_prompt, snippet_uses
 from zvisiongenerator.utils.prompts import inspect_prompts_text
 from zvisiongenerator.utils.atomic_write import write_text_atomic
 from zvisiongenerator.web.prompt_files import host_local_path, normalize_prompt_file_path
@@ -117,11 +117,19 @@ def preview_document_payload(document_payload: Any, *, roll_entry_id: str | None
     if roll_entry_id is not None and roll_entry_id in previews:
         rolled = {"entry_id": roll_entry_id, "prompt": roll_prompt(previews[roll_entry_id])}
     return {
-        "entries": {entry_id: asdict(preview) for entry_id, preview in previews.items()},
+        "entries": {entry_id: _preview_to_payload(preview) for entry_id, preview in previews.items()},
         "problems": [asdict(problem) for problem in problems],
         "snippet_uses": snippet_uses(document),
         "rolled": rolled,
     }
+
+
+def _preview_to_payload(preview: EntryPreview) -> dict[str, Any]:
+    """Serialize an entry preview; ``scene`` is left out when the entry has none."""
+    payload = asdict(preview)
+    if payload["scene"] is None:
+        del payload["scene"]
+    return payload
 
 
 def create_prompt_file(directory: str, name: str, *, accepted_extensions: tuple[str, ...]) -> dict[str, Any]:
@@ -162,6 +170,7 @@ def _document_to_payload(document: PromptDocument) -> dict[str, Any]:
                         "negative": _value_to_payload(entry.negative) if entry.negative is not None else None,
                         "active": entry.active,
                         "enhance": entry.enhance,
+                        "scene": _value_to_payload(entry.scene) if entry.scene is not None else None,
                     }
                     for entry in doc_set.entries
                 ],
@@ -192,6 +201,7 @@ def _document_from_payload(payload: Any) -> PromptDocument:
             if not isinstance(active, bool):
                 raise ValueError("Entry 'active' must be true or false.")
             negative = entry.get("negative")
+            scene = entry.get("scene")
             entries.append(
                 DocumentEntry(
                     id=_string(entry, "id"),
@@ -199,6 +209,7 @@ def _document_from_payload(payload: Any) -> PromptDocument:
                     negative=None if negative is None else _value_from_payload(negative, "negative"),
                     active=active,
                     enhance=entry.get("enhance"),
+                    scene=None if scene is None else _value_from_payload(scene, "scene"),
                 )
             )
         sets.append(DocumentSet(id=_string(set_data, "id"), name=_string(set_data, "name", allow_empty=True), entries=tuple(entries)))

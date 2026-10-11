@@ -66,7 +66,9 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
 
     The top-level keys are the reusable settings (schema, workflow, prompt, model, family, seed, steps,
     dimensions, frame count, reference image, LoRAs); ``generation`` records time, upscale, audio and format.
-    An auto-enhanced prompt replaces the template prompt so the asset records what rendered.
+    An auto-enhanced prompt replaces the template prompt so the asset records what rendered. The prompt is the
+    action alone; the scene is recorded apart as ``scene`` (omitted when there is none), and ``scene_input`` and
+    ``prompt_input`` keep the user's own text when the scene or prompt was enhanced.
     """
     upscale = _drop_empty({"factor": request.upscale, "steps": request.upscale_steps}) if request.upscale else None
     return _drop_unserializable(
@@ -74,6 +76,7 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
             "schema": VIDEO_CONFIG_SCHEMA,
             "workflow": "img2vid" if request.image_path else "txt2vid",
             "prompt": artifacts.metadata.get("enhanced_prompt") or request.prompt,
+            **_video_scene_fields(request, artifacts),
             "model": _portable_path(request.model_name),
             "model_family": request.model_family,
             "seed": request.seed,
@@ -95,6 +98,22 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
             ),
         }
     )
+
+
+def _video_scene_fields(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> dict[str, str]:
+    """Return the video payload's scene keys that apply: ``scene``, and the user's inputs when the text was enhanced.
+
+    The inputs come from the request when its scene or prompt already holds a rewrite made before the job; otherwise,
+    for a rewrite made by the job, they are the scene and prompt as written.
+    """
+    metadata = artifacts.metadata
+    enhanced = bool(metadata.get("enhanced_prompt"))
+    fields = {
+        "scene": metadata.get("enhanced_scene") or metadata.get("scene"),
+        "scene_input": request.scene_input or (request.scene if enhanced else None),
+        "prompt_input": request.prompt_input or (request.prompt if enhanced else None),
+    }
+    return {key: text for key, value in fields.items() if (text := optional_text(value)) is not None}
 
 
 def embed_mp4_config(video_path: str | Path, payload: dict[str, Any]) -> None:
@@ -172,6 +191,10 @@ class RecordedSettings:
     frame_count: int | None = None
     image_path: str | None = None
     image_strength: float | None = None
+    # Video scene as generated, and the user's own scene and prompt when the recorded ones were enhanced.
+    scene: str | None = None
+    scene_input: str | None = None
+    prompt_input: str | None = None
     # ``path:weight`` entries joined by commas, as ``--lora`` takes them.
     lora: str | None = None
     # How the file was made: time, quantize, upscale and post-processing (empty for files that predate it).
@@ -199,6 +222,9 @@ def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
         frame_count=optional_int(config.get("frame_count")),
         image_path=_local_path(optional_text(config.get("image_path"))),
         image_strength=optional_float(config.get("image_strength")),
+        scene=optional_text(config.get("scene")),
+        scene_input=optional_text(config.get("scene_input")),
+        prompt_input=optional_text(config.get("prompt_input")),
         lora=_lora_string(config.get("lora")),
         generation=_generation_block(config.get("generation")),
         source=_source_block(config.get("source")),

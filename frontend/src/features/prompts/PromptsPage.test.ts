@@ -29,8 +29,8 @@ function sample(): PromptDocument {
     snippets: [{ id: 'n0', name: 'light', value: { kind: 'text', text: 'soft light' } }],
     sets: [
       { id: 's0', name: 'portrait', entries: [
-        { id: 's0.e0', prompt: { kind: 'text', text: 'a woman, $light, {red|blue} dress' }, negative: null, active: true, enhance: null },
-        { id: 's0.e1', prompt: { kind: 'text', text: 'a man' }, negative: null, active: false, enhance: null },
+        { id: 's0.e0', prompt: { kind: 'text', text: 'a woman, $light, {red|blue} dress' }, scene: null, negative: null, active: true, enhance: null },
+        { id: 's0.e1', prompt: { kind: 'text', text: 'a man' }, scene: null, negative: null, active: false, enhance: null },
       ] },
     ],
   };
@@ -121,6 +121,62 @@ describe('PromptsPage', () => {
 
     const request = api.savePromptDocument.mock.calls[0][0];
     expect(request.document.sets[0].entries.map((entry: { active: boolean }) => entry.active)).toEqual([true, true]);
+  });
+
+  describe('scene', () => {
+    function menuItem(label: string): HTMLElement {
+      const found = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((item) => item.textContent?.trim() === label);
+      if (!found) throw new Error(`No menu item "${label}"`);
+      return found;
+    }
+
+    async function chooseFromMenu(label: string): Promise<void> {
+      target.querySelector<HTMLButtonElement>('[data-entry-id="s0.e0"] [aria-label="Prompt actions"]')!.click();
+      await settle();
+      menuItem(label).click();
+      await settle();
+    }
+
+    it('adds a scene to an entry and saves it with the document', async () => {
+      api.savePromptDocument.mockImplementation(async ({ document }: { document: PromptDocument }) => saved(document));
+      await mountPage();
+      expect(target.querySelector('[data-testid="entry-scene"]')).toBeNull();
+
+      await chooseFromMenu('Add scene');
+      expect(target.querySelectorAll('[data-testid="entry-scene"]')).toHaveLength(1);
+      button('Save').click();
+      await settle();
+
+      const entries = api.savePromptDocument.mock.calls[0][0].document.sets[0].entries;
+      expect(entries[0].scene).toEqual({ kind: 'text', text: '' });
+      expect(entries[1].scene).toBeNull();
+    });
+
+    it('removes a scene again with the same action', async () => {
+      const document = sample();
+      document.sets[0].entries[0].scene = { kind: 'text', text: 'A rainy street at night.' };
+      api.loadPromptDocument.mockResolvedValue(loaded(document));
+      await mountPage();
+      expect(target.querySelectorAll('[data-testid="entry-scene"]')).toHaveLength(1);
+
+      await chooseFromMenu('Remove scene');
+      expect(target.querySelector('[data-testid="entry-scene"]')).toBeNull();
+    });
+
+    it('previews the resolved scene of the selected entry', async () => {
+      const document = sample();
+      document.sets[0].entries[0].scene = { kind: 'text', text: '$light street' };
+      api.loadPromptDocument.mockResolvedValue(loaded(document));
+      api.previewPromptDocument.mockResolvedValue({ ...PREVIEW, entries: { 's0.e0': { prompt: 'a woman', negative: null, scene: 'soft light street' } } });
+      await mountPage();
+
+      expect(target.querySelector('section[aria-label="Scene"]')?.textContent).toContain('soft light street');
+    });
+
+    it('shows no scene box in the preview for an entry without one', async () => {
+      await mountPage();
+      expect(target.querySelector('section[aria-label="Scene"]')).toBeNull();
+    });
   });
 
   it('saves edits and remaps the Workspace selection for the file', async () => {

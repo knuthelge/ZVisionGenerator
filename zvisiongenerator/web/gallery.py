@@ -60,6 +60,9 @@ class GalleryAsset:
     lora: str | None
     has_reusable_config: bool
     negative_prompt: str | None = None
+    scene: str | None = None
+    scene_input: str | None = None
+    prompt_input: str | None = None
     scheduler: str | None = None
     model_family: str | None = None
     image_strength: float | None = None
@@ -163,7 +166,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
 
     reuse_params: dict[str, str] = {"workflow": resolved_workflow}
     if asset.has_reusable_config:
-        reuse_params["prompt"] = asset.prompt
+        reuse_params.update(_reuse_text_params(asset, video=workflow_mode(resolved_workflow) == "video"))
         if resolved_model:
             reuse_params["model"] = resolved_model
         if asset.lora:
@@ -203,7 +206,8 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "filename": asset.name,
         "created_at": created_at,
         "workflow": requested_workflow,
-        "prompt": asset.prompt,
+        "prompt": asset.prompt or asset.scene or "",
+        "scene": asset.scene,
         "model": asset.model_label,
         "width": asset.width,
         "height": asset.height,
@@ -231,6 +235,26 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "details": _asset_details_json(asset),
         "upscale": _asset_upscale_json(asset, web_config, resolved_model) if asset.kind == "image" else None,
     }
+
+
+def _reuse_text_params(asset: GalleryAsset, *, video: bool) -> dict[str, str]:
+    """Return the Reuse query params for an asset's text: the user's own text, plus the generated pair when it was enhanced.
+
+    An enhanced video asset records its generated scene apart from its generated prompt, so the prompt params never
+    carry scene text. Without recorded inputs (plain or older assets) the recorded text is what the user wrote.
+    """
+    if not video:
+        return {"prompt": asset.prompt}
+    if asset.scene_input or asset.prompt_input:
+        pairs = {
+            "scene": asset.scene_input,
+            "prompt": asset.prompt_input,
+            "enhanced_scene": asset.scene,
+            "enhanced_prompt": asset.prompt,
+        }
+    else:
+        pairs = {"scene": asset.scene, "prompt": asset.prompt}
+    return {key: value for key, value in pairs.items() if value}
 
 
 def delete_gallery_assets(output_dir: str, selected_paths: list[str]) -> None:
@@ -306,6 +330,9 @@ def _build_gallery_asset(root: Path, candidate: Path) -> GalleryAsset | None:
         lora=metadata["lora"],
         has_reusable_config=metadata["has_reusable_config"],
         negative_prompt=metadata["negative_prompt"],
+        scene=metadata["scene"],
+        scene_input=metadata["scene_input"],
+        prompt_input=metadata["prompt_input"],
         scheduler=metadata["scheduler"],
         model_family=metadata["model_family"],
         image_strength=metadata["image_strength"],
@@ -321,7 +348,12 @@ def _read_asset_metadata(asset_path: Path, kind: str) -> dict[str, Any]:
     filename_metadata = _parse_generated_filename(asset_path)
     image_metadata = _read_image_metadata(asset_path) if kind == "image" else {}
 
-    prompt = _coerce_text(recorded.prompt or image_metadata.get("prompt") or asset_path.stem.replace("_", " "))
+    prompt = recorded.prompt or image_metadata.get("prompt")
+    if not prompt and recorded.scene:
+        # A scene-only video records no prompt; it stays empty rather than falling back to the file name.
+        prompt = ""
+    else:
+        prompt = _coerce_text(prompt or asset_path.stem.replace("_", " "))
     width = recorded.width or optional_int(image_metadata.get("width") or filename_metadata.get("width"))
     height = recorded.height or optional_int(image_metadata.get("height") or filename_metadata.get("height"))
 
@@ -345,6 +377,9 @@ def _read_asset_metadata(asset_path: Path, kind: str) -> dict[str, Any]:
         "lora": recorded.lora,
         "has_reusable_config": bool(config),
         "negative_prompt": recorded.negative_prompt,
+        "scene": recorded.scene,
+        "scene_input": recorded.scene_input,
+        "prompt_input": recorded.prompt_input,
         "scheduler": recorded.scheduler,
         "model_family": recorded.model_family,
         "image_strength": recorded.image_strength,

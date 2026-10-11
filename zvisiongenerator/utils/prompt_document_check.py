@@ -32,10 +32,14 @@ class DocumentProblem:
 
 @dataclass(frozen=True)
 class EntryPreview:
-    """An entry's prompt and negative prompt as the model receives them (``{a|b}`` choices not yet picked)."""
+    """An entry's prompt, negative prompt and scene as the model receives them (``{a|b}`` choices not yet picked).
+
+    ``scene`` is ``None`` when the entry has no scene or its scene resolves to blank text.
+    """
 
     prompt: str
     negative: str | None
+    scene: str | None = None
 
 
 def _snippet_values(document: PromptDocument) -> dict[str, Any]:
@@ -51,7 +55,8 @@ def _preview_entry(entry: DocumentEntry, snippets: dict[str, Any]) -> EntryPrevi
     """
     prompt = flatten_value(resolve_snippets(entry.prompt.to_python(), snippets))
     negative = flatten_value(resolve_snippets(entry.negative.to_python(), snippets)) if entry.negative is not None else ""
-    return EntryPreview(prompt=prompt, negative=negative or None)
+    scene = flatten_value(resolve_snippets(entry.scene.to_python(), snippets)) if entry.scene is not None else ""
+    return EntryPreview(prompt=prompt, negative=negative or None, scene=scene or None)
 
 
 def preview_document(document: PromptDocument) -> tuple[dict[str, EntryPreview], list[DocumentProblem]]:
@@ -72,6 +77,8 @@ def preview_document(document: PromptDocument) -> tuple[dict[str, EntryPreview],
             previews[entry.id] = preview
             if not preview.prompt.strip():
                 problems.append(DocumentProblem(entry.id, severity, "The prompt is empty."))
+            if entry.scene is not None and preview.scene is None:
+                problems.append(DocumentProblem(entry.id, "warning", "The scene is empty and is ignored."))
             problems.extend(_enhance_problems(entry))
     return previews, problems
 
@@ -91,6 +98,8 @@ def snippet_uses(document: PromptDocument) -> dict[str, int]:
             counts.update(snippet_references(entry.prompt.to_python()))
             if entry.negative is not None:
                 counts.update(snippet_references(entry.negative.to_python()))
+            if entry.scene is not None:
+                counts.update(snippet_references(entry.scene.to_python()))
     return {snippet.id: counts[snippet.name] for snippet in document.snippets}
 
 
@@ -120,7 +129,7 @@ def _name_problems(document: PromptDocument) -> list[DocumentProblem]:
 
 def _field_problems(entry: DocumentEntry) -> list[DocumentProblem]:
     problems: list[DocumentProblem] = []
-    for value in (entry.prompt, entry.negative):
+    for value in (entry.prompt, entry.negative, entry.scene):
         if value is None or value.kind != "fields":
             continue
         keys = [key.strip() for key, _ in value.fields]

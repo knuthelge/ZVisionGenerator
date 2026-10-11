@@ -15,7 +15,7 @@ class PromptFileDocument:
     """Represent a normalized prompt file plus its active option metadata."""
 
     path: str
-    options: list[dict[str, str | int | None]]
+    options: list[dict[str, str | int | bool | None]]
 
 
 def inspect_prompt_file(path: str, *, accepted_extensions: tuple[str, ...]) -> PromptFileDocument:
@@ -82,7 +82,7 @@ def _find_option(inspection: PromptFileInspection, option_id: str) -> PromptFile
     raise ValueError(f"Prompt option '{option_id}' is missing or inactive.")
 
 
-def _serialize_options(options: list[PromptFileOption]) -> list[dict[str, str | int | None]]:
+def _serialize_options(options: list[PromptFileOption]) -> list[dict[str, str | int | bool | None]]:
     """Serialize active prompt options for the Web UI chooser."""
     return [
         {
@@ -92,6 +92,8 @@ def _serialize_options(options: list[PromptFileOption]) -> list[dict[str, str | 
             "label": _build_option_label(option),
             "prompt_preview": option.prompt,
             "negative_preview": option.negative_prompt,
+            "scene_preview": option.scene,
+            "has_scene": option.scene is not None,
             "enhance": format_enhance_spec(option.enhance) if option.enhance is not None else None,
         }
         for option in options

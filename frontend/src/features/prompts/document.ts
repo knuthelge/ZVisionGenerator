@@ -150,7 +150,7 @@ export function structuredUses(document: PromptDocument, name: string): boolean 
   const pattern = new RegExp(`\\$${name}(?![A-Za-z0-9_])`);
   const values: (PromptValue | null)[] = [
     ...document.snippets.map((snippet) => snippet.value),
-    ...document.sets.flatMap((set) => set.entries.flatMap((entry) => [entry.prompt, entry.negative])),
+    ...document.sets.flatMap((set) => set.entries.flatMap((entry) => [entry.prompt, entry.negative, entry.scene])),
   ];
   return values.some((value) => value?.kind === 'structured' && pattern.test(JSON.stringify(value.data)));
 }
@@ -178,7 +178,7 @@ export function newId(): string {
 }
 
 export function newEntry(): DocumentEntry {
-  return { id: newId(), prompt: { kind: 'text', text: '' }, negative: null, active: true, enhance: null };
+  return { id: newId(), scene: null, prompt: { kind: 'text', text: '' }, negative: null, active: true, enhance: null };
 }
 
 export function newSet(name: string): DocumentSet {

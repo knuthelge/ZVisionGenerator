@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  canSubmitText,
   clampedNote,
   effectiveEnhanceSettings,
   enhanceContext,
@@ -9,6 +10,8 @@ import {
   isEnhancedStale,
   isNoOpSettings,
   settingsPayload,
+  splitsPrompt,
+  submittedPair,
   submittedPrompt,
   workflowMode,
 } from './promptEnhance';
@@ -20,9 +23,11 @@ function state(overrides: Partial<DraftState> = {}): DraftState {
     workflow: 'txt2img',
     promptSource: 'inline',
     prompt: 'a fox',
+    scene: '',
     jsonPromptEnabled: false,
     enhanceAuto: false,
     enhancedPrompt: '',
+    enhancedScene: '',
     enhancedFrom: null,
     enhanceSettings: null,
     ...overrides,
@@ -46,24 +51,16 @@ describe('submission rule', () => {
 });
 
 describe('isEnhancedStale', () => {
-  it('is false for hand-typed text', () => {
-    expect(isEnhancedStale(state({ enhancedPrompt: 'typed', enhancedFrom: null }))).toBe(false);
-  });
+  const made = { prompt: 'a fox', mode: 'image' as const };
 
-  it('is false when prompt and mode match', () => {
-    expect(isEnhancedStale(state({ enhancedPrompt: 'x', enhancedFrom: { prompt: 'a fox', mode: 'image' } }))).toBe(false);
-  });
-
-  it('is true after the prompt changes', () => {
-    expect(isEnhancedStale(state({ prompt: 'a cat', enhancedPrompt: 'x', enhancedFrom: { prompt: 'a fox', mode: 'image' } }))).toBe(true);
-  });
-
-  it('is true after the workflow mode changes', () => {
-    expect(isEnhancedStale(state({ workflow: 'txt2vid', enhancedPrompt: 'x', enhancedFrom: { prompt: 'a fox', mode: 'image' } }))).toBe(true);
-  });
-
-  it('is false when the box is empty', () => {
-    expect(isEnhancedStale(state({ prompt: 'a cat', enhancedPrompt: '', enhancedFrom: { prompt: 'a fox', mode: 'image' } }))).toBe(false);
+  it.each([
+    ['hand-typed text', { enhancedPrompt: 'typed', enhancedFrom: null }, false],
+    ['prompt and mode match', { enhancedPrompt: 'x', enhancedFrom: made }, false],
+    ['the prompt changes', { prompt: 'a cat', enhancedPrompt: 'x', enhancedFrom: made }, true],
+    ['the workflow mode changes', { workflow: 'txt2vid' as const, enhancedPrompt: 'x', enhancedFrom: made }, true],
+    ['the box is empty', { prompt: 'a cat', enhancedPrompt: '', enhancedFrom: made }, false],
+  ])('is stale only when the text it was made from changed: %s', (_name, overrides, stale) => {
+    expect(isEnhancedStale(state(overrides))).toBe(stale);
   });
 });
 
@@ -114,6 +111,7 @@ describe('settings helpers', () => {
     expect(isNoOpSettings({ ...SETTINGS, motion: ['action'] }, 'image')).toBe(true);
     expect(isNoOpSettings({ ...SETTINGS, motion: ['action'] }, 'video')).toBe(false);
     expect(isNoOpSettings({ ...SETTINGS, length: 'longer' }, 'image')).toBe(false);
+    expect(isNoOpSettings({ ...SETTINGS, mood: 'eerie' }, 'image')).toBe(false);
   });
 
   it('strips motion for images', () => {
@@ -133,10 +131,6 @@ describe('settings helpers', () => {
     const contract = { matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' } } } as unknown as PromptEnhancerContract;
     const saved = { style: 'photo', details: [], length: 'longer', motion: [], sound: [], note: '' } as unknown as EnhanceSettings;
     expect(effectiveEnhanceSettings(state({ enhanceSettings: saved }), contract)).toEqual({ ...saved, mood: 'keep' });
-  });
-
-  it('treats a non-keep mood as a change', () => {
-    expect(isNoOpSettings({ ...SETTINGS, mood: 'eerie' }, 'image')).toBe(false);
   });
 
   it('maps workflows to modes', () => {
@@ -170,5 +164,65 @@ describe('createNdjsonParser', () => {
     const parser = createNdjsonParser((frame) => frames.push(frame));
     parser.push('not json\n{"type":"error","detail":"x"}\n');
     expect(frames).toEqual([{ type: 'error', detail: 'x' }]);
+  });
+});
+
+describe('scene and prompt pair', () => {
+  const video = (overrides: Partial<DraftState> = {}) => state({ workflow: 'txt2vid', ...overrides });
+
+  it.each([
+    ['txt2vid', 'A castle.', '', true],
+    ['txt2vid', '', 'A knight rides in.', true],
+    ['txt2vid', '  ', '  ', false],
+    ['img2vid', 'A castle.', '', true],
+    ['txt2img', 'A castle.', '', false],
+    ['txt2img', '', 'a fox', true],
+  ] as const)('%s with scene %j and prompt %j can run text: %s', (workflow, scene, prompt, expected) => {
+    expect(canSubmitText(state({ workflow, scene, prompt }))).toBe(expected);
+  });
+
+  it('splits only a video prompt that has no scene', () => {
+    expect(splitsPrompt(video({ scene: '', prompt: 'a knight' }))).toBe(true);
+    expect(splitsPrompt(video({ scene: 'A castle.', prompt: 'a knight' }))).toBe(false);
+    expect(splitsPrompt(video({ scene: '', prompt: '' }))).toBe(false);
+    expect(splitsPrompt(state({ workflow: 'txt2img', scene: '', prompt: 'a fox' }))).toBe(false);
+  });
+
+  it('is never a no-op for a split video prompt, and unchanged for images', () => {
+    expect(isNoOpSettings(SETTINGS, 'video', false, true)).toBe(false);
+    expect(isNoOpSettings(SETTINGS, 'video', false, false)).toBe(true);
+    expect(isNoOpSettings(SETTINGS, 'image', false, true)).toBe(true);
+  });
+
+  it('uses the Enhanced pair when either Enhanced box has text', () => {
+    expect(enhancedOverrideActive(video({ enhancedScene: 'A castle at dusk.' }))).toBe(true);
+    expect(enhancedOverrideActive(video({ enhancedPrompt: 'A knight rides in.' }))).toBe(true);
+    expect(enhancedOverrideActive(video({ enhancedScene: ' ', enhancedPrompt: ' ' }))).toBe(false);
+    // An image never carries a scene, so a stray Enhanced scene does not switch its text.
+    expect(enhancedOverrideActive(state({ workflow: 'txt2img', enhancedScene: 'A castle.' }))).toBe(false);
+  });
+
+  it('submits the Enhanced pair, with no scene when the enhanced scene is blank', () => {
+    const base = { scene: 'A castle.', prompt: 'a knight' };
+    expect(submittedPair(video(base))).toEqual({ scene: 'A castle.', prompt: 'a knight' });
+    expect(submittedPair(video({ ...base, enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.' }))).toEqual({ scene: 'A castle at dusk.', prompt: 'A knight rides in.' });
+    expect(submittedPair(video({ ...base, enhancedPrompt: 'A knight rides in.' }))).toEqual({ scene: '', prompt: 'A knight rides in.' });
+    expect(submittedPair(state({ workflow: 'txt2img', scene: 'ignored', prompt: 'a fox' }))).toEqual({ scene: '', prompt: 'a fox' });
+  });
+
+  describe('staleness', () => {
+    const enhanced = { enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.' };
+    const made = { scene: 'A castle.', prompt: 'a knight', mode: 'video' as const };
+
+    it.each([
+      ['scene, prompt and workflow match what was enhanced', { scene: 'A castle.', prompt: 'a knight', ...enhanced, enhancedFrom: made }, false],
+      ['the scene changes', { scene: 'A harbour.', prompt: 'a knight', ...enhanced, enhancedFrom: made }, true],
+      ['the prompt changes', { scene: 'A castle.', prompt: 'a queen', ...enhanced, enhancedFrom: made }, true],
+      ['the workflow mode changes', { workflow: 'txt2img' as const, prompt: 'a knight', enhancedPrompt: 'x', enhancedFrom: made }, true],
+      ['only an Enhanced scene exists and the scene changes', { scene: 'A harbour.', enhancedScene: 'A castle at dusk.', enhancedFrom: { ...made, prompt: 'a fox' } }, true],
+      ['the source was saved before scenes existed', { scene: '', prompt: 'a fox', enhancedPrompt: 'x', enhancedFrom: { prompt: 'a fox', mode: 'video' as const } }, false],
+    ])('is stale only when the text it was made from changed: %s', (_name, overrides, stale) => {
+      expect(isEnhancedStale(video(overrides))).toBe(stale);
+    });
   });
 });

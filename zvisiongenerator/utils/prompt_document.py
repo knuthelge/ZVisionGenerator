@@ -23,7 +23,7 @@ from ruamel.yaml.scalarstring import DoubleQuotedScalarString, LiteralScalarStri
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, settings_to_mapping
 
 SNIPPETS_KEY = "snippets"
-ENTRY_KEY_ORDER = ("active", "prompt", "negative", "enhance")
+ENTRY_KEY_ORDER = ("active", "scene", "prompt", "negative", "enhance")
 
 # YAML 1.1 booleans that PyYAML (and so the CLI) reads as false; ruamel reads YAML 1.2 and keeps them as strings.
 _YAML11_FALSE = frozenset({"no", "No", "NO", "false", "False", "FALSE", "off", "Off", "OFF"})
@@ -38,7 +38,7 @@ ValueKind = Literal["text", "fields", "structured"]
 
 @dataclass(frozen=True)
 class PromptValue:
-    """Hold a ``prompt``, ``negative`` or snippet value in the form the builder edits it.
+    """Hold a ``prompt``, ``negative``, ``scene`` or snippet value in the form the builder edits it.
 
     ``text`` is a plain string, ``fields`` a flat mapping of strings to strings, and ``structured`` anything
     else (lists, nested mappings, numbers), carried as plain data and never rewritten.
@@ -67,6 +67,7 @@ class DocumentEntry:
     negative: PromptValue | None = None
     active: bool = True
     enhance: Any = None  # None (off), True (default options), or the mapping as written
+    scene: PromptValue | None = None
 
 
 @dataclass(frozen=True)
@@ -133,6 +134,7 @@ def _document_from_root(root: Any) -> PromptDocument:
                     negative=None if entry.get("negative") is None else _value_from_node(entry["negative"]),
                     active=is_active(entry.get("active", True)),
                     enhance=_enhance_from_node(entry.get("enhance")),
+                    scene=None if entry.get("scene") is None else _value_from_node(entry["scene"]),
                 )
             )
         sets.append(DocumentSet(id=set_id, name=name, entries=tuple(entries)))
@@ -460,6 +462,11 @@ def _yaml11_safe(text: str) -> str:
 
 def _apply_entry(node: CommentedMap, entry: DocumentEntry) -> None:
     """Write *entry*'s keys onto *node*, leaving unchanged keys (and their comments) as they are."""
+    if entry.scene is None:
+        if "scene" in node and node["scene"] is not None:
+            del node["scene"]
+    else:
+        _set_value(node, "scene", entry.scene)
     _set_value(node, "prompt", entry.prompt)
     if entry.negative is None:
         if "negative" in node and node["negative"] is not None:

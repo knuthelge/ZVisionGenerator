@@ -1,4 +1,4 @@
-"""Shared pass-through step used by the image and video ``enhance_prompt_stage`` functions."""
+"""Pass-through step used by the image ``enhance_prompt_stage``; the video stage applies its scene and action pair itself."""
 
 from __future__ import annotations
 

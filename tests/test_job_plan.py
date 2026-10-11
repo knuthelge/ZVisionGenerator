@@ -29,6 +29,7 @@ class TestJobPlan:
     def test_defaults(self):
         iteration = _iteration()
         assert iteration.enhanced_prompt is None and iteration.enhance_status is EnhanceStatus.OFF
+        assert iteration.scene is None and iteration.resolved_scene is None and iteration.enhanced_scene is None
         assert JobPlan(iterations=()).cancelled is False
 
     def test_has_rewrites(self):
@@ -51,6 +52,25 @@ class TestJobPlan:
     def test_invariant_breaches_raise(self, overrides):
         with pytest.raises(ValueError, match="IterationPlan"):
             _iteration(**overrides)
+
+    @pytest.mark.parametrize("status", [EnhanceStatus.OFF, EnhanceStatus.FAILED, EnhanceStatus.SKIPPED])
+    def test_enhanced_scene_needs_the_enhanced_status(self, status):
+        with pytest.raises(ValueError, match="enhanced_scene"):
+            _iteration(enhance=EnhanceSettings(), enhanced_scene="A castle.", enhance_status=status)
+
+    def test_scene_fields_ride_along_with_a_rewrite(self):
+        iteration = _iteration(
+            enhance=EnhanceSettings(),
+            scene="A {castle|castle}.",
+            resolved_scene="A castle.",
+            enhanced_prompt="A knight rides in.",
+            enhanced_scene="A castle at dusk.",
+            enhance_status=EnhanceStatus.ENHANCED,
+        )
+        assert (iteration.scene, iteration.resolved_scene, iteration.enhanced_scene) == ("A {castle|castle}.", "A castle.", "A castle at dusk.")
+
+    def test_scene_without_a_rewrite_is_valid(self):
+        assert _iteration(scene="A castle.", resolved_scene="A castle.").enhanced_scene is None
 
     @pytest.mark.parametrize("status", [EnhanceStatus.OFF, EnhanceStatus.FAILED, EnhanceStatus.SKIPPED])
     def test_requested_without_rewrite_is_valid(self, status):

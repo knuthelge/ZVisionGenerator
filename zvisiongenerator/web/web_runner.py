@@ -299,6 +299,7 @@ class WebRunner:
         args: argparse.Namespace,
         model_ref: str,
         enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
+        scene_by_set: dict[str, list[str | None]] | None = None,
         admission_check: Callable[[], None] | None = None,
         context: dict[str, Any] | None = None,
         supported_controls: tuple[str, ...] | None = None,
@@ -325,6 +326,7 @@ class WebRunner:
                 progress_callback=progress_callback,
                 control_signal=control_signal,
                 enhance_by_set=enhance_by_set,
+                scene_by_set=scene_by_set,
             ),
         )
 
@@ -751,6 +753,7 @@ class WebRunner:
         progress_callback: Callable[[EventPayload], None],
         control_signal: SkipSignal,
         enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
+        scene_by_set: dict[str, list[str | None]] | None = None,
     ) -> None:
         """Run preflight, then load the video model inside the worker thread and run the batch; Quit stops either."""
         require_ffmpeg()
@@ -761,6 +764,8 @@ class WebRunner:
             mode="video",
             model_family=request.model_family,
             enhance_by_set=enhance_by_set,
+            scene=getattr(args, "scene", None),
+            scene_by_set=scene_by_set,
             control=control_signal,
             progress_callback=progress_callback,
         )
