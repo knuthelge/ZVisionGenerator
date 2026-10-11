@@ -19,7 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Web server and shared libraries updated (FastAPI 0.143, uvicorn 0.54, python-multipart 0.0.32, Pillow 12.3, huggingface-hub ≥1.32)
 - Building the web frontend from source needs Node.js 22.22.2+, 24.15+ or 26+ (contributors only; the packaged app is unaffected)
 - Windows/Linux: torch 2.14 with CUDA 13.0, diffusers 0.41.0, transformers 5.19, accelerate 1.15, bitsandbytes 0.50, peft 0.21; images can differ slightly for the same seed
-- Windows/Linux: NVIDIA driver 580+ and an RTX 20-series or newer GPU are required (GTX 900/10-series, Titan V and V100 are no longer supported); the CUDA error and the prompt enhancer's CPU fallback say to update the driver
+- **Breaking** — Windows/Linux: NVIDIA driver 580+ and an RTX 20-series or newer GPU are required (GTX 900/10-series, Titan V and V100 are no longer supported); the CUDA error and the prompt enhancer's CPU fallback say to update the driver
 - Windows/Linux: stored q4/q8 copies are rebuilt once after updating
 - macOS: mflux 0.22 and mlx-lm 0.32. Z-Image now runs in bfloat16 and its images change slightly for the same seed
 - macOS: images made with a LoRA change slightly on every image model
@@ -27,9 +27,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - macOS: video uses LTX MLX v0.16.3, so clips change for the same seed. It uses the `transformer-distilled-1.1` weights (downloaded once if missing), short step counts end on the final sigma instead of leaving noise, and image-to-video preprocesses the start image differently
 - macOS: `--low-memory` (on by default) streams the LTX transformer from disk on Macs with 24 GB of memory or less, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. Turn it off with `--no-low-memory` (or **Low memory** in the Web UI), which also turns off the rest of low-memory mode
 - Web UI: "Use as reference" also loads the image's prompt into the prompt box
+- Images and videos record paths inside your home folder (LoRAs, models, reference images) as `~/…`, so a shared file does not show your user name
+- Windows/Linux: video has no audio track, so the Web UI hides the Audio toggle and the enhancer's Sound options, and rewrites describe no sounds
 
 ### Removed
-- Windows/Linux: `hf-transfer` is no longer installed; downloads use Xet. Set `HF_XET_HIGH_PERFORMANCE=1` instead of `HF_HUB_ENABLE_HF_TRANSFER` for faster downloads
+- Windows/Linux: `hf-transfer` is no longer installed; downloads use Xet. On every platform, set `HF_XET_HIGH_PERFORMANCE=1` for faster downloads; `HF_HUB_ENABLE_HF_TRANSFER` has no effect
 
 ### Fixed
 - Web UI: a refused Generate (e.g. image-to-image without a reference image) shows the reason above the Generate button and in its notice, instead of replacing the preview with "The Workspace could not load" and the raw server response

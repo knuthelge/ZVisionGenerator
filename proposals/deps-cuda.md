@@ -1,6 +1,6 @@
 # Windows and Linux: torch 2.14, CUDA 13 and diffusers 0.41
 
-**Status:** Done (2026-10-10, unreleased). Shipped in `dcdae96`, on top of the shared refresh in `8b5daa3`, `4e0c936`, `a477fe7` and `f3a03a2` (see [deps-shared.md](deps-shared.md)). Verified on one 10 GB Ampere (sm_86) card; see [Verification (2026-10-10)](#verification-2026-10-10).
+**Status:** Done (2026-10-10, unreleased). Shipped in `460329b`, on top of the shared refresh in `e5fce24`, `d7bc31a`, `ac27be1` and `7212d0a` (see [deps-shared.md](deps-shared.md)). Verified on one 10 GB Ampere (sm_86) card; see [Verification (2026-10-10)](#verification-2026-10-10).
 
 This is one of three dependency proposals. It covers the packages that only the Windows and Linux (CUDA) backends exercise: torch, diffusers, transformers, accelerate and bitsandbytes. See also [Shared packages and the frontend](deps-shared.md) and [macOS: mflux 0.22 and a fresh LTX](deps-macos.md).
 

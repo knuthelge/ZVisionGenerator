@@ -46,7 +46,7 @@ ziv-video -m MODEL --ratio 1:1 --size s --prompt "Abstract art"
 
 ## Prompt Enhancement
 
-Video prompts can be rewritten by the local [prompt enhancer](prompts.md#enhancing-prompts), which adds visible motion and camera movement in time order and fits the action to the clip length. With audio on, the **Sound** options add ambience, sound effects, dialogue or music, and sounds you wrote are always kept. Use `--enhance style=cinematic,motion=action+camera-move,sound=ambient+effects`, or the Enhance options in the Web UI. For image-to-video, the rewrite describes motion and change rather than appearance; the enhancer does not see the starting image itself. Prompts are rewritten before the video model loads, and the enhancer is unloaded first, so it adds no memory during generation. In the Web UI, **Cancel** (or `Esc` twice) stops a video job at any point, including while prompts are rewritten. Pause, Skip and Repeat are not available for video.
+Video prompts can be rewritten by the local [prompt enhancer](prompts.md#enhancing-prompts), which adds visible motion and camera movement in time order and fits the action to the clip length. With audio on (macOS only), the **Sound** options add ambience, sound effects, dialogue or music, and sounds you wrote are always kept. Use `--enhance style=cinematic,motion=action+camera-move,sound=ambient+effects`, or the Enhance options in the Web UI. For image-to-video, the rewrite describes motion and change rather than appearance; the enhancer does not see the starting image itself. Prompts are rewritten before the video model loads, and the enhancer is unloaded first, so it adds no memory during generation. In the Web UI, **Cancel** (or `Esc` twice) stops a video job while prompts are rewritten and at the next denoising step; while the model loads, and during the Windows/Linux upscale pass, it takes effect once that finishes. Pause, Skip and Repeat are not available for video.
 
 ## Video Upscale & Audio
 
@@ -69,7 +69,11 @@ ziv-video -m MODEL --upscale 2 --no-audio --prompt "..."
 
 `--upscale 2` is the only supported video upscale mode. On macOS it uses the existing MLX distilled two-stage path. On Windows and Linux it uses the diffusers latent upscaler when that API is present in the installed diffusers build. If the selected runtime or model layout does not expose the latent upscaler, `ziv-video` fails explicitly instead of silently ignoring the request.
 
+Audio is generated on macOS only. On Windows and Linux videos have no audio track, so `--audio` has no effect and the Web UI hides the Audio toggle and the enhancer's Sound options.
+
 Windows and Linux video generation require CUDA. CPU fallback is not available for the diffusers video backend.
+
+Each video records the settings it was made with, as images do (see [Output Files](image.md#output-files)); **Reuse settings** in the Web UI loads them.
 
 ## Video LoRA
 

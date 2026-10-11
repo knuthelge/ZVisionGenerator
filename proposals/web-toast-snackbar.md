@@ -1,6 +1,6 @@
 # Toasts as a bottom snackbar
 
-**Status:** Done (2026-10-09, unreleased)
+**Status:** Done (2026-10-09, v0.13.0b17)
 
 ## Problem
 

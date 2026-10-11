@@ -111,7 +111,8 @@ def run_preflight(
         prompts_data: Set name → list of ``(prompt, negative_prompt)`` tuples.
         config: Loaded config dict (seed bounds, enhancer model and options, word ceilings).
         args: Job arguments; reads ``runs``, ``seed``, ``no_enhance``, ``enhance``,
-            ``enhance_model`` and ``json_prompt_enabled``.
+            ``enhance_model`` and ``json_prompt_enabled``, and for the rewrite context ``width``,
+            ``height``, ``ratio``, ``num_frames``, ``fps``, ``no_audio`` and ``image_path``.
         mode: ``"image"`` or ``"video"``.
         model_family: Generation model family, for the enhanced-prompt word ceiling.
         enhance_by_set: Per-entry prompt-file ``enhance:`` settings aligned with *prompts_data*.

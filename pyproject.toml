@@ -56,7 +56,7 @@ line-length = 200
 exclude = ["zvisiongenerator/_version.py", "packages"]
 
 [tool.ruff.lint]
-# Ruff 0.16 widened the default rule set; keep the previous defaults.
+# Pin the rule set rather than follow Ruff's default.
 select = ["E4", "E7", "E9", "F"]
 
 [[tool.uv.index]]

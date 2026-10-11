@@ -108,6 +108,8 @@ ziv-image -m my-model --prompt "Cyberpunk cityscape" --image sketch.png --image-
 
 The reference image is automatically resized to match target dimensions. Works on macOS, Windows, and Linux.
 
+In the Web UI, **Use as reference** (`E`) in the asset viewer opens an image as the reference for img2img or img2vid and loads its prompt too, replacing an Enhanced prompt made for the previous one.
+
 ## LoRA Support
 
 Both platforms support LoRA weights. Place `.safetensors` files in `~/.ziv/loras/`:
@@ -258,7 +260,7 @@ The asset viewer's **Details** show the amounts an image was made with, includin
 
 Images are saved as `<set name>_<YYYY-MM-DD_HH-MM-SS>.png` (for example `portrait_2026-10-04_14-03-22.png`), with `_2`, `_3`… added when that name is already taken, so no file is overwritten. Videos follow the same pattern with their format's extension.
 
-The settings each file was made with are embedded in it: prompt, negative prompt, model and family, seed, steps, guidance, scheduler, size, LoRAs, reference image and strength, quantization, generation time, upscale factor/denoise/steps, and the sharpen, contrast and saturation amounts. The Web UI asset viewer shows them under **Details** (**I**), and **Reuse settings** loads them into the Workspace.
+The settings each file was made with are embedded in it: prompt, negative prompt, model and family, seed, steps, guidance, scheduler, size, LoRAs, reference image and strength, quantization, generation time, upscale factor/denoise/steps, and the sharpen, contrast and saturation amounts. The Web UI asset viewer shows them under **Details** (**I**), and **Reuse settings** loads them into the Workspace. Paths inside your home folder, such as LoRAs, models and reference images, are recorded as `~/…`, so a shared file does not show your user name; the prompt is stored as written.
 
 ## Keyboard Shortcuts
 

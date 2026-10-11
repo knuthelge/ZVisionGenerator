@@ -12,6 +12,7 @@ make install
 | Target | Description |
 |--------|-------------|
 | `make install` | Install Python dependencies with `uv sync` and frontend dependencies with `pnpm --dir frontend install --frozen-lockfile` |
+| `make frontend-install` | Install only the frontend pnpm dependencies |
 | `make lock` | Regenerate uv.lock |
 | `make lint` | Run ruff linter |
 | `make lint-fix` | Run ruff linter with auto-fix |
@@ -20,10 +21,12 @@ make install
 | `make test` | Run tests with pytest |
 | `make docs-check` | Build documentation with `mkdocs build --strict` |
 | `make check` | Full CI gate: lint + format-check + pytest + frontend checks + docs build + packaged SPA static gate |
+| `make frontend-dev` | Start the Vite dev server |
 | `make frontend-build` | Build the Svelte app into `zvisiongenerator/web/static/app/` |
 | `make frontend-static-check` | Rebuild the Svelte app and fail if packaged static artifacts changed or are untracked |
 | `make frontend-test` | Run frontend type checks and Vitest tests |
 | `make frontend-palette-check` | Fail on raw colour classes or literals in Svelte files (`PALETTE_STRICT=0` only warns) |
+| `make update-ltx` | Re-vendor `ltx-core-mlx` and `ltx-pipelines-mlx` into `packages/` |
 | `make build` | Build wheel and sdist |
 | `make clean` | Remove build artifacts, caches, venv |
 | `make run` | Run `ziv-image` CLI (use `ARGS="..."`) |
@@ -265,9 +268,11 @@ Mock heavy image and video dependencies in tests. Diffusers backend tests patch 
     - `_pending_loras` on the pipeline (LoRAs applied at load)
     - the duck-typed `stepwise` slot and its `bind(..., stage=)` contract, which returns the stage's `on_step` callable
     - `_pre_denoise_flush(video_state, audio_state)` (guards against the Metal watchdog) and `_decode_and_save_video(frame_rate=, seed=)`
-    - `dit`, `load()`, `prompt_encoder`, and `image_conditioner` (`__call__(fn, free_after=)` and `resolve_crf`)
+    - `dit`, `load()`, `prompt_encoder`, `video_patchifier`, `audio_patchifier`, `low_memory`, and `image_conditioner` (`__call__(fn, free_after=)` and `resolve_crf`)
+    - resetting `vae_decoder`, `audio_decoder` and `vocoder` to `None` to free the decoders
     - `utils._orchestration.combined_image_conditionings`, `utils.args.ImageConditioningInput`, and `utils.helpers.create_noised_state(legacy_scalar_blend=True)`
-    - `scheduler.shorten_schedule` and `DISTILLED_SIGMAS`, and `utils.samplers.denoise_loop` with its `on_step(step_idx, total, video_x0, sigma)` signature
+    - `ltx_core_mlx`'s `X0Model`, `snap_output_dimensions(two_stage=)`, `compute_video_latent_shape`, `compute_audio_token_count`, `compute_audio_positions`, `compute_video_positions` and `aggressive_cleanup`
+    - `scheduler.shorten_schedule`, `DISTILLED_SIGMAS` and `STAGE_2_SIGMAS`, and `utils.samplers.denoise_loop` with its `on_step(step_idx, total, video_x0, sigma)` signature
     - `DistilledPipeline.generate_and_save` for upscale, and `BasePipeline`'s `gemma_model_id` default, the transformer-file preference order and the `low_memory` and `low_ram_streaming` constructor arguments
 - **Cache limit.** `low_ram_streaming` makes the pipeline set the MLX buffer-cache limit to 0 for the whole process. `backends/memory_mac.mlx_cache_limit` scopes that to model construction and each generation, then restores the previous limit.
 

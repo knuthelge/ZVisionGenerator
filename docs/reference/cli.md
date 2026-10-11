@@ -87,7 +87,7 @@ Comma-separated `key=value` pairs; join several values with `+`. Omitted keys us
 | `details` | `lighting`, `composition`, `camera`, `materials`, `color`, `environment`, `subject` | `lighting+composition` |
 | `length` | `shorter`, `same`, `longer`, `extra` | `same` |
 | `motion` (`ziv-video` only) | `action`, `camera-move`, `pacing` | `action` |
-| `sound` (`ziv-video` only, used with audio on) | `ambient`, `effects`, `dialogue`, `music` | none |
+| `sound` (`ziv-video` only, used with audio on, macOS only) | `ambient`, `effects`, `dialogue`, `music` | none |
 
 The free-text direction is not part of the spec; pass it with `--enhance-note`.
 
@@ -119,7 +119,7 @@ Platform-aware aliases:
 | `--seed` | `None` (random) | Seed for reproducible video generation |
 | `--low-memory` / `--no-low-memory` | enabled | Low-memory mode for LTX. On macOS with 24 GB of memory or less it also streams the transformer from disk, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. `--no-low-memory` turns that off too |
 | `--upscale` | disabled | Upscale factor: `2` only. Fails explicitly when the active backend cannot provide the LTX latent upscaler. |
-| `--audio` / `--no-audio` | enabled | Include or strip audio in video output |
+| `--audio` / `--no-audio` | enabled | Include or strip audio in video output. macOS only; Windows/Linux videos have no audio track |
 | `--lora` | `None` | Comma-separated LoRAs with optional weights: `name:0.8,name2:0.5`. Windows/Linux require diffusers-compatible LTX LoRA adapters. |
 | `-r`, `--runs` | `1` | Number of batch runs |
 | `-o`, `--output` | `.` | Output directory |

@@ -1,6 +1,6 @@
 # Quantization parity on CUDA: FP8 q8, stored quants and memory fit
 
-**Status:** Done (2026-10-09, unreleased)
+**Status:** Done (2026-10-09, v0.13.0b17)
 
 ## Problem
 
