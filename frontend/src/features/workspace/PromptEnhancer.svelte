@@ -1,6 +1,8 @@
 <script lang="ts">
   import { draft } from '$lib/state/draft.svelte';
   import { enhancePrompt } from '$lib/api/promptEnhance';
+  import { extendEnhanceHint, extendGuard } from '$lib/state/extend';
+  import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { EnhanceOptions } from '$lib/components/molecules';
   import { Icon, Toggle } from '$lib/components/atoms';
   import { popover } from '$lib/actions/popover';
@@ -8,9 +10,11 @@
     clampedNote,
     effectiveEnhanceSettings,
     enhanceContext,
+    enhancedSourceFor,
     enhancePhaseMessage,
     canSubmitText,
     hasAudio,
+    autoSplitsPrompt,
     isNoOpSettings,
     settingsPayload,
     splitsPrompt,
@@ -59,10 +63,14 @@
   const mode = $derived(workflowMode(draft.state.workflow));
   const settings = $derived(effectiveEnhanceSettings(draft.state, contract));
   const audioSupported = $derived(contract.video_audio ?? true);
-  const audio = $derived(hasAudio(draft.state, audioSupported));
+  // An extension of a silent clip is silent whatever the Audio toggle says, so the Sound axis does not apply.
+  const sourceHasAudio = $derived(draft.state.workflow === 'extend' ? (draft.extendSource?.has_audio ?? null) : null);
+  const audio = $derived(hasAudio(draft.state, audioSupported, sourceHasAudio));
+  // An extension needs a source it can read before any text can be written for it.
+  const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath)));
   // A video prompt without a scene is split into scene and action, so it is never a no-op. On demand that needs a prompt;
   // auto-enhance (also in file mode, where the prompt box is blank) only needs the default scene to be blank.
-  const autoNoOp = $derived(isNoOpSettings(settings, mode, audio, mode === 'video' && draft.state.scene.trim() === ''));
+  const autoNoOp = $derived(isNoOpSettings(settings, mode, audio, autoSplitsPrompt(draft.state)));
   const noOp = $derived(isNoOpSettings(settings, mode, audio, splitsPrompt(draft.state)));
   const available = $derived(contract.model !== null);
 
@@ -73,11 +81,12 @@
   let abort: AbortController | null = null;
 
   const downloadSize = $derived(downloadedThisSession ? null : contract.download_size_label);
-  const enhanceDisabled = $derived(busy || jobsActive || enhancing || noOp || !available || !canSubmitText(draft.state));
+  const enhanceDisabled = $derived(busy || jobsActive || enhancing || noOp || !available || !canSubmitText(draft.state) || sourceGuard.blocked);
   const disabledHint = $derived(
     !available ? (contract.error ?? 'No prompt enhancer model is configured.')
       : jobsActive ? 'Available when all jobs have finished.'
       : busy ? 'Available once the job is submitted.'
+      : sourceGuard.blocked ? extendEnhanceHint(sourceGuard)
       : noOp ? 'Pick a style, a mood, a detail, a length, or write a direction.'
       : !canSubmitText(draft.state) ? (mode === 'video' ? 'Write a scene or a prompt first.' : 'Write a prompt first.')
       : null
@@ -91,7 +100,7 @@
   export async function runEnhance(): Promise<void> {
     if (enhanceDisabled) return;
     onstart?.();
-    const source = { prompt: draft.state.prompt, scene: mode === 'video' ? draft.state.scene : '', mode };
+    const source = enhancedSourceFor(draft.state);
     const requested = settings;
     enhancing = true;
     streamingText = '';
@@ -102,7 +111,7 @@
     abort = new AbortController();
     try {
       await enhancePrompt(
-        { prompt: source.prompt, ...(mode === 'video' ? { scene: source.scene } : {}), mode, settings: settingsPayload(requested, mode, audio), max_words: maxWords, context: enhanceContext(draft.state, audioSupported) },
+        { prompt: source.prompt, ...(mode === 'video' ? { scene: source.scene } : {}), mode, settings: settingsPayload(requested, mode, audio), max_words: maxWords, context: enhanceContext(draft.state, audioSupported, sourceHasAudio) },
         (frame) => {
           if (frame.type === 'status') {
             phase = frame.phase;

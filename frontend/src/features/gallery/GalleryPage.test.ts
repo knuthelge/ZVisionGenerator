@@ -302,6 +302,49 @@ describe('GalleryPage regressions', () => {
     expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', { workflow: 'img2vid', image_path: '/outputs/nested/asset.png', prompt: asset.prompt });
   });
 
+  it('sends a video to the Extend Video workflow from its menu, with its model, and leaves the text to the source', async () => {
+    const asset = makeAsset({
+      filename: 'walk.mp4', media_type: 'video', workflow: 'txt2vid', file_path: '/outputs/walk.mp4', scene: 'A street at night.', prompt: 'She waves.',
+      lora: 'style:0.8', reuse_state: {
+        requested_workflow: 'txt2vid', resolved_workflow: 'txt2vid', workflow_available: true, requested_model: 'ltx-8', resolved_model: 'ltx-8', model_available: true, fallback_reasons: [],
+      },
+      extend: { available: true, reason: null },
+    });
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+
+    (target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
+    flushSync();
+    expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['extend', 'download', 'delete']);
+    (document.querySelector('[role="menu"] [data-action="extend"]') as HTMLButtonElement).click();
+
+    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', {
+      workflow: 'extend', source_video: '/outputs/walk.mp4', model: 'ltx-8', lora: 'style:0.8',
+    });
+    expect(toastMocks.addToast).toHaveBeenCalledWith('walk.mp4 is now the source video', 'success');
+  });
+
+  it('extends a video from the viewer, and offers no Extend for an image', async () => {
+    const video = makeAsset({ id: 'out/walk.mp4', filename: 'walk.mp4', media_type: 'video', file_path: '/outputs/walk.mp4', prompt: 'She waves.', extend: { available: true, reason: null } });
+    const image = makeAsset({ id: 'out/a.png', filename: 'a.png', file_path: '/outputs/a.png' });
+    galleryApiMocks.getGallery.mockResolvedValue({ assets: [video, image], page: 1, total_pages: 1, total_count: 2 });
+
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    (target.querySelector(`button[aria-label="View ${video.filename}"]`) as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    await settle();
+
+    // The gallery's prompt may only be a display fallback; the text comes from the server once it has read the source.
+    (getViewer()!.querySelector('[data-action="extend"]') as HTMLButtonElement).click();
+    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', { workflow: 'extend', source_video: '/outputs/walk.mp4' });
+
+    (target.querySelector(`button[aria-label="More actions for ${image.filename}"]`) as HTMLButtonElement).click();
+    flushSync();
+    expect(document.querySelector('[role="menu"] [data-action="extend"]')).toBeNull();
+  });
+
   it('removes a deleted asset from the workspace history too', async () => {
     const asset = makeAsset();
     historyStore.seedHistory([asset]);

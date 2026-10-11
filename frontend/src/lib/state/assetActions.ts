@@ -9,6 +9,7 @@ export interface AssetActionHandlers {
   onpreview?: (asset: GalleryAsset, trigger: HTMLElement) => void;
   onreuse?: (asset: GalleryAsset) => void;
   onreference?: (asset: GalleryAsset, target: ReferenceTarget) => void;
+  onextend?: (asset: GalleryAsset) => void;
   onupscale?: (asset: GalleryAsset, factor: UpscaleFactor) => void;
   ondelete?: (asset: GalleryAsset, options?: DeleteOptions) => void;
 }
@@ -18,6 +19,7 @@ const WORKFLOW_LABELS: Record<JobWorkflow, string> = {
   img2img: 'Image to image',
   txt2vid: 'Text to video',
   img2vid: 'Image to video',
+  extend: 'Extend video',
   upscale: 'Upscale',
 };
 
@@ -50,6 +52,8 @@ const FALLBACK_REASON_TEXT: Record<string, string> = {
   workflow_media_mismatch: 'The saved workflow does not match this media type; the default workflow is used.',
   missing_reference_image: 'The original reference image is unknown; reuse starts a text-to-media run instead.',
   model_not_configured: 'The original model is not configured here; the default model is used.',
+  missing_source_video: 'The video this one continued has moved or been deleted; choose it again to extend.',
+  extend_unavailable: 'Extending a video is not available here; reuse starts a text-to-video run instead.',
 };
 
 /** Return the workspace prefill params carried by an asset's reuse URL. */
@@ -69,6 +73,31 @@ export function canUseAsReference(asset: GalleryAsset): boolean {
 export function referenceParams(asset: GalleryAsset, target: ReferenceTarget): Record<string, string> {
   const params: Record<string, string> = { workflow: REFERENCE_WORKFLOWS[target], image_path: asset.file_path ?? '' };
   if (asset.prompt) params.prompt = asset.prompt;
+  return params;
+}
+
+/** Return whether a video can be extended right now. */
+export function canExtend(asset: GalleryAsset): boolean {
+  return asset.extend?.available === true;
+}
+
+/** Return why a video cannot be extended, or null when it can or the asset does not offer extending. */
+export function extendReason(asset: GalleryAsset): string | null {
+  return asset.extend && !asset.extend.available ? asset.extend.reason : null;
+}
+
+/**
+ * Return the workspace prefill params that make a video the source of an extension.
+ *
+ * The text is left out on purpose: the server describes the source when the Workspace inspects it, and that answer fills
+ * Scene (a recorded scene) or Prompt (a single recorded prompt) or leaves both empty. The gallery's own prompt may be only
+ * a display fallback such as the file name, and must never reach the boxes.
+ */
+export function extendParams(asset: GalleryAsset): Record<string, string> {
+  const params: Record<string, string> = { workflow: 'extend', source_video: asset.file_path ?? '' };
+  const model = asset.reuse_state?.resolved_model;
+  if (model) params.model = model;
+  if (asset.lora) params.lora = asset.lora;
   return params;
 }
 

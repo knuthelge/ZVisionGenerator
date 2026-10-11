@@ -6,7 +6,7 @@
   import { acceptsPageShortcut } from '$lib/keyboard';
   import { workflowLabel } from '$lib/state/assetActions';
   import {
-    etaLabel, formatClock, headline, isActive, isPaused, itemActivity, itemNoun, iterations, jobBar, jobControls, jobPhase, jobTone,
+    etaLabel, finishingText, formatClock, headline, isActive, isPaused, itemActivity, itemNoun, iterations, jobBar, jobControls, jobPhase, jobTone,
     stageBars, type JobTone
   } from '$lib/state/jobView';
   import { trackStepTiming, type StepTiming } from '$lib/state/stepTiming';
@@ -240,7 +240,7 @@
         live={headerLive && activity === 'stepping'}
         busy={headerLive && activity !== 'stepping'}
         {stepMs}
-        valuetext={activity === 'stepping' ? `Step ${job.currentStep} of ${job.totalSteps}` : activity === 'finishing' ? 'Finishing up' : 'Starting'}
+        valuetext={activity === 'stepping' ? `Step ${job.currentStep} of ${job.totalSteps}` : activity === 'finishing' ? finishingText(job) : 'Starting'}
       />
     {:else if bar.kind === 'bar'}
       <div class="ui-progress job-bar" role="progressbar" aria-label="Job progress" aria-valuemin="0" aria-valuemax={total} aria-valuenow={done} aria-valuetext="{done} of {total} {noun}s done">

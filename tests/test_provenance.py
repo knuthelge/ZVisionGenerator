@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import json
 import subprocess
+from functools import partial
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+from conftest import make_extend_source
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
-from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.core.video_types import ExtendSource, ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.provenance import (
     IMAGE_CONFIG_SCHEMA,
     VIDEO_CONFIG_SCHEMA,
@@ -602,3 +605,121 @@ class TestHomePathsArePortable:
         assert settings.image_path == str(Path("/home/me")) + "/out/ref.png"
         assert settings.lora == f"{Path('/home/me')}/.ziv/loras/a.safetensors:0.7,{Path('/home/me')}/.ziv/loras/b.safetensors:1"
         assert settings.source is not None and settings.source["path"] == str(Path("/home/me")) + "/out/p.png"
+
+
+_make_extend_source = partial(make_extend_source, scene="A woman in a red raincoat on a rainy street at night.")
+
+
+def _make_extend_request(source: ExtendSource | None = None, frames: int = 48, **overrides) -> VideoGenerationRequest:
+    source = source or _make_extend_source()
+    defaults: dict = dict(width=source.width, height=source.height, num_frames=25 + frames, extend=ExtendSpec(source, frames), prompt="")
+    defaults.update(overrides)
+    return _make_video_request(**defaults)
+
+
+class TestBuildExtendConfigPayload:
+    def test_plain_extend_payload_keys_and_values(self):
+        request = _make_extend_request(prompt="She walks away.", scene="A woman in a red raincoat on a rainy street at night.", lora_paths=["/models/motion.safetensors"], lora_weights=[0.7])
+        artifacts = VideoWorkingArtifacts(
+            generation_time=30.04,
+            metadata={"scene": "A woman in a red raincoat on a rainy street at night.", "prompt_sent": "She walks away."},
+        )
+        assert build_video_config_payload(request, artifacts) == {
+            "schema": VIDEO_CONFIG_SCHEMA,
+            "workflow": "extend",
+            "scene": "A woman in a red raincoat on a rainy street at night.",
+            "prompt": "She walks away.",
+            "model": "ltx-8",
+            "model_family": "ltx",
+            "seed": 42,
+            "steps": 8,
+            "width": 512,
+            "height": 256,
+            "ratio": None,
+            "size": None,
+            "frame_count": 97,
+            "image_path": None,
+            "lora": "/models/motion.safetensors:0.7",
+            "generation": {"time": 30.0, "audio": True, "output_format": "mp4"},
+            "source_video": "/videos/clip.mp4",
+            "extend_frames": 48,
+        }
+
+    def test_frame_count_is_the_whole_clip_not_the_window(self):
+        request = _make_extend_request(frames=16)
+        payload = build_video_config_payload(request, VideoWorkingArtifacts())
+        assert request.num_frames == 41
+        assert payload["frame_count"] == 49 + 16 and payload["extend_frames"] == 16
+
+    def test_size_is_the_displayed_size_of_a_rotated_source(self):
+        source = _make_extend_source(width=256, height=512)
+        payload = build_video_config_payload(_make_extend_request(source, width=999, height=999), VideoWorkingArtifacts())
+        assert (payload["width"], payload["height"]) == (256, 512)
+
+    def test_enhanced_extend_records_the_action_alone_and_the_inputs(self):
+        request = _make_extend_request(prompt="she leaves", scene="A street at night.")
+        artifacts = VideoWorkingArtifacts(
+            metadata={
+                "scene": "A street at night.",
+                "prompt_sent": "she leaves",
+                "enhanced_prompt": "She turns and walks into the rain.",
+                "enhanced_scene": "A street at night.",
+            }
+        )
+        payload = build_video_config_payload(request, artifacts)
+        assert payload["prompt"] == "She turns and walks into the rain."
+        assert payload["scene"] == "A street at night."
+        assert payload["prompt_input"] == "she leaves" and payload["scene_input"] == "A street at night."
+        assert "street" not in payload["prompt"]
+
+    def test_enhanced_empty_continuation_records_no_prompt_input(self):
+        request = _make_extend_request(scene="A street at night.")
+        artifacts = VideoWorkingArtifacts(metadata={"enhanced_prompt": "She keeps walking.", "enhanced_scene": "A street at night."})
+        payload = build_video_config_payload(request, artifacts)
+        assert payload["prompt"] == "She keeps walking." and "prompt_input" not in payload
+
+    def test_legacy_stripped_action_is_recorded_as_sent(self):
+        """The old dialogue was dropped before generation: the record holds what the model got, not the template."""
+        request = _make_extend_request(_make_extend_source(scene=None, prompt='She says "go." Then she sighs.'), prompt='She says "go." Then she sighs.')
+        artifacts = VideoWorkingArtifacts(metadata={"prompt_sent": "Then she sighs."})
+        payload = build_video_config_payload(request, artifacts)
+        assert payload["prompt"] == "Then she sighs." and "scene" not in payload
+
+    def test_empty_continuation_records_an_empty_prompt(self):
+        payload = build_video_config_payload(_make_extend_request(scene="A street."), VideoWorkingArtifacts(metadata={"scene": "A street.", "prompt_sent": ""}))
+        assert payload["prompt"] == "" and payload["scene"] == "A street."
+
+    @pytest.mark.parametrize(("has_audio", "no_audio", "expected"), [(True, True, False), (False, False, False)])
+    def test_audio_is_what_the_joined_clip_has(self, has_audio, no_audio, expected):
+        request = _make_extend_request(_make_extend_source(has_audio=has_audio), no_audio=no_audio)
+        assert build_video_config_payload(request, VideoWorkingArtifacts())["generation"]["audio"] is expected
+
+    def test_source_video_is_recorded_with_the_home_directory_as_tilde(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        request = _make_extend_request(_make_extend_source(path=tmp_path / "videos" / "clip.mp4"))
+        assert build_video_config_payload(request, VideoWorkingArtifacts())["source_video"] == "~/videos/clip.mp4"
+        settings = recorded_settings(build_video_config_payload(request, VideoWorkingArtifacts()))
+        assert settings.source_video == str(tmp_path / "videos" / "clip.mp4")
+
+    def test_recorded_settings_round_trip(self):
+        request = _make_extend_request(prompt="She walks away.", scene="A street.")
+        artifacts = VideoWorkingArtifacts(metadata={"scene": "A street.", "prompt_sent": "She walks away."})
+        settings = recorded_settings(json.loads(json.dumps(build_video_config_payload(request, artifacts))))
+        assert (settings.workflow, settings.scene, settings.prompt) == ("extend", "A street.", "She walks away.")
+        assert (settings.source_video, settings.extend_frames, settings.frame_count) == ("/videos/clip.mp4", 48, 97)
+
+    def test_recorded_settings_of_other_videos_have_no_extend_fields(self):
+        settings = recorded_settings(build_video_config_payload(_make_video_request(), VideoWorkingArtifacts()))
+        assert settings.source_video is None and settings.extend_frames is None
+
+    def test_extend_of_extend_copies_the_scene_unchanged_and_uses_the_prompt_as_what_just_happened(self):
+        first = _make_extend_request(prompt="She walks away.", scene="A street at night.")
+        first_payload = build_video_config_payload(first, VideoWorkingArtifacts(metadata={"scene": "A street at night.", "prompt_sent": "She walks away."}))
+        recorded = recorded_settings(first_payload)
+        # The next link starts from the joined clip, pre-filled with the recorded scene, and sends it as it is.
+        second_source = _make_extend_source(path=Path("/videos/clip-extended.mp4"), frame_count=first_payload["frame_count"], scene=recorded.scene, prompt=recorded.prompt)
+        second = _make_extend_request(second_source, prompt="A taxi stops.", scene=recorded.scene)
+        second_payload = build_video_config_payload(second, VideoWorkingArtifacts(metadata={"scene": recorded.scene, "prompt_sent": "A taxi stops."}))
+        assert second_payload["scene"] == first_payload["scene"] == "A street at night."
+        assert second_source.prompt == "She walks away."
+        assert second_payload["frame_count"] == 97 + 48 and second_payload["source_video"] == "/videos/clip-extended.mp4"

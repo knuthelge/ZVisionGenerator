@@ -33,12 +33,16 @@ class PickerPurpose:
     accepted_extensions: tuple[str, ...] = ()
 
 
+# Containers a video can be extended from (the picker, the inspect route and job submission share this list).
+SOURCE_VIDEO_EXTENSIONS = (".mp4", ".mov", ".m4v", ".mkv", ".webm")
+
 _PICKER_PURPOSES: dict[str, PickerPurpose] = {
     "output_directory": PickerPurpose(name="output_directory", kind="directory", label="Output directory"),
     "prompt_file": PickerPurpose(name="prompt_file", kind="existing_file", label="Prompt file", accepted_extensions=(".yaml", ".yml")),
     "prompt_file_folder": PickerPurpose(name="prompt_file_folder", kind="directory", label="Prompt file folder"),
     "checkpoint_file": PickerPurpose(name="checkpoint_file", kind="existing_file", label="Checkpoint file", accepted_extensions=(".safetensors",)),
     "lora_file": PickerPurpose(name="lora_file", kind="existing_file", label="LoRA file", accepted_extensions=(".safetensors",)),
+    "source_video": PickerPurpose(name="source_video", kind="existing_file", label="Source video", accepted_extensions=SOURCE_VIDEO_EXTENSIONS),
 }
 
 

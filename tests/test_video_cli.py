@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import warnings
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from conftest import make_extend_source
 
 from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
@@ -379,43 +381,74 @@ class TestVideoCliPreflight:
         assert order == []
 
 
+def _cli_source(**overrides):
+    return make_extend_source(**{"path": Path("clip.mp4"), "height": 288, "frame_count": 120, "scene": "A rainy street.", "prompt": "She waves.", **overrides})
+
+
+def _run_cli(
+    monkeypatch,
+    tmp_path,
+    argv,
+    *,
+    backend,
+    source=None,
+    load_error=None,
+    config=None,
+    local_models=("org/recorded-model", "ltx-8"),
+    extend_supported=True,
+    fit=None,
+):
+    """Run ``main()`` with heavy steps patched out; return what the batch received plus the backend and memory-check mocks."""
+    import zvisiongenerator.video_cli as video_cli
+
+    model_info = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
+    backend.load_model.return_value = (MagicMock(), model_info)
+    memory = MagicMock(return_value=fit)
+    monkeypatch.chdir(tmp_path)
+    app_config = {"ui": {"default_models": {"video": "ltx-8"}}} if config is None else config
+    monkeypatch.setattr(video_cli, "load_config", lambda: app_config)
+    monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(video_cli, "find_local_model_dir", lambda ref: tmp_path if ref in local_models else None)
+    monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
+    monkeypatch.setattr(video_cli, "supports_video_extend", lambda: extend_supported)
+    monkeypatch.setattr(video_cli, "supports_video_audio", lambda: True)
+    monkeypatch.setattr(video_cli, "detect_video_model", lambda _model: model_info)
+    monkeypatch.setattr(video_cli, "resolve_video_defaults", lambda _family, _config, cli_overrides: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
+    monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
+    monkeypatch.setattr(video_cli, "get_accelerator_memory_budget", lambda: MagicMock(gpu_bytes=16 * 1024**3))
+    monkeypatch.setattr(video_cli, "window_memory_fit", memory)
+    monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args, **_kwargs: object())
+    loaded: list[str] = []
+
+    def _load_source(path):
+        loaded.append(path)
+        if load_error is not None:
+            raise load_error
+        return source or _cli_source()
+
+    monkeypatch.setattr(video_cli, "load_extend_source", _load_source)
+    captured: dict = {"backend": backend, "memory": memory, "loaded": loaded}
+
+    def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, skip_signal=None):
+        captured.update(prompts_data=prompts_data, args=args, plan=plan)
+
+    monkeypatch.setattr(video_cli, "run_video_batch", _fake_run_video_batch)
+    with patch("sys.argv", ["ziv-video", "-o", str(tmp_path / "out"), *argv]):
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("always")
+            try:
+                video_cli.main()
+            finally:
+                captured["warnings"] = [str(item.message) for item in seen]
+                captured["memory_warnings"] = [message for message in captured["warnings"] if "GB" in message]
+    return captured
+
+
 class TestVideoCliScene:
     """``--scene`` reaches the plan; scene-only runs are valid; a run with no scene and no prompt is refused."""
 
     def _main(self, monkeypatch, tmp_path, argv):
-        """Run ``main()`` with heavy steps patched out; return what the batch received, or ``None`` if the CLI exited first."""
-        import zvisiongenerator.video_cli as video_cli
-
-        model_info = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
-        backend = MagicMock()
-        backend.load_model.return_value = (MagicMock(), model_info)
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(
-            video_cli, "load_config", lambda: {"video_generation": {"default_ratio": "16:9", "default_size": "m"}, "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}}}
-        )
-        monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
-        monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
-        monkeypatch.setattr(video_cli, "detect_video_model", lambda _model: model_info)
-        monkeypatch.setattr(video_cli, "resolve_video_defaults", lambda _family, _config, cli_overrides: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
-        monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
-        monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args, **_kwargs: object())
-        captured: dict = {}
-
-        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, skip_signal=None):
-            captured.update(prompts_data=prompts_data, args=args, plan=plan)
-
-        monkeypatch.setattr(video_cli, "run_video_batch", _fake_run_video_batch)
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "-o", str(tmp_path / "out"), *argv]):
-            video_cli.main()
-        return captured
-
-    def test_parser_has_scene_flag_defaulting_to_none(self):
-        parser = _build_video_parser()
-        assert parser.parse_args(["-m", "model"]).scene is None
-        assert parser.parse_args(["-m", "model", "--scene", "A castle."]).scene == "A castle."
-
-    def test_prompts_file_flag_defaults_to_none(self):
-        assert _build_video_parser().parse_args(["-m", "model"]).prompts_file is None
+        return _run_cli(monkeypatch, tmp_path, ["-m", "ltx-2.3", *argv], backend=MagicMock())
 
     def test_scene_alone_is_a_scene_only_run(self, monkeypatch, tmp_path):
         captured = self._main(monkeypatch, tmp_path, ["--scene", "A castle at dusk."])
@@ -479,6 +512,349 @@ class TestVideoCliScene:
         captured = self._main(monkeypatch, tmp_path, ["-p", str(prompts), "--prompt", "inline", "--scene", "Job scene."])
         assert captured["prompts_data"] == {"prompt": [("inline", None)]}
         assert captured["plan"].iterations[0].scene == "Job scene."
+
+
+class TestVideoCliExtend:
+    """``--extend`` loads and checks the source before the model, takes defaults from it, and sets the args the extend workflow reads."""
+
+    _source = staticmethod(_cli_source)
+
+    def _main(self, monkeypatch, tmp_path, argv, **options):
+        """Run ``main()`` through :func:`_run_cli`; ``self.backend`` holds the backend mock even when the CLI exits first."""
+        backend = self.backend = MagicMock()
+        return _run_cli(monkeypatch, tmp_path, argv, backend=backend, **options)
+
+    def test_parser_extend_options(self):
+        args = _build_video_parser().parse_args(["--extend", "clip.mp4", "--extend-seconds", "1.5"])
+        assert (args.extend_path, args.extend_seconds, args.extend_frames) == ("clip.mp4", 1.5, None)
+        args = _build_video_parser().parse_args(["--extend", "clip.mp4", "--extend-frames", "40"])
+        assert (args.extend_seconds, args.extend_frames) == (None, 40)
+
+    def test_extend_length_options_are_exclusive(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-seconds", "2", "--extend-frames", "48"])
+        assert "not allowed with argument" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("flag", ["--extend-seconds", "--extend-frames"])
+    def test_length_without_extend_is_refused(self, monkeypatch, tmp_path, capsys, flag):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "m", "--prompt", "a dog", flag, "16"])
+        assert f"{flag} requires --extend" in capsys.readouterr().err
+
+    def test_extend_frames_below_eight_is_refused(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-frames", "4"])
+        assert "--extend-frames must be at least 8" in capsys.readouterr().err
+
+    def test_extend_seconds_must_be_positive(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-seconds", "0"])
+        assert "--extend-seconds must be a finite number greater than 0" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("seconds", ["nan", "inf"])
+    def test_extend_seconds_must_be_finite(self, monkeypatch, tmp_path, capsys, seconds):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-seconds", seconds])
+        assert "--extend-seconds must be a finite number greater than 0" in capsys.readouterr().err
+        self.backend.load_model.assert_not_called()
+
+    @pytest.mark.parametrize("path", ["", "   "])
+    def test_a_blank_extend_path_is_refused(self, monkeypatch, tmp_path, capsys, path):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", path, "--prompt", "a dog"])
+        assert "--extend needs a video path" in capsys.readouterr().err
+        self.backend.load_model.assert_not_called()
+
+    def test_capability_gate_refuses_extend_before_the_source_is_read(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], extend_supported=False)
+        assert "macOS only" in capsys.readouterr().err
+        self.backend.load_model.assert_not_called()
+
+    def test_capability_gate_does_not_touch_other_runs(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], extend_supported=False)
+        assert captured["args"].extend_source is None and captured["loaded"] == []
+
+    @pytest.mark.parametrize(
+        ("extra", "flag"),
+        [
+            (["--upscale", "2"], "--upscale"),
+            (["--image", "pic.png"], "--image"),
+            (["--ratio", "16:9"], "--ratio"),
+            (["--size", "m"], "--size"),
+            (["-W", "512"], "--width"),
+            (["-H", "288"], "--height"),
+            (["--frames", "49"], "--frames"),
+        ],
+    )
+    def test_options_that_choose_a_size_are_refused(self, monkeypatch, tmp_path, capsys, extra, flag):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", *extra])
+        assert f"{flag} cannot be used with --extend" in capsys.readouterr().err
+        self.backend.load_model.assert_not_called()
+
+    def test_source_problems_are_printed_and_exit_before_the_model_loads(self, monkeypatch, tmp_path, capsys):
+        error = ValueError("clip.mp4 cannot be extended: The video is HDR. The video is interlaced.")
+        with pytest.raises(SystemExit) as exit_info:
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], load_error=error)
+        assert exit_info.value.code == 2
+        err = capsys.readouterr().err
+        assert "The video is HDR." in err and "The video is interlaced." in err
+        self.backend.load_model.assert_not_called()
+
+    def test_missing_source_file_exits_before_the_model_loads(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "gone.mp4"], load_error=FileNotFoundError("Video not found: gone.mp4"))
+        assert "Video not found: gone.mp4" in capsys.readouterr().err
+        self.backend.load_model.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("argv", "overrides", "expected"),
+        [
+            (["--prompt", ""], {}, ""),
+            ([], {}, ""),  # a source recorded with a scene continues from an empty action
+            ([], {"scene": None, "prompt": None}, ""),
+            ([], {"scene": None, "prompt": 'She says "Hi." She waves.'}, 'She says "Hi." She waves.'),  # a legacy source continues from its own prompt
+            (["--prompt", ""], {"scene": None, "prompt": "She waves."}, ""),
+        ],
+        ids=["explicit empty", "omitted", "no recorded prompt", "omitted for a legacy source", "explicit empty for a legacy source"],
+    )
+    def test_an_omitted_or_empty_prompt_plans_one_iteration(self, monkeypatch, tmp_path, argv, overrides, expected):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", *argv], source=self._source(**overrides))
+        assert captured["prompts_data"] == {"prompt": [(expected, None)]}
+        (iteration,) = captured["plan"].iterations
+        assert iteration.resolved_prompt == expected
+        assert not any("Still the original prompt" in message for message in captured["warnings"])
+
+    def test_a_prompts_file_is_not_replaced_by_a_legacy_prompt(self, monkeypatch, tmp_path):
+        prompts = tmp_path / "mine.yaml"
+        prompts.write_text("s:\n  - prompt: one\n")
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-p", str(prompts)], source=self._source(scene=None, prompt="She waves."))
+        assert captured["prompts_data"] == {"s": [("one", None)]}
+
+    def test_a_prompt_is_used_as_given(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--prompt", "She turns away."])
+        assert captured["prompts_data"] == {"prompt": [("She turns away.", None)]}
+
+    def test_a_prompts_file_is_read_when_given(self, monkeypatch, tmp_path):
+        prompts = tmp_path / "mine.yaml"
+        prompts.write_text("s:\n  - prompt: one\n  - prompt: two\n")
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-p", str(prompts)])
+        assert captured["prompts_data"] == {"s": [("one", None), ("two", None)]}
+
+    def test_a_prompts_file_entry_without_a_prompt_is_refused_by_the_loader(self, monkeypatch, tmp_path, capsys):
+        prompts = tmp_path / "mine.yaml"
+        prompts.write_text("s:\n  - prompt: one\n  - prompt: ''\n")
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-p", str(prompts)])
+        assert "empty prompt" in capsys.readouterr().err
+        self.backend.load_model.assert_not_called()
+
+    _KEEP_ALL = "style=keep,mood=keep,details=,length=same,motion=,sound="
+
+    def _preflight_spy(self, monkeypatch):
+        """Replace the preflight with a spy so no enhancer loads; the spy's ``call_args`` holds what the CLI planned."""
+        import zvisiongenerator.video_cli as video_cli
+
+        spy = MagicMock(return_value=MagicMock(cancelled=False, has_rewrites=False))
+        monkeypatch.setattr(video_cli, "run_preflight", spy)
+        return spy
+
+    def test_keep_everything_runs_when_the_prompt_splits_into_scene_and_action(self, monkeypatch, tmp_path):
+        from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
+
+        self._preflight_spy(monkeypatch)
+        args = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a fox", "--enhance", self._KEEP_ALL])["args"]
+        assert args.enhance == EnhanceSettings(style="keep", mood="keep", details=(), length="same", motion=(), sound=())
+
+    def test_keep_everything_is_refused_as_a_noop_with_a_scene(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--scene", "A castle.", "--prompt", "a fox", "--enhance", self._KEEP_ALL])
+        assert "Nothing to enhance" in capsys.readouterr().err
+
+    def test_keep_everything_runs_for_an_extension_even_with_a_scene(self, monkeypatch, tmp_path):
+        self._preflight_spy(monkeypatch)
+        args = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--scene", "A castle.", "--prompt", "she waves", "--enhance", self._KEEP_ALL])["args"]
+        assert args.enhance is not None
+
+    def test_an_entry_with_keep_everything_settings_is_kept_for_an_extension(self, monkeypatch, tmp_path):
+        import zvisiongenerator.video_cli as video_cli
+        from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
+
+        keep_all = EnhanceSettings(style="keep", mood="keep", details=(), length="same", motion=(), sound=())
+        prompts = tmp_path / "mine.yaml"
+        prompts.write_text("s:\n  - prompt: one\n")
+        inspection = MagicMock(prompts_data={"s": [("one", None)]}, scene_by_set={"s": ["Entry scene."]}, enhance_by_set={"s": [keep_all]})
+        monkeypatch.setattr(video_cli, "inspect_prompts_file", lambda _path: inspection)
+        spy = self._preflight_spy(monkeypatch)
+        self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-p", str(prompts)])
+        assert spy.call_args.kwargs["enhance_by_set"] == {"s": [keep_all]}
+
+    def test_a_missing_prompts_file_is_an_error_only_when_given(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-p", str(tmp_path / "nope.yaml")])
+        assert "Prompts file not found" in capsys.readouterr().err
+
+    @pytest.mark.parametrize(
+        ("fps", "seconds", "frames"),
+        [(24.0, "2", 48), (30.0, "2", 64), (25.0, "4", 96), (24.0, "0.1", 8)],
+    )
+    def test_seconds_convert_at_the_source_frame_rate(self, monkeypatch, tmp_path, fps, seconds, frames):
+        args = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-seconds", seconds], source=self._source(fps=fps))["args"]
+        assert (args.extend_frames, args.num_frames, args.fps) == (frames, frames + 25, fps)
+
+    def test_seconds_that_do_not_land_on_a_step_warn(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-seconds", "2"], source=self._source(fps=30.0))
+        assert any("--extend-seconds" in message for message in captured["warnings"])
+
+    def test_seconds_on_a_step_do_not_warn(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-seconds", "2"])
+        assert not any("--extend-seconds" in message for message in captured["warnings"])
+
+    @pytest.mark.parametrize(("requested", "snapped"), [(48, 48), (50, 48), (53, 56), (9, 8)])
+    def test_frames_snap_to_a_multiple_of_eight(self, monkeypatch, tmp_path, requested, snapped):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--extend-frames", str(requested)])
+        assert captured["args"].extend_frames == snapped and captured["args"].num_frames == snapped + 25
+        assert any("--extend-frames" in message for message in captured["warnings"]) is (requested != snapped)
+
+    def test_args_for_the_extend_workflow(self, monkeypatch, tmp_path):
+        source = self._source()
+        args = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], source=source)["args"]
+        assert args.extend_source is source
+        assert (args.width, args.height) == (512, 288)
+        assert (args.extend_frames, args.num_frames, args.fps) == (48, 73, 24.0)
+        assert args.ratio is None and args.size is None and args.upscale_steps is None
+
+    def test_size_is_not_aligned_or_resolved(self, monkeypatch, tmp_path):
+        args = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], source=self._source(width=96, height=64))["args"]
+        assert (args.width, args.height) == (96, 64)
+
+    def test_scene_defaults_to_the_sources_scene(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--prompt", "She leaves."])
+        assert captured["args"].scene == "A rainy street."
+        assert captured["plan"].iterations[0].scene == "A rainy street."
+
+    def test_an_explicit_scene_wins(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--scene", " A beach. "])
+        assert captured["args"].scene == "A beach."
+
+    def test_an_explicit_empty_scene_means_no_scene(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--scene", "", "--prompt", "She leaves."])
+        assert captured["args"].scene is None and captured["plan"].iterations[0].scene is None
+
+    def test_a_legacy_source_has_no_default_scene(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--prompt", "She leaves."], source=self._source(scene=None, prompt="She waves."))
+        assert captured["args"].scene is None
+
+    def test_a_legacy_prompt_left_unchanged_warns(self, monkeypatch, tmp_path):
+        source = self._source(scene=None, prompt="She waves,  then smiles.")
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--prompt", "She waves, then smiles."], source=source)
+        assert any("Still the original prompt" in message for message in captured["warnings"])
+
+    def test_a_legacy_prompt_that_was_edited_does_not_warn(self, monkeypatch, tmp_path):
+        source = self._source(scene=None, prompt="She waves.")
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--prompt", "She sits down."], source=source)
+        assert not any("Still the original prompt" in message for message in captured["warnings"])
+
+    def test_the_original_prompt_of_a_scene_bearing_source_does_not_warn(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--prompt", "She waves."])
+        assert not any("Still the original prompt" in message for message in captured["warnings"])
+
+    def test_model_defaults_to_the_sources_model(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], source=self._source(model="org/recorded-model"))
+        assert captured["args"].model == "org/recorded-model"
+        assert captured["backend"].load_model.call_args.args[0] == "org/recorded-model"
+        assert captured["backend"].load_model.call_args.kwargs["mode"] == "extend"
+        assert not any("not available locally" in message for message in captured["warnings"])
+
+    def test_an_explicit_model_wins(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "org/other"], source=self._source(model="org/recorded-model"))
+        assert captured["args"].model == "org/other"
+
+    def test_an_unavailable_source_model_falls_back_to_the_config_default_with_a_warning(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], source=self._source(model="org/not-downloaded"))
+        assert captured["args"].model == "ltx-8"
+        assert any("org/not-downloaded" in message and "not available locally" in message for message in captured["warnings"])
+
+    def test_a_source_without_a_model_uses_the_config_default_silently(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], source=self._source(model=None))
+        assert captured["args"].model == "ltx-8"
+        assert not any("not available locally" in message for message in captured["warnings"])
+
+    def test_no_model_anywhere_is_an_error(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], source=self._source(model=None), config={})
+        assert "--model is required" in capsys.readouterr().err
+        self.backend.load_model.assert_not_called()
+
+    def test_loras_default_to_the_sources_existing_loras(self, monkeypatch, tmp_path):
+        kept = tmp_path / "kept.safetensors"
+        kept.write_text("x")
+        source = self._source(lora=f"{kept}:0.8,{tmp_path / 'gone.safetensors'}:0.5")
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], source=source)
+        assert captured["args"].lora_paths == [str(kept)] and captured["args"].lora_weights == [0.8]
+        assert captured["backend"].load_model.call_args.kwargs["loras"] == [(str(kept), 0.8)]
+        assert any("gone.safetensors" in message and "not found" in message for message in captured["warnings"])
+
+    def test_all_loras_missing_means_none(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], source=self._source(lora=f"{tmp_path / 'gone.safetensors'}:0.5"))
+        assert captured["args"].lora_paths is None
+        assert captured["backend"].load_model.call_args.kwargs["loras"] is None
+
+    def test_explicit_loras_win(self, monkeypatch, tmp_path):
+        mine = tmp_path / "mine.safetensors"
+        mine.write_text("x")
+        source = self._source(lora=f"{tmp_path / 'gone.safetensors'}:0.5")
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--lora", f"{mine}:0.3"], source=source)
+        assert captured["args"].lora_paths == [str(mine)] and captured["args"].lora_weights == [0.3]
+        assert not any("gone.safetensors" in message for message in captured["warnings"])
+
+    def test_a_window_that_does_not_fit_warns_and_the_run_continues(self, monkeypatch, tmp_path):
+        fit = {"status": "too_large", "required_gb": 40.2, "budget_gb": 16.0}
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "org/recorded-model"], fit=fit)
+        (warning,) = captured["memory_warnings"]
+        assert "40.2 GB" in warning and "too large" in warning and "--extend-seconds" in warning and "--extend-frames" in warning
+        assert "args" in captured
+        call = captured["memory"].call_args
+        assert call.args == ("org/recorded-model",)
+        assert (call.kwargs["width"], call.kwargs["height"], call.kwargs["frames"], call.kwargs["low_memory"], call.kwargs["budget_bytes"]) == (512, 288, 73, True, 16 * 1024**3)
+
+    def test_a_window_that_fits_does_not_warn(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], fit={"status": "fits", "required_gb": 9.0, "budget_gb": 16.0})
+        assert captured["memory_warnings"] == []
+
+    def test_an_unknown_memory_fit_does_not_warn(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], fit=None)
+        assert captured["memory_warnings"] == []
+
+    def test_audio_follows_the_source_and_the_flag(self, monkeypatch, tmp_path):
+        from zvisiongenerator.utils.video_extend import extend_audio_output
+
+        with_audio = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"])["args"]
+        assert with_audio.no_audio is False and extend_audio_output(with_audio.extend_source, no_audio=with_audio.no_audio)
+        muted = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--no-audio"])["args"]
+        assert muted.no_audio is True and not extend_audio_output(muted.extend_source, no_audio=muted.no_audio)
+
+    def test_runs_and_seed_reach_the_batch(self, monkeypatch, tmp_path):
+        args = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-r", "3", "--seed", "7"])["args"]
+        assert (args.runs, args.seed) == (3, 7)
+
+    def test_the_source_path_is_expanded(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        captured = self._main(monkeypatch, tmp_path, ["--extend", "~/clip.mp4"])
+        assert captured["loaded"] == [str(tmp_path / "clip.mp4")]
+
+    def test_a_non_extend_run_is_unchanged(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"])
+        args = captured["args"]
+        assert args.extend_source is None and (args.width, args.height, args.num_frames) == (704, 448, 49)
+        assert captured["memory_warnings"] == []
+        assert captured["backend"].load_model.call_args.kwargs["mode"] == "t2v"
+
+    def test_model_is_still_required_without_extend(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--prompt", "a dog"])
+        assert "--model is required" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

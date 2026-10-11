@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import type { ActiveJobState } from '$lib/types';
 import {
-  documentTitle, etaLabel, formatClock, headline, isReviewing, itemActivity, itemFraction, iterations, jobBar, jobControls, jobTone, outcome,
-  phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine, reviewVideoUrl, stageBars, timeLeft
+  documentTitle, etaLabel, finishingLabel, formatClock, headline, isReviewing, isSteppedStage, isVideo, itemActivity, itemFraction, iterations,
+  jobBar, jobControls, jobTone, outcome, phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine,
+  reviewVideoUrl, stageBars, timeLeft
 } from './jobView';
 
 const IMAGE_CONTROLS = ['next', 'pause', 'resume', 'repeat', 'quit'];
@@ -181,6 +182,37 @@ describe('jobView', () => {
     expect(formatClock(75)).toBe('1:15');
     expect(formatClock(3725)).toBe('1:02:05');
     expect(formatClock(Number.NaN)).toBe('0:00');
+  });
+
+  describe('extend', () => {
+    const extending = (overrides: Partial<ActiveJobState> = {}) => job({ workflow: 'extend', stageNames: ['extend_video', 'join_clips'], stageName: 'extend_video', ...overrides });
+
+    it('treats an extension as a video job', () => {
+      expect(isVideo(extending())).toBe(true);
+      expect(headline(extending())).toBe('Generating video');
+    });
+
+    it('steps through the extension stage and not through the join', () => {
+      expect(isSteppedStage('extend_video')).toBe(true);
+      expect(isSteppedStage('join_clips')).toBe(false);
+      expect(itemActivity(extending({ currentStep: 3, totalSteps: 8, stageSteps: { extend_video: 8 } }))).toBe('stepping');
+    });
+
+    it('is finishing while the clips are joined, after the last step', () => {
+      const joining = extending({ stageName: 'join_clips', currentStep: 8, totalSteps: 8, stageSteps: { extend_video: 8 } });
+      expect(itemActivity(joining)).toBe('finishing');
+      expect(finishingLabel(joining)).toBe('Joining clips…');
+    });
+
+    it('labels the finishing stretch of other stages as finishing up', () => {
+      expect(finishingLabel(job({ stageName: 'save' }))).toBe('Finishing up…');
+      expect(finishingLabel(extending())).toBe('Finishing up…');
+    });
+
+    it('labels the extension bar Generate when the item has more than one stepped stage', () => {
+      const bars = stageBars(extending({ stageNames: ['extend_video', 'upscale'], currentStep: 2, totalSteps: 8 }));
+      expect(bars.map((bar) => bar.label)).toEqual(['Generate', 'Upscale']);
+    });
   });
 });
 

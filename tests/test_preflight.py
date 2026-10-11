@@ -6,12 +6,15 @@ from argparse import Namespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from conftest import make_extend_source
 
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
 from zvisiongenerator.core.job_plan import EnhanceStatus
-from zvisiongenerator.preflight import plan_iterations, run_preflight
+from zvisiongenerator.core.video_types import ExtendSource
+from zvisiongenerator.preflight import _iteration_context, _job_context, plan_iterations, run_preflight
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhance_by_set_for_mode, entry_scene
+from zvisiongenerator.utils.prompt_enhance_video import CONTINUE_NATURALLY
 
 
 def _plan(prompts_data, **overrides):
@@ -419,6 +422,108 @@ class TestVideoScene:
         (iteration,) = plan.iterations
         assert iteration.scene is None and iteration.enhanced_scene is None
         assert "snowy" not in enhancer.prompts[0] and "Own." not in enhancer.prompts[0]
+
+
+class TestVideoExtend:
+    """Verify the rewrite context and prompts of a job that extends a clip."""
+
+    _OLD = "A woman in a red raincoat stands on a rainy street. She says to the camera that it is late."
+    _SCENE = "A woman in a red raincoat on a rainy street at night."
+    _ACTION_TEXT = "She turns and walks slowly down the wet pavement, her umbrella tilting against the rain."
+
+    def _source(self, **overrides) -> ExtendSource:
+        return make_extend_source(**{"scene": self._SCENE, **overrides})
+
+    def _extend_args(self, source=None, **overrides):
+        source = source or self._source()
+        values = dict(extend_source=source, extend_frames=48, width=source.width, height=source.height, num_frames=25 + 48, no_audio=False)
+        values.update(overrides)
+        return _args(**values)
+
+    # -- the job context ---------------------------------------------------
+
+    def test_context_describes_the_window_at_the_source_frame_rate(self):
+        context = _job_context(self._extend_args(), mode="video")
+        assert context.extends is True
+        assert context.seconds == pytest.approx(73 / 24)
+        assert context.new_seconds == pytest.approx(2.0)
+        assert context.orientation == "landscape"
+        assert context.reference_image is False
+        assert context.audio is True
+
+    def test_other_jobs_do_not_extend(self):
+        context = _job_context(_args(width=704, height=448, num_frames=97, fps=24, no_audio=False), mode="video")
+        assert context.extends is False and context.previous is None and context.new_seconds is None
+        assert context.seconds == pytest.approx(97 / 24)
+
+    def test_image_jobs_ignore_the_extend_arguments(self):
+        assert _job_context(self._extend_args(), mode="image").extends is False
+
+    def test_prompt_is_original_is_decided_per_prompt(self):
+        context = _job_context(self._extend_args(self._source(scene=None, prompt=self._OLD)), mode="video")
+        unchanged = _plan({"a": [(f"  {self._OLD}\n", None)]})[0]
+        edited = _plan({"a": [("She waves.", None)]})[0]
+        assert _iteration_context(context, unchanged).prompt_is_original is True
+        assert _iteration_context(context, edited).prompt_is_original is False
+        scene_context = _job_context(self._extend_args(), mode="video")
+        assert _iteration_context(scene_context, unchanged) is scene_context
+
+    # -- the rewrite -------------------------------------------------------
+
+    def test_scene_is_kept_and_only_the_action_is_written(self):
+        enhancer = _FakeEnhancer([], texts=[self._ACTION_TEXT])
+        plan, *_ = _run({"v": [("she leaves", None)]}, enhancer=enhancer, mode="video", args=self._extend_args(), scene=self._SCENE)
+        (iteration,) = plan.iterations
+        assert iteration.enhance_status is EnhanceStatus.ENHANCED
+        assert iteration.enhanced_scene == self._SCENE and iteration.enhanced_prompt == self._ACTION_TEXT
+        assert enhancer.prompts[0] == "she leaves"
+        assert self._SCENE in enhancer.systems[0] and "She opens a black umbrella." in enhancer.systems[0]
+
+    def test_an_empty_continuation_is_allowed_and_asks_to_continue(self):
+        enhancer = _FakeEnhancer([], texts=[self._ACTION_TEXT])
+        plan, *_ = _run({"v": [("", None)]}, enhancer=enhancer, mode="video", args=self._extend_args(), scene=self._SCENE)
+        assert enhancer.prompts[0] == CONTINUE_NATURALLY
+        assert plan.iterations[0].enhance_status is EnhanceStatus.ENHANCED
+
+    def test_an_empty_scene_and_prompt_are_allowed_for_a_source_without_a_scene(self):
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
+        args = self._extend_args(self._source(scene=None, prompt=None))
+        plan, *_ = _run({"v": [("", None)]}, enhancer=enhancer, mode="video", args=args)
+        assert plan.iterations[0].enhance_status is EnhanceStatus.ENHANCED
+        assert plan.iterations[0].enhanced_scene == "A snowy field at dusk, soft light."
+
+    def test_an_empty_prompt_and_scene_still_fail_outside_extend(self):
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
+        with pytest.warns(UserWarning, match="Enter a scene or a prompt"):
+            plan, *_ = _run({"v": [("", None)]}, enhancer=enhancer, mode="video", args=_args(width=704, height=448, num_frames=97, fps=24))
+        assert plan.iterations[0].enhance_status is EnhanceStatus.FAILED
+        assert enhancer.calls == []
+
+    def test_legacy_source_with_the_unchanged_prompt_extracts_the_scene_and_continues_naturally(self):
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
+        args = self._extend_args(self._source(scene=None, prompt=self._OLD))
+        plan, *_ = _run({"v": [(self._OLD, None)]}, enhancer=enhancer, mode="video", args=args)
+        assert self._OLD in enhancer.systems[0]
+        assert CONTINUE_NATURALLY in enhancer.prompts[0] and "She says to the camera" not in enhancer.prompts[0]
+        assert plan.iterations[0].enhanced_scene == "A snowy field at dusk, soft light."
+        assert plan.iterations[0].enhanced_prompt == "A red fox runs across it."
+
+    def test_legacy_source_with_an_edited_prompt_sends_the_users_text(self):
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
+        args = self._extend_args(self._source(scene=None, prompt=self._OLD))
+        _run({"v": [("She picks up the umbrella.", None)]}, enhancer=enhancer, mode="video", args=args)
+        assert "She picks up the umbrella." in enhancer.prompts[0] and CONTINUE_NATURALLY not in enhancer.prompts[0]
+
+    def test_each_prompt_of_a_job_is_compared_to_the_old_prompt_on_its_own(self):
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT, _PAIR_TEXT])
+        args = self._extend_args(self._source(scene=None, prompt=self._OLD))
+        _run({"v": [(self._OLD, None), ("She picks up the umbrella.", None)]}, enhancer=enhancer, mode="video", args=args)
+        assert CONTINUE_NATURALLY in enhancer.prompts[0] and CONTINUE_NATURALLY not in enhancer.prompts[1]
+
+    def test_an_action_that_repeats_the_previous_clip_is_retried(self):
+        enhancer = _FakeEnhancer([], texts=["She opens a black umbrella.", self._ACTION_TEXT])
+        plan, *_ = _run({"v": [("she leaves", None)]}, enhancer=enhancer, mode="video", args=self._extend_args(), scene=self._SCENE)
+        assert len(enhancer.calls) == 2 and plan.iterations[0].enhanced_prompt == self._ACTION_TEXT
 
 
 # ── Controls ────────────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@
   import { historyStore } from '$lib/state/history.svelte';
   import { jobStore } from '$lib/state/job.svelte';
   import { draft } from '$lib/state/draft.svelte';
-  import { referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
+  import { extendParams, referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { startUpscale } from '$lib/state/upscale';
   import type { GalleryAsset, UpscaleFactor } from '$lib/types';
   import { Button, Select, Spinner } from '$lib/components/atoms';
@@ -428,6 +428,11 @@
     router.navigate('workspace', referenceParams(asset, target));
   }
 
+  function extendAsset(asset: GalleryAsset): void {
+    router.navigate('workspace', extendParams(asset));
+    addToast(`${asset.filename} is now the source video`, 'success');
+  }
+
   async function upscaleAsset(asset: GalleryAsset, factor: UpscaleFactor): Promise<void> {
     // The job panel and queue live in the Workspace; follow the upscale there.
     if (await startUpscale(asset, factor)) router.navigate('workspace');
@@ -548,6 +553,7 @@
             onpreview={openViewer}
             onreuse={reuseInWorkspace}
             onreference={useAsReference}
+            onextend={extendAsset}
             onupscale={upscaleAsset}
             ondelete={deleteSingle}
           />
@@ -584,6 +590,7 @@
   onnearend={() => { if (hasMore) void loadMorePages(); }}
   onreuse={reuseInWorkspace}
   onreference={useAsReference}
+  onextend={extendAsset}
   onupscale={upscaleAsset}
   ondelete={deleteSingle}
 />

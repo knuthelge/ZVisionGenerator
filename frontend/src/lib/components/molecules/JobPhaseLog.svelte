@@ -4,7 +4,7 @@
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import Alert from './Alert.svelte';
   import {
-    enhanceProgress, formatClock, isActive, isPaused, isVideo, itemActivity, iterations, jobPhase, outcome, phaseRows,
+    enhanceProgress, finishingLabel, finishingText, formatClock, isActive, isPaused, isVideo, itemActivity, iterations, jobPhase, outcome, phaseRows,
     positionLabel, readySummary, stageBars, stepFraction, type PhaseRow, type PhaseRowStatus
   } from '$lib/state/jobView';
   import type { ActiveJobState } from '$lib/types';
@@ -92,7 +92,7 @@
               <span>{bar.label}</span><span>Starting…</span>
             {:else if bar.state === 'done'}
               <span>{bar.label} · {bar.total} steps</span>
-              {#if finishing}<span>Finishing up…</span>{:else}<span class="job-step-done"><Icon name="check" size={12} />Done</span>{/if}
+              {#if finishing}<span>{finishingLabel(job)}</span>{:else}<span class="job-step-done"><Icon name="check" size={12} />Done</span>{/if}
             {:else}
               <span>{bar.label}</span><span>Next</span>
             {/if}
@@ -113,7 +113,7 @@
     <div class="job-step">
       <div class="job-step-head">
         {#if activity === 'finishing'}
-          <span>Finishing up…</span><span class="num">100%</span>
+          <span>{finishingLabel(job)}</span><span class="num">100%</span>
         {:else if activity === 'starting'}
           <span>Starting…</span>
         {:else if activity === 'reviewing'}
@@ -131,7 +131,7 @@
           live={running && activity === 'stepping'}
           busy={running && activity !== 'stepping'}
           {stepMs}
-          valuetext={activity === 'stepping' ? `Step ${job.currentStep} of ${job.totalSteps}` : activity === 'finishing' ? 'Finishing up' : 'Starting'}
+          valuetext={activity === 'stepping' ? `Step ${job.currentStep} of ${job.totalSteps}` : activity === 'finishing' ? finishingText(job) : 'Starting'}
         />
       {/if}
     </div>

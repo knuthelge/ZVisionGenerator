@@ -9,7 +9,7 @@ import zipfile
 
 import pytest
 
-from zvisiongenerator.web.workspace_contract import build_workflow_contract, canonicalize_workflow
+from zvisiongenerator.web.workspace_contract import build_workflow_contract, canonicalize_workflow, workflow_mode
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -124,7 +124,61 @@ def test_workflow_contract_exposes_canonical_values_only() -> None:
     contract = build_workflow_contract()
 
     assert "legacy_aliases" not in contract
+    assert contract["values"] == ["txt2img", "img2img", "txt2vid", "img2vid", "extend"]
+    assert list(contract["definitions"]) == contract["values"]
+
+
+def test_workflow_contract_drops_extend_without_the_capability() -> None:
+    contract = build_workflow_contract(video_extend=False)
+
     assert contract["values"] == ["txt2img", "img2img", "txt2vid", "img2vid"]
+    assert "extend" not in contract["definitions"]
+    assert "extend" in build_workflow_contract(video_extend=True)["definitions"]
+
+
+def test_extend_definition_lists_its_controls_and_cleared_fields() -> None:
+    definition = build_workflow_contract()["definitions"]["extend"]
+
+    assert (definition["mode"], definition["model_kind"]) == ("video", "video")
+    assert definition["visible_controls"] == [
+        "workflow",
+        "model",
+        "loras",
+        "prompt_source",
+        "prompt_scene",
+        "prompt_inline",
+        "prompt_enhance",
+        "prompt_enhance_auto",
+        "prompt_file_path",
+        "prompt_file_option",
+        "prompt_file_preview",
+        "prompt_file_edit",
+        "source_video",
+        "source_video_path",
+        "source_video_clear",
+        "extend_length",
+        "runs",
+        "steps",
+        "seed",
+        "audio",
+        "low_memory",
+    ]
+    assert (definition["supports_reference_image"], definition["requires_reference_image"], definition["requires_source_video"]) == (False, False, True)
+    assert set(definition["clear_fields"]) >= {"ratio", "size", "width", "height", "frames", "image_path", "upscale", "video_upscale_enabled", "video_upscale_factor", "negative_prompt", "guidance"}
+
+
+def test_extend_definition_drops_audio_when_video_has_no_audio_track() -> None:
+    without_audio = build_workflow_contract(video_audio=False)["definitions"]["extend"]
+
+    assert "audio" not in without_audio["visible_controls"]
+    assert "source_video" in without_audio["visible_controls"]
+
+
+def test_only_extend_requires_a_source_video() -> None:
+    definitions = build_workflow_contract()["definitions"]
+
+    assert {name for name, definition in definitions.items() if definition["requires_source_video"]} == {"extend"}
+    assert all(not any(control.startswith("source_video") for control in definitions[name]["visible_controls"]) for name in ("txt2img", "img2img", "txt2vid", "img2vid"))
 
 
 def test_workflow_contract_hides_audio_when_video_has_no_audio_track() -> None:
@@ -153,6 +207,8 @@ def test_workflow_contract_accepts_only_canonical_values() -> None:
     assert canonicalize_workflow("img2img") == "img2img"
     assert canonicalize_workflow("txt2vid") == "txt2vid"
     assert canonicalize_workflow("img2vid") == "img2vid"
+    assert canonicalize_workflow("extend") == "extend"
+    assert workflow_mode("extend") == "video"
     assert canonicalize_workflow("image") is None
     assert canonicalize_workflow("texttoimage") is None
     assert canonicalize_workflow("i2i") is None

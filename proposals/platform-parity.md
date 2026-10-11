@@ -18,6 +18,8 @@ Missing on Windows and Linux:
 6. **No low-RAM video streaming.** `--low-memory` on CUDA means `enable_model_cpu_offload()`, which moves each whole component onto the GPU in turn. macOS gets DiT block streaming (`low_ram_streaming`). CUDA image models already stream block by block (`image_win._stream_to_gpu`), but video doesn't.
 7. **No video memory-fit badges.** `model_status.describe_model_status` returns `memory_fit: None` for CUDA video ("CUDA video is not estimated").
 
+Extending a video is also macOS only: `supports_video_extend()` is false on CUDA, which hides the Extend Video workflow and refuses `--extend` (step 11).
+
 Different defaults or behaviour for the same feature:
 
 8. **Z-Image's default scheduler differs.** `model_presets.zimage.default_scheduler` is `beta` for mflux and `null` (FlowMatch Euler) for diffusers, so the same settings look different on each platform. The diffusers backend already supports `beta` (`FlowMatchEulerDiscreteScheduler(use_beta_sigmas=True)`).
@@ -111,6 +113,17 @@ Dropped on 2026-10-11. This step existed to keep a config key and CLI flag ident
 
 - Look for a public, pinned NF4 or other pre-quantized copy of the same model that transformers loads directly. If one exists, point `prompt_enhancer.model.win32` / `.linux` at it and update `download_size_label`.
 - Otherwise keep the 9 GB repo. It's a one-time download, and the label already tells users. Lowest priority.
+
+### 11. Extend a video on CUDA
+
+macOS extends a clip by pinning its last 25 frames at the start of a one-stage window and splicing the new part onto the original ([Extend a video](archive/video-extend.md)). The splice, source checks and prompts are shared; CUDA needs the generation step, video only:
+
+- diffusers 0.41.0 ships `LTX2ConditionPipeline`; `LTX2VideoCondition(frames=…, index=0, strength=1.0)` overwrites the first latent frames, which matches the MLX pin. Build it from the components already loaded (no reload) and re-apply LoRAs.
+- Pin the 25 tail frames as a pixel condition at index 0, and export at the source's fps; `_export_video` uses the model's `default_fps` today.
+- No upscale for extend; `_upscale_video` re-runs from frames without conditions.
+- A source with audio gets silence for the new part until step 2 lands.
+- Implement `VideoExtender` and turn on `supports_video_extend()` for the diffusers backend. The legacy LTX 0.9 branch has no condition pipeline and does not offer extend.
+- Spike first: confirm that 25 frames encode to exactly 4 latent frames, and measure the seam.
 
 ## Verification
 

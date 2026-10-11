@@ -4,9 +4,66 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from zvisiongenerator.core.types import StageOutcome
+
+if TYPE_CHECKING:
+    from zvisiongenerator.utils.video_probe import VideoProbe
+
+
+@dataclass(frozen=True)
+class ExtendSource:
+    """A checked clip to continue: its displayed geometry, timing, colour tags and the settings recorded in it."""
+
+    path: Path
+    # Displayed size: a clip stored sideways and rotated by its display matrix reports the size it is shown at.
+    width: int
+    height: int
+    fps: float
+    # The frame rate as ffprobe writes it (e.g. ``30000/1001``), passed to ffmpeg unchanged.
+    fps_text: str
+    frame_count: int
+    has_audio: bool
+    # Seconds from the start of the file to the first video frame (an input ``-ss`` is relative to the file start).
+    video_start: float
+    color_space: str | None = None
+    color_primaries: str | None = None
+    color_trc: str | None = None
+    # Scene and prompt recorded in the file (the action only when a scene was recorded).
+    scene: str | None = None
+    prompt: str | None = None
+    model: str | None = None
+    lora: str | None = None
+    # The probe this value was built from. The source file is never modified, so it stays valid for the whole job;
+    # it is not part of the value's identity.
+    probe: VideoProbe | None = field(default=None, compare=False, repr=False)
+
+    @property
+    def legacy(self) -> bool:
+        """Whether the file predates scenes: a single recorded prompt that holds the scene and the action together."""
+        return self.scene is None and bool(self.prompt)
+
+
+@dataclass(frozen=True)
+class ExtendSpec:
+    """What to append to a source clip: the clip and the number of new frames (a multiple of 8)."""
+
+    source: ExtendSource
+    frames: int
+
+
+@dataclass(frozen=True)
+class ExtendSegment:
+    """The generated part of an extension: its video and, when the source has sound, its audio as a WAV file.
+
+    The WAV starts ``lead_samples`` before the new part: that lead-in is the model's reconstruction of the source's
+    last sound, which fills the end of a source track that is shorter than its video. The new part follows it.
+    """
+
+    video_path: Path
+    audio_path: Path | None = None
+    lead_samples: int = 0
 
 
 @dataclass(frozen=True)
@@ -63,6 +120,9 @@ class VideoGenerationRequest:
     # The user's own text, recorded when ``prompt``/``scene`` already hold an enhanced rewrite made before the job (e.g. in the Web UI)
     scene_input: str | None = None
     prompt_input: str | None = None
+
+    # Extend: the clip to continue and the new frames to add; ``None`` for a plain generation
+    extend: ExtendSpec | None = None
 
 
 @dataclass

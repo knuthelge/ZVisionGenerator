@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from PIL import Image, UnidentifiedImageError
 
-from zvisiongenerator.backends import get_backend_name, get_prompt_enhancer_session, supports_video_audio, supports_video_upscale_review
+from zvisiongenerator.backends import get_backend_name, get_prompt_enhancer_session, supports_video_audio, supports_video_extend, supports_video_upscale_review
 from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu
 from zvisiongenerator.converters.convert_checkpoint import MODEL_TYPES
 from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_local
@@ -54,12 +54,14 @@ from zvisiongenerator.utils.prompt_enhance_video import EnhancePairResult, enhan
 from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
 from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
 from zvisiongenerator.upscale_runner import read_upscale_source
+from zvisiongenerator.utils.video_extend import apply_extend_args
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.workflows import build_upscale_workflow
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response, huggingface_token_env_var
 from zvisiongenerator.web.config_contract import persist_writable_config_patch, resolve_output_dir as resolve_config_output_dir
 from zvisiongenerator.web.defaults import default_image_size_for_ratio, default_video_size_for_ratio
+from zvisiongenerator.web.extend_api import EXTEND_UNAVAILABLE_MESSAGE, extend_context_from_body, extend_source_response, load_source_video, requested_extend_frames
 from zvisiongenerator.web.gallery import (
     GALLERY_MEDIA_EXTENSIONS,
     build_gallery_page_json,
@@ -191,6 +193,21 @@ async def open_picker(request: Request) -> dict[str, str | None]:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return result.to_payload()
+
+
+@app.post("/api/extend/source")
+async def api_extend_source(request: Request) -> dict[str, Any]:
+    """Inspect a host-local video that may be extended: its facts, recorded scene and prompt, problems and memory fit."""
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
+    try:
+        return await run_in_threadpool(extend_source_response, payload, load_web_config(), _media_output_root())
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/api/prompt-files/inspect")
@@ -375,12 +392,17 @@ def _validate_enhance_body(body: Any) -> dict[str, Any]:
             raise ValueError("scene must be a string.")
         if prompt is None:
             prompt = ""
-        if not isinstance(prompt, str) or not (prompt.strip() or scene.strip()):
+        if not isinstance(prompt, str):
             raise ValueError("Enter a scene or a prompt to enhance.")
     elif not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("Enter a prompt to enhance.")
+    context = _enhance_context_from_body(body.get("context"), mode=mode, prompt=prompt)
+    # Extending a clip may start from nothing: the enhancer then continues the scene naturally.
+    if mode == "video" and not context.extends and not (prompt.strip() or scene.strip()):
+        raise ValueError("Enter a scene or a prompt to enhance.")
     settings = settings_from_mapping(body.get("settings") or {}, mode=mode, motion_in_image="warn")
-    validate_settings(settings, mode=mode, split=mode == "video" and not scene.strip() and bool(prompt.strip()))
+    # An extension always writes a new action, so its settings are never a no-op.
+    validate_settings(settings, mode=mode, split=context.extends or (mode == "video" and not scene.strip() and bool(prompt.strip())))
     app_config = load_config()
     options = enhance_options(app_config)
     max_words = body.get("max_words")
@@ -394,7 +416,7 @@ def _validate_enhance_body(body: Any) -> dict[str, Any]:
         "scene": scene,
         "mode": mode,
         "settings": settings,
-        "context": _enhance_context_from_body(body.get("context"), mode=mode),
+        "context": context,
         "ceiling": max_words,
         "repo": repo,
         "revision": revision,
@@ -403,12 +425,21 @@ def _validate_enhance_body(body: Any) -> dict[str, Any]:
     }
 
 
-def _enhance_context_from_body(raw: Any, *, mode: str) -> EnhanceContext:
-    """Validate the enhance request's job facts (frame size or ratio, frames, fps, audio, reference image)."""
+def _enhance_context_from_body(raw: Any, *, mode: str, prompt: str = "") -> EnhanceContext:
+    """Validate the enhance request's job facts (frame size or ratio, frames, fps, audio, reference image).
+
+    A video request with ``context.source_video`` extends that clip: the server reads the clip's size, frame rate,
+    recorded prompt and recorded scene itself, so only the source, the new length and the audio setting come from the client.
+
+    Args:
+        prompt: The user's prompt template, compared with a legacy source's recorded prompt.
+    """
     if raw is None:
         return EnhanceContext()
     if not isinstance(raw, dict):
         raise ValueError("context must be a JSON object.")
+    if mode == "video" and raw.get("source_video") is not None:
+        return extend_context_from_body(raw, prompt)
 
     def _positive(key: str) -> int | float | None:
         value = raw.get(key)
@@ -770,7 +801,7 @@ def _default_workflow_for_mode(mode: str) -> str:
 
 
 def _build_workflow_contract() -> dict[str, Any]:
-    return build_workflow_contract(video_audio=supports_video_audio(), video_upscale_review=supports_video_upscale_review())
+    return build_workflow_contract(video_audio=supports_video_audio(), video_upscale_review=supports_video_upscale_review(), video_extend=supports_video_extend())
 
 
 def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
@@ -957,19 +988,28 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
 def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     app_config = web_config.app_config
     workflow = _workflow_from_form(_optional_text(form, "workflow"), fallback="txt2vid")
+    extend = workflow == "extend"
+    if extend and not supports_video_extend():
+        raise ValueError(EXTEND_UNAVAILABLE_MESSAGE)
     model_name = _text_or_default(form, "model", web_config.default_models.video)
     if not model_name:
         raise ValueError("A video model is required.")
 
-    ratio = _choice_or_default(form, "ratio", web_config.video_ratios, app_config.get("video_generation", {}).get("default_ratio", "16:9"))
-    size = _resolve_video_size(form, web_config, ratio)
+    # An extension takes its size, frame rate and length from the source clip, so the size and reference-image fields are ignored.
+    ratio = None if extend else _choice_or_default(form, "ratio", web_config.video_ratios, app_config.get("video_generation", {}).get("default_ratio", "16:9"))
+    size = None if extend else _resolve_video_size(form, web_config, ratio)
     output_dir = _resolve_output_dir(web_config.output_dir)
-    image_path = _resolve_reference_image(form, output_dir)
+    image_path = None if extend else _resolve_reference_image(form, output_dir)
+    # The source is checked again here: the file may have changed since the Workspace inspected it.
+    source = load_source_video(_optional_text(form, "source_video"), key="source_video") if extend else None
     audio_enabled = _checkbox(form, "audio", default=True) and supports_video_audio()
     scene = _optional_text(form, "scene")
-    _prompt_source, prompt, _negative_prompt, prompts_data, enhance_by_set, scene_by_set = _resolve_prompt_submission_with_enhance(form, allow_empty_prompt=scene is not None)
-    enhance_by_set = enhance_by_set_for_mode(enhance_by_set, mode="video", scene_by_set=scene_by_set, job_scene=scene)
-    upscale = _optional_int(form, "upscale")
+    if source is not None and "scene" not in form:
+        scene = source.scene
+    _prompt_source, prompt, _negative_prompt, prompts_data, enhance_by_set, scene_by_set = _resolve_prompt_submission_with_enhance(form, allow_empty_prompt=scene is not None or extend)
+    # An extension always writes a new action beside the kept scene, so no prompt-file entry is a no-op: nothing is dropped.
+    enhance_by_set = enhance_by_set_for_mode(enhance_by_set, mode="video", scene_by_set=None if extend else scene_by_set, job_scene=None if extend else scene)
+    upscale = None if extend else _optional_int(form, "upscale")
     args = argparse.Namespace(
         model=model_name,
         prompt=prompt,
@@ -980,9 +1020,9 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         image_path=image_path,
         ratio=ratio,
         size=size,
-        width=_optional_int(form, "width"),
-        height=_optional_int(form, "height"),
-        frames=_optional_int(form, "frames"),
+        width=None if extend else _optional_int(form, "width"),
+        height=None if extend else _optional_int(form, "height"),
+        frames=None if extend else _optional_int(form, "frames"),
         num_frames=None,
         steps=_optional_int(form, "steps"),
         seed=_optional_int(form, "seed"),
@@ -1001,7 +1041,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     )
     if review_enabled(args) and not supports_video_upscale_review():
         raise HTTPException(status_code=400, detail="Review before upscaling is not available for video on this platform.")
-    _apply_enhance_submission(args, form, mode="video", json_caption=False, split=not (scene or "").strip())
+    _apply_enhance_submission(args, form, mode="video", json_caption=False, split=extend or not (scene or "").strip())
     if _WORKFLOW_DEFINITIONS[workflow]["requires_reference_image"] and image_path is None:
         raise ValueError("Image-to-video requires a reference image.")
     _validate_video_args(args)
@@ -1014,7 +1054,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         raise ValueError(f"Model '{model_name}' does not support image-to-video.")
 
     video_sizes = app_config.get("video_sizes", {})
-    if video_sizes:
+    if video_sizes and not extend:
         if args.ratio not in video_sizes:
             raise ValueError(f"Unknown ratio '{args.ratio}'. Valid: {list(video_sizes.keys())}")
         if args.size not in video_sizes.get(args.ratio, {}):
@@ -1035,11 +1075,16 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     }
     defaults = resolve_video_defaults(model_info.family, app_config, cli_overrides)
     args.steps = defaults["steps"]
-    args.width = defaults["width"]
-    args.height = defaults["height"]
-    args.num_frames = defaults["num_frames"]
-    args.fps = model_info.default_fps
-    _normalize_video_args(args, app_config, model_info)
+    if source is not None:
+        # The window keeps the source's size and frame rate; no resolution or frame alignment applies.
+        apply_extend_args(args, source, requested_extend_frames(_optional_int(form, "extend_frames"), _optional_float(form, "extend_seconds"), source.fps))
+        _normalize_video_steps(args, app_config, model_info)
+    else:
+        args.width = defaults["width"]
+        args.height = defaults["height"]
+        args.num_frames = defaults["num_frames"]
+        args.fps = model_info.default_fps
+        _normalize_video_args(args, app_config, model_info)
 
     request = VideoGenerationRequest(
         backend=None,
@@ -1066,14 +1111,18 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     except RuntimeError as exc:
         raise ValueError(str(exc)) from exc
 
+    if source is not None:
+        job_type, meta = "Extend video", f"{args.width}x{args.height} · +{args.extend_frames} frames · {args.steps} steps"
+    else:
+        job_type, meta = "Image to Video" if image_path else "Text to Video", f"{args.width}x{args.height} · {args.num_frames} frames · {args.steps} steps"
     context = _public_job_context(
         form,
         mode="video",
-        job_type="Image to Video" if image_path else "Text to Video",
+        job_type=job_type,
         model=model_name,
         prompt=prompt or scene or "",
         runs=args.runs,
-        meta=f"{args.width}x{args.height} · {args.num_frames} frames · {args.steps} steps",
+        meta=meta,
         output_dir=args.output,
         image_path=image_path,
     )
@@ -1392,7 +1441,8 @@ def _validate_video_args(args: argparse.Namespace) -> None:
         raise ValueError("Upscale only supports factor 2 (LTX spatial upscaler).")
 
 
-def _normalize_video_args(args: argparse.Namespace, config: dict[str, Any], model_info: Any) -> None:
+def _normalize_video_steps(args: argparse.Namespace, config: dict[str, Any], model_info: Any) -> None:
+    """Settle the step counts of a video job: upscale steps, and LTX's cap of 8 steps."""
     steps_explicitly_set = args.steps is not None
     if args.upscale:
         upscale_cfg = config.get("video_model_presets", {}).get("ltx", {}).get("upscale", {})
@@ -1410,6 +1460,9 @@ def _normalize_video_args(args: argparse.Namespace, config: dict[str, Any], mode
         if args.upscale_steps is not None:
             args.upscale_steps = args.steps
 
+
+def _normalize_video_args(args: argparse.Namespace, config: dict[str, Any], model_info: Any) -> None:
+    _normalize_video_steps(args, config, model_info)
     alignment = 64 if args.upscale else model_info.resolution_alignment
     args.width, args.height = align_resolution(args.width, args.height, alignment, model_info.family.upper())
     args.num_frames = align_ltx_frames(args.num_frames, model_info.frame_alignment)

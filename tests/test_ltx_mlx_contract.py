@@ -1,6 +1,6 @@
 """Pin the vendored LTX MLX internals that ``backends/video_mac.py`` relies on.
 
-Introspection only: no pipeline is constructed and no weights are loaded. A failure here after
+Introspection, plus a few tiny-array shape checks: no pipeline is constructed and no weights are loaded. A failure here after
 ``make update-ltx`` means upstream changed a name or signature the macOS video backend calls.
 """
 
@@ -14,17 +14,30 @@ import pytest
 pytest.importorskip("mlx")
 pytest.importorskip("ltx_pipelines_mlx")
 
-from ltx_core_mlx.components.patchifiers import compute_video_latent_shape, snap_output_dimensions  # noqa: E402
+from ltx_core_mlx.components.patchifiers import AudioPatchifier, VideoLatentPatchifier, compute_video_latent_shape, snap_output_dimensions  # noqa: E402
+from ltx_core_mlx.conditioning.types import VideoConditionByLatentIndex  # noqa: E402
+from ltx_core_mlx.model.audio_vae import encode_audio  # noqa: E402
 from ltx_core_mlx.model.transformer.model import X0Model  # noqa: E402
+from ltx_core_mlx.model.video_vae.video_vae import (  # noqa: E402
+    VideoDecoder as VaeVideoDecoder,
+    _compute_decode_tiling,
+    _ffmpeg_sink,
+    decode_cache_limit,
+    stream_chunks_to_ffmpeg,
+)
+from ltx_core_mlx.utils.audio import AudioData, load_audio  # noqa: E402
 from ltx_core_mlx.utils.memory import aggressive_cleanup  # noqa: E402
 from ltx_core_mlx.utils.positions import compute_audio_positions, compute_audio_token_count, compute_video_positions  # noqa: E402
 from ltx_pipelines_mlx import BasePipeline, DistilledPipeline  # noqa: E402
 from ltx_pipelines_mlx.distilled import Stage1Result  # noqa: E402
+from ltx_pipelines_mlx.extend_distilled import carry_audio_tokens, fit_audio_latent  # noqa: E402
+from ltx_pipelines_mlx.retake import encode_video_tensor  # noqa: E402
 from ltx_pipelines_mlx.scheduler import DISTILLED_SIGMAS, STAGE_2_SIGMAS, shorten_schedule  # noqa: E402
 from ltx_pipelines_mlx.utils._orchestration import combined_image_conditionings  # noqa: E402
 from ltx_pipelines_mlx.utils.args import ImageConditioningInput  # noqa: E402
-from ltx_pipelines_mlx.utils.blocks import ImageConditioner, PromptEncoder  # noqa: E402
+from ltx_pipelines_mlx.utils.blocks import AudioConditioner, AudioDecoder, ImageConditioner, PromptEncoder, VideoDecoder as VideoDecoderBlock  # noqa: E402
 from ltx_pipelines_mlx.utils.helpers import create_noised_state  # noqa: E402
+from ltx_pipelines_mlx.utils.media_io import video_preprocess  # noqa: E402
 from ltx_pipelines_mlx.utils.samplers import denoise_loop  # noqa: E402
 from ltx_pipelines_mlx.utils.stepwise import StepwisePreview  # noqa: E402
 
@@ -186,3 +199,82 @@ class TestGeometryHelpers:
 
     def test_aggressive_cleanup_takes_no_arguments(self):
         assert not _params(aggressive_cleanup)
+
+
+class TestExtendContract:
+    """Internals the macOS backend uses to continue a clip from its tail."""
+
+    def test_video_pin_condition_arguments(self):
+        assert list(_params(VideoConditionByLatentIndex.__init__))[1:4] == ["frame_indices", "clean_latent", "strength"]
+
+    def test_video_tail_encoding_arguments(self):
+        assert list(_params(encode_video_tensor)) == ["encoder", "video_tensor"]
+        assert list(_params(video_preprocess))[:3] == ["frames", "height", "width"]
+
+    def test_tail_audio_loading_arguments(self):
+        _assert_params(load_audio, "path", "target_sample_rate", "start_time", "max_duration", "mono")
+
+    def test_audio_encoding_arguments(self):
+        assert list(_params(encode_audio))[:4] == ["waveform", "sample_rate", "encoder", "processor"]
+
+    def test_audio_carry_helpers(self):
+        assert list(_params(fit_audio_latent)) == ["audio_latent", "audio_tokens"]
+        assert list(_params(carry_audio_tokens))[:2] == ["frame_rate", "carry_pixel_frames"]
+
+    def test_audio_conditioner_frees_after_the_call(self):
+        _assert_keyword_only(AudioConditioner.__call__, "free_after")
+
+    def test_pipeline_assigns_the_blocks_and_flags_the_extension_relies_on(self):
+        source = inspect.getsource(BasePipeline.__init__)
+        for attr in ("self._loaded", "self.audio_conditioner", "self.video_decoder_block", "self.audio_decoder_block", "self.audio_patchifier"):
+            assert attr in source, f"BasePipeline.__init__ does not assign {attr}"
+
+    def test_freeing_the_transformer_follows_the_upstream_decode_wrapper(self):
+        source = inspect.getsource(BasePipeline._decode_and_save_video)
+        assert "self.dit = None" in source
+        assert "self._loaded = False" in source
+
+    def test_video_decoder_block_loads_without_arguments_and_names_its_decoder(self):
+        assert list(_params(VideoDecoderBlock.load)) == ["self"]
+        assert "self.video_decoder" in inspect.getsource(VideoDecoderBlock.__init__)
+
+    def test_audio_decoder_block_decodes_a_latent(self):
+        assert list(_params(AudioDecoder.__call__)) == ["self", "audio_latent"]
+
+    def test_audio_patchifier_patchifies_a_latent(self):
+        assert list(_params(AudioPatchifier.patchify)) == ["self", "latent"]
+
+    def test_tiled_decode_arguments(self):
+        assert list(_params(VaeVideoDecoder.tiled_decode)) == ["self", "latent", "tiling_config"]
+
+    def test_decode_tiling_and_streaming_helpers(self):
+        assert list(_params(_compute_decode_tiling)) == ["latent_shape", "frame_rate", "budget_bytes"]
+        assert not _params(decode_cache_limit)
+        assert list(_params(stream_chunks_to_ffmpeg)) == ["chunks", "proc"]
+        assert list(_params(_ffmpeg_sink)) == ["cmd"]
+
+
+class TestExtendShapes:
+    """Tail-carry shapes the backend builds, checked on tiny arrays (no weights are loaded)."""
+
+    def test_loaded_audio_exposes_its_waveform_and_rate(self):
+        assert {"waveform", "sample_rate"} <= set(inspect.signature(AudioData).parameters)
+
+    def test_audio_tail_pin_is_one_token_per_carry_step(self):
+        import mlx.core as mx
+
+        tokens = carry_audio_tokens(24.0, 25)
+        fitted = fit_audio_latent(mx.zeros((1, 8, tokens + 3, 16)), tokens)
+        padded = fit_audio_latent(mx.zeros((1, 8, tokens - 2, 16)), tokens)
+
+        assert tokens == 26
+        assert AudioPatchifier().patchify(fitted)[0].shape == (1, 26, 128)
+        assert AudioPatchifier().patchify(padded)[0].shape == (1, 26, 128)
+
+    def test_video_tail_pin_patchifies_to_one_token_per_latent_cell(self):
+        import mlx.core as mx
+
+        tokens, dims = VideoLatentPatchifier().patchify(mx.zeros((1, 128, 4, 14, 22)))
+
+        assert tokens.shape == (1, 4 * 14 * 22, 128)
+        assert dims == (4, 14, 22)

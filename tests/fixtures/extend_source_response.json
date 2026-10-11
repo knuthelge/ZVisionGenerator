@@ -1,0 +1,21 @@
+{
+  "path": "/clips/clip.mp4",
+  "filename": "clip.mp4",
+  "media_url": "/media/clip.mp4",
+  "width": 512,
+  "height": 256,
+  "rotation": 0,
+  "fps": 24.0,
+  "frame_count": 97,
+  "duration_seconds": 4.042,
+  "has_audio": true,
+  "scene": "A woman in a red raincoat on a rainy street at night.",
+  "prompt": "She opens a black umbrella and walks away.",
+  "legacy": false,
+  "model": "ltx-8",
+  "lora": null,
+  "problems": [],
+  "extend_frames": 48,
+  "window_frames": 73,
+  "memory_fit": null
+}

@@ -185,6 +185,11 @@ def supports_video_audio() -> bool:
     return _video_backend_is_ltx_mlx()
 
 
+def supports_video_extend() -> bool:
+    """Return whether this platform's video backend can extend a clip (LTX MLX on macOS; diffusers cannot yet)."""
+    return _video_backend_is_ltx_mlx()
+
+
 def supports_video_upscale_review() -> bool:
     """Return whether this platform's video backend can pause after the half-size render of an upscale (LTX MLX on macOS only)."""
     return _video_backend_is_ltx_mlx()

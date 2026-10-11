@@ -1,6 +1,7 @@
+import { extendPrefillFor } from './extend';
 import { workflowMode } from './promptEnhance';
-import { alignFrameCount } from './videoDuration';
-import type { DraftState, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
+import { alignFrameCount, defaultExtendFrames, snapExtendFrames } from './videoDuration';
+import type { DraftState, ExtendSourceInfo, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
 const SCHEMA_VERSION = 3;
@@ -70,6 +71,10 @@ const DEFAULT_DRAFT: DraftState = {
   enhancedFrom: null,
   enhanceSettings: null,
   enhanceAuto: false,
+  extendSourcePath: null,
+  extendFrames: null,
+  missingSourceVideo: false,
+  extendPrefill: null,
 };
 
 const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
@@ -87,6 +92,8 @@ const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
   height: 'custom_dimensions',
   frames: 'frame_count',
   lora: 'loras',
+  source_video: 'source_video',
+  extend_frames: 'extend_length',
   image_path: 'reference_image_path',
   negative_prompt: 'negative_prompt',
   scheduler: 'scheduler',
@@ -207,10 +214,14 @@ function _modelDefaultsFor(ctx: WorkspaceContext, workflow: Workflow, model: str
   return (defaultsMap?.[model] ?? (model === currentModel ? fallback : null)) as ImageModelDefaults | VideoModelDefaults | null;
 }
 
-/** Return a video model's frame rate and frame alignment, falling back to the default video model's. */
-export function videoTimingFor(ctx: WorkspaceContext, model: string): { fps: number; frameAlignment: number } {
+/**
+ * Return a video model's frame rate and frame alignment, falling back to the default video model's.
+ *
+ * @param sourceFps An extension's frame rate is its source's: when given, it replaces the model's.
+ */
+export function videoTimingFor(ctx: WorkspaceContext, model: string, sourceFps: number | null = null): { fps: number; frameAlignment: number } {
   const defaults = ctx.video_model_defaults?.[model] ?? ctx.video_defaults;
-  return { fps: defaults?.fps ?? 24, frameAlignment: defaults?.frame_alignment ?? 1 };
+  return { fps: sourceFps ?? defaults?.fps ?? 24, frameAlignment: defaults?.frame_alignment ?? 1 };
 }
 
 /** Apply a workflow's cleared fields and then the model's defaults to a state. */
@@ -278,14 +289,24 @@ function loadFromStorage(): DraftState {
 
 let _draft = $state<DraftState>(loadFromStorage());
 let _authorityReady = $state(false);
+// What the server last reported about the extend source; fetched again on load, so it is not saved with the draft.
+let _extendSource = $state<ExtendSourceInfo | null>(null);
+
+/** The frame rate an extension runs at: its source's, once known. */
+function _sourceFps(workflow: Workflow): number | null {
+  return workflow === 'extend' ? _extendSource?.fps ?? null : null;
+}
 
 export const draft = {
   get state(): DraftState { return _draft; },
   get authorityReady(): boolean { return _authorityReady; },
+  /** What the server reported about the chosen extend source; null before it answers or without a source. */
+  get extendSource(): ExtendSourceInfo | null { return _extendSource; },
 
   loadDraft(): void {
     _draft = loadFromStorage();
     _authorityReady = false;
+    _extendSource = null;
   },
 
   /**
@@ -309,8 +330,21 @@ export const draft = {
       return !controlId || visibleControls === null || visibleControls.has(controlId);
     };
 
+    // An extension names its source: the URL then describes the whole job, so its text replaces whatever the boxes held.
+    const extending = workflow === 'extend' && canApply('source_video') && Boolean(params.source_video || params.missing_source_video);
     // Reusing text fills both boxes of the pair (a missing part is blank), and the Enhanced pair when the asset kept one.
-    const reusesText = ['prompt', 'scene', 'enhanced_prompt', 'enhanced_scene'].some((key) => params[key]);
+    const reusesText = extending || ['prompt', 'scene', 'enhanced_prompt', 'enhanced_scene'].some((key) => params[key]);
+    if (extending) {
+      // A source that moved still names its old path; the Workspace asks for it to be chosen again.
+      prefill.extendSourcePath = params.source_video || null;
+      prefill.missingSourceVideo = params.missing_source_video === 'true';
+      if (prefill.extendSourcePath !== _draft.extendSourcePath) _extendSource = null;
+    }
+    if (params.extend_frames && canApply('extend_frames')) {
+      const frames = Number(params.extend_frames);
+      // A multiple of 8, not 8k+1: the new frames are not a clip length.
+      if (Number.isFinite(frames)) prefill.extendFrames = snapExtendFrames(frames);
+    }
     if (reusesText && canApply('prompt')) {
       prefill.prompt = params.prompt ?? '';
       prefill.enhancedPrompt = canApply('enhanced_prompt') ? params.enhanced_prompt ?? '' : '';
@@ -321,6 +355,17 @@ export const draft = {
       // The reused Enhanced pair came from the reused inputs, so it is not out of date; with none, a stale Enhanced box would silently win.
       const enhanced = `${prefill.enhancedPrompt}${prefill.enhancedScene}`.trim() !== '';
       prefill.enhancedFrom = enhanced ? { prompt: prefill.prompt, scene: prefill.scene ?? '', mode: workflowMode(workflow) } : null;
+      if (enhanced && prefill.enhancedFrom && workflow === 'extend') {
+        prefill.enhancedFrom.sourceVideoPath = prefill.extendSourcePath !== undefined ? prefill.extendSourcePath : _draft.extendSourcePath;
+        prefill.enhancedFrom.extendFrames = prefill.extendFrames !== undefined ? prefill.extendFrames : _draft.extendFrames;
+      }
+      // Text the URL carried is settled for this source: a later inspection of it must not replace it.
+      // That holds for blank text too (a Reuse that recorded none keeps both boxes blank), but only when the URL named the
+      // boxes at all: an Extend action names none, and the first inspection then fills them from the source's recorded text.
+      if (extending && prefill.extendSourcePath) {
+        const named = ['scene', 'prompt', 'enhanced_scene', 'enhanced_prompt'].some((key) => key in params);
+        prefill.extendPrefill = named ? { path: prefill.extendSourcePath, scene: prefill.scene ?? '', prompt: prefill.prompt } : null;
+      }
     }
     if (params.model && canApply('model')) prefill.model = params.model;
     if (params.steps && canApply('steps')) prefill.steps = Number(params.steps);
@@ -390,9 +435,10 @@ export const draft = {
     if (isVideoMode) {
       nextState = { ...nextState, negativePrompt: '', quantize: null, jsonPromptEnabled: false, jsonPrompt: '', firstSigma: null };
       // A kept or restored count may predate snapping; show the count the server will generate.
-      const timing = videoTimingFor(ctx, model);
+      const timing = videoTimingFor(ctx, model, _sourceFps(workflow));
       nextState.fps = timing.fps;
-      nextState.frameCount = alignFrameCount(nextState.frameCount, timing.frameAlignment);
+      // An extension has no clip length of its own: its new frames (`extendFrames`) stay multiples of 8, not 8k+1.
+      if (workflow !== 'extend') nextState.frameCount = alignFrameCount(nextState.frameCount, timing.frameAlignment);
     } else {
       const imageDefaults = modelDefaults as ImageModelDefaults | null;
       nextState = {
@@ -438,6 +484,11 @@ export const draft = {
       historyCollapsed: s.historyCollapsed,
       sidebarCollapsed: s.sidebarCollapsed,
       lastGeneratedAt: s.lastGeneratedAt,
+      // The source is an input, kept like the prompt; its length returns to the 2 s default.
+      extendSourcePath: s.extendSourcePath,
+      missingSourceVideo: s.missingSourceVideo,
+      extendPrefill: s.extendPrefill,
+      extendFrames: _extendSource?.fps ? defaultExtendFrames(_extendSource.fps) : s.extendFrames,
     };
     this.hydrateFromContext(ctx, s.model);
     // Restore prompt inputs after hydration, which re-applies the default prompt source.
@@ -478,9 +529,67 @@ export const draft = {
     this.saveDraft();
   },
 
+  /**
+   * Choose the video to extend, or none with null.
+   * Forgets what was known about the previous source and any "source moved" notice.
+   */
+  setExtendSourcePath(path: string | null): void {
+    if (path !== _draft.extendSourcePath) _extendSource = null;
+    _draft = { ..._draft, extendSourcePath: path, missingSourceVideo: false };
+    this.saveDraft();
+  },
+
+  /** Forget the extend source's facts, for example when its file is gone; the chosen path stays. */
+  clearExtendSource(): void {
+    _extendSource = null;
+  },
+
+  /**
+   * Take what the server reported about the extend source and pre-fill from it.
+   *
+   * The first answer for a source sets the frame rate, a missing length (2 s) and, when the source offers them, the model
+   * and LoRAs, and fills Scene and Prompt (`extendPrefillFor`): a box is replaced only when it is empty or still holds the
+   * previous prefill, unless `replaceText` forces both, and replacing clears the Enhanced pair. Later answers for the same
+   * source (a new model or length was inspected) only refresh the facts and never touch the text.
+   *
+   * @param ctx When given and the source's model differs from the draft's, the model's defaults are loaded.
+   */
+  applyExtendSource(info: ExtendSourceInfo, ctx: WorkspaceContext | null = null, options: { replaceText?: boolean } = {}): void {
+    _extendSource = info;
+    const previous = _draft.extendPrefill;
+    const sourceKey = _draft.extendSourcePath ?? '';
+    const settled = previous !== null && previous.path === sourceKey;
+    const updates: Partial<DraftState> = { missingSourceVideo: false };
+    if (info.fps) updates.fps = info.fps;
+    if (_draft.extendFrames === null && info.extend_frames !== null) updates.extendFrames = info.extend_frames;
+    if (!settled || options.replaceText) {
+      const fill = extendPrefillFor(info);
+      const sceneFree = options.replaceText || _draft.scene === '' || _draft.scene === previous?.scene;
+      const promptFree = options.replaceText || _draft.prompt === '' || _draft.prompt === previous?.prompt;
+      if (sceneFree) updates.scene = fill.scene;
+      if (promptFree) updates.prompt = fill.prompt;
+      if (sceneFree || promptFree) {
+        updates.enhancedPrompt = '';
+        updates.enhancedScene = '';
+        updates.enhancedFrom = null;
+      }
+      updates.extendPrefill = { path: sourceKey, scene: updates.scene ?? previous?.scene ?? '', prompt: updates.prompt ?? previous?.prompt ?? '' };
+      if (info.lora) updates.loraString = info.lora;
+    }
+    _draft = { ..._draft, ...updates };
+    if (!settled || options.replaceText) {
+      if (info.model && info.model !== _draft.model) {
+        if (ctx) this.hydrateFromContext(ctx, info.model);
+        else _draft = { ..._draft, model: info.model };
+      }
+    }
+    this.saveDraft();
+  },
+
   reset(): void {
     _draft = { ...DEFAULT_DRAFT };
     _authorityReady = false;
+    _extendSource = null;
     localStorage.removeItem(STORAGE_KEY);
   }
 };

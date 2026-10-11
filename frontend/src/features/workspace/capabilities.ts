@@ -14,6 +14,10 @@ export interface WorkspaceCapabilities {
   /** Video workflows: the Scene box (the Default scene in prompt-file mode). */
   showScene: boolean;
   showPromptFileControls: boolean;
+  /** The workflow continues a chosen video (extend): it has a Source video section in place of Size. */
+  showSourceVideo: boolean;
+  /** Extend only: the length of the new frames, in place of Duration. */
+  showExtendLength: boolean;
   showNegativePrompt: boolean;
   showEnhance: boolean;
   showEnhanceAuto: boolean;
@@ -72,6 +76,8 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
     showPromptSource: visible.has('prompt_source') && (context?.prompt_sources.length ?? 0) > 0,
     showPromptInline: visible.has('prompt_inline'),
     showScene: visible.has('prompt_scene'),
+    showSourceVideo: visible.has('source_video'),
+    showExtendLength: visible.has('extend_length'),
     showPromptFileControls: ['prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit'].some((id) => visible.has(id)),
     showNegativePrompt: visible.has('negative_prompt') && supportsNegativePrompt,
     showEnhance: enhancer !== null && visible.has('prompt_enhance'),

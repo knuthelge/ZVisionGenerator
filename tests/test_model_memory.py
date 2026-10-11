@@ -17,7 +17,9 @@ from zvisiongenerator.utils.model_memory import (
     estimate_cuda_image_memory,
     estimate_image_memory,
     estimate_ltx_mlx_memory,
+    estimate_ltx_mlx_window_memory,
     read_safetensors_totals,
+    window_memory_fit,
 )
 from zvisiongenerator.utils.model_memory import WeightTotals
 
@@ -154,6 +156,120 @@ class TestEstimateLtxMlxMemory:
         _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"w": ("BF16", [10, 10])})
 
         assert estimate_ltx_mlx_memory(tmp_path, tmp_path) is None
+
+
+class TestEstimateLtxMlxWindowMemory:
+    _make_ltx = TestEstimateLtxMlxMemory._make_ltx
+    # The measured reference window: 73 frames (10 latent frames) at 704x448 (22 x 14 tokens per latent frame).
+    _REFERENCE = {"width": 704, "height": 448, "frames": 73}
+
+    def test_equals_the_plain_estimate_at_the_reference_window(self, tmp_path):
+        model_dir, text_encoder_dir = self._make_ltx(tmp_path)
+
+        assert model_memory._REFERENCE_TOKENS == 3080
+        assert estimate_ltx_mlx_window_memory(model_dir, text_encoder_dir, **self._REFERENCE) == estimate_ltx_mlx_memory(model_dir, text_encoder_dir)
+
+    def test_a_smaller_window_keeps_the_allowance(self, tmp_path):
+        model_dir, text_encoder_dir = self._make_ltx(tmp_path)
+
+        small = estimate_ltx_mlx_window_memory(model_dir, text_encoder_dir, width=512, height=256, frames=33)
+
+        assert small == estimate_ltx_mlx_memory(model_dir, text_encoder_dir)
+
+    def test_a_larger_window_scales_the_working_allowance_by_its_tokens(self, tmp_path):
+        model_dir, text_encoder_dir = self._make_ltx(tmp_path)
+        base = estimate_ltx_mlx_memory(model_dir, text_encoder_dir)
+
+        # 145 frames is 19 latent frames, 1.9x the reference window's 10.
+        large = estimate_ltx_mlx_window_memory(model_dir, text_encoder_dir, width=704, height=448, frames=145)
+
+        assert large == base - _VIDEO_MARGIN + int(_VIDEO_MARGIN * (19 * 22 * 14) / 3080)
+        assert large > base
+
+    def test_grows_with_the_window(self, tmp_path):
+        model_dir, text_encoder_dir = self._make_ltx(tmp_path)
+        sizes = [estimate_ltx_mlx_window_memory(model_dir, text_encoder_dir, width=1280, height=704, frames=frames) for frames in (73, 121, 241)]
+
+        assert sizes == sorted(sizes) and len(set(sizes)) == 3
+
+    def test_low_memory_off_keeps_every_stage_resident(self, tmp_path):
+        model_dir, text_encoder_dir = self._make_ltx(tmp_path)
+
+        resident = estimate_ltx_mlx_window_memory(model_dir, text_encoder_dir, low_memory=False, **self._REFERENCE)
+
+        assert resident == estimate_ltx_mlx_memory(model_dir, text_encoder_dir, low_memory=False)
+
+    def test_returns_none_for_non_ltx_layout(self, tmp_path):
+        assert estimate_ltx_mlx_window_memory(tmp_path, tmp_path, **self._REFERENCE) is None
+
+
+class TestWindowMemoryFit:
+    _make_ltx = TestEstimateLtxMlxMemory._make_ltx
+    _WINDOW = {"width": 704, "height": 448, "frames": 73, "low_memory": True}
+
+    @pytest.fixture(autouse=True)
+    def _text_encoder_repo(self, monkeypatch):
+        monkeypatch.setattr(model_memory, "ltx_mlx_text_encoder_repo", lambda: "example/gemma")
+
+    def _finder(self, model_dir: Path | None, text_encoder_dir: Path | None):
+        return lambda reference: {"example/model": model_dir, "example/gemma": text_encoder_dir}.get(reference)
+
+    def _required(self, model_dir: Path, text_encoder_dir: Path) -> int:
+        required = estimate_ltx_mlx_window_memory(model_dir, text_encoder_dir, width=704, height=448, frames=73)
+        assert required is not None
+        return required
+
+    def test_classifies_the_window_estimate_against_the_budget(self, tmp_path):
+        model_dir, text_encoder_dir = self._make_ltx(tmp_path)
+        required = self._required(model_dir, text_encoder_dir)
+        finder = self._finder(model_dir, text_encoder_dir)
+
+        fits = window_memory_fit("example/model", budget_bytes=required, find_local_dir=finder, **self._WINDOW)
+        too_large = window_memory_fit("example/model", budget_bytes=required // 2, find_local_dir=finder, **self._WINDOW)
+
+        assert fits == {"status": "fits", "required_gb": round(required / _GIB, 1), "budget_gb": round(required / _GIB, 1)}
+        assert too_large is not None and too_large["status"] == "too_large"
+
+    def test_a_tight_budget_is_tight(self, tmp_path):
+        model_dir, text_encoder_dir = self._make_ltx(tmp_path)
+        required = self._required(model_dir, text_encoder_dir)
+
+        result = window_memory_fit("example/model", budget_bytes=int(required / 1.3), find_local_dir=self._finder(model_dir, text_encoder_dir), **self._WINDOW)
+
+        assert result is not None and result["status"] == "tight"
+
+    def test_looks_the_model_and_its_text_encoder_up_by_reference(self, tmp_path):
+        model_dir, text_encoder_dir = self._make_ltx(tmp_path)
+        seen: list[str] = []
+
+        def finder(reference: str) -> Path | None:
+            seen.append(reference)
+            return self._finder(model_dir, text_encoder_dir)(reference)
+
+        window_memory_fit("example/model", budget_bytes=_GIB, find_local_dir=finder, **self._WINDOW)
+
+        assert seen == ["example/model", "example/gemma"]
+
+    @pytest.mark.parametrize("budget", [None, 0])
+    def test_no_budget_gives_none(self, tmp_path, budget):
+        model_dir, text_encoder_dir = self._make_ltx(tmp_path)
+
+        assert window_memory_fit("example/model", budget_bytes=budget, find_local_dir=self._finder(model_dir, text_encoder_dir), **self._WINDOW) is None
+
+    def test_a_model_that_is_not_downloaded_gives_none(self, tmp_path):
+        _, text_encoder_dir = self._make_ltx(tmp_path)
+
+        assert window_memory_fit("example/model", budget_bytes=_GIB, find_local_dir=self._finder(None, text_encoder_dir), **self._WINDOW) is None
+
+    def test_a_missing_text_encoder_gives_none(self, tmp_path):
+        model_dir, _ = self._make_ltx(tmp_path)
+
+        assert window_memory_fit("example/model", budget_bytes=_GIB, find_local_dir=self._finder(model_dir, None), **self._WINDOW) is None
+
+    def test_a_model_without_the_ltx_layout_gives_none(self, tmp_path):
+        _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"w": ("BF16", [10, 10])})
+
+        assert window_memory_fit("example/model", budget_bytes=_GIB, find_local_dir=self._finder(tmp_path, tmp_path), **self._WINDOW) is None
 
 
 @pytest.mark.parametrize(

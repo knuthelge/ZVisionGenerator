@@ -1,0 +1,26 @@
+{
+  "enhanced_source_moved": {
+    "workflow": "extend",
+    "scene": "My street.",
+    "prompt": "She waves.",
+    "enhanced_scene": "A wet street at night.",
+    "enhanced_prompt": "She waves slowly.",
+    "model": "ltx-8",
+    "steps": "8",
+    "seed": "1",
+    "source_video": "/clips/walk.mp4",
+    "extend_frames": "48",
+    "missing_source_video": "true"
+  },
+  "blank_text": {
+    "workflow": "extend",
+    "model": "ltx-8",
+    "steps": "8",
+    "seed": "1",
+    "source_video": "/clips/walk.mp4",
+    "extend_frames": "48",
+    "missing_source_video": "true",
+    "scene": "",
+    "prompt": ""
+  }
+}

@@ -45,7 +45,9 @@ from .provenance import (
 from .prompt_compose import expand_random_choices
 from .prompt_enhance import EnhanceResult, EnhanceSettings, enhance_prompt, matrix_contract, parse_enhance_entry, parse_enhance_spec
 from .prompts import load_prompts_file
+from .video_extend import load_extend_source
 from .video_model_detect import VideoModelInfo, detect_video_model
+from .video_probe import VideoProbe, probe_video
 
 __all__ = [
     "ImageModelInfo",
@@ -61,6 +63,7 @@ __all__ = [
     "VIDEO_CONFIG_SCHEMA",
     "SkipSignal",
     "VideoModelInfo",
+    "VideoProbe",
     "build_image_config_payload",
     "build_video_config_payload",
     "detect_image_model",
@@ -83,6 +86,7 @@ __all__ = [
     "is_huggingface_repo_id",
     "is_remote_lora_reference",
     "load_config",
+    "load_extend_source",
     "load_prompts_file",
     "matrix_contract",
     "optional_float",
@@ -92,6 +96,7 @@ __all__ = [
     "parse_enhance_entry",
     "parse_enhance_spec",
     "parse_lora_arg",
+    "probe_video",
     "read_mp4_config",
     "read_png_config",
     "recorded_settings",

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import inspect
 import sys
+import typing
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from zvisiongenerator.core.video_backend import VideoBackend
+from zvisiongenerator.core.video_backend import VideoBackend, VideoExtender
 
 
 class TestVideoBackendProtocol:
@@ -47,6 +49,45 @@ class TestVideoBackendProtocol:
                 pass
 
         assert not isinstance(Incomplete(), VideoBackend)
+
+
+def _shape(fn) -> list[tuple[str, object, object]]:
+    """Return a method's parameters as ``(name, kind, default)``, ignoring ``self`` and annotations."""
+    return [(p.name, p.kind, p.default) for name, p in inspect.signature(fn).parameters.items() if name != "self"]
+
+
+class TestVideoExtenderProtocol:
+    """Verify extending is a separate, optional capability that the macOS backend provides."""
+
+    def test_extender_is_not_runtime_checkable(self):
+        with pytest.raises(TypeError):
+            isinstance(MagicMock(), VideoExtender)
+
+    def test_extender_declares_only_extend_video(self):
+        assert typing.get_protocol_members(VideoExtender) == {"extend_video"}
+
+    def test_video_backend_does_not_require_extend_video(self):
+        assert "extend_video" not in typing.get_protocol_members(VideoBackend)
+
+    @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only backends")
+    def test_ltx_backend_provides_extend_video_with_the_protocol_signature(self):
+        from zvisiongenerator.backends.video_mac import LtxVideoBackend
+
+        assert _shape(LtxVideoBackend.extend_video) == _shape(VideoExtender.extend_video)
+
+    @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only backends")
+    def test_ltx_backend_is_still_a_video_backend(self):
+        from zvisiongenerator.backends.video_mac import LtxVideoBackend
+
+        assert isinstance(LtxVideoBackend(), VideoBackend)
+
+    def test_diffusers_backend_is_a_video_backend_without_extend_video(self):
+        from zvisiongenerator.backends.video_diffusers import DiffusersVideoBackend
+
+        backend = DiffusersVideoBackend()
+
+        assert isinstance(backend, VideoBackend)
+        assert not hasattr(backend, "extend_video")
 
 
 class TestGetVideoBackend:

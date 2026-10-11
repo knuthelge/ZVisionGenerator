@@ -21,7 +21,7 @@
 <script lang="ts">
   import { Icon, ShortcutList } from '$lib/components/atoms';
   import { isTyping } from '$lib/keyboard';
-  import { canUseAsReference, describeFallbackReason, upscaleFactor, upscaleFactors, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
+  import { canExtend, canUseAsReference, describeFallbackReason, extendReason, upscaleFactor, upscaleFactors, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { GalleryAsset, UpscaleFactor } from '$lib/types';
   import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
@@ -56,6 +56,7 @@
     onnavigate,
     onreuse,
     onreference,
+    onextend,
     onupscale,
     ondelete,
   }: Props = $props();
@@ -101,6 +102,10 @@
     asset && onupscale ? upscaleEntries(asset, onupscale) : []
   );
 
+  // A video offers Extend where an image offers Use as reference; the button is absent without the capability.
+  const showExtend = $derived(Boolean(onextend && asset?.media_type === 'video' && asset.extend));
+  const extendBlocked = $derived(asset ? extendReason(asset) : null);
+
   const sections = $derived(asset ? assetDetailSections(asset) : null);
   const source = $derived(asset?.details?.source ?? null);
   // A scene-only video carries its scene as its prompt; show it once, and a separate Scene section only when it differs.
@@ -118,6 +123,17 @@
       return true;
     }
     onupscale(asset, factor);
+    return true;
+  }
+
+  /** Extend the shown video from the keyboard; when it can't be extended, say why instead. */
+  function runExtend(): boolean {
+    if (!asset || !onextend || !showExtend) return false;
+    if (!canExtend(asset)) {
+      addToast(extendBlocked ?? 'This video cannot be extended.', 'warning');
+      return true;
+    }
+    onextend(asset);
     return true;
   }
 
@@ -160,6 +176,7 @@
         if (hasNext) onnavigate(assets.length - 1);
         return hasNext;
       case 'reference':
+        if (asset.media_type === 'video') return runExtend();
         if (referenceItems.length === 0) return false;
         referenceOpen = true;
         return true;
@@ -259,6 +276,16 @@
           title="Use as reference (E)"
           onclick={() => { referenceOpen = !referenceOpen; }}
         ><Icon name="reference" size={14} />Use as reference<Icon name="chevdown" size={12} class="opacity-70" /></button>
+      {/if}
+      {#if showExtend}
+        <button
+          type="button"
+          class="viewer-btn ui-btn"
+          data-action="extend"
+          disabled={!canExtend(asset)}
+          title={extendBlocked ?? 'Extend this video (E)'}
+          onclick={() => onextend?.(asset)}
+        ><Icon name="extend" size={14} />Extend</button>
       {/if}
       {#if upscaleItems.length > 0}
         <button

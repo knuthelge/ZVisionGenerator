@@ -60,16 +60,19 @@ def build_video_workflow(args: argparse.Namespace, *, enhance: bool = False) -> 
     """Build video generation workflow based on CLI args.
 
     Args:
-        args: Parsed video CLI arguments. Must have ``image_path`` attribute.
+        args: Parsed video CLI arguments. Must have ``image_path`` attribute; ``extend_source`` selects extending a clip.
         enhance: Add the auto prompt-enhancement stage after prompt resolution.
 
     Returns:
-        GenerationWorkflow with stages for T2V or I2V.
+        GenerationWorkflow with stages for T2V, I2V or extending a clip. Extending ends with the joined clip, which
+        already has the right audio, so it has no audio-stripping stage.
     """
     from zvisiongenerator.workflows.video_stages import (
         enhance_prompt_stage as video_enhance_prompt,
         resolve_prompt_stage as video_resolve_prompt,
         generate_filename_stage,
+        extend_video_stage,
+        join_clips_stage,
         text_to_video_stage,
         image_to_video_stage,
         strip_audio_stage,
@@ -80,11 +83,11 @@ def build_video_workflow(args: argparse.Namespace, *, enhance: bool = False) -> 
     if enhance:
         stages.append(video_enhance_prompt)
     stages.append(generate_filename_stage)
-    if args.image_path:
-        stages.append(image_to_video_stage)
+    if getattr(args, "extend_source", None) is not None:
+        stages += [extend_video_stage, join_clips_stage]
     else:
-        stages.append(text_to_video_stage)
-    if getattr(args, "no_audio", False):
-        stages.append(strip_audio_stage)
+        stages.append(image_to_video_stage if args.image_path else text_to_video_stage)
+        if getattr(args, "no_audio", False):
+            stages.append(strip_audio_stage)
     stages.append(log_video_stage)
     return GenerationWorkflow(name="video", stages=stages)

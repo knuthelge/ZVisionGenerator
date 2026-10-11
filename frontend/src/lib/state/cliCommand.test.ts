@@ -160,4 +160,36 @@ describe('cliCommand', () => {
     // A stray review field without an upscale must not make the CLI refuse the command.
     expect(cliCommand({ mode: 'video', model: 'ltx', prompt: 'waves', review: 'true' }).command).not.toContain('--review');
   });
+
+  describe('extend', () => {
+    const extend = { mode: 'video', workflow: 'extend', source_video: '/clips/walk one.mp4', extend_frames: '48', model: 'ltx', steps: '8' };
+
+    it('continues the source with the new frames and leaves out the size and length flags', () => {
+      const { command } = cliCommand({
+        ...extend, prompt: 'She turns and waves.', scene: 'A rainy street.',
+        ratio: '16:9', size: 'm', width: '848', height: '480', frames: '97', image_path: '/refs/a.png', video_upscale_factor: '2', upscale: '2',
+        audio: 'false',
+      });
+
+      expect(command).toBe("ziv video --extend '/clips/walk one.mp4' --extend-frames 48 --model ltx --prompt 'She turns and waves.' --scene 'A rainy street.' --steps 8 --no-audio");
+    });
+
+    it('leaves --prompt out when the prompt is empty and still runs without any text', () => {
+      expect(cliCommand({ ...extend, prompt: '', scene: '' }).command).toBe("ziv video --extend '/clips/walk one.mp4' --extend-frames 48 --model ltx --steps 8");
+      expect(cliCommand({ ...extend, prompt: '', scene: 'A rainy street.' }).command).toContain("--scene 'A rainy street.'");
+    });
+
+    it('sends an empty --scene or --prompt where the CLI would fill them from the source', () => {
+      const blank = { ...extend, prompt: '', scene: '' };
+      expect(cliCommand(blank, { extendSource: { scene: 'A rainy street.', legacy: false } }).command).toContain(" --scene ''");
+      expect(cliCommand(blank, { extendSource: { scene: 'A rainy street.', legacy: false } }).command).not.toContain('--prompt');
+      expect(cliCommand(blank, { extendSource: { scene: null, legacy: true } }).command).toContain(" --prompt ''");
+      expect(cliCommand(blank, { extendSource: { scene: null, legacy: true } }).command).not.toContain('--scene');
+      expect(cliCommand(blank, { extendSource: { scene: null, legacy: false } }).command).not.toMatch(/--(prompt|scene)/);
+    });
+
+    it('refuses an extension without a source', () => {
+      expect(() => cliCommand({ mode: 'video', workflow: 'extend', prompt: 'a', source_video: ' ' })).toThrow('video to extend');
+    });
+  });
 });

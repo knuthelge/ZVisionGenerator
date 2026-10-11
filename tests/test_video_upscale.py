@@ -2,21 +2,23 @@
 
 from __future__ import annotations
 
-from conftest import _make_plan
+from conftest import _make_plan, make_extend_source
 
 import sys
 from argparse import Namespace
+from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import NamedTuple
 from unittest.mock import MagicMock, call, patch
 
+import numpy as np
 import pytest
 
 from tests.conftest import _make_video_args
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.backends.video_mac import LtxVideoBackend, _LOW_RAM_THRESHOLD_BYTES, _LtxModel, _TwoStageProgress, _use_low_ram_streaming
-from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.backends.video_mac import LtxVideoBackend, _drop_leading_frames, _LOW_RAM_THRESHOLD_BYTES, _LtxModel, _TwoStageProgress, _use_low_ram_streaming
+from zvisiongenerator.core.video_types import ExtendSegment, VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_cli import _build_video_parser, _resolve_upscale_steps
 from zvisiongenerator.workflows import build_video_workflow
@@ -376,7 +378,30 @@ def ltx(monkeypatch):
     samplers = MagicMock()
     samplers.denoise_loop.return_value = h.output
 
+    # Modules the extension path imports lazily.
+    h.conditioning_types = MagicMock()
+    h.conditioning_types.VideoConditionByLatentIndex.side_effect = lambda **fields: SimpleNamespace(**fields)
+    h.audio_vae = MagicMock()
+    h.audio_vae.encode_audio.return_value = "raw_audio_latent"
+    h.audio_io = MagicMock()
+    h.audio_io.load_audio.return_value = SimpleNamespace(waveform="tail_waveform", sample_rate=16000)
+    h.extend_distilled = MagicMock()
+    h.extend_distilled.carry_audio_tokens.side_effect = lambda fps, count: round(count / fps * 25)
+    h.extend_distilled.fit_audio_latent.side_effect = lambda latent, tokens: np.zeros((1, 8, tokens, 16))
+    h.retake = MagicMock()
+    h.retake.encode_video_tensor.return_value = "video_latent"
+    h.media_io = MagicMock()
+    h.media_io.video_preprocess.return_value = "video_tensor"
+    h.video_vae = MagicMock()
+    h.video_vae._compute_decode_tiling.return_value = None
+    h.streamed = []
+    h.video_vae.stream_chunks_to_ffmpeg.side_effect = lambda chunks, proc: h.streamed.extend(chunks)
+
     h.calls.attach_mock(h.mx.eval, "mx_eval")
+    h.calls.attach_mock(h.retake.encode_video_tensor, "encode_video_tensor")
+    h.calls.attach_mock(h.audio_io.load_audio, "load_audio")
+    h.calls.attach_mock(h.audio_vae.encode_audio, "encode_audio")
+    h.calls.attach_mock(h.extend_distilled.fit_audio_latent, "fit_audio_latent")
     h.calls.attach_mock(h.memory.aggressive_cleanup, "aggressive_cleanup")
     h.calls.attach_mock(h.orchestration.combined_image_conditionings, "combined_image_conditionings")
     h.calls.attach_mock(h.scheduler.shorten_schedule, "shorten_schedule")
@@ -391,18 +416,27 @@ def ltx(monkeypatch):
         "ltx_core_mlx": MagicMock(),
         "ltx_core_mlx.components": MagicMock(),
         "ltx_core_mlx.components.patchifiers": patchifiers,
+        "ltx_core_mlx.conditioning": MagicMock(),
+        "ltx_core_mlx.conditioning.types": h.conditioning_types,
         "ltx_core_mlx.model": MagicMock(),
+        "ltx_core_mlx.model.audio_vae": h.audio_vae,
+        "ltx_core_mlx.model.video_vae": MagicMock(),
+        "ltx_core_mlx.model.video_vae.video_vae": h.video_vae,
         "ltx_core_mlx.model.transformer": MagicMock(),
         "ltx_core_mlx.model.transformer.model": transformer,
         "ltx_core_mlx.utils": MagicMock(),
+        "ltx_core_mlx.utils.audio": h.audio_io,
         "ltx_core_mlx.utils.memory": h.memory,
         "ltx_core_mlx.utils.positions": positions,
         "ltx_pipelines_mlx": MagicMock(),
+        "ltx_pipelines_mlx.extend_distilled": h.extend_distilled,
+        "ltx_pipelines_mlx.retake": h.retake,
         "ltx_pipelines_mlx.scheduler": h.scheduler,
         "ltx_pipelines_mlx.utils": MagicMock(),
         "ltx_pipelines_mlx.utils._orchestration": h.orchestration,
         "ltx_pipelines_mlx.utils.args": args,
         "ltx_pipelines_mlx.utils.helpers": helpers,
+        "ltx_pipelines_mlx.utils.media_io": h.media_io,
         "ltx_pipelines_mlx.utils.samplers": samplers,
     }
     for name, module in modules.items():
@@ -947,3 +981,470 @@ class TestTwoStageProgress:
 
         assert events[0]["phase"] == "video_upscale_stage_1"
         assert events[0]["total_steps"] == 11
+
+
+# ---------------------------------------------------------------------------
+# macOS LTX backend — extending a clip
+# ---------------------------------------------------------------------------
+
+_WINDOW_LATENT_SHAPE = (9, 14, 22)  # (F, H, W) of a 73-frame window at 704x448
+_EXT_WIDTH, _EXT_HEIGHT = 704, 448
+_CARRY = 25
+
+
+class _FakeWaveform:
+    """Stand-in for the decoded audio: indexing gives itself and ``astype`` gives the samples."""
+
+    def __init__(self, samples: np.ndarray) -> None:
+        self._samples = samples
+
+    def __getitem__(self, _index):
+        return self
+
+    def astype(self, _dtype) -> np.ndarray:
+        return self._samples
+
+
+def _chunks(sizes: list[int]) -> list[np.ndarray]:
+    """Return decoded chunks ``(1, 3, T, 2, 2)`` whose pixels hold the frame's index in the window."""
+    chunks, start = [], 0
+    for size in sizes:
+        values = np.arange(start, start + size, dtype=np.float32)
+        chunks.append(np.broadcast_to(values[None, None, :, None, None], (1, 3, size, 2, 2)).copy())
+        start += size
+    return chunks
+
+
+def _frame_ids(chunks) -> list[int]:
+    return [int(v) for chunk in chunks for v in chunk[0, 0, :, 0, 0]]
+
+
+_source = partial(
+    make_extend_source,
+    path=Path("/tmp/clip.mp4"),
+    width=_EXT_WIDTH,
+    height=_EXT_HEIGHT,
+    frame_count=120,
+    video_start=0.5,
+    color_space="bt709",
+    color_primaries="bt709",
+    color_trc="bt709",
+    scene=None,
+    prompt=None,
+)
+
+
+def _audio_patchify(latent):
+    batch, channels, tokens, width = latent.shape
+    return latent.transpose(0, 2, 1, 3).reshape(batch, tokens, channels * width), tokens
+
+
+@pytest.fixture
+def ext(ltx, monkeypatch, tmp_path):
+    """Extend the ``ltx`` fixture with the tail reader, the WAV writer and a runner for ``extend_video``."""
+    ltx.patchifiers.compute_video_latent_shape.return_value = _WINDOW_LATENT_SHAPE
+    ltx.tail = MagicMock(side_effect=lambda source: np.zeros((_CARRY, source.height, source.width, 3), np.uint8))
+    ltx.wav = MagicMock()
+    monkeypatch.setattr("zvisiongenerator.backends.video_mac.read_source_tail", ltx.tail)
+    monkeypatch.setattr("zvisiongenerator.backends.video_mac.write_pcm16_wav", ltx.wav)
+    ltx.segment_dir = tmp_path
+    ltx.chunks = _chunks([16, 16, 16, 16, 9])
+    ltx.waveform = _FakeWaveform(np.zeros((2, 146000), np.float32))
+    ltx.state_at_decode = {}
+
+    def pipeline(*, low_memory: bool = True) -> MagicMock:
+        pipe = _pipeline(ltx, low_memory=low_memory)
+        pipe.dit = object()
+        pipe._loaded = True
+        pipe.video_patchifier.patchify.return_value = ("video_tokens", (4, 14, 22))
+        pipe.video_patchifier.unpatchify.return_value = SimpleNamespace(shape=(1, 128, *_WINDOW_LATENT_SHAPE))
+        pipe.audio_patchifier.patchify.side_effect = _audio_patchify
+        pipe.audio_conditioner.side_effect = lambda fn, free_after: fn("audio_encoder", "audio_processor")
+        pipe.video_decoder_block.video_decoder = "conv"
+        decoder = pipe.video_decoder_block.load.return_value
+
+        def tiled_decode(latent, tiling):
+            ltx.state_at_decode.update(dit=pipe.dit, loaded=pipe._loaded)
+            return ltx.chunks
+
+        decoder.tiled_decode.side_effect = tiled_decode
+        pipe.audio_decoder_block.side_effect = lambda latent: ltx.waveform
+        ltx.calls.attach_mock(pipe.audio_patchifier.patchify, "audio_patchify")
+        return pipe
+
+    def run(pipe=None, *, source=None, extend_frames=48, audio_output=True, step_callback=None, handle=None):
+        pipe = pipe or pipeline()
+        result = LtxVideoBackend().extend_video(
+            handle or _handle(pipe),
+            source or _source(),
+            "a prompt",
+            extend_frames=extend_frames,
+            seed=42,
+            steps=8,
+            segment_dir=ltx.segment_dir,
+            audio_output=audio_output,
+            step_callback=step_callback,
+        )
+        return pipe, result
+
+    ltx.pipeline = pipeline
+    ltx.run = run
+    return ltx
+
+
+class TestExtendVideo:
+    """Verify the carry-conditioned window generation; no model is loaded."""
+
+    def test_returns_the_segment_files(self, ext):
+        _, result = ext.run()
+
+        assert result == ExtendSegment(video_path=ext.segment_dir / "segment.mp4", audio_path=ext.segment_dir / "segment.wav", lead_samples=12000)
+
+    def test_reads_the_source_tail(self, ext):
+        source = _source()
+
+        ext.run(source=source)
+
+        ext.tail.assert_called_once_with(source)
+
+    @pytest.mark.parametrize("extend_frames", [48, 96])
+    def test_window_is_the_carry_plus_the_new_frames(self, ext, extend_frames):
+        ext.run(extend_frames=extend_frames)
+
+        ext.patchifiers.compute_video_latent_shape.assert_called_once_with(_CARRY + extend_frames, _EXT_HEIGHT, _EXT_WIDTH)
+        ext.positions.compute_audio_token_count.assert_called_once_with(_CARRY + extend_frames, frame_rate=24.0)
+        video_call, _ = ext.helpers.create_noised_state.call_args_list
+        assert video_call.kwargs["base_shape"] == (1, 9 * 14 * 22, 128)
+        assert video_call.kwargs["spatial_dims"] == _WINDOW_LATENT_SHAPE
+
+    @pytest.mark.parametrize("frames", [0, 7, 12, 50])
+    def test_extend_frames_must_be_a_positive_multiple_of_eight(self, ext, frames):
+        with pytest.raises(ValueError, match="multiple of 8"):
+            ext.run(extend_frames=frames)
+
+        ext.tail.assert_not_called()
+
+    def test_video_pin_covers_the_carried_latent_frames_at_full_strength(self, ext):
+        pipe, _ = ext.run()
+
+        video_call, _ = ext.helpers.create_noised_state.call_args_list
+        (pin,) = video_call.kwargs["conditionings"]
+        assert pin.frame_indices == [0, 1, 2, 3]
+        assert pin.clean_latent == "video_tokens"
+        assert pin.strength == 1.0
+        pipe.video_patchifier.patchify.assert_called_once_with("video_latent")
+
+    def test_tail_frames_are_encoded_at_the_displayed_size_inside_the_conditioner(self, ext):
+        pipe = ext.pipeline(low_memory=True)
+
+        ext.run(pipe)
+
+        (frames, height, width), _ = ext.media_io.video_preprocess.call_args
+        assert len(frames) == _CARRY
+        assert (height, width) == (_EXT_HEIGHT, _EXT_WIDTH)
+        ext.retake.encode_video_tensor.assert_called_once_with(ext.encoder, "video_tensor")
+        assert pipe.image_conditioner.call_args.kwargs == {"free_after": True}
+
+    def test_carry_is_encoded_before_the_pipeline_loads(self, ext):
+        ext.run()
+
+        names = _call_names(ext)
+        assert names.index("encode_video_tensor") < names.index("load")
+        assert names.index("encode_audio") < names.index("load")
+
+    def test_audio_is_fitted_before_it_is_patchified(self, ext):
+        ext.run()
+
+        names = _call_names(ext)
+        assert names.index("encode_audio") < names.index("fit_audio_latent") < names.index("audio_patchify")
+
+    def test_audio_pin_has_the_carry_token_shape(self, ext):
+        ext.run()
+
+        _, audio_call = ext.helpers.create_noised_state.call_args_list
+        (pin,) = audio_call.kwargs["conditionings"]
+        assert pin.clean_latent.shape == (1, 26, 128)
+        assert pin.frame_indices == list(range(26))
+        assert pin.strength == 1.0
+        assert audio_call.kwargs["spatial_dims"] == (_AUDIO_TOKENS, 1, 1)
+        ext.extend_distilled.fit_audio_latent.assert_called_once()
+        assert ext.extend_distilled.fit_audio_latent.call_args.args[1] == 26
+
+    def test_audio_state_uses_the_next_seed_and_legacy_blend(self, ext):
+        ext.run()
+
+        video_call, audio_call = ext.helpers.create_noised_state.call_args_list
+        assert (video_call.kwargs["seed"], audio_call.kwargs["seed"]) == (42, 43)
+        assert audio_call.kwargs["legacy_scalar_blend"] is True
+        assert audio_call.kwargs["sigma"] == 1.0
+
+    def test_tail_audio_is_read_at_its_position_in_the_file(self, ext):
+        source = _source(video_start=0.5, frame_count=120)
+
+        ext.run(source=source)
+
+        ext.audio_io.load_audio.assert_called_once()
+        assert ext.audio_io.load_audio.call_args.args == (source.path,)
+        kwargs = ext.audio_io.load_audio.call_args.kwargs
+        assert kwargs["target_sample_rate"] == 16000
+        assert kwargs["start_time"] == pytest.approx(0.5 + (120 - _CARRY) / 24.0)
+        assert kwargs["max_duration"] == pytest.approx(_CARRY / 24.0)
+        ext.audio_vae.encode_audio.assert_called_once_with("tail_waveform", 16000, "audio_encoder", "audio_processor")
+
+    def test_unreadable_audio_raises_before_generating(self, ext):
+        ext.audio_io.load_audio.return_value = None
+
+        with pytest.raises(RuntimeError, match="audio"):
+            ext.run()
+
+        ext.samplers.denoise_loop.assert_not_called()
+
+    def test_silent_source_has_no_pin_no_decode_and_no_wav(self, ext):
+        pipe, result = ext.run(source=_source(has_audio=False))
+
+        ext.audio_io.load_audio.assert_not_called()
+        ext.audio_vae.encode_audio.assert_not_called()
+        ext.extend_distilled.fit_audio_latent.assert_not_called()
+        pipe.audio_patchifier.patchify.assert_not_called()
+        _, audio_call = ext.helpers.create_noised_state.call_args_list
+        assert audio_call.kwargs["conditionings"] == []
+        assert audio_call.kwargs["spatial_dims"] == _WINDOW_LATENT_SHAPE
+        pipe.audio_decoder_block.assert_not_called()
+        ext.wav.assert_not_called()
+        assert result.audio_path is None
+
+    def test_silent_source_still_pins_the_video(self, ext):
+        ext.run(source=_source(has_audio=False))
+
+        video_call, _ = ext.helpers.create_noised_state.call_args_list
+        assert len(video_call.kwargs["conditionings"]) == 1
+
+    def test_without_audio_output_the_pin_stays_but_no_wav_is_written(self, ext):
+        pipe, result = ext.run(audio_output=False)
+
+        _, audio_call = ext.helpers.create_noised_state.call_args_list
+        assert len(audio_call.kwargs["conditionings"]) == 1
+        pipe.audio_decoder_block.assert_not_called()
+        ext.wav.assert_not_called()
+        assert result == ExtendSegment(video_path=ext.segment_dir / "segment.mp4", audio_path=None)
+
+    def test_the_source_frame_rate_overrides_the_handle_for_positions_audio_length_and_decode(self, ext):
+        pipe = ext.pipeline()
+        ext.video_vae._compute_decode_tiling.return_value = "tiling"
+
+        ext.run(pipe, source=_source(fps=30.0, fps_text="30/1"), handle=_handle(pipe, frame_rate=24.0))
+
+        ext.positions.compute_video_positions.assert_called_once_with(*_WINDOW_LATENT_SHAPE, frame_rate=30.0)
+        ext.positions.compute_audio_token_count.assert_called_once_with(_CARRY + 48, frame_rate=30.0)
+        ext.extend_distilled.carry_audio_tokens.assert_called_once_with(30.0, _CARRY)
+        assert ext.video_vae._compute_decode_tiling.call_args.kwargs == {"frame_rate": 30.0}
+        assert ext.audio_io.load_audio.call_args.kwargs["start_time"] == pytest.approx(0.5 + (120 - _CARRY) / 30.0)
+        command = ext.video_vae._ffmpeg_sink.call_args.args[0]
+        assert command[command.index("-r") + 1] == "30/1"
+        pipe._decode_and_save_video.assert_not_called()
+
+    def test_the_segment_is_encoded_with_the_source_size_and_colour_tags(self, ext):
+        ext.run(source=_source(color_space="smpte170m", color_primaries="smpte170m", color_trc="bt709"))
+
+        command = ext.video_vae._ffmpeg_sink.call_args.args[0]
+        assert command[command.index("-s") + 1] == f"{_EXT_WIDTH}x{_EXT_HEIGHT}"
+        assert command[-1] == str(ext.segment_dir / "segment.mp4")
+        assert "colorspace=smpte170m" in command[command.index("-vf") + 1]
+
+    def test_the_dit_is_freed_before_the_video_decode(self, ext):
+        pipe, _ = ext.run(ext.pipeline(low_memory=True))
+
+        assert ext.state_at_decode == {"dit": None, "loaded": False}
+        assert pipe.dit is None
+
+    def test_the_dit_stays_without_low_memory(self, ext):
+        pipe = ext.pipeline(low_memory=False)
+        dit = pipe.dit
+
+        ext.run(pipe)
+
+        assert ext.state_at_decode == {"dit": dit, "loaded": True}
+
+    def test_decoders_are_freed_afterwards_under_low_memory(self, ext):
+        pipe, _ = ext.run(ext.pipeline(low_memory=True))
+
+        assert pipe.vae_decoder is None
+        assert pipe.audio_decoder is None
+        assert pipe.vocoder is None
+
+    def test_tiled_decode_and_streaming_both_run_inside_the_cache_limit(self, ext):
+        events: list[str] = []
+        pipe = ext.pipeline()
+        decoder = pipe.video_decoder_block.load.return_value
+        decode = decoder.tiled_decode.side_effect
+        decoder.tiled_decode.side_effect = lambda *args: (events.append("tiled_decode"), decode(*args))[1]
+        stream = ext.video_vae.stream_chunks_to_ffmpeg.side_effect
+        ext.video_vae.stream_chunks_to_ffmpeg.side_effect = lambda chunks, proc: (events.append("stream"), stream(chunks, proc))[1]
+        limit = ext.video_vae.decode_cache_limit.return_value
+        limit.__enter__.side_effect = lambda: events.append("limit_on")
+        limit.__exit__.side_effect = lambda *exc: events.append("limit_off")
+        ext.wav.side_effect = lambda *args: events.append("wav")
+
+        ext.run(pipe)
+
+        assert events == ["limit_on", "tiled_decode", "stream", "limit_off", "wav"]
+
+    @pytest.mark.parametrize("tiling", [None, "temporal-tiles"])
+    def test_only_the_new_frames_are_streamed_with_or_without_tiling(self, ext, tiling):
+        ext.video_vae._compute_decode_tiling.return_value = tiling
+        ext.chunks = _chunks([73]) if tiling is None else _chunks([16, 16, 16, 16, 9])
+
+        ext.run()
+
+        assert _frame_ids(ext.streamed) == list(range(_CARRY, _CARRY + 48))
+        assert ext.video_vae._compute_decode_tiling.call_args.args[0] == (1, 128, *_WINDOW_LATENT_SHAPE)
+
+    def test_audio_is_cut_to_the_new_frames(self, ext):
+        samples = np.arange(2 * 146000, dtype=np.float32).reshape(2, 146000) / 1e6
+        ext.waveform = _FakeWaveform(samples)
+
+        ext.run()
+
+        written, path = ext.wav.call_args.args
+        assert written.shape == (2, 12000 + 96000)  # a quarter second of the carried frames' sound, then the new frames' sound
+        np.testing.assert_array_equal(written, samples[:, 50000 - 12000 : 146000])
+        assert path == ext.segment_dir / "segment.wav"
+
+    def test_short_audio_fades_out_and_is_zero_padded_to_the_new_frames(self, ext):
+        ext.waveform = _FakeWaveform(np.ones((2, 144480), np.float32))
+
+        ext.run()
+
+        written = ext.wav.call_args.args[0]
+        assert written.shape == (2, 12000 + 96000)
+        real_end = 144480 - (50000 - 12000)
+        assert written[:, : real_end - 384].min() == 1.0
+        assert written[:, real_end - 1].max() == 0.0  # the last real sample is the end of the fade
+        assert written[:, real_end:].max() == 0.0
+
+    def test_audio_cut_follows_the_source_frame_rate(self, ext):
+        ext.run(source=_source(fps=30.0, fps_text="30/1"), extend_frames=48)
+
+        assert ext.wav.call_args.args[0].shape == (2, 12000 + round(48 / 30 * 48000))
+
+    def test_upscale_model_is_rejected(self, ext):
+        pipe = ext.pipeline()
+
+        with pytest.raises(ValueError, match="upscale"):
+            ext.run(pipe, handle=_handle(pipe, upscale=True))
+
+        ext.tail.assert_not_called()
+
+    def test_diffusion_decoder_is_rejected(self, ext):
+        pipe = ext.pipeline()
+        pipe.video_decoder_block.video_decoder = "diffusion"
+
+        with pytest.raises(ValueError, match="diffusion"):
+            ext.run(pipe)
+
+        pipe.load.assert_not_called()
+
+    def test_progress_is_reported_as_video_generate(self, ext):
+        events: list[dict] = []
+
+        ext.run(step_callback=events.append)
+
+        on_step = ext.samplers.denoise_loop.call_args.kwargs["on_step"]
+        on_step(2, 8, MagicMock(), 0.5)
+        assert events == [{"phase": "video_generate", "current_step": 3, "total_steps": 8}]
+
+    def test_a_callback_that_raises_stops_the_generation(self, ext):
+        class Quit(Exception):
+            pass
+
+        def stop(_event):
+            raise Quit
+
+        ext.samplers.denoise_loop.side_effect = lambda **kwargs: kwargs["on_step"](0, 8, None, 1.0)
+
+        with pytest.raises(Quit):
+            ext.run(step_callback=stop)
+
+        ext.video_vae.stream_chunks_to_ffmpeg.assert_not_called()
+
+    def test_prompt_and_distilled_schedule_are_used(self, ext):
+        pipe, _ = ext.run()
+
+        assert pipe.prompt_encoder.call_args == call("a prompt", free_after=True)
+        ext.scheduler.shorten_schedule.assert_called_once_with(_FAKE_DISTILLED_SIGMAS, 8, keep="start")
+
+    def test_streaming_handle_scopes_the_cache_limit_over_the_carry_encode_and_generation(self, ext):
+        ext.mx.set_cache_limit.return_value = "previous"
+        pipe = ext.pipeline()
+        limits_at_encode = []
+
+        def encode(*_):
+            limits_at_encode.append(list(ext.mx.set_cache_limit.call_args_list))
+            return "video_latent"
+
+        ext.retake.encode_video_tensor.side_effect = encode
+
+        ext.run(pipe, handle=_handle(pipe, low_ram_streaming=True))
+
+        assert limits_at_encode == [[call(0)]]
+        assert ext.mx.set_cache_limit.call_args_list == [call(0), call("previous")]
+
+    def test_non_streaming_handle_leaves_the_cache_limit_alone(self, ext):
+        ext.run()
+
+        ext.mx.set_cache_limit.assert_not_called()
+
+
+class TestDropLeadingFrames:
+    """Verify the cut of the carried frames from decoded chunks, whatever the chunking."""
+
+    @pytest.mark.parametrize(
+        "sizes",
+        [
+            [73],
+            [16, 16, 16, 16, 9],
+            [25, 48],
+            [10, 15, 20, 28],
+            [24, 1, 48],
+            [26, 47],
+            [1] * 73,
+            [80],
+        ],
+    )
+    def test_leaves_the_frames_after_the_carry(self, sizes):
+        kept = list(_drop_leading_frames(_chunks(sizes), _CARRY))
+
+        assert _frame_ids(kept) == list(range(_CARRY, sum(sizes)))
+
+    def test_whole_chunks_inside_the_carry_are_skipped(self):
+        kept = list(_drop_leading_frames(_chunks([16, 9, 20]), _CARRY))
+
+        assert [chunk.shape[2] for chunk in kept] == [20]
+
+    def test_a_chunk_after_the_carry_passes_through_unchanged(self):
+        chunks = _chunks([25, 16])
+
+        kept = list(_drop_leading_frames(chunks, _CARRY))
+
+        assert kept[0] is chunks[1]
+
+    def test_keeps_the_other_axes(self):
+        (kept,) = _drop_leading_frames(_chunks([73]), _CARRY)
+
+        assert kept.shape == (1, 3, 48, 2, 2)
+
+    def test_consumes_the_chunks_lazily(self):
+        pulled = []
+
+        def source():
+            for chunk in _chunks([16, 16, 16, 16, 9]):
+                pulled.append(chunk.shape[2])
+                yield chunk
+
+        first = next(_drop_leading_frames(source(), _CARRY))
+
+        assert first.shape[2] == 7
+        assert pulled == [16, 16]
+
+    def test_carry_longer_than_the_clip_yields_nothing(self):
+        assert list(_drop_leading_frames(_chunks([16, 9]), _CARRY + 1)) == []

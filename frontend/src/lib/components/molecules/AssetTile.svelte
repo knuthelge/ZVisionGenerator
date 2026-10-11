@@ -32,6 +32,7 @@
     onpreview,
     onreuse,
     onreference,
+    onextend,
     onupscale,
     ondelete,
     class: extraClass = '',
@@ -42,7 +43,7 @@
 
   const isVideo = $derived(asset.media_type === 'video');
   const canReuse = $derived(asset.has_reusable_config === true);
-  const menuItems = $derived(assetMenuEntries(asset, { onreference, onupscale, ondelete }, deleting, referenceUnavailable));
+  const menuItems = $derived(assetMenuEntries(asset, { onreference, onextend, onupscale, ondelete }, deleting, referenceUnavailable));
   // Stage videos play inline, so previewing goes through the expand action instead of the media.
   const inlineVideo = $derived(density === 'stage' && isVideo);
   // The stage shows the full-resolution file; small tiles use the thumbnail.

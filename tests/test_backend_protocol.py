@@ -93,6 +93,21 @@ class TestBackendRegistryLookup:
 
         assert backends.supports_video_audio() is expected
 
+    @pytest.mark.parametrize(("platform", "expected"), [("darwin", True), ("win32", False), ("linux", False)])
+    def test_only_the_ltx_mlx_video_backend_extends_a_clip(self, monkeypatch, platform, expected):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends.sys, "platform", platform)
+
+        assert backends.supports_video_extend() is expected
+
+    def test_an_unregistered_platform_cannot_extend_a_clip(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends.sys, "platform", "freebsd")
+
+        assert backends.supports_video_extend() is False
+
     @pytest.mark.parametrize("platform", ["win32", "linux"])
     def test_cuda_memory_budget_is_vram_plus_system_memory(self, monkeypatch, platform):
         import zvisiongenerator.backends as backends

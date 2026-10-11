@@ -9,7 +9,7 @@
   import { addToast } from '$lib/state/toasts.svelte';
   import { getWorkspaceCoreContext, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
   import { deleteAsset } from '$lib/api/gallery';
-  import { referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
+  import { canExtend, extendParams, referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { Icon, MascotSpot, ToolbarSelectShell } from '$lib/components/atoms';
   import { rememberMascotSpots } from '$lib/components/atoms/MascotSpot.svelte';
   import {
@@ -25,6 +25,9 @@
   import { isReviewing } from '$lib/state/jobView';
   import { jobSettingsPrefill } from '$lib/state/jobSettings';
   import { cliCommand, formSettings, type CliCaveat, type CliCommand } from '$lib/state/cliCommand';
+  import { extendGuard, finalizeSceneFields, type ExtendGuard } from '$lib/state/extend';
+  import { extendInspection } from '$lib/state/extendInspection.svelte';
+  import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
   import { formatLoraString, loraLabel, parseLoraString, type LoraChip } from '$lib/state/loras';
   import QueuePanel from './QueuePanel.svelte';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
@@ -36,6 +39,13 @@
   import { startUpscale } from '$lib/state/upscale';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
   import type { DraftState, GalleryAsset, JobControlAction, JobSnapshot, UpscaleFactor, WorkspaceContext, Workflow } from '$lib/types';
+
+  interface Props {
+    /** The workflows the server offers, once its context has loaded; the top bar shows a tab for each. */
+    workflows?: Workflow[] | null;
+  }
+
+  let { workflows = $bindable(null) }: Props = $props();
 
   let context = $state<WorkspaceContext | null>(null);
   let loadError = $state<string | null>(null);
@@ -346,6 +356,20 @@
     addToast(`${asset.filename} is now the reference image`, 'success');
   }
 
+  /** Make a video the source of an extension; its recorded scene and prompt fill the boxes once the server has described it. */
+  function extendAsset(asset: GalleryAsset): void {
+    if (!asset.file_path || !canExtend(asset)) return;
+    const params = extendParams(asset);
+    if (draft.state.workflow === params.workflow) {
+      draft.loadFromUrl(params, context);
+      draft.saveDraft();
+    } else applyPrefill(params, { keepSettings: true });
+    imageFile = null;
+    closeLightbox();
+    addToast(`${asset.filename} is now the source video`, 'success');
+    void extendInspection.inspect(context, { replaceText: true });
+  }
+
   // Tried in order: the visible prompt field (the Scene box sits above it), else any text field, else any control in the pane.
   const COMPOSE_FOCUS = [
     '.compose-pane #ws-prompt:not([hidden]), .compose-pane #ws-enhanced-prompt:not([hidden]):not([disabled])',
@@ -462,6 +486,16 @@
     _prevWorkflow = currentWorkflow;
   });
 
+  // An extension's source is described by the server: on load, and again when its length, model or memory setting change
+  // (the memory note depends on them). A source the user just chose is inspected by the Source video section instead.
+  $effect(() => {
+    const path = draft.state.extendSourcePath;
+    const watching = authorityReady && draft.state.workflow === 'extend' && path !== null;
+    if (!watching || extendInspection.isCurrent()) return;
+    const timer = setTimeout(() => void extendInspection.inspect(context), extendInspection.requestedPath() === path ? INPUT_DEBOUNCE_MS : 0);
+    return () => clearTimeout(timer);
+  });
+
   onMount(() => {
     const unsubscribeLifecycle = jobStore.subscribeLifecycle({
       onComplete: handleJobComplete,
@@ -475,6 +509,7 @@
 
     // Load stored draft as the baseline state.
     draft.loadDraft();
+    extendInspection.reset();
 
     let cancelled = false;
     let historyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -484,6 +519,7 @@
       .then((ctx) => {
         if (cancelled) return;
         context = ctx;
+        workflows = ctx.workflow_contract.values;
         if (ctx.history_assets.length > 0) {
           historyStore.seedHistory(ctx.history_assets);
         }
@@ -508,7 +544,14 @@
         void jobStore.reconnectActiveJob({ snapshot: ctx.active_job });
         // "Generate this one" on the Prompts page: queue that prompt with these settings once the form exists.
         const run = takePromptRun();
-        if (run) void tick().then(() => submitForm(run));
+        if (run) {
+          void (async () => {
+            await tick();
+            // A saved source has not been described yet; the run waits for the answer rather than being refused for want of it.
+            if (ctx && draft.state.workflow === 'extend' && draft.state.extendSourcePath) await extendInspection.inspect(ctx);
+            if (!cancelled) await submitForm(run);
+          })();
+        }
 
         historyTimer = setTimeout(() => {
           if (cancelled) return;
@@ -607,9 +650,44 @@
         formData.set('scene', pair.scene);
       }
     }
-    // A blank scene is no scene: today's form data, without the field.
-    if (String(formData.get('scene') ?? '').trim() === '') formData.delete('scene');
+    // Outside an extension a blank scene is no scene: today's form data, without the field. An extension always sends it.
+    finalizeSceneFields(formData, draft.state);
     return formData;
+  }
+
+  /** Whether an extension may start now; any other workflow always may. */
+  function currentExtendGuard(): ExtendGuard {
+    return extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath));
+  }
+
+  /** Tell the user why an extension cannot start and bring them to the source's path field; false when nothing stands in the way. */
+  function extendBlocked(): boolean {
+    const guard = currentExtendGuard();
+    if (!guard.blocked) return false;
+    // Still being checked: nothing is wrong yet, so there is nothing to tell and nowhere to send the user.
+    if (guard.kind === 'checking') return true;
+    if (guard.note) addToast(guard.note, 'error');
+    // The path field sits in the Source video section; the collapsed sidebar has to open for it to take focus.
+    void (async () => {
+      if (draft.state.sidebarCollapsed) {
+        draft.update('sidebarCollapsed', false);
+        await tick();
+      }
+      document.getElementById('ws-source-path')?.focus();
+    })();
+    return true;
+  }
+
+  /** Wait for the answer about the source when Generate or Copy CLI is pressed while it is still being checked. */
+  async function settleExtendSource(): Promise<void> {
+    if (currentExtendGuard().kind !== 'checking') return;
+    busy = true;
+    try {
+      if (extendInspection.isCurrent()) await extendInspection.settled();
+      else await extendInspection.inspect(context);
+    } finally {
+      busy = false;
+    }
   }
 
   /** Whether prompt-file mode lacks a file or a chosen prompt, so there is nothing to run. */
@@ -621,6 +699,8 @@
   async function copyCliCommand(): Promise<void> {
     // Report empty or invalid fields the way Generate does, rather than copying a command for them.
     if (!formEl || !authorityReady || !formEl.reportValidity()) return;
+    await settleExtendSource();
+    if (extendBlocked()) return;
     if (promptChoiceMissing()) {
       addToast(context?.prompt_file.help.option_required ?? 'Choose a prompt first.', 'error');
       return;
@@ -631,7 +711,8 @@
     const promptFileOptionCount = loaded && loaded.path === settings.prompts_file ? loaded.count : null;
     let built: CliCommand;
     try {
-      built = cliCommand(settings, { outputDir: context?.output_dir, promptFileOptionCount });
+      const extendSource = draft.extendSource ? { scene: draft.extendSource.scene, legacy: draft.extendSource.legacy } : null;
+      built = cliCommand(settings, { outputDir: context?.output_dir, promptFileOptionCount, extendSource });
     } catch (err) {
       addToast(errorText(err, 'Could not build the CLI command'), 'error');
       return;
@@ -667,6 +748,8 @@
     if (!run && promptChoiceMissing()) {
       return;
     }
+    await settleExtendSource();
+    if (extendBlocked()) return;
     submitError = null;
     busy = true;
     draft.saveDraft();
@@ -898,6 +981,7 @@
                   onpreview={openOutputViewer}
                   onreuse={reuseAsset}
                   onreference={useAsReference}
+                  onextend={extendAsset}
                   onupscale={upscaleAsset}
                   {referenceUnavailable}
                   ondelete={deleteWorkspaceAsset}
@@ -925,6 +1009,7 @@
                       onpreview={openOutputViewer}
                       onreuse={reuseAsset}
                       onreference={useAsReference}
+                      onextend={extendAsset}
                       onupscale={upscaleAsset}
                   {referenceUnavailable}
                       ondelete={deleteWorkspaceAsset}
@@ -963,6 +1048,7 @@
               onpreview={openHistoryViewer}
               onreuse={reuseAsset}
               onreference={useAsReference}
+              onextend={extendAsset}
               onupscale={upscaleAsset}
               {referenceUnavailable}
               ondelete={deleteWorkspaceAsset}
@@ -1011,6 +1097,7 @@
         onpreview={openHistoryViewer}
         onreuse={reuseAsset}
         onreference={useAsReference}
+        onextend={extendAsset}
         onupscale={upscaleAsset}
         {referenceUnavailable}
         ondelete={deleteWorkspaceAsset}
@@ -1030,6 +1117,7 @@
   onnavigate={navigateLightbox}
   onreuse={reuseAsset}
   onreference={useAsReference}
+  onextend={extendAsset}
   {referenceUnavailable}
   onupscale={upscaleAsset}
   ondelete={deleteWorkspaceAsset}

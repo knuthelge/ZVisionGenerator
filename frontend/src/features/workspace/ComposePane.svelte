@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import { draft } from '$lib/state/draft.svelte';
   import { canSubmitText, enhancedOverrideActive, isEnhancedStale } from '$lib/state/promptEnhance';
+  import { isOriginalLegacyPrompt } from '$lib/state/extend';
   import { autogrow } from '$lib/actions/autogrow';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { Icon } from '$lib/components/atoms';
@@ -59,7 +60,16 @@
   const textMissing = $derived(!enhancedUsed && !canSubmitText(s));
 
   const SCENE_PLACEHOLDER = 'Who and where, look, style, camera. Kept for extensions.';
-  const promptPlaceholder = $derived(caps.showScene ? 'What happens: action, camera moves, sound, dialogue.' : 'Describe the scene...');
+  const LEGACY_SCENE_PLACEHOLDER = 'Move the scene description here from the prompt (who, where, look). Then change the prompt to what happens next.';
+  const extending = $derived(s.workflow === 'extend');
+  const promptPlaceholder = $derived(
+    extending ? 'What happens next…' : caps.showScene ? 'What happens: action, camera moves, sound, dialogue.' : 'Describe the scene...'
+  );
+  // A source that recorded one prompt and no scene: the old prompt is pre-filled and the scene is left for the user to write.
+  const legacySource = $derived(extending && draft.extendSource?.legacy === true);
+  const scenePlaceholder = $derived(legacySource ? LEGACY_SCENE_PLACEHOLDER : SCENE_PLACEHOLDER);
+  // Shown from the prefill until the Prompt is edited; it never blocks Generate.
+  const originalPromptShown = $derived(extending && !promptFileMode && isOriginalLegacyPrompt(s, draft.extendSource));
   const DEFAULT_SCENE_HELP = 'Used for prompts in the file that have no scene: of their own.';
 
   function countWords(text: string): number {
@@ -176,6 +186,7 @@
       role={showTabs && !pairMode ? 'tabpanel' : undefined}
       aria-labelledby={showTabs && !pairMode ? 'ws-tab-prompt' : undefined}
       placeholder={promptPlaceholder}
+      aria-describedby={originalPromptShown ? 'ws-prompt-original' : undefined}
       required={textMissing}
       hidden={showingEnhanced}
       oninvalid={showPromptForValidation}
@@ -285,7 +296,8 @@
               id="ws-scene"
               name="scene"
               class="prompt-text scene-text"
-              placeholder={SCENE_PLACEHOLDER}
+              class:scene-legacy={legacySource && s.scene === ''}
+              placeholder={scenePlaceholder}
               value={s.scene}
               use:autogrow={[s.scene, showingEnhanced]}
               oninput={(e) => draft.update('scene', e.currentTarget.value)}
@@ -330,6 +342,14 @@
     {#if jsonMode}
       <p class="ui-help">Must be a JSON object. Replaces the normal prompt.</p>
     {/if}
+    <!-- The region stays in the page so assistive technology announces the warning when it appears. -->
+    <div aria-live="polite">
+      {#if originalPromptShown}
+        <p id="ws-prompt-original" class="ui-help ui-help-warning original-warning" data-testid="original-prompt-warning">
+          <Icon name="alert" size={12} />Still the original prompt. Change it to what happens next.
+        </p>
+      {/if}
+    </div>
     {#if errorText}
       <p class="ui-help ui-help-error" role="alert">{errorText}</p>
     {/if}
@@ -348,7 +368,8 @@
           id="ws-scene"
           name="scene"
           class="prompt-text scene-text"
-          placeholder={SCENE_PLACEHOLDER}
+          class:scene-legacy={legacySource && s.scene === ''}
+          placeholder={scenePlaceholder}
           aria-describedby="ws-scene-help"
           value={s.scene}
           use:autogrow={[s.scene, showingEnhanced]}
@@ -426,6 +447,10 @@
   .prompt-text:disabled { opacity: 0.6; }
   /* The Scene box is the smaller of the two: two lines, growing to four, then it scrolls. */
   .scene-text { min-height: 58px; max-height: 98px; }
+  /* The long legacy placeholder takes three lines while the box is empty, so it is never cut off. */
+  .scene-text.scene-legacy { min-height: 78px; }
+  .original-warning { display: flex; align-items: flex-start; gap: 4px; }
+  .original-warning :global(svg) { margin-top: 2px; }
   .prompt-link { font-size: var(--text-meta); font-weight: 600; color: var(--color-text-muted); }
   .prompt-link:hover { color: var(--color-text-primary); }
   .prompt-link:disabled { opacity: 0.5; }

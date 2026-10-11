@@ -53,8 +53,21 @@ export const SEGMENT_LIMIT = 48;
 
 /** Workflow stages that run denoising steps, with the label their bar gets. */
 const STEPPED_STAGES: Record<string, string> = {
-  text_to_image: 'Generate', upscale: 'Upscale', text_to_video: 'Generate', image_to_video: 'Generate',
+  text_to_image: 'Generate', upscale: 'Upscale', text_to_video: 'Generate', image_to_video: 'Generate', extend_video: 'Generate',
 };
+
+/** What an item shows after its last step, for stages that name their work; others read "Finishing up…". */
+const FINISHING_LABELS: Record<string, string> = { join_clips: 'Joining clips…' };
+
+/** The label for the stretch after the last step: what the current stage is doing, or "Finishing up…". */
+export function finishingLabel(job: ActiveJobState): string {
+  return FINISHING_LABELS[job.stageName] ?? 'Finishing up…';
+}
+
+/** The same label without its ellipsis, for a progress bar's accessible value text. */
+export function finishingText(job: ActiveJobState): string {
+  return finishingLabel(job).replace(/…$/, '');
+}
 
 /** Whether a workflow stage runs denoising steps (as opposed to e.g. resolving the prompt or saving the file). */
 export function isSteppedStage(name: string): boolean {
@@ -94,7 +107,7 @@ export function isPaused(job: ActiveJobState): boolean {
 }
 
 export function isVideo(job: ActiveJobState): boolean {
-  return job.workflow === 'txt2vid' || job.workflow === 'img2vid';
+  return job.workflow === 'txt2vid' || job.workflow === 'img2vid' || job.workflow === 'extend';
 }
 
 export function itemNoun(job: ActiveJobState): 'image' | 'video' {

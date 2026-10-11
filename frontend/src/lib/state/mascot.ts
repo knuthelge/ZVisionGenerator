@@ -83,5 +83,5 @@ export function mascotMood({ job, reaction, loadError, loading, greeting, typing
 
 /** Pick what the mascot holds: a clapperboard for video workflows, otherwise a brush. */
 export function mascotTool(workflow: JobWorkflow | undefined): MascotTool {
-  return workflow === 'txt2vid' || workflow === 'img2vid' ? 'clapper' : 'brush';
+  return workflow === 'txt2vid' || workflow === 'img2vid' || workflow === 'extend' ? 'clapper' : 'brush';
 }

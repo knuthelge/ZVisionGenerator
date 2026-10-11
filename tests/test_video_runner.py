@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from conftest import _make_plan
+from conftest import _make_plan, make_extend_source
 
 from dataclasses import replace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from tests.conftest import _make_mock_video_backend, _make_video_args
 from zvisiongenerator.core.job_plan import EnhanceStatus, JobPlan
 from zvisiongenerator.core.types import StageOutcome
+from zvisiongenerator.core.video_types import ExtendSpec
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
@@ -377,3 +378,53 @@ class TestVideoQuit:
 
         assert workflow.run.call_count == 2
         assert events[-1]["type"] == "batch_completed"
+
+
+class TestExtendBatch:
+    """Verify an extension job builds its request from the extend arguments and plans each run with its own seed."""
+
+    def _source(self):
+        return make_extend_source(scene="A street at night.", prompt="She walks away.")
+
+    def _run(self, *, runs=1, prompts=None, **arg_overrides):
+        requests = []
+        workflow = MagicMock()
+        workflow.run.side_effect = lambda request, artifacts: requests.append(request) or StageOutcome.success
+        source = self._source()
+        args = _make_video_args(runs=runs, width=512, height=256, num_frames=25 + 48, extend_source=source, extend_frames=48, **arg_overrides)
+        prompts = prompts or {"default": [("", None)]}
+        config: dict = {"generation": {"seed_min": 4, "seed_max": 10**9}}
+        run_video_batch(_make_mock_video_backend(), MagicMock(), _ltx_model_info(), workflow, prompts, config, args, plan=_make_plan(prompts, args, config=config, scene=source.scene))
+        return requests, source
+
+    def test_request_carries_the_extend_spec_and_the_window_size(self):
+        (request,), source = self._run()
+        assert request.extend == ExtendSpec(source, 48)
+        assert (request.width, request.height, request.num_frames) == (512, 256, 73)
+        assert request.image_path is None and request.upscale is None
+
+    def test_planned_scene_reaches_the_request_and_an_empty_prompt_is_accepted(self):
+        (request,), _ = self._run()
+        assert request.prompt == "" and request.scene == "A street at night." and request.resolved_scene == "A street at night."
+
+    def test_prints_the_added_frames_and_the_source_name(self, capsys):
+        self._run()
+        assert "+48 frames from clip.mp4" in capsys.readouterr().out
+
+    def test_sibling_runs_get_different_seeds(self):
+        with patch("zvisiongenerator.preflight.random.randint", side_effect=[1111, 2222]):
+            requests, _ = self._run(runs=2, seed=None)
+        assert [r.seed for r in requests] == [1111, 2222]
+        assert all(r.extend is not None and r.extend.frames == 48 for r in requests)
+
+    def test_fixed_seed_repeats_across_runs(self):
+        requests, _ = self._run(runs=2, seed=9)
+        assert [r.seed for r in requests] == [9, 9]
+
+    def test_other_jobs_have_no_extend(self):
+        workflow = MagicMock()
+        workflow.run.return_value = StageOutcome.success
+        args = _make_video_args()
+        prompts = {"default": [("a sunset", None)]}
+        run_video_batch(_make_mock_video_backend(), MagicMock(), _ltx_model_info(), workflow, prompts, {}, args, plan=_make_plan(prompts, args))
+        assert workflow.run.call_args.args[0].extend is None

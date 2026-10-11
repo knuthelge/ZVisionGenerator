@@ -5,3 +5,4 @@ export * from './config';
 export * from './sse';
 export * from './models';
 export * from './promptFiles';
+export * from './extend';

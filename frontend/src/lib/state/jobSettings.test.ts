@@ -93,4 +93,22 @@ describe('jobSettingsPrefill', () => {
     expect(jobSettingsPrefill({ mode: 'video', prompt: 'waves', review: 'true' }).patch.videoUpscaleReview).toBe(false);
     expect(jobSettingsPrefill({ ...video, review: 'true' }).patch.upscaleReview).toBeUndefined();
   });
+
+  it('restores an extension from its source, length and text', () => {
+    const { params, patch } = jobSettingsPrefill({
+      mode: 'video', workflow: 'extend', model: 'ltx', prompt_source: 'inline', source_video: '/clips/walk.mp4', extend_frames: '48',
+      scene: 'A rainy street.', prompt: 'She waves.', steps: '8', seed: '7', audio: 'true', low_memory: 'true',
+    });
+
+    expect(params).toEqual({ workflow: 'extend', model: 'ltx', steps: '8', seed: '7', source_video: '/clips/walk.mp4', extend_frames: '48' });
+    expect(patch).toMatchObject({ scene: 'A rainy street.', prompt: 'She waves.', seed: 7, audio: true, lowMemory: true, videoUpscaleEnabled: false });
+    // The text is the job's own, so inspecting its source must not replace it.
+    expect(patch.extendPrefill).toEqual({ path: '/clips/walk.mp4', scene: '', prompt: '' });
+  });
+
+  it('keeps the blank scene of an extension that sent none', () => {
+    const { patch } = jobSettingsPrefill({ mode: 'video', workflow: 'extend', source_video: '/clips/walk.mp4', scene: '', prompt: '' });
+
+    expect(patch).toMatchObject({ scene: '', prompt: '' });
+  });
 });

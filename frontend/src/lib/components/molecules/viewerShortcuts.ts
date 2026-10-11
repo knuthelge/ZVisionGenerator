@@ -12,7 +12,7 @@ export const VIEWER_SHORTCUTS: readonly ShortcutEntry[] = [
   { keys: ['←', '→'], label: 'Previous / next asset' },
   { keys: ['Home', 'End'], label: 'First / last asset' },
   { keys: ['R'], label: 'Reuse settings' },
-  { keys: ['E'], label: 'Use as reference' },
+  { keys: ['E'], label: 'Use as reference (image) or extend (video)' },
   { keys: ['X → 2'], label: 'Upscale 2×' },
   { keys: ['X → 4'], label: 'Upscale 4×' },
   { keys: ['D'], label: 'Download' },

@@ -37,6 +37,7 @@
     minus: 'M7 12h10',
     offline: 'M3 9a14 14 0 0118 0M6.5 12.5a9 9 0 0111 0M10 16a4 4 0 014 0M12 19.5h.01',
     film: 'M4 5h16v14H4zM8 5v14M16 5v14M4 9h4M4 15h4M16 9h4M16 15h4',
+    extend: 'M3 6h10v12H3zM15 12h6M18 9l3 3-3 3',
     clock: 'M12 4a8 8 0 110 16 8 8 0 010-16zM12 8v4l2.5 2.5',
   } as const;
 

@@ -7,13 +7,16 @@ import sys
 from argparse import Namespace
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from zvisiongenerator.core.job_plan import JobPlan
+from zvisiongenerator.core.video_types import ExtendSource
 from zvisiongenerator.preflight import plan_iterations
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
+from zvisiongenerator.utils.video_probe import VideoProbe
 
 # Starlette's TestClient sends ``Host: testserver``; allow it through the Web UI request guard.
 os.environ.setdefault("ZIV_UI_ALLOWED_HOSTS", "testserver")
@@ -102,6 +105,54 @@ def _make_video_args(**overrides):
     )
     defaults.update(overrides)
     return Namespace(**defaults)
+
+
+def make_extend_source(**overrides: Any) -> ExtendSource:
+    """Return a checked 24 fps, 512x256, 49-frame source with sound that was recorded with a scene and an action."""
+    values: dict[str, Any] = dict(
+        path=Path("/videos/clip.mp4"),
+        width=512,
+        height=256,
+        fps=24.0,
+        fps_text="24/1",
+        frame_count=49,
+        has_audio=True,
+        video_start=0.0,
+        scene="A woman in a red raincoat on a rainy street.",
+        prompt="She opens a black umbrella.",
+    )
+    values.update(overrides)
+    return ExtendSource(**values)
+
+
+def make_probe(**overrides: Any) -> VideoProbe:
+    """Return the probe of a clean 512x256, 24 fps, 73-frame h264 clip with audio and no colour tags."""
+    values: dict[str, Any] = dict(
+        coded_width=512,
+        coded_height=256,
+        width=512,
+        height=256,
+        codec="h264",
+        profile="High",
+        pix_fmt="yuv420p",
+        bits_per_sample=8,
+        sample_aspect_ratio="1:1",
+        r_frame_rate="24/1",
+        avg_frame_rate="24/1",
+        time_base="1/12288",
+        field_order="progressive",
+        color_space=None,
+        color_primaries=None,
+        color_trc=None,
+        rotation=0,
+        frame_count=73,
+        duration=3.04,
+        video_start=0.0,
+        format_start=0.0,
+        has_audio=True,
+    )
+    values.update(overrides)
+    return VideoProbe(**values)
 
 
 def _make_mock_video_backend(name="ltx"):

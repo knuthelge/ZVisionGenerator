@@ -33,8 +33,13 @@ def add_enhance_arguments(parser: argparse.ArgumentParser, *, mode: str) -> None
     parser.add_argument("--enhance-model", type=str, default=None, metavar="REPO[@REVISION]", help="Hugging Face repo or local path of the enhancer LLM (overrides config).")
 
 
-def parse_enhance_args(parser: argparse.ArgumentParser, args: argparse.Namespace, *, mode: str) -> None:
-    """Replace ``args.enhance`` (raw SPEC plus ``--enhance-note``) with ``EnhanceSettings`` or ``None``; report errors via *parser*."""
+def parse_enhance_args(parser: argparse.ArgumentParser, args: argparse.Namespace, *, mode: str, split: bool = False) -> None:
+    """Replace ``args.enhance`` (raw SPEC plus ``--enhance-note``) with ``EnhanceSettings`` or ``None``; report errors via *parser*.
+
+    Args:
+        split: A video job whose prompts are split into scene and action (no scene given, or an extension), so
+            settings that keep everything still change the prompt and are not refused as a no-op.
+    """
     spec = args.enhance
     note = getattr(args, "enhance_note", None)
     if args.no_enhance and (spec is not None or note is not None):
@@ -46,7 +51,7 @@ def parse_enhance_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         settings = parse_enhance_spec(spec, mode=mode)
         if note is not None:
             settings = replace(settings, note=settings_from_mapping({"note": note}, mode=mode).note)
-        validate_settings(settings, mode=mode)
+        validate_settings(settings, mode=mode, split=mode == "video" and split)
     except ValueError as exc:
         parser.error(f"--enhance: {exc}")
     args.enhance = settings

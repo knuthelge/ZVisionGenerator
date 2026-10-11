@@ -1,6 +1,6 @@
 // ── Core data types ──────────────────────────────────────────────────────────
 
-export type Workflow = 'txt2img' | 'img2img' | 'txt2vid' | 'img2vid';
+export type Workflow = 'txt2img' | 'img2img' | 'txt2vid' | 'img2vid' | 'extend';
 
 /** Workflow of a job: a Workspace workflow, or an upscale of an existing image. */
 export type JobWorkflow = Workflow | 'upscale';
@@ -53,6 +53,65 @@ export interface GalleryAsset {
   details?: AssetDetails;
   /** Upscale options for an image (null for videos and images of unknown size). */
   upscale?: AssetUpscale | null;
+  /** Whether a video can be extended; null for images and where the platform cannot extend. */
+  extend?: AssetExtend | null;
+  /** The video an extension continued, as recorded; null for other assets. */
+  source_video?: string | null;
+  /** The frames an extension added, as recorded; null for other assets. */
+  extend_frames?: number | null;
+}
+
+/** Whether a video can be extended, with the reason when it cannot. */
+export interface AssetExtend {
+  available: boolean;
+  /** Why the video cannot be extended; null when it can. */
+  reason: string | null;
+}
+
+/** A problem that stops a video from being extended. */
+export interface ExtendProblem {
+  code: string;
+  message: string;
+}
+
+/** How an extension window fits this machine's memory; null in `ExtendSourceInfo` when it cannot be told. */
+export interface ExtendMemoryFit {
+  status: string;
+  required_gb: number;
+  budget_gb: number;
+}
+
+/**
+ * What `POST /api/extend/source` reports about a video chosen for extending.
+ *
+ * Facts the server could not read are null. `width` and `height` are the displayed size.
+ */
+export interface ExtendSourceInfo {
+  path: string;
+  filename: string;
+  /** Where the browser can load the video; null when it lies outside the output folder. */
+  media_url: string | null;
+  width: number | null;
+  height: number | null;
+  rotation: number | null;
+  fps: number | null;
+  frame_count: number | null;
+  duration_seconds: number | null;
+  has_audio: boolean | null;
+  /** The scene recorded in the video, or null. */
+  scene: string | null;
+  /** The prompt recorded in the video, or null. */
+  prompt: string | null;
+  /** The video recorded only a single prompt and no scene. */
+  legacy: boolean;
+  /** The model it was made with, when this machine offers it. */
+  model: string | null;
+  lora: string | null;
+  problems: ExtendProblem[];
+  /** The new frames, snapped to a multiple of 8 (a 2 s default when none was requested); null when the frame rate is unknown. */
+  extend_frames: number | null;
+  window_frames: number | null;
+  memory_fit: ExtendMemoryFit | null;
 }
 
 /** How a saved asset was made, as recorded in its embedded settings. */
@@ -190,6 +249,10 @@ export interface EnhanceContext {
   fps: number | null;
   audio: boolean;
   reference_image: boolean;
+  /** Extend only: the video being continued; the server reads its size, frame rate and recorded text. */
+  source_video?: string | null;
+  /** Extend only: the new frames, a multiple of 8. */
+  extend_frames?: number | null;
 }
 
 export interface EnhanceAxis {
@@ -223,6 +286,10 @@ export interface EnhancedSource {
   /** The scene it was produced beside; missing in drafts saved before scenes existed. */
   scene?: string;
   mode: WorkflowMode;
+  /** Extend only: the source video it was produced for; a different source makes it out of date. */
+  sourceVideoPath?: string | null;
+  /** Extend only: the new frames it was produced for. */
+  extendFrames?: number | null;
 }
 
 /**
@@ -434,6 +501,8 @@ export interface WorkflowContractEntry {
   visible_controls: string[];
   supports_reference_image: boolean;
   requires_reference_image: boolean;
+  /** The workflow continues a chosen video (extend). */
+  requires_source_video: boolean;
   clear_fields: string[];
 }
 
@@ -561,6 +630,14 @@ export interface DraftState {
   enhanceSettings: EnhanceSettings | null;
   /** Enhance each image's prompt on the server at generation time. */
   enhanceAuto: boolean;
+  /** Extend: the video to continue; null until one is chosen. Its facts are fetched again on load. */
+  extendSourcePath: string | null;
+  /** Extend: the new frames, a multiple of 8; null until a source sets the 2 s default. Never aligned to 8k+1. */
+  extendFrames: number | null;
+  /** Extend: the source could not be found where Reuse recorded it, so it must be chosen again. */
+  missingSourceVideo: boolean;
+  /** Extend: the source whose Scene and Prompt were settled, and the text its prefill put there (to tell edits from prefill). */
+  extendPrefill: { path: string; scene: string; prompt: string } | null;
 }
 
 export type WorkspacePrefill = Partial<Omit<DraftState, 'historyCollapsed' | 'sidebarCollapsed' | 'lastGeneratedAt' | 'version'>>;

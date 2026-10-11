@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
 import { enhancedOverrideActive } from './promptEnhance';
 import { draft, offeredSizes, settingDefaultsFor, videoTimingFor } from './draft.svelte';
 import type { WorkspaceContext, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
@@ -106,6 +107,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
           visible_controls: ['workflow', 'model', 'prompt_inline', 'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed'],
           supports_reference_image: false,
           requires_reference_image: false,
+          requires_source_video: false,
           clear_fields: ['image_path', 'image_strength', 'frames', 'audio', 'low_memory'],
         },
         img2img: {
@@ -114,6 +116,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
           visible_controls: ['workflow', 'model', 'prompt_inline', 'negative_prompt', 'reference_image', 'reference_image_path', 'reference_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'image_strength', 'seed'],
           supports_reference_image: true,
           requires_reference_image: true,
+          requires_source_video: false,
           clear_fields: ['frames', 'audio', 'low_memory'],
         },
         txt2vid: {
@@ -122,6 +125,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
           visible_controls: ['workflow', 'model', 'prompt_inline', 'prompt_scene', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
           supports_reference_image: false,
           requires_reference_image: false,
+          requires_source_video: false,
           clear_fields: ['negative_prompt', 'guidance', 'image_path', 'image_strength', 'quantize'],
         },
         img2vid: {
@@ -130,7 +134,17 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
           visible_controls: ['workflow', 'model', 'prompt_inline', 'prompt_scene', 'reference_image', 'reference_image_path', 'reference_image_clear', 'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory'],
           supports_reference_image: true,
           requires_reference_image: true,
+          requires_source_video: false,
           clear_fields: ['negative_prompt', 'guidance', 'quantize'],
+        },
+        extend: {
+          mode: 'video',
+          model_kind: 'video',
+          visible_controls: ['workflow', 'model', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'runs', 'steps', 'seed', 'audio', 'low_memory'],
+          supports_reference_image: false,
+          requires_reference_image: false,
+          requires_source_video: true,
+          clear_fields: ['negative_prompt', 'guidance', 'image_path', 'image_strength', 'quantize', 'ratio', 'size', 'width', 'height', 'frames', 'video_upscale_enabled', 'video_upscale_factor'],
         },
       },
       field_precedence: { defaults: [], dimensions: '' },
@@ -368,6 +382,9 @@ describe('draft store', () => {
 
       expect(videoTimingFor(ctx, 'unknown-video')).toEqual({ fps: 30, frameAlignment: 8 });
       expect(videoTimingFor(ctx, 'ltx-v-0.9')).toEqual({ fps: 24, frameAlignment: 1 });
+      // A source's frame rate replaces the model's, and the alignment stays the model's.
+      expect(videoTimingFor(ctx, 'ltx-v-0.9', 30)).toEqual({ fps: 30, frameAlignment: 1 });
+      expect(videoTimingFor(ctx, 'ltx-v-0.9', null)).toEqual({ fps: 24, frameAlignment: 1 });
     });
 
     it('uses preferredModel when it is valid for the current workflow', () => {
@@ -826,5 +843,196 @@ describe('offeredSizes', () => {
 
   it('offers every video preset for the ratio', () => {
     expect(offeredSizes(makeContext(), 'txt2vid', 'ltx-v-0.9', '16:9')).toEqual(['s', 'm']);
+  });
+});
+
+describe('extend', () => {
+  const extendContext = (overrides: Partial<WorkspaceContext> = {}): WorkspaceContext => {
+    const ctx = makeContext({
+      video_models: [{ id: 'ltx-v-0.9', label: 'LTX Video', type: 'video' }, { id: 'ltx-2', label: 'LTX 2', type: 'video' }],
+      video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults(), 'ltx-2': makeVideoDefaults({ steps: 12, frame_alignment: 8 }) },
+      ...overrides,
+    });
+    ctx.workflow_contract.values = ['txt2img', 'img2img', 'txt2vid', 'img2vid', 'extend'];
+    return ctx;
+  };
+  const SOURCE = '/clips/walk.mp4';
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+    draft.update('workflow', 'extend');
+  });
+
+  describe('URL and Reuse prefill', () => {
+    it('selects the extend workflow with its source and new frames', () => {
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_frames: '48', scene: 'A street.', model: 'ltx-2', lora: 'style:0.7', steps: '6', seed: '5' }, extendContext());
+      expect(draft.state).toMatchObject({
+        workflow: 'extend', extendSourcePath: SOURCE, extendFrames: 48, scene: 'A street.', prompt: '', model: 'ltx-2', loraString: 'style:0.7', steps: 6, seed: 5,
+        missingSourceVideo: false,
+      });
+    });
+
+    it('does not align the new frames to 8k+1, only to a multiple of 8', () => {
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_frames: '48' }, extendContext());
+      expect(draft.state.extendFrames).toBe(48);
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_frames: '50' }, extendContext());
+      expect(draft.state.extendFrames).toBe(48);
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_frames: '3' }, extendContext());
+      expect(draft.state.extendFrames).toBe(8);
+    });
+
+    it('ignores size, clip length and reference fields, which an extension does not have', () => {
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, frames: '121', width: '640', height: '480', ratio: '9:16', size: 's', image_path: '/a.png', guidance: '4' }, extendContext());
+      expect(draft.state.frameCount).not.toBe(121);
+      expect(draft.state.width).not.toBe(640);
+      expect(draft.state.ratio).not.toBe('9:16');
+      expect(draft.state.referenceImagePath).toBeNull();
+      expect(draft.state.guidance).not.toBe(4);
+    });
+
+    it('flags a source that moved and keeps its recorded path', () => {
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, extend_frames: '48', missing_source_video: 'true', scene: 'A street.' }, extendContext());
+      expect(draft.state).toMatchObject({ extendSourcePath: SOURCE, missingSourceVideo: true, scene: 'A street.' });
+    });
+
+    it('flags a source with no recorded path', () => {
+      draft.loadFromUrl({ workflow: 'extend', missing_source_video: 'true' }, extendContext());
+      expect(draft.state).toMatchObject({ extendSourcePath: null, missingSourceVideo: true });
+    });
+
+    it('replaces the text of the boxes with the reused pair, blank where the URL has none', () => {
+      draft.patch({ scene: 'old scene', prompt: 'old prompt', enhancedPrompt: 'old enhanced', enhancedScene: 'old enhanced scene' });
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE, scene: 'A street.' }, extendContext());
+      expect(draft.state).toMatchObject({ scene: 'A street.', prompt: '', enhancedPrompt: '', enhancedScene: '', enhancedFrom: null });
+    });
+
+    it('fills the Enhanced pair of a reused extension, current for its source and length', () => {
+      draft.loadFromUrl({
+        workflow: 'extend', source_video: SOURCE, extend_frames: '48', scene: 'A street.', prompt: 'She waves.', enhanced_scene: 'A wet street.', enhanced_prompt: 'She waves slowly.',
+      }, extendContext());
+      expect(draft.state).toMatchObject({ enhancedScene: 'A wet street.', enhancedPrompt: 'She waves slowly.' });
+      expect(draft.state.enhancedFrom).toEqual({ prompt: 'She waves.', scene: 'A street.', mode: 'video', sourceVideoPath: SOURCE, extendFrames: 48 });
+    });
+
+    it('leaves the extend fields alone for other workflows', () => {
+      draft.loadFromUrl({ workflow: 'txt2vid', source_video: SOURCE, extend_frames: '48', prompt: 'p' }, extendContext());
+      expect(draft.state).toMatchObject({ workflow: 'txt2vid', extendSourcePath: null });
+    });
+
+    it('ignores an extension URL where the contract does not offer extend', () => {
+      draft.update('workflow', 'txt2vid');
+      draft.loadFromUrl({ workflow: 'extend', source_video: SOURCE }, makeContext());
+      expect(draft.state.workflow).toBe('txt2vid');
+      expect(draft.state.extendSourcePath).toBeNull();
+    });
+  });
+
+  describe('applyExtendSource', () => {
+    beforeEach(() => {
+      draft.setExtendSourcePath(SOURCE);
+    });
+
+    it('fills Scene from a recorded scene and leaves Prompt empty', () => {
+      draft.applyExtendSource(sceneSource());
+      expect(draft.state).toMatchObject({ scene: 'A woman on a rainy street.', prompt: '' });
+      expect(draft.extendSource?.path).toBe(SOURCE);
+    });
+
+    it('leaves both empty when no prompt is recorded', () => {
+      draft.patch({ scene: 'something', prompt: 'else' });
+      draft.applyExtendSource(sourceInfo(), null, { replaceText: true });
+      expect(draft.state).toMatchObject({ scene: '', prompt: '' });
+    });
+
+    it('takes the source frame rate and the default length, and clears the "moved" notice', () => {
+      draft.patch({ missingSourceVideo: true, fps: 24 });
+      draft.applyExtendSource(sourceInfo({ fps: 30000 / 1001, extend_frames: 56 }));
+      expect(draft.state).toMatchObject({ fps: 30000 / 1001, extendFrames: 56, missingSourceVideo: false });
+    });
+
+    it('keeps a length already chosen', () => {
+      draft.patch({ extendFrames: 96 });
+      draft.applyExtendSource(sourceInfo({ extend_frames: 48 }));
+      expect(draft.state.extendFrames).toBe(96);
+    });
+
+    it('takes the model and LoRAs of the source and loads the model defaults', () => {
+      const ctx = extendContext();
+      draft.hydrateFromContext(ctx);
+      draft.applyExtendSource(sourceInfo({ model: 'ltx-2', lora: 'style:0.7' }), ctx);
+      expect(draft.state).toMatchObject({ model: 'ltx-2', loraString: 'style:0.7', steps: 12 });
+    });
+
+    it('keeps the model and LoRAs when the source offers none', () => {
+      draft.patch({ model: 'ltx-v-0.9', loraString: 'mine:1' });
+      draft.applyExtendSource(sourceInfo());
+      expect(draft.state).toMatchObject({ model: 'ltx-v-0.9', loraString: 'mine:1' });
+    });
+
+    it('clears the Enhanced pair when the boxes are filled', () => {
+      draft.patch({ enhancedPrompt: 'x', enhancedScene: 'y', enhancedFrom: { prompt: '', mode: 'video' } });
+      draft.applyExtendSource(sceneSource());
+      expect(draft.state).toMatchObject({ enhancedPrompt: '', enhancedScene: '', enhancedFrom: null });
+    });
+
+    it('keeps a box the user edited when a different source is chosen', () => {
+      draft.applyExtendSource(legacySource());
+      draft.patch({ prompt: 'She turns and leaves.' });
+      draft.setExtendSourcePath('/clips/other.mp4');
+      draft.applyExtendSource(sceneSource({ path: '/clips/other.mp4' }));
+      expect(draft.state).toMatchObject({ scene: 'A woman on a rainy street.', prompt: 'She turns and leaves.' });
+    });
+
+  });
+
+  describe('source path', () => {
+    it('forgets the previous source facts and the moved notice when another is chosen', () => {
+      draft.setExtendSourcePath(SOURCE);
+      draft.applyExtendSource(sourceInfo());
+      draft.patch({ missingSourceVideo: true });
+      draft.setExtendSourcePath('/clips/other.mp4');
+      expect(draft.extendSource).toBeNull();
+      expect(draft.state).toMatchObject({ extendSourcePath: '/clips/other.mp4', missingSourceVideo: false });
+    });
+
+    it('keeps the facts when the same path is set again', () => {
+      draft.setExtendSourcePath(SOURCE);
+      draft.applyExtendSource(sourceInfo());
+      draft.setExtendSourcePath(SOURCE);
+      expect(draft.extendSource).not.toBeNull();
+    });
+
+  });
+
+  describe('hydrateFromContext', () => {
+    it('keeps the new frames as a multiple of 8, not 8k+1', () => {
+      const ctx = extendContext({ video_defaults: makeVideoDefaults({ frame_alignment: 8 }), video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ frame_alignment: 8 }) } });
+      draft.patch({ extendFrames: 48 });
+      draft.hydrateFromContext(ctx, null, { keepSettings: true });
+      expect(draft.state.extendFrames).toBe(48);
+    });
+
+    it('runs at the source frame rate instead of the model frame rate, and other workflows at the model frame rate', () => {
+      const ctx = extendContext();
+      draft.setExtendSourcePath(SOURCE);
+      draft.applyExtendSource(sourceInfo({ fps: 30 }));
+      draft.hydrateFromContext(ctx, null, { keepSettings: true });
+      expect(draft.state.fps).toBe(30);
+      draft.onWorkflowChange('txt2vid', ctx);
+      expect(draft.state.fps).toBe(24);
+    });
+
+  });
+
+  describe('resetSelections', () => {
+    it('keeps the source and text and returns the length to two seconds at the source frame rate', () => {
+      const ctx = extendContext();
+      draft.setExtendSourcePath(SOURCE);
+      draft.applyExtendSource(sourceInfo({ fps: 30 }));
+      draft.patch({ extendFrames: 96, scene: 'Kept.' });
+      draft.resetSelections(ctx);
+      expect(draft.state).toMatchObject({ extendSourcePath: SOURCE, extendFrames: 64, scene: 'Kept.', fps: 30 });
+    });
   });
 });

@@ -8,7 +8,9 @@ Stages are pure functions operating on the immutable request and mutable artifac
 
 from __future__ import annotations
 
+import shutil
 import subprocess
+import tempfile
 import time
 import warnings
 from collections.abc import Callable
@@ -18,7 +20,10 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.ffmpeg import strip_audio
 from zvisiongenerator.utils.provenance import build_video_config_payload, embed_mp4_config
-from zvisiongenerator.utils.prompt_compose import compose_video_prompt, expand_random_choices
+from zvisiongenerator.utils.prompt_compose import compose_video_prompt, expand_random_choices, strip_quotes_while_original
+from zvisiongenerator.utils.video_extend import extend_audio_output
+from zvisiongenerator.utils.video_splice import splice_clips
+from zvisiongenerator.workflows.enhance_stage import apply_planned_enhancement
 
 
 def _upscale_kwargs(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> dict[str, object]:
@@ -58,13 +63,27 @@ def resolve_prompt_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
 
     ``{a|b|c}`` choice blocks are expanded in each part, supporting nesting. ``artifacts.resolved_prompt`` is the
     scene and prompt composed; the scene alone is recorded as ``metadata["scene"]`` when there is one.
+
+    When extending a clip recorded with a single prompt (no scene) and the prompt is still that original, its quoted
+    sentences are dropped so the old dialogue is not repeated. The action sent is recorded as ``metadata["prompt_sent"]``.
     """
     prompt = request.resolved_prompt if request.resolved_prompt is not None else expand_random_choices(request.prompt)
     scene = request.resolved_scene if request.resolved_scene is not None else expand_random_choices(request.scene or "")
+    if request.extend is not None:
+        prompt = _extend_action(request, prompt)
+        artifacts.metadata["prompt_sent"] = prompt
     artifacts.resolved_prompt = compose_video_prompt(scene, prompt)
     if scene.strip():
         artifacts.metadata["scene"] = scene
     return StageOutcome.success
+
+
+def _extend_action(request: VideoGenerationRequest, resolved_prompt: str) -> str:
+    """Return the action to send when extending: *resolved_prompt*, without quoted sentences while a legacy source's prompt is unchanged."""
+    source = request.extend.source
+    if not source.legacy:
+        return resolved_prompt
+    return strip_quotes_while_original(resolved_prompt, template=request.prompt, recorded_prompt=source.prompt)
 
 
 def enhance_prompt_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:
@@ -77,14 +96,12 @@ def enhance_prompt_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
     if action is None:
         return StageOutcome.success
     scene = request.enhanced_scene
-    composed = compose_video_prompt(scene, action)
-    artifacts.resolved_prompt = composed
-    artifacts.metadata["enhanced_prompt"] = action
-    if scene and scene.strip():
-        artifacts.metadata["enhanced_scene"] = scene
-    print(f"Enhanced prompt:\n{' '.join(composed.split())}\n")
-    if request.on_prompt_enhanced is not None:
-        request.on_prompt_enhanced(composed)
+    apply_planned_enhancement(
+        request,
+        artifacts,
+        resolved_prompt=compose_video_prompt(scene, action),
+        extra_metadata={"enhanced_scene": scene} if scene and scene.strip() else None,
+    )
     return StageOutcome.success
 
 
@@ -153,6 +170,85 @@ def image_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
         return StageOutcome.failed
     artifacts.video_path = result
     return StageOutcome.success
+
+
+def extend_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:
+    """Call backend.extend_video() to generate the new part of the clip, and keep it for ``join_clips_stage``.
+
+    The segment is written to a directory in the system temp folder; ``artifacts.metadata`` holds the
+    directory as ``extend_segment_dir`` and the result as ``extend_segment``. The directory is removed again when the
+    backend fails or returns nothing; otherwise ``join_clips_stage`` removes it.
+
+    Raises:
+        ValueError: If the request has no ``extend``.
+        RuntimeError: If the backend cannot extend videos.
+    """
+    extend = request.extend
+    if extend is None:
+        raise ValueError("extend_video_stage requires request.extend to be set")
+    extender = getattr(request.backend, "extend_video", None)
+    if not callable(extender):
+        raise RuntimeError("This video backend cannot extend videos.")
+    prompt = artifacts.resolved_prompt if artifacts.resolved_prompt is not None else request.prompt
+    prompt_one_line = " ".join(prompt.split())
+    print(f"  Prompt: {prompt_one_line[:100]}{'...' if len(prompt_one_line) > 100 else ''}")
+    Path(request.output_dir).mkdir(parents=True, exist_ok=True)
+    segment_dir = tempfile.mkdtemp(prefix="ziv-extend-")
+    t0 = time.monotonic()
+    try:
+        segment = extender(
+            model=request.model,
+            source=extend.source,
+            prompt=prompt,
+            extend_frames=extend.frames,
+            seed=request.seed,
+            steps=request.steps,
+            segment_dir=segment_dir,
+            audio_output=_extend_has_audio(request),
+            step_callback=request.step_callback,
+        )
+    except BaseException:
+        shutil.rmtree(segment_dir, ignore_errors=True)
+        raise
+    artifacts.generation_time = time.monotonic() - t0
+    if segment is None:
+        shutil.rmtree(segment_dir, ignore_errors=True)
+        return StageOutcome.failed
+    artifacts.metadata["extend_segment"] = segment
+    artifacts.metadata["extend_segment_dir"] = segment_dir
+    return StageOutcome.success
+
+
+def join_clips_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:
+    """Splice the generated segment onto the source clip into the output file; remove the segment directory afterwards.
+
+    A failing splice warns and fails the generation.
+
+    Raises:
+        ValueError: If the request has no ``extend``, or no segment or output filename is set.
+    """
+    extend = request.extend
+    segment = artifacts.metadata.pop("extend_segment", None)
+    segment_dir = artifacts.metadata.pop("extend_segment_dir", None)
+    try:
+        if extend is None or segment is None or artifacts.filename is None:
+            raise ValueError("join_clips_stage requires request.extend, a generated segment and an output filename")
+        output = Path(request.output_dir) / artifacts.filename
+        try:
+            artifacts.video_path = splice_clips(extend.source, segment, output, extend_frames=extend.frames, include_audio=_extend_has_audio(request))
+        except (subprocess.CalledProcessError, RuntimeError) as exc:
+            detail = exc.stderr.decode("utf-8", "replace").strip() if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
+            warnings.warn(f"Joining the clips failed: {detail}", stacklevel=2)
+            return StageOutcome.failed
+    finally:
+        if segment_dir is not None:
+            shutil.rmtree(segment_dir, ignore_errors=True)
+    return StageOutcome.success
+
+
+def _extend_has_audio(request: VideoGenerationRequest) -> bool:
+    """Return whether an extension carries sound: the source has audio and the job did not ask for none."""
+    return extend_audio_output(request.extend.source, no_audio=request.no_audio)
 
 
 def log_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:

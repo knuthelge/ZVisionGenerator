@@ -2,11 +2,16 @@
   import { draft, MAX_SHARPEN_AMOUNT, offeredSizes, settingDefaultsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
   import { ActionBar, InspectorRow, InspectorSection } from '$lib/components/molecules';
+  import { fileName } from '$lib/components/molecules/assetDetails';
+  import { MEMORY_FIT_CONSEQUENCES } from '$lib/components/molecules/ModelStatusBadges.svelte';
+  import { extendGuard, extendMemoryNote } from '$lib/state/extend';
+  import { extendInspection } from '$lib/state/extendInspection.svelte';
   import type { NumberSpec, ScrubOptions } from '$lib/actions/scrub';
   import type { WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
   import { randomSeed } from './seed';
-  import { durationSpec, framesToSeconds, secondsToFrames } from '$lib/state/videoDuration';
+  import SourceVideoSection from './SourceVideoSection.svelte';
+  import { defaultExtendFrames, durationSpec, EXTEND_FRAME_STEP, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
 
   interface Props {
     context: WorkspaceContext;
@@ -70,10 +75,26 @@
   // The clip length is edited in seconds but submitted as frames, snapped to a count the model accepts.
   const timing = $derived(videoTimingFor(context, model));
   const secondsSpec = $derived(durationSpec(timing.fps, timing.frameAlignment));
-  const shownSeconds = $derived(Math.round(framesToSeconds(s.frameCount, timing.fps) * 100) / 100);
+  const shownSeconds = $derived(roundSeconds(framesToSeconds(s.frameCount, timing.fps)));
 
   function setSeconds(seconds: number | null): void {
     if (seconds !== null) draft.update('frameCount', secondsToFrames(seconds, timing.fps, timing.frameAlignment));
+  }
+
+  // --- Extend: the length of the new frames (the source itself is chosen in SourceVideoSection) ---
+  const info = $derived(draft.extendSource);
+  const sourceStatus = $derived(extendInspection.statusFor(s.extendSourcePath));
+  const sourceGuard = $derived(extendGuard(s, info, sourceStatus));
+  const sourceFps = $derived(info?.fps ?? null);
+  const silentSource = $derived(s.workflow === 'extend' && info?.has_audio === false);
+  const extendSecondsSpec = $derived(sourceFps ? durationSpec(sourceFps, EXTEND_FRAME_STEP) : { step: 0.1, min: 0.1 });
+  const shownExtendSeconds = $derived(sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null);
+  const extendLength = $derived(info && sourceFps && info.frame_count !== null && s.extendFrames !== null ? extendTotal(info.frame_count, s.extendFrames, sourceFps) : null);
+  const extendDefaultFrames = $derived(sourceFps ? defaultExtendFrames(sourceFps) : null);
+  const memoryNote = $derived(extendMemoryNote(info?.memory_fit ?? null));
+
+  function setExtendSeconds(seconds: number | null): void {
+    if (seconds !== null && sourceFps) draft.update('extendFrames', extendFramesFromSeconds(seconds, sourceFps));
   }
 
   const dimensionSpec = $derived<NumberSpec>({ step: caps.dimensionStep, min: caps.dimensionMin, max: caps.dimensionMax ?? undefined });
@@ -109,6 +130,7 @@
       caps.showDimensions && changed('dimensionMode'),
       caps.showRuns && changed('runs'),
       caps.showFrameCount && changed('frameCount'),
+      caps.showExtendLength && extendDefaultFrames !== null && s.extendFrames !== extendDefaultFrames,
       caps.showSteps && changed('steps'),
       caps.showGuidance && changed('guidance'),
       caps.showI2IStrength && changed('referenceImageStrength'),
@@ -153,7 +175,7 @@
   const videoUpscaleReviewOn = $derived(caps.showVideoUpscaleReview && s.videoUpscaleEnabled && s.videoUpscaleReview);
   const videoSummary = $derived(
     [
-      s.audio ? 'Audio' : null,
+      s.audio && !silentSource ? 'Audio' : null,
       s.lowMemory ? 'Low memory' : null,
       s.videoUpscaleEnabled ? `${s.videoUpscaleFactor}× upscale` : null,
       videoUpscaleReviewOn ? 'Review' : null,
@@ -188,7 +210,7 @@
   });
 
   const referencePreview = $derived(filePreviewUrl ?? referencePreviewUrl);
-  const referenceName = $derived(imageFile?.name ?? (s.referenceImagePath ? s.referenceImagePath.split('/').pop() ?? '' : ''));
+  const referenceName = $derived(imageFile?.name ?? (s.referenceImagePath ? fileName(s.referenceImagePath) : ''));
 
   function clearImage(): void {
     onImageFileChange(null);
@@ -204,7 +226,10 @@
 
   // --- Footer ---------------------------------------------------------------
   const promptFileMode = $derived(s.promptSource === 'file');
-  const submitDisabled = $derived(busy || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)));
+  const promptChoiceMissing = $derived(promptFileMode && s.promptFileOptionIds.length === 0);
+  const submitDisabled = $derived(busy || (promptFileMode && (!s.promptFilePath || s.promptFileOptionIds.length === 0)) || sourceGuard.blocked);
+  // One reason at a time, linked to Generate: the source comes first, then the prompt file.
+  const generateReason = $derived(sourceGuard.note ?? (promptChoiceMissing ? context.prompt_file.help.option_required : null));
 
   function resetAll(): void {
     draft.resetSelections(context);
@@ -235,6 +260,10 @@
   </div>
 
   <div class="settings-scroll">
+    {#if caps.showSourceVideo}
+      <SourceVideoSection {context} {busy} guard={sourceGuard} />
+    {/if}
+
     {#if caps.showDimensions}
       <InspectorSection id="size" title="Size" summary={sizeSummary}>
         <InspectorRow label="Ratio" changed={changed('ratio')} onreset={() => reset('ratio', 'size', 'dimensionMode')}>
@@ -275,6 +304,29 @@
           <span class="frame-count">{s.frameCount} frames</span>
           <input type="hidden" name="frames" value={s.frameCount}>
         </InspectorRow>
+      {/if}
+      {#if caps.showExtendLength}
+        <InspectorRow
+          label="Extend by (s)"
+          forId="ws-extend-seconds"
+          scrubber={scrubber(shownExtendSeconds, extendSecondsSpec, setExtendSeconds, sourceFps === null)}
+          changed={extendDefaultFrames !== null && s.extendFrames !== extendDefaultFrames}
+          onreset={() => extendDefaultFrames !== null && draft.update('extendFrames', extendDefaultFrames)}
+        >
+          <InspectorNumber id="ws-extend-seconds" value={shownExtendSeconds} {...extendSecondsSpec} disabled={sourceFps === null} title={sourceFps === null ? 'Choose a video to extend first.' : undefined} commitOnly onchange={setExtendSeconds} />
+          <span class="frame-count" data-testid="extend-frames">{sourceFps !== null && s.extendFrames !== null ? `+${s.extendFrames} frames` : '—'}</span>
+          {#if s.extendFrames !== null}<input type="hidden" name="extend_frames" value={s.extendFrames}>{/if}
+        </InspectorRow>
+        <InspectorRow label="Total">
+          <span class="extend-total" data-testid="extend-total">{extendLength ? `${extendLength.seconds.toFixed(2)} s · ${extendLength.frames} frames` : '—'}</span>
+        </InspectorRow>
+        <div aria-live="polite">
+          {#if memoryNote}
+            <p class="row-hint ui-help-warning memory-note" data-testid="extend-memory-note" title="{memoryNote.text}&#10;{MEMORY_FIT_CONSEQUENCES.unified[memoryNote.status]}">
+              <Icon name="alert" size={12} />{memoryNote.text}
+            </p>
+          {/if}
+        </div>
       {/if}
       {#if caps.showSteps}
         <InspectorRow label="Steps" forId="ws-steps" scrubber={scrubber(s.steps, SPEC.steps, (v) => draft.update('steps', v))} changed={changed('steps')} onreset={() => reset('steps')}>
@@ -487,7 +539,17 @@
       <InspectorSection id="video" title="Video" summary={videoSummary} active={videoSummary !== 'Off'}>
         {#if caps.showAudio}
           <InspectorRow label="Audio" changed={changed('audio')} onreset={() => reset('audio')}>
-            <Toggle id="ws-audio" name="audio" ariaLabel="Audio" checked={s.audio} onchange={(e) => draft.update('audio', (e.currentTarget as HTMLInputElement).checked)} />
+            <!-- A silent source gives a silent clip; the preference is kept and audio=false is what gets submitted. -->
+            <Toggle
+              id="ws-audio"
+              name="audio"
+              ariaLabel={silentSource ? 'Audio (the source has no audio)' : 'Audio'}
+              title={silentSource ? 'Source has no audio' : undefined}
+              checked={s.audio && !silentSource}
+              disabled={silentSource}
+              onchange={(e) => draft.update('audio', (e.currentTarget as HTMLInputElement).checked)}
+            />
+            {#if silentSource}<span class="frame-count">Source has no audio</span>{/if}
             <input type="hidden" name="audio" value="false">
           </InspectorRow>
         {/if}
@@ -542,8 +604,8 @@
         A job is running. New runs join the queue.
       </p>
     {/if}
-    {#if promptFileMode && s.promptFileOptionIds.length === 0}
-      <p class="ui-alert ui-alert-warning footer-note">{context.prompt_file.help.option_required}</p>
+    {#if generateReason}
+      <p id="ws-generate-reason" class="ui-alert ui-alert-warning footer-note">{generateReason}</p>
     {/if}
     {#if submitError}
       <p class="ui-alert ui-alert-error footer-note" role="alert" data-testid="generate-error">
@@ -567,6 +629,7 @@
         id="ws-submit"
         type="submit"
         disabled={submitDisabled}
+        aria-describedby={generateReason ? 'ws-generate-reason' : undefined}
         class="ui-btn ui-btn-primary ui-btn-main"
       >
         <Icon name="bolt" size={16} />
@@ -599,6 +662,12 @@
   .inspector-select:focus, .inspector-text:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-surface); }
   .inspector-select option { background: var(--color-bg-surface); }
   .row-hint { padding: 0 12px 6px 116px; font-size: var(--text-meta); color: var(--color-text-muted); }
+
+  /* The row hint's muted colour is scoped to this pane and would otherwise outrank the warning colour. */
+  .row-hint.ui-help-warning { color: var(--color-warning); }
+  .memory-note { display: flex; align-items: flex-start; gap: 4px; }
+  .memory-note :global(svg) { margin-top: 2px; }
+  .extend-total { font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-secondary); }
 
   .reference-drop { border-radius: var(--radius-sm); }
   .reference-drop[data-dragover='true'] { outline: 2px dashed var(--color-primary-main); outline-offset: -2px; }

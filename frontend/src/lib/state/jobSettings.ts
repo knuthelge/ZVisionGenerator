@@ -1,7 +1,8 @@
 import type { DraftState, EnhanceSettings, JobSettings, PromptSource } from '$lib/types';
+import { snapExtendFrames } from './videoDuration';
 
 /** Fields the workspace prefill path applies on top of the model's defaults (the same keys as a reuse URL). */
-const PREFILL_KEYS = ['workflow', 'model', 'steps', 'guidance', 'seed', 'ratio', 'size', 'width', 'height', 'frames', 'lora', 'image_path'] as const;
+const PREFILL_KEYS = ['workflow', 'model', 'steps', 'guidance', 'seed', 'ratio', 'size', 'width', 'height', 'frames', 'lora', 'image_path', 'source_video', 'extend_frames'] as const;
 
 export interface JobSettingsPrefill {
   /** Applied like a reuse URL: workflow and model first, so their defaults load before the values. */
@@ -75,6 +76,14 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
     enhanceAuto: settings.enhance_auto !== undefined,
   };
   if (isVideo) patch.scene = ownScene;
+  // An extension's boxes are the job's own text, blank scene included; the source's recorded text must not replace them.
+  if (isVideo && first(settings, 'workflow') === 'extend') {
+    const source = first(settings, 'source_video') ?? null;
+    const frames = numberOrNull(first(settings, 'extend_frames'));
+    patch.extendPrefill = { path: source ?? '', scene: '', prompt: '' };
+    // The Enhanced pair was made for this source and length, so it is current (as loadFromUrl records for a Reuse).
+    if (patch.enhancedFrom) patch.enhancedFrom = { ...patch.enhancedFrom, sourceVideoPath: source, extendFrames: frames === null ? null : snapExtendFrames(frames) };
+  }
   if (jsonPrompt !== undefined) patch.jsonPrompt = jsonPrompt;
   if (promptSource === 'file') {
     patch.promptFilePath = first(settings, 'prompts_file') ?? null;

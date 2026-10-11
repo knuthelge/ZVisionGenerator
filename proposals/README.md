@@ -17,7 +17,7 @@ These files are not part of the published docs site, and the docs don't link to 
 | Proposal | Status | Summary |
 |---|---|---|
 | [Controls for Web UI video jobs](video-job-controls.md) | In progress | Quit has shipped; Next and Pause for video jobs remain |
-| [Feature parity between macOS and Windows/Linux](platform-parity.md) | Proposed | Klein img2img, video audio, two-stage video upscale with review, quantized and streamed video with memory badges on CUDA; matching Z-Image scheduler, ffmpeg install and enhancer download |
+| [Feature parity between macOS and Windows/Linux](platform-parity.md) | Proposed | Klein img2img, video audio, two-stage video upscale with review, quantized and streamed video with memory badges on CUDA, extending a video; matching Z-Image scheduler, ffmpeg install and enhancer download |
 | [First and last frame for image-to-video](video-first-last-frame.md) | Proposed | An optional end image for `img2vid`: macOS first (MLX keyframe on the true last frame), then CUDA via `LTX2ConditionPipeline.from_pipe` with generate-and-trim once a spike confirms it; Last frame picker, `--end-image`, recorded settings and a two-frame enhancer rule |
 | [Upscale existing videos on macOS with SeedVR2](video-upscale-seedvr2-mac.md) | Proposed | Upscale gallery videos 2× or 4× with the SeedVR2 already in mflux: a chunked clip loop over its 3D VAE and transformer, audio and frame rate kept, macOS only behind a capability flag; a spike sets chunk size, model and size limit first |
 | [Edit images: inpaint, extend and Klein edits](image-editing.md) | Proposed | Paint a mask and redraw it, extend the canvas, and (Klein) edit from a prompt, through one editor opened from any image |
@@ -25,13 +25,13 @@ These files are not part of the published docs site, and the docs don't link to 
 | [Show model download progress in Web UI jobs](model-download-progress.md) | Proposed | Download a missing model as its own step before loading, and show bytes, speed and ETA on the job card, with Stop and resume |
 | [Faster generation on macOS](macos-speed.md) | Proposed | Ranked speed opportunities on Apple Silicon (Ideogram quants, model reuse across Web UI jobs, LTX dtype and streaming, Klein text encoder), with a measurement plan to size them first |
 | [Show memory use while a job runs](live-memory-usage.md) | Proposed | Feasibility study: live memory use during generation is readable on macOS, Windows and Linux; Windows VRAM spill into shared memory is the one part still to verify |
-| [Extend a video](video-extend.md) | Accepted | Continue a clip from its last 25 frames in the one-stage loop and splice the new part onto the untouched original, with audio; macOS first, then video-only on Windows/Linux |
-| [A scene for video prompts](video-scene.md) | In progress | An optional Scene beside the video prompt (CLI, prompt files, Web UI), sent first, and an enhancer that writes both a scene and an action in one call |
 
 ## Archive
 
 | Proposal | Status | Summary |
 |---|---|---|
+| [Extend a video](archive/video-extend.md) | Done (unreleased) | Continue a clip from its last 25 frames in the one-stage loop and splice the new part onto the untouched original, with audio, on macOS; Windows/Linux moved to platform parity |
+| [A scene for video prompts](archive/video-scene.md) | Done (unreleased) | An optional Scene beside the video prompt (CLI, prompt files, Web UI), sent first, and an enhancer that writes both a scene and an action in one call |
 | [Review before upscaling](archive/upscale-review.md) | Done (unreleased) | Pause each in-run upscale after the small render: Approve runs the full-size pass, Discard skips it. Images everywhere, video on macOS; CUDA video moved to platform parity |
 | [Linux: keep systemd-oomd from killing the editor during model loads](archive/linux-oomd-model-loads.md) | Done (unreleased) | Relax oomd's memory-pressure limit with an optional drop-in, measured over an 18-job run, and documented for Linux users |
 | [Prompt enhancer: audio, image awareness and model-aware rewrites](archive/prompt-enhancer-v2.md) | Done (v0.13.0b19) | A Sound option for video with audio, clip length and frame shape in the rewrite, image-to-video rewrites that describe change, and a free-text Direction; vision, per-model hints and length trimming rejected |

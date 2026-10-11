@@ -158,6 +158,30 @@ portrait:
 
 The `negative` field supports the same structured format as `prompt` (strings, dicts, lists).
 
+## Scenes for Video
+
+A video prompt can have a **scene** (who and where, look, style, camera setup) apart from its action. Add `scene:` to an entry:
+
+```yaml
+snippets:
+  courtyard: A knight in a grey castle courtyard, overcast, handheld camera.
+
+castle:
+  - scene: $courtyard
+    prompt: She draws her sword and turns to the gate.
+  - scene: $courtyard
+    prompt: She sheathes the sword and walks toward the tower.
+  - prompt: A raven lands on the wall.   # no scene: uses --scene or the Workspace Default scene
+```
+
+- `scene:` belongs to an entry. To share one scene across a set, put it in a `$snippet` as above; there is no scene on the set itself.
+- The video model receives the scene first, then the prompt. An entry with no `scene:` uses `--scene` (or the Workspace's Default scene) if one is given, and otherwise only its prompt, as before.
+- A `scene:` takes snippets, structured values and `{a|b}` choices like a prompt does. An entry still needs a `prompt`.
+- Image jobs ignore `scene:`, so a file can serve both.
+- Old prompt files work unchanged.
+
+With `--extend`, each entry's prompt is the action that follows the source clip, and an entry's `scene:` replaces the source's scene for that entry (see [Extend a Video](video.md#extend-a-video)).
+
 ## Enhancing Prompts
 
 A small local LLM can rewrite a prompt with more visual detail before it is generated. It runs on your machine. The default model is an uncensored variant of Qwen3.5-4B, because small instruction-tuned models often refuse or tone down ordinary creative prompts, such as a battle scene, a horror shot or a villain's portrait. The uncensored variant rewrites them faithfully instead.
@@ -203,9 +227,25 @@ The enhancer also knows the job's shape:
 - **Clip length (video):** one continuous action for clips up to 5 seconds, two or three beats up to 10 seconds, so the action fits the clip.
 - **Starting image:** for image-to-video, the rewrite describes motion and change instead of appearance, which the first frame already shows. For img2img it mentions the subject only briefly. The enhancer does not see the image itself.
 
+### Scene and Action (Video)
+
+For video, one rewrite returns two parts: a **scene** and an **action** (see [Scenes for Video](#scenes-for-video)). The options shape them differently:
+
+| Option | Shapes |
+|---|---|
+| Style, Mood, Details | mostly the scene |
+| Motion, Sound | the action |
+| Direction | both |
+
+- **Text to video** splits and expands, so it works when you wrote everything in the prompt or gave only a scene: the setting, look and camera setup go to the scene, and events in time order, camera moves, sound and quoted dialogue go to the action.
+- **Image to video** writes a short scene (style, and what the image does not show) and an action that describes the change.
+- **Extend** keeps your scene exactly as it is and writes only the action that happens next, using the previous clip's prompt as context so it does not repeat its actions or spoken lines. From a clip made without a scene, the enhancer takes a scene from the old prompt. See [Extend a Video](video.md#extend-a-video).
+- **Length** covers the total, within the encoder's cap. When you give both a scene and a prompt, it is split in proportion to what you wrote; when one of them is empty, roughly a third goes to the scene and two thirds to the action. The action never aims below 12 words.
+- If the rewrite does not come back as a valid pair, the enhancer retries once, then uses what it wrote as the action and keeps your scene.
+
 ### In the Web UI
 
-- **Enhance**: click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. When that tab has text, it is what gets generated; the **used** badge shows which tab that is. Edit it, enhance again, or **Clear** it to go back to your prompt. The button is unavailable while generation jobs are running or queued.
+- **Enhance**: click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. For video, the tabs are **Your text** and **Enhanced**, and each holds a Scene and a Prompt box that switch together; both enhanced boxes are editable. When that tab has text, it is what gets generated; the **used** badge shows which tab that is. Edit it, enhance again, or **Clear** it to go back to your prompt. The button is unavailable while generation jobs are running or queued.
 - If you change the prompt or switch between image and video afterwards, the Enhanced prompt is marked **Out of date**. It is still used until you **Re-enhance** or **Clear** it.
 - `{a|b}` choices are picked before the rewrite, so the enhancer sees one plain prompt and the Enhanced prompt has no choices left. Enhance again for a different pick, or use **Enhance each image when generating** to keep a fresh pick per image.
 - **Enhance each image when generating** rewrites every image's prompt on the server, after its `{a|b}` choices are picked, using that image's seed. It works with inline prompts and prompt files. All rewrites run before the model loads, so the first image starts once every prompt is rewritten; the progress panel shows *Enhancing prompt N of M*. A prompt that could not be enhanced, or was skipped, is marked in the panel and generated from the original prompt.
@@ -230,6 +270,8 @@ woman:
     enhance:
       sound: [ambient, dialogue]   # video with audio on
 ```
+
+An entry's own `enhance:` that asks for no change at all (style and mood keep, no details, length same, no motion or sound, no direction) is refused when the file loads: a warning appears and that entry is not enhanced. To have the enhancer split a single prompt into scene and action, use `enhance: true` or set at least one option. Job-level `--enhance` and the Web UI accept keep-all settings when the prompt has no scene.
 
 From the command line, `--enhance` enhances every prompt and overrides entries' `enhance:` settings; `--no-enhance` turns all enhancement off:
 

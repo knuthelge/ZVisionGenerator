@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { alignFrameCount, durationSpec, framesToSeconds, secondsToFrames } from './videoDuration';
+import {
+  alignFrameCount,
+  defaultExtendFrames,
+  durationSpec,
+  extendTotal,
+  framesToSeconds,
+  secondsToFrames,
+  snapExtendFrames,
+} from './videoDuration';
 
 describe('video duration conversion', () => {
   it('aligns frame counts to the nearest 8k+1 like the server', () => {
@@ -44,5 +52,26 @@ describe('video duration conversion', () => {
   it('steps by one alignment step with no upper bound', () => {
     expect(durationSpec(24, 8)).toEqual({ step: 8 / 24, min: 8 / 24 });
     expect(durationSpec(24, 8).max).toBeUndefined();
+  });
+});
+
+describe('extend length', () => {
+  it('snaps frame counts to multiples of 8, never to 8k+1', () => {
+    expect(snapExtendFrames(50)).toBe(48);
+    expect(snapExtendFrames(49)).toBe(48);
+    expect(snapExtendFrames(48)).toBe(48);
+    expect(snapExtendFrames(56)).toBe(56);
+    expect(snapExtendFrames(Number.NaN)).toBe(8);
+  });
+
+  it('defaults to two seconds at the source frame rate', () => {
+    expect(defaultExtendFrames(24)).toBe(48);
+    expect(defaultExtendFrames(30000 / 1001)).toBe(56);
+  });
+
+  it('adds the new frames to the source for the total', () => {
+    const total = extendTotal(97, 48, 24);
+    expect(total.frames).toBe(145);
+    expect(total.seconds).toBeCloseTo(6.0417, 3);
   });
 });

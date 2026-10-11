@@ -17,7 +17,7 @@ from zvisiongenerator.core.progress_events import make_prompt_enhanced_callback 
 from zvisiongenerator.core.progress_events import make_step_progress_callback as _make_step_progress_callback
 from zvisiongenerator.core.progress_events import run_workflow_with_progress as _run_workflow_with_progress
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.core.video_types import ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.review import REVIEW_PROMPT, await_review_decision, review_enabled
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
@@ -143,6 +143,7 @@ def run_video_batch(
             *skip_signal*.
         RuntimeError: When *plan*'s iteration order differs from the batch loop.
     """
+    extend = _extend_spec(args)
     total_prompts = sum(len(p) for p in prompts_data.values())
     total_iterations = args.runs * total_prompts
     plan.require_runnable(total_iterations)
@@ -217,7 +218,10 @@ def run_video_batch(
                 # Display progress
                 eta_str = f"  ETA: {eta:.0f}s" if eta is not None else ""
                 print(f"\n[{ran_iterations}/{total_iterations}] Run {run_idx + 1}/{args.runs} | Set: {set_name} | Prompt {prompt_idx + 1}/{len(prompts)}{eta_str}")
-                print(f"  {args.width}x{args.height}, {args.num_frames} frames, seed={seed}")
+                if extend is not None:
+                    print(f"  {args.width}x{args.height}, +{extend.frames} frames from {extend.source.path.name}, seed={seed}")
+                else:
+                    print(f"  {args.width}x{args.height}, {args.num_frames} frames, seed={seed}")
                 if args.upscale:
                     print("  Upscale: 2x" + (" (review)" if with_review else ""))
                 if getattr(args, "no_audio", False):
@@ -275,6 +279,7 @@ def run_video_batch(
                     enhanced_scene=planned.enhanced_scene,
                     scene_input=getattr(args, "scene_input", None),
                     prompt_input=getattr(args, "prompt_input", None),
+                    extend=extend,
                     on_prompt_enhanced=_make_prompt_enhanced_callback(
                         progress_callback,
                         mode="video",
@@ -365,6 +370,14 @@ def run_video_batch(
         total_iterations=total_iterations,
         total_time=total_time,
     )
+
+
+def _extend_spec(args: argparse.Namespace) -> ExtendSpec | None:
+    """Return what to append to the source clip when the job extends one (``extend_source`` set), else ``None``."""
+    source = getattr(args, "extend_source", None)
+    if source is None:
+        return None
+    return ExtendSpec(source, args.extend_frames)
 
 
 def _emit_cancelled(progress_callback: ProgressCallback | None, completed: int, total: int) -> None:

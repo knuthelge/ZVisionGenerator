@@ -1,14 +1,18 @@
 """VideoBackend Protocol — contract for platform-specific video inference engines.
 
-Protocol requires name, load_model, text_to_video, image_to_video.
+Protocol requires name, load_model, text_to_video, image_to_video. ``VideoExtender`` is a separate, optional
+capability that only the macOS backend provides.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
+
+if TYPE_CHECKING:
+    from zvisiongenerator.core.video_types import ExtendSegment, ExtendSource
 
 
 @runtime_checkable
@@ -83,4 +87,28 @@ class VideoBackend(Protocol):
 
         Takes the same optional ``stage1_steps`` and ``review`` keyword arguments as ``text_to_video``.
         """
+        ...
+
+
+class VideoExtender(Protocol):
+    """Optional capability: continue an existing clip from its last frames.
+
+    Deliberately not ``runtime_checkable`` and not part of ``VideoBackend``: only the macOS backend provides it.
+    Callers gate on ``supports_video_extend()`` and look the method up on the backend.
+    """
+
+    def extend_video(
+        self,
+        model: Any,
+        source: ExtendSource,
+        prompt: str,
+        *,
+        extend_frames: int,
+        seed: int,
+        steps: int,
+        segment_dir: str | Path,
+        audio_output: bool,
+        step_callback: Any | None = None,
+    ) -> ExtendSegment | None:
+        """Generate the segment that follows ``source``; returns its video and optional audio files, or None if failed."""
         ...

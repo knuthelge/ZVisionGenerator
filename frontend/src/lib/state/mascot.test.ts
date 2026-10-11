@@ -86,3 +86,10 @@ describe('mascotTool', () => {
     expect(mascotTool(undefined)).toBe('brush');
   });
 });
+
+describe('mascotTool for extend', () => {
+  it('holds the clapperboard for an extension', () => {
+    expect(mascotTool('extend')).toBe('clapper');
+    expect(mascotTool('txt2img')).toBe('brush');
+  });
+});

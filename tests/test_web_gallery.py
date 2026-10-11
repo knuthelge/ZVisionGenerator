@@ -17,8 +17,10 @@ from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.gallery import (
     GalleryAsset,
     delete_gallery_assets,
+    gallery_asset_for_output_path,
     gallery_asset_to_json,
     list_gallery_assets,
+    resolve_output_asset_path,
 )
 
 
@@ -426,7 +428,7 @@ def _reuse_web_config() -> SimpleNamespace:
 
 def _reuse_params(payload: dict) -> dict[str, str]:
     query = urlsplit(payload["reuse_workspace_url"].removeprefix("#")).query
-    return {key: values[0] for key, values in parse_qs(query).items()}
+    return {key: values[0] for key, values in parse_qs(query, keep_blank_values=True).items()}
 
 
 def _video_reuse(tmp_path, config_overrides: dict) -> tuple[dict, dict[str, str]]:
@@ -500,3 +502,226 @@ def test_reuse_of_an_image_keeps_only_the_prompt(tmp_path, monkeypatch):
 
     assert params["prompt"] == "A castle."
     assert not {"scene", "enhanced_scene", "enhanced_prompt"} & set(params)
+
+
+# ---------------------------------------------------------------------------
+# Extend: capability block, source and Reuse
+# ---------------------------------------------------------------------------
+
+
+def _extend_config(source: Path | None, **overrides) -> dict:
+    return {
+        "workflow": "extend",
+        "scene": "A woman in a red raincoat on a rainy street.",
+        "prompt": "She opens a black umbrella and walks away.",
+        "source_video": str(source) if source is not None else None,
+        "extend_frames": 48,
+        "frame_count": 97,
+        "width": 512,
+        "height": 256,
+        **overrides,
+    }
+
+
+def test_extend_info_is_present_on_videos_and_absent_on_images(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
+    monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
+    video, _params = _video_reuse(tmp_path, {"prompt": "A knight rides in."})
+    _make_png_with_config(tmp_path / "pic.png", {"schema": "zvisiongenerator.config.v1", "workflow": "txt2img", "prompt": "A castle.", "model": "zit"})
+    image = gallery_asset_to_json(_find_asset(list_gallery_assets(str(tmp_path)), "pic.png"), _reuse_web_config())
+
+    assert video["extend"] == {"available": True, "reason": None}
+    assert image["extend"] is None
+
+
+def test_extend_asset_carries_source_and_new_frames(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"\x00")
+
+    payload, _params = _video_reuse(tmp_path, _extend_config(source))
+
+    assert payload["source_video"] == str(source)
+    assert payload["extend_frames"] == 48
+    assert payload["workflow"] == "extend"
+    assert payload["frame_count"] == 97
+
+
+def test_other_videos_carry_no_source(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
+
+    payload, _params = _video_reuse(tmp_path, {"prompt": "A knight rides in."})
+
+    assert (payload["source_video"], payload["extend_frames"]) == (None, None)
+
+
+def test_reuse_of_an_extend_output_returns_to_extend_with_source_length_and_text(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"\x00")
+
+    payload, params = _video_reuse(tmp_path, _extend_config(source, lora="/loras/style.safetensors:0.8", guidance=3.0, ratio="16:9", size="m"))
+
+    assert params == {
+        "workflow": "extend",
+        "source_video": str(source),
+        "extend_frames": "48",
+        "scene": "A woman in a red raincoat on a rainy street.",
+        "prompt": "She opens a black umbrella and walks away.",
+        "model": "ltx-8",
+        "lora": "/loras/style.safetensors:0.8",
+        "steps": "8",
+        "seed": "1",
+    }
+    assert payload["reuse_state"]["resolved_workflow"] == "extend"
+    assert payload["reuse_state"]["workflow_available"] is True
+    assert payload["reuse_state"]["fallback_reasons"] == []
+
+
+def test_reuse_of_an_enhanced_extend_output_offers_inputs_and_the_generated_pair(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"\x00")
+    config = _extend_config(source, prompt="She opens a black umbrella, rain drumming on it, and walks off.", prompt_input="She walks away.")
+
+    _payload, params = _video_reuse(tmp_path, config)
+
+    assert params["prompt"] == "She walks away."
+    assert params["enhanced_prompt"] == "She opens a black umbrella, rain drumming on it, and walks off."
+    assert params["enhanced_scene"] == "A woman in a red raincoat on a rainy street."
+    assert params["scene"] == ""
+    assert not {"frames", "width", "height", "ratio", "size", "image_path", "guidance"} & set(params)
+
+
+def test_a_video_with_settings_but_no_text_shows_no_file_name_as_its_prompt(tmp_path):
+    payload, params = _video_reuse(tmp_path, {})
+
+    assert payload["prompt"] == ""
+    assert not {"scene", "prompt"} & set(params)
+
+
+def test_a_video_without_embedded_settings_still_shows_its_file_name(tmp_path):
+    (tmp_path / "walk_in_rain.mp4").write_bytes(b"\x00" * 8)
+    with patch("zvisiongenerator.web.gallery.read_mp4_config", return_value=None):
+        asset = _find_asset(list_gallery_assets(str(tmp_path)), "walk_in_rain.mp4")
+
+    payload = gallery_asset_to_json(asset, _reuse_web_config())
+
+    assert payload["prompt"] == "walk in rain"
+    assert asset.has_reusable_config is False
+    assert set(_reuse_params(payload)) == {"workflow"}
+
+
+_FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.mark.parametrize(
+    ("case", "config"),
+    [
+        (
+            "enhanced_source_moved",
+            {"scene": "A wet street at night.", "prompt": "She waves slowly.", "scene_input": "My street.", "prompt_input": "She waves."},
+        ),
+        ("blank_text", {"scene": "", "prompt": ""}),
+    ],
+)
+def test_extend_reuse_params_match_the_shared_fixture_the_frontend_loads(tmp_path, monkeypatch, case, config):
+    """``frontend/src/lib/state/extendFlow.test.ts`` feeds this same file into ``loadFromUrl``; change both together."""
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
+    expected = json.loads((_FIXTURES / "extend_reuse_params.json").read_text(encoding="utf-8"))[case]
+
+    payload, params = _video_reuse(tmp_path, _extend_config(Path("/clips/walk.mp4"), **config))
+
+    assert params == expected
+    if case == "blank_text":
+        assert payload["prompt"] == ""  # the file name is not shown as the prompt
+
+
+def test_reuse_of_an_extend_output_whose_source_moved_stays_extend_and_flags_it(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
+
+    payload, params = _video_reuse(tmp_path, _extend_config(tmp_path / "moved.mp4"))
+
+    assert params["workflow"] == "extend"
+    assert params["missing_source_video"] == "true"
+    assert payload["reuse_state"]["resolved_workflow"] == "extend"
+    assert payload["reuse_state"]["workflow_available"] is False
+    assert payload["reuse_state"]["fallback_reasons"] == ["missing_source_video"]
+
+
+def test_reuse_of_an_extend_output_without_the_capability_falls_back_to_text_to_video(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: False)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"\x00")
+
+    payload, params = _video_reuse(tmp_path, _extend_config(source))
+
+    assert params["workflow"] == "txt2vid"
+    assert not {"source_video", "extend_frames", "missing_source_video"} & set(params)
+    assert payload["reuse_state"]["fallback_reasons"] == ["extend_unavailable"]
+    assert payload["extend"] is None
+
+
+@pytest.mark.parametrize("directory", [".web_uploads", ".splice-x9y8z7"])
+def test_staging_and_scratch_directories_never_list_as_gallery_assets(tmp_path, directory):
+    (tmp_path / "clip.mp4").write_bytes(b"\x00" * 8)
+    (tmp_path / directory).mkdir()
+    (tmp_path / directory / "scratch.mp4").write_bytes(b"\x00" * 8)
+    (tmp_path / directory / "scratch.png").write_bytes(b"\x00" * 8)
+    (tmp_path / "kept").mkdir()
+    (tmp_path / "kept" / "nested.mp4").write_bytes(b"\x00" * 8)
+
+    ids = sorted(asset.id for asset in list_gallery_assets(str(tmp_path)))
+
+    assert ids == ["clip.mp4", "kept/nested.mp4"]
+    assert gallery_asset_for_output_path(str(tmp_path), str(tmp_path / directory / "scratch.mp4")) is None
+    assert resolve_output_asset_path(tmp_path, f"{directory}/scratch.mp4") is None
+
+
+def test_other_dot_directories_keep_listing_their_assets(tmp_path):
+    (tmp_path / ".archive").mkdir()
+    (tmp_path / ".archive" / "old.mp4").write_bytes(b"\x00" * 8)
+
+    assert [asset.id for asset in list_gallery_assets(str(tmp_path))] == [".archive/old.mp4"]
+
+
+def test_output_media_url_is_only_given_for_served_files_under_the_root(tmp_path):
+    from zvisiongenerator.web.gallery import output_media_url
+
+    served = tmp_path / "sub dir" / "clip.mp4"
+    served.parent.mkdir()
+    served.write_bytes(b"\x00")
+    (tmp_path / "other.m4v").write_bytes(b"\x00")
+    staging = tmp_path / ".web_uploads" / "clip.mp4"
+    staging.parent.mkdir()
+    staging.write_bytes(b"\x00")
+    outside = tmp_path.parent / "outside.mp4"
+
+    assert output_media_url(tmp_path, served) == "/media/sub%20dir/clip.mp4"
+    assert output_media_url(tmp_path, tmp_path / "other.m4v") is None
+    assert output_media_url(tmp_path, staging) is None
+    assert output_media_url(tmp_path, outside) is None
+
+
+def test_a_video_that_cannot_be_extended_says_why(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
+
+    def extend_info(name: str, *, upscaled: bool, vanished: bool) -> dict:
+        directory = tmp_path / name
+        directory.mkdir()
+        config = {"schema": "zvisiongenerator.config.v1", "workflow": "txt2vid", "model": "ltx-8", "prompt": "A knight rides in."}
+        if upscaled:
+            config["generation"] = {"upscale": {"factor": 2, "steps": 8}}
+        (directory / "clip.mp4").write_bytes(b"\x00" * 8)
+        with patch("zvisiongenerator.web.gallery.read_mp4_config", return_value=config):
+            asset = _find_asset(list_gallery_assets(str(directory)), "clip.mp4")
+        if vanished:
+            (directory / "clip.mp4").unlink()
+        return gallery_asset_to_json(asset, _reuse_web_config())["extend"]
+
+    upscaled = extend_info("upscaled", upscaled=True, vanished=False)
+    vanished = extend_info("vanished", upscaled=False, vanished=True)
+    both = extend_info("both", upscaled=True, vanished=True)
+
+    assert all(info["available"] is False and info["reason"] for info in (upscaled, vanished, both))
+    assert upscaled["reason"] == both["reason"] != vanished["reason"]  # an upscaled video gives that reason even when its file is gone too

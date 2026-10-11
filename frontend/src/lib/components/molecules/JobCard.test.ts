@@ -336,6 +336,27 @@ describe('JobCard', () => {
       expect(log().querySelector('[aria-label="Current image"]')?.classList.contains('is-live')).toBe(true);
     });
 
+    it('says the clips are being joined once an extension ran its last step, in the log and on the bars', () => {
+      render({
+        workflow: 'extend', runs: 3, stageNames: ['extend_video', 'join_clips'], stageName: 'join_clips', stageSteps: { extend_video: 8 }, currentStep: 8, totalSteps: 8,
+      });
+      expect(log().querySelector('.job-step-head')?.textContent).toContain('Joining clips…');
+      expect(log().textContent).not.toContain('Finishing up');
+      expect(header().querySelector('.ui-area-label')?.textContent).toBe('Extend video');
+    });
+
+    it('reads the joining stretch to assistive technology without the ellipsis', () => {
+      render({ workflow: 'extend', runs: 3, stageNames: ['extend_video', 'join_clips'], stageName: 'join_clips', stageSteps: { extend_video: 8 }, currentStep: 8, totalSteps: 8 });
+      const valuetexts = Array.from(target.querySelectorAll('[role="progressbar"]')).map((bar) => bar.getAttribute('aria-valuetext'));
+      expect(valuetexts).toContain('Joining clips');
+      expect(valuetexts).not.toContain('Finishing up');
+    });
+
+    it('reads the header bar of a single extension as joining clips too', () => {
+      render({ workflow: 'extend', runs: 1, stageNames: ['extend_video', 'join_clips'], stageName: 'join_clips', stageSteps: { extend_video: 8 }, currentStep: 8, totalSteps: 8 });
+      expect(header().querySelector('[role="progressbar"]')?.getAttribute('aria-valuetext')).toBe('Joining clips');
+    });
+
     it('promises the first preview at 25% and says so when a model renders none', () => {
       render({ runs: 3, currentStep: 2, totalSteps: 28 });
       expect(log().querySelector('.job-media')?.textContent).toContain('25%');

@@ -132,6 +132,53 @@ describe('AssetTile', () => {
     expect(menuActions()).toEqual(['download', 'delete']);
   });
 
+  describe('extend', () => {
+    const video = (overrides: Partial<GalleryAsset> = {}): GalleryAsset =>
+      makeAsset({ media_type: 'video', filename: 'a.mp4', url: '/media/out/a.mp4', extend: { available: true, reason: null }, ...overrides });
+
+    it('lists Extend first in a video menu, ahead of Download and Delete', () => {
+      const asset = video();
+      const onextend = vi.fn();
+      mountTile({ asset, onextend, ondelete: vi.fn(), onreference: vi.fn() });
+      openMenu(asset);
+      expect(menuActions()).toEqual(['extend', 'download', 'delete']);
+
+      (document.querySelector('[data-action="extend"]') as HTMLButtonElement).click();
+      flushSync();
+      expect(onextend).toHaveBeenCalledWith(asset);
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+    });
+
+    it('disables Extend with the reason when the video cannot be extended', () => {
+      const asset = video({ extend: { available: false, reason: "Upscaled videos can't be extended yet." } });
+      const onextend = vi.fn();
+      mountTile({ asset, onextend });
+      openMenu(asset);
+
+      const item = document.querySelector('[data-action="extend"]') as HTMLElement;
+      expect(item.getAttribute('aria-disabled')).toBe('true');
+      expect(item.getAttribute('title')).toBe("Upscaled videos can't be extended yet.");
+      item.click();
+      expect(onextend).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['an image', makeAsset({ extend: { available: true, reason: null } })],
+      ['a video where extending is unavailable on this machine', video({ extend: null })],
+    ])('has no Extend item for %s', (_name, asset) => {
+      mountTile({ asset, onextend: vi.fn() });
+      openMenu(asset);
+      expect(menuActions()).not.toContain('extend');
+    });
+
+    it('has no Extend item without a handler', () => {
+      const asset = video();
+      mountTile({ asset });
+      openMenu(asset);
+      expect(menuActions()).toEqual(['download']);
+    });
+  });
+
   it('closes the menu with Escape and returns focus to its button', async () => {
     const asset = makeAsset();
     mountTile({ asset, ondelete: vi.fn() });

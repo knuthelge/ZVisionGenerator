@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import queue
 import threading
@@ -13,12 +14,14 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import _make_args
+from conftest import _make_args, make_extend_source
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.prompt_enhance import EnhanceContext, EnhanceSettings
 from zvisiongenerator.utils.prompt_enhance_video import split_scene_action
+from zvisiongenerator.utils.video_extend import ExtendInspection, ExtendProblem
+from zvisiongenerator.web import extend_api as extend_api_module
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import web_runner as web_runner_module
 from zvisiongenerator.web import workspace_api as workspace_api_module
@@ -611,3 +614,232 @@ class TestConfigFields:
         field = next(f for f in WRITABLE_CONFIG_FIELDS if f.key == key)
         with pytest.raises(ValueError):
             _validate_config_value(field, value, None)
+
+
+# ── /api/prompt/enhance: extending a clip ───────────────────────────────────
+
+
+_SOURCE_SCENE = "A woman in a red raincoat on a rainy street at night."
+_SOURCE_ACTION = 'She looks at the camera and says "I told you".'
+_LEGACY_PROMPT = 'A woman in a red raincoat stands on a rainy street at night. She says "I told you".'
+
+
+class _Clip(SimpleNamespace):
+    """A source clip on disk; ``source`` is the :class:`ExtendSource` the server will load for it."""
+
+
+@pytest.fixture
+def clip(monkeypatch, tmp_path):
+    path = tmp_path / "clip.mp4"
+    path.write_bytes(b"\x00")
+    state = _Clip(
+        path=path,
+        source=make_extend_source(path=path, frame_count=97, scene=_SOURCE_SCENE, prompt=_SOURCE_ACTION),
+    )
+    extend_api_module._inspect_by_identity.cache_clear()
+    monkeypatch.setattr(extend_api_module, "inspect_extend_source", lambda _path: ExtendInspection(None, None, (), state.source))
+    for module in (web_server, extend_api_module):
+        monkeypatch.setattr(module, "supports_video_extend", lambda: True)
+        monkeypatch.setattr(module, "supports_video_audio", lambda: True)
+    return state
+
+
+def _extend_body(clip, **overrides) -> dict:
+    body = {
+        "mode": "video",
+        "scene": _SOURCE_SCENE,
+        "prompt": "She opens an umbrella.",
+        "settings": {"style": "cinematic"},
+        "context": {"source_video": str(clip.path), "extend_frames": 48, "audio": True},
+    }
+    return {**body, **overrides}
+
+
+class TestExtendEnhance:
+    def test_context_comes_from_the_source_clip(self, clip):
+        job = web_server._validate_enhance_body(_extend_body(clip))
+
+        assert job["context"] == EnhanceContext(
+            audio=True,
+            seconds=(25 + 48) / 24,
+            orientation="landscape",
+            extends=True,
+            previous=_SOURCE_ACTION,
+            extract_from=None,
+            prompt_is_original=False,
+            new_seconds=2.0,
+        )
+        assert (job["scene"], job["prompt"]) == (_SOURCE_SCENE, "She opens an umbrella.")
+
+    def test_context_ignores_facts_the_client_sends_about_the_source(self, clip):
+        body = _extend_body(
+            clip,
+            context={
+                "source_video": str(clip.path),
+                "extend_frames": 48,
+                "previous": "invented",
+                "extract_from": "invented",
+                "width": 64,
+                "height": 640,
+                "frames": 5,
+                "fps": 3,
+                "reference_image": True,
+            },
+        )
+
+        context = web_server._validate_enhance_body(body)["context"]
+
+        assert (context.previous, context.extract_from, context.orientation, context.reference_image) == (_SOURCE_ACTION, None, "landscape", False)
+        assert context.seconds == (25 + 48) / 24
+
+    def test_legacy_source_extracts_its_scene_and_flags_an_unchanged_prompt(self, clip):
+        clip.source = dataclasses.replace(clip.source, scene=None, prompt=_LEGACY_PROMPT)
+
+        unchanged = web_server._validate_enhance_body(_extend_body(clip, scene="", prompt='A woman in a red raincoat stands on a  rainy street at night. She says "I told you".'))["context"]
+        edited = web_server._validate_enhance_body(_extend_body(clip, scene="", prompt="She walks away."))["context"]
+        empty = web_server._validate_enhance_body(_extend_body(clip, scene="", prompt=""))["context"]
+
+        assert (unchanged.extract_from, unchanged.previous, unchanged.prompt_is_original) == (_LEGACY_PROMPT, _LEGACY_PROMPT, True)
+        assert (edited.extract_from, edited.prompt_is_original) == (_LEGACY_PROMPT, False)
+        assert empty.prompt_is_original is False
+
+    def test_a_scene_bearing_source_never_flags_the_original_prompt(self, clip):
+        context = web_server._validate_enhance_body(_extend_body(clip, prompt=_SOURCE_ACTION))["context"]
+
+        assert context.prompt_is_original is False
+
+    def test_empty_scene_and_prompt_are_allowed_when_extending(self, clip):
+        job = web_server._validate_enhance_body(_extend_body(clip, scene="", prompt=""))
+
+        assert (job["scene"], job["prompt"]) == ("", "")
+        assert job["context"].extends is True
+
+    def test_empty_scene_and_prompt_are_refused_without_a_source(self):
+        with pytest.raises(ValueError, match="Enter a scene or a prompt"):
+            web_server._validate_enhance_body({"mode": "video", "scene": "", "prompt": "", "settings": {"style": "cinematic"}, "context": {"frames": 97, "fps": 24}})
+
+    def test_settings_that_change_nothing_are_valid_when_extending(self, clip):
+        keep_all = {"style": "keep", "mood": "keep", "details": [], "length": "same", "motion": [], "sound": []}
+
+        assert web_server._validate_enhance_body(_extend_body(clip, settings=keep_all))["settings"].style == "keep"
+
+    def test_audio_is_off_for_a_silent_source_and_when_not_requested_or_supported(self, clip, monkeypatch):
+        silent = dataclasses.replace(clip.source, has_audio=False)
+        requested = _extend_body(clip)
+        not_requested = _extend_body(clip, context={"source_video": str(clip.path), "extend_frames": 48})
+
+        assert web_server._validate_enhance_body(requested)["context"].audio is True
+        assert web_server._validate_enhance_body(not_requested)["context"].audio is False
+        clip.source = silent
+        extend_api_module._inspect_by_identity.cache_clear()  # the stub's source changed without the file changing
+        assert web_server._validate_enhance_body(requested)["context"].audio is False
+        clip.source = dataclasses.replace(silent, has_audio=True)
+        extend_api_module._inspect_by_identity.cache_clear()
+        monkeypatch.setattr(extend_api_module, "supports_video_audio", lambda: False)
+        assert web_server._validate_enhance_body(requested)["context"].audio is False
+
+    def test_length_defaults_to_two_seconds_and_accepts_seconds(self, clip):
+        default = web_server._validate_enhance_body(_extend_body(clip, context={"source_video": str(clip.path)}))["context"]
+        seconds = web_server._validate_enhance_body(_extend_body(clip, context={"source_video": str(clip.path), "extend_seconds": 1}))["context"]
+
+        assert default.new_seconds == 2.0 and default.seconds == (25 + 48) / 24
+        assert seconds.new_seconds == 1.0 and seconds.seconds == (25 + 24) / 24
+
+    @pytest.mark.parametrize(
+        ("context", "message"),
+        [
+            ({"extend_frames": 12}, "extend_frames must be a multiple of 8"),
+            ({"extend_frames": 0}, "extend_frames must be a multiple of 8"),
+            ({"extend_frames": True}, "context.extend_frames must be an integer"),
+            ({"extend_frames": "48"}, "context.extend_frames must be an integer"),
+            ({"extend_seconds": 0}, "extend_seconds must be positive"),
+            ({"extend_seconds": "2"}, "context.extend_seconds must be a number"),
+            ({"extend_seconds": float("nan")}, "extend_seconds"),
+            ({"extend_seconds": float("inf")}, "extend_seconds"),
+            ({"audio": True, "source_video": ""}, "source_video"),
+            ({"source_video": 5}, "source_video"),
+            ({"source_video": "https://example.com/a.mp4"}, "host-local"),
+            ({"source_video": "clip.png"}, "video file"),
+        ],
+    )
+    def test_invalid_extend_context_is_rejected(self, clip, context, message):
+        body = _extend_body(clip, context={"source_video": str(clip.path), **context})
+
+        with pytest.raises(ValueError, match=message):
+            web_server._validate_enhance_body(body)
+
+    def test_a_source_that_cannot_be_extended_is_rejected_with_the_problems(self, clip, monkeypatch):
+        problems = (ExtendProblem("interlaced", "The video is interlaced."),)
+        monkeypatch.setattr(extend_api_module, "inspect_extend_source", lambda _path: ExtendInspection(None, None, problems, None))
+
+        with pytest.raises(ValueError, match="interlaced"):
+            web_server._validate_enhance_body(_extend_body(clip))
+
+    def test_extending_is_refused_without_the_capability(self, clip, monkeypatch):
+        monkeypatch.setattr(extend_api_module, "supports_video_extend", lambda: False)
+
+        with pytest.raises(ValueError, match="macOS only"):
+            web_server._validate_enhance_body(_extend_body(clip))
+
+    def test_the_source_is_ignored_for_images(self, clip):
+        job = web_server._validate_enhance_body({"mode": "image", "prompt": "a fox", "settings": {"style": "photo"}, "context": {"source_video": str(clip.path), "frames": 97, "fps": 24}})
+
+        assert job["context"].extends is False
+
+    def test_route_streams_the_action_only_for_a_kept_scene(self, monkeypatch, no_active_job, clip):
+        enhancer = _FakeEnhancer(["She opens a black umbrella and steps away from the light."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=_extend_body(clip)))
+
+        texts = [frame for frame in frames if frame["type"] == "text"]
+        assert texts and all(frame["scene"] == "" and frame["prompt"] == frame["text"] for frame in texts)
+        assert frames[-1] == {"type": "done", "scene": _SOURCE_SCENE, "prompt": "She opens a black umbrella and steps away from the light.", "clamped": False}
+        system, user = enhancer.messages[0][0]["content"], enhancer.messages[0][1]["content"]
+        assert _SOURCE_SCENE in system and _SOURCE_ACTION in system
+        assert user == "She opens an umbrella."
+
+    def test_route_continues_naturally_from_an_empty_prompt(self, monkeypatch, no_active_job, clip):
+        enhancer = _FakeEnhancer(["She lowers the umbrella and looks up at the sky."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=_extend_body(clip, prompt="")))
+
+        assert frames[-1]["type"] == "done" and frames[-1]["scene"] == _SOURCE_SCENE
+        assert enhancer.messages[0][1]["content"] == "Continue the scene naturally."
+
+    def test_route_extracts_the_scene_of_a_legacy_source(self, monkeypatch, no_active_job, clip):
+        clip.source = dataclasses.replace(clip.source, scene=None, prompt=_LEGACY_PROMPT)
+        enhancer = _FakeEnhancer(["SCENE: A woman in a red raincoat on a rainy street at night.\nACTION: She sighs and walks into the dark."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=_extend_body(clip, scene="", prompt=_LEGACY_PROMPT)))
+
+        assert frames[-1] == {"type": "done", "scene": "A woman in a red raincoat on a rainy street at night.", "prompt": "She sighs and walks into the dark.", "clamped": False}
+        assert _LEGACY_PROMPT in enhancer.messages[0][0]["content"]
+        assert enhancer.messages[0][1]["content"] == "Continue the scene naturally."
+
+    def test_route_sends_the_users_text_for_an_edited_legacy_prompt(self, monkeypatch, no_active_job, clip):
+        clip.source = dataclasses.replace(clip.source, scene=None, prompt=_LEGACY_PROMPT)
+        enhancer = _FakeEnhancer(["SCENE: A woman in a red raincoat on a rainy street at night.\nACTION: She sighs and walks into the dark."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=_extend_body(clip, scene="", prompt="She walks away.")))
+
+        assert frames[-1]["type"] == "done"
+        assert enhancer.messages[0][1]["content"] == "She walks away."
+
+    def test_route_rejects_a_bad_source_before_loading_the_enhancer(self, monkeypatch, no_active_job, clip, tmp_path):
+        session = _FakeSession(_FakeEnhancer([]))
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: session)
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json=_extend_body(clip, context={"source_video": str(tmp_path / "gone.mp4")}))
+
+        assert response.status_code == 422
+        assert "Source video not found" in response.json()["detail"]
+        assert session.acquired == []

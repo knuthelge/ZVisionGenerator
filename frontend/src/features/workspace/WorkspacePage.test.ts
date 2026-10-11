@@ -4,13 +4,16 @@ import { createClassComponent } from 'svelte/legacy';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '$lib/api/client';
+import { reactiveProps } from '../../test-utils/reactiveProps.svelte';
 import { draft } from '$lib/state/draft.svelte';
+import { extendInspection } from '$lib/state/extendInspection.svelte';
+import { legacySource, sceneSource, sourceInfo } from '$lib/state/extend.fixtures';
 import { historyStore } from '$lib/state/history.svelte';
 import { jobStore } from '$lib/state/job.svelte';
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { router } from '$lib/state/router.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
-import type { EnhanceFrame, ImageModelDefaults, JobContext, JobSnapshot, VideoModelDefaults, WorkspaceContext, GalleryAsset, GalleryPage } from '$lib/types';
+import type { EnhanceFrame, ImageModelDefaults, JobContext, JobSnapshot, PromptEnhancerContract, VideoModelDefaults, WorkspaceContext, GalleryAsset, GalleryPage } from '$lib/types';
 
 const workspaceApiMocks = vi.hoisted(() => ({
   getWorkspaceContext: vi.fn<() => Promise<WorkspaceContext>>(),
@@ -29,6 +32,12 @@ const promptFileApiMocks = vi.hoisted(() => ({
   inspectPromptFile: vi.fn(),
   writePromptFile: vi.fn(),
 }));
+
+const extendApiMocks = vi.hoisted(() => ({
+  inspectExtendSource: vi.fn(),
+}));
+
+vi.mock('$lib/api/extend', () => ({ inspectExtendSource: extendApiMocks.inspectExtendSource }));
 
 vi.mock('$lib/api/workspace', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/workspace')>();
@@ -82,13 +91,14 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   draft.reset();
+  extendInspection.reset();
   historyStore.seedHistory([]);
   jobStore.clearJob();
   toasts.splice(0, toasts.length);
   for (const mock of [
     workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.getJobSnapshot,
     workspaceApiMocks.getHistory, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.listJobs, promptFileApiMocks.openPathPicker,
-    promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, enhanceApiMocks.enhancePrompt,
+    promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, extendApiMocks.inspectExtendSource, enhanceApiMocks.enhancePrompt,
     galleryApiMocks.deleteAsset,
   ]) mock.mockReset();
   workspaceApiMocks.clearQueue.mockClear();
@@ -250,6 +260,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
           ],
           supports_reference_image: false,
           requires_reference_image: false,
+          requires_source_video: false,
           clear_fields: ['image_path', 'image_strength', 'frames', 'audio', 'low_memory'],
         },
         img2img: {
@@ -266,6 +277,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
           ],
           supports_reference_image: true,
           requires_reference_image: true,
+          requires_source_video: false,
           clear_fields: ['frames', 'audio', 'low_memory'],
         },
         txt2vid: {
@@ -279,6 +291,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
           ],
           supports_reference_image: false,
           requires_reference_image: false,
+          requires_source_video: false,
           clear_fields: ['negative_prompt', 'guidance', 'image_path', 'image_strength', 'quantize'],
         },
         img2vid: {
@@ -293,7 +306,17 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
           ],
           supports_reference_image: true,
           requires_reference_image: true,
+          requires_source_video: false,
           clear_fields: ['negative_prompt', 'guidance', 'quantize'],
+        },
+        extend: {
+          mode: 'video',
+          model_kind: 'video',
+          visible_controls: ['workflow', 'model', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'runs', 'steps', 'seed', 'audio', 'low_memory'],
+          supports_reference_image: false,
+          requires_reference_image: false,
+          requires_source_video: true,
+          clear_fields: ['negative_prompt', 'guidance', 'image_path', 'image_strength', 'quantize', 'ratio', 'size', 'width', 'height', 'frames', 'video_upscale_enabled', 'video_upscale_factor'],
         },
       },
       field_precedence: {
@@ -387,10 +410,17 @@ async function mountWorkspace(context: WorkspaceContext): Promise<void> {
 
 const field = (id: string) => document.querySelector(`#${id}`) as HTMLTextAreaElement;
 
+
 function type(id: string, value: string): void {
   const el = field(id);
   el.value = value;
   el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+/** Wait out the 300 ms input debounce of the source check. */
+async function waitDebounce(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 340));
+  await settle();
 }
 
 /** Open the Enhance popover and return its Enhance button. */
@@ -398,6 +428,19 @@ async function openEnhanceRun(): Promise<HTMLButtonElement> {
   (document.querySelector('#ws-enhance-toggle') as HTMLButtonElement).click();
   await settle();
   return document.querySelector('#ws-enhance-run') as HTMLButtonElement;
+}
+
+/** Enhance with the current settings through the popover. */
+async function runEnhance(): Promise<void> {
+  (await openEnhanceRun()).click();
+  await settle();
+}
+
+/** Make the next source check wait until the returned function is called with the server's answer. */
+function holdInspection(): (info: ReturnType<typeof sceneSource>) => void {
+  let release: (info: ReturnType<typeof sceneSource>) => void = () => undefined;
+  extendApiMocks.inspectExtendSource.mockReturnValue(new Promise((resolve) => { release = resolve; }));
+  return (info) => release(info);
 }
 
 /** Replace the clipboard with a spy and return it. */
@@ -3426,3 +3469,707 @@ describe('WorkspacePage asset actions and settings', () => {
   });
 });
 
+
+describe('WorkspacePage extend', () => {
+  const SOURCE = '/clips/walk.mp4';
+  const ENHANCER: PromptEnhancerContract = {
+    matrix: {
+      axes: [
+        { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep' }], default: ['keep'] },
+        { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action' }], default: ['action'] },
+      ],
+      defaults: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: ['action'], sound: [], note: '' },
+    },
+    model: 'owner/llm',
+    revision: null,
+    downloaded: true,
+    download_size_label: null,
+    default_max_words: 300,
+    error: null,
+  };
+
+  /** A context whose contract lists `extend`, with the control list the server sends for it. */
+  function makeExtendContext(options: { withExtend?: boolean } = {}): WorkspaceContext {
+    const context = makeContext();
+    if (options.withExtend !== false) context.workflow_contract.values = [...context.workflow_contract.values, 'extend'];
+    context.workflow_contract.definitions.extend.visible_controls = [
+      'workflow', 'model', 'loras', 'prompt_source', 'prompt_scene', 'prompt_inline', 'prompt_enhance', 'prompt_enhance_auto',
+      'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
+      'source_video', 'source_video_path', 'source_video_clear', 'extend_length', 'runs', 'steps', 'seed', 'audio', 'low_memory',
+    ];
+    context.prompt_enhancer = ENHANCER;
+    return context;
+  }
+
+  beforeEach(() => {
+    workspaceApiMocks.submitGenerate.mockResolvedValue({
+      job_id: 'job-ext', workflow: 'extend', prompt: '', model: 'ltx-8', runs: 1, created_at: '2026-10-11T10:00:00Z',
+    });
+    promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'cancelled', path: null, message: null });
+  });
+
+  async function mountExtend(options: { context?: WorkspaceContext; params?: Record<string, string>; props?: Record<string, unknown> } = {}): Promise<void> {
+    workspaceApiMocks.parseUrlPrefill.mockReturnValue(options.params ?? {});
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(options.context ?? makeExtendContext());
+    if (!options.params) draft.update('workflow', 'extend');
+    app = flushSync(() => mount(WorkspacePage, { target, props: options.props }));
+    await settle();
+  }
+
+  const input = (id: string) => target.querySelector(`#${id}`) as HTMLInputElement;
+  const button = (id: string) => target.querySelector(`#${id}`) as HTMLButtonElement;
+  const text = (selector: string) => (target.querySelector(selector)?.textContent ?? '').replace(/\s+/g, ' ').trim();
+
+  function typePath(value: string, key?: 'Enter' | 'change'): void {
+    const el = input('ws-source-path');
+    el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    if (key === 'Enter') el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    if (key === 'change') el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  /** Choose a source the way Browse does, and let the server describe it. */
+  async function chooseSource(info = sceneSource(), path = SOURCE): Promise<void> {
+    extendApiMocks.inspectExtendSource.mockResolvedValue(info);
+    promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'selected', path, message: null });
+    button('ws-source-browse').click();
+    await settle();
+  }
+
+  async function submit(): Promise<FormData | undefined> {
+    target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    return workspaceApiMocks.submitGenerate.mock.calls.at(-1)?.[0] as FormData | undefined;
+  }
+
+  const lastInspect = () => extendApiMocks.inspectExtendSource.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+
+  describe('the tab', () => {
+    it('tells the top bar which workflows the contract lists', async () => {
+      const props = reactiveProps<{ workflows: string[] | null }>({ workflows: null });
+      await mountExtend({ props });
+      expect(props.workflows).toContain('extend');
+    });
+  });
+
+  describe('with no source', () => {
+    it('offers the path field and Browse for a source video, with Clear disabled', async () => {
+      await mountExtend();
+      expect(target.querySelector('[data-section="source-video"]')).not.toBeNull();
+      expect(input('ws-source-path').name).toBe('source_video');
+      expect(button('ws-source-browse').getAttribute('aria-label')).toBe('Browse for a source video');
+      expect(button('ws-source-clear').disabled).toBe(true);
+      expect(text('[data-section="source-video"] .inspector-summary')).toBe('None');
+    });
+
+    it('disables Generate with the reason linked to it, and leaves the length rows waiting', async () => {
+      await mountExtend();
+      expect(button('ws-submit').disabled).toBe(true);
+      expect(text('#ws-generate-reason')).toBe('Choose a video to extend.');
+      expect(button('ws-submit').getAttribute('aria-describedby')).toBe('ws-generate-reason');
+      expect(input('ws-extend-seconds').disabled).toBe(true);
+      expect(text('[data-testid="extend-frames"]')).toBe('—');
+      expect(text('[data-testid="extend-total"]')).toBe('—');
+    });
+
+    it('has no Size, Duration, Reference image or upscale controls', async () => {
+      await mountExtend();
+      for (const section of ['size', 'reference', 'upscale']) expect(target.querySelector(`[data-section="${section}"]`)).toBeNull();
+      expect(target.querySelector('#ws-duration')).toBeNull();
+      expect(target.querySelector('#ws-video-upscale')).toBeNull();
+      expect(target.querySelector('[data-section="sampling"]')).not.toBeNull();
+    });
+
+    it('refuses to submit, says why and moves focus to the path field', async () => {
+      await mountExtend();
+      expect(await submit()).toBeUndefined();
+      expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
+      expect(toasts.map((toast) => [toast.type, toast.message])).toContainEqual(['error', 'Choose a video to extend.']);
+      await settle();
+      expect(document.activeElement).toBe(input('ws-source-path'));
+    });
+
+    it('disables Generate on the collapsed strip with the reason as its title', async () => {
+      draft.update('sidebarCollapsed', true);
+      await mountExtend();
+      const generate = target.querySelector('[data-testid="sidebar-strip"] button[type="submit"]') as HTMLButtonElement;
+      expect(generate.disabled).toBe(true);
+      expect(generate.title).toBe('Generate: choose a video to extend');
+    });
+
+    it('keeps the placeholders for an empty extension and allows an empty Prompt', async () => {
+      await mountExtend();
+      expect(field('ws-prompt').placeholder).toBe('What happens next…');
+      expect(field('ws-prompt').required).toBe(false);
+      expect(field('ws-scene').placeholder).toBe('Who and where, look, style, camera. Kept for extensions.');
+    });
+  });
+
+  describe('choosing a source', () => {
+    it('asks the server about the picked path and shows what it says', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource());
+
+      expect(promptFileApiMocks.openPathPicker).toHaveBeenCalledWith({ kind: 'existing_file', purpose: 'source_video', initial_path: null });
+      expect(lastInspect()).toMatchObject({ path: SOURCE, extend_frames: null, model: 'ltx-8' });
+      expect(draft.state.extendSourcePath).toBe(SOURCE);
+      expect(text('[data-section="source-video"] .inspector-summary')).toBe('walk.mp4');
+      expect(text('[data-testid="extend-source-facts"]')).toBe('512 × 288 · 24 fps · 4.04 s · 97 frames · Audio');
+      expect(input('ws-source-path').value).toBe(SOURCE);
+      expect(button('ws-source-clear').disabled).toBe(false);
+      expect(button('ws-submit').disabled).toBe(false);
+      expect(target.querySelector('#ws-generate-reason')).toBeNull();
+    });
+
+    it('shows the last frame of a clip inside the output folder as its thumbnail', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource({ media_url: '/media/out/walk.mp4', duration_seconds: 4.04 }));
+      expect(target.querySelector('[data-section="source-video"] .reference-thumb video')?.getAttribute('src')).toBe('/media/out/walk.mp4#t=3.99');
+
+      await chooseSource(sceneSource({ media_url: null }), '/elsewhere/walk.mp4');
+      expect(target.querySelector('[data-section="source-video"] .reference-thumb video')).toBeNull();
+      expect(target.querySelector('[data-section="source-video"] .reference-thumb svg')).not.toBeNull();
+    });
+
+    it('lists a rejected source\'s problems, keeps Generate off and points to the Source video section', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource({ problems: [{ code: 'off_grid', message: 'Its size, 500 × 300, isn\'t a multiple of 32.' }, { code: 'hdr', message: 'It is HDR or wide gamut.' }] }));
+
+      const problems = target.querySelector('[data-testid="extend-source-problems"]');
+      expect(problems?.textContent).toContain("This video can't be extended:");
+      expect(Array.from(problems!.querySelectorAll('li')).map((item) => item.textContent)).toEqual(["Its size, 500 × 300, isn't a multiple of 32.", 'It is HDR or wide gamut.']);
+      expect(button('ws-submit').disabled).toBe(true);
+      expect(text('#ws-generate-reason')).toBe("This video can't be extended. See Source video.");
+      expect(target.querySelector('#ws-source-help')?.getAttribute('aria-live')).toBe('polite');
+    });
+
+    it('reports a path with no video and keeps the reason Choose a video', async () => {
+      await mountExtend();
+      extendApiMocks.inspectExtendSource.mockRejectedValue(new ApiError('not found', 404, 'Source video not found: /nope.mp4'));
+      promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'selected', path: '/nope.mp4', message: null });
+      button('ws-source-browse').click();
+      await settle();
+
+      expect(text('#ws-source-help')).toBe('No video at this path.');
+      expect(input('ws-source-path').getAttribute('aria-invalid')).toBe('true');
+      expect(input('ws-source-path').getAttribute('aria-describedby')).toBe('ws-source-help');
+      expect(button('ws-submit').disabled).toBe(true);
+      expect(text('#ws-generate-reason')).toBe('Choose a video to extend.');
+    });
+
+    it('shows the picker\'s message when the host cannot pick files', async () => {
+      await mountExtend();
+      promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'unsupported', path: null, message: 'No file picker on this host.' });
+      button('ws-source-browse').click();
+      await settle();
+      expect(text('#ws-source-help')).toBe('No file picker on this host.');
+      expect(extendApiMocks.inspectExtendSource).not.toHaveBeenCalled();
+    });
+
+    it('clears the source and its facts but keeps the typed text', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource());
+      type('ws-prompt', 'She turns away.');
+      await settle();
+
+      button('ws-source-clear').click();
+      await settle();
+      expect(draft.state.extendSourcePath).toBeNull();
+      expect(draft.extendSource).toBeNull();
+      expect(target.querySelector('[data-testid="extend-source-facts"]')).toBeNull();
+      expect(input('ws-source-path').value).toBe('');
+      expect(field('ws-scene').value).toBe('A woman on a rainy street.');
+      expect(field('ws-prompt').value).toBe('She turns away.');
+      expect(button('ws-submit').disabled).toBe(true);
+    });
+
+    it('shows the moved-file message for a Reuse whose source is gone, and gives the moved path no facts', async () => {
+      extendApiMocks.inspectExtendSource.mockRejectedValue(new ApiError('not found', 404, 'gone'));
+      await mountExtend({ params: { workflow: 'extend', source_video: '/clips/old.mp4', missing_source_video: 'true', scene: 'A street.', prompt: 'She waves.' } });
+      const moved = target.querySelector('[data-testid="extend-source-moved"]');
+      expect(moved?.textContent).toContain('The source video has moved or been deleted; choose it again to extend.');
+      expect(field('ws-scene').value).toBe('A street.');
+      expect(field('ws-prompt').value).toBe('She waves.');
+      expect(button('ws-submit').disabled).toBe(true);
+      expect(input('ws-source-path').getAttribute('aria-invalid')).toBe('true');
+    });
+  });
+
+  describe('Scene and Prompt', () => {
+    it('fills the old prompt of a legacy source, warns right away and points the Scene placeholder at moving the description', async () => {
+      await mountExtend();
+      await chooseSource(legacySource());
+
+      expect(field('ws-prompt').value).toBe('A woman stands in the rain and says "Hello".');
+      expect(field('ws-scene').value).toBe('');
+      expect(field('ws-scene').placeholder).toBe('Move the scene description here from the prompt (who, where, look). Then change the prompt to what happens next.');
+      const warning = target.querySelector('[data-testid="original-prompt-warning"]') as HTMLElement;
+      expect(warning.id).toBe('ws-prompt-original');
+      expect(warning.textContent?.trim()).toBe('Still the original prompt. Change it to what happens next.');
+      expect(warning.closest('[aria-live="polite"]')).not.toBeNull();
+      expect(field('ws-prompt').getAttribute('aria-describedby')).toBe('ws-prompt-original');
+      expect(button('ws-submit').disabled).toBe(false);
+    });
+
+    it('hides the warning once the Prompt is edited and still submits either way', async () => {
+      await mountExtend();
+      await chooseSource(legacySource());
+
+      const unchanged = await submit();
+      expect(unchanged?.get('prompt')).toBe('A woman stands in the rain and says "Hello".');
+
+      type('ws-prompt', 'She walks away.');
+      await settle();
+      expect(target.querySelector('[data-testid="original-prompt-warning"]')).toBeNull();
+      expect(field('ws-prompt').getAttribute('aria-describedby')).toBeNull();
+      expect((await submit())?.get('prompt')).toBe('She walks away.');
+    });
+
+  });
+
+  describe('the source flow', () => {
+    it('lets a new source replace both boxes, edits included, and clears the Enhanced pair', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource());
+      type('ws-scene', 'My own scene.');
+      type('ws-prompt', 'My own action.');
+      draft.patch({ enhancedScene: 'Enhanced scene.', enhancedPrompt: 'Enhanced action.' });
+      await settle();
+
+      await chooseSource(sceneSource({ path: '/clips/other.mp4', scene: 'Another scene.', prompt: 'Another action.' }), '/clips/other.mp4');
+      expect(field('ws-scene').value).toBe('Another scene.');
+      expect(field('ws-prompt').value).toBe('');
+      expect(draft.state).toMatchObject({ enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
+    });
+
+    it('replaces the boxes when a different path is typed and checked', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource());
+      type('ws-prompt', 'My own action.');
+
+      extendApiMocks.inspectExtendSource.mockResolvedValue(legacySource({ path: '/clips/other.mp4' }));
+      typePath('/clips/other.mp4', 'Enter');
+      await settle();
+      expect(lastInspect()).toMatchObject({ path: '/clips/other.mp4' });
+      expect(field('ws-prompt').value).toBe('A woman stands in the rain and says "Hello".');
+      expect(field('ws-scene').value).toBe('');
+    });
+
+    it('waits 300 ms after the last keystroke before checking a typed path', async () => {
+      await mountExtend();
+      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
+      typePath('/clips/w');
+      typePath('/clips/walk.mp4');
+      await settle();
+      expect(extendApiMocks.inspectExtendSource).not.toHaveBeenCalled();
+
+      await waitDebounce();
+      expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(1);
+      expect(lastInspect()).toMatchObject({ path: '/clips/walk.mp4' });
+    });
+
+    it('keeps a typed path when the workflow changes before the check', async () => {
+      await mountExtend();
+      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
+      typePath('/clips/walk.mp4');
+      draft.update('workflow', 'txt2vid');
+      await settle();
+      expect(draft.state.extendSourcePath).toBe('/clips/walk.mp4');
+
+      draft.update('workflow', 'extend');
+      await settle();
+      expect(lastInspect()).toMatchObject({ path: '/clips/walk.mp4' });
+    });
+
+    it('checks the path when the field is left', async () => {
+      await mountExtend();
+      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
+      typePath(SOURCE, 'change');
+      await settle();
+      expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not submit the form when Enter is pressed in the path field', async () => {
+      await mountExtend();
+      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
+      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+      input('ws-source-path').value = SOURCE;
+      input('ws-source-path').dispatchEvent(new Event('input', { bubbles: true }));
+      input('ws-source-path').dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(true);
+    });
+
+    it('keeps edits when the same source is checked again', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource());
+      type('ws-scene', 'My own scene.');
+      type('ws-prompt', 'My own action.');
+      await settle();
+
+      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource({ scene: 'Changed on disk.' }));
+      typePath(SOURCE, 'Enter');
+      await settle();
+      expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(2);
+      expect(field('ws-scene').value).toBe('My own scene.');
+      expect(field('ws-prompt').value).toBe('My own action.');
+    });
+
+    it('checks the source again when the length changes, so the memory note follows', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource());
+      expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(1);
+      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource({ extend_frames: 72, memory_fit: { status: 'tight', required_gb: 21, budget_gb: 24 } }));
+
+      input('ws-extend-seconds').value = '3';
+      input('ws-extend-seconds').dispatchEvent(new Event('change', { bubbles: true }));
+      await settle();
+      expect(draft.state.extendFrames).toBe(72);
+      await waitDebounce();
+
+      expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(2);
+      expect(lastInspect()).toMatchObject({ path: SOURCE, extend_frames: 72 });
+      expect(text('[data-testid="extend-memory-note"]')).toContain('Tight: needs ~21 GB of 24 GB.');
+    });
+
+    it('checks a saved source once on load and leaves the text it was reused with', async () => {
+      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
+      await mountExtend({ params: { workflow: 'extend', source_video: SOURCE, extend_frames: '48', scene: 'My street.', prompt: 'She waves.' } });
+      await settle();
+      expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(1);
+      expect(lastInspect()).toMatchObject({ path: SOURCE, extend_frames: 48 });
+      expect(field('ws-scene').value).toBe('My street.');
+      expect(field('ws-prompt').value).toBe('She waves.');
+      expect(button('ws-submit').disabled).toBe(false);
+    });
+
+  });
+
+  describe('length', () => {
+    it('shows Extend by with its frames and the total at the source frame rate', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource());
+      expect(input('ws-extend-seconds').value).toBe('2');
+      expect(input('ws-extend-seconds').disabled).toBe(false);
+      expect(text('[data-testid="extend-frames"]')).toBe('+48 frames');
+      expect(text('[data-testid="extend-total"]')).toBe('6.04 s · 145 frames');
+      expect(text('label[for="ws-extend-seconds"]')).toBe('Extend by (s)');
+    });
+
+    it('snaps a typed length to 8-frame steps of the source frame rate', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource({ fps: 30, frame_count: 90 }));
+      input('ws-extend-seconds').value = '2';
+      input('ws-extend-seconds').dispatchEvent(new Event('change', { bubbles: true }));
+      await settle();
+      expect(draft.state.extendFrames).toBe(64);
+      expect(input('ws-extend-seconds').value).toBe('2.13');
+      expect(text('[data-testid="extend-frames"]')).toBe('+64 frames');
+      expect(text('[data-testid="extend-total"]')).toBe('5.13 s · 154 frames');
+    });
+
+    it.each([
+      ['tight', 'Tight: needs ~21 GB of 24 GB. The Mac may slow down while generating.'],
+      ['too_large', 'Too large: needs ~40 GB of 24 GB. Expect heavy swapping or an out-of-memory error.'],
+    ])('notes a %s fit without blocking Generate', async (status, note) => {
+      await mountExtend();
+      await chooseSource(sceneSource({ memory_fit: { status, required_gb: status === 'tight' ? 21 : 40, budget_gb: 24 } }));
+      expect(text('[data-testid="extend-memory-note"]')).toBe(note);
+      expect(target.querySelector('[data-testid="extend-memory-note"]')?.closest('[aria-live="polite"]')).not.toBeNull();
+      expect(button('ws-submit').disabled).toBe(false);
+    });
+
+    it.each([['fits', { status: 'fits', required_gb: 10, budget_gb: 24 }], ['unknown', null]])('shows no memory note when the fit is %s', async (_name, fit) => {
+      await mountExtend();
+      await chooseSource(sceneSource({ memory_fit: fit }));
+      expect(target.querySelector('[data-testid="extend-memory-note"]')).toBeNull();
+    });
+  });
+
+  describe('audio', () => {
+    it('disables Audio for a silent source, keeps the preference and submits audio=false', async () => {
+      draft.update('audio', true);
+      await mountExtend();
+      await chooseSource(sourceInfo({ has_audio: false }));
+
+      const audio = input('ws-audio');
+      expect(audio.disabled).toBe(true);
+      expect(audio.checked).toBe(false);
+      expect(draft.state.audio).toBe(true);
+      expect(text('[data-section="video"] .inspector-summary')).not.toContain('Audio');
+      expect((await submit())?.getAll('audio')).toEqual(['false']);
+    });
+
+    it('leaves Audio on for a source with sound', async () => {
+      draft.update('audio', true);
+      await mountExtend();
+      await chooseSource(sourceInfo({ has_audio: true }));
+      expect(input('ws-audio').disabled).toBe(false);
+      expect(input('ws-audio').checked).toBe(true);
+    });
+  });
+
+  describe('what Generate submits', () => {
+    it('sends the source, the new frames and both text boxes, and none of the size or length fields', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource());
+      type('ws-prompt', 'She waves.');
+      await settle();
+
+      const form = await submit();
+      expect(form?.get('workflow')).toBe('extend');
+      expect(form?.get('mode')).toBe('video');
+      expect(form?.get('source_video')).toBe(SOURCE);
+      expect(form?.get('extend_frames')).toBe('48');
+      expect(form?.get('scene')).toBe('A woman on a rainy street.');
+      expect(form?.get('prompt')).toBe('She waves.');
+      for (const name of ['ratio', 'size', 'width', 'height', 'frames', 'image_path', 'upscale', 'video_upscale_factor']) expect(form?.has(name)).toBe(false);
+    });
+
+    it('records a blank scene as blank, not as the source\'s scene', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource());
+      type('ws-scene', '');
+      await settle();
+      expect((await submit())?.get('scene')).toBe('');
+    });
+
+    it('waits for a source still being checked, then submits, without a reason, a toast or a jump of focus', async () => {
+      await mountExtend();
+      const release = holdInspection();
+      promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'selected', path: SOURCE, message: null });
+      button('ws-source-browse').click();
+      await settle();
+      expect(button('ws-submit').disabled).toBe(true);
+      expect(target.querySelector('#ws-generate-reason')).toBeNull();
+      expect(target.querySelector('[data-section="source-video"] .spinner')).not.toBeNull();
+
+      target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await settle();
+      expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
+      expect(toasts).toHaveLength(0);
+      expect(document.activeElement).not.toBe(input('ws-source-path'));
+
+      release(sceneSource());
+      await settle();
+      expect(button('ws-submit').disabled).toBe(false);
+      expect(workspaceApiMocks.submitGenerate).toHaveBeenCalledTimes(1);
+      expect((workspaceApiMocks.submitGenerate.mock.calls[0][0] as FormData).get('source_video')).toBe(SOURCE);
+    });
+
+    it('stays off the queue while the source is rejected', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource({ problems: [{ code: 'hdr', message: 'It is HDR or wide gamut.' }] }));
+      expect(await submit()).toBeUndefined();
+      expect(toasts.map((toast) => toast.message)).toContain("This video can't be extended. See Source video.");
+    });
+  });
+
+  describe('Enhance', () => {
+    it('is enabled with both boxes empty once a source can be extended, and sends the source and its audio', async () => {
+      enhanceApiMocks.enhancePrompt.mockResolvedValue();
+      draft.update('audio', true);
+      await mountExtend();
+      await chooseSource(sourceInfo({ has_audio: false }));
+
+      await openEnhanceRun();
+      const run = document.querySelector('#ws-enhance-run') as HTMLButtonElement;
+      expect(run.disabled).toBe(false);
+      run.click();
+      await settle();
+
+      const body = enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0] as { mode: string; context: Record<string, unknown> };
+      expect(body.mode).toBe('video');
+      expect(body.context).toMatchObject({ source_video: SOURCE, extend_frames: 48, audio: false, reference_image: false });
+    });
+
+    it.each([
+      ['no source is chosen', undefined, 'Choose a video to extend first.'],
+      ['the source is rejected', sceneSource({ problems: [{ code: 'hdr', message: 'It is HDR or wide gamut.' }] }), 'Choose a video that can be extended first.'],
+    ])('is disabled, with its own hint, when %s', async (_name, info, hint) => {
+      await mountExtend();
+      if (info) await chooseSource(info);
+      await openEnhanceRun();
+      expect((document.querySelector('#ws-enhance-run') as HTMLButtonElement).disabled).toBe(true);
+      expect(document.querySelector('.enhance-popover')?.textContent).toContain(hint);
+    });
+
+    it('marks the Enhanced pair out of date when the length changes', async () => {
+      enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+        (rest[0] as (frame: EnhanceFrame) => void)({ type: 'done', scene: 'A woman on a rainy street.', prompt: 'She waves slowly.', clamped: false });
+      });
+      await mountExtend();
+      await chooseSource(sceneSource());
+      await runEnhance();
+      expect(draft.state.enhancedFrom).toMatchObject({ mode: 'video', sourceVideoPath: SOURCE, extendFrames: 48 });
+      expect(target.textContent).not.toContain('Out of date');
+
+      draft.update('extendFrames', 72);
+      await settle();
+      expect(target.textContent).toContain('Out of date');
+    });
+  });
+
+  describe('Copy CLI command', () => {
+    let writeText: ReturnType<typeof vi.fn<(text: string) => Promise<void>>>;
+
+    beforeEach(() => {
+      writeText = mockClipboard();
+    });
+
+    it('copies the extension with the source, the length and the scene', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource());
+      type('ws-prompt', 'She waves.');
+      await settle();
+      button('ws-copy-cli').click();
+      await settle();
+      const command = writeText.mock.calls[0]?.[0] ?? '';
+      expect(command).toContain('ziv video');
+      expect(command).toContain('--extend /clips/walk.mp4 --extend-frames 48');
+      expect(command).toContain("--prompt 'She waves.'");
+      expect(command).toContain("--scene 'A woman on a rainy street.'");
+      for (const flag of ['--ratio', '--size', '--frames', '--upscale', '--width']) expect(command).not.toContain(flag);
+    });
+
+    it("sends an empty --scene where the CLI would otherwise fill it in from the source", async () => {
+      await mountExtend();
+      await chooseSource(sceneSource());
+      type('ws-scene', '');
+      await settle();
+      button('ws-copy-cli').click();
+      await settle();
+      expect(writeText.mock.calls[0]?.[0]).toContain("--scene ''");
+    });
+
+    it('does not copy without a source and says why', async () => {
+      await mountExtend();
+      button('ws-copy-cli').click();
+      await settle();
+      expect(writeText).not.toHaveBeenCalled();
+      expect(toasts.map((toast) => toast.message)).toContain('Choose a video to extend.');
+    });
+  });
+
+  describe('Extend from an asset', () => {
+    const clip = (overrides: Partial<GalleryAsset> = {}): GalleryAsset =>
+      makeAsset({
+        id: 'out/walk.mp4', url: '/media/out/walk.mp4', thumbnail_url: '/media/out/walk.mp4', filename: 'walk.mp4', media_type: 'video', workflow: 'txt2vid',
+        file_path: SOURCE, scene: 'A woman on a rainy street.', prompt: 'She looks up.', extend: { available: true, reason: null }, ...overrides,
+      });
+
+    async function mountWithClip(asset: GalleryAsset, workflow: 'txt2vid' | 'extend' = 'txt2vid'): Promise<void> {
+      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
+      workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage([asset]));
+      workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue({ ...makeExtendContext(), history_assets: [asset] });
+      draft.update('workflow', workflow);
+      app = flushSync(() => mount(WorkspacePage, { target }));
+      await settle();
+    }
+
+    const historyTile = (asset: GalleryAsset) => target.querySelector(`#ws-history-shell article[aria-label="${asset.filename}"]`) as HTMLElement;
+
+    function openMenu(asset: GalleryAsset): void {
+      (historyTile(asset).querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
+      flushSync();
+    }
+
+    it('lists Extend, then Download and Delete, in a history tile\'s menu', async () => {
+      const asset = clip();
+      await mountWithClip(asset);
+      openMenu(asset);
+      expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['extend', 'download', 'delete']);
+    });
+
+    it('turns the Workspace to Extend Video with the clip as source, its scene in the boxes, and checks it', async () => {
+      const asset = clip();
+      await mountWithClip(asset);
+      openMenu(asset);
+      (document.querySelector('[role="menu"] [data-action="extend"]') as HTMLButtonElement).click();
+      await settle();
+
+      expect(draft.state).toMatchObject({ workflow: 'extend', extendSourcePath: SOURCE, scene: 'A woman on a rainy street.', prompt: '' });
+      expect(lastInspect()).toMatchObject({ path: SOURCE });
+      expect(input('ws-source-path').value).toBe(SOURCE);
+      expect(text('[data-testid="extend-source-facts"]')).toContain('512 × 288');
+      expect(toasts.map((toast) => toast.message)).toContain('walk.mp4 is now the source video');
+    });
+
+    it('replaces the text of an earlier source when already on Extend Video', async () => {
+      const asset = clip();
+      await mountWithClip(asset, 'extend');
+      draft.patch({ scene: 'Old scene.', prompt: 'Old action.', extendSourcePath: '/clips/old.mp4' });
+      await settle();
+
+      openMenu(asset);
+      (document.querySelector('[role="menu"] [data-action="extend"]') as HTMLButtonElement).click();
+      await settle();
+      expect(draft.state).toMatchObject({ extendSourcePath: SOURCE, scene: 'A woman on a rainy street.', prompt: '' });
+    });
+
+    it('disables Extend with its reason in the menu when the video cannot be extended', async () => {
+      const asset = clip({ extend: { available: false, reason: "Upscaled videos can't be extended yet." } });
+      await mountWithClip(asset);
+      openMenu(asset);
+      const item = document.querySelector('[role="menu"] [data-action="extend"]') as HTMLElement;
+      expect(item.getAttribute('aria-disabled')).toBe('true');
+      expect(item.getAttribute('title')).toBe("Upscaled videos can't be extended yet.");
+      item.click();
+      await settle();
+      expect(draft.state.workflow).toBe('txt2vid');
+    });
+
+    it('extends from the viewer button and the E key, and closes the viewer', async () => {
+      const asset = clip();
+      await mountWithClip(asset);
+      (historyTile(asset).querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLButtonElement).click();
+      await settle();
+      const viewerButton = document.querySelector('[data-testid="asset-viewer"] [data-action="extend"]') as HTMLButtonElement;
+      expect(viewerButton).not.toBeNull();
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true, cancelable: true }));
+      await settle();
+      expect(draft.state).toMatchObject({ workflow: 'extend', extendSourcePath: SOURCE });
+      expect(document.querySelector('[data-testid="asset-viewer"]')).toBeNull();
+    });
+
+    it('has no Extend item for an image or where the server offers none', async () => {
+      const image = makeAsset({ id: 'out/a.png', filename: 'a.png', file_path: '/outputs/a.png' });
+      const video = clip({ id: 'out/b.mp4', filename: 'b.mp4', extend: null });
+      workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage([image, video]));
+      workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue({ ...makeExtendContext(), history_assets: [image, video] });
+      app = flushSync(() => mount(WorkspacePage, { target }));
+      await settle();
+      for (const asset of [image, video]) {
+        openMenu(asset);
+        expect(document.querySelector('[role="menu"] [data-action="extend"]')).toBeNull();
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        flushSync();
+      }
+    });
+  });
+
+  describe('a prompt sent from the Prompts page', () => {
+    it('queues the run once the saved source has been checked', async () => {
+      extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
+      draft.update('workflow', 'extend');
+      draft.update('extendSourcePath', SOURCE);
+      requestPromptRun({ path: '/server/prompts.yaml', optionId: 'portrait:1' });
+      await mountExtend();
+      await settle();
+
+      expect(workspaceApiMocks.submitGenerate).toHaveBeenCalledTimes(1);
+      const form = workspaceApiMocks.submitGenerate.mock.calls[0][0] as FormData;
+      expect(form.get('source_video')).toBe(SOURCE);
+      expect(form.getAll('prompt_option_id')).toEqual(['portrait:1']);
+    });
+
+    it('refuses the run with a reason when no source is chosen', async () => {
+      requestPromptRun({ path: '/server/prompts.yaml', optionId: 'portrait:1' });
+      await mountExtend();
+      await settle();
+
+      expect(workspaceApiMocks.submitGenerate).not.toHaveBeenCalled();
+      expect(toasts.map((toast) => toast.message)).toContain('Choose a video to extend.');
+    });
+  });
+});

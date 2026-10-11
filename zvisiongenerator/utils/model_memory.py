@@ -12,14 +12,26 @@ import json
 import math
 import struct
 from dataclasses import dataclass
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
-from zvisiongenerator.utils.model_files import component_of, is_ltx_mlx_layout, ltx_mlx_transformer_file, is_krea2_model, model_weight_files
+from zvisiongenerator.utils.model_files import (
+    component_of,
+    find_local_model_dir,
+    is_krea2_model,
+    is_ltx_mlx_layout,
+    ltx_mlx_text_encoder_repo,
+    ltx_mlx_transformer_file,
+    model_weight_files,
+)
 from zvisiongenerator.utils.stored_quant import stored_quant_bits
 
 GIB = 1024**3
 _IMAGE_WORKING_BYTES = int(1.5 * GIB)
 _VIDEO_WORKING_BYTES = 3 * GIB
+# Video tokens of the extension window the working-memory allowance was measured on (73 frames at 704x448).
+_REFERENCE_TOKENS = 3080
 # Apple's recommended working set is conservative: a modest overshoot is absorbed by memory compression
 # without a noticeable slowdown.
 _FITS_RATIO = 1.1
@@ -235,6 +247,70 @@ def estimate_ltx_mlx_memory(model_dir: Path, text_encoder_dir: Path, *, low_memo
         return None
     peak = max(gemma, denoise) + connector if low_memory else gemma + connector + denoise
     return peak + _VIDEO_WORKING_BYTES
+
+
+def estimate_ltx_mlx_window_memory(model_dir: Path, text_encoder_dir: Path, *, width: int, height: int, frames: int, low_memory: bool = True) -> int | None:
+    """Estimate peak memory for generating an extension window with ltx-pipelines-mlx.
+
+    The weights are those of ``estimate_ltx_mlx_memory``. Its working-memory allowance was measured on a
+    window of ``_REFERENCE_TOKENS`` video tokens; a larger window scales the allowance by its token count,
+    and a smaller one keeps it, since the prompt encode sets the floor.
+
+    Args:
+        model_dir: The LTX MLX model directory.
+        text_encoder_dir: The Gemma text-encoder directory.
+        width: Output width in pixels.
+        height: Output height in pixels.
+        frames: Frames in the window, carried frames included (25 + 8n).
+        low_memory: Whether the pipeline frees Gemma before loading the transformer.
+
+    Returns:
+        Estimated peak bytes, or ``None`` when the layout is not LTX MLX or weights are unreadable.
+    """
+    base = estimate_ltx_mlx_memory(model_dir, text_encoder_dir, low_memory=low_memory)
+    if base is None:
+        return None
+    tokens = ((frames - 1) // 8 + 1) * (width // 32) * (height // 32)
+    return base - _VIDEO_WORKING_BYTES + int(_VIDEO_WORKING_BYTES * max(1.0, tokens / _REFERENCE_TOKENS))
+
+
+def window_memory_fit(
+    resolved_model: str,
+    *,
+    width: int,
+    height: int,
+    frames: int,
+    low_memory: bool,
+    budget_bytes: int | None,
+    find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
+) -> dict[str, Any] | None:
+    """Check an extension window against the memory budget; callers warn on ``tight`` or ``too_large`` and never block.
+
+    Args:
+        resolved_model: The resolved model reference (a local directory or a Hugging Face repo id).
+        width: Output width in pixels.
+        height: Output height in pixels.
+        frames: Frames in the window, carried frames included.
+        low_memory: Whether the pipeline frees Gemma before loading the transformer.
+        budget_bytes: The accelerator's memory budget, or ``None`` when unknown.
+        find_local_dir: Locates a downloaded model directory.
+
+    Returns:
+        ``{"status", "required_gb", "budget_gb"}``, or ``None`` when there is no budget or the model is not a
+        downloaded LTX MLX model with its text encoder.
+    """
+    if not budget_bytes:
+        return None
+    model_dir = find_local_dir(resolved_model)
+    if model_dir is None or not is_ltx_mlx_layout(model_dir):
+        return None
+    text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo())
+    if text_encoder_dir is None:
+        return None
+    required = estimate_ltx_mlx_window_memory(model_dir, text_encoder_dir, width=width, height=height, frames=frames, low_memory=low_memory)
+    if required is None:
+        return None
+    return {"status": classify_memory_fit(required, budget_bytes), "required_gb": round(required / GIB, 1), "budget_gb": round(budget_bytes / GIB, 1)}
 
 
 def classify_memory_fit(required_bytes: int, budget_bytes: int) -> str:

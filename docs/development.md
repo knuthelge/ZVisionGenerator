@@ -43,6 +43,7 @@ make install
 - Use `conftest.py::_make_args(**overrides)` to build minimal `argparse.Namespace` objects.
 - Use `tmp_path` fixture for filesystem operations.
 - Use `@pytest.mark.parametrize` for data-driven tests with many input/output pairs.
+- Tests that run the real `ffmpeg` and `ffprobe` (in `tests/test_video_probe.py`, `tests/test_video_splice.py` and `tests/test_video_tail.py`) are marked to skip when the tools are missing and are meant to be run locally with ffmpeg installed; run them before changing the extend join. Everything else mocks ffmpeg.
 - Skip heavy dependencies: `pytest.importorskip("torch")`, `@pytest.mark.skipif(sys.platform == ...)` for platform-specific tests.
 - Assert behavior and machine-readable contracts, not documentation prose, help text wording, CSS utility classes, source-code text, or incidental selector details.
 - String assertions are appropriate only when the string is the contract under test, such as routes, config keys, storage keys, parser options, event names, filenames, enum values, structured statuses, and accessibility or control names required for operability.
@@ -99,9 +100,9 @@ zvisiongenerator/
 │   ├── progress_events.py         Shared image/video workflow progress event helpers
 │   ├── latent_preview.py          Latent → RGB projection factors shared by live previews
 │   ├── image_types.py             Image request and artifacts
-│   ├── video_types.py             Video request and artifacts
+│   ├── video_types.py             Video request and artifacts, and the extend source, spec and segment
 │   ├── image_backend.py           Image backend protocol
-│   ├── video_backend.py           Video backend protocol
+│   ├── video_backend.py           Video backend protocol and the optional VideoExtender protocol
 │   ├── prompt_enhancer.py         Prompt-enhancer protocol
 │   └── workflow.py                Unified workflow engine (image + video)
 ├── processing/
@@ -116,7 +117,7 @@ zvisiongenerator/
 │   ├── atomic_write.py            Atomic file replacement for config and prompt-file writers
 │   ├── config.py                  Config loading (image + video)
 │   ├── console.py                 Console formatting
-│   ├── ffmpeg.py                  ffmpeg availability check and install
+│   ├── ffmpeg.py                  ffmpeg availability check and install, and the error for a failed ffmpeg or ffprobe run
 │   ├── filename.py                Output filenames ({set}_{timestamp}) and collision counters
 │   ├── image_model_detect.py      Image model type detection
 │   ├── interactive.py             Keyboard interrupt handling and review state
@@ -125,7 +126,7 @@ zvisiongenerator/
 │   ├── model_memory.py            Header-only memory estimates (MLX unified memory; CUDA GPU and system memory)
 │   ├── paths.py                   ~/.ziv/ model store resolution
 │   ├── platform.py                Platform metadata and platform-aware alias values
-│   ├── prompt_compose.py          Structured prompt flattening & snippets
+│   ├── prompt_compose.py          Structured prompt flattening & snippets; video scene helpers (compose scene + prompt, quoted-line stripping, original-prompt check)
 │   ├── prompt_document.py         Prompt file ↔ editable document for the Web UI builder (comment-preserving, ruamel.yaml)
 │   ├── prompt_document_check.py   Builder document previews and problems, with the prompt loader's rules
 │   ├── prompt_enhance.py          Prompt-enhancement settings, length plans, chat messages, run, and post-processing (no model I/O)
@@ -134,14 +135,20 @@ zvisiongenerator/
 │   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
 │   ├── stored_quant.py            Stored-quant naming, manifests and folder handling
 │   ├── upscale.py                 Upscale output sizes, size limits and denoise defaults
-│   └── video_model_detect.py      Video model type detection
+│   ├── video_extend.py            Extend: source checks and problem codes, loading the source, frame and audio-sample arithmetic of the window
+│   ├── video_model_detect.py      Video model type detection
+│   ├── video_probe.py             ffprobe a clip: stream facts, rotation and the checks' inputs
+│   ├── video_splice.py            Join a generated segment onto the source clip (stream copy or one re-encode) with the audio
+│   └── video_tail.py              Read a clip's last frames at their displayed size
 ├── web/
 │   ├── config.py                  Web UI config loading and model inventory discovery
 │   ├── config_api.py              JSON config response assembly
 │   ├── config_contract.py         Writable config semantics and path readback helpers
 │   ├── defaults.py                Ratio and size defaults for Web UI contracts
+│   ├── extend_api.py              Extend routes: check and describe a source video, fit its window to memory, build the rewrite context of an extension
 │   ├── gallery.py                 Gallery inventory and response serialization
 │   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
+│   ├── json_fields.py             Typed reads of optional fields in a JSON request body
 │   ├── model_delete.py            Delete installed models, LoRAs, and HF downloads
 │   ├── model_inventory.py         Backend model inventory for Web UI contracts
 │   ├── model_status.py            Per-model downloaded / memory-fit status for the SPA
@@ -157,7 +164,7 @@ zvisiongenerator/
 └── workflows/
     ├── enhance_stage.py           Applies the planned rewrite in image and video workflows
     ├── image_stages.py            Image pipeline stage definitions
-    └── video_stages.py            Video pipeline stage definitions
+    └── video_stages.py            Video pipeline stage definitions, including extend_video and join_clips
 
 prompts.yaml                       Default prompt definitions
 ```
@@ -172,13 +179,15 @@ The `image_win.py` module is the shared diffusers/CUDA image backend for both Wi
 
 Windows and Linux video resolution is config-driven through `video_model_presets.ltx.diffusers.default_repo` and the `ltx-2.3` alias. The backend assumes a diffusers-compatible repository layout and keeps the configured default overrideable from user config. macOS keeps the MLX-only `ltx-4` and `ltx-8` aliases.
 
+Extending a clip is an optional capability, not part of `VideoBackend`: the `VideoExtender` Protocol in `core/video_backend.py` declares `extend_video(model, source, prompt, *, extend_frames, seed, steps, segment_dir, audio_output, step_callback=None)`, which only the macOS backend implements. Callers gate on `supports_video_extend()` in `backends/__init__.py` (beside `supports_video_audio()`) and look the method up on the backend; the Web UI contract drops the `extend` workflow, and the CLI refuses `--extend`, when it is false.
+
 The Windows/Linux video backend is CUDA-only. Validation happens lazily during backend load so importing the package or running non-video code paths does not require torch, diffusers, or a GPU.
 
 The Windows/Linux diffusers image backend is also CUDA-only. Validation happens lazily during image backend load so importing the package or running non-image code paths does not require torch, diffusers, or a GPU.
 
 ### Workflow Stages
 
-Image stage functions in `workflows/image_stages.py` have the uniform signature `(ImageGenerationRequest, ImageWorkingArtifacts) -> StageOutcome`. Video stage functions in `workflows/video_stages.py` have the signature `(VideoGenerationRequest, VideoWorkingArtifacts) -> StageOutcome`. Stages are composed dynamically by `build_workflow()` and `build_video_workflow()`. `build_upscale_workflow()` upscales an existing image (`load_source_stage` → `upscale_stage` → `sharpen_stage` → `save_image_stage`); the Web UI runs it through `WebRunner.submit_upscale_job` and `upscale_runner.run_upscale`, which emits the same events as a one-image batch, without preflight or the batch loop.
+Image stage functions in `workflows/image_stages.py` have the uniform signature `(ImageGenerationRequest, ImageWorkingArtifacts) -> StageOutcome`. Video stage functions in `workflows/video_stages.py` have the signature `(VideoGenerationRequest, VideoWorkingArtifacts) -> StageOutcome`. Stages are composed dynamically by `build_workflow()` and `build_video_workflow()`. A video workflow starts with `resolve_prompt_stage`, which composes the scene and the prompt into the text the model receives (`compose_video_prompt`), and `enhance_prompt_stage` applies a planned scene and action rewrite. A job whose arguments carry an `extend_source` swaps the generation stage for the extend pair: `extend_video` (calls `extend_video` on the backend for the new segment only) and `join_clips` (`utils/video_splice.splice_clips` joins the segment onto the untouched source and removes the temporary segment directory). The extend variant has no `strip_audio` stage, since the joined clip already has the right audio; its provenance `workflow` is `extend`, with `source_video` and `extend_frames` recorded. `build_upscale_workflow()` upscales an existing image (`load_source_stage` → `upscale_stage` → `sharpen_stage` → `save_image_stage`); the Web UI runs it through `WebRunner.submit_upscale_job` and `upscale_runner.run_upscale`, which emits the same events as a one-image batch, without preflight or the batch loop.
 
 ### Review Before Upscaling
 
@@ -191,7 +200,7 @@ Every image and video job (CLI and Web UI) runs in two phases, and only one mode
 1. **Preflight** (`preflight.run_preflight`) runs before the generation model loads. It plans every iteration with `plan_iterations` (seed, `{a|b}` expansion, enhancement settings) and, when any iteration asks for auto enhancement, loads the prompt enhancer, rewrites those prompts, closes the enhancer and frees accelerator memory. It returns a frozen `JobPlan` (`core/job_plan.py`).
 2. **Generation**: the entry point loads the model and passes the plan to `run_batch` / `run_video_batch` as the required `plan=` argument. Runners raise `ValueError` for a cancelled plan or one whose length differs from the batch, and `RuntimeError` when an iteration is out of order. Retry and repeat keep the planned text and draw a new random seed.
 
-`JobPlan.iterations` holds one `IterationPlan` per iteration in run → set → prompt order, the order the runners loop in. Each carries `seed`, `resolved_prompt`, `enhanced_prompt` and `enhance_status` (`off`, `enhanced`, `failed`, `skipped`). The workflow's `enhance_prompt_stage` only applies the planned rewrite; no workflow stage calls the LLM.
+`JobPlan.iterations` holds one `IterationPlan` per iteration in run → set → prompt order, the order the runners loop in. Each carries `seed`, `resolved_prompt`, `enhanced_prompt` and `enhance_status` (`off`, `enhanced`, `failed`, `skipped`); video iterations also carry `scene`, `resolved_scene` and `enhanced_scene`, and a video rewrite returns the scene and the action together. The workflow's `enhance_prompt_stage` only applies the planned rewrite; no workflow stage calls the LLM.
 
 Entry points own the control signal. `image_cli.main` creates the `SkipSignal` and its key listener before preflight and stops it after `run_batch`; Web UI image and video jobs pass their control signal to both phases. Video jobs offer only Quit: `run_video_batch` checks it before each video and raises from the step callback so a running video stops at its next denoising step, then emits `batch_cancelled`. During preflight there is a control boundary before each rewrite and a final one after the enhancer is released: `skip` skips the next rewrite, `pause` waits, `quit` cancels, and `repeat` is dropped. A rewrite stopped by the user (the `cancelled` callback saw Next or Quit) is `skipped`, never `failed`. On Quit, preflight releases the enhancer and memory before emitting `batch_cancelled`.
 
@@ -282,6 +291,10 @@ Mock heavy image and video dependencies in tests. Diffusers backend tests patch 
     - `scheduler.shorten_schedule`, `DISTILLED_SIGMAS` and `STAGE_2_SIGMAS`, and `utils.samplers.denoise_loop` with its `on_step(step_idx, total, video_x0, sigma)` signature
     - for review before upscaling: `_stage1` (shadowed per call), `Stage1Result.video_tokens`/`audio_tokens`/`latent_dims`, `_load_decoders`, `dit`/`_loaded` (restored after the preview decode), and the model state released after an aborted generation
     - `DistilledPipeline.generate_and_save` for upscale, and `BasePipeline`'s `gemma_model_id` default, the transformer-file preference order and the `low_memory` and `low_ram_streaming` constructor arguments
+    - Extending a clip (`LtxVideoBackend.extend_video`), video side: `conditioning.types.VideoConditionByLatentIndex(frame_indices, clean_latent, strength)` pins the carried tail at the start of the window; `retake.encode_video_tensor(encoder, video_tensor)` and `utils.media_io.video_preprocess(frames, height, width)` encode the tail frames inside `image_conditioner(fn, free_after=)`
+    - Extending a clip, audio side: `ltx_core_mlx.utils.audio.load_audio(path, target_sample_rate, start_time, max_duration, mono)` reads the tail's sound at its position in the file; `audio_vae.encode_audio(waveform, sample_rate, encoder, processor)` encodes it inside `audio_conditioner(fn, free_after=)`; `extend_distilled.fit_audio_latent(audio_latent, audio_tokens)` fits the `(1, 8, T, 16)` latent before `audio_patchifier.patchify`, and `extend_distilled.carry_audio_tokens(frame_rate, carry_pixel_frames)` gives the token count
+    - Extending a clip, decode: the pipeline's `_loaded` flag (cleared with `dit = None` so the next `load()` reloads the transformer), `video_decoder_block.load()` and `video_decoder_block.video_decoder` (the diffusion decoder is rejected), `video_vae.VideoDecoder.tiled_decode(latent, tiling_config)`, `video_vae._compute_decode_tiling(latent_shape, frame_rate, budget_bytes)` (which may return `None` or temporal tiles), `video_vae.decode_cache_limit()`, `video_vae.stream_chunks_to_ffmpeg(chunks, proc)` and `video_vae._ffmpeg_sink(cmd)`, and `audio_decoder_block.__call__(audio_latent)`
+    - Extending a clip: `ltx_core_mlx.utils.audio.load_audio` returns an `AudioData` whose `.waveform` and `.sample_rate` are passed to `encode_audio`, and `video_patchifier.patchify` and `audio_patchifier.patchify` return `(tokens, dims)` tuples, so the tokens are `patchify(...)[0]`
 - **Cache limit.** `low_ram_streaming` makes the pipeline set the MLX buffer-cache limit to 0 for the whole process. `backends/memory_mac.mlx_cache_limit` scopes that to model construction and each generation, then restores the previous limit.
 
 ## Releasing

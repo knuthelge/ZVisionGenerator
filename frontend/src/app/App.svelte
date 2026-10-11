@@ -5,7 +5,7 @@
   import { shouldApplyStartupView } from './startupRouting';
   import { jobStore } from '$lib/state/job.svelte';
   import { documentTitle, isReviewing } from '$lib/state/jobView';
-  import type { PageId } from '$lib/types';
+  import type { PageId, Workflow } from '$lib/types';
   import Spinner from '$lib/components/atoms/Spinner.svelte';
   import TopNav from '$lib/components/organisms/TopNav.svelte';
   import ToastContainer from '$lib/components/molecules/ToastContainer.svelte';
@@ -19,6 +19,8 @@
   const _validPages: PageId[] = ['workspace', 'prompts', 'gallery', 'config', 'models'];
 
   let ready = $state(false);
+  // The workflows the Workspace's contract lists; the Workspace fills it once its context has loaded.
+  let workflows = $state<Workflow[] | null>(null);
 
   const baseTitle = document.title;
   $effect(() => {
@@ -44,10 +46,10 @@
 
 {#if ready}
   <div class="h-dvh flex flex-col overflow-hidden bg-bg-base text-text-primary font-sans">
-    <TopNav currentPage={router.page} />
+    <TopNav currentPage={router.page} {workflows} />
     <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
       {#if router.page === 'workspace'}
-        <WorkspacePage />
+        <WorkspacePage bind:workflows />
       {:else if router.page === 'prompts'}
         <PromptsPage />
       {:else if router.page === 'gallery'}

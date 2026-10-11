@@ -1,4 +1,4 @@
-import type { JobSettings } from '$lib/types';
+import type { ExtendSourceInfo, JobSettings } from '$lib/types';
 import { checked, first, numberOrNull, values } from './jobSettings';
 
 /** A submitted setting the CLI cannot express exactly; the copied command differs from the Web job there. */
@@ -21,6 +21,11 @@ export interface CliCommandOptions {
   outputDir?: string | null;
   /** How many prompts the chosen prompts file holds; unknown counts as more than were chosen. */
   promptFileOptionCount?: number | null;
+  /**
+   * Extend only: what the source video recorded. `ziv video --extend` fills a missing `--scene` from the source's scene
+   * and a missing `--prompt` from a legacy source's prompt, so a blank Scene or Prompt is then sent as an empty flag.
+   */
+  extendSource?: Pick<ExtendSourceInfo, 'scene' | 'legacy'> | null;
 }
 
 const SAFE_ARG = /^[A-Za-z0-9_\-+=.,:/@%]+$/;
@@ -88,11 +93,20 @@ function amountToggle(args: string[], settings: JobSettings, name: string, defau
  */
 export function cliCommand(settings: JobSettings, options: CliCommandOptions = {}): CliCommand {
   const isVideo = first(settings, 'mode') === 'video';
+  // An extension continues a chosen video and takes its size, frame rate and length from it.
+  const isExtend = isVideo && first(settings, 'workflow') === 'extend';
   const args: string[] = ['ziv', isVideo ? 'video' : 'image'];
   const caveats: CliCaveat[] = [];
   const flag = (name: string, value: string | undefined): void => {
     if (value !== undefined) args.push(name, value);
   };
+
+  if (isExtend) {
+    const source = text(settings, 'source_video');
+    if (source === undefined) throw new Error('Choose a video to extend first.');
+    args.push('--extend', source);
+    flag('--extend-frames', text(settings, 'extend_frames'));
+  }
 
   flag('--model', text(settings, 'model'));
   if (!isVideo) flag('--quantize', text(settings, 'quantize'));
@@ -105,25 +119,28 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
   const [promptFlag, promptValue] = isJson ? ['--json-prompt', text(settings, 'json_prompt')]
     : isFile ? ['--prompts-file', text(settings, 'prompts_file')]
     : ['--prompt', text(settings, 'prompt')];
-  if (promptValue === undefined && (isFile || scene === undefined)) {
+  // An extension may continue with neither: the source's scene carries it.
+  if (promptValue === undefined && (isFile || (scene === undefined && !isExtend))) {
     throw new Error(isJson ? 'Write a JSON caption first.' : isFile ? 'Choose a prompts file first.' : isVideo ? 'Write a scene or a prompt first.' : 'Write a prompt first.');
   }
   if (promptValue !== undefined) args.push(promptFlag, promptValue);
+  else if (isExtend && !isFile && options.extendSource?.legacy) args.push('--prompt', '');
   flag('--scene', scene);
+  if (isExtend && !isJson && scene === undefined && options.extendSource?.scene) args.push('--scene', '');
   if (isFile && values(settings, 'prompt_option_id').length < (options.promptFileOptionCount ?? Infinity)) caveats.push('prompt_options');
   if (!isJson && !isFile && text(settings, 'negative_prompt') !== undefined) caveats.push('negative_prompt');
 
-  // Size: a custom width and height stand on their own; otherwise the ratio and preset.
+  // Size: a custom width and height stand on their own; otherwise the ratio and preset. An extension has neither: it takes both from its source.
   const width = text(settings, 'width');
   const height = text(settings, 'height');
-  if (width !== undefined || height !== undefined) {
+  if (!isExtend && (width !== undefined || height !== undefined)) {
     flag('--width', width);
     flag('--height', height);
-  } else {
+  } else if (!isExtend) {
     flag('--ratio', text(settings, 'ratio'));
     flag('--size', text(settings, 'size'));
   }
-  if (isVideo) flag('--frames', text(settings, 'frames'));
+  if (isVideo && !isExtend) flag('--frames', text(settings, 'frames'));
 
   const runs = numberOrNull(first(settings, 'runs'));
   if (runs !== null && runs !== 1) args.push('--runs', String(runs));
@@ -138,8 +155,8 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
   flag('--lora', text(settings, 'lora'));
 
   // Reference image: an upload wins over a typed path, as on the server. It has no host path, so the command names it.
-  const upload = text(settings, 'image_file');
-  const imagePath = upload ?? text(settings, 'image_path');
+  const upload = isExtend ? undefined : text(settings, 'image_file');
+  const imagePath = isExtend ? undefined : upload ?? text(settings, 'image_path');
   if (upload !== undefined) caveats.push('uploaded_image');
   flag('--image', imagePath);
   if (!isVideo && imagePath !== undefined) flag('--image-strength', text(settings, 'image_strength'));
@@ -147,9 +164,11 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
   if (isVideo) {
     if (settings.audio !== undefined && !checked(settings, 'audio')) args.push('--no-audio');
     if (settings.low_memory !== undefined && !checked(settings, 'low_memory')) args.push('--no-low-memory');
-    const upscale = text(settings, 'video_upscale_factor') ?? text(settings, 'upscale');
-    flag('--upscale', upscale);
-    if (upscale !== undefined && checked(settings, 'review')) args.push('--review');
+    if (!isExtend) {
+      const upscale = text(settings, 'video_upscale_factor') ?? text(settings, 'upscale');
+      flag('--upscale', upscale);
+      if (upscale !== undefined && checked(settings, 'review')) args.push('--review');
+    }
   } else {
     amountToggle(args, settings, 'sharpen', true);
     amountToggle(args, settings, 'contrast', false);

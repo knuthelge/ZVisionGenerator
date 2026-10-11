@@ -13,6 +13,8 @@
     /** Report typed values only on commit, for a value the parent reshapes (e.g. converts and snaps). */
     commitOnly?: boolean;
     ariaLabel?: string;
+    /** Tooltip, e.g. why the field is disabled. */
+    title?: string;
     onchange: (value: number | null) => void;
   }
 
@@ -28,6 +30,7 @@
     disabled = false,
     commitOnly = false,
     ariaLabel,
+    title,
     onchange,
   }: Props = $props();
 
@@ -93,6 +96,7 @@
   {placeholder}
   {disabled}
   aria-label={ariaLabel}
+  {title}
   class="inspector-number"
   value={value ?? ''}
   oninput={onInput}

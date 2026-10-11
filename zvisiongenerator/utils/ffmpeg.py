@@ -22,6 +22,12 @@ def require_ffmpeg() -> None:
     raise RuntimeError("ffmpeg is required for video generation but was not found on PATH. Install ffmpeg from https://ffmpeg.org/download.html, ensure it is on PATH, then retry.")
 
 
+def tool_error(message: str, stderr: bytes | str | None, *, limit: int = 1500) -> RuntimeError:
+    """Return a ``RuntimeError`` that says *message* and ends with the last *limit* characters of a tool's stderr."""
+    text = stderr.decode(errors="replace") if isinstance(stderr, bytes) else (stderr or "")
+    return RuntimeError(f"{message}: {text.strip()[-limit:]}")
+
+
 def strip_audio(video_path: Path) -> None:
     """Remove audio track from video in-place using ffmpeg.
 

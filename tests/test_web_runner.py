@@ -19,11 +19,12 @@ import pytest
 
 from tests.conftest import _make_args
 from tests.conftest import _make_plan
-from tests.conftest import _make_video_args
+from tests.conftest import _make_video_args, make_extend_source
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import web_runner as web_runner_module
+from zvisiongenerator.workflows import build_video_workflow
 
 
 @pytest.fixture(autouse=True)
@@ -294,6 +295,33 @@ class TestWebRunner:
 
         assert seen["video"]["scene"] is None
         assert seen["video"]["scene_by_set"] is None
+
+    def test_extend_job_builds_the_extend_workflow_and_loads_the_plain_model(self, monkeypatch):
+        """Args that carry an extend source run the extend stages with the plain (not upscale) pipeline, and the source reaches the batch."""
+        seen: dict[str, object] = {}
+
+        def _fake_run_video_batch(*, workflow, args, progress_callback, **_kw):
+            seen["stages"] = [stage.__name__ for stage in workflow.stages]
+            seen["args"] = args
+            progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
+
+        source = make_extend_source(path=Path("/clips/clip.mp4"), frame_count=97, scene=None, prompt=None)
+        args = _make_video_args(extend_source=source, extend_frames=48, width=512, height=256, num_frames=73, fps=24.0, image_path=None, upscale=None, scene="A street.")
+        monkeypatch.setattr(web_runner_module, "run_video_batch", _fake_run_video_batch)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            backend = _stub_request_job(monkeypatch)
+            monkeypatch.setattr(web_runner_module, "build_video_workflow", build_video_workflow)
+            request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", width=512, height=256, num_frames=73)
+            job_id = runner.submit_video_request_job(request=request, prompts_data={"default": [("", None)]}, config={}, args=args, model_ref="model")
+            _wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        assert "extend_video_stage" in seen["stages"] and "join_clips_stage" in seen["stages"]
+        assert not {"text_to_video_stage", "image_to_video_stage", "strip_audio_stage"} & set(seen["stages"])
+        assert seen["args"].extend_source is source
+        assert "upscale" not in backend.load_model.call_args.kwargs
 
     def test_upscale_job_loads_model_and_runs_workflow_once(self, tmp_path, monkeypatch):
         """Upscale jobs load the recorded model (with its quant and LoRAs), run once, and accept only quit."""

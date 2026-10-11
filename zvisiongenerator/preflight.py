@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from zvisiongenerator.backends import prompt_enhancer_session, release_accelerator_memory
 from zvisiongenerator.core.job_plan import EnhanceStatus, IterationPlan, JobPlan
 from zvisiongenerator.core.progress_events import ProgressCallback, emit_progress
-from zvisiongenerator.utils.prompt_compose import expand_random_choices
+from zvisiongenerator.utils.prompt_compose import expand_random_choices, is_original_prompt
 from zvisiongenerator.utils.prompt_enhance import (
     EnhanceContext,
     EnhanceSettings,
@@ -31,6 +31,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     resolve_item_enhance,
 )
 from zvisiongenerator.utils.prompt_enhance_video import PAIR_FALLBACK_WARNING, enhance_video_prompt
+from zvisiongenerator.utils.video_extend import extend_enhance_context
 
 if TYPE_CHECKING:
     from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
@@ -242,7 +243,16 @@ def _rewrite_all(
 
 
 def _job_context(args: argparse.Namespace, *, mode: str) -> EnhanceContext:
-    """Return the rewrite context for a job from its arguments (frame size or ratio, frames, fps, audio, reference image)."""
+    """Return the rewrite context for a job from its arguments (frame size or ratio, frames, fps, audio, reference image).
+
+    A video job that extends a clip (``args.extend_source``) describes the generation window: the source's displayed
+    size and frame rate, the carried plus new frames, and the new frames and the source's prompt for the extend modes.
+    ``prompt_is_original`` depends on each prompt and is set per iteration (see ``_iteration_context``).
+    """
+    no_audio = getattr(args, "no_audio", True)
+    source = getattr(args, "extend_source", None) if mode == "video" else None
+    if source is not None:
+        return extend_enhance_context(source, args.extend_frames, no_audio=no_audio)
     return enhance_context(
         mode=mode,
         width=getattr(args, "width", None),
@@ -250,9 +260,16 @@ def _job_context(args: argparse.Namespace, *, mode: str) -> EnhanceContext:
         ratio=getattr(args, "ratio", None),
         frames=getattr(args, "num_frames", None),
         fps=getattr(args, "fps", None),
-        audio=not getattr(args, "no_audio", True),
+        audio=not no_audio,
         reference_image=bool(getattr(args, "image_path", None)),
     )
+
+
+def _iteration_context(context: EnhanceContext, iteration: IterationPlan) -> EnhanceContext:
+    """Return *context* for one iteration: when extending a legacy source, whether its prompt template is still the source's."""
+    if not context.extends or context.extract_from is None:
+        return context
+    return replace(context, prompt_is_original=is_original_prompt(iteration.prompt, context.extract_from))
 
 
 def _make_rewriter(
@@ -267,7 +284,7 @@ def _make_rewriter(
         shared = dict(
             seed=iteration.seed,
             ceiling=ceiling,
-            context=context,
+            context=_iteration_context(context, iteration),
             length_cfg=options["length"],
             temperature=options["temperature"],
             max_tokens=options["max_new_tokens"],

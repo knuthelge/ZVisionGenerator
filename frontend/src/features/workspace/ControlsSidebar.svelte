@@ -2,6 +2,8 @@
   import { Icon, Spinner } from '$lib/components/atoms';
   import { ActionBar } from '$lib/components/molecules';
   import { draft } from '$lib/state/draft.svelte';
+  import { extendGuard } from '$lib/state/extend';
+  import { extendInspection } from '$lib/state/extendInspection.svelte';
   import type { WorkspaceContext } from '$lib/types';
   import ComposePane from './ComposePane.svelte';
   import SettingsPane from './SettingsPane.svelte';
@@ -28,6 +30,9 @@
   const generateLabel = $derived(jobsActive ? 'Add to queue' : 'Generate');
   const authorityReady = $derived(context !== null && draft.authorityReady);
   const collapsed = $derived(draft.state.sidebarCollapsed);
+  // An extension waits for a source it can read; the strip's Generate follows the same rule as the footer's.
+  const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath)));
+  const stripTitle = $derived(sourceGuard.note ? `${generateLabel}: ${sourceGuard.note.charAt(0).toLowerCase()}${sourceGuard.note.slice(1).replace(/\.$/, '')}` : `${generateLabel} (⌘↵)`);
 
   function setCollapsed(value: boolean): void {
     draft.update('sidebarCollapsed', value);
@@ -73,8 +78,8 @@
           type="submit"
           class="strip-generate"
           aria-label={generateLabel}
-          title="{generateLabel} (⌘↵)"
-          disabled={busy || !authorityReady}
+          title={stripTitle}
+          disabled={busy || !authorityReady || sourceGuard.blocked}
         >
           <Icon name="bolt" size={18} />
         </button>

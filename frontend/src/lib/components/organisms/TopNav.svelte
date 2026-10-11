@@ -8,8 +8,10 @@
 
   interface Props {
     currentPage: PageId;
+    /** The workflows the server offers (the contract's values); null until the Workspace has loaded them. */
+    workflows?: readonly Workflow[] | null;
   }
-  let { currentPage }: Props = $props();
+  let { currentPage, workflows = null }: Props = $props();
 
   const navItems: { id: PageId; label: string }[] = [
     { id: 'workspace', label: 'Workspace' },
@@ -23,10 +25,13 @@
     { id: 'txt2img', label: 'Text to Image' },
     { id: 'img2img', label: 'Image to Image' },
     { id: 'img2vid', label: 'Image to Video' },
-    { id: 'txt2vid', label: 'Text to Video' }
+    { id: 'txt2vid', label: 'Text to Video' },
+    { id: 'extend', label: 'Extend Video' }
   ];
 
   const reviewWaiting = $derived(isReviewing(jobStore.current));
+  // Until the contract is known the four always-available workflows show; Extend Video appears only when the server lists it.
+  const visibleWorkflows = $derived(workflowItems.filter((item) => (workflows === null ? item.id !== 'extend' : workflows.includes(item.id))));
 
   const logoSrc = '/app-static/ziv-icon.svg';
 </script>
@@ -40,7 +45,7 @@
 
     {#if currentPage === 'workspace'}
       <nav class="workflow-tabs" aria-label="Workflow">
-        {#each workflowItems as item}
+        {#each visibleWorkflows as item (item.id)}
           <button
             type="button"
             class="nav-tab"
@@ -84,7 +89,7 @@
   .nav-tab:hover { color: var(--color-text-primary); }
   .nav-tab:focus-visible { outline-offset: -2px; }
   .nav-tab.active { border-color: var(--color-primary-main); color: var(--color-text-primary); }
-  @media (max-width: 900px) {
+  @media (max-width: 1000px) {
     .app-nav { flex-wrap: wrap; gap: 0; padding: 0 12px; }
     .nav-workflows { display: contents; }
     .brand { min-height: 44px; }

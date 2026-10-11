@@ -1,8 +1,8 @@
-import type { DraftState, EnhanceContext, EnhanceSettings, PromptEnhancerContract, Workflow, WorkflowMode } from '$lib/types';
+import type { DraftState, EnhanceContext, EnhancedSource, EnhanceSettings, PromptEnhancerContract, Workflow, WorkflowMode } from '$lib/types';
 
 /** Media mode of a canonical workflow. */
 export function workflowMode(workflow: Workflow): WorkflowMode {
-  return workflow === 'txt2vid' || workflow === 'img2vid' ? 'video' : 'image';
+  return workflow === 'txt2vid' || workflow === 'img2vid' || workflow === 'extend' ? 'video' : 'image';
 }
 
 const FALLBACK_SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', details: ['lighting', 'composition'], length: 'same', motion: ['action'], sound: [], note: '' };
@@ -13,8 +13,13 @@ export function effectiveEnhanceSettings(state: DraftState, contract: PromptEnha
   return { ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...defaults.sound], ...state.enhanceSettings };
 }
 
-/** Whether the job's video has an audio track, so the Sound axis applies; *supported* is false where the video backend writes no audio. */
-export function hasAudio(state: DraftState, supported = true): boolean {
+/**
+ * Whether the job's video has an audio track, so the Sound axis applies; *supported* is false where the video backend writes no audio.
+ *
+ * @param sourceHasAudio Extend only: whether the source has audio; a silent source yields a silent clip. Null when unknown.
+ */
+export function hasAudio(state: DraftState, supported = true, sourceHasAudio: boolean | null = null): boolean {
+  if (state.workflow === 'extend' && sourceHasAudio === false) return false;
   return supported && workflowMode(state.workflow) === 'video' && state.audio;
 }
 
@@ -39,8 +44,27 @@ export function settingsPayload(settings: EnhanceSettings, mode: WorkflowMode, a
   return audio ? { ...base, motion, sound } : { ...base, motion };
 }
 
-/** The job facts an on-demand enhancement needs: frame shape, clip length, audio and reference image. */
-export function enhanceContext(state: DraftState, audioSupported = true): EnhanceContext {
+/**
+ * The job facts an on-demand enhancement needs: frame shape, clip length, audio and reference image.
+ *
+ * An extension names its source and new frames instead; the server reads the source's size, frame rate and recorded text.
+ *
+ * @param sourceHasAudio Extend only: whether the source has audio, when known.
+ */
+export function enhanceContext(state: DraftState, audioSupported = true, sourceHasAudio: boolean | null = null): EnhanceContext {
+  if (state.workflow === 'extend') {
+    return {
+      ratio: null,
+      width: null,
+      height: null,
+      frames: null,
+      fps: null,
+      audio: hasAudio(state, audioSupported, sourceHasAudio),
+      reference_image: false,
+      source_video: state.extendSourcePath,
+      extend_frames: state.extendFrames,
+    };
+  }
   const video = workflowMode(state.workflow) === 'video';
   const custom = state.dimensionMode === 'custom';
   return {
@@ -54,15 +78,44 @@ export function enhanceContext(state: DraftState, audioSupported = true): Enhanc
   };
 }
 
-/** Whether *state* is a video prompt with no scene but with a prompt, so an enhancement splits it into scene and action. */
+/**
+ * Whether an enhancement of *state* always changes the text, so no setting makes it a no-op.
+ *
+ * True for a video prompt with no scene but with a prompt (split into scene and action), and for an extension,
+ * which always writes a new action.
+ */
 export function splitsPrompt(state: DraftState): boolean {
+  if (state.workflow === 'extend') return true;
   return workflowMode(state.workflow) === 'video' && state.scene.trim() === '' && state.prompt.trim() !== '';
 }
 
-/** Whether there is text to run: a scene or a prompt for video, a prompt for images. */
+/**
+ * Whether auto-enhance always changes the text of *state*'s job, so no setting makes it a no-op.
+ *
+ * Auto-enhance rewrites each prompt at submit time (also in file mode, where the prompt box is blank), so unlike
+ * `splitsPrompt` it needs no prompt: a blank default scene is enough for a video, and an extension always writes a new action.
+ */
+export function autoSplitsPrompt(state: DraftState): boolean {
+  if (state.workflow === 'extend') return true;
+  return workflowMode(state.workflow) === 'video' && state.scene.trim() === '';
+}
+
+/** Whether there is text to run: a scene or a prompt for video, a prompt for images. An extension may run with neither (it continues naturally). */
 export function canSubmitText(state: DraftState): boolean {
+  if (state.workflow === 'extend') return true;
   if (state.prompt.trim() !== '') return true;
   return workflowMode(state.workflow) === 'video' && state.scene.trim() !== '';
+}
+
+/** What an enhancement started now would be produced from, kept with its result to tell when it goes out of date. */
+export function enhancedSourceFor(state: DraftState): EnhancedSource {
+  const mode = workflowMode(state.workflow);
+  const source: EnhancedSource = { prompt: state.prompt, scene: mode === 'video' ? state.scene : '', mode };
+  if (state.workflow === 'extend') {
+    source.sourceVideoPath = state.extendSourcePath;
+    source.extendFrames = state.extendFrames;
+  }
+  return source;
 }
 
 /** Whether the Enhanced text replaces the inline text on submit; for video, text in either Enhanced box counts. */
@@ -84,13 +137,16 @@ export function submittedPrompt(state: DraftState): string {
   return submittedPair(state).prompt;
 }
 
-/** Whether the Enhanced text was produced from a different scene, prompt or workflow mode than the current one. */
+/** Whether the Enhanced text was produced from a different scene, prompt, workflow mode or, for an extension, source or length than the current one. */
 export function isEnhancedStale(state: DraftState): boolean {
   const source = state.enhancedFrom;
   if (source === null) return false;
   const mode = workflowMode(state.workflow);
   if (state.enhancedPrompt.trim() === '' && (mode !== 'video' || state.enhancedScene.trim() === '')) return false;
-  return source.prompt !== state.prompt || source.mode !== mode || (mode === 'video' && (source.scene ?? '') !== state.scene);
+  if (source.prompt !== state.prompt || source.mode !== mode || (mode === 'video' && (source.scene ?? '') !== state.scene)) return true;
+  // Outside an extension the source and length mean nothing, so an Enhanced pair made for one is out of date once the workflow is another.
+  const extending = state.workflow === 'extend';
+  return (source.sourceVideoPath ?? null) !== (extending ? state.extendSourcePath : null) || (source.extendFrames ?? null) !== (extending ? state.extendFrames : null);
 }
 
 /** Status line for an enhancement phase. */

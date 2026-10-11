@@ -4,12 +4,14 @@ import {
   clampedNote,
   effectiveEnhanceSettings,
   enhanceContext,
+  enhancedSourceFor,
   enhancePhaseMessage,
   enhancedOverrideActive,
   hasAudio,
   isEnhancedStale,
   isNoOpSettings,
   settingsPayload,
+  autoSplitsPrompt,
   splitsPrompt,
   submittedPair,
   submittedPrompt,
@@ -136,6 +138,7 @@ describe('settings helpers', () => {
   it('maps workflows to modes', () => {
     expect(workflowMode('img2img')).toBe('image');
     expect(workflowMode('img2vid')).toBe('video');
+    expect(workflowMode('extend')).toBe('video');
   });
 
   it('formats phase and clamp messages', () => {
@@ -188,6 +191,15 @@ describe('scene and prompt pair', () => {
     expect(splitsPrompt(state({ workflow: 'txt2img', scene: '', prompt: 'a fox' }))).toBe(false);
   });
 
+  it('auto-enhance splits a video with a blank default scene whatever the prompt box holds, and any extension', () => {
+    expect(autoSplitsPrompt(video({ scene: '', prompt: '' }))).toBe(true);
+    expect(autoSplitsPrompt(video({ scene: '  ', prompt: 'a knight' }))).toBe(true);
+    expect(autoSplitsPrompt(video({ scene: 'A castle.', prompt: '' }))).toBe(false);
+    expect(autoSplitsPrompt(state({ workflow: 'txt2img', scene: '', prompt: 'a fox' }))).toBe(false);
+    expect(autoSplitsPrompt(state({ workflow: 'extend', scene: 'A street.', prompt: 'She waves.' }))).toBe(true);
+    expect(autoSplitsPrompt(state({ workflow: 'extend', scene: '', prompt: '' }))).toBe(true);
+  });
+
   it('is never a no-op for a split video prompt, and unchanged for images', () => {
     expect(isNoOpSettings(SETTINGS, 'video', false, true)).toBe(false);
     expect(isNoOpSettings(SETTINGS, 'video', false, false)).toBe(true);
@@ -223,6 +235,74 @@ describe('scene and prompt pair', () => {
       ['the source was saved before scenes existed', { scene: '', prompt: 'a fox', enhancedPrompt: 'x', enhancedFrom: { prompt: 'a fox', mode: 'video' as const } }, false],
     ])('is stale only when the text it was made from changed: %s', (_name, overrides, stale) => {
       expect(isEnhancedStale(video(overrides))).toBe(stale);
+    });
+  });
+});
+
+describe('extend', () => {
+  const extending = (overrides: Partial<DraftState> = {}) => state({
+    workflow: 'extend', prompt: '', scene: '', audio: true, fps: 24, frameCount: 97, ratio: '16:9', dimensionMode: 'ratio', width: 848, height: 480,
+    extendSourcePath: '/clips/walk.mp4', extendFrames: 48, ...overrides,
+  });
+
+  it('describes the job by its source and new frames, with no frame shape or reference image', () => {
+    expect(enhanceContext(extending())).toEqual({
+      ratio: null, width: null, height: null, frames: null, fps: null, audio: true, reference_image: false,
+      source_video: '/clips/walk.mp4', extend_frames: 48,
+    });
+  });
+
+  it('has no audio where the backend writes none or the source is silent', () => {
+    expect(enhanceContext(extending(), false).audio).toBe(false);
+    expect(enhanceContext(extending(), true, false).audio).toBe(false);
+    expect(enhanceContext(extending(), true, true).audio).toBe(true);
+    expect(hasAudio(extending({ audio: false }))).toBe(false);
+  });
+
+  it('adds no source facts to the context of other workflows', () => {
+    expect(enhanceContext(state({ workflow: 'txt2vid' }))).not.toHaveProperty('source_video');
+  });
+
+  it('allows an empty scene and prompt, which continue naturally', () => {
+    expect(canSubmitText(extending())).toBe(true);
+    expect(canSubmitText(state({ workflow: 'txt2vid', prompt: '', scene: '' }))).toBe(false);
+    expect(canSubmitText(state({ workflow: 'txt2img', prompt: ' ' }))).toBe(false);
+  });
+
+  it('is never a no-op, since an extension always writes a new action', () => {
+    expect(splitsPrompt(extending())).toBe(true);
+    expect(splitsPrompt(extending({ scene: 'A street.', prompt: 'She waves.' }))).toBe(true);
+  });
+
+  describe('staleness', () => {
+    const enhanced = () => extending({ prompt: 'She waves.', enhancedPrompt: 'She waves slowly.', enhancedFrom: enhancedSourceFor(extending({ prompt: 'She waves.' })) });
+
+    it('records the source and length the Enhanced text was made for', () => {
+      expect(enhancedSourceFor(extending({ prompt: 'She waves.', scene: 'A street.' }))).toEqual({
+        prompt: 'She waves.', scene: 'A street.', mode: 'video', sourceVideoPath: '/clips/walk.mp4', extendFrames: 48,
+      });
+      expect(enhancedSourceFor(state({ workflow: 'txt2vid', prompt: 'p' }))).toEqual({ prompt: 'p', scene: '', mode: 'video' });
+      expect(enhancedSourceFor(state({ workflow: 'txt2img', prompt: 'p', scene: 'ignored' }))).toEqual({ prompt: 'p', scene: '', mode: 'image' });
+    });
+
+    it.each([
+      ['the source and length are the same', {}, false],
+      ['the source changes', { extendSourcePath: '/clips/other.mp4' }, true],
+      ['the length changes', { extendFrames: 56 }, true],
+      ['the workflow is no longer an extension', { workflow: 'txt2vid' as const }, true],
+    ])('is out of date only when %s', (_name, overrides, stale) => {
+      expect(isEnhancedStale({ ...enhanced(), ...overrides })).toBe(stale);
+    });
+
+    it('is out of date when text made for another video workflow is used to extend', () => {
+      const made = state({ workflow: 'txt2vid', prompt: 'She waves.', enhancedPrompt: 'x', enhancedFrom: enhancedSourceFor(state({ workflow: 'txt2vid', prompt: 'She waves.' })) });
+      expect(isEnhancedStale(made)).toBe(false);
+      expect(isEnhancedStale({ ...made, workflow: 'extend', extendSourcePath: '/clips/walk.mp4', extendFrames: 48 })).toBe(true);
+    });
+
+    it('is not out of date for Enhanced text from before extensions existed', () => {
+      const old = state({ workflow: 'txt2vid', prompt: 'p', enhancedPrompt: 'x', enhancedFrom: { prompt: 'p', mode: 'video', scene: '' } });
+      expect(isEnhancedStale(old)).toBe(false);
     });
   });
 });

@@ -1,8 +1,8 @@
-import { canUseAsReference, upscaleFactors, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
+import { canExtend, canUseAsReference, extendReason, upscaleFactors, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
 import type { GalleryAsset } from '$lib/types';
 import type { ActionMenuEntry } from './ActionMenu.svelte';
 
-/** Build the secondary actions for an asset: reference, upscale, download, delete. */
+/** Build the secondary actions for an asset: reference, extend, upscale, download, delete. */
 export function assetMenuEntries(
   asset: GalleryAsset,
   handlers: AssetActionHandlers,
@@ -10,11 +10,18 @@ export function assetMenuEntries(
   referenceUnavailable: Partial<Record<ReferenceTarget, string>> = {}
 ): ActionMenuEntry[] {
   const entries: ActionMenuEntry[] = [];
-  const { onreference, onupscale, ondelete } = handlers;
+  const { onreference, onextend, onupscale, ondelete } = handlers;
   if (onreference && canUseAsReference(asset)) {
     entries.push(
       { kind: 'heading', label: 'Use as reference' },
       ...referenceEntries(asset, onreference, referenceUnavailable),
+      { kind: 'separator' }
+    );
+  }
+  // A video that offers extending lists it, disabled with the reason when it can't be extended right now.
+  if (onextend && asset.media_type === 'video' && asset.extend) {
+    entries.push(
+      { kind: 'item', id: 'extend', label: 'Extend', disabled: !canExtend(asset), title: extendReason(asset) ?? undefined, onselect: () => onextend(asset) },
       { kind: 'separator' }
     );
   }

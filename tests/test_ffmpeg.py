@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg, require_ffmpeg
+from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg, require_ffmpeg, tool_error
 
 
 class TestRequireFfmpeg:
@@ -98,3 +98,19 @@ class TestEnsureFfmpegInstallFails:
             ensure_ffmpeg()
 
         assert exc_info.value.code == 1
+
+
+class TestToolError:
+    @pytest.mark.parametrize("stderr", [b"  boom\n", "  boom\n"])
+    def test_ends_with_the_stripped_stderr(self, stderr):
+        error = tool_error("ffmpeg failed", stderr)
+
+        assert isinstance(error, RuntimeError)
+        assert str(error) == "ffmpeg failed: boom"
+
+    def test_keeps_only_the_last_characters(self):
+        assert str(tool_error("ffmpeg failed", "x" * 10 + "tail", limit=4)) == "ffmpeg failed: tail"
+
+    @pytest.mark.parametrize("stderr", [None, b""])
+    def test_missing_stderr_gives_an_empty_tail(self, stderr):
+        assert str(tool_error("ffmpeg failed", stderr)) == "ffmpeg failed: "

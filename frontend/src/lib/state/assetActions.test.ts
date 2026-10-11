@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { GalleryAsset } from '$lib/types';
 
-import { assetAspect, canUseAsReference, referenceParams, reuseParams } from './assetActions';
+import { assetAspect, canExtend, canUseAsReference, describeFallbackReason, extendParams, extendReason, referenceParams, reuseParams, workflowLabel } from './assetActions';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -49,3 +49,50 @@ describe('asset actions', () => {
     expect(assetAspect(makeAsset())).toBe(1);
   });
 });
+
+describe('extend actions', () => {
+  const video = (overrides: Partial<GalleryAsset> = {}): GalleryAsset => makeAsset({
+    id: 'out/clip.mp4',
+    filename: 'clip.mp4',
+    workflow: 'txt2vid',
+    media_type: 'video',
+    file_path: '/outputs/out/clip.mp4',
+    extend: { available: true, reason: null },
+    ...overrides,
+  });
+
+  it('offers extending only when the server says the video can be', () => {
+    expect(canExtend(video())).toBe(true);
+    expect(canExtend(video({ extend: { available: false, reason: "Upscaled videos can't be extended yet." } }))).toBe(false);
+    expect(canExtend(video({ extend: null }))).toBe(false);
+    expect(canExtend(makeAsset())).toBe(false);
+  });
+
+  it('explains why a video cannot be extended', () => {
+    const reason = "Upscaled videos can't be extended yet.";
+    expect(extendReason(video({ extend: { available: false, reason } }))).toBe(reason);
+    expect(extendReason(video())).toBeNull();
+    expect(extendReason(video({ extend: null }))).toBeNull();
+  });
+
+  it('sends the source, model and LoRAs and no text, which the server fills in once it has read the source', () => {
+    const asset = video({ scene: 'A woman on a rainy street.', prompt: 'A woman on a rainy street.', lora: 'style:0.7', reuse_state: { resolved_model: 'ltx-2', requested_model: 'ltx-2' } as GalleryAsset['reuse_state'] });
+    expect(extendParams(asset)).toEqual({
+      workflow: 'extend',
+      source_video: '/outputs/out/clip.mp4',
+      model: 'ltx-2',
+      lora: 'style:0.7',
+    });
+  });
+
+  it('never sends the display prompt, which is the file name for a clip with no recorded text', () => {
+    expect(extendParams(video({ scene: null, prompt: 'clip mp4' }))).toEqual({ workflow: 'extend', source_video: '/outputs/out/clip.mp4' });
+  });
+
+  it('labels the workflow and explains the extend fallbacks', () => {
+    expect(workflowLabel('extend')).toBe('Extend video');
+    expect(describeFallbackReason('missing_source_video')).not.toBe('missing_source_video');
+    expect(describeFallbackReason('extend_unavailable')).not.toBe('extend_unavailable');
+  });
+});
+

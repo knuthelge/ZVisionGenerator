@@ -12,9 +12,11 @@ from urllib.parse import quote, unquote, urlencode
 
 from PIL import Image, UnidentifiedImageError
 
+from zvisiongenerator.backends import supports_video_extend
 from zvisiongenerator.utils.provenance import image_prompt_text, optional_float, optional_int, optional_text, read_mp4_config, read_png_config, recorded_settings
 from zvisiongenerator.utils.config import model_capabilities
 from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, upscale_options, upscale_output_size
+from zvisiongenerator.utils.video_splice import SPLICE_DIR_PREFIX
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canonicalize_workflow, default_workflow_for_mode, workflow_mode
 
@@ -23,6 +25,10 @@ _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 _VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".mkv"})
 GALLERY_MEDIA_EXTENSIONS = _IMAGE_EXTENSIONS | _VIDEO_EXTENSIONS
 _STAGING_DIR_NAMES = frozenset({".web_uploads"})
+# Scratch directories the video splice creates beside the finished outputs (see ``video_splice``).
+_STAGING_DIR_PREFIXES = (SPLICE_DIR_PREFIX,)
+EXTEND_UPSCALED_REASON = "Upscaled videos can't be extended yet."
+EXTEND_MISSING_FILE_REASON = "The file is missing."
 
 
 @dataclass(frozen=True)
@@ -68,6 +74,10 @@ class GalleryAsset:
     image_strength: float | None = None
     generation: dict[str, Any] = field(default_factory=dict)
     source: dict[str, Any] | None = None
+    # An extension: the clip it continued and the frames it added; ``upscaled`` marks a video that was upscaled.
+    source_video: str | None = None
+    extend_frames: int | None = None
+    upscaled: bool = False
 
 
 def list_gallery_assets(output_dir: str) -> list[GalleryAsset]:
@@ -144,6 +154,11 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         fallback_reasons.append("workflow_media_mismatch")
 
     resolved_workflow = requested_workflow
+    video_extend = supports_video_extend()
+    if resolved_workflow == "extend" and not video_extend:
+        resolved_workflow = default_workflow
+        workflow_available = False
+        fallback_reasons.append("extend_unavailable")
     if WORKFLOW_DEFINITIONS[resolved_workflow]["requires_reference_image"] and asset.reference_image_path is None:
         resolved_workflow = default_workflow
         workflow_available = False
@@ -164,6 +179,12 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         if not model_available:
             fallback_reasons.append("model_not_configured")
 
+    extending = resolved_workflow == "extend"
+    if extending and not _source_video_exists(asset.source_video):
+        # The workflow stays extend: the source is chosen again in the Workspace.
+        workflow_available = False
+        fallback_reasons.append("missing_source_video")
+
     reuse_params: dict[str, str] = {"workflow": resolved_workflow}
     if asset.has_reusable_config:
         reuse_params.update(_reuse_text_params(asset, video=workflow_mode(resolved_workflow) == "video"))
@@ -177,16 +198,23 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
             reuse_params["guidance"] = f"{asset.guidance:g}"
         if asset.seed is not None:
             reuse_params["seed"] = str(asset.seed)
-        if asset.ratio is not None:
-            reuse_params["ratio"] = asset.ratio
-        if asset.size is not None:
-            reuse_params["size"] = asset.size
-        if asset.width is not None:
-            reuse_params["width"] = str(asset.width)
-        if asset.height is not None:
-            reuse_params["height"] = str(asset.height)
-        if asset.frame_count is not None and workflow_mode(resolved_workflow) == "video":
-            reuse_params["frames"] = str(asset.frame_count)
+        if extending:
+            # An extension takes its size, frame rate and length from the source; only the source and the new frames carry over.
+            reuse_params.update(_extend_reuse_params(asset, source_missing="missing_source_video" in fallback_reasons))
+            # Both boxes are named even when blank: a Reuse that recorded no text keeps them blank instead of taking the source's.
+            reuse_params.setdefault("scene", "")
+            reuse_params.setdefault("prompt", "")
+        else:
+            if asset.ratio is not None:
+                reuse_params["ratio"] = asset.ratio
+            if asset.size is not None:
+                reuse_params["size"] = asset.size
+            if asset.width is not None:
+                reuse_params["width"] = str(asset.width)
+            if asset.height is not None:
+                reuse_params["height"] = str(asset.height)
+            if asset.frame_count is not None and workflow_mode(resolved_workflow) == "video":
+                reuse_params["frames"] = str(asset.frame_count)
         if WORKFLOW_DEFINITIONS[resolved_workflow]["requires_reference_image"] and asset.reference_image_path is not None:
             reuse_params["image_path"] = asset.reference_image_path
         if asset.negative_prompt and workflow_mode(resolved_workflow) == "image":
@@ -214,6 +242,8 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "ratio": asset.ratio,
         "size": asset.size,
         "frame_count": asset.frame_count,
+        "source_video": asset.source_video,
+        "extend_frames": asset.extend_frames,
         "image_path": asset.reference_image_path,
         "file_path": asset.filesystem_path,
         "seed": asset.seed,
@@ -234,7 +264,50 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "reuse_workspace_url": f"#/workspace?{urlencode(reuse_params)}",
         "details": _asset_details_json(asset),
         "upscale": _asset_upscale_json(asset, web_config, resolved_model) if asset.kind == "image" else None,
+        "extend": _asset_extend_json(asset) if asset.kind == "video" and video_extend else None,
     }
+
+
+def _asset_extend_json(asset: GalleryAsset) -> dict[str, Any]:
+    """Return whether a video can be extended as ``{"available", "reason"}``; the reason is ``None`` when it can."""
+    if asset.upscaled:
+        return {"available": False, "reason": EXTEND_UPSCALED_REASON}
+    if not Path(asset.filesystem_path).is_file():
+        return {"available": False, "reason": EXTEND_MISSING_FILE_REASON}
+    return {"available": True, "reason": None}
+
+
+def _extend_reuse_params(asset: GalleryAsset, *, source_missing: bool) -> dict[str, str]:
+    """Return the Reuse query params that belong to an extension: the source, its new frames and, when the source moved, the flag."""
+    params: dict[str, str] = {}
+    if asset.source_video:
+        params["source_video"] = asset.source_video
+    if asset.extend_frames is not None:
+        params["extend_frames"] = str(asset.extend_frames)
+    if source_missing:
+        params["missing_source_video"] = "true"
+    return params
+
+
+def _source_video_exists(path: str | None) -> bool:
+    """Return whether the recorded source video of an extension is still a file."""
+    if not path:
+        return False
+    try:
+        return Path(path).expanduser().is_file()
+    except OSError:
+        return False
+
+
+def output_media_url(root: Path, path: Path) -> str | None:
+    """Return the ``/media`` URL of a media file inside the output root, or ``None`` when the server would not serve it."""
+    try:
+        asset_id = path.resolve().relative_to(root.resolve()).as_posix()
+    except OSError, ValueError:
+        return None
+    if normalize_asset_id(asset_id) is None or path.suffix.lower() not in GALLERY_MEDIA_EXTENSIONS:
+        return None
+    return f"/media/{quote(asset_id, safe='/')}"
 
 
 def _reuse_text_params(asset: GalleryAsset, *, video: bool) -> dict[str, str]:
@@ -287,7 +360,7 @@ def normalize_asset_id(asset_id: str) -> str | None:
     if path.is_absolute():
         return None
     parts = path.parts
-    if not parts or any(part in {"", ".", ".."} or part in _STAGING_DIR_NAMES for part in parts):
+    if not parts or any(part in {"", ".", ".."} or _is_staging_part(part) for part in parts):
         return None
     return path.as_posix()
 
@@ -338,6 +411,9 @@ def _build_gallery_asset(root: Path, candidate: Path) -> GalleryAsset | None:
         image_strength=metadata["image_strength"],
         generation=metadata["generation"],
         source=_source_with_asset_id(root, metadata["source"]),
+        source_video=metadata["source_video"],
+        extend_frames=metadata["extend_frames"],
+        upscaled=metadata["upscaled"],
     )
 
 
@@ -349,8 +425,9 @@ def _read_asset_metadata(asset_path: Path, kind: str) -> dict[str, Any]:
     image_metadata = _read_image_metadata(asset_path) if kind == "image" else {}
 
     prompt = recorded.prompt or image_metadata.get("prompt")
-    if not prompt and recorded.scene:
-        # A scene-only video records no prompt; it stays empty rather than falling back to the file name.
+    if not prompt and (recorded.scene or (kind == "video" and config)):
+        # A video that recorded its settings but no prompt (scene-only, or a blank-text extension) stays empty; the file
+        # name stands in only for assets with no recorded settings, where it is display text and never reusable text.
         prompt = ""
     else:
         prompt = _coerce_text(prompt or asset_path.stem.replace("_", " "))
@@ -385,6 +462,9 @@ def _read_asset_metadata(asset_path: Path, kind: str) -> dict[str, Any]:
         "image_strength": recorded.image_strength,
         "generation": recorded.generation,
         "source": recorded.source,
+        "source_video": recorded.source_video,
+        "extend_frames": recorded.extend_frames,
+        "upscaled": bool(recorded.generation.get("upscale")),
     }
 
 
@@ -501,7 +581,12 @@ def _asset_kind(path: Path) -> str | None:
 
 
 def _is_hidden_from_inventory(root: Path, candidate: Path) -> bool:
-    return any(part in _STAGING_DIR_NAMES for part in candidate.relative_to(root).parts)
+    return any(_is_staging_part(part) for part in candidate.relative_to(root).parts)
+
+
+def _is_staging_part(part: str) -> bool:
+    """Return whether a path component names an upload or scratch directory that never holds gallery assets."""
+    return part in _STAGING_DIR_NAMES or part.startswith(_STAGING_DIR_PREFIXES)
 
 
 def _format_age(timestamp: float) -> str:

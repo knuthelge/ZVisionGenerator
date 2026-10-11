@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryAsset } from '$lib/types';
 
 import AssetViewer from './AssetViewer.svelte';
+import { toasts } from '$lib/state/toasts.svelte';
 import { requestConfirm } from './confirm.svelte';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
@@ -227,6 +228,79 @@ describe('AssetViewer', () => {
     expect(document.querySelector('[role="menu"]')).not.toBeNull();
     press('Delete');
     expect(ondelete).not.toHaveBeenCalled();
+  });
+
+  describe('extend', () => {
+    const clip = (overrides: Partial<GalleryAsset> = {}): GalleryAsset =>
+      makeAsset({ id: 'out/clip.mp4', url: '/media/out/clip.mp4', filename: 'clip.mp4', media_type: 'video', extend: { available: true, reason: null }, ...overrides });
+
+    function extendButton(): HTMLButtonElement | null {
+      return document.querySelector('[data-action="extend"]');
+    }
+
+    it('shows an Extend button for a video and runs it on the shown asset', () => {
+      const onextend = vi.fn();
+      const asset = clip();
+      mountViewer({ assets: [asset], onextend });
+      expect(extendButton()?.disabled).toBe(false);
+      expect(extendButton()?.getAttribute('title')).toBe('Extend this video (E)');
+      extendButton()!.click();
+      expect(onextend).toHaveBeenCalledWith(asset);
+    });
+
+    it('has no Extend button for an image, without a handler, or when extending is unavailable here', () => {
+      mountViewer({ assets: [makeAsset({ extend: { available: true, reason: null } })], onextend: vi.fn() });
+      expect(extendButton()).toBeNull();
+
+      flushSync(() => { void unmount(app!); });
+      mountViewer({ assets: [clip()] });
+      expect(extendButton()).toBeNull();
+
+      flushSync(() => { void unmount(app!); });
+      mountViewer({ assets: [clip({ extend: null })], onextend: vi.fn() });
+      expect(extendButton()).toBeNull();
+    });
+
+    it('disables the button with the reason as its tooltip when the video cannot be extended', () => {
+      const onextend = vi.fn();
+      mountViewer({ assets: [clip({ extend: { available: false, reason: 'The file is missing.' } })], onextend });
+      expect(extendButton()?.disabled).toBe(true);
+      expect(extendButton()?.getAttribute('title')).toBe('The file is missing.');
+      extendButton()!.click();
+      expect(onextend).not.toHaveBeenCalled();
+    });
+
+    it('extends with E on a video instead of opening the reference menu', () => {
+      const onextend = vi.fn();
+      const asset = clip();
+      mountViewer({ assets: [asset], onextend, onreference: vi.fn() });
+      expect(press('e').defaultPrevented).toBe(true);
+      expect(onextend).toHaveBeenCalledWith(asset);
+      expect(document.querySelector('[role="menu"]')).toBeNull();
+    });
+
+    it('says why with E when the video cannot be extended', () => {
+      const onextend = vi.fn();
+      mountViewer({ assets: [clip({ extend: { available: false, reason: "Upscaled videos can't be extended yet." } })], onextend });
+      press('e');
+      expect(onextend).not.toHaveBeenCalled();
+      expect(toasts.map((toast) => [toast.type, toast.message])).toContainEqual(['warning', "Upscaled videos can't be extended yet."]);
+    });
+
+    it('leaves E alone for a video that cannot be extended on this machine', () => {
+      const onextend = vi.fn();
+      mountViewer({ assets: [clip({ extend: null })], onextend });
+      expect(press('e').defaultPrevented).toBe(false);
+      expect(onextend).not.toHaveBeenCalled();
+    });
+
+    it('still opens the reference menu with E on an image', () => {
+      const onextend = vi.fn();
+      mountViewer({ assets: [makeAsset()], onextend, onreference: vi.fn() });
+      press('e');
+      expect(document.querySelector('[role="menu"]')).not.toBeNull();
+      expect(onextend).not.toHaveBeenCalled();
+    });
   });
 
   it('copies the prompt with C', async () => {

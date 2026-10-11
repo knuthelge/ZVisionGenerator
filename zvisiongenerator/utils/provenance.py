@@ -69,35 +69,67 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
     An auto-enhanced prompt replaces the template prompt so the asset records what rendered. The prompt is the
     action alone; the scene is recorded apart as ``scene`` (omitted when there is none), and ``scene_input`` and
     ``prompt_input`` keep the user's own text when the scene or prompt was enhanced.
+
+    An extension (``workflow`` ``"extend"``) records the action as sent, the ``source_video`` it continued and the
+    new frames as ``extend_frames``; ``frame_count`` is the whole output clip and the size is the source's displayed one.
     """
     upscale = _drop_empty({"factor": request.upscale, "steps": request.upscale_steps}) if request.upscale else None
-    return _drop_unserializable(
-        {
-            "schema": VIDEO_CONFIG_SCHEMA,
-            "workflow": "img2vid" if request.image_path else "txt2vid",
-            "prompt": artifacts.metadata.get("enhanced_prompt") or request.prompt,
-            **_video_scene_fields(request, artifacts),
-            "model": _portable_path(request.model_name),
-            "model_family": request.model_family,
-            "seed": request.seed,
-            "steps": request.steps,
-            "width": request.width,
-            "height": request.height,
-            "ratio": None,
-            "size": None,
-            "frame_count": request.num_frames,
-            "image_path": _portable_path(request.image_path),
-            "lora": _format_loras(request.lora_paths, request.lora_weights),
-            "generation": _drop_empty(
-                {
-                    "time": _round_seconds(artifacts.generation_time),
-                    "upscale": upscale,
-                    "audio": not request.no_audio,
-                    "output_format": request.output_format,
-                }
-            ),
-        }
-    )
+    extend = request.extend
+    audio = not request.no_audio if extend is None else _extend_audio_output(extend.source, no_audio=request.no_audio)
+    payload = {
+        "schema": VIDEO_CONFIG_SCHEMA,
+        "workflow": _video_workflow(request),
+        "prompt": _video_prompt(request, artifacts),
+        **_video_scene_fields(request, artifacts),
+        "model": _portable_path(request.model_name),
+        "model_family": request.model_family,
+        "seed": request.seed,
+        "steps": request.steps,
+        "width": extend.source.width if extend is not None else request.width,
+        "height": extend.source.height if extend is not None else request.height,
+        "ratio": None,
+        "size": None,
+        "frame_count": extend.source.frame_count + extend.frames if extend is not None else request.num_frames,
+        "image_path": _portable_path(request.image_path),
+        "lora": _format_loras(request.lora_paths, request.lora_weights),
+        "generation": _drop_empty(
+            {
+                "time": _round_seconds(artifacts.generation_time),
+                "upscale": upscale,
+                "audio": audio,
+                "output_format": request.output_format,
+            }
+        ),
+    }
+    if extend is not None:
+        payload["source_video"] = _portable_path(str(extend.source.path))
+        payload["extend_frames"] = extend.frames
+    return _drop_unserializable(payload)
+
+
+def _extend_audio_output(source: Any, *, no_audio: bool) -> bool:
+    """Return whether an extension has sound (see ``extend_audio_output``); imported late because ``video_extend`` imports this module."""
+    from zvisiongenerator.utils.video_extend import extend_audio_output
+
+    return extend_audio_output(source, no_audio=no_audio)
+
+
+def _video_workflow(request: VideoGenerationRequest) -> str:
+    """Return the video workflow name: ``extend``, ``img2vid`` or ``txt2vid``."""
+    if request.extend is not None:
+        return "extend"
+    return "img2vid" if request.image_path else "txt2vid"
+
+
+def _video_prompt(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> str:
+    """Return the prompt a video records: the enhanced action, else the template; an extension records the action it sent.
+
+    The action sent differs from the template when quoted sentences of a legacy source's prompt were stripped.
+    """
+    enhanced = artifacts.metadata.get("enhanced_prompt")
+    if request.extend is not None and not enhanced:
+        return artifacts.metadata.get("prompt_sent", request.prompt)
+    return enhanced or request.prompt
 
 
 def _video_scene_fields(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> dict[str, str]:
@@ -195,6 +227,9 @@ class RecordedSettings:
     scene: str | None = None
     scene_input: str | None = None
     prompt_input: str | None = None
+    # An extension: the clip it continued and the frames it added (``frame_count`` is the whole clip).
+    source_video: str | None = None
+    extend_frames: int | None = None
     # ``path:weight`` entries joined by commas, as ``--lora`` takes them.
     lora: str | None = None
     # How the file was made: time, quantize, upscale and post-processing (empty for files that predate it).
@@ -225,6 +260,8 @@ def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
         scene=optional_text(config.get("scene")),
         scene_input=optional_text(config.get("scene_input")),
         prompt_input=optional_text(config.get("prompt_input")),
+        source_video=_local_path(optional_text(config.get("source_video"))),
+        extend_frames=optional_int(config.get("extend_frames")),
         lora=_lora_string(config.get("lora")),
         generation=_generation_block(config.get("generation")),
         source=_source_block(config.get("source")),

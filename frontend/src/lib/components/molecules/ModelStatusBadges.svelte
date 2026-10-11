@@ -11,7 +11,7 @@
   export const NOT_DOWNLOADED_TOOLTIP = 'Not downloaded: it downloads the first time you generate with it.';
 
   /** What each fit level means in practice on each kind of memory; fits needs no explanation. */
-  const MEMORY_FIT_CONSEQUENCES: Record<MemoryKind, Partial<Record<MemoryFitStatus, string>>> = {
+  export const MEMORY_FIT_CONSEQUENCES: Record<MemoryKind, Partial<Record<MemoryFitStatus, string>>> = {
     unified: {
       tight: 'It runs, but macOS compresses or swaps other memory to make room, so the Mac can slow down while generating.',
       too_large: 'More than MLX will try to fit (1.5× the recommendation): expect heavy swapping or an out-of-memory error.'

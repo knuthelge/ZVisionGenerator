@@ -4,31 +4,49 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import os
 import sys
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends import get_video_backend, supports_video_audio, supports_video_upscale_review
+from zvisiongenerator.backends import get_accelerator_memory_budget, get_video_backend, supports_video_audio, supports_video_extend, supports_video_upscale_review
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
 from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.utils.config import load_config, resolve_video_defaults, select_ratio_size_defaults
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
-from zvisiongenerator.utils.lora import resolve_lora_references
-from zvisiongenerator.utils.paths import resolve_model_path
+from zvisiongenerator.utils.lora import parse_lora_arg, resolve_lora_references
+from zvisiongenerator.utils.model_files import find_local_model_dir
+from zvisiongenerator.utils.model_memory import window_memory_fit
+from zvisiongenerator.utils.paths import resolve_lora_path, resolve_model_path
+from zvisiongenerator.utils.prompt_compose import is_original_prompt
 from zvisiongenerator.utils.prompt_enhance import enhance_by_set_for_mode
 from zvisiongenerator.utils.prompts import inspect_prompts_file
+from zvisiongenerator.utils.video_extend import DEFAULT_EXTEND_SECONDS, EXTEND_FRAME_STEP, apply_extend_args, load_extend_source, resolve_extend_frames
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.video_runner import run_video_batch
 from zvisiongenerator.enhance_cli import add_enhance_arguments, parse_enhance_args
 from zvisiongenerator.workflows import build_video_workflow
 
+if TYPE_CHECKING:
+    from zvisiongenerator.core.video_types import ExtendSource
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PROMPTS_FILE = "prompts.yaml"
+# Options that choose a size or a frame count; an extension keeps the source's size and takes its own length.
+_EXTEND_REFUSED_OPTIONS = (
+    ("image_path", "--image", "an extension continues the source video, not an image"),
+    ("upscale", "--upscale", "an extension is generated at the source's size"),
+    ("ratio", "--ratio", "an extension keeps the source video's size"),
+    ("size", "--size", "an extension keeps the source video's size"),
+    ("width", "--width", "an extension keeps the source video's size"),
+    ("height", "--height", "an extension keeps the source video's size"),
+    ("frames", "--frames", "use --extend-seconds or --extend-frames for the length of an extension"),
+)
 
 
 def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
@@ -38,15 +56,38 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
         description="Z-Vision Video Generator — text-to-video and image-to-video.",
         epilog=f"Example usage: {prog} -m models/ltx-mlx --ratio 16:9 --size m --prompt 'a sunset'",
     )
-    parser.add_argument("-m", "--model", type=str, default=None, help="Model alias, local path, or supported/configured HuggingFace repo ID.")
+    parser.add_argument("-m", "--model", type=str, default=None, help="Model alias, local path, or supported/configured HuggingFace repo ID. With --extend, defaults to the source video's model.")
     parser.add_argument("-p", "--prompts-file", type=str, default=None, help=f"Path to YAML prompts file (default: {_DEFAULT_PROMPTS_FILE}).")
     parser.add_argument("-r", "--runs", type=int, default=1, help="Number of batch runs.")
-    parser.add_argument("--prompt", type=str, default=None, help="Inline prompt: what happens (overrides --prompts-file). May be empty when --scene is given.")
+    parser.add_argument("--prompt", type=str, default=None, help="Inline prompt: what happens (overrides --prompts-file). May be empty when --scene or --extend is given.")
     parser.add_argument(
         "--scene",
         type=str,
         default=None,
-        help="Scene: who and where, look, style, camera. Sent before the prompt. Alone it makes a scene-only run; with --prompts-file it fills entries without their own 'scene:'.",
+        help="Scene: who and where, look, style, camera. Sent before the prompt. Alone it makes a scene-only run; with --prompts-file it fills entries without their own 'scene:'. With --extend, defaults to the source video's scene.",
+    )
+    parser.add_argument(
+        "--extend",
+        dest="extend_path",
+        type=str,
+        default=None,
+        metavar="SRC",
+        help="Continue the video SRC: generate what happens next and append it, writing a new file. The prompt may be empty. macOS only.",
+    )
+    extend_length = parser.add_mutually_exclusive_group()
+    extend_length.add_argument(
+        "--extend-seconds",
+        type=float,
+        default=None,
+        metavar="S",
+        help=f"Length to add with --extend in seconds, converted at the source's frame rate (default: {DEFAULT_EXTEND_SECONDS:g}).",
+    )
+    extend_length.add_argument(
+        "--extend-frames",
+        type=int,
+        default=None,
+        metavar="N",
+        help=f"Frames to add with --extend, rounded to a multiple of {EXTEND_FRAME_STEP} (minimum {EXTEND_FRAME_STEP}).",
     )
     parser.add_argument("--image", dest="image_path", type=str, default=None, help="Input image for image-to-video.")
     parser.add_argument("--ratio", type=str, default=None, help="Aspect ratio for generated video (e.g. 16:9, 9:16, 1:1).")
@@ -94,88 +135,118 @@ def _resolve_upscale_steps(args: argparse.Namespace, config: dict[str, Any], mod
                 args.upscale_steps = args.steps
 
 
-def _unknown_video_model_guidance(platform_key: str) -> str:
-    """Return platform-aware guidance for unknown video model selections."""
+def _check_extend_options(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Refuse extend options that cannot be used as given: no capability, options that choose a size, a bad length, a length without ``--extend``."""
+    if args.extend_path is None:
+        for value, flag in ((args.extend_seconds, "--extend-seconds"), (args.extend_frames, "--extend-frames")):
+            if value is not None:
+                parser.error(f"{flag} requires --extend")
+        return
+    if not args.extend_path.strip():
+        parser.error("--extend needs a video path")
+    if not supports_video_extend():
+        parser.error("--extend is available on macOS only for now.")
+    for attribute, flag, reason in _EXTEND_REFUSED_OPTIONS:
+        if getattr(args, attribute) is not None:
+            parser.error(f"{flag} cannot be used with --extend: {reason}")
+    if args.extend_frames is not None and args.extend_frames < EXTEND_FRAME_STEP:
+        parser.error(f"--extend-frames must be at least {EXTEND_FRAME_STEP}")
+    if args.extend_seconds is not None and (not math.isfinite(args.extend_seconds) or args.extend_seconds <= 0):
+        parser.error("--extend-seconds must be a finite number greater than 0")
 
-    suffix = "supported/configured HuggingFace LTX repo IDs, or a local path containing 'ltx'."
-    if platform_key == "darwin":
-        return f"Use a supported LTX model: 'ltx-4' or 'ltx-8' on macOS, known LTX repo prefixes, {suffix}"
-    if platform_key == "win32":
-        return f"Use a supported LTX model: 'ltx-2.3' on Windows, known LTX repo prefixes, {suffix}"
-    if platform_key.startswith("linux"):
-        return f"Use a supported LTX model: 'ltx-2.3' on Linux, known LTX repo prefixes, {suffix}"
-    return f"Use a supported LTX model: 'ltx-4' or 'ltx-8' on macOS, 'ltx-2.3' on Windows/Linux, known LTX repo prefixes, {suffix}"
 
-
-def main(*, prog: str = "ziv-video") -> None:
-    """Entry point for ziv-video CLI."""
-    parser = _build_video_parser(prog=prog)
-    args = parser.parse_args()
-    setup_logging("video")
-
-    # Validation (matching image CLI pattern)
-    if args.model is None:
-        parser.error("--model is required. Provide a model alias, local path, or supported/configured HuggingFace repo ID.")
-    if args.runs < 1:
-        parser.error("--runs must be at least 1")
-    if args.steps is not None and args.steps < 1:
-        parser.error("--steps must be at least 1")
-    if args.upscale is not None and args.upscale != 2:
-        parser.error("--upscale only supports factor 2 (LTX spatial upscaler)")
-    if args.review and args.upscale is None:
-        parser.error("--review needs --upscale: without an upscale there is no half-size render to review.")
-    if args.review and not supports_video_upscale_review():
-        parser.error("--review is not supported by the video backend of this platform.")
-    if args.review and not stdin_is_interactive():
-        parser.error("--review needs an interactive terminal to ask for each decision.")
-    parse_enhance_args(parser, args, mode="video")
-
-    # Expand ~ in filesystem-only path arguments. Model/LoRA tokens are resolved by shared helpers.
-    if args.image_path:
-        args.image_path = str(Path(args.image_path).expanduser())
-    args.output = str(Path(args.output).expanduser())
-    args.scene = (args.scene or "").strip() or None
-    args.scene_input = args.prompt_input = None
-    scene_only = args.prompt is None and args.prompts_file is None and args.scene is not None
-    args.prompts_file = str(Path(args.prompts_file or _DEFAULT_PROMPTS_FILE).expanduser())
-
-    # Load config early so aliases are available for model resolution
-    try:
-        config = load_config()
-    except ValueError as e:
-        parser.error(str(e))
-
-    # Resolve friendly model names (e.g. "ltx-2-mlx" → ~/.ziv/models/...)
-    try:
-        args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
-    except ValueError as e:
-        parser.error(str(e))
-
-    # Validate prompt source BEFORE heavy operations (model loading, ffmpeg check)
-    if args.prompt is not None and not args.prompt.strip() and args.scene is None:
-        parser.error("--prompt must not be empty")
-    if args.prompt is None and not scene_only:
-        prompts_path = Path(args.prompts_file)
-        if not prompts_path.is_file():
-            parser.error(f"Prompts file not found: {args.prompts_file}. Provide --prompt or a valid --prompts-file.")
-
-    # Check ffmpeg is available (required by video backends)
+def _load_extend_source(parser: argparse.ArgumentParser, path: str) -> ExtendSource:
+    """Return the checked source clip, or exit with every problem found before any model loads."""
     ensure_ffmpeg()
+    try:
+        return load_extend_source(path)
+    except (FileNotFoundError, ValueError) as e:
+        parser.error(str(e))
 
-    # Detect video model family
-    model_info = detect_video_model(args.model)
-    if model_info.family == "unknown":
-        parser.error(f"Could not detect video model family for '{args.model}'. {_unknown_video_model_guidance(sys.platform)}")
 
-    # Validate --image file exists
-    if args.image_path and not os.path.isfile(args.image_path):
-        parser.error(f"Image file not found: {args.image_path}")
+def _model_available_locally(model: str, config: dict[str, Any]) -> bool:
+    """Return whether a model reference resolves to a fully downloaded local model."""
+    try:
+        resolved = resolve_model_path(model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+    except ValueError:
+        return False
+    return find_local_model_dir(resolved) is not None
 
-    # Validate T2V-only model with --image
-    if args.image_path and not model_info.supports_i2v:
-        parser.error(f"Model '{args.model}' does not support image-to-video.")
 
-    # Default ratio/size from shared config-backed semantics.
+def _extend_model(model: str | None, source: ExtendSource, config: dict[str, Any]) -> str:
+    """Return the model for an extension: the one given, else the source's when available locally, else the configured default.
+
+    Raises:
+        ValueError: If no model is given and neither the source nor the config names one.
+    """
+    if model is not None:
+        return model
+    if source.model and _model_available_locally(source.model, config):
+        return source.model
+    if source.model:
+        warnings.warn(f"The model this video was made with ({source.model}) is not available locally; using the configured default model.", stacklevel=2)
+    default = ((config.get("ui") or {}).get("default_models") or {}).get("video")
+    if not default:
+        raise ValueError("--model is required: the source video records no model available locally and no default video model is configured.")
+    return default
+
+
+def _extend_lora(lora: str | None, source: ExtendSource) -> str | None:
+    """Return the ``--lora`` value for an extension: the one given, else the source's LoRAs that still exist (others are dropped with a warning)."""
+    if lora is not None or not source.lora:
+        return lora
+    try:
+        recorded = parse_lora_arg(source.lora)
+    except ValueError:
+        warnings.warn(f"The LoRAs recorded in the source video could not be read ({source.lora}); using none.", stacklevel=2)
+        return None
+    kept: list[str] = []
+    for name, weight in recorded:
+        if os.path.exists(resolve_lora_path(name)):
+            kept.append(f"{name}:{weight:g}")
+        else:
+            warnings.warn(f"The LoRA {name} used by the source video was not found; skipping it.", stacklevel=2)
+    return ",".join(kept) or None
+
+
+def _extend_prompt(prompt: str | None, source: ExtendSource) -> str | None:
+    """Return the inline prompt for an extension: the one given, else a legacy source's recorded prompt, else ``None`` (an empty prompt).
+
+    A source with a recorded scene or no recorded prompt continues from its scene alone. A legacy source has only its
+    prompt, so omitting ``--prompt`` keeps it; the run then strips quoted sentences and continues naturally.
+    """
+    if prompt is None and source.legacy:
+        return source.prompt
+    return prompt
+
+
+def _warn_if_still_original_prompt(prompt: str | None, source: ExtendSource) -> None:
+    """Warn when the prompt for a source without a recorded scene is still that source's own prompt (it would repeat its action)."""
+    if source.legacy and prompt is not None and source.prompt is not None and is_original_prompt(prompt, source.prompt):
+        warnings.warn("Still the original prompt. Change it to what happens next.", stacklevel=2)
+
+
+def _warn_if_window_too_large(args: argparse.Namespace) -> None:
+    """Warn when the extension window may not fit in memory; the run continues either way."""
+    budget = get_accelerator_memory_budget()
+    fit = window_memory_fit(
+        args.model,
+        width=args.width,
+        height=args.height,
+        frames=args.num_frames,
+        low_memory=args.low_memory,
+        budget_bytes=budget.gpu_bytes if budget else None,
+    )
+    if fit is not None and fit["status"] != "fits":
+        warnings.warn(
+            f"The {args.num_frames}-frame extension window needs about {fit['required_gb']:g} GB; this machine's budget is {fit['budget_gb']:g} GB "
+            f"({fit['status'].replace('_', ' ')}). Continuing; it may be slow or fail. Use --extend-seconds or --extend-frames for a shorter extension.",
+            stacklevel=2,
+        )
+
+
+def _apply_ratio_size_defaults(parser: argparse.ArgumentParser, args: argparse.Namespace, config: dict[str, Any]) -> None:
+    """Fill ``--ratio`` and ``--size`` from the config defaults and refuse values the size table does not have."""
     vgen_cfg = config.get("video_generation", {})
     vsizes = config.get("video_sizes", {})
     default_ratio, default_size = select_ratio_size_defaults(
@@ -197,6 +268,113 @@ def main(*, prog: str = "ziv-video") -> None:
             parser.error(f"Unknown ratio '{args.ratio}'. Valid: {list(vsizes.keys())}")
         if args.size not in vsizes.get(args.ratio, {}):
             parser.error(f"Unknown size '{args.size}' for ratio '{args.ratio}'. Valid: {list(vsizes.get(args.ratio, {}).keys())}")
+
+
+def _unknown_video_model_guidance(platform_key: str) -> str:
+    """Return platform-aware guidance for unknown video model selections."""
+
+    suffix = "supported/configured HuggingFace LTX repo IDs, or a local path containing 'ltx'."
+    if platform_key == "darwin":
+        return f"Use a supported LTX model: 'ltx-4' or 'ltx-8' on macOS, known LTX repo prefixes, {suffix}"
+    if platform_key == "win32":
+        return f"Use a supported LTX model: 'ltx-2.3' on Windows, known LTX repo prefixes, {suffix}"
+    if platform_key.startswith("linux"):
+        return f"Use a supported LTX model: 'ltx-2.3' on Linux, known LTX repo prefixes, {suffix}"
+    return f"Use a supported LTX model: 'ltx-4' or 'ltx-8' on macOS, 'ltx-2.3' on Windows/Linux, known LTX repo prefixes, {suffix}"
+
+
+def main(*, prog: str = "ziv-video") -> None:
+    """Entry point for ziv-video CLI."""
+    parser = _build_video_parser(prog=prog)
+    args = parser.parse_args()
+    setup_logging("video")
+
+    # Validation (matching image CLI pattern)
+    if args.model is None and args.extend_path is None:
+        parser.error("--model is required. Provide a model alias, local path, or supported/configured HuggingFace repo ID.")
+    if args.runs < 1:
+        parser.error("--runs must be at least 1")
+    if args.steps is not None and args.steps < 1:
+        parser.error("--steps must be at least 1")
+    if args.upscale is not None and args.upscale != 2:
+        parser.error("--upscale only supports factor 2 (LTX spatial upscaler)")
+    if args.review and args.upscale is None:
+        parser.error("--review needs --upscale: without an upscale there is no half-size render to review.")
+    if args.review and not supports_video_upscale_review():
+        parser.error("--review is not supported by the video backend of this platform.")
+    if args.review and not stdin_is_interactive():
+        parser.error("--review needs an interactive terminal to ask for each decision.")
+    # A blank scene or an extension splits each prompt into scene and action, so even keep-everything settings change it.
+    parse_enhance_args(parser, args, mode="video", split=args.extend_path is not None or not (args.scene or "").strip())
+    _check_extend_options(parser, args)
+
+    # Expand ~ in filesystem-only path arguments. Model/LoRA tokens are resolved by shared helpers.
+    if args.image_path:
+        args.image_path = str(Path(args.image_path).expanduser())
+    if args.extend_path is not None:
+        args.extend_path = str(Path(args.extend_path).expanduser())
+    args.output = str(Path(args.output).expanduser())
+    scene_given = args.scene is not None
+    args.scene = (args.scene or "").strip() or None
+    args.scene_input = args.prompt_input = None
+    args.extend_source = None
+    # One inline iteration: no prompt source was given, and there is a scene or a clip to continue (the prompt is then empty).
+    inline_run = args.prompt is None and args.prompts_file is None and (args.scene is not None or args.extend_path is not None)
+    args.prompts_file = str(Path(args.prompts_file or _DEFAULT_PROMPTS_FILE).expanduser())
+
+    # Load config early so aliases are available for model resolution
+    try:
+        config = load_config()
+    except ValueError as e:
+        parser.error(str(e))
+
+    # An extension takes its scene, model and LoRAs from the source clip unless the options say otherwise.
+    source = _load_extend_source(parser, args.extend_path) if args.extend_path is not None else None
+    if source is not None:
+        if not scene_given:
+            args.scene = source.scene
+        _warn_if_still_original_prompt(args.prompt, source)
+        if inline_run:
+            args.prompt = _extend_prompt(args.prompt, source)
+        try:
+            args.model = _extend_model(args.model, source, config)
+        except ValueError as e:
+            parser.error(str(e))
+        args.lora = _extend_lora(args.lora, source)
+
+    # Resolve friendly model names (e.g. "ltx-2-mlx" → ~/.ziv/models/...)
+    try:
+        args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
+    except ValueError as e:
+        parser.error(str(e))
+
+    # Validate prompt source BEFORE heavy operations (model loading, ffmpeg check)
+    if args.prompt is not None and not args.prompt.strip() and args.scene is None and source is None:
+        parser.error("--prompt must not be empty")
+    if args.prompt is None and not inline_run:
+        prompts_path = Path(args.prompts_file)
+        if not prompts_path.is_file():
+            parser.error(f"Prompts file not found: {args.prompts_file}. Provide --prompt or a valid --prompts-file.")
+
+    # Check ffmpeg is available (required by video backends)
+    ensure_ffmpeg()
+
+    # Detect video model family
+    model_info = detect_video_model(args.model)
+    if model_info.family == "unknown":
+        parser.error(f"Could not detect video model family for '{args.model}'. {_unknown_video_model_guidance(sys.platform)}")
+
+    # Validate --image file exists
+    if args.image_path and not os.path.isfile(args.image_path):
+        parser.error(f"Image file not found: {args.image_path}")
+
+    # Validate T2V-only model with --image
+    if args.image_path and not model_info.supports_i2v:
+        parser.error(f"Model '{args.model}' does not support image-to-video.")
+
+    # An extension keeps the source's size, so it has no ratio or size.
+    if source is None:
+        _apply_ratio_size_defaults(parser, args, config)
 
     # Parse LoRA args (matching image CLI pattern)
     lora_paths, lora_weights = None, None
@@ -228,30 +406,40 @@ def main(*, prog: str = "ziv-video") -> None:
 
     # Apply resolved defaults to args
     args.steps = defaults["steps"]
-    args.width = defaults["width"]
-    args.height = defaults["height"]
-    args.num_frames = defaults["num_frames"]
 
     steps_explicitly_set = "steps" in cli_overrides
     _resolve_upscale_steps(args, config, model_info.family, steps_explicitly_set=steps_explicitly_set)
 
     # Audio flag normalization; a backend without an audio track records and rewrites for silent video.
     args.no_audio = not getattr(args, "audio", True) or not supports_video_audio()
-    args.fps = model_info.default_fps
 
-    # Alignment corrections using model metadata
-    # When upscaling, use 64-alignment so half-res (dim//2) stays 32-aligned
-    alignment = 64 if args.upscale else model_info.resolution_alignment
-    args.width, args.height = align_resolution(
-        args.width,
-        args.height,
-        alignment,
-        model_info.family.upper(),
-    )
-    args.num_frames = align_ltx_frames(args.num_frames, model_info.frame_alignment)
+    if source is not None:
+        # The source decides size and frame rate; its length was checked on load, so there is no resolution or frame alignment.
+        extend_frames, note = resolve_extend_frames(
+            frames=args.extend_frames, seconds=args.extend_seconds, fps=source.fps, strict=False, frames_name="--extend-frames", seconds_name="--extend-seconds"
+        )
+        if note:
+            warnings.warn(note, stacklevel=2)
+        apply_extend_args(args, source, extend_frames)
+    else:
+        args.width = defaults["width"]
+        args.height = defaults["height"]
+        args.num_frames = defaults["num_frames"]
+        args.fps = model_info.default_fps
 
-    if args.width < 64 or args.height < 64:
-        parser.error(f"Resolved dimensions {args.width}x{args.height} are too small (minimum 64x64)")
+        # Alignment corrections using model metadata
+        # When upscaling, use 64-alignment so half-res (dim//2) stays 32-aligned
+        alignment = 64 if args.upscale else model_info.resolution_alignment
+        args.width, args.height = align_resolution(
+            args.width,
+            args.height,
+            alignment,
+            model_info.family.upper(),
+        )
+        args.num_frames = align_ltx_frames(args.num_frames, model_info.frame_alignment)
+
+        if args.width < 64 or args.height < 64:
+            parser.error(f"Resolved dimensions {args.width}x{args.height} are too small (minimum 64x64)")
 
     # Create output directory
     os.makedirs(args.output, exist_ok=True)
@@ -262,8 +450,11 @@ def main(*, prog: str = "ziv-video") -> None:
     except RuntimeError as e:
         parser.error(str(e))
 
+    if source is not None:
+        _warn_if_window_too_large(args)
+
     # Determine mode hint
-    mode = "i2v" if args.image_path else "t2v"
+    mode = "extend" if source is not None else "i2v" if args.image_path else "t2v"
 
     # Prepare LoRA tuples for backend
     loras: list[tuple[str, float]] | None = None
@@ -272,7 +463,7 @@ def main(*, prog: str = "ziv-video") -> None:
 
     # Load prompts and run preflight before the model: prompt-file and enhancer errors fail fast, and the enhancer is unloaded first
     enhance_by_set = scene_by_set = None
-    if args.prompt is not None or scene_only:
+    if args.prompt is not None or inline_run:
         prompts_data: dict[str, list[tuple[str, str | None]]] = {"prompt": [(args.prompt or "", None)]}
     else:
         try:
@@ -281,7 +472,10 @@ def main(*, prog: str = "ziv-video") -> None:
             parser.error(str(e))
         scene_by_set = inspection.scene_by_set
         prompts_data = inspection.prompts_data
-        enhance_by_set = enhance_by_set_for_mode(inspection.enhance_by_set, mode="video", scene_by_set=scene_by_set, job_scene=args.scene)
+        # An extension writes a new action beside the kept scene, so no entry's settings are a no-op and none is dropped.
+        enhance_by_set = enhance_by_set_for_mode(
+            inspection.enhance_by_set, mode="video", scene_by_set=None if source is not None else scene_by_set, job_scene=None if source is not None else args.scene
+        )
     try:
         plan = run_preflight(prompts_data, config, args, mode="video", model_family=model_info.family, enhance_by_set=enhance_by_set, scene=args.scene, scene_by_set=scene_by_set)
     except (ValueError, RuntimeError) as e:

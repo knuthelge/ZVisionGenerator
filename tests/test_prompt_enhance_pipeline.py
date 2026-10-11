@@ -24,6 +24,7 @@ from zvisiongenerator.utils.provenance import build_image_config_payload, build_
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_runner import run_video_batch
 from zvisiongenerator.workflows import build_video_workflow, build_workflow
+from zvisiongenerator.workflows.enhance_stage import apply_planned_enhancement
 from zvisiongenerator.workflows.image_stages import enhance_prompt_stage, resolve_prompt_stage
 from zvisiongenerator.workflows.video_stages import enhance_prompt_stage as video_enhance_prompt_stage
 from zvisiongenerator.workflows.video_stages import resolve_prompt_stage as video_resolve_prompt_stage
@@ -49,6 +50,52 @@ class TestWorkflowComposition:
         args = _make_video_args()
         assert video_enhance_prompt_stage not in build_video_workflow(args).stages
         assert build_video_workflow(args, enhance=True).stages[1] is video_enhance_prompt_stage
+
+
+# ── Shared reporting helper ─────────────────────────────────────────────────
+
+
+class TestApplyPlannedEnhancement:
+    """The helper both enhance stages report through."""
+
+    def test_image_defaults_store_print_and_report_the_rewrite_unchanged(self, capsys):
+        seen: list[str] = []
+        request = _image_request(enhanced_prompt="A red fox\nin deep snow.", on_prompt_enhanced=seen.append)
+        artifacts = ImageWorkingArtifacts(resolved_prompt="a red fox")
+        apply_planned_enhancement(request, artifacts)
+        assert artifacts.resolved_prompt == "A red fox\nin deep snow."
+        assert artifacts.metadata == {"enhanced_prompt": "A red fox\nin deep snow."}
+        assert seen == ["A red fox\nin deep snow."]
+        assert capsys.readouterr().out == "Enhanced prompt:\nA red fox in deep snow.\n\n"
+
+    def test_not_enhanced_prints_nothing_and_changes_nothing(self, capsys):
+        artifacts = ImageWorkingArtifacts(resolved_prompt="a red fox")
+        apply_planned_enhancement(_image_request(enhanced_prompt=None), artifacts)
+        assert artifacts.resolved_prompt == "a red fox" and artifacts.metadata == {}
+        assert capsys.readouterr().out == ""
+
+    def test_composed_text_is_shown_and_reported_while_the_rewrite_is_stored(self, capsys):
+        seen: list[str] = []
+        request = _image_request(enhanced_prompt="A fox sprints.", on_prompt_enhanced=seen.append)
+        artifacts = ImageWorkingArtifacts()
+        apply_planned_enhancement(request, artifacts, resolved_prompt="A field. A fox sprints.", extra_metadata={"enhanced_scene": "A field."})
+        assert artifacts.resolved_prompt == "A field. A fox sprints."
+        assert artifacts.metadata == {"enhanced_prompt": "A fox sprints.", "enhanced_scene": "A field."}
+        assert seen == ["A field. A fox sprints."]
+        assert capsys.readouterr().out == "Enhanced prompt:\nA field. A fox sprints.\n\n"
+
+    def test_video_stage_reports_through_the_helper(self):
+        request = VideoGenerationRequest(backend=None, model=None, prompt="a fox runs", enhanced_prompt="A fox sprints.", enhanced_scene="A field.")
+        artifacts = VideoWorkingArtifacts()
+        with patch("zvisiongenerator.workflows.video_stages.apply_planned_enhancement") as helper:
+            assert video_enhance_prompt_stage(request, artifacts) is StageOutcome.success
+        helper.assert_called_once_with(request, artifacts, resolved_prompt="A field. A fox sprints.", extra_metadata={"enhanced_scene": "A field."})
+
+    def test_video_stage_without_a_scene_adds_no_scene_metadata(self):
+        request = VideoGenerationRequest(backend=None, model=None, prompt="a fox runs", enhanced_prompt="A fox sprints.")
+        with patch("zvisiongenerator.workflows.video_stages.apply_planned_enhancement") as helper:
+            video_enhance_prompt_stage(request, VideoWorkingArtifacts())
+        assert helper.call_args.kwargs["extra_metadata"] is None
 
 
 # ── Stage behaviour ─────────────────────────────────────────────────────────
