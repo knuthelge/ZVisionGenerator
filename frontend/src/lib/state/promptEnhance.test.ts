@@ -96,6 +96,12 @@ describe('sound, direction and context', () => {
     expect(hasAudio(video)).toBe(true);
   });
 
+  it('has no audio where the video backend writes none', () => {
+    const video = state({ workflow: 'txt2vid', frameCount: 97, fps: 24, audio: true });
+    expect(hasAudio(video, false)).toBe(false);
+    expect(enhanceContext(video, false).audio).toBe(false);
+  });
+
   it('describes the image job without video facts', () => {
     const image = state({ workflow: 'txt2img', ratio: '2:3', dimensionMode: 'custom', width: 1024, height: 576, frameCount: 97, fps: 24, audio: true });
     expect(enhanceContext(image)).toEqual({ ratio: '2:3', width: 1024, height: 576, frames: null, fps: null, audio: false, reference_image: false });

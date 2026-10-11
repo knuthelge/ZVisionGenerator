@@ -171,6 +171,12 @@ class TestEnhanceEndpoint:
         assert job["context"] == EnhanceContext(audio=True, seconds=97 / 24, orientation="portrait", reference_image=True)
         assert (job["settings"].sound, job["settings"].note) == (("ambient",), "at dusk")
 
+    def test_context_audio_is_off_when_video_has_no_audio_track(self, monkeypatch):
+        monkeypatch.setattr(web_server, "supports_video_audio", lambda: False)
+        body = {"prompt": "a fox", "mode": "video", "context": {"frames": 97, "fps": 24, "audio": True}}
+
+        assert web_server._validate_enhance_body(body)["context"].audio is False
+
     def test_missing_context_is_empty(self):
         assert web_server._validate_enhance_body({"prompt": "a fox"})["context"] == EnhanceContext()
 

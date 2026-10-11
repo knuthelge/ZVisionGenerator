@@ -127,6 +127,16 @@ def test_workflow_contract_exposes_canonical_values_only() -> None:
     assert contract["values"] == ["txt2img", "img2img", "txt2vid", "img2vid"]
 
 
+def test_workflow_contract_hides_audio_when_video_has_no_audio_track() -> None:
+    with_audio = build_workflow_contract()["definitions"]
+    without_audio = build_workflow_contract(video_audio=False)["definitions"]
+
+    for workflow in ("txt2vid", "img2vid"):
+        assert "audio" in with_audio[workflow]["visible_controls"]
+        assert "audio" not in without_audio[workflow]["visible_controls"]
+        assert "low_memory" in without_audio[workflow]["visible_controls"]
+
+
 def test_workflow_contract_accepts_only_canonical_values() -> None:
     assert canonicalize_workflow("txt2img") == "txt2img"
     assert canonicalize_workflow("img2img") == "img2img"

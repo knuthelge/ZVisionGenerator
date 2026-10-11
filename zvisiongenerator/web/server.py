@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from PIL import Image, UnidentifiedImageError
 
-from zvisiongenerator.backends import get_backend_name, get_prompt_enhancer_session
+from zvisiongenerator.backends import get_backend_name, get_prompt_enhancer_session, supports_video_audio
 from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu
 from zvisiongenerator.converters.convert_checkpoint import MODEL_TYPES
 from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_local
@@ -408,7 +408,7 @@ def _enhance_context_from_body(raw: Any, *, mode: str) -> EnhanceContext:
         ratio=ratio,
         frames=_positive("frames"),
         fps=_positive("fps"),
-        audio=raw.get("audio") is True,
+        audio=raw.get("audio") is True and supports_video_audio(),
         reference_image=raw.get("reference_image") is True,
     )
 
@@ -713,7 +713,7 @@ def _default_workflow_for_mode(mode: str) -> str:
 
 
 def _build_workflow_contract() -> dict[str, Any]:
-    return build_workflow_contract()
+    return build_workflow_contract(video_audio=supports_video_audio())
 
 
 def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
@@ -904,7 +904,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     size = _resolve_video_size(form, web_config, ratio)
     output_dir = _resolve_output_dir(web_config.output_dir)
     image_path = _resolve_reference_image(form, output_dir)
-    audio_enabled = _checkbox(form, "audio", default=True)
+    audio_enabled = _checkbox(form, "audio", default=True) and supports_video_audio()
     _prompt_source, prompt, _negative_prompt, prompts_data, enhance_by_set = _resolve_prompt_submission_with_enhance(form)
     enhance_by_set = enhance_by_set_for_mode(enhance_by_set, mode="video")
     args = argparse.Namespace(

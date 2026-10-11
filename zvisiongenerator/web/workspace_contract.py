@@ -232,13 +232,24 @@ def workflow_mode(workflow: str) -> str:
     return "video" if workflow in {"txt2vid", "img2vid"} else "image"
 
 
-def build_workflow_contract() -> dict[str, Any]:
-    """Build the backend-owned workflow and control visibility contract."""
+def build_workflow_contract(*, video_audio: bool = True) -> dict[str, Any]:
+    """Build the backend-owned workflow and control visibility contract.
+
+    Args:
+        video_audio: Whether the video backend writes an audio track; without one the Audio control is hidden.
+    """
     return {
         "values": list(CANONICAL_WORKFLOW_VALUES),
-        "definitions": {name: dict(value) for name, value in WORKFLOW_DEFINITIONS.items()},
+        "definitions": {name: _definition_for_platform(value, video_audio=video_audio) for name, value in WORKFLOW_DEFINITIONS.items()},
         "field_precedence": {
             "defaults": ["cli", "model_variant", "model_family", "global"],
             "dimensions": "explicit_width_height_overrides_ratio_size",
         },
     }
+
+
+def _definition_for_platform(definition: dict[str, Any], *, video_audio: bool) -> dict[str, Any]:
+    """Copy a workflow definition, dropping the Audio control when the video backend writes no audio."""
+    if video_audio:
+        return dict(definition)
+    return {**definition, "visible_controls": [control for control in definition["visible_controls"] if control != "audio"]}

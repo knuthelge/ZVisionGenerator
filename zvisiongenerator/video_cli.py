@@ -10,7 +10,7 @@ import warnings
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import get_video_backend
+from zvisiongenerator.backends import get_video_backend, supports_video_audio
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
 from zvisiongenerator.utils.app_log import setup_logging
@@ -211,8 +211,8 @@ def main(*, prog: str = "ziv-video") -> None:
     steps_explicitly_set = "steps" in cli_overrides
     _resolve_upscale_steps(args, config, model_info.family, steps_explicitly_set=steps_explicitly_set)
 
-    # Audio flag normalization
-    args.no_audio = not getattr(args, "audio", True)
+    # Audio flag normalization; a backend without an audio track records and rewrites for silent video.
+    args.no_audio = not getattr(args, "audio", True) or not supports_video_audio()
     args.fps = model_info.default_fps
 
     # Alignment corrections using model metadata

@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import get_backend_name, supports_stored_quants
+from zvisiongenerator.backends import get_backend_name, supports_stored_quants, supports_video_audio
 from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
 from zvisiongenerator.utils.config import resolve_defaults, resolve_enhancer_model, resolve_video_defaults
@@ -143,6 +143,7 @@ def build_prompt_enhancer_contract(web_config: WebUiConfig, *, downloaded: Calla
         "downloaded": False,
         "download_size_label": size_label if isinstance(size_label, str) else None,
         "default_max_words": resolve_enhance_ceiling(app_config, family=None, mode="image"),
+        "video_audio": supports_video_audio(),
         "error": None,
     }
     try:

@@ -52,7 +52,8 @@
 
   const mode = $derived(workflowMode(draft.state.workflow));
   const settings = $derived(effectiveEnhanceSettings(draft.state, contract));
-  const audio = $derived(hasAudio(draft.state));
+  const audioSupported = $derived(contract.video_audio ?? true);
+  const audio = $derived(hasAudio(draft.state, audioSupported));
   const noOp = $derived(isNoOpSettings(settings, mode, audio));
   const available = $derived(contract.model !== null);
 
@@ -91,7 +92,7 @@
     abort = new AbortController();
     try {
       await enhancePrompt(
-        { prompt: source.prompt, mode, settings: settingsPayload(requested, mode, audio), max_words: maxWords, context: enhanceContext(draft.state) },
+        { prompt: source.prompt, mode, settings: settingsPayload(requested, mode, audio), max_words: maxWords, context: enhanceContext(draft.state, audioSupported) },
         (frame) => {
           if (frame.type === 'status') {
             phase = frame.phase;

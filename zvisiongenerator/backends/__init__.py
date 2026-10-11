@@ -173,6 +173,12 @@ def supports_stored_quants() -> bool:
     return sys.platform in _IMAGE_BACKENDS_MAP
 
 
+def supports_video_audio() -> bool:
+    """Return whether this platform's video backend writes an audio track (LTX MLX on macOS; diffusers writes frames only)."""
+    registration = _VIDEO_BACKENDS_MAP.get(sys.platform)
+    return registration is not None and registration[1] is _create_ltx_video_backend
+
+
 # --- Prompt enhancer ---
 
 

@@ -210,6 +210,8 @@ export interface PromptEnhancerContract {
   /** Approximate first-use download size, null once downloaded. */
   download_size_label: string | null;
   default_max_words: number;
+  /** Whether this platform's video backend writes an audio track; without one the Sound axis never applies. */
+  video_audio?: boolean;
   error: string | null;
 }
 

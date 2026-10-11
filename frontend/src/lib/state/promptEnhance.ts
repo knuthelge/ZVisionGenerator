@@ -13,9 +13,9 @@ export function effectiveEnhanceSettings(state: DraftState, contract: PromptEnha
   return { ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...defaults.sound], ...state.enhanceSettings };
 }
 
-/** Whether the job's video has an audio track, so the Sound axis applies. */
-export function hasAudio(state: DraftState): boolean {
-  return workflowMode(state.workflow) === 'video' && state.audio;
+/** Whether the job's video has an audio track, so the Sound axis applies; *supported* is false where the video backend writes no audio. */
+export function hasAudio(state: DraftState, supported = true): boolean {
+  return supported && workflowMode(state.workflow) === 'video' && state.audio;
 }
 
 /** Whether *settings* would ask for no change at all (keep style and mood, no details, same length, no direction, no video motion or sound). */
@@ -34,7 +34,7 @@ export function settingsPayload(settings: EnhanceSettings, mode: WorkflowMode, a
 }
 
 /** The job facts an on-demand enhancement needs: frame shape, clip length, audio and reference image. */
-export function enhanceContext(state: DraftState): EnhanceContext {
+export function enhanceContext(state: DraftState, audioSupported = true): EnhanceContext {
   const video = workflowMode(state.workflow) === 'video';
   const custom = state.dimensionMode === 'custom';
   return {
@@ -43,7 +43,7 @@ export function enhanceContext(state: DraftState): EnhanceContext {
     height: custom ? state.height : null,
     frames: video ? state.frameCount : null,
     fps: video ? state.fps : null,
-    audio: hasAudio(state),
+    audio: hasAudio(state, audioSupported),
     reference_image: state.workflow === 'img2img' || state.workflow === 'img2vid',
   };
 }
