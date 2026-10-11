@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { draft, offeredSizes, settingDefaultsFor } from './draft.svelte';
+import { draft, offeredSizes, settingDefaultsFor, videoTimingFor } from './draft.svelte';
 import type { WorkspaceContext, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -301,6 +301,72 @@ describe('draft store', () => {
       expect(draft.state.width).toBe(960);
       expect(draft.state.height).toBe(544);
       expect(draft.state.frameCount).toBe(81);
+    });
+
+    it('takes the frame rate from the video model defaults', () => {
+      const ctx = makeContext({
+        video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ fps: 30 }) },
+      });
+
+      draft.update('workflow', 'txt2vid');
+      draft.hydrateFromContext(ctx, null);
+
+      expect(draft.state.fps).toBe(30);
+    });
+
+    it('aligns a reused frame count to one the model accepts', () => {
+      const ctx = makeContext({
+        video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ frame_alignment: 8 }) },
+      });
+
+      draft.update('workflow', 'txt2vid');
+      draft.hydrateFromContext(ctx, null);
+      draft.loadFromUrl({ frames: '50' }, ctx);
+
+      expect(draft.state.frameCount).toBe(49);
+    });
+
+    it('aligns a reused frame count with the default video model when the named one has no defaults', () => {
+      const aligned = makeVideoDefaults({ frame_alignment: 8 });
+      const ctx = makeContext({ video_defaults: aligned, video_model_defaults: { 'ltx-v-0.9': aligned } });
+
+      draft.update('workflow', 'txt2vid');
+      draft.hydrateFromContext(ctx, null);
+      draft.loadFromUrl({ model: 'stale-ltx', frames: '50' }, ctx);
+
+      expect(draft.state.frameCount).toBe(49);
+    });
+
+    it('aligns a kept frame count that predates snapping', () => {
+      const ctx = makeContext({
+        video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ frame_alignment: 8 }) },
+      });
+
+      draft.update('workflow', 'txt2vid');
+      draft.hydrateFromContext(ctx, null);
+      draft.update('frameCount', 100);
+      draft.hydrateFromContext(ctx, null, { keepSettings: true });
+
+      expect(draft.state.frameCount).toBe(97);
+    });
+
+    it('aligns an off-grid configured default so Reset matches the hydrated count', () => {
+      const ctx = makeContext({
+        video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ frame_count: 50, frame_alignment: 8 }) },
+      });
+
+      draft.update('workflow', 'txt2vid');
+      draft.hydrateFromContext(ctx, null);
+
+      expect(draft.state.frameCount).toBe(49);
+      expect(settingDefaultsFor(ctx, { workflow: 'txt2vid', model: 'ltx-v-0.9' }).frameCount).toBe(49);
+    });
+
+    it('takes fps and alignment together from the default video model for a model without defaults', () => {
+      const ctx = makeContext({ video_defaults: makeVideoDefaults({ fps: 30, frame_alignment: 8 }) });
+
+      expect(videoTimingFor(ctx, 'unknown-video')).toEqual({ fps: 30, frameAlignment: 8 });
+      expect(videoTimingFor(ctx, 'ltx-v-0.9')).toEqual({ fps: 24, frameAlignment: 1 });
     });
 
     it('uses preferredModel when it is valid for the current workflow', () => {

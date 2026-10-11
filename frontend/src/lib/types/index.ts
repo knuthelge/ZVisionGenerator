@@ -407,6 +407,8 @@ export interface VideoModelDefaults {
   quantize: number | null;
   max_steps: number | null;
   fps: number;
+  /** Valid frame counts are `frame_alignment * k + 1`; 1 means any count. */
+  frame_alignment?: number;
   upscale: UpscaleDefaults;
   enhance_max_words?: number;
 }

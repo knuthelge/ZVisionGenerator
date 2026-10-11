@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { draft, MAX_SHARPEN_AMOUNT, offeredSizes, settingDefaultsFor, type SettingKey } from '$lib/state/draft.svelte';
+  import { draft, MAX_SHARPEN_AMOUNT, offeredSizes, settingDefaultsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
   import { ActionBar, InspectorRow, InspectorSection } from '$lib/components/molecules';
   import type { NumberSpec, ScrubOptions } from '$lib/actions/scrub';
   import type { WorkspaceContext } from '$lib/types';
   import { workspaceCapabilities } from './capabilities';
   import { randomSeed } from './seed';
+  import { durationSpec, framesToSeconds, secondsToFrames } from '$lib/state/videoDuration';
 
   interface Props {
     context: WorkspaceContext;
@@ -42,7 +43,6 @@
 
   const SPEC = {
     runs: { step: 1, min: 1, max: 100 },
-    frames: { step: 1, min: 1, max: 256 },
     steps: { step: 1, min: 1, max: 60 },
     guidance: { step: 0.1, min: 0, max: 10 },
     strength: { step: 0.01, min: 0, max: 1 },
@@ -66,6 +66,16 @@
   );
   const shownWidth = $derived(dimensionMode === 'custom' ? s.width : presetDims[0]);
   const shownHeight = $derived(dimensionMode === 'custom' ? s.height : presetDims[1]);
+  // --- Duration -------------------------------------------------------------
+  // The clip length is edited in seconds but submitted as frames, snapped to a count the model accepts.
+  const timing = $derived(videoTimingFor(context, model));
+  const secondsSpec = $derived(durationSpec(timing.fps, timing.frameAlignment));
+  const shownSeconds = $derived(Math.round(framesToSeconds(s.frameCount, timing.fps) * 100) / 100);
+
+  function setSeconds(seconds: number | null): void {
+    if (seconds !== null) draft.update('frameCount', secondsToFrames(seconds, timing.fps, timing.frameAlignment));
+  }
+
   const dimensionSpec = $derived<NumberSpec>({ step: caps.dimensionStep, min: caps.dimensionMin, max: caps.dimensionMax ?? undefined });
 
   function pickRatio(ratio: string): void {
@@ -260,8 +270,10 @@
         </InspectorRow>
       {/if}
       {#if caps.showFrameCount}
-        <InspectorRow label="Frames" forId="ws-frames" scrubber={scrubber(s.frameCount, SPEC.frames, (v) => draft.update('frameCount', v))} changed={changed('frameCount')} onreset={() => reset('frameCount')}>
-          <InspectorNumber id="ws-frames" name="frames" value={s.frameCount} {...SPEC.frames} onchange={(v) => v !== null && draft.update('frameCount', v)} />
+        <InspectorRow label="Duration (s)" forId="ws-duration" scrubber={scrubber(shownSeconds, secondsSpec, setSeconds)} changed={changed('frameCount')} onreset={() => reset('frameCount')}>
+          <InspectorNumber id="ws-duration" value={shownSeconds} {...secondsSpec} commitOnly onchange={setSeconds} />
+          <span class="frame-count">{s.frameCount} frames</span>
+          <input type="hidden" name="frames" value={s.frameCount}>
         </InspectorRow>
       {/if}
       {#if caps.showSteps}
@@ -577,6 +589,7 @@
   .mini-seg.factor { flex: none; width: 90px; }
   .mini-seg > button { flex: 1; min-width: 0; padding: 0 2px; }
   .mini-range { flex: none; width: 90px; }
+  .frame-count { flex: none; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); white-space: nowrap; }
   .dim-times { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
 
   .inspector-select, .inspector-text { width: 100%; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: var(--text-ui); color: var(--color-text-primary); }

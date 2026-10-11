@@ -401,6 +401,7 @@ def _build_video_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
     ratio, size = resolve_video_ratio_size_defaults(web_config)
     supports_i2v = False
     fps = 24
+    frame_alignment = 1
     try:
         resolved_model = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
         model_info = detect_video_model(resolved_model)
@@ -408,6 +409,8 @@ def _build_video_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         supports_i2v = bool(getattr(model_info, "supports_i2v", False))
         fps_value = getattr(model_info, "default_fps", 24)
         fps = fps_value if isinstance(fps_value, int) else 24
+        alignment_value = getattr(model_info, "frame_alignment", 1)
+        frame_alignment = alignment_value if isinstance(alignment_value, int) and alignment_value > 0 else 1
     except Exception:
         family = _resolve_video_bootstrap_family(app_config, None)
     defaults = resolve_video_defaults(family, app_config, {"ratio": ratio, "size": size})
@@ -425,6 +428,7 @@ def _build_video_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         "quantize": None,
         "max_steps": _default_video_max_steps(app_config, family),
         "fps": fps,
+        "frame_alignment": frame_alignment,
         "upscale": _video_bootstrap_upscale(),
         "enhance_max_words": resolve_enhance_ceiling(app_config, family=family, mode="video"),
     }

@@ -152,6 +152,7 @@ function makeVideoDefaults(overrides: Partial<VideoModelDefaults> = {}): VideoMo
     quantize: null,
     max_steps: 8,
     fps: 24,
+    frame_alignment: 8,
     upscale: {
       enabled: false,
       factor: 2,
@@ -1236,6 +1237,97 @@ describe('WorkspacePage', () => {
     expect(target.querySelector('input[name="audio"]')).toBeNull();
     expect(target.querySelector('input[name="low_memory"]')).toBeNull();
     expect(target.querySelector('input[name="frames"]')).toBeNull();
+  });
+
+  it('edits the clip length in seconds and submits it as a frame count the model accepts', async () => {
+    const context = makeContext();
+    draft.update('workflow', 'txt2vid');
+    draft.update('model', 'ltx-8');
+    draft.hydrateFromContext(context, 'ltx-8');
+    app = flushSync(() => mount(ControlsSidebar, {
+      target,
+      props: {
+        context,
+        busy: false,
+        imageFile: null,
+        onImageFileChange: vi.fn(),
+      },
+    }));
+    await settle();
+
+    const duration = target.querySelector('#ws-duration') as HTMLInputElement;
+    const frames = (): string | undefined => target.querySelector<HTMLInputElement>('input[name="frames"]')?.value;
+    expect(duration.value).toBe('2');
+    expect(frames()).toBe('49');
+
+    // Typed seconds snap to the nearest 8k+1 frame count, with no upper limit.
+    duration.value = '20';
+    duration.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(frames()).toBe('481');
+    expect(duration.value).toBe('20');
+
+    duration.value = '2.2';
+    duration.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(frames()).toBe('57');
+    expect(duration.value).toBe('2.33');
+
+    // Arrow keys move one valid frame step.
+    duration.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    await settle();
+    expect(frames()).toBe('65');
+
+    // Partial input is left alone while typing; it converts only on commit.
+    duration.value = '0';
+    duration.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(duration.value).toBe('0');
+    expect(frames()).toBe('65');
+
+    // A commit that keeps the same frame count still shows the rounded seconds, not the raw step.
+    duration.value = '2.68';
+    duration.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(frames()).toBe('65');
+    expect(duration.value).toBe('2.67');
+
+    // Enter commits and submits in the same task, so the frames field must update before any await.
+    duration.value = '5';
+    duration.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(frames()).toBe('121');
+    expect(duration.value).toBe('5');
+
+    // Clearing the field and leaving it shows the duration that will still be submitted.
+    duration.value = '';
+    duration.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(duration.value).toBe('5');
+    expect(frames()).toBe('121');
+
+    // An arrow key after typing nudges from the typed text, not the last committed value.
+    duration.value = '10';
+    duration.dispatchEvent(new Event('input', { bubbles: true }));
+    duration.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    await settle();
+    expect(frames()).toBe('249');
+
+    // A nudge from typed text that snaps back to the held count replaces the typed text, so a later blur keeps it.
+    duration.value = '5';
+    duration.dispatchEvent(new Event('change', { bubbles: true }));
+    duration.value = '4.8';
+    duration.dispatchEvent(new Event('input', { bubbles: true }));
+    duration.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+    expect(duration.value).toBe('5');
+    duration.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(frames()).toBe('121');
+
+    // Any non-nullable field shows the value it still holds when cleared and left.
+    const steps = target.querySelector('#ws-steps') as HTMLInputElement;
+    const kept = steps.value;
+    steps.value = '';
+    steps.dispatchEvent(new Event('input', { bubbles: true }));
+    steps.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(steps.value).toBe(kept);
   });
 
   it('shows only truthful controls for the active workflow and model capabilities', async () => {

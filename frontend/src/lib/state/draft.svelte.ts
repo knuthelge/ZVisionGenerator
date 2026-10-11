@@ -1,4 +1,5 @@
 import { workflowMode } from './promptEnhance';
+import { alignFrameCount } from './videoDuration';
 import type { DraftState, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
@@ -147,7 +148,8 @@ function _applyVideoDefaults(state: DraftState, defaults: VideoModelDefaults): D
     steps: defaults.steps,
     width: defaults.width,
     height: defaults.height,
-    frameCount: defaults.frame_count,
+    // A configured default may be off the model's grid; align it so Reset matches what the server generates.
+    frameCount: alignFrameCount(defaults.frame_count, defaults.frame_alignment ?? 1),
     audio: defaults.audio,
     lowMemory: defaults.low_memory,
     videoUpscaleEnabled: defaults.upscale.enabled,
@@ -198,6 +200,12 @@ function _modelDefaultsFor(ctx: WorkspaceContext, workflow: Workflow, model: str
   const fallback = isVideoMode ? ctx.video_defaults : ctx.defaults;
   const currentModel = isVideoMode ? ctx.current_video_model : ctx.current_image_model;
   return (defaultsMap?.[model] ?? (model === currentModel ? fallback : null)) as ImageModelDefaults | VideoModelDefaults | null;
+}
+
+/** Return a video model's frame rate and frame alignment, falling back to the default video model's. */
+export function videoTimingFor(ctx: WorkspaceContext, model: string): { fps: number; frameAlignment: number } {
+  const defaults = ctx.video_model_defaults?.[model] ?? ctx.video_defaults;
+  return { fps: defaults?.fps ?? 24, frameAlignment: defaults?.frame_alignment ?? 1 };
 }
 
 /** Apply a workflow's cleared fields and then the model's defaults to a state. */
@@ -305,7 +313,11 @@ export const draft = {
     if (params.size && canApply('size')) prefill.size = params.size;
     if (params.width && canApply('width')) prefill.width = Number(params.width);
     if (params.height && canApply('height')) prefill.height = Number(params.height);
-    if (params.frames && canApply('frames')) prefill.frameCount = Number(params.frames);
+    if (params.frames && canApply('frames')) {
+      // Show the count the server will generate, not one it would re-align.
+      const alignment = ctx ? videoTimingFor(ctx, prefill.model ?? _draft.model).frameAlignment : 1;
+      prefill.frameCount = alignFrameCount(Number(params.frames), alignment);
+    }
     if (params.lora && canApply('lora')) prefill.loraString = params.lora;
     if (params.image_path && canApply('image_path')) prefill.referenceImagePath = params.image_path;
     if (params.negative_prompt && canApply('negative_prompt')) prefill.negativePrompt = params.negative_prompt;
@@ -365,6 +377,10 @@ export const draft = {
 
     if (isVideoMode) {
       nextState = { ...nextState, negativePrompt: '', quantize: null, jsonPromptEnabled: false, jsonPrompt: '', firstSigma: null };
+      // A kept or restored count may predate snapping; show the count the server will generate.
+      const timing = videoTimingFor(ctx, model);
+      nextState.fps = timing.fps;
+      nextState.frameCount = alignFrameCount(nextState.frameCount, timing.frameAlignment);
     } else {
       const imageDefaults = modelDefaults as ImageModelDefaults | null;
       nextState = {

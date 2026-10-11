@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Docs: a Linux troubleshooting note for when `systemd-oomd` closes the terminal or editor while a large model loads, with an optional drop-in that relaxes its limit
 
 ### Changed
+- Web UI: video length is set in seconds (**Duration (s)**) instead of frames. It snaps to a frame count the model accepts (8k+1 for LTX), shows that count, and is no longer capped at 256 frames
 - Web UI: stopping the server (Ctrl-C on `ziv ui`) cancels the running job instead of waiting for it
 
 ## [0.13.0b19] - 2026-10-11

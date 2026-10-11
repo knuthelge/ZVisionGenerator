@@ -25,6 +25,7 @@ from zvisiongenerator.web.gallery import list_gallery_assets
 from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.provenance import embed_png_config
 
@@ -104,6 +105,7 @@ def _make_workspace_bootstrap_view() -> dict[str, object]:
         "quantize": None,
         "max_steps": 8,
         "fps": 24,
+        "frame_alignment": 8,
         "upscale": {"enabled": False, "factor": 2, "steps": None},
     }
     return {
@@ -382,6 +384,37 @@ def test_workspace_bootstrap_uses_backend_registry_name(monkeypatch):
 
     assert captured["backend_name"] == "registry-owned"
     assert defaults["scheduler"] == "beta"
+
+
+@pytest.mark.parametrize(("family", "alignment"), [("ltx", 8), ("unknown", 1)])
+def test_video_bootstrap_defaults_include_frame_alignment(monkeypatch, family, alignment):
+    """Video bootstrap defaults should expose the model's frame alignment so the UI can snap frame counts."""
+    web_config = _make_web_config()
+    monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(
+        workspace_api_module,
+        "detect_video_model",
+        lambda _model: VideoModelInfo(family=family, backend=family, supports_i2v=True, default_fps=24, frame_alignment=alignment, resolution_alignment=32),
+    )
+
+    defaults = workspace_api_module._build_video_bootstrap_defaults("ltx-8", web_config)
+
+    assert defaults["frame_alignment"] == alignment
+
+
+def test_video_bootstrap_defaults_fall_back_to_unaligned_frames_when_detection_fails(monkeypatch):
+    """A model that cannot be detected should leave frame counts unconstrained."""
+    web_config = _make_web_config()
+    monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: model)
+
+    def _fail(_model):
+        raise RuntimeError("no model")
+
+    monkeypatch.setattr(workspace_api_module, "detect_video_model", _fail)
+
+    defaults = workspace_api_module._build_video_bootstrap_defaults("missing", web_config)
+
+    assert defaults["frame_alignment"] == 1
 
 
 def test_workspace_bootstrap_defaults_include_ideogram_capability_flags(monkeypatch):

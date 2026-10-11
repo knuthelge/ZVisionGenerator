@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { flushSync } from 'svelte';
   import { nudgeValue, snapToSpec, type NumberSpec } from '$lib/actions/scrub';
 
   interface Props extends NumberSpec {
@@ -9,6 +10,8 @@
     /** Empty input means `null` (e.g. "auto" or "random"); otherwise empty input is ignored. */
     nullable?: boolean;
     disabled?: boolean;
+    /** Report typed values only on commit, for a value the parent reshapes (e.g. converts and snaps). */
+    commitOnly?: boolean;
     ariaLabel?: string;
     onchange: (value: number | null) => void;
   }
@@ -23,11 +26,13 @@
     placeholder,
     nullable = false,
     disabled = false,
+    commitOnly = false,
     ariaLabel,
     onchange,
   }: Props = $props();
 
   function onInput(event: Event): void {
+    if (commitOnly) return;
     const raw = (event.currentTarget as HTMLInputElement).value;
     if (raw === '') {
       if (nullable) onchange(null);
@@ -37,16 +42,32 @@
     if (Number.isFinite(parsed)) onchange(parsed);
   }
 
+  /** Report a settled value; a commit-only one reaches the form only now, and Enter commits and submits in one task. */
+  function report(next: number | null): void {
+    if (next === value) return;
+    if (commitOnly) flushSync(() => onchange(next));
+    else onchange(next);
+  }
+
+  /** Show the value the parent kept: it may reshape a change, and an unchanged value would not re-render. */
+  function showKept(input: HTMLInputElement): void {
+    input.value = value === null ? '' : String(value);
+  }
+
   // Typed values settle on a valid step within bounds once the field is committed (blur or Enter),
   // so the form never submits a value the backend or the browser would reject.
   function onCommit(event: Event): void {
     const input = event.currentTarget as HTMLInputElement;
-    if (input.value === '') return;
+    if (input.value === '') {
+      // A blank means `null` only for nullable fields; others keep the value they hold.
+      if (nullable && commitOnly) report(null);
+      showKept(input);
+      return;
+    }
     const parsed = Number(input.value);
     if (!Number.isFinite(parsed)) return;
-    const snapped = snapToSpec(parsed, { step, min, max });
-    input.value = String(snapped);
-    if (snapped !== value) onchange(snapped);
+    report(snapToSpec(parsed, { step, min, max }));
+    showKept(input);
   }
 
   // Arrow keys step by `step`, Shift by ten steps. The browser's own step and range checks are off
@@ -55,7 +76,12 @@
   function onKeydown(event: KeyboardEvent): void {
     if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
     event.preventDefault();
-    onchange(nudgeValue(value, event.key === 'ArrowUp' ? 1 : -1, { step, min, max }, event.shiftKey));
+    // A commit-only field may hold typed text it has not reported yet; nudge from that.
+    const input = event.currentTarget as HTMLInputElement;
+    const typed = Number(input.value);
+    const start = commitOnly && input.value !== '' && Number.isFinite(typed) ? typed : value;
+    report(nudgeValue(start, event.key === 'ArrowUp' ? 1 : -1, { step, min, max }, event.shiftKey));
+    showKept(input);
   }
 </script>
 
