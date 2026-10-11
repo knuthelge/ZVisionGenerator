@@ -1372,20 +1372,44 @@ are sharing a meal at the diner. Style: Camera: iPhone. Color: Warm
 <td>Lighting, Composition, Camera &amp; lens, Materials &amp; textures, Color &amp; mood, Environment, Subject</td>
 </tr>
 <tr>
+<td>Motion (video only)</td>
+<td>any</td>
+<td>Action / sequence, Camera movement, Pacing</td>
+</tr>
+<tr>
+<td>Sound (video with audio on, macOS only)</td>
+<td>any</td>
+<td>Ambience, Sound effects, Dialogue, Music</td>
+</tr>
+<tr>
 <td>Length</td>
 <td>one</td>
 <td>Shorter (≈50 %), Same, Longer (≈200 %), Extra long (≈300 %)</td>
 </tr>
 <tr>
-<td>Motion (video only)</td>
-<td>any</td>
-<td>Action / sequence, Camera movement, Pacing</td>
+<td>Direction</td>
+<td>free text</td>
+<td>e.g. <em>at night, in the rain</em> or <em>focus on the dog</em> (up to 300 characters)</td>
 </tr>
 </tbody>
 </table>
 <p>Mood sets the feeling of the scene. The enhancer conveys it through light, color, setting and expression instead of naming it. The <strong>Color &amp; mood</strong> detail only adds more description of color and mood; it does not pick one.</p>
 <p>Length is a target, not a guarantee. Longer aims for at least 40 words and Extra long for at least 80, so short prompts still grow; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length. On short prompts, Same is approximate.</p>
-<p>The enhancer keeps your subject and every detail you describe. It adds only things that can be seen: no sounds, smells, or story. It never adds new people, animals, or major objects.</p>
+<p>The enhancer keeps your subject and every detail you describe. It adds only things that can be seen, no smells or story, and never adds new people, animals, or major objects. Sound is the exception for video with audio on:</p>
+<ul>
+<li>The enhancer keeps every sound and every quoted line of speech you wrote, word for word, whether or not a Sound option is picked.</li>
+<li>With no Sound option picked, it adds no new sounds.</li>
+<li><strong>Ambience</strong> and <strong>Sound effects</strong> describe the setting's soundscape and sounds that match the action. <strong>Music</strong> describes music in the scene or a score.</li>
+<li><strong>Dialogue</strong> keeps your quoted lines. If you wrote none, it writes short lines that fit the scene. Only people already in the scene speak.</li>
+<li>With audio off, on Windows and Linux (whose videos have no audio track), and for images, the enhancer describes no sounds and Sound is ignored.</li>
+</ul>
+<p><strong>Direction</strong> is a short instruction the enhancer follows, such as a time of day, weather, or what to focus on. A direction alone is enough to enhance, without picking other options.</p>
+<p>The enhancer also knows the job's shape:</p>
+<ul>
+<li><strong>Frame:</strong> portrait, landscape or square, from the ratio or size, so the composition fits the frame.</li>
+<li><strong>Clip length (video):</strong> one continuous action for clips up to 5 seconds, two or three beats up to 10 seconds, so the action fits the clip.</li>
+<li><strong>Starting image:</strong> for image-to-video, the rewrite describes motion and change instead of appearance, which the first frame already shows. For img2img it mentions the subject only briefly. The enhancer does not see the image itself.</li>
+</ul>
 <h3 id="in-the-web-ui">In the Web UI</h3>
 <ul>
 <li><strong>Enhance</strong>: click ✨ <strong>Enhance</strong> in the prompt box, pick options, and click <strong>Enhance prompt</strong>. The rewrite appears in the <strong>Enhanced</strong> tab. When that tab has text, it is what gets generated; the <strong>used</strong> badge shows which tab that is. Edit it, enhance again, or <strong>Clear</strong> it to go back to your prompt. The button is unavailable while generation jobs are running or queued.</li>
@@ -1403,16 +1427,22 @@ are sharing a meal at the diner. Style: Camera: iPhone. Color: Warm
       mood: mysterious
       details: [lighting, camera]
       length: longer
+      note: rain on the pavement
   - prompt: a quiet street at dawn
     enhance: true        # default options
+  - prompt: two friends talking at a cafe table
+    enhance:
+      sound: [ambient, dialogue]   # video with audio on
 </code></pre>
 <p>From the command line, <code>--enhance</code> enhances every prompt and overrides entries' <code>enhance:</code> settings; <code>--no-enhance</code> turns all enhancement off:</p>
 <pre><code class="language-bash">ziv-image -m klein9b --prompt &quot;a fox in snow&quot; --enhance
 ziv-image -m klein9b -p prompts.yaml --enhance style=photo,mood=serene,details=lighting+camera,length=longer
-ziv-video -m ltx-8 --prompt &quot;a fox runs&quot; --enhance style=cinematic,motion=action+camera-move
+ziv-video -m ltx-8 --prompt &quot;a fox runs&quot; --enhance style=cinematic,motion=action+camera-move,sound=ambient+effects
+ziv-image -m klein9b --prompt &quot;a lighthouse&quot; --enhance-note &quot;in a storm, at night&quot;
 ziv-image -m klein9b -p prompts.yaml --no-enhance
 </code></pre>
-<p><code>motion</code> only applies to video. Prompt files shared between image and video may include it; images ignore it.</p>
+<p><code>--enhance-note</code> sets the direction and turns on enhancement by itself.</p>
+<p><code>motion</code> and <code>sound</code> only apply to video, and <code>sound</code> only with audio on. Prompt files shared between image and video may include them; images ignore them.</p>
 <p>The enhanced prompt is printed while prompts are enhanced and again before each generation, and stored in the image or video metadata, so Gallery shows and reuses the prompt that actually rendered.</p>
 <h3 id="while-prompts-are-enhanced">While Prompts Are Enhanced</h3>
 <p>Jobs with auto enhancement rewrite every prompt before the model loads. In image jobs (Web UI controls or <code>ziv-image</code> keys):</p>
@@ -1422,7 +1452,7 @@ ziv-image -m klein9b -p prompts.yaml --no-enhance
 <li><strong>Pause</strong> (<code>p</code>) waits until you resume.</li>
 <li><strong>Repeat</strong> (<code>r</code>) has no effect.</li>
 </ul>
-<p>Video jobs have no Web UI controls; <code>ziv-video</code> can be stopped with Ctrl+C.</p>
+<p>Web UI video jobs offer only <strong>Cancel</strong>, which also stops the rewrites; <code>ziv-video</code> can be stopped with Ctrl+C.</p>
 <p><strong>Repeat</strong> and automatic retries keep the image's <code>{a|b}</code> choices and enhanced prompt and only change the seed. The new seed is always random, even when a seed is set.</p>
 <h3 id="memory">Memory</h3>
 <p>The enhancer and the image or video model are never loaded together: the enhancer is unloaded, and its memory freed, before the model loads. Peak memory is the larger of the two, not their sum. Clicking Enhance loads the enhancer (about 3 GB on macOS) and frees it after two idle minutes, or when a job starts.</p>

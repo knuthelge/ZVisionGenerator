@@ -1123,7 +1123,7 @@ ziv-video -m MODEL -p prompts.yaml -r 3
 ziv-video -m MODEL --ratio 1:1 --size s --prompt &quot;Abstract art&quot;
 </code></pre>
 <h2 id="prompt-enhancement">Prompt Enhancement</h2>
-<p>Video prompts can be rewritten by the local <a href="../prompts/#enhancing-prompts">prompt enhancer</a>, which adds visible motion and camera movement in time order. Use <code>--enhance style=cinematic,motion=action+camera-move</code>, or the Enhance options in the Web UI. Image-to-video enhancement does not look at the starting image. Prompts are rewritten before the video model loads, and the enhancer is unloaded first, so it adds no memory during generation. Video jobs have no Web UI controls, so a running rewrite phase cannot be stopped from the browser.</p>
+<p>Video prompts can be rewritten by the local <a href="../prompts/#enhancing-prompts">prompt enhancer</a>, which adds visible motion and camera movement in time order and fits the action to the clip length. With audio on (macOS only), the <strong>Sound</strong> options add ambience, sound effects, dialogue or music, and sounds you wrote are always kept. Use <code>--enhance style=cinematic,motion=action+camera-move,sound=ambient+effects</code>, or the Enhance options in the Web UI. For image-to-video, the rewrite describes motion and change rather than appearance; the enhancer does not see the starting image itself. Prompts are rewritten before the video model loads, and the enhancer is unloaded first, so it adds no memory during generation. In the Web UI, <strong>Cancel</strong> (or <code>Esc</code> twice) stops a video job while prompts are rewritten and at the next denoising step; while the model loads, and during the Windows/Linux upscale pass, it takes effect once that finishes. Pause, Skip and Repeat are not available for video.</p>
 <h2 id="video-upscale-audio">Video Upscale &amp; Audio</h2>
 <pre><code class="language-bash"># Generate upscaled video (2x resolution)
 ziv-video -m MODEL --upscale 2 --prompt &quot;...&quot;
@@ -1141,7 +1141,9 @@ ziv-video -m MODEL --no-audio --prompt &quot;...&quot;
 ziv-video -m MODEL --upscale 2 --no-audio --prompt &quot;...&quot;
 </code></pre>
 <p><code>--upscale 2</code> is the only supported video upscale mode. On macOS it uses the existing MLX distilled two-stage path. On Windows and Linux it uses the diffusers latent upscaler when that API is present in the installed diffusers build. If the selected runtime or model layout does not expose the latent upscaler, <code>ziv-video</code> fails explicitly instead of silently ignoring the request.</p>
+<p>Audio is generated on macOS only. On Windows and Linux videos have no audio track, so <code>--audio</code> has no effect and the Web UI hides the Audio toggle and the enhancer's Sound options.</p>
 <p>Windows and Linux video generation require CUDA. CPU fallback is not available for the diffusers video backend.</p>
+<p>Each video records the settings it was made with, as images do (see <a href="../image/#output-files">Output Files</a>); <strong>Reuse settings</strong> in the Web UI loads them.</p>
 <h2 id="video-lora">Video LoRA</h2>
 <pre><code class="language-bash"># Single LoRA
 ziv-video -m MODEL --prompt &quot;A sunset&quot; --lora /path/to/style.safetensors
@@ -1198,6 +1200,7 @@ ziv-video -m MODEL --prompt &quot;A dance&quot; --lora style.safetensors:0.5,mot
 <li><strong>Resolution</strong>: width and height must be divisible by 32 (64 when using <code>--upscale</code>)</li>
 <li><strong>Frames</strong>: must follow 8k+1 pattern (9, 17, 25, 33, 41, 49, ..., 97, 121)</li>
 <li><strong>macOS MLX Q4 baseline</strong>: <code>ltx-4</code>, 704×448, ≤49 frames with <code>--low-memory</code></li>
+<li><strong>macOS low memory</strong>: <code>--low-memory</code> (the default) frees each model component once it has run. On Macs with 24 GB of memory or less it also streams the transformer from disk during generation, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. <code>--no-low-memory</code> (or <strong>Low memory</strong> off in the Web UI) turns off both, keeping every component loaded</li>
 </ul>
 <p>Windows and Linux use the configurable diffusers repository behind <code>ltx-2.3</code> instead of shipped Q4/Q8 aliases.</p>
 <h2 id="model-detection">Model Detection</h2>

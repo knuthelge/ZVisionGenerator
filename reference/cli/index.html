@@ -1274,6 +1274,11 @@ ziv ui [options]       # Same as ziv-ui
 <td>Rewrite each prompt with a local LLM before the model loads. <code>SPEC</code> is optional, e.g. <code>style=photo,details=lighting+camera,length=longer</code>. Overrides prompt-file <code>enhance:</code> entries. Ignored with <code>--json-prompt</code></td>
 </tr>
 <tr>
+<td><code>--enhance-note TEXT</code></td>
+<td>—</td>
+<td>Free-text direction for the enhancer, e.g. <code>"at night, in the rain"</code> (up to 300 characters). Implies <code>--enhance</code></td>
+</tr>
+<tr>
 <td><code>--no-enhance</code></td>
 <td>—</td>
 <td>Disable enhancement, including prompt-file <code>enhance:</code> entries</td>
@@ -1322,8 +1327,14 @@ ziv ui [options]       # Same as ziv-ui
 <td><code>action</code>, <code>camera-move</code>, <code>pacing</code></td>
 <td><code>action</code></td>
 </tr>
+<tr>
+<td><code>sound</code> (<code>ziv-video</code> only, used with audio on, macOS only)</td>
+<td><code>ambient</code>, <code>effects</code>, <code>dialogue</code>, <code>music</code></td>
+<td>none</td>
+</tr>
 </tbody>
 </table>
+<p>The free-text direction is not part of the spec; pass it with <code>--enhance-note</code>.</p>
 <p>See <a href="../../guides/prompts/#enhancing-prompts">Enhancing Prompts</a>.</p>
 <p>The <code>ideo</code> alias selects Ideogram 4 (<code>ideogram-ai/ideogram-4-fp8</code>), a macOS/MLX-only image model. Its width and height must be in the 256–2048 range and multiples of 16. Size presets that exceed this range — <code>--size xl</code> with <code>--ratio 16:9</code> or <code>--ratio 9:16</code> (2112 px) — are rejected before the model loads, as are <code>--image</code> and <code>--upscale</code> (both require img2img, which Ideogram 4 does not support).</p>
 <h2 id="ziv-video-video-generation"><code>ziv-video</code> — Video Generation</h2>
@@ -1401,7 +1412,7 @@ ziv ui [options]       # Same as ziv-ui
 <tr>
 <td><code>--low-memory</code> / <code>--no-low-memory</code></td>
 <td>enabled</td>
-<td>Low-memory mode for LTX</td>
+<td>Low-memory mode for LTX. On macOS with 24 GB of memory or less it also streams the transformer from disk, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. <code>--no-low-memory</code> turns that off too</td>
 </tr>
 <tr>
 <td><code>--upscale</code></td>
@@ -1411,7 +1422,7 @@ ziv ui [options]       # Same as ziv-ui
 <tr>
 <td><code>--audio</code> / <code>--no-audio</code></td>
 <td>enabled</td>
-<td>Include or strip audio in video output</td>
+<td>Include or strip audio in video output. macOS only; Windows/Linux videos have no audio track</td>
 </tr>
 <tr>
 <td><code>--lora</code></td>
@@ -1436,7 +1447,12 @@ ziv ui [options]       # Same as ziv-ui
 <tr>
 <td><code>--enhance [SPEC]</code></td>
 <td>disabled</td>
-<td>Rewrite each prompt with a local LLM before the model loads (see the <code>--enhance</code> spec above; <code>motion</code> is allowed)</td>
+<td>Rewrite each prompt with a local LLM before the model loads (see the <code>--enhance</code> spec above; <code>motion</code> and <code>sound</code> are allowed)</td>
+</tr>
+<tr>
+<td><code>--enhance-note TEXT</code></td>
+<td>—</td>
+<td>Free-text direction for the enhancer (up to 300 characters). Implies <code>--enhance</code></td>
 </tr>
 <tr>
 <td><code>--no-enhance</code></td>

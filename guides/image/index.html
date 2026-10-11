@@ -1432,6 +1432,7 @@ ziv-image -m krea2 -q 4 --prompt &quot;a portrait&quot;
 ziv-image -m my-model --prompt &quot;Cyberpunk cityscape&quot; --image sketch.png --image-strength 0.8
 </code></pre>
 <p>The reference image is automatically resized to match target dimensions. Works on macOS, Windows, and Linux.</p>
+<p>In the Web UI, <strong>Use as reference</strong> (<code>E</code>) in the asset viewer opens an image as the reference for img2img or img2vid and loads its prompt too, replacing an Enhanced prompt made for the previous one.</p>
 <h2 id="lora-support">LoRA Support</h2>
 <p>Both platforms support LoRA weights. Place <code>.safetensors</code> files in <code>~/.ziv/loras/</code>:</p>
 <pre><code class="language-bash"># Single LoRA at default weight (1.0)
@@ -1558,7 +1559,7 @@ ziv-image -m my-model -q 8    # 8-bit quantization
 <li>
 <p>The copy holds the base model only. LoRAs are applied on top of it when a job loads.</p>
 </li>
-<li>It is replaced automatically when the source model's weights change (including a new download of an alias's Hugging Face repo) or the software that creates it is updated.</li>
+<li>It is replaced automatically when the source model's weights change (including a new download of an alias's Hugging Face repo) or the software that creates it is updated. After an update that changes the quantization code (for example a new mflux version on macOS), the next q8 or q4 job of each model rebuilds its copy once, which takes the extra time and disk space of a first run.</li>
 <li>It is listed on the Models page as <em>q8 copy of &lt;name&gt;</em>, where you can delete it to free disk space. It does not appear in the model picker: choose the base model and a quantize level.</li>
 <li>Deleting a model on the Models page, or an alias's Hugging Face download, also deletes its copies.</li>
 <li>Stopping a job while the copy is being saved takes effect once the current save step finishes. The copy is then discarded and the next job tries again.</li>
@@ -1591,7 +1592,7 @@ ziv-image -m my-model --prompt &quot;a sunset&quot; --no-sharpen           # dis
 <p>The asset viewer's <strong>Details</strong> show the amounts an image was made with, including the pre-sharpen of an upscale.</p>
 <h2 id="output-files">Output Files</h2>
 <p>Images are saved as <code>&lt;set name&gt;_&lt;YYYY-MM-DD_HH-MM-SS&gt;.png</code> (for example <code>portrait_2026-10-04_14-03-22.png</code>), with <code>_2</code>, <code>_3</code>… added when that name is already taken, so no file is overwritten. Videos follow the same pattern with their format's extension.</p>
-<p>The settings each file was made with are embedded in it: prompt, negative prompt, model and family, seed, steps, guidance, scheduler, size, LoRAs, reference image and strength, quantization, generation time, upscale factor/denoise/steps, and the sharpen, contrast and saturation amounts. The Web UI asset viewer shows them under <strong>Details</strong> (<strong>I</strong>), and <strong>Reuse settings</strong> loads them into the Workspace.</p>
+<p>The settings each file was made with are embedded in it: prompt, negative prompt, model and family, seed, steps, guidance, scheduler, size, LoRAs, reference image and strength, quantization, generation time, upscale factor/denoise/steps, and the sharpen, contrast and saturation amounts. The Web UI asset viewer shows them under <strong>Details</strong> (<strong>I</strong>), and <strong>Reuse settings</strong> loads them into the Workspace. Paths inside your home folder, such as LoRAs, models and reference images, are recorded as <code>~/…</code>, so a shared file does not show your user name; the prompt is stored as written.</p>
 <h2 id="keyboard-shortcuts">Keyboard Shortcuts</h2>
 <p>During batch generation:</p>
 <table>
