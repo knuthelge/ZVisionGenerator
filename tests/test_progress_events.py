@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from PIL import Image
 import pytest
 
-from zvisiongenerator.core.progress_events import preview_milestone_steps
+from zvisiongenerator.core.progress_events import preview_milestone_steps, run_workflow_with_progress
+from zvisiongenerator.core.types import StageOutcome
+from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.workflows.image_stages import _emit_step_progress
 
 
@@ -36,3 +40,25 @@ def test_stage_step_progress_forwards_preview_images():
     assert "preview" not in events[0]
     assert events[1]["preview"] is preview
     assert events[1]["phase"] == "image_generate"
+
+
+@dataclass
+class _StageRequest:
+    step_callback: object = None
+
+
+def test_workflow_started_lists_every_stage_name_in_order():
+    def text_to_image_stage(request, artifacts):
+        return StageOutcome.success
+
+    def upscale_stage(request, artifacts):
+        return StageOutcome.success
+
+    events: list[dict] = []
+    workflow = GenerationWorkflow(name="dynamic", stages=[text_to_image_stage, upscale_stage])
+
+    run_workflow_with_progress(workflow, _StageRequest(), object(), progress_callback=events.append, event_context={})
+
+    started = next(event for event in events if event["type"] == "workflow_started")
+    assert started["stage_names"] == ["text_to_image", "upscale"]
+    assert started["total_stages"] == 2

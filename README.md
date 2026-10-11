@@ -26,7 +26,7 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 - **Reference images** — img2img steering from any starting image
 - **Model variants** — image quantization across supported image backends, plus macOS MLX video Q4/Q8 aliases
 - **Post-processing** — contrast, saturation, and CAS sharpening (image only)
-- **Interactive controls** — skip, quit, pause, and repeat during batch runs (image only)
+- **Interactive controls** — skip, quit, pause, and repeat during image batch runs; Web UI video jobs can be cancelled
 
 ## Platform Support
 

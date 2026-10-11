@@ -7,9 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
+- Web UI: video jobs can be cancelled with Cancel or `Esc` twice, also while their prompts are rewritten
 - Windows/Linux: RTX 50-series (Blackwell) GPUs are supported
 
 ### Changed
+- Web UI: redesigned job card with a progress bar for the whole job, how long queueing, prompt enhancement and model loading took, a larger live preview, the step percentage, and a separate bar for the upscale pass. It says when a pause or skip is waiting to take effect and when a file is being written after the last step
+- Web UI: `Esc` stops the running job only when pressed twice; the Cancel button still stops it at once
 - Web server and shared libraries updated (FastAPI 0.143, uvicorn 0.54, python-multipart 0.0.32, Pillow 12.3, huggingface-hub ≥1.32)
 - Building the web frontend from source needs Node.js 22.22.2+, 24.15+ or 26+ (contributors only; the packaged app is unaffected)
 - Windows/Linux: torch 2.14 with CUDA 13.0, diffusers 0.41.0, transformers 5.19, accelerate 1.15, bitsandbytes 0.50, peft 0.21; images can differ slightly for the same seed
@@ -26,6 +29,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Windows/Linux: `hf-transfer` is no longer installed; downloads use Xet. Set `HF_XET_HIGH_PERFORMANCE=1` instead of `HF_HUB_ENABLE_HF_TRANSFER` for faster downloads
 
 ### Fixed
+- Web UI: a failed job shows the server's reason (e.g. out of memory while loading the model) instead of "Job failed.", on the phase where it failed
+- Web UI: Pause and Skip are available while prompts are enhanced, and Pause while the model loads
+- Web UI: the upscale pass no longer shows the previous pass's last step (e.g. 10 of 10) before its own first step, and keeps the last live preview until it renders its own
+- Web UI: the step bar no longer flashes a dark gap between the finished steps and the step in progress
 - Videos keep their recorded settings, so the gallery shows their model, size and seed
 - macOS: video clips have the requested number of frames
 - Windows/Linux: LTX-2.3 video failed to load (`cannot import name 'Gemma4UnifiedForConditionalGeneration'`) because the installed transformers was too old

@@ -4,6 +4,8 @@ import type { SSESubscription } from '$lib/api/sse';
 import { ApiError } from '$lib/api/client';
 import { cancelJob, clearQueue, getJobSnapshot, jobPreviewUrl, listJobs } from '$lib/api/workspace';
 import { clearActiveJobId, readActiveJobId, writeActiveJobId } from './activeJobStorage';
+import { initialPhase, trackJobEvent } from './jobPhases';
+import { isSteppedStage } from './jobView';
 
 let _job = $state<ActiveJobState | null>(null);
 // Generation jobs waiting behind the active one, oldest first (from the server; shared by every tab).
@@ -185,7 +187,9 @@ function makeInitialJobState(ctx: JobContext): ActiveJobState {
     paused: false,
     message: 'Waiting for worker allocation...',
     outputs: [],
-    previewUrl: null
+    previewUrl: null,
+    ...initialPhase('queued', ctx.created_at),
+    connection: 'live',
   };
 }
 
@@ -222,8 +226,20 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     message: isPaused ? 'Job paused. Resume to continue.' : (statusMessage || 'Reconnected to active job.'),
     ...promptProgress(lastEvent),
     outputs: dedupeOutputs(snapshot.outputs ?? []),
-    previewUrl: previewUrlFor(snapshot.job_id ?? snapshot.id, snapshot.preview_version)
+    previewUrl: previewUrlFor(snapshot.job_id ?? snapshot.id, snapshot.preview_version),
+    ...initialPhase(snapshot.status, snapshot.created_at, lastEvent),
+    connection: 'live',
   };
+}
+
+/** The server's reason for a failure, from a `job_failed` event or snapshot; a generic line when it gave none. */
+function failureMessage(event: Record<string, unknown> | null | undefined): string {
+  return eventFieldString(event, 'message').trim() || 'Job failed.';
+}
+
+/** Apply the phase, timing and queued-control bookkeeping every event carries. */
+function track(type: string, event: unknown): void {
+  if (_job) _job = trackJobEvent(_job, type, event as Record<string, unknown>, Date.now());
 }
 
 function isTerminalStatus(status: string): boolean {
@@ -263,8 +279,13 @@ function applyStatusEvent(type: string, event: SSEEvent): void {
     ...(type === 'prompt_started' ? { currentStep: 0, totalSteps: 0, stageName: '', stageIndex: 0, message: 'Preparing generation.', enhancedPrompt: undefined, enhanceStatus: eventEnhanceStatus(data) } : {}),
     ...(type === 'prompts_enhancing' ? { stageName: 'enhancing_prompts', currentStep: Math.max(0, eventFieldNumber(data, 'index') - 1), totalSteps: eventFieldNumber(data, 'total') } : {}),
     ...(type === 'preflight_finished' ? { currentStep: 0, totalSteps: 0, stageName: '' } : {}),
-    ...(type === 'workflow_stage_started' ? { stageName: eventFieldString(data, 'stage_name') } : {}),
-    ...((type === 'prompt_started' || type === 'workflow_stage_started') && !isReplayedBeforeSnapshot(data) ? { previewUrl: null } : {}),
+    // A new denoising pass (e.g. the upscale) starts its own step count; the last pass's count must not show as its own.
+    ...(type === 'workflow_stage_started' ? {
+      stageName: eventFieldString(data, 'stage_name'),
+      ...(isSteppedStage(eventFieldString(data, 'stage_name')) ? { currentStep: 0, totalSteps: 0 } : {}),
+    } : {}),
+    // A new stage keeps the last preview until it sends its own.
+    ...(type === 'prompt_started' && !isReplayedBeforeSnapshot(data) ? { previewUrl: null } : {}),
     ...(type === 'job_started' ? { status: 'running' as const } : {}),
   };
 }
@@ -303,6 +324,7 @@ function attachJobEvents(jobId: string): void {
     onStep(event) {
       _recoveryAttempts = 0;
       if (!_job) return;
+      track('step_progress', event);
       const ev = event as unknown as StepEvent;
       _job = {
         ..._job,
@@ -322,6 +344,7 @@ function attachJobEvents(jobId: string): void {
     },
     onGenerationFinished(event) {
       if (!_job) return;
+      track('generation_finished', event);
       const asset = event.status === 'success' && isGalleryAsset(event.asset) ? event.asset : null;
       const outputs = asset
         ? dedupeOutputs([..._job.outputs, asset])
@@ -344,26 +367,35 @@ function attachJobEvents(jobId: string): void {
       };
     },
     onJobCompleted(event) {
+      track('job_completed', event);
       finishCompleted((event as { outputs?: unknown }).outputs);
     },
-    onJobFailed() {
-      finishFailed('Job failed.');
+    onJobFailed(event) {
+      track('job_failed', event);
+      finishFailed(failureMessage(event as unknown as Record<string, unknown>));
     },
     onJobCancelled(event) {
+      track('job_cancelled', event);
       if ((event as { reason?: unknown }).reason === REMOVED_REASON) finishRemoved();
       else finishCancelled();
     },
-    onJobPaused() {
+    onJobPaused(event) {
       if (!_job) return;
+      track('job_paused', event);
       _job = { ..._job, status: 'paused', paused: true, message: 'Job paused. Resume to continue.' };
     },
-    onJobResumed() {
+    onJobResumed(event) {
       if (!_job) return;
+      track('job_resumed', event);
       _job = { ..._job, status: 'running', paused: false, message: 'Job resumed.' };
     },
     onStatus(type, event) {
       _recoveryAttempts = 0;
+      track(type, event);
       applyStatusEvent(type, event);
+    },
+    onReconnecting() {
+      if (_job && !isTerminalStatus(_job.status)) _job = { ..._job, connection: 'reconnecting' };
     },
     onClose() {
       _subscription = null;
@@ -474,7 +506,7 @@ async function recoverLostStream(jobId: string): Promise<void> {
       finishLost();
     } else {
       // Transient (network, 5xx, ...): keep the job and its stored id so a later attempt or reload can reattach.
-      _job = { ..._job!, message: 'Connection to the job lost. Retrying...' };
+      _job = { ..._job!, connection: 'reconnecting', message: 'Connection to the job lost. Retrying...' };
       scheduleRecovery(jobId);
     }
     return;
@@ -487,7 +519,7 @@ async function recoverLostStream(jobId: string): Promise<void> {
   } else if (snapshot.status === 'cancelled') {
     finishCancelled();
   } else if (snapshot.status === 'failed') {
-    finishFailed('Job failed.');
+    finishFailed(failureMessage(snapshot.last_event));
   } else {
     // Still running: reattach. The attempt count persists until an event arrives, so a stream that keeps failing backs off.
     connectSnapshot(snapshot);

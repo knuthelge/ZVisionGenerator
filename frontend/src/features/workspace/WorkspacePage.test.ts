@@ -1350,7 +1350,7 @@ describe('WorkspacePage', () => {
     expect(workspaceApiMocks.submitGenerate).toHaveBeenCalledTimes(2);
     expect(target.textContent).not.toContain('backend rejected first attempt');
     expect(jobStore.current?.job_id).toBe('job-retry');
-    expect(target.textContent).toContain('Retry prompt');
+    expect(target.querySelector('.job-card')).not.toBeNull();
   });
 
   it('keeps rendered workspace labels associated with controls across workflow states', async () => {
@@ -2261,9 +2261,9 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
   });
 
   it.each([
-    ['job_failed', 'Job failed.'],
-    ['job_cancelled', 'Job stopped.'],
-  ] as const)('adds generation_finished assets to the history before %s and keeps them afterward', async (terminal, terminalMessage) => {
+    ['job_failed', 'failed'],
+    ['job_cancelled', 'stopped'],
+  ] as const)('adds generation_finished assets to the history before %s and keeps them afterward', async (terminal, tone) => {
     await mountWorkspace(makeContext());
     target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
@@ -2281,7 +2281,7 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
 
     source.emit(terminal, { type: terminal, job_id: 'job-promo' });
     await settle();
-    expect(target.textContent).toContain(terminalMessage);
+    expect(target.querySelector(`.job-card[data-tone="${tone}"]`)).not.toBeNull();
     expect(target.querySelector(`.history-strip img[src="${output.thumbnail_url || output.url}"]`)).not.toBeNull();
   });
 

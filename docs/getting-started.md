@@ -112,7 +112,9 @@ Workspace settings are remembered in the browser between visits and restarts, as
 
 To run the same job from a terminal, press the terminal button in the *Settings* header. It copies a `ziv image` or `ziv video` command with the current model, prompt, LoRAs and settings, writing to the Web UI's output folder. The CLI has no inline negative prompt and runs every prompt in a prompts file rather than only the selected ones, so a notice says when the copied command differs from what Generate would run; an uploaded reference image is named by its file name, so replace it with the file's path.
 
-To give the preview more room, collapse the Compose and Settings sidebar with the **«** button next to *Compose*. It folds into a narrow strip with an expand button and a Generate button, and the choice is remembered in the browser. On phone-width screens the sidebar always shows above the preview. While a job runs, its card shows the progress and controls on the left and the live preview and outputs on the right.
+To give the preview more room, collapse the Compose and Settings sidebar with the **«** button next to *Compose*. It folds into a narrow strip with an expand button and a Generate button, and the choice is remembered in the browser. On phone-width screens the sidebar always shows above the preview.
+
+While a job runs, its card shows the progress, the time left and a live preview of the current image. **Pause** and **Cancel** are at the top of the card; **Skip** and **Repeat** are next to the current image. Pause and Repeat wait until the current image is finished, while Skip and Cancel stop it at its next step. If a job fails, the card shows why. Finished images appear in the history strip.
 
 The workspace model picker and the Models page show whether each model is already downloaded; models that are not yet downloaded download on first use. They also show whether a downloaded model fits this machine's memory. On macOS this is compared with the GPU memory Apple recommends for the machine:
 
@@ -152,7 +154,7 @@ Workspace:
 | `Alt+3` | Focus the newest history tile (expands the strip; `←` / `→` move between tiles) |
 | `Alt+⇧+1` / `Alt+⇧+2` | Show or hide the sidebar (focuses the prompt / the settings when shown) |
 | `Alt+⇧+3` | Show or hide the history strip (focuses the newest tile when shown) |
-| `Esc` | Stop the running job |
+| `Esc` `Esc` | Stop the running job (press twice) |
 | `P` | Pause or resume the running job |
 | `N` | Skip to the next image |
 | `R` | Repeat the current image |

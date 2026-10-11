@@ -17,7 +17,7 @@ STARTED_EVENT = "job_started"
 # ``reason`` of a ``job_cancelled`` event for a job removed from the queue before it started.
 REMOVED_REASON = "removed"
 IMAGE_SUPPORTED_CONTROLS = ("next", "pause", "resume", "repeat", "quit")
-VIDEO_SUPPORTED_CONTROLS: tuple[str, ...] = ()
+VIDEO_SUPPORTED_CONTROLS = ("quit",)
 UPSCALE_SUPPORTED_CONTROLS = ("quit",)
 
 

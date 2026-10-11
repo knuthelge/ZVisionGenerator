@@ -1,0 +1,185 @@
+import { describe, expect, it } from 'vitest';
+
+import type { ActiveJobState } from '$lib/types';
+import {
+  etaLabel, formatClock, headline, itemActivity, itemFraction, iterations, jobBar, jobControls, jobTone, outcome, phaseRows, positionLabel,
+  readySummary, stageBars, timeLeft
+} from './jobView';
+
+const IMAGE_CONTROLS = ['next', 'pause', 'resume', 'repeat', 'quit'];
+
+function job(overrides: Partial<ActiveJobState> = {}): ActiveJobState {
+  return {
+    job_id: 'j', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '', status: 'running', phase: 'generate',
+    currentStep: 0, totalSteps: 28, elapsed: 0, remaining: 0, stageName: '', stageIndex: 0, batchLabel: '', batchIndex: 0,
+    paused: false, message: '', outputs: [], previewUrl: null, supported_controls: IMAGE_CONTROLS, ...overrides,
+  };
+}
+
+const batch = (overrides: Partial<ActiveJobState> = {}) => job({ runs: 8, promptCount: 3, promptNumber: 2, batchIndex: 2, ...overrides });
+
+describe('jobView', () => {
+  it('places the current item in the batch from its run and prompt', () => {
+    expect(iterations(batch())).toEqual({ total: 24, index: 7, done: 7 });
+    expect(iterations(batch({ itemFinished: true })).done).toBe(8);
+    expect(iterations(job({ phase: 'enhance', runs: 4 })).index).toBe(0);
+  });
+
+  describe('headline', () => {
+    it.each([
+      ['a waiting job', job({ status: 'queued', phase: 'queue' }), 'Waiting to start'],
+      ['a rewrite', job({ phase: 'enhance', stageName: 'enhancing_prompts', currentStep: 1, totalSteps: 4 }), 'Enhancing prompt 2 of 4'],
+      ['a first-use model prep', job({ phase: 'load', loadQuant: 8 }), 'Preparing the model'],
+      ['a batch item', batch(), 'Generating image 8 of 24'],
+      ['the upscale pass', batch({ stageNames: ['text_to_image', 'upscale'], stageName: 'upscale' }), 'Upscaling image 8 of 24'],
+      ['a pause between images', batch({ status: 'paused', paused: true, itemFinished: true }), 'Paused after image 8 of 24'],
+      ['a pause before the first image', batch({ status: 'paused', paused: true, batchIndex: 0, promptNumber: 1 }), 'Paused before image 1 of 24'],
+      ['a failure while loading', job({ status: 'failed', phase: 'load' }), 'Failed while loading the model'],
+      ['a failure on an item', batch({ status: 'failed' }), 'Failed on image 8 of 24'],
+      ['a stop during enhancement', job({ status: 'cancelled', phase: 'enhance' }), 'Stopped while enhancing prompts'],
+      ['a stop mid-batch', batch({ status: 'cancelled', itemFinished: true }), 'Stopped after 8 of 24 images'],
+      ['a lost connection', batch({ connection: 'reconnecting' }), 'Reconnecting…'],
+      ['a video', job({ workflow: 'txt2vid' }), 'Generating video'],
+    ])('describes %s', (_, state, text) => {
+      expect(headline(state)).toBe(text);
+    });
+  });
+
+  describe('controls', () => {
+    it('splits job and item controls while generating a batch', () => {
+      expect(jobControls(batch())).toEqual({ job: ['pause', 'quit'], item: ['next', 'repeat'] });
+    });
+
+    it('offers no Skip for a single item', () => {
+      expect(jobControls(job()).item).toEqual(['repeat']);
+    });
+
+    it('follows what the server honours in each phase', () => {
+      expect(jobControls(job({ status: 'queued', phase: 'queue' }))).toEqual({ job: ['quit'], item: [] });
+      expect(jobControls(job({ phase: 'enhance', stageName: 'enhancing_prompts', currentStep: 0, totalSteps: 3 }))).toEqual({ job: ['pause', 'quit'], item: ['next'] });
+      expect(jobControls(job({ phase: 'load' }))).toEqual({ job: ['pause', 'quit'], item: [] });
+      expect(jobControls(batch({ status: 'paused', paused: true }))).toEqual({ job: ['resume', 'quit'], item: [] });
+      expect(jobControls(job({ workflow: 'upscale', supported_controls: ['quit'] }))).toEqual({ job: ['quit'], item: [] });
+      expect(jobControls(batch({ workflow: 'txt2vid', supported_controls: ['quit'] }))).toEqual({ job: ['quit'], item: [] });
+      expect(jobControls(batch({ status: 'completed' }))).toEqual({ job: [], item: [] });
+    });
+  });
+
+  describe('job bar', () => {
+    it('gives each item a segment, marks run boundaries and fills the current one by step', () => {
+      const bar = jobBar(job({ runs: 2, promptCount: 2, promptNumber: 1, batchIndex: 1, currentStep: 7, totalSteps: 28 }));
+      expect(bar.kind === 'segments' && bar.segments.map((s) => [s.state, s.runBreak, s.fill])).toEqual([
+        ['done', false, 1], ['done', false, 1], ['now', true, 0.25], ['pending', false, 0],
+      ]);
+    });
+
+    it('marks the failed item and leaves no current item once the job ended', () => {
+      const bar = jobBar(job({ runs: 3, batchIndex: 1, status: 'failed' }));
+      expect(bar.kind === 'segments' && bar.segments.map((s) => s.state)).toEqual(['done', 'failed', 'pending']);
+    });
+
+    it('becomes one bar above 48 items', () => {
+      expect(jobBar(job({ runs: 200, batchIndex: 50, currentStep: 14 }))).toEqual({ kind: 'bar', fraction: 50.5 / 200 });
+    });
+
+    it('fills a single item by its progress', () => {
+      expect(jobBar(job({ currentStep: 7 }))).toEqual({ kind: 'bar', fraction: 0.25 });
+    });
+  });
+
+  describe('stages', () => {
+    const upscaling = { stageNames: ['resolve_prompt', 'text_to_image', 'upscale', 'save_image'], stageSteps: { text_to_image: 28, upscale: 12 } };
+
+    it('shows a bar per stepped stage only when an item has more than one', () => {
+      expect(stageBars(job({ stageNames: ['resolve_prompt', 'text_to_image', 'save_image'] }))).toEqual([]);
+      expect(stageBars(job({ ...upscaling, stageName: 'text_to_image', currentStep: 14, totalSteps: 28 })).map((bar) => bar.state)).toEqual(['current', 'next']);
+      expect(stageBars(job({ ...upscaling, stageName: 'upscale', currentStep: 6, totalSteps: 12 })).map((bar) => [bar.label, bar.state, bar.total])).toEqual([
+        ['Generate', 'done', 28], ['Upscale', 'current', 12],
+      ]);
+    });
+
+    it('counts each stage of the item equally', () => {
+      expect(itemFraction(job({ ...upscaling, stageName: 'text_to_image', currentStep: 14, totalSteps: 28 }))).toBe(0.25);
+      expect(itemFraction(job({ ...upscaling, stageName: 'upscale', currentStep: 6, totalSteps: 12 }))).toBe(0.75);
+    });
+  });
+
+  it('lists the run log with the ended phase marked', () => {
+    const rows = phaseRows(job({ status: 'failed', phase: 'load', enhanceTotal: 0, phaseMarks: { queue: { start: 0, end: 2 }, load: { start: 2, end: 9 } } }));
+    expect(rows.map((row) => [row.key, row.status, row.secs ?? null, row.detail])).toEqual([
+      ['queue', 'done', 2, ''], ['load', 'failed', 7, 'zit'], ['generate', 'pending', null, 'Not started'],
+    ]);
+  });
+
+  it('lists prompt enhancement only for a job that rewrites prompts', () => {
+    expect(phaseRows(job({ phase: 'load', enhanceTotal: 0 })).map((row) => row.key)).toEqual(['queue', 'load', 'generate']);
+    expect(phaseRows(job({ phase: 'load', enhanceTotal: 2 })).map((row) => [row.key, row.status])).toEqual([
+      ['queue', 'done'], ['enhance', 'done'], ['load', 'current'], ['generate', 'pending'],
+    ]);
+  });
+
+  describe('item activity', () => {
+    const upscaled = { stageNames: ['resolve_prompt', 'text_to_image', 'upscale', 'save_image'] };
+
+    it.each([
+      ['before the first step', job({ totalSteps: 0 }), 'starting'],
+      ['while steps run', job({ currentStep: 3 }), 'stepping'],
+      ['after the last step, while the file is written', job({ currentStep: 28 }), 'finishing'],
+      ['in a stage after the steps (saving)', job({ ...upscaled, stageName: 'save_image', stageSteps: { text_to_image: 28, upscale: 12 }, currentStep: 12, totalSteps: 12 }), 'finishing'],
+      ['after the generate pass, before the upscale pass', job({ ...upscaled, stageName: 'text_to_image', currentStep: 28 }), 'starting'],
+      ['between the two passes of an upscaled video', job({ workflow: 'txt2vid', stepPhase: 'video_upscale_stage_1', currentStep: 30, totalSteps: 30 }), 'starting'],
+    ] as const)('is %s', (_, state, activity) => {
+      expect(itemActivity(state)).toBe(activity);
+    });
+
+    it('counts a finishing item as complete in the job bar', () => {
+      expect(itemFraction(job({ currentStep: 28 }))).toBe(1);
+    });
+  });
+
+  it('leaves out prompt enhancement for gallery upscales', () => {
+    expect(phaseRows(job({ workflow: 'upscale' })).map((row) => row.key)).toEqual(['queue', 'load', 'generate']);
+  });
+
+  it('folds the setup phases into one Ready line, without durations it does not know', () => {
+    const marks = { queue: { start: 0, end: 1 }, enhance: { start: 1, end: 23 }, load: { start: 23, end: 37 } };
+    expect(readySummary(job({ enhanceTotal: 3, phaseMarks: marks }))).toEqual({ parts: ['queued 0:01', '3 prompts enhanced 0:22', 'model loaded 0:14'], secs: 37, warn: false });
+    expect(readySummary(job({ enhanceStatus: 'failed' }))).toEqual({ parts: ['queued', 'model loaded'], secs: undefined, warn: true });
+  });
+
+  it('says where the item sits, or what runs next when paused between items', () => {
+    expect(positionLabel(batch())).toBe('Prompt 2 of 3 · run 3 of 8');
+    expect(positionLabel(batch({ status: 'paused', paused: true, itemFinished: true }))).toBe('Next: prompt 3 of 3 · run 3 of 8');
+    expect(positionLabel(job({ runs: 4 }))).toBe('Run 1 of 4');
+  });
+
+  it('gives an estimate only for running multi-item jobs', () => {
+    expect(etaLabel(batch({ remaining: 1104 }))).toBe('About 18 min left');
+    expect(etaLabel(batch())).toBe('Estimate after the first image');
+    expect(etaLabel(job({ remaining: 300 }))).toBe('');
+    expect(etaLabel(batch({ remaining: 600, status: 'paused', paused: true }))).toBe('');
+    expect(timeLeft(30)).toBe('Under a minute left');
+    expect(timeLeft(7210)).toBe('About 2 h 0 min left');
+  });
+
+  it('counts what an ended job saved and what never ran', () => {
+    const asset = { id: 'a' } as ActiveJobState['outputs'][number];
+    expect(outcome(batch({ status: 'failed', message: 'CUDA out of memory.', outputs: Array(7).fill(asset) }))).toEqual({
+      text: 'CUDA out of memory.', error: true, saved: '7 of 24 saved to History · 16 not run',
+    });
+    expect(outcome(job({ status: 'cancelled', message: 'Job stopped.' }))).toEqual({ text: 'You stopped the job.', error: false, saved: 'Nothing saved' });
+    expect(outcome(batch())).toBeNull();
+  });
+
+  it('tones the job by status, connection and phase', () => {
+    expect(jobTone(job({ phase: 'load' }))).toBe('preparing');
+    expect(jobTone(batch({ connection: 'reconnecting' }))).toBe('stale');
+    expect(jobTone(batch({ status: 'cancelled' }))).toBe('stopped');
+  });
+
+  it('formats clocks from seconds', () => {
+    expect(formatClock(75)).toBe('1:15');
+    expect(formatClock(3725)).toBe('1:02:05');
+    expect(formatClock(Number.NaN)).toBe('0:00');
+  });
+});

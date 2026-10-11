@@ -123,7 +123,9 @@ def run_workflow_with_progress(
     if total_stages == 0:
         return StageOutcome.success
 
-    emit_progress(progress_callback, "workflow_started", total_stages=total_stages, stage_name=_stage_label(stages[0]), **event_context)
+    # stage_names lets clients show stages that have not started yet (e.g. an upscale pass after generation).
+    stage_names = [_stage_label(stage) for stage in stages]
+    emit_progress(progress_callback, "workflow_started", total_stages=total_stages, stage_name=stage_names[0], stage_names=stage_names, **event_context)
 
     for stage_index, stage in enumerate(stages, start=1):
         stage_name = _stage_label(stage)

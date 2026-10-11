@@ -22,6 +22,8 @@ export function connectJobSSE(
     onClose?: () => void;
     /** The stream closed for good without a terminal event (e.g. 404 after a server restart or job pruning). */
     onStreamLost?: () => void;
+    /** The stream dropped and the browser is reconnecting; the next event means it is live again. */
+    onReconnecting?: () => void;
   }
 ): SSESubscription {
   const es = new EventSource(`/jobs/${jobId}/events`);
@@ -50,6 +52,9 @@ export function connectJobSSE(
       case 'prompt_enhance_failed':
       case 'preflight_finished':
       case 'job_started':
+      case 'workflow_started':
+      case 'generation_repeat':
+      case 'control_queued':
         handlers.onStatus?.(type, data);
         break;
       case 'generation_finished': {
@@ -75,7 +80,7 @@ export function connectJobSSE(
 
   }
 
-  const eventTypes = ['prompt_started', 'step_progress', 'batch_completed', 'job_completed', 'job_failed', 'job_cancelled', 'progress_text', 'job_paused', 'job_resumed', 'model_loading', 'batch_started', 'workflow_stage_started', 'workflow_stage_completed', 'generation_finished', 'enhancer_loading', 'prompt_enhanced', 'preflight_started', 'prompts_enhancing', 'prompt_enhance_failed', 'preflight_finished', 'job_started'];
+  const eventTypes = ['prompt_started', 'step_progress', 'batch_completed', 'job_completed', 'job_failed', 'job_cancelled', 'progress_text', 'job_paused', 'job_resumed', 'model_loading', 'batch_started', 'workflow_stage_started', 'workflow_stage_completed', 'generation_finished', 'enhancer_loading', 'prompt_enhanced', 'preflight_started', 'prompts_enhancing', 'prompt_enhance_failed', 'preflight_finished', 'job_started', 'workflow_started', 'generation_repeat', 'control_queued'];
   eventTypes.forEach(type => {
     es.addEventListener(type, (event: Event) => {
       try {
@@ -99,7 +104,12 @@ export function connectJobSSE(
   // transient failure. A non-200 response instead closes it permanently
   // (readyState CLOSED, no retry), so hand recovery to the caller.
   es.onerror = () => {
-    if (closed || es.readyState !== EventSource.CLOSED) return;
+    if (closed) return;
+    if (es.readyState === EventSource.CONNECTING) {
+      handlers.onReconnecting?.();
+      return;
+    }
+    if (es.readyState !== EventSource.CLOSED) return;
     close();
     handlers.onStreamLost?.();
   };

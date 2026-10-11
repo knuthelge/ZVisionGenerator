@@ -6,7 +6,7 @@ import argparse
 import logging
 import time
 import warnings
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.core.job_plan import JobPlan
 from zvisiongenerator.core.progress_events import ProgressCallback
@@ -20,7 +20,37 @@ from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorki
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 
+if TYPE_CHECKING:
+    from zvisiongenerator.utils.interactive import SkipSignal
+
 logger = logging.getLogger(__name__)
+
+
+class _VideoCancelled(Exception):
+    """Raised from a step callback to stop a running video when Quit is queued."""
+
+
+def _quit_requested(skip_signal: SkipSignal | None) -> bool:
+    """Return whether Quit is queued on *skip_signal*."""
+    return skip_signal is not None and skip_signal.pending() == "quit"
+
+
+def _cancellable_step_callback(step_callback: ProgressCallback | None, skip_signal: SkipSignal | None) -> ProgressCallback | None:
+    """Wrap *step_callback* so a queued Quit stops the denoising loop at its next step.
+
+    Both video backends call the step callback from their denoising loop, so raising there ends the generation. The
+    diffusers latent upscaler reports only once, after it finishes, so a Quit during that pass applies when it ends.
+    """
+    if skip_signal is None:
+        return step_callback
+
+    def _callback(payload: dict[str, Any]) -> None:
+        if _quit_requested(skip_signal):
+            raise _VideoCancelled
+        if step_callback is not None:
+            step_callback(payload)
+
+    return _callback
 
 
 def run_video_batch(
@@ -34,8 +64,12 @@ def run_video_batch(
     *,
     plan: JobPlan,
     progress_callback: ProgressCallback | None = None,
+    skip_signal: SkipSignal | None = None,
 ) -> None:
     """Run the video batch generation loop.
+
+    A Quit queued on *skip_signal* stops the batch before the next video, or the running video at its next step; the
+    batch then ends with ``batch_cancelled``. Other actions are not supported for video and are ignored.
 
     Args:
         backend: Video backend instance (satisfies VideoBackend Protocol).
@@ -47,6 +81,7 @@ def run_video_batch(
         args: Parsed video CLI arguments.
         plan: Preflight plan with one iteration per run × prompt (seeds, resolved and enhanced prompts).
         progress_callback: Receives structured progress events.
+        skip_signal: Control signal of a Web UI job; only Quit is honoured.
 
     Raises:
         ValueError: When *plan* was cancelled or does not match the batch size.
@@ -72,6 +107,9 @@ def run_video_batch(
     for run_idx in range(args.runs):
         for set_name, prompts in prompts_data.items():
             for prompt_idx, (prompt, _) in enumerate(prompts):
+                if _quit_requested(skip_signal):
+                    _emit_cancelled(progress_callback, len(gen_times), total_iterations)
+                    return
                 ran_iterations += 1
                 avg = sum(gen_times) / len(gen_times) if gen_times else None
                 remaining = total_iterations - completed_iterations
@@ -139,16 +177,19 @@ def run_video_batch(
                     num_frames=args.num_frames,
                     seed=seed,
                     steps=args.steps,
-                    step_callback=_make_step_progress_callback(
-                        progress_callback,
-                        mode="video",
-                        run_index=run_idx,
-                        total_runs=args.runs,
-                        ran_iterations=ran_iterations,
-                        total_iterations=total_iterations,
-                        set_name=set_name,
-                        prompt_index=prompt_idx,
-                        total_prompts=len(prompts),
+                    step_callback=_cancellable_step_callback(
+                        _make_step_progress_callback(
+                            progress_callback,
+                            mode="video",
+                            run_index=run_idx,
+                            total_runs=args.runs,
+                            ran_iterations=ran_iterations,
+                            total_iterations=total_iterations,
+                            set_name=set_name,
+                            prompt_index=prompt_idx,
+                            total_prompts=len(prompts),
+                        ),
+                        skip_signal,
                     ),
                     image_path=getattr(args, "image_path", None),
                     upscale=getattr(args, "upscale", None),
@@ -190,6 +231,10 @@ def run_video_batch(
                         progress_callback=progress_callback,
                         event_context=event_context,
                     )
+                except _VideoCancelled:
+                    print("\n⏹ Video cancelled.")
+                    _emit_cancelled(progress_callback, len(gen_times), total_iterations)
+                    return
                 except Exception as exc:
                     logger.exception("Video generation failed")
                     warnings.warn(f"Video generation failed: {exc}", stacklevel=2)
@@ -227,3 +272,9 @@ def run_video_batch(
         total_iterations=total_iterations,
         total_time=total_time,
     )
+
+
+def _emit_cancelled(progress_callback: ProgressCallback | None, completed: int, total: int) -> None:
+    """Report that the batch stopped on Quit after *completed* of *total* videos."""
+    print("\n⏹ Quitting batch...")
+    _emit_progress(progress_callback, "batch_cancelled", mode="video", completed_iterations=completed, total_iterations=total)

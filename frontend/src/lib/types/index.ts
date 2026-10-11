@@ -591,7 +591,45 @@ export interface ActiveJobState extends JobContext {
   enhancedPrompt?: string;
   /** Outcome of auto enhancement for the current generation, planned before the model loaded. */
   enhanceStatus?: EnhanceStatus;
+  /** Where the job is in the server's phase order; unset until an event says. */
+  phase?: JobPhase;
+  /** Server timestamps (epoch seconds) at which each phase started and ended, for the setup durations. */
+  phaseMarks?: PhaseMarks;
+  /** Rewrites planned before the model loads; 0 when the job does not enhance prompts. */
+  enhanceTotal?: number;
+  /** Bits of the quantized copy the model load saves first (first use of a model only); unset for a plain load. */
+  loadQuant?: number;
+  /** The current item has finished (its generation_finished arrived); the next item has not started yet. */
+  itemFinished?: boolean;
+  /** Ordered workflow stages of the current item, e.g. ["text_to_image", "upscale"]. */
+  stageNames?: string[];
+  /** Step counts of the current item's stepped stages that have run, by stage name. */
+  stageSteps?: Record<string, number>;
+  /** Backend phase of the last step event, e.g. "image_upscale" or "video_upscale_stage_1". */
+  stepPhase?: string;
+  /** A control the server accepted that has not taken effect yet (pause waits for the current image). */
+  controlQueued?: JobControlAction | null;
+  /** 'reconnecting' while the event stream is down and the shown progress may be stale. */
+  connection?: 'live' | 'reconnecting';
+  /** Client time (ms since epoch) of the last event received. */
+  lastEventAt?: number;
+  /** Server clock minus client clock, in seconds, so live phase durations count from server timestamps. */
+  serverOffset?: number;
 }
+
+/** Server phase order of a job: queued, prompt enhancement, model load, then the generation loop. */
+export type JobPhase = 'queue' | 'enhance' | 'load' | 'generate';
+
+/** Epoch-second start and end of the setup phases, as reported by the server. */
+export interface PhaseMarks {
+  queue?: { start?: number; end?: number };
+  enhance?: { start?: number; end?: number };
+  load?: { start?: number; end?: number };
+  generate?: { start?: number; end?: number };
+}
+
+/** A job control the server accepts (`POST /jobs/{id}/controls/{action}`). */
+export type JobControlAction = 'pause' | 'resume' | 'next' | 'repeat' | 'quit';
 
 /** Per-iteration auto-enhancement outcome reported on `prompt_started`. */
 export type EnhanceStatus = 'off' | 'enhanced' | 'failed' | 'skipped';

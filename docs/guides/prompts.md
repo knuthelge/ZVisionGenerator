@@ -233,7 +233,7 @@ Jobs with auto enhancement rewrite every prompt before the model loads. In image
 - **Pause** (`p`) waits until you resume.
 - **Repeat** (`r`) has no effect.
 
-Video jobs have no Web UI controls; `ziv-video` can be stopped with Ctrl+C.
+Web UI video jobs offer only **Cancel**, which also stops the rewrites; `ziv-video` can be stopped with Ctrl+C.
 
 **Repeat** and automatic retries keep the image's `{a|b}` choices and enhanced prompt and only change the seed. The new seed is always random, even when a seed is set.
 

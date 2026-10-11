@@ -273,6 +273,10 @@
   .ui-btn[aria-pressed='true'], .ui-btn[aria-expanded='true'], .ui-btn-on,
   .ui-btn[aria-pressed='true']:hover:not(:disabled), .ui-btn[aria-expanded='true']:hover:not(:disabled), .ui-btn-on:hover:not(:disabled) { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); }
   .ui-btn kbd { font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 400; opacity: 0.7; }
+  /* A key chip, in text or on a button. */
+  .ui-kbd { display: inline-block; min-width: 16px; padding: 0 4px; border-radius: var(--radius-xs); background: var(--color-bg-surface-hover); font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 400; line-height: 16px; text-align: center; color: var(--color-text-muted); }
+  .ui-btn .ui-kbd { opacity: 1; }
+  .ui-btn-primary .ui-kbd { background: color-mix(in srgb, var(--color-primary-ink) 18%, transparent); color: var(--color-primary-ink); }
   /* The main action of a section (a bar, panel, form, dialog or popover): at most one per section. */
   .ui-btn-primary { background: var(--color-primary-main); color: var(--color-primary-ink); font-family: var(--font-heading); font-weight: 800; }
   .ui-btn-primary:hover:not(:disabled) { background: var(--color-primary-hover); color: var(--color-primary-ink); }
@@ -421,6 +425,9 @@
   .ui-alert-error { background: var(--color-error-surface); color: var(--color-error); }
   .ui-alert-success { background: var(--color-success-surface); color: var(--color-success); }
   .ui-alert-info { background: var(--color-primary-surface); color: var(--color-primary-main); }
+  /* A determinate bar on the .ui-range track; the fill follows --progress-color. */
+  .ui-progress { position: relative; height: 4px; overflow: hidden; border-radius: 9999px; background: var(--color-zinc-700); }
+  .ui-progress > .ui-progress-fill { display: block; height: 100%; border-radius: inherit; background: var(--progress-color, var(--color-primary-main)); transition: width 0.3s ease; }
 
   .ui-table { width: 100%; border-collapse: collapse; font-size: var(--text-ui); font-variant-numeric: tabular-nums; }
   .ui-table th { padding: 6px 8px; border-bottom: 1px solid var(--color-border-strong); text-align: left; white-space: nowrap; font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }

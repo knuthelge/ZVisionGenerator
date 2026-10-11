@@ -60,8 +60,9 @@ type EventPayload = dict[str, Any]
 
 logger = logging.getLogger(__name__)
 
-# Events that end the generation a live preview belongs to, so the stale preview is dropped.
-_PREVIEW_RESET_EVENT_TYPES = frozenset({"prompt_started", "workflow_stage_started", "generation_finished", *TERMINAL_EVENT_TYPES})
+# Events that end the generation a live preview belongs to, so the stale preview is dropped. A new workflow stage
+# (e.g. the upscale pass) keeps the previous stage's preview until it sends its own.
+_PREVIEW_RESET_EVENT_TYPES = frozenset({"prompt_started", "generation_finished", *TERMINAL_EVENT_TYPES})
 
 
 class JobConflictError(RuntimeError):
@@ -287,10 +288,12 @@ class WebRunner:
         admission_check: Callable[[], None] | None = None,
         context: dict[str, Any] | None = None,
     ) -> str:
-        """Queue the video job; the worker loads the model and runs the batch loop."""
+        """Queue the video job; the worker loads the model and runs the batch loop. Only Quit is supported."""
+        control_signal = SkipSignal()
         return self._submit_job(
             job_type="video",
             exclusive=True,
+            control_signal=control_signal,
             supported_controls=VIDEO_SUPPORTED_CONTROLS,
             context={"output_dir": getattr(args, "output", None), **(context or {})},
             admission_check=admission_check,
@@ -301,6 +304,7 @@ class WebRunner:
                 args=args,
                 model_ref=model_ref,
                 progress_callback=progress_callback,
+                control_signal=control_signal,
                 enhance_by_set=enhance_by_set,
             ),
         )
@@ -699,12 +703,25 @@ class WebRunner:
         args: argparse.Namespace,
         model_ref: str,
         progress_callback: Callable[[EventPayload], None],
+        control_signal: SkipSignal,
         enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
     ) -> None:
-        """Run preflight, then load the video model inside the worker thread and run the batch."""
+        """Run preflight, then load the video model inside the worker thread and run the batch; Quit stops either."""
         require_ffmpeg()
-        plan = run_preflight(prompts_data, config, args, mode="video", model_family=request.model_family, enhance_by_set=enhance_by_set, progress_callback=progress_callback)
+        plan = run_preflight(
+            prompts_data,
+            config,
+            args,
+            mode="video",
+            model_family=request.model_family,
+            enhance_by_set=enhance_by_set,
+            control=control_signal,
+            progress_callback=progress_callback,
+        )
         if plan.cancelled:
+            return
+        if control_signal.pending() == "quit":
+            progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": len(plan.iterations)})
             return
         progress_callback({"type": "model_loading", "mode": "video", "model": request.model_name or model_ref})
         backend = get_video_backend(request.model_family)
@@ -732,6 +749,7 @@ class WebRunner:
             args=args,
             plan=plan,
             progress_callback=progress_callback,
+            skip_signal=control_signal,
         )
 
     def _make_progress_callback(self, job_id: str) -> Callable[[EventPayload], None]:

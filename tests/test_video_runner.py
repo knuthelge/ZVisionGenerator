@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 from tests.conftest import _make_mock_video_backend, _make_video_args
 from zvisiongenerator.core.types import StageOutcome
+from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_runner import run_video_batch
 
@@ -211,3 +212,71 @@ class TestRunVideoBatch:
         assert finished_events[0]["filename"] == "clip.mp4"
         assert finished_events[0]["output_path"] == "/tmp/clip.mp4"
         assert finished_events[0]["generation_time"] == 0.25
+
+
+class TestVideoQuit:
+    """Verify a queued Quit stops a video batch before the next video or mid-video."""
+
+    @staticmethod
+    def _run(workflow, *, runs: int, skip_signal):
+        events: list[dict[str, object]] = []
+        args = _make_video_args(runs=runs, steps=8)
+        prompts = {"default": [("a sunset", None)]}
+        config: dict = {"generation": {"seed_min": 4, "seed_max": 100}}
+        run_video_batch(
+            _make_mock_video_backend(),
+            MagicMock(),
+            _ltx_model_info(),
+            workflow,
+            prompts,
+            config,
+            args,
+            progress_callback=events.append,
+            plan=_make_plan(prompts, args, config=config),
+            skip_signal=skip_signal,
+        )
+        return events
+
+    def test_quit_queued_before_a_video_stops_the_batch_without_running_it(self):
+        skip_signal = SkipSignal()
+        skip_signal.queue_action("quit")
+        workflow = MagicMock()
+
+        events = self._run(workflow, runs=2, skip_signal=skip_signal)
+
+        workflow.run.assert_not_called()
+        assert events[-1] == {"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 2}
+
+    def test_quit_stops_the_running_video_at_its_next_step_and_skips_the_rest(self):
+        skip_signal = SkipSignal()
+        steps_seen: list[int] = []
+
+        def _denoise(request, artifacts):
+            for step in range(1, 9):
+                if step == 3:
+                    skip_signal.queue_action("quit")
+                request.step_callback({"current_step": step, "total_steps": 8})
+                steps_seen.append(step)
+            return StageOutcome.success
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _denoise
+
+        events = self._run(workflow, runs=3, skip_signal=skip_signal)
+
+        assert steps_seen == [1, 2]
+        assert workflow.run.call_count == 1
+        assert not [event for event in events if event["type"] == "generation_finished"]
+        assert events[-1]["type"] == "batch_cancelled"
+        assert events[-1]["completed_iterations"] == 0
+
+    def test_other_actions_are_ignored_for_video(self):
+        skip_signal = SkipSignal()
+        skip_signal.queue_action("pause")
+        workflow = MagicMock()
+        workflow.run.return_value = StageOutcome.success
+
+        events = self._run(workflow, runs=2, skip_signal=skip_signal)
+
+        assert workflow.run.call_count == 2
+        assert events[-1]["type"] == "batch_completed"

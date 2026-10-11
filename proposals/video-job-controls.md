@@ -1,6 +1,8 @@
 # Controls for Web UI video jobs
 
-**Status:** Proposed (2026-10-04)
+**Status:** In progress (2026-10-11)
+
+Quit has shipped: Web UI video jobs get a control signal, preflight and `run_video_batch` honour Quit, and a running video stops at its next denoising step (the step callback raises). Next and Pause remain open.
 
 ## Problem
 

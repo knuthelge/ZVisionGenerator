@@ -222,7 +222,7 @@ class TestWebRunner:
     def test_submit_video_job_tracks_video_runner_progress(self, monkeypatch):
         """Video jobs should publish progress and terminal state from the wrapped runner."""
 
-        def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, plan, progress_callback):
+        def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, plan, progress_callback, skip_signal):
             progress_callback({"type": "batch_started", "mode": "video", "total_iterations": 1, "total_runs": 1})
             progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
 
@@ -345,7 +345,7 @@ class TestWebRunner:
     def test_submit_video_job_all_failed_batch_ends_failed(self, monkeypatch):
         """Video jobs with only failed generations should publish a failed terminal state."""
 
-        def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, plan, progress_callback):
+        def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, plan, progress_callback, skip_signal):
             progress_callback({"type": "batch_started", "mode": "video", "total_iterations": 1, "total_runs": 1})
             progress_callback({"type": "generation_finished", "mode": "video", "status": "failed"})
             progress_callback({"type": "batch_failed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
@@ -632,6 +632,33 @@ class TestWebRunner:
         finally:
             runner.shutdown()
 
+    def test_video_jobs_accept_quit_and_refuse_other_controls(self, monkeypatch):
+        """A running video job can be cancelled; its batch sees the queued Quit and ends the job."""
+        started = threading.Event()
+
+        def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, plan, progress_callback, skip_signal):
+            progress_callback({"type": "batch_started", "mode": "video", "total_iterations": 1, "total_runs": 1})
+            started.set()
+            while skip_signal.pending() != "quit":
+                time.sleep(0.01)
+            progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
+
+        monkeypatch.setattr(web_runner_module, "run_video_batch", _fake_run_video_batch)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            job_id = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args())
+            assert started.wait(timeout=1.0)
+            assert runner.get_job_snapshot(job_id)["supported_controls"] == ["quit"]
+
+            with pytest.raises(web_runner_module.UnsupportedJobControlError):
+                runner.queue_job_control(job_id, "pause")
+            assert runner.queue_job_control(job_id, "quit") == {"job_id": job_id, "action": "quit", "status": "queued"}
+
+            assert _wait_for_status(runner, job_id, "cancelled")["terminal_event"] == "job_cancelled"
+        finally:
+            runner.shutdown()
+
     def test_active_exclusive_snapshot_uses_public_job_shape(self, monkeypatch):
         """Reconnect consumers should see the same public snapshot shape for an active job."""
         started = threading.Event()
@@ -883,13 +910,14 @@ class TestLivePreview:
         assert runner.get_job_preview(job_id) is None
         assert runner.get_job_snapshot(job_id)["preview_version"] == 0
 
-    def test_a_new_workflow_stage_drops_the_previous_stage_preview(self, running_job):
+    def test_a_new_workflow_stage_keeps_the_previous_stage_preview_until_it_sends_one(self, running_job):
         runner, job_id = running_job
         runner._publish_event(job_id, {"type": "step_progress", "current_step": 2, "total_steps": 8, "preview": Image.new("RGB", (8, 8))})
 
         runner._publish_event(job_id, {"type": "workflow_stage_started", "stage_name": "upscale"})
 
-        assert runner.get_job_preview(job_id) is None
+        assert runner.get_job_preview(job_id) is not None
+        assert runner.get_job_snapshot(job_id)["preview_version"] == 1
 
     def test_a_preview_that_cannot_be_encoded_is_dropped_without_failing_the_step(self, running_job, monkeypatch):
         runner, job_id = running_job

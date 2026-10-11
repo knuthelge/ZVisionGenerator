@@ -347,7 +347,7 @@ class TestWebPreflight:
             progress_callback({"type": "generation_started", "mode": "image"})
             progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
 
-        def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, plan, progress_callback):
+        def _fake_run_video_batch(*, backend, model, model_info, workflow, prompts_data, config, args, plan, progress_callback, skip_signal):
             order.append("run_video_batch")
 
         monkeypatch.setattr(web_runner_module, "run_batch", _fake_run_batch)

@@ -150,9 +150,14 @@ describe('jobStore reconnect contract', () => {
     source.emit('step_progress', { type: 'step_progress', current_step: 2, total_steps: 8, elapsed_secs: 1, preview_version: 4 });
     source.emit('prompt_started', { type: 'prompt_started', prompt: 'Next' });
     expect(jobStore.current?.previewUrl).toBeNull();
-    source.emit('step_progress', { type: 'step_progress', current_step: 2, total_steps: 8, elapsed_secs: 1, preview_version: 5 });
+    // A new stage (the upscale pass) keeps the last preview until it sends its own, and starts its own step count.
+    source.emit('step_progress', { type: 'step_progress', current_step: 8, total_steps: 8, elapsed_secs: 1, preview_version: 5 });
     source.emit('workflow_stage_started', { type: 'workflow_stage_started', stage_name: 'upscale' });
-    expect(jobStore.current?.previewUrl).toBeNull();
+    expect(jobStore.current).toMatchObject({ previewUrl: '/jobs/job-preview/preview?v=5', stageName: 'upscale', currentStep: 0, totalSteps: 0 });
+    // A stage without steps (saving the file) keeps the finished count.
+    source.emit('step_progress', { type: 'step_progress', current_step: 12, total_steps: 12, elapsed_secs: 1 });
+    source.emit('workflow_stage_started', { type: 'workflow_stage_started', stage_name: 'save_image' });
+    expect(jobStore.current).toMatchObject({ currentStep: 12, totalSteps: 12 });
   });
 
   it('ignores preview changes in history replayed up to the reconnect snapshot', async () => {
@@ -780,5 +785,65 @@ describe('jobStore queue', () => {
     await vi.advanceTimersByTimeAsync(20000);
     window.dispatchEvent(new Event('focus'));
     expect(listCalls()).toBe(hiddenStart);
+  });
+});
+
+describe('jobStore job card bookkeeping', () => {
+  type Source = { emit: (type: string, data: unknown) => void; emitError: () => void; readyState: number };
+  const source = (): Source => (globalThis.EventSource as unknown as { lastInstance: Source }).lastInstance;
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    jobStore.clearJob();
+    jobStore.startJob({ job_id: 'job-card', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 3, created_at: '100' });
+  });
+
+  it('keeps the server reason a job failed for', () => {
+    source().emit('job_failed', { type: 'job_failed', job_id: 'job-card', message: 'CUDA out of memory.' });
+    expect(jobStore.current).toMatchObject({ status: 'failed', message: 'CUDA out of memory.' });
+  });
+
+  it('falls back to a generic line when the failure has no reason', () => {
+    source().emit('job_failed', { type: 'job_failed', job_id: 'job-card' });
+    expect(jobStore.current?.message).toBe('Job failed.');
+  });
+
+  it('follows the phases in server order and times the finished ones', () => {
+    source().emit('job_started', { type: 'job_started', timestamp: 104 });
+    expect(jobStore.current?.phase).toBe('load');
+    source().emit('preflight_started', { type: 'preflight_started', timestamp: 105, total_rewrites: 3 });
+    expect(jobStore.current).toMatchObject({ phase: 'enhance', enhanceTotal: 3 });
+    source().emit('model_loading', { type: 'model_loading', timestamp: 120, phase: 'saving_quant', quantize: 8 });
+    expect(jobStore.current).toMatchObject({ phase: 'load', loadQuant: 8 });
+    source().emit('batch_started', { type: 'batch_started', timestamp: 150 });
+    expect(jobStore.current?.phase).toBe('generate');
+    expect(jobStore.current?.phaseMarks).toMatchObject({ queue: { start: 100, end: 104 }, enhance: { start: 105, end: 120 }, load: { start: 120, end: 150 } });
+  });
+
+  it('keeps a control the server queued until it takes effect', () => {
+    source().emit('control_queued', { type: 'control_queued', action: 'pause' });
+    expect(jobStore.current?.controlQueued).toBe('pause');
+    source().emit('step_progress', { type: 'step_progress', current_step: 3, total_steps: 8, elapsed_secs: 1 });
+    expect(jobStore.current?.controlQueued).toBe('pause');
+    source().emit('job_paused', { type: 'job_paused' });
+    expect(jobStore.current?.controlQueued).toBeNull();
+  });
+
+  it('learns the stages of each image and the steps of those that ran', () => {
+    source().emit('workflow_started', { type: 'workflow_started', stage_names: ['text_to_image', 'upscale'] });
+    source().emit('step_progress', { type: 'step_progress', current_step: 28, total_steps: 28, elapsed_secs: 1, workflow_stage_name: 'text_to_image' });
+    expect(jobStore.current).toMatchObject({ stageNames: ['text_to_image', 'upscale'], stageSteps: { text_to_image: 28 } });
+    source().emit('generation_finished', { type: 'generation_finished', status: 'success' });
+    expect(jobStore.current?.itemFinished).toBe(true);
+    source().emit('prompt_started', { type: 'prompt_started', prompt: 'Next' });
+    expect(jobStore.current).toMatchObject({ itemFinished: false, stageSteps: {} });
+  });
+
+  it('marks the job as reconnecting while the stream is down, and live again on the next event', () => {
+    source().readyState = 0;
+    source().emitError();
+    expect(jobStore.current?.connection).toBe('reconnecting');
+    source().emit('step_progress', { type: 'step_progress', current_step: 1, total_steps: 8, elapsed_secs: 1 });
+    expect(jobStore.current?.connection).toBe('live');
   });
 });
