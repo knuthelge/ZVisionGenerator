@@ -13,6 +13,8 @@
     busy: boolean;
     /** A job is running or queued: Generate adds to the queue. */
     jobsActive?: boolean;
+    /** Why the server refused the last Generate, shown above the button. */
+    submitError?: string | null;
     imageFile: File | null;
     /** Preview for a reference path that points at a known asset. */
     referencePreviewUrl: string | null;
@@ -23,7 +25,7 @@
     oncopycli?: () => void;
   }
 
-  let { context, busy, jobsActive = false, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, oncopycli }: Props = $props();
+  let { context, busy, jobsActive = false, submitError = null, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, oncopycli }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -488,6 +490,11 @@
     {/if}
     {#if promptFileMode && s.promptFileOptionIds.length === 0}
       <p class="ui-alert ui-alert-warning footer-note">{context.prompt_file.help.option_required}</p>
+    {/if}
+    {#if submitError}
+      <p class="ui-alert ui-alert-error footer-note" role="alert" data-testid="generate-error">
+        <Icon name="alert" size={14} /><span class="min-w-0 break-words">{submitError}</span>
+      </p>
     {/if}
     <ActionBar>
       <button

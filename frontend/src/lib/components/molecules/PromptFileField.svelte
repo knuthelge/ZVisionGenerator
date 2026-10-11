@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '$lib/api/client';
   import { inspectPromptFile } from '$lib/api/promptFiles';
   import { untrack, type Snippet } from 'svelte';
   import { Icon } from '$lib/components/atoms';
@@ -107,7 +108,7 @@
       const inspection = await inspectPromptFile(candidate);
       return await applyInspection(inspection, successMessage);
     } catch (err) {
-      optionsError = err instanceof Error ? err.message : 'Failed to inspect prompt file.';
+      optionsError = errorText(err, 'Failed to inspect prompt file.');
       throw err instanceof Error ? err : new Error(optionsError);
     } finally {
       loadingOptions = false;

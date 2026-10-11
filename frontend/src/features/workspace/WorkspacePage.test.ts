@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/inde
 import { createClassComponent } from 'svelte/legacy';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiError } from '$lib/api/client';
 import { draft } from '$lib/state/draft.svelte';
 import { historyStore } from '$lib/state/history.svelte';
 import { jobStore } from '$lib/state/job.svelte';
@@ -521,6 +522,25 @@ describe('WorkspacePage', () => {
     expect(submittedFormData).toBeInstanceOf(FormData);
     expect(submittedFormData.get('seed')).toBe('9876');
     expect(submittedFormData.has('output')).toBe(false);
+  });
+
+  it('shows a refused Generate above the button, keeps the preview, and clears it when a setting changes', async () => {
+    draft.update('prompt', 'A lighthouse at dusk');
+    await mountWorkspace(makeContext());
+    toasts.splice(0, toasts.length);
+    workspaceApiMocks.submitGenerate.mockRejectedValueOnce(new ApiError('rejected', 422, 'Image-to-image requires a reference image.'));
+
+    target.querySelector('form')!.requestSubmit();
+    await settle();
+
+    expect(target.querySelector('[data-testid="generate-error"]')?.textContent).toContain('Image-to-image requires a reference image.');
+    expect(target.textContent).not.toContain('The Workspace could not load');
+    expect(toasts[0]?.type).toBe('error');
+    expect(toasts[0]?.message).toBe('Image-to-image requires a reference image.');
+
+    draft.update('steps', draft.state.steps + 1);
+    await settle();
+    expect(target.querySelector('[data-testid="generate-error"]')).toBeNull();
   });
 
   it('collapses the sidebar into a strip, remembers it, and still submits every field', async () => {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
-  import { api } from '$lib/api/client';
+  import { api, errorText } from '$lib/api/client';
   import { draft } from '$lib/state/draft.svelte';
   import { enhancedOverrideActive, submittedPrompt } from '$lib/state/promptEnhance';
   import { jobStore } from '$lib/state/job.svelte';
@@ -34,11 +34,14 @@
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { startUpscale } from '$lib/state/upscale';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
-  import type { GalleryAsset, JobSnapshot, UpscaleFactor, WorkspaceContext, Workflow } from '$lib/types';
+  import type { DraftState, GalleryAsset, JobSnapshot, UpscaleFactor, WorkspaceContext, Workflow } from '$lib/types';
 
   let context = $state<WorkspaceContext | null>(null);
   let loadError = $state<string | null>(null);
   let busy = $state(false);
+  // Why the server refused the last Generate, and the draft it refused; any settings change clears it.
+  let submitError = $state.raw<{ message: string; draft: DraftState } | null>(null);
+  const generateError = $derived(submitError?.draft === draft.state ? submitError.message : null);
   let formEl = $state<HTMLFormElement | undefined>(undefined);
   let imageFile = $state<File | null>(null);
   let lightboxOpen = $state(false);
@@ -510,7 +513,7 @@
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        loadError = e instanceof Error ? e.message : 'Failed to load workspace context';
+        loadError = errorText(e, 'Failed to load workspace context');
       });
 
     // ⌘↵ / Ctrl↵ generates; with ⇧ a locked seed is re-rolled first. Alt+1 / 2 / 3 open and focus Compose / Settings / History;
@@ -615,7 +618,7 @@
     try {
       built = cliCommand(settings, { outputDir: context?.output_dir, promptFileOptionCount });
     } catch (err) {
-      addToast(err instanceof Error ? err.message : 'Could not build the CLI command', 'error');
+      addToast(errorText(err, 'Could not build the CLI command'), 'error');
       return;
     }
     const { command, caveats } = built;
@@ -644,7 +647,7 @@
     if (!run && promptChoiceMissing()) {
       return;
     }
-    loadError = null;
+    submitError = null;
     busy = true;
     draft.saveDraft();
 
@@ -656,8 +659,9 @@
         addToast(`${run ? `Queued ${run.optionId}` : 'Added to the queue'} as #${jobCtx.queue_position}.`, 'info');
       } else if (run) addToast(`Queued ${run.optionId} from the prompt file.`, 'success');
     } catch (err) {
-      loadError = err instanceof Error ? err.message : 'Generate failed';
-      addToast('Generation failed', 'error');
+      const message = errorText(err, 'Generation failed.');
+      submitError = { message, draft: draft.state };
+      addToast(message, 'error');
     } finally {
       busy = false;
     }
@@ -831,10 +835,11 @@
       {busy}
       jobsActive={jobStore.jobsActive}
       queuedCount={jobStore.queuedJobs.length}
+      submitError={generateError}
       {imageFile}
       {referencePreviewUrl}
       lastSeed={historyStore.assets[0]?.seed ?? null}
-      onImageFileChange={(f) => { imageFile = f; }}
+      onImageFileChange={(f) => { imageFile = f; submitError = null; }}
       oncopycli={copyCliCommand}
     />
 

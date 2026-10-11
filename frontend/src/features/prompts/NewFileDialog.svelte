@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createPromptFile } from '$lib/api/promptFiles';
-  import { ApiError } from '$lib/api/client';
+  import { errorText } from '$lib/api/client';
   import { Modal, PathField } from '$lib/components/molecules';
 
   interface Props {
@@ -35,7 +35,7 @@
       open = false;
       oncreated(path);
     } catch (err) {
-      error = err instanceof ApiError ? err.detail : err instanceof Error ? err.message : 'Could not create the file.';
+      error = errorText(err, 'Could not create the file.');
     } finally {
       creating = false;
     }

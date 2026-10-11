@@ -14,6 +14,8 @@
     jobsActive?: boolean;
     /** Jobs waiting behind the active one, shown as a badge on the collapsed strip. */
     queuedCount?: number;
+    /** Why the server refused the last Generate. */
+    submitError?: string | null;
     imageFile: File | null;
     referencePreviewUrl?: string | null;
     lastSeed?: number | null;
@@ -22,7 +24,7 @@
     oncopycli?: () => void;
   }
 
-  let { context, busy, jobsActive = false, queuedCount = 0, imageFile, referencePreviewUrl = null, lastSeed = null, onImageFileChange, oncopycli }: Props = $props();
+  let { context, busy, jobsActive = false, queuedCount = 0, submitError = null, imageFile, referencePreviewUrl = null, lastSeed = null, onImageFileChange, oncopycli }: Props = $props();
   const generateLabel = $derived(jobsActive ? 'Add to queue' : 'Generate');
   const authorityReady = $derived(context !== null && draft.authorityReady);
   const collapsed = $derived(draft.state.sidebarCollapsed);
@@ -38,7 +40,7 @@
   <div class="sidebar-panes">
     {#if authorityReady && context}
       <ComposePane {context} {busy} {jobsActive} oncollapse={() => setCollapsed(true)} />
-      <SettingsPane {context} {busy} {jobsActive} {imageFile} {referencePreviewUrl} {lastSeed} {onImageFileChange} {oncopycli} />
+      <SettingsPane {context} {busy} {jobsActive} {submitError} {imageFile} {referencePreviewUrl} {lastSeed} {onImageFileChange} {oncopycli} />
     {:else}
       <div class="flex-1 overflow-y-auto p-3">
         <p class="flex items-center gap-2 text-ui text-text-muted" role="status"><Spinner size="sm" />Loading settings…</p>

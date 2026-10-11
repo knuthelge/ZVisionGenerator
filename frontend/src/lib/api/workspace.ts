@@ -11,14 +11,7 @@ export function getWorkspaceCoreContext(): Promise<WorkspaceContext> {
 }
 
 export function submitGenerate(formData: FormData): Promise<JobContext> {
-  return fetch('/api/generate', {
-    method: 'POST',
-    headers: { Accept: 'application/json' },
-    body: formData
-  }).then(async r => {
-    if (!r.ok) throw new Error(`Generate failed: ${await r.text()}`);
-    return r.json() as Promise<JobContext>;
-  });
+  return api.post<JobContext>('/api/generate', formData);
 }
 
 export function getJobSnapshot(jobId: string): Promise<JobSnapshot> {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import { writePromptFile } from '$lib/api/promptFiles';
-  import { ApiError } from '$lib/api/client';
+  import { errorText } from '$lib/api/client';
 
   interface Props {
     path: string;
@@ -25,7 +25,7 @@
       await writePromptFile(path, text);
       onreload();
     } catch (err) {
-      error = err instanceof ApiError ? err.detail : err instanceof Error ? err.message : 'Saving failed.';
+      error = errorText(err, 'Saving failed.');
     } finally {
       saving = false;
     }

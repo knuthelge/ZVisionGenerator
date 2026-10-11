@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { errorText } from '$lib/api/client';
   import { openPathPicker } from '$lib/api/promptFiles';
   import { Button, Input } from '$lib/components/atoms';
   import FormField from './FormField.svelte';
@@ -158,7 +159,7 @@
       statusTone = 'success';
     } catch (err) {
       if (currentRequestVersion === requestVersion) {
-        error = err instanceof Error ? err.message : 'Failed to resolve path.';
+        error = errorText(err, 'Failed to resolve path.');
       }
     } finally {
       if (currentRequestVersion === requestVersion) pending = false;
@@ -199,7 +200,7 @@
       }
     } catch (err) {
       if (currentRequestVersion === requestVersion) {
-        error = err instanceof Error ? err.message : 'Failed to open the path picker.';
+        error = errorText(err, 'Failed to open the path picker.');
       }
     } finally {
       if (currentRequestVersion === requestVersion) pending = false;

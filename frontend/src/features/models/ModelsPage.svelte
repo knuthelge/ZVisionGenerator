@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { errorText } from '$lib/api/client';
   import { getModelInventory, convertCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteLora } from '$lib/api/models';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { ModelDeleteInfo, ModelInventory, ModelStatusFields } from '$lib/types';
@@ -32,7 +33,7 @@
     try {
       inventory = await getModelInventory();
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to load model inventory';
+      error = errorText(e, 'Failed to load model inventory');
     } finally {
       loading = false;
     }
@@ -68,7 +69,7 @@
         addToast('Operation failed', 'error');
       }
     } catch (err) {
-      notice = { tone: 'error', message: err instanceof Error ? err.message : 'Conversion failed.' };
+      notice = { tone: 'error', message: errorText(err, 'Conversion failed.') };
       addToast('Operation failed', 'error');
     } finally {
       formsBusy = false;
@@ -101,7 +102,7 @@
         addToast('Operation failed', 'error');
       }
     } catch (err) {
-      notice = { tone: 'error', message: err instanceof Error ? err.message : 'Import failed.' };
+      notice = { tone: 'error', message: errorText(err, 'Import failed.') };
       addToast('Operation failed', 'error');
     } finally {
       formsBusy = false;
@@ -130,7 +131,7 @@
       addToast(result.message, 'success');
       await loadInventory();
     } catch (err) {
-      notice = { tone: 'error', message: err instanceof Error ? err.message : 'Delete failed.' };
+      notice = { tone: 'error', message: errorText(err, 'Delete failed.') };
       addToast('Delete failed', 'error');
     } finally {
       deleting = false;
@@ -162,7 +163,7 @@
         addToast('Operation failed', 'error');
       }
     } catch (err) {
-      notice = { tone: 'error', message: err instanceof Error ? err.message : 'Download failed.' };
+      notice = { tone: 'error', message: errorText(err, 'Download failed.') };
       addToast('Operation failed', 'error');
     } finally {
       formsBusy = false;

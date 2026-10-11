@@ -32,6 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Windows/Linux: `hf-transfer` is no longer installed; downloads use Xet. Set `HF_XET_HIGH_PERFORMANCE=1` instead of `HF_HUB_ENABLE_HF_TRANSFER` for faster downloads
 
 ### Fixed
+- Web UI: a refused Generate (e.g. image-to-image without a reference image) shows the reason above the Generate button and in its notice, instead of replacing the preview with "The Workspace could not load" and the raw server response
+- Web UI: Settings, Models and other pages show the server's reason for a refused request instead of the raw response, and a refused settings save no longer offers Retry
 - Web UI: a failed job shows the server's reason (e.g. out of memory while loading the model) instead of "Job failed.", on the phase where it failed
 - Web UI: Pause and Skip are available while prompts are enhanced, and Pause while the model loads
 - Web UI: the upscale pass no longer shows the previous pass's last step (e.g. 10 of 10) before its own first step, and keeps the last live preview until it renders its own

@@ -110,6 +110,8 @@ The **Prompts** page builds prompt files visually: snippets, sets of prompts, an
 
 Workspace settings are remembered in the browser between visits and restarts, as long as the Web UI starts on the same port. Choosing a different model applies that model's defaults.
 
+If the server can't start a job with the current settings, for example image-to-image without a reference image, the reason shows above the Generate button and in a notice. It goes away when you change a setting.
+
 To run the same job from a terminal, press the terminal button in the *Settings* header. It copies a `ziv image` or `ziv video` command with the current model, prompt, LoRAs and settings, writing to the Web UI's output folder. The CLI has no inline negative prompt and runs every prompt in a prompts file rather than only the selected ones, so a notice says when the copied command differs from what Generate would run; an uploaded reference image is named by its file name, so replace it with the file's path.
 
 To give the preview more room, collapse the Compose and Settings sidebar with the **«** button next to *Compose*. It folds into a narrow strip with an expand button and a Generate button, and the choice is remembered in the browser. On phone-width screens the sidebar always shows above the preview.

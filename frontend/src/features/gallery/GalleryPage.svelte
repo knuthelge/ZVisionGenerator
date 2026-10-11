@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
+  import { errorText } from '$lib/api/client';
   import { router } from '$lib/state/router.svelte';
   import { addToast, dismissToast } from '$lib/state/toasts.svelte';
   import { getGallery, deleteAsset } from '$lib/api/gallery';
@@ -168,7 +169,7 @@
       if (preserveLocalOnError) {
         addToast('Gallery refresh failed; deleted assets remain removed. Change the view to retry.', 'warning');
       } else {
-        error = e instanceof Error ? e.message : 'Failed to load gallery';
+        error = errorText(e, 'Failed to load gallery');
       }
     } finally {
       if (pageOneRequestRevision === _pageOneRequestRevision) {

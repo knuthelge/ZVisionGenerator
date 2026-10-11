@@ -1,4 +1,4 @@
-import { ApiError } from '$lib/api/client';
+import { errorText } from '$lib/api/client';
 import { submitUpscale } from '$lib/api/gallery';
 import { jobStore } from '$lib/state/job.svelte';
 import { addToast } from '$lib/state/toasts.svelte';
@@ -13,17 +13,11 @@ export async function startUpscale(asset: GalleryAsset, factor: UpscaleFactor): 
   try {
     job = await submitUpscale(asset.id, factor);
   } catch (error) {
-    addToast(`Upscale failed: ${upscaleErrorText(error)}`, 'error');
+    addToast(`Upscale failed: ${errorText(error, 'Please try again.')}`, 'error');
     return null;
   }
   jobStore.jobSubmitted(job);
   if (job.queue_position) addToast(`Upscale of ${asset.filename} added to the queue as #${job.queue_position}.`, 'info');
   else addToast(`Upscaling ${asset.filename} ${factor}×`, 'success');
   return job;
-}
-
-/** Return the server's reason for a refused upscale, e.g. a size limit. */
-export function upscaleErrorText(error: unknown): string {
-  if (error instanceof ApiError && error.detail) return error.detail;
-  return error instanceof Error ? error.message : 'Please try again.';
 }

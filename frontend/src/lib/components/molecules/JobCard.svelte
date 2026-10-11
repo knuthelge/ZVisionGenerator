@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { errorText } from '$lib/api/client';
   import { Badge, Icon, StepProgress } from '$lib/components/atoms';
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import { acceptsPageShortcut } from '$lib/keyboard';
@@ -94,7 +95,7 @@
       // Resume takes effect at once; the others wait for the server to act on them.
       if (action !== 'resume') requested = { jobId, action, at: performance.now() };
     } catch (error) {
-      rejected = { jobId, action, reason: error instanceof Error ? error.message : '' };
+      rejected = { jobId, action, reason: errorText(error, '') };
     } finally {
       sending = null;
     }

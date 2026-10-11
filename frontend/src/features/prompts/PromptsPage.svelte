@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { ApiError } from '$lib/api/client';
+  import { ApiError, errorText } from '$lib/api/client';
   import { loadPromptDocument, openPathPicker, previewPromptDocument, savePromptDocument } from '$lib/api/promptFiles';
   import { Icon, Spinner } from '$lib/components/atoms';
   import { ActionMenu, EmptyState, requestConfirm } from '$lib/components/molecules';
@@ -74,10 +74,6 @@
     }, UNSAVED_DELAY_MS);
   }
 
-  function detail(err: unknown, fallback: string): string {
-    return err instanceof ApiError ? err.detail || fallback : err instanceof Error ? err.message : fallback;
-  }
-
   async function openFile(path: string): Promise<void> {
     if (loadingPath === path) return;
     if (builder.dirty && builder.path && builder.path !== path) {
@@ -113,7 +109,7 @@
       }
       phase = 'ready';
     } catch (err) {
-      loadError = detail(err, 'Could not open the prompt file.');
+      loadError = errorText(err, 'Could not open the prompt file.');
       if (err instanceof ApiError && err.status === 422) forgetRecent(path);
       phase = 'error';
     } finally {
@@ -148,7 +144,7 @@
       if (result.status === 'selected' && result.path) await openFile(result.path);
       else if (result.status === 'error' && result.message) addToast(result.message, 'error');
     } catch (err) {
-      addToast(detail(err, 'Could not open the file picker.'), 'error');
+      addToast(errorText(err, 'Could not open the file picker.'), 'error');
     }
   }
 
@@ -192,7 +188,7 @@
         });
         return overwrite ? save(true) : null;
       }
-      addToast(detail(err, 'Saving failed.'), 'error');
+      addToast(errorText(err, 'Saving failed.'), 'error');
       return null;
     } finally {
       saving = false;

@@ -1,3 +1,4 @@
+import { detailFromText } from './client';
 import type { EnhanceContext, EnhanceFrame, EnhanceSettings, WorkflowMode } from '$lib/types';
 
 export interface EnhanceRequest {
@@ -39,13 +40,7 @@ export function createNdjsonParser(onFrame: (frame: EnhanceFrame) => void): { pu
 
 async function errorDetail(response: Response): Promise<string> {
   const text = await response.text().catch(() => response.statusText);
-  try {
-    const parsed = JSON.parse(text) as { detail?: unknown };
-    if (typeof parsed.detail === 'string') return parsed.detail;
-  } catch {
-    // not JSON
-  }
-  return text || `Enhance failed (${response.status})`;
+  return detailFromText(text) || `Enhance failed (${response.status})`;
 }
 
 /**

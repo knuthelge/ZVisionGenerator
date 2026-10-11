@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
+  import { errorText, isRetryable } from '$lib/api/client';
   import { getConfig, updateConfig } from '$lib/api/config';
   import { addToast, dismissToast } from '$lib/state/toasts.svelte';
   import type { AppConfig, WritableConfigField, WritableConfigValue } from '$lib/types';
@@ -28,7 +29,7 @@
     try {
       applyConfig(await getConfig());
     } catch (e) {
-      error = e instanceof Error ? e.message : 'Failed to load configuration';
+      error = errorText(e, 'Failed to load configuration');
     } finally {
       loading = false;
     }
@@ -168,12 +169,14 @@
       applyConfig(nextConfig);
       addToast('Settings saved', 'success');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to save configuration';
+      const msg = errorText(err, 'Failed to save configuration');
       saveStatus = {
         tone: 'error',
         message: msg
       };
-      retryToastId = addToast('Save failed: ' + msg, 'error', { action: { label: 'Retry', run: () => form.requestSubmit() } });
+      // A rejected value fails the same way again, so only network and server faults offer Retry.
+      if (isRetryable(err)) retryToastId = addToast('Save failed: ' + msg, 'error', { action: { label: 'Retry', run: () => form.requestSubmit() } });
+      else addToast('Save failed: ' + msg, 'error');
     } finally {
       saving = false;
     }

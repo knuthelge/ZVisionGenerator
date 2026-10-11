@@ -14,10 +14,26 @@ export class ApiError extends Error {
   }
 }
 
-function detailFromText(text: string): string {
+/** Return the server's explanation for a failed request, or *fallback* when it gave none. */
+export function errorText(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) return error.detail || fallback;
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+/** Whether repeating the request could succeed: true for network and server faults, false when the server rejected the input. */
+export function isRetryable(error: unknown): boolean {
+  return !(error instanceof ApiError) || error.status >= 500;
+}
+
+/** Return the text of a FastAPI error body: its `detail` string, the messages of a validation-error list, or the raw text. */
+export function detailFromText(text: string): string {
   try {
     const parsed = JSON.parse(text) as { detail?: unknown };
     if (typeof parsed.detail === 'string') return parsed.detail;
+    if (Array.isArray(parsed.detail)) {
+      const messages = parsed.detail.map((item: { msg?: unknown } | null) => item?.msg).filter((msg): msg is string => typeof msg === 'string');
+      if (messages.length > 0) return messages.join(' ');
+    }
   } catch {
     // not JSON
   }
@@ -25,10 +41,12 @@ function detailFromText(text: string): string {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  // FormData sets its own multipart Content-Type; any other body goes as JSON.
+  const isForm = body instanceof FormData;
   const response = await fetch(`${BASE}${path}`, {
     method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : {},
-    body: body !== undefined ? JSON.stringify(body) : undefined
+    headers: body !== undefined && !isForm ? { 'Content-Type': 'application/json' } : {},
+    body: isForm ? body : body !== undefined ? JSON.stringify(body) : undefined
   });
 
   if (!response.ok) {

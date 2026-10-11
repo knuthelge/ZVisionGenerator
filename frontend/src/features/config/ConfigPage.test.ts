@@ -2,6 +2,7 @@
 import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/index-client.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ApiError } from '$lib/api/client';
 import type { AppConfig, WritableConfigField } from '$lib/types';
 
 const configApiMocks = vi.hoisted(() => ({
@@ -10,7 +11,7 @@ const configApiMocks = vi.hoisted(() => ({
 }));
 
 const toastMocks = vi.hoisted(() => ({
-  addToast: vi.fn<(message: string, tone: string) => void>(),
+  addToast: vi.fn<(message: string, tone: string, options?: { action?: { label: string } }) => void>(),
 }));
 
 vi.mock('$lib/api/config', () => ({
@@ -224,6 +225,26 @@ describe('ConfigPage', () => {
     });
     expect(toastMocks.addToast).toHaveBeenCalledTimes(1);
     expect(toastMocks.addToast.mock.calls[0][1]).toBe('success');
+  });
+
+  it('shows the server reason for a refused save and offers Retry only for server faults', async () => {
+    configApiMocks.getConfig.mockResolvedValue(makeConfig());
+    configApiMocks.updateConfig
+      .mockRejectedValueOnce(new ApiError('rejected', 422, 'Default video model must be one of the discovered video models.'))
+      .mockRejectedValueOnce(new ApiError('crashed', 500, 'Could not write the config file.'));
+
+    app = flushSync(() => mount(ConfigPage, { target }));
+    await settle();
+    const form = target.querySelector('form') as HTMLFormElement;
+
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(toastMocks.addToast.mock.calls[0]).toEqual(['Save failed: Default video model must be one of the discovered video models.', 'error']);
+
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    expect(toastMocks.addToast.mock.calls[1][0]).toBe('Save failed: Could not write the config file.');
+    expect(toastMocks.addToast.mock.calls[1][2]?.action?.label).toBe('Retry');
   });
 
   it('submits a manually typed output directory without requiring resolve or browse', async () => {
