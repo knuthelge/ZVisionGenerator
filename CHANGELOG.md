@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b19] - 2026-10-11
+
 ### Added
 - Web UI: video jobs can be cancelled with Cancel or `Esc` twice, also while their prompts are rewritten
 - Windows/Linux: RTX 50-series (Blackwell) GPUs are supported
