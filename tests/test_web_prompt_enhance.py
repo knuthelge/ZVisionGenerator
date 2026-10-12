@@ -139,7 +139,55 @@ class TestEnhanceEndpoint:
         with TestClient(web_server.app) as client:
             frames = _frames(client.post("/api/prompt/enhance", json=body))
         done = frames[-1]
-        assert done["type"] == "done" and done["scene"] == "A castle." and done["warning"]
+        # The fallback leaves the scene unrewritten: the frame's scene is "" so the client keeps the user's scene.
+        assert done["type"] == "done" and done["scene"] == "" and done["warning"]
+
+    def test_video_action_only_frames_carry_no_scene(self, monkeypatch, no_active_job):
+        enhancer = _FakeEnhancer(["The knight draws his sword and raises it high."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = {"scene": "A castle at dusk.", "prompt": "he draws his sword", "mode": "video", "settings": {"parts": "action"}}
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+        texts = [frame for frame in frames if frame["type"] == "text"]
+        assert texts and all(frame["scene"] == "" and frame["prompt"] == frame["text"] for frame in texts)
+        assert frames[-1] == {"type": "done", "scene": "", "prompt": "The knight draws his sword and raises it high.", "clamped": False}
+        system, user = enhancer.messages[0][0]["content"], enhancer.messages[0][1]["content"]
+        assert "A castle at dusk." in system and "kept exactly as written" in system and user == "he draws his sword"
+
+    def test_video_action_only_with_keep_all_settings_is_valid(self, no_active_job):
+        keep_all = {"style": "keep", "mood": "keep", "details": [], "length": "same", "motion": [], "sound": [], "parts": "action"}
+        job = web_server._validate_enhance_body({"scene": "A castle.", "prompt": "a knight", "mode": "video", "settings": keep_all})
+        assert job["settings"].parts == "action"
+        with pytest.raises(ValueError, match="Nothing to enhance"):
+            web_server._validate_enhance_body({"scene": "A castle.", "prompt": "a knight", "mode": "video", "settings": {**keep_all, "parts": "both"}})
+
+    def test_video_action_only_with_a_blank_scene_splits_into_both(self, monkeypatch, no_active_job):
+        enhancer = _FakeEnhancer(["SCENE: A rainy street at night.\nACTION: A woman walks past a neon sign."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = {"scene": "", "prompt": "a woman walks in the rain", "mode": "video", "settings": {"parts": "action"}}
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+        texts = [frame for frame in frames if frame["type"] == "text"]
+        assert (texts[-1]["scene"], texts[-1]["prompt"]) == ("A rainy street at night.", "A woman walks past a neon sign.")
+        assert frames[-1]["scene"] == "A rainy street at night."
+
+    def test_video_parts_both_rewrites_the_scene(self, monkeypatch, no_active_job):
+        enhancer = _FakeEnhancer(["SCENE: A castle at dusk, banners.\nACTION: A knight rides in."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = {"scene": "A castle at dusk.", "prompt": "a knight", "mode": "video", "settings": {"parts": "both"}}
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json=body))
+        assert frames[-1]["scene"] == "A castle at dusk, banners."
+
+    def test_invalid_parts_is_rejected(self, no_active_job):
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json={"scene": "A castle.", "prompt": "a knight", "mode": "video", "settings": {"parts": "scene"}})
+        assert response.status_code == 422
+
+    def test_parts_is_ignored_for_images(self):
+        with pytest.warns(UserWarning, match="ignored for images"):
+            job = web_server._validate_enhance_body({"prompt": "a fox", "mode": "image", "settings": {"style": "photo", "parts": "action"}})
+        assert job["settings"].parts is None
 
     def test_image_done_frame_has_no_scene(self, monkeypatch, no_active_job):
         monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(_FakeEnhancer(["A grey fox in snow."])))
@@ -245,16 +293,6 @@ class TestEnhanceEndpoint:
     def test_image_ignores_a_scene_of_any_type(self):
         job = web_server._validate_enhance_body({"prompt": "a fox", "scene": 3, "mode": "image", "settings": {"style": "photo"}})
         assert job["scene"] == ""
-
-    def test_extending_with_a_scene_streams_the_text_as_action_only(self):
-        """The server keeps the scene and the enhancer writes the action, so every partial goes to ``prompt``."""
-        job = web_server._validate_enhance_body({"scene": "A castle at dusk.", "prompt": "the knight leaves", "mode": "video", "settings": {"style": "cinematic"}})
-        job["context"] = EnhanceContext(extends=True, previous="A knight rides in.")
-        frames: queue.Queue[dict] = queue.Queue()
-        result = web_server._enhance_for_job(job, _FakeEnhancer(["The knight turns his horse and rides away."]), frames, threading.Event())
-        texts = [frames.get_nowait() for _ in range(frames.qsize())]
-        assert texts and all(frame["scene"] == "" and frame["prompt"] == frame["text"] for frame in texts)
-        assert result.scene == "A castle at dusk." and result.prompt == "The knight turns his horse and rides away."
 
     def test_missing_context_is_empty(self):
         assert web_server._validate_enhance_body({"prompt": "a fox"})["context"] == EnhanceContext()
@@ -795,43 +833,10 @@ class TestExtendEnhance:
 
         texts = [frame for frame in frames if frame["type"] == "text"]
         assert texts and all(frame["scene"] == "" and frame["prompt"] == frame["text"] for frame in texts)
-        assert frames[-1] == {"type": "done", "scene": _SOURCE_SCENE, "prompt": "She opens a black umbrella and steps away from the light.", "clamped": False}
+        assert frames[-1] == {"type": "done", "scene": "", "prompt": "She opens a black umbrella and steps away from the light.", "clamped": False}
         system, user = enhancer.messages[0][0]["content"], enhancer.messages[0][1]["content"]
         assert _SOURCE_SCENE in system and _SOURCE_ACTION in system
         assert user == "She opens an umbrella."
-
-    def test_route_continues_naturally_from_an_empty_prompt(self, monkeypatch, no_active_job, clip):
-        enhancer = _FakeEnhancer(["She lowers the umbrella and looks up at the sky."])
-        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
-
-        with TestClient(web_server.app) as client:
-            frames = _frames(client.post("/api/prompt/enhance", json=_extend_body(clip, prompt="")))
-
-        assert frames[-1]["type"] == "done" and frames[-1]["scene"] == _SOURCE_SCENE
-        assert enhancer.messages[0][1]["content"] == "Continue the scene naturally."
-
-    def test_route_extracts_the_scene_of_a_legacy_source(self, monkeypatch, no_active_job, clip):
-        clip.source = dataclasses.replace(clip.source, scene=None, prompt=_LEGACY_PROMPT)
-        enhancer = _FakeEnhancer(["SCENE: A woman in a red raincoat on a rainy street at night.\nACTION: She sighs and walks into the dark."])
-        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
-
-        with TestClient(web_server.app) as client:
-            frames = _frames(client.post("/api/prompt/enhance", json=_extend_body(clip, scene="", prompt=_LEGACY_PROMPT)))
-
-        assert frames[-1] == {"type": "done", "scene": "A woman in a red raincoat on a rainy street at night.", "prompt": "She sighs and walks into the dark.", "clamped": False}
-        assert _LEGACY_PROMPT in enhancer.messages[0][0]["content"]
-        assert enhancer.messages[0][1]["content"] == "Continue the scene naturally."
-
-    def test_route_sends_the_users_text_for_an_edited_legacy_prompt(self, monkeypatch, no_active_job, clip):
-        clip.source = dataclasses.replace(clip.source, scene=None, prompt=_LEGACY_PROMPT)
-        enhancer = _FakeEnhancer(["SCENE: A woman in a red raincoat on a rainy street at night.\nACTION: She sighs and walks into the dark."])
-        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
-
-        with TestClient(web_server.app) as client:
-            frames = _frames(client.post("/api/prompt/enhance", json=_extend_body(clip, scene="", prompt="She walks away.")))
-
-        assert frames[-1]["type"] == "done"
-        assert enhancer.messages[0][1]["content"] == "She walks away."
 
     def test_route_rejects_a_bad_source_before_loading_the_enhancer(self, monkeypatch, no_active_job, clip, tmp_path):
         session = _FakeSession(_FakeEnhancer([]))

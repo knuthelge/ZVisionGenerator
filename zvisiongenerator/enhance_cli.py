@@ -11,6 +11,7 @@ from zvisiongenerator.utils.prompt_enhance import parse_enhance_spec, settings_f
 def add_enhance_arguments(parser: argparse.ArgumentParser, *, mode: str) -> None:
     """Register the prompt-enhancement flags on *parser*."""
     video = ",motion=action+camera-move,sound=ambient+effects" if mode == "video" else ""
+    parts_help = " parts=action keeps the scene and rewrites only the action (parts=both is the default; with --extend and a scene, action)." if mode == "video" else ""
     parser.add_argument(
         "--enhance",
         nargs="?",
@@ -19,7 +20,7 @@ def add_enhance_arguments(parser: argparse.ArgumentParser, *, mode: str) -> None
         metavar="SPEC",
         help=(
             "Rewrite each prompt with a local LLM before the model loads. Optional SPEC sets the options, e.g. "
-            f"'style=cinematic,mood=dramatic,details=lighting+camera,length=longer{video}'. Applies to every prompt and overrides prompt-file 'enhance:' entries."
+            f"'style=cinematic,mood=dramatic,details=lighting+camera,length=longer{video}'. Applies to every prompt and overrides prompt-file 'enhance:' entries.{parts_help}"
         ),
     )
     parser.add_argument(

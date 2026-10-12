@@ -1,4 +1,4 @@
-import type { DraftState, EnhanceSettings, JobSettings, PromptSource } from '$lib/types';
+import type { DraftState, EnhanceParts, EnhanceSettings, JobSettings, PromptSource, Workflow } from '$lib/types';
 import { snapExtendFrames } from './videoDuration';
 
 /** Fields the workspace prefill path applies on top of the model's defaults (the same keys as a reuse URL). */
@@ -35,11 +35,14 @@ export function numberOrNull(value: string | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function enhanceSettings(value: string | undefined): EnhanceSettings | null {
+/** Restore the enhance options a job was submitted with; its Rewrite choice is remembered for the job's own workflow. */
+function enhanceSettings(value: string | undefined, workflow: Workflow | undefined): EnhanceSettings | null {
   if (!value) return null;
   try {
     const parsed = JSON.parse(value) as Partial<EnhanceSettings>;
-    return { style: parsed.style ?? 'keep', mood: parsed.mood ?? 'keep', details: parsed.details ?? [], length: parsed.length ?? 'same', motion: parsed.motion ?? [], sound: parsed.sound ?? [], note: parsed.note ?? '' };
+    const settings: EnhanceSettings = { style: parsed.style ?? 'keep', mood: parsed.mood ?? 'keep', details: parsed.details ?? [], length: parsed.length ?? 'same', motion: parsed.motion ?? [], sound: parsed.sound ?? [], note: parsed.note ?? '' };
+    const parts: EnhanceParts | undefined = parsed.parts === 'both' || parsed.parts === 'action' ? parsed.parts : undefined;
+    return parts !== undefined && workflow !== undefined ? { ...settings, partsByWorkflow: { [workflow]: parts } } : settings;
   } catch {
     return null;
   }
@@ -56,19 +59,23 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
   const promptSource = (first(settings, 'prompt_source') ?? 'inline') as PromptSource;
   const isVideo = first(settings, 'mode') === 'video';
   const jsonPrompt = first(settings, 'json_prompt');
-  // A video run that used the Enhanced pair also recorded the user's own text; it becomes the boxes, and the pair that ran the Enhanced tab.
+  // A video run that used Enhanced text also recorded the user's own text; it becomes the boxes, and each part that differs fills its Enhanced box.
   const ranEnhanced = isVideo && (settings.scene_input !== undefined || settings.prompt_input !== undefined);
   const ranScene = first(settings, 'scene') ?? '';
   const ranPrompt = first(settings, 'prompt') ?? '';
   const ownScene = ranEnhanced ? first(settings, 'scene_input') ?? '' : ranScene;
   const ownPrompt = ranEnhanced ? first(settings, 'prompt_input') ?? '' : ranPrompt;
+  // A part that ran as written is not Enhanced text: only a part that differs from its recorded input fills its Enhanced box.
+  const enhancedPrompt = ranEnhanced && ranPrompt !== ownPrompt ? ranPrompt : '';
+  const enhancedScene = ranEnhanced && ranScene !== ownScene ? ranScene : '';
+  const hasEnhanced = enhancedPrompt.trim() !== '' || enhancedScene.trim() !== '';
   const patch: Partial<DraftState> = {
     promptSource,
     // Without recorded inputs the submitted text is what ran (an Enhanced override included), so it becomes the text.
     prompt: ownPrompt,
-    enhancedPrompt: ranEnhanced ? ranPrompt : '',
-    enhancedScene: ranEnhanced ? ranScene : '',
-    enhancedFrom: ranEnhanced ? { prompt: ownPrompt, scene: ownScene, mode: 'video' } : null,
+    enhancedPrompt,
+    enhancedScene,
+    enhancedFrom: hasEnhanced ? { prompt: ownPrompt, scene: ownScene, mode: 'video' } : null,
     jsonPromptEnabled: jsonPrompt !== undefined,
     negativePrompt: first(settings, 'negative_prompt') ?? '',
     seed: numberOrNull(first(settings, 'seed')),
@@ -96,7 +103,7 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
   if (settings.scheduler !== undefined) patch.scheduler = first(settings, 'scheduler') || null;
   if (settings.first_sigma !== undefined) patch.firstSigma = numberOrNull(first(settings, 'first_sigma'));
   if (settings.quantize !== undefined) patch.quantize = numberOrNull(first(settings, 'quantize'));
-  const enhance = enhanceSettings(first(settings, 'enhance_settings'));
+  const enhance = enhanceSettings(first(settings, 'enhance_settings'), first(settings, 'workflow') as Workflow | undefined);
   if (enhance) patch.enhanceSettings = enhance;
 
   for (const [name, enabledKey, amountKey] of [

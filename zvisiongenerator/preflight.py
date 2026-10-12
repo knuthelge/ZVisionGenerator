@@ -30,7 +30,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     resolve_enhance_ceiling,
     resolve_item_enhance,
 )
-from zvisiongenerator.utils.prompt_enhance_video import PAIR_FALLBACK_WARNING, enhance_video_prompt
+from zvisiongenerator.utils.prompt_enhance_video import PAIR_FALLBACK_WARNING, PARTS_FALLBACK_WARNING, enhance_video_prompt
 from zvisiongenerator.utils.video_extend import extend_enhance_context
 
 if TYPE_CHECKING:
@@ -292,6 +292,8 @@ def _make_rewriter(
         )
         try:
             if mode == "video":
+                if iteration.enhance.parts == "action" and not (iteration.resolved_scene or "").strip():
+                    warnings.warn(PARTS_FALLBACK_WARNING, stacklevel=2)
                 pair = enhance_video_prompt(enhancer, iteration.resolved_scene, iteration.resolved_prompt, iteration.enhance, **shared)
                 if pair.format_fallback:
                     warnings.warn(PAIR_FALLBACK_WARNING, stacklevel=2)

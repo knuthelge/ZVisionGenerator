@@ -20,6 +20,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     parse_enhance_spec,
     plan_length,
     resolve_enhance_ceiling,
+    resolve_parts,
     settings_from_mapping,
     validate_settings,
 )
@@ -74,6 +75,7 @@ class TestMatrix:
             "motion": ["action"],
             "sound": [],
             "note": "",
+            "parts": None,
         }
         motion, sound, length = contract["axes"][3], contract["axes"][4], contract["axes"][5]
         assert (motion["video_only"], motion["audio_only"]) == (True, False)
@@ -161,7 +163,7 @@ class TestSpec:
             ("mood=angry", "keep, serene, joyful, romantic, melancholic, mysterious, eerie, dramatic, epic, whimsical, nostalgic"),
             ("details=lighting+smell", "lighting, composition, camera, materials, color, environment, subject"),
             ("length=huge", "shorter, same, longer, extra"),
-            ("colour=red", "Valid keys: style, mood, details, motion, sound, length, note"),
+            ("colour=red", "Valid keys: style, mood, details, motion, sound, length, note, parts"),
             ("cinematic", "Use key=value"),
         ],
     )
@@ -782,19 +784,12 @@ class TestEnhanceVideoPrompt:
         result, _ = _pair_run(['SCENE: A castle.\nACTION: The knight shouts "Charge!" and rides in.'])
         assert '"Charge!"' in result.prompt
 
-    def test_fallback_uses_the_action_segment_and_keeps_the_users_scene(self):
+    def test_fallback_uses_the_action_segment_and_leaves_the_scene_unrewritten(self):
+        """The fallback result's scene is "" (not rewritten), so callers keep the user's scene and never copy it into an enhanced field."""
         result, enhancer = _pair_run(["no markers at all", "ACTION: A knight rides in on a horse."], scene=_USER_SCENE)
-        assert (result.scene, result.prompt) == (_USER_SCENE, "A knight rides in on a horse.")
+        assert (result.scene, result.prompt) == ("", "A knight rides in on a horse.")
         assert result.warning is not None and "scene is left as written" in result.warning
         assert len(enhancer.calls) == 2
-
-    def test_fallback_after_a_blank_line_takes_the_text_after_the_scene_segment(self):
-        result, _ = _pair_run(["", "SCENE: A castle.\n\nA knight rides in on a horse."], scene=_USER_SCENE)
-        assert (result.scene, result.prompt) == (_USER_SCENE, "A knight rides in on a horse.")
-
-    def test_fallback_without_a_blank_line_drops_only_the_first_line(self):
-        result, _ = _pair_run(["", "SCENE: A castle.\nA knight rides in on a horse."], scene=_USER_SCENE)
-        assert result.prompt == "A knight rides in on a horse."
 
     def test_fallback_without_markers_uses_the_whole_text(self):
         result, _ = _pair_run(["", "A knight gallops across the drawbridge."])
@@ -810,7 +805,9 @@ class TestEnhanceVideoPrompt:
     )
     def test_a_fallback_composes_without_duplicated_scene_text(self, second):
         result, _ = _pair_run(["no markers", second], scene=_USER_SCENE)
-        composed = f"{result.scene} {result.prompt}"
+        # The fallback leaves the scene unrewritten (""), so the caller composes the user's own scene with the action.
+        assert result.scene == ""
+        composed = f"{_USER_SCENE} {result.prompt}"
         assert composed == f"{_USER_SCENE} A knight rides in on a horse."
         assert composed.count("castle") == 1 and "lone tower" not in composed
 
@@ -994,15 +991,17 @@ class TestRepeatsSource:
 
 
 class TestExtendWithScene:
-    def test_the_scene_is_returned_unchanged_and_the_output_is_the_action(self):
+    def test_the_scene_is_not_rewritten_and_the_output_is_the_action(self):
+        """The result's scene is "" (kept as written by the caller), where it once echoed the user's scene back."""
         result, enhancer = _extend_run(["She opens a black umbrella and walks away."])
-        assert result == EnhancePairResult(scene=_EXT_SCENE, prompt="She opens a black umbrella and walks away.", clamped=False, warning=None)
+        assert result == EnhancePairResult(scene="", prompt="She opens a black umbrella and walks away.", clamped=False, warning=None)
         assert len(enhancer.calls) == 1 and enhancer.calls[0]["seed"] == 10
 
     def test_the_scene_and_the_previous_prompt_are_in_the_system_message_only(self):
         _, enhancer = _extend_run(["She opens a black umbrella and walks away."])
         system = _sent_system(enhancer)
         assert f"The scene (kept as is, do not restate): {_EXT_SCENE}" in system
+        assert "Never repeat their clothing, appearance or the setting" in system
         assert f"What just happened (do not repeat its actions or quoted lines): {_EXT_PREVIOUS}" in system
         assert _sent_user(enhancer) == "She grabs an umbrella."
 
@@ -1074,7 +1073,7 @@ class TestExtendWithScene:
 
     def test_a_scene_and_action_reply_keeps_only_the_action(self):
         result, enhancer = _extend_run([f"SCENE: {_EXT_SCENE} Neon signs glow.\nACTION: She walks away slowly."])
-        assert result.prompt == "She walks away slowly." and "Neon" not in result.prompt and result.scene == _EXT_SCENE
+        assert result.prompt == "She walks away slowly." and "Neon" not in result.prompt and result.scene == ""
         assert len(enhancer.calls) == 1
 
     def test_a_scene_without_an_action_is_retried(self):
@@ -1180,3 +1179,200 @@ class TestExtendBlankInputs:
         context = EnhanceContext(previous='x says "I told you so".')
         result, _ = _pair_run(['SCENE: A castle.\nACTION: He says "I told you so".'], context=context)
         assert result.prompt == 'He says "I told you so".'
+
+
+# ── The parts setting: rewrite both or only the action ──────────────────────
+
+_KEPT_SCENE = "A knight in dull armor stands in a castle courtyard at dusk."
+_ACTION_ONLY = EnhanceSettings(parts="action")
+
+
+def _action_run(outputs: list[str], *, scene: str = _KEPT_SCENE, prompt: str = "he draws his sword", context: EnhanceContext | None = None, settings: EnhanceSettings = _ACTION_ONLY):
+    enhancer = _FakeEnhancer(outputs)
+    result = enhance_video_prompt(enhancer, scene, prompt, settings, seed=10, ceiling=300, context=context or enhance_context(mode="video", frames=121, fps=24.0))
+    return result, enhancer
+
+
+class TestPartsGrammar:
+    def test_default_is_auto(self):
+        assert EnhanceSettings().parts is None
+        assert parse_enhance_spec("", mode="video").parts is None
+
+    @pytest.mark.parametrize("value", ["both", "action"])
+    def test_spec_round_trip(self, value):
+        settings = parse_enhance_spec(f"style=anime,parts={value}", mode="video")
+        assert settings.parts == value
+        assert parse_enhance_spec(format_enhance_spec(settings), mode="video") == settings
+
+    def test_format_omits_the_default_and_writes_a_set_value_last(self):
+        assert "parts" not in format_enhance_spec(EnhanceSettings())
+        assert format_enhance_spec(EnhanceSettings(parts="action")).endswith(",parts=action")
+
+    def test_image_format_omits_parts(self):
+        assert "parts" not in format_enhance_spec(EnhanceSettings(parts="action"), mode="image")
+
+    def test_mapping_round_trip_and_null_means_auto(self):
+        settings = settings_from_mapping({"parts": "action", "length": "longer"}, mode="video")
+        assert settings.parts == "action"
+        assert settings_from_mapping({"parts": None}, mode="video").parts is None
+
+    def test_invalid_value_lists_the_choices(self):
+        with pytest.raises(ValueError, match="both, action"):
+            parse_enhance_spec("parts=scene", mode="video")
+        with pytest.raises(ValueError, match="both, action"):
+            settings_from_mapping({"parts": ""}, mode="video")
+        with pytest.raises(ValueError, match="both, action"):
+            settings_from_mapping({"parts": 3}, mode="video")
+
+    def test_images_reject_or_ignore_parts_like_motion(self):
+        with pytest.raises(ValueError, match="only applies to video"):
+            parse_enhance_spec("parts=action", mode="image")
+        with pytest.warns(UserWarning, match="ignored for images"):
+            assert settings_from_mapping({"parts": "action"}, mode="image", motion_in_image="warn").parts is None
+
+    def test_contract_describes_the_choice(self):
+        parts = matrix_contract()["parts"]
+        assert (parts["key"], parts["video_only"], parts["default"]) == ("parts", True, None)
+        assert [(option["slug"], option["label"]) for option in parts["options"]] == [("both", "Scene and action"), ("action", "Action only")]
+
+    def test_prompt_file_entry_accepts_parts(self):
+        assert parse_enhance_entry({"parts": "action"}, mode="video", where="entry 0").parts == "action"
+        with pytest.raises(ValueError, match="Invalid 'enhance' in entry 0"):
+            parse_enhance_entry({"parts": "scene"}, mode="video", where="entry 0")
+
+
+class TestResolveParts:
+    @pytest.mark.parametrize(
+        ("parts", "scene", "extends", "expected"),
+        [
+            (None, "A castle.", False, "both"),
+            (None, "A castle.", True, "action"),
+            (None, "", True, "both"),
+            (None, "  ", False, "both"),
+            ("both", "A castle.", True, "both"),
+            ("action", "A castle.", False, "action"),
+            ("action", "A castle.", True, "action"),
+            ("action", "", False, "both"),
+            ("action", None, True, "both"),
+        ],
+    )
+    def test_rule(self, parts, scene, extends, expected):
+        assert resolve_parts(EnhanceSettings(parts=parts), scene=scene, extends=extends) == expected
+
+
+class TestPartsNoop:
+    def test_action_is_a_change_even_with_keep_all_settings(self):
+        keep = EnhanceSettings(details=(), motion=(), parts="action")
+        assert is_noop(keep, mode="video") is False
+        validate_settings(keep, mode="video")
+
+    def test_both_and_auto_keep_the_existing_rule(self):
+        for parts in (None, "both"):
+            assert is_noop(EnhanceSettings(details=(), motion=(), parts=parts), mode="video") is True
+
+    def test_images_ignore_parts(self):
+        assert is_noop(EnhanceSettings(details=(), motion=(), parts="action"), mode="image") is True
+
+    def test_a_keep_all_action_entry_with_its_own_scene_is_kept(self):
+        entry = EnhanceSettings(details=(), motion=(), parts="action")
+        plain = EnhanceSettings(details=(), motion=())
+        with pytest.warns(UserWarning, match="no change in videos"):
+            result = enhance_by_set_for_mode({"a": [entry, plain]}, mode="video", scene_by_set={"a": ["A castle.", "A castle."]})
+        assert result == {"a": [entry, None]}
+
+
+class TestActionOnlyWithoutExtending:
+    def test_the_scene_is_not_in_the_result(self):
+        result, enhancer = _action_run(["The knight draws his sword and raises it."])
+        assert result == EnhancePairResult(scene="", prompt="The knight draws his sword and raises it.", clamped=False, warning=None)
+        assert len(enhancer.calls) == 1
+
+    def test_the_prompt_says_to_keep_the_scene(self):
+        _, enhancer = _action_run(["The knight draws his sword and raises it."])
+        system, user = _sent_system(enhancer), _sent_user(enhancer)
+        assert f"The scene (kept exactly as written, do not restate or change it): {_KEPT_SCENE}" in system
+        assert "Never repeat their clothing, appearance or the setting" in system
+        assert "SCENE:" not in system and _KEPT_SCENE not in user and user == "he draws his sword"
+
+    def test_style_mood_and_details_belong_to_the_scene_and_are_left_out(self):
+        settings = EnhanceSettings(style="anime", mood="eerie", details=("lighting",), motion=("camera-move",), note="Keep it quiet.", parts="action")
+        _, enhancer = _action_run(["The knight draws his sword."], settings=settings)
+        system = _sent_system(enhancer)
+        assert "Style:" not in system and "Mood:" not in system and "Add detail on" not in system
+        assert "Motion: describe camera movement." in system and "Direction from the user (follow it): Keep it quiet." in system
+
+    def test_a_blank_prompt_asks_for_an_action_that_suits_the_scene(self):
+        result, enhancer = _action_run(["The knight walks across the courtyard."], prompt="")
+        assert "write an action that suits the scene" in _sent_user(enhancer) and result.scene == ""
+
+    def test_a_reference_image_gets_the_describe_change_rule(self):
+        context = enhance_context(mode="video", frames=121, fps=24.0, reference_image=True)
+        _, enhancer = _action_run(["The knight draws his sword."], context=context)
+        assert "The first frame is supplied as an image. Describe the motion, camera movement and changes over time" in _sent_system(enhancer)
+
+    def test_no_reference_image_rule_without_an_image(self):
+        _, enhancer = _action_run(["The knight draws his sword."])
+        assert "first frame is supplied" not in _sent_system(enhancer)
+
+    def test_duration_and_frame_rules_apply(self):
+        context = enhance_context(mode="video", width=512, height=768, frames=121, fps=24.0)
+        _, enhancer = _action_run(["The knight draws his sword."], context=context)
+        system = _sent_system(enhancer)
+        assert "Frame: portrait" in system and "Duration: about 5 seconds" in system
+
+    def test_sound_needs_audio(self):
+        settings = EnhanceSettings(sound=("effects",), parts="action")
+        _, silent = _action_run(["The knight draws his sword."], settings=settings)
+        _, loud = _action_run(["The knight draws his sword."], settings=settings, context=enhance_context(mode="video", frames=121, fps=24.0, audio=True))
+        assert "Sound:" not in _sent_system(silent) and "Sound: describe sound effects" in _sent_system(loud)
+
+    def test_an_echo_of_the_prompt_is_retried(self):
+        result, enhancer = _action_run(["he draws his sword", "The knight draws his sword and raises it."])
+        assert result.prompt == "The knight draws his sword and raises it." and [call["seed"] for call in enhancer.calls] == [10, 11]
+
+    def test_a_scene_and_action_reply_keeps_only_the_action(self):
+        result, _ = _action_run([f"SCENE: {_KEPT_SCENE} Torches burn.\nACTION: The knight draws his sword."])
+        assert (result.scene, result.prompt) == ("", "The knight draws his sword.")
+
+    def test_two_unusable_outputs_raise(self):
+        with pytest.raises(RuntimeError, match="no usable rewrite"):
+            _action_run(["", "I cannot help with that."])
+
+    def test_a_scene_that_fills_the_budget_warns_and_still_runs(self):
+        long_scene = " ".join(["word"] * 260)
+        with pytest.warns(UserWarning, match="scene uses most of the word budget"):
+            result, _ = _action_run(["The knight draws his sword."], scene=long_scene)
+        assert result.warning == SCENE_HEAVY_WARNING
+
+    def test_both_asks_for_a_scene_and_action_pair_even_with_a_scene(self):
+        result, enhancer = _action_run(["SCENE: A castle courtyard.\nACTION: A knight draws his sword."], settings=EnhanceSettings(parts="both"))
+        assert (result.scene, result.prompt) == ("A castle courtyard.", "A knight draws his sword.")
+        assert "SCENE:" in _sent_system(enhancer)
+
+    def test_a_blank_scene_falls_back_to_both_without_error(self):
+        result, enhancer = _action_run(["SCENE: A castle courtyard.\nACTION: A knight draws his sword."], scene="")
+        assert (result.scene, result.prompt) == ("A castle courtyard.", "A knight draws his sword.")
+        assert "Prompt: he draws his sword" in _sent_user(enhancer)
+
+
+class TestActionOnlyWhenExtending:
+    def test_explicit_action_matches_the_auto_default_for_a_scene(self):
+        explicit, _ = _extend_run(["She opens a black umbrella."], settings=_ACTION_ONLY)
+        auto, _ = _extend_run(["She opens a black umbrella."])
+        assert explicit == auto and explicit.scene == ""
+
+    def test_a_blank_scene_falls_back_to_a_pair(self):
+        result, _ = _extend_run([_EXT_PAIR], scene="", settings=_ACTION_ONLY)
+        assert result.scene == _EXT_SCENE
+
+    def test_both_with_a_scene_rewrites_the_scene_and_sends_it_to_the_model(self):
+        result, enhancer = _extend_run([_EXT_PAIR], settings=EnhanceSettings(parts="both"))
+        assert (result.scene, result.prompt) == (_EXT_SCENE, "She opens a black umbrella.")
+        assert _sent_user(enhancer) == f"Scene: {_EXT_SCENE}\nWhat happens next: She grabs an umbrella."
+        system = _sent_system(enhancer)
+        assert "SCENE:" in system and "rewrite it, keeping its facts" in system and "What just happened" in system
+
+    def test_both_with_a_scene_still_rejects_a_repeat_of_the_previous_prompt(self):
+        repeat = f'SCENE: {_EXT_SCENE}\nACTION: She says "I told you so".'
+        result, enhancer = _extend_run([repeat, _EXT_PAIR], settings=EnhanceSettings(parts="both"))
+        assert result.prompt == "She opens a black umbrella." and len(enhancer.calls) == 2

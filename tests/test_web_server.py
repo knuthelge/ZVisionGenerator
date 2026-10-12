@@ -2869,6 +2869,26 @@ def test_video_submission_with_a_scene_still_refuses_no_op_enhance_settings(monk
     assert submitted == []
 
 
+def test_video_submission_accepts_action_only_settings_that_keep_everything(monkeypatch, tmp_path):
+    """``parts=action`` rewrites the action to fit the scene, so unchanged style, mood and length are not a no-op."""
+    submitted = _stub_video_submission(monkeypatch, tmp_path)
+    settings = json.dumps({"style": "keep", "mood": "keep", "details": [], "length": "same", "motion": [], "sound": [], "parts": "action"})
+
+    response = _post_video({"scene": "A night street.", "enhance_auto": "on", "enhance_settings": settings, "prompt": "She walks away."})
+
+    assert response.status_code == 200
+    assert submitted[0]["args"].enhance.parts == "action"
+
+
+def test_video_submission_refuses_an_unknown_parts_value(monkeypatch, tmp_path):
+    submitted = _stub_video_submission(monkeypatch, tmp_path)
+
+    response = _post_video({"scene": "A night street.", "enhance_auto": "on", "enhance_settings": json.dumps({"parts": "scene"}), "prompt": "She walks away."})
+
+    assert response.status_code == 422 and "both, action" in response.json()["detail"]
+    assert submitted == []
+
+
 def test_extend_submission_with_a_prompt_file_keeps_no_op_entries_for_the_enhancer(monkeypatch, tmp_path, clip):
     submitted = _stub_extend_submission(monkeypatch, tmp_path, clip)
     path = tmp_path / "prompts.yaml"

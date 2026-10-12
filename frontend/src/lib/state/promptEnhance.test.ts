@@ -6,15 +6,21 @@ import {
   enhanceContext,
   enhancedSourceFor,
   enhancePhaseMessage,
-  enhancedOverrideActive,
+  anyEnhancedUsed,
+  actionOnlyBlocked,
+  defaultParts,
+  enhancedPartUsed,
   hasAudio,
   isEnhancedStale,
   isNoOpSettings,
+  rememberedParts,
+  runParts,
   settingsPayload,
   autoSplitsPrompt,
   splitsPrompt,
   submittedPair,
   submittedPrompt,
+  withRememberedParts,
   workflowMode,
 } from './promptEnhance';
 import { createNdjsonParser } from '$lib/api/promptEnhance';
@@ -47,7 +53,7 @@ describe('submission rule', () => {
     [{ enhancedPrompt: 'A fox in snow.', jsonPromptEnabled: true }, false, 'a fox'],
     [{ enhancedPrompt: 'A fox in snow.', enhanceAuto: true }, false, 'a fox'],
   ])('%o → override %s', (overrides, active, prompt) => {
-    expect(enhancedOverrideActive(state(overrides))).toBe(active);
+    expect(anyEnhancedUsed(state(overrides))).toBe(active);
     expect(submittedPrompt(state(overrides))).toBe(prompt);
   });
 });
@@ -114,6 +120,12 @@ describe('settings helpers', () => {
     expect(isNoOpSettings({ ...SETTINGS, motion: ['action'] }, 'video')).toBe(false);
     expect(isNoOpSettings({ ...SETTINGS, length: 'longer' }, 'image')).toBe(false);
     expect(isNoOpSettings({ ...SETTINGS, mood: 'eerie' }, 'image')).toBe(false);
+  });
+
+  it('treats an action-only video rewrite as a change, like the server', () => {
+    expect(isNoOpSettings({ ...SETTINGS, parts: 'action' }, 'video')).toBe(false);
+    expect(isNoOpSettings({ ...SETTINGS, parts: 'both' }, 'video')).toBe(true);
+    expect(isNoOpSettings({ ...SETTINGS, parts: 'action' }, 'image')).toBe(true);
   });
 
   it('strips motion for images', () => {
@@ -206,20 +218,72 @@ describe('scene and prompt pair', () => {
     expect(isNoOpSettings(SETTINGS, 'image', false, true)).toBe(true);
   });
 
-  it('uses the Enhanced pair when either Enhanced box has text', () => {
-    expect(enhancedOverrideActive(video({ enhancedScene: 'A castle at dusk.' }))).toBe(true);
-    expect(enhancedOverrideActive(video({ enhancedPrompt: 'A knight rides in.' }))).toBe(true);
-    expect(enhancedOverrideActive(video({ enhancedScene: ' ', enhancedPrompt: ' ' }))).toBe(false);
+  it('uses the Enhanced text of each part whose Enhanced box has text', () => {
+    expect(enhancedPartUsed(video({ enhancedScene: 'A castle at dusk.' }), 'scene')).toBe(true);
+    expect(enhancedPartUsed(video({ enhancedScene: 'A castle at dusk.' }), 'action')).toBe(false);
+    expect(enhancedPartUsed(video({ enhancedPrompt: 'A knight rides in.' }), 'action')).toBe(true);
+    expect(enhancedPartUsed(video({ enhancedPrompt: 'A knight rides in.' }), 'scene')).toBe(false);
+    expect(anyEnhancedUsed(video({ enhancedScene: ' ', enhancedPrompt: ' ' }))).toBe(false);
     // An image never carries a scene, so a stray Enhanced scene does not switch its text.
-    expect(enhancedOverrideActive(state({ workflow: 'txt2img', enhancedScene: 'A castle.' }))).toBe(false);
+    expect(anyEnhancedUsed(state({ workflow: 'txt2img', enhancedScene: 'A castle.' }))).toBe(false);
   });
 
-  it('submits the Enhanced pair, with no scene when the enhanced scene is blank', () => {
-    const base = { scene: 'A castle.', prompt: 'a knight' };
-    expect(submittedPair(video(base))).toEqual({ scene: 'A castle.', prompt: 'a knight' });
-    expect(submittedPair(video({ ...base, enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.' }))).toEqual({ scene: 'A castle at dusk.', prompt: 'A knight rides in.' });
-    expect(submittedPair(video({ ...base, enhancedPrompt: 'A knight rides in.' }))).toEqual({ scene: '', prompt: 'A knight rides in.' });
+  it.each([
+    ['neither part enhanced', {}, { scene: 'A castle.', prompt: 'a knight' }],
+    ['both parts enhanced', { enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.' }, { scene: 'A castle at dusk.', prompt: 'A knight rides in.' }],
+    ['only the action enhanced', { enhancedPrompt: 'A knight rides in.' }, { scene: 'A castle.', prompt: 'A knight rides in.' }],
+    ['only the scene enhanced', { enhancedScene: 'A castle at dusk.' }, { scene: 'A castle at dusk.', prompt: 'a knight' }],
+    ['a blank Enhanced scene', { enhancedScene: '  ', enhancedPrompt: 'A knight rides in.' }, { scene: 'A castle.', prompt: 'A knight rides in.' }],
+    ['file source', { enhancedScene: 'x', enhancedPrompt: 'y', promptSource: 'file' as const }, { scene: 'A castle.', prompt: 'a knight' }],
+    ['auto-enhance', { enhancedScene: 'x', enhancedPrompt: 'y', enhanceAuto: true }, { scene: 'A castle.', prompt: 'a knight' }],
+    ['a JSON caption', { enhancedScene: 'x', enhancedPrompt: 'y', jsonPromptEnabled: true }, { scene: 'A castle.', prompt: 'a knight' }],
+  ])('submits each part enhanced or as written: %s', (_name, overrides, expected) => {
+    expect(submittedPair(video({ scene: 'A castle.', prompt: 'a knight', ...overrides }))).toEqual(expected);
+  });
+
+  it('never submits a scene for an image', () => {
     expect(submittedPair(state({ workflow: 'txt2img', scene: 'ignored', prompt: 'a fox' }))).toEqual({ scene: '', prompt: 'a fox' });
+  });
+
+  describe('Rewrite', () => {
+    it('defaults to Action only for an extension and Scene and action for the other videos', () => {
+      expect(defaultParts('extend')).toBe('action');
+      expect(defaultParts('txt2vid')).toBe('both');
+      expect(defaultParts('img2vid')).toBe('both');
+      expect(rememberedParts(state({ workflow: 'extend' }))).toBe('action');
+      expect(rememberedParts(state({ workflow: 'txt2vid' }))).toBe('both');
+    });
+
+    it('remembers the choice for each video workflow apart', () => {
+      const settings = withRememberedParts({ ...SETTINGS }, 'extend', 'both');
+      expect(rememberedParts(state({ workflow: 'extend', enhanceSettings: settings }))).toBe('both');
+      expect(rememberedParts(state({ workflow: 'txt2vid', enhanceSettings: settings }))).toBe('both');
+      const action = withRememberedParts(settings, 'txt2vid', 'action');
+      expect(rememberedParts(state({ workflow: 'txt2vid', enhanceSettings: action }))).toBe('action');
+      expect(rememberedParts(state({ workflow: 'extend', enhanceSettings: action }))).toBe('both');
+      expect(rememberedParts(state({ workflow: 'img2vid', enhanceSettings: action }))).toBe('both');
+    });
+
+    it('falls back to both while the Scene is blank, without changing the remembered choice', () => {
+      const remembered = state({ workflow: 'extend', scene: '  ', prompt: 'She waves.' });
+      expect(actionOnlyBlocked(remembered)).toBe(true);
+      expect(runParts(remembered)).toBe('both');
+      expect(rememberedParts(remembered)).toBe('action');
+      expect(runParts({ ...remembered, scene: 'A street.' })).toBe('action');
+      expect(runParts(video({ scene: 'A castle.' }))).toBe('both');
+    });
+
+    it('does not fall back for prompt-file entries, which bring their own scenes', () => {
+      const file = state({ workflow: 'extend', scene: '', promptSource: 'file' });
+      expect(actionOnlyBlocked(file)).toBe(false);
+      expect(runParts(file)).toBe('action');
+    });
+
+    it('is sent with a video payload and left out for images and for the browser-only memory', () => {
+      const settings = { ...SETTINGS, parts: 'action' as const };
+      expect(settingsPayload(settings, 'video')).toEqual({ style: 'keep', mood: 'keep', details: [], length: 'same', parts: 'action', motion: [] });
+      expect(settingsPayload(SETTINGS, 'video')).not.toHaveProperty('parts');
+    });
   });
 
   describe('staleness', () => {

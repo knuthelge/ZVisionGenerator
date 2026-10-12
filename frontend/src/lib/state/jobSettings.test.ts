@@ -69,6 +69,30 @@ describe('jobSettingsPrefill', () => {
     expect(patch.enhancedFrom).toEqual({ scene: 'A castle.', prompt: 'a knight', mode: 'video' });
   });
 
+  it('fills only the Enhanced box of a part that ran enhanced, not the one that ran as written', () => {
+    const { patch } = jobSettingsPrefill({
+      mode: 'video', workflow: 'extend', source_video: '/clips/walk.mp4', scene: 'A street.', prompt: 'She boards the tram.', scene_input: 'A street.', prompt_input: 'She waves.',
+    });
+
+    expect(patch).toMatchObject({ scene: 'A street.', prompt: 'She waves.', enhancedScene: '', enhancedPrompt: 'She boards the tram.' });
+    expect(patch.enhancedFrom).toMatchObject({ scene: 'A street.', prompt: 'She waves.', mode: 'video', sourceVideoPath: '/clips/walk.mp4' });
+  });
+
+  it('leaves both Enhanced boxes empty when neither part differs from its recorded input', () => {
+    const { patch } = jobSettingsPrefill({ mode: 'video', workflow: 'txt2vid', scene: 'A castle.', prompt: 'a knight', scene_input: 'A castle.', prompt_input: 'a knight' });
+
+    expect(patch).toMatchObject({ enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
+  });
+
+  it('remembers the Rewrite choice of a queued job for its own workflow', () => {
+    const { patch } = jobSettingsPrefill({
+      mode: 'video', workflow: 'extend', source_video: '/clips/walk.mp4', prompt: 'She waves.',
+      enhance_auto: 'true', enhance_settings: '{"style":"keep","mood":"keep","details":[],"length":"same","motion":[],"parts":"both"}',
+    });
+
+    expect(patch.enhanceSettings?.partsByWorkflow).toEqual({ extend: 'both' });
+  });
+
   it('keeps a typed scene when an image job is loaded', () => {
     const { patch } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', prompt: 'a fox' });
 

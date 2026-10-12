@@ -1,4 +1,4 @@
-import type { DraftState, EnhanceContext, EnhancedSource, EnhanceSettings, PromptEnhancerContract, Workflow, WorkflowMode } from '$lib/types';
+import type { DraftState, EnhanceContext, EnhancedSource, EnhanceParts, EnhanceSettings, PromptEnhancerContract, Workflow, WorkflowMode } from '$lib/types';
 
 /** Media mode of a canonical workflow. */
 export function workflowMode(workflow: Workflow): WorkflowMode {
@@ -7,10 +7,41 @@ export function workflowMode(workflow: Workflow): WorkflowMode {
 
 const FALLBACK_SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', details: ['lighting', 'composition'], length: 'same', motion: ['action'], sound: [], note: '' };
 
+/** What Rewrite starts as: an extension keeps its scene and writes the next action; the other video workflows write both. */
+export function defaultParts(workflow: Workflow): EnhanceParts {
+  return workflow === 'extend' ? 'action' : 'both';
+}
+
+/** The Rewrite choice remembered for the current workflow, or that workflow's default. */
+export function rememberedParts(state: Pick<DraftState, 'workflow' | 'enhanceSettings'>): EnhanceParts {
+  return state.enhanceSettings?.partsByWorkflow?.[state.workflow] ?? defaultParts(state.workflow);
+}
+
+/** Settings with the Rewrite choice for *workflow* remembered in `partsByWorkflow`; the other fields and workflows are kept. */
+export function withRememberedParts(settings: EnhanceSettings, workflow: Workflow, parts: EnhanceParts): EnhanceSettings {
+  return { ...settings, partsByWorkflow: { ...settings.partsByWorkflow, [workflow]: parts } };
+}
+
+/** Whether Rewrite = Action only has to wait for a scene: an inline video run with a blank Scene splits the text into both parts. */
+export function actionOnlyBlocked(state: DraftState): boolean {
+  return workflowMode(state.workflow) === 'video' && state.promptSource === 'inline' && state.scene.trim() === '';
+}
+
+/**
+ * The parts a run rewrites: the remembered choice, except that a blank Scene always means both.
+ *
+ * The remembered choice itself is not changed. Prompt-file entries bring their own scenes, so a file run never falls back here.
+ */
+export function runParts(state: DraftState, remembered: EnhanceParts = rememberedParts(state)): EnhanceParts {
+  return remembered === 'action' && actionOnlyBlocked(state) ? 'both' : remembered;
+}
+
 /** The user's last-used options, with axes they never set (e.g. saved before an axis existed) taken from the backend matrix defaults. */
 export function effectiveEnhanceSettings(state: DraftState, contract: PromptEnhancerContract | undefined): EnhanceSettings {
   const defaults = { ...FALLBACK_SETTINGS, ...contract?.matrix.defaults };
-  return { ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...defaults.sound], ...state.enhanceSettings };
+  const settings: EnhanceSettings = { ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...defaults.sound], ...state.enhanceSettings };
+  delete settings.parts;
+  return workflowMode(state.workflow) === 'video' ? { ...settings, parts: rememberedParts(state) } : settings;
 }
 
 /**
@@ -26,22 +57,31 @@ export function hasAudio(state: DraftState, supported = true, sourceHasAudio: bo
 /**
  * Whether *settings* would ask for no change at all (keep style and mood, no details, same length, no direction, no video motion or sound).
  *
+ * A video that rewrites the action only (`parts` is `action`) always writes a new action, so it is never a no-op; pass the
+ * parts the run uses (a blank scene means both), as `runParts` gives them.
+ *
  * @param split The job is a video whose scene is blank and whose prompt is not, so the rewrite splits it.
  */
 export function isNoOpSettings(settings: EnhanceSettings, mode: WorkflowMode, audio = false, split = false): boolean {
   // A video prompt written without a scene is split into scene and action, which is always a change.
   if (mode === 'video' && split) return false;
+  if (mode === 'video' && settings.parts === 'action') return false;
   const hasMotion = mode === 'video' && settings.motion.length > 0;
   const hasSound = mode === 'video' && audio && settings.sound.length > 0;
   return settings.style === 'keep' && settings.mood === 'keep' && settings.details.length === 0 && settings.length === 'same' && !settings.note.trim() && !hasMotion && !hasSound;
 }
 
-/** Settings as sent to the backend; `motion` only applies to video, `sound` only to video with audio, and a blank `note` is left out. */
+/**
+ * Settings as sent to the backend; `motion` and `parts` only apply to video, `sound` only to video with audio, and a blank `note` is left out.
+ *
+ * The per-workflow Rewrite memory stays in the browser.
+ */
 export function settingsPayload(settings: EnhanceSettings, mode: WorkflowMode, audio = false): Partial<EnhanceSettings> {
-  const { motion, sound, note, ...rest } = settings;
+  const { motion, sound, note, parts, partsByWorkflow: _remembered, ...rest } = settings;
   const base: Partial<EnhanceSettings> = note.trim() ? { ...rest, note } : rest;
   if (mode !== 'video') return base;
-  return audio ? { ...base, motion, sound } : { ...base, motion };
+  const video = parts === undefined ? { ...base, motion } : { ...base, parts, motion };
+  return audio ? { ...video, sound } : video;
 }
 
 /**
@@ -118,21 +158,28 @@ export function enhancedSourceFor(state: DraftState): EnhancedSource {
   return source;
 }
 
-/** Whether the Enhanced text replaces the inline text on submit; for video, text in either Enhanced box counts. */
-export function enhancedOverrideActive(state: DraftState): boolean {
+/** Whether Generate sends the Enhanced text of one part: its Enhanced box has text, and the text is inline with no JSON caption and no enhancing at job time. */
+export function enhancedPartUsed(state: DraftState, part: 'scene' | 'action'): boolean {
   if (state.promptSource !== 'inline' || state.jsonPromptEnabled || state.enhanceAuto) return false;
-  if (state.enhancedPrompt.trim() !== '') return true;
+  if (part === 'action') return state.enhancedPrompt.trim() !== '';
   return workflowMode(state.workflow) === 'video' && state.enhancedScene.trim() !== '';
 }
 
-/** The scene and prompt to submit: the Enhanced pair when it applies, otherwise the boxes. Images never carry a scene. */
-export function submittedPair(state: DraftState): { scene: string; prompt: string } {
-  const video = workflowMode(state.workflow) === 'video';
-  if (enhancedOverrideActive(state)) return { scene: video ? state.enhancedScene : '', prompt: state.enhancedPrompt };
-  return { scene: video ? state.scene : '', prompt: state.prompt };
+/** Whether Generate sends Enhanced text for at least one part. */
+export function anyEnhancedUsed(state: DraftState): boolean {
+  return enhancedPartUsed(state, 'scene') || enhancedPartUsed(state, 'action');
 }
 
-/** The `prompt` form value to submit: the Enhanced text when it applies, otherwise the prompt box. */
+/** The scene and prompt to submit: each part is its Enhanced text when that has text, otherwise your text. Images never carry a scene. */
+export function submittedPair(state: DraftState): { scene: string; prompt: string } {
+  const video = workflowMode(state.workflow) === 'video';
+  return {
+    scene: !video ? '' : enhancedPartUsed(state, 'scene') ? state.enhancedScene : state.scene,
+    prompt: enhancedPartUsed(state, 'action') ? state.enhancedPrompt : state.prompt,
+  };
+}
+
+/** The `prompt` form value to submit. */
 export function submittedPrompt(state: DraftState): string {
   return submittedPair(state).prompt;
 }

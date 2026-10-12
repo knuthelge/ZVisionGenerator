@@ -410,7 +410,6 @@ async function mountWorkspace(context: WorkspaceContext): Promise<void> {
 
 const field = (id: string) => document.querySelector(`#${id}`) as HTMLTextAreaElement;
 
-
 function type(id: string, value: string): void {
   const el = field(id);
   el.value = value;
@@ -1327,30 +1326,21 @@ describe('WorkspacePage', () => {
       expect(submitted.get('prompt')).toBe('');
     });
 
-    it('enables Enhance with a scene alone and disables it with both boxes empty', async () => {
+    it('enables Enhance with a scene or an action alone, and explains the disabled button only while both boxes are empty', async () => {
       draft.update('workflow', 'txt2vid');
       await mountWorkspace(withVideoEnhancer(makeContext()));
       expect((await openEnhanceRun()).disabled).toBe(true);
+      expect(document.querySelector('#ws-enhance-panel')?.textContent).toContain('Write a scene or an action first.');
 
       type('ws-scene', 'A castle at dusk.');
       await settle();
       expect((document.querySelector('#ws-enhance-run') as HTMLButtonElement).disabled).toBe(false);
+      expect(document.querySelector('#ws-enhance-panel')?.textContent).not.toContain('Write a scene or an action first.');
 
       type('ws-scene', '');
       type('ws-prompt', 'a knight rides in');
       await settle();
       expect((document.querySelector('#ws-enhance-run') as HTMLButtonElement).disabled).toBe(false);
-    });
-
-    it('explains the disabled Enhance button only while both boxes are empty', async () => {
-      draft.update('workflow', 'txt2vid');
-      await mountWorkspace(withVideoEnhancer(makeContext()));
-      await openEnhanceRun();
-      expect(document.querySelector('#ws-enhance-panel')?.textContent).toContain('Write a scene or a prompt first.');
-
-      type('ws-scene', 'A castle at dusk.');
-      await settle();
-      expect(document.querySelector('#ws-enhance-panel')?.textContent).not.toContain('Write a scene or a prompt first.');
     });
 
     it('lets a video prompt without a scene be enhanced with the default settings, because the split is the change', async () => {
@@ -1408,39 +1398,232 @@ describe('WorkspacePage', () => {
       expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).not.toHaveProperty('scene');
     });
 
-    it('submits the Enhanced pair and records the user text beside it', async () => {
+    it.each([
+      ['neither part', {}, 'A castle.', 'a knight'],
+      ['both parts', { enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.' }, 'A castle at dusk.', 'A knight rides in.'],
+    ])('sends each part enhanced when its Enhanced box has text: %s', async (_name, enhanced, scene, prompt) => {
       draft.update('workflow', 'txt2vid');
-      draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
+      draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedFrom: null, ...enhanced });
       await mountWorkspace(withVideoEnhancer(makeContext()));
 
       const submitted = await submitForm();
-      expect(submitted.get('scene')).toBe('A castle at dusk.');
-      expect(submitted.get('prompt')).toBe('A knight rides in.');
-      expect(submitted.get('scene_input')).toBe('A castle.');
-      expect(submitted.get('prompt_input')).toBe('a knight');
+      expect(submitted.get('scene')).toBe(scene);
+      expect(submitted.get('prompt')).toBe(prompt);
+      // The user's own text is recorded only when some part ran enhanced.
+      expect(submitted.has('scene_input')).toBe(Object.keys(enhanced).length > 0);
+      expect(submitted.has('prompt_input')).toBe(Object.keys(enhanced).length > 0);
+      if (Object.keys(enhanced).length > 0) {
+        expect(submitted.get('scene_input')).toBe('A castle.');
+        expect(submitted.get('prompt_input')).toBe('a knight');
+      }
     });
 
-    it('runs with no scene when the Enhanced pair has none, still recording the user scene', async () => {
-      draft.update('workflow', 'txt2vid');
-      draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedPrompt: 'A knight rides in.', enhancedFrom: null });
-      await mountWorkspace(withVideoEnhancer(makeContext()));
+    describe('Rewrite row', () => {
+      const chip = (label: string) => Array.from(document.querySelectorAll('#ws-enhance-panel [role="radiogroup"] [role="radio"]')).find((el) => el.textContent?.trim() === label) as HTMLButtonElement;
+      const rewriteChips = () => Array.from(document.querySelectorAll('#ws-enhance-panel [aria-labelledby="ws-enhance-rewrite-label"] [role="radio"]')) as HTMLButtonElement[];
 
-      const submitted = await submitForm();
-      expect(submitted.has('scene')).toBe(false);
-      expect(submitted.get('prompt')).toBe('A knight rides in.');
-      expect(submitted.get('scene_input')).toBe('A castle.');
+      it('comes first in the popover, for the video workflows only', async () => {
+        draft.update('workflow', 'txt2vid');
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        await openEnhanceRun();
+        expect(document.querySelector('#ws-enhance-rewrite-label')?.textContent?.trim()).toBe('Rewrite');
+        expect(document.querySelector('#ws-enhance-panel fieldset')?.querySelector('#ws-enhance-rewrite-label')).not.toBeNull();
+        expect(rewriteChips().map((el) => el.textContent?.trim())).toEqual(['Scene and action', 'Action only']);
+
+        draft.update('workflow', 'txt2img');
+        await settle();
+        expect(document.querySelector('#ws-enhance-rewrite-label')).toBeNull();
+      });
+
+      it('defaults to Scene and action and remembers a choice for Text to Video', async () => {
+        draft.update('workflow', 'txt2vid');
+        draft.patch({ scene: 'A castle.', prompt: 'a knight' });
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        await openEnhanceRun();
+        expect(rewriteChips().map((el) => el.getAttribute('aria-checked'))).toEqual(['true', 'false']);
+        expect(document.querySelector('#ws-enhance-rewrite-help')?.textContent).toBe('Enhance rewrites both from your text.');
+
+        chip('Action only').click();
+        await settle();
+        expect(rewriteChips().map((el) => el.getAttribute('aria-checked'))).toEqual(['false', 'true']);
+        expect(document.querySelector('#ws-enhance-rewrite-help')?.textContent).toBe('Your scene is kept as written.');
+        expect(draft.state.enhanceSettings?.partsByWorkflow).toEqual({ txt2vid: 'action' });
+      });
+
+      it('disables Action only with the reason while the Scene is blank, and the run uses both', async () => {
+        enhanceApiMocks.enhancePrompt.mockResolvedValue();
+        draft.update('workflow', 'txt2vid');
+        draft.patch({ prompt: 'a knight rides in', enhanceSettings: { style: 'photo', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        await openEnhanceRun();
+
+        const actionOnly = chip('Action only');
+        expect(actionOnly.disabled).toBe(true);
+        expect(chip('Scene and action').getAttribute('aria-checked')).toBe('true');
+        const help = document.querySelector('#ws-enhance-rewrite-help') as HTMLElement;
+        expect(help.textContent).toBe('Write a scene first. With no scene, Enhance splits your text into both.');
+        expect(actionOnly.getAttribute('aria-describedby')).toBe(help.id);
+
+        (document.querySelector('#ws-enhance-run') as HTMLButtonElement).click();
+        await settle();
+        expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ settings: { parts: 'both' } });
+        // The remembered choice survives and applies again once there is a scene.
+        expect(draft.state.enhanceSettings?.partsByWorkflow).toEqual({ txt2vid: 'action' });
+        type('ws-scene', 'A castle.');
+        await settle();
+        expect(chip('Action only').disabled).toBe(false);
+        expect(chip('Action only').getAttribute('aria-checked')).toBe('true');
+      });
+
+      it('sends parts with an on-demand enhancement and keeps the memory out of the payload', async () => {
+        enhanceApiMocks.enhancePrompt.mockResolvedValue();
+        draft.update('workflow', 'txt2vid');
+        draft.patch({ scene: 'A castle.', prompt: 'a knight' });
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        await openEnhanceRun();
+        chip('Action only').click();
+        await settle();
+        (document.querySelector('#ws-enhance-run') as HTMLButtonElement).click();
+        await settle();
+        const body = enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0] as { settings: Record<string, unknown> };
+        expect(body.settings.parts).toBe('action');
+        expect(body.settings).not.toHaveProperty('partsByWorkflow');
+      });
+
+      it('sends parts inside enhance_settings with auto-enhance, and none for images', async () => {
+        draft.update('workflow', 'txt2vid');
+        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhanceAuto: true });
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        expect(JSON.parse(String((await submitForm()).get('enhance_settings'))).parts).toBe('both');
+
+        draft.patch({ enhanceSettings: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
+        await settle();
+        expect(JSON.parse(String((await submitForm()).get('enhance_settings'))).parts).toBe('action');
+      });
     });
 
-    it('submits plain fields without the user-text records when nothing is enhanced, and leaves an empty scene out', async () => {
-      draft.update('workflow', 'txt2vid');
-      draft.update('prompt', 'a knight rides in');
-      await mountWorkspace(withVideoEnhancer(makeContext()));
+    describe('markers', () => {
+      const labelRow = (id: string) => target.querySelector(`label[for="${id}"]`)!.closest('.label-row') as HTMLElement;
+      /** The text beside the label: clip links and the enhanced marker. */
+      const rowText = (id: string) => (labelRow(id).querySelector('.label-extras')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+      const useMine = (id: string) => Array.from(labelRow(id).querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Use mine') as HTMLButtonElement | undefined;
+      const status = () => target.querySelector('[role="status"]')?.textContent?.trim();
 
-      const submitted = await submitForm();
-      expect(submitted.get('prompt')).toBe('a knight rides in');
-      expect(submitted.has('scene')).toBe(false);
-      expect(submitted.has('scene_input')).toBe(false);
-      expect(submitted.has('prompt_input')).toBe(false);
+      it('shows no marker, no Use mine and no pill on Your text when nothing is enhanced', async () => {
+        draft.update('workflow', 'txt2vid');
+        draft.patch({ scene: 'A castle.', prompt: 'a knight' });
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        expect(rowText('ws-scene')).toBe('');
+        expect(rowText('ws-prompt')).toBe('');
+        expect(target.querySelector('#ws-tab-prompt')?.textContent?.trim()).toBe('Your text');
+        expect(target.querySelector('#ws-tab-enhanced')?.textContent?.trim()).toBe('Enhanced');
+      });
+
+      it('marks only the part with Enhanced text, in both tabs, and describes the field by it', async () => {
+        draft.update('workflow', 'txt2vid');
+        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedPrompt: 'A knight rides in.', enhancedFrom: null });
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        expect(rowText('ws-prompt')).toBe('Uses enhanced Use mine');
+        expect(rowText('ws-scene')).not.toContain('Uses enhanced');
+        const marker = document.getElementById('ws-action-marker')!;
+        expect(marker.textContent?.trim()).toBe('Uses enhanced');
+        expect(field('ws-prompt').getAttribute('aria-describedby')).toContain('ws-action-marker');
+        expect(field('ws-enhanced-prompt').getAttribute('aria-describedby')).toContain('ws-action-marker');
+        expect(field('ws-scene').getAttribute('aria-describedby')).toBeNull();
+        // The pill moves to the Enhanced tab only.
+        expect(target.querySelector('#ws-tab-prompt')?.textContent?.trim()).toBe('Your text');
+        expect(target.querySelector('#ws-tab-enhanced')?.textContent).toContain('used');
+
+        (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
+        await settle();
+        expect(rowText('ws-enhanced-prompt')).toContain('Uses enhanced');
+      });
+
+      it('clears one part with Use mine, announces it and sends the user text for that part', async () => {
+        draft.update('workflow', 'txt2vid');
+        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        expect(rowText('ws-scene')).toContain('Uses enhanced');
+        expect(rowText('ws-prompt')).toContain('Uses enhanced');
+
+        useMine('ws-prompt')!.click();
+        await settle();
+        expect(draft.state).toMatchObject({ enhancedPrompt: '', enhancedScene: 'A castle at dusk.' });
+        expect(rowText('ws-prompt')).not.toContain('Uses enhanced');
+        expect(rowText('ws-scene')).toContain('Uses enhanced');
+        expect(status()).toBe('Action now uses your text.');
+        const submitted = await submitForm();
+        expect(submitted.get('scene')).toBe('A castle at dusk.');
+        expect(submitted.get('prompt')).toBe('a knight');
+
+        useMine('ws-scene')!.click();
+        await settle();
+        expect(status()).toBe('Scene now uses your text.');
+        expect(draft.state.enhancedFrom).toBeNull();
+        expect(target.querySelector('#ws-tab-enhanced')?.textContent?.trim()).toBe('Enhanced');
+      });
+
+      it('shows no marker while auto-enhancing, whatever the boxes hold', async () => {
+        draft.update('workflow', 'txt2vid');
+        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedPrompt: 'Ignored.', enhanceAuto: true });
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        expect(rowText('ws-prompt')).not.toContain('Uses enhanced');
+        expect(target.querySelector('#ws-tab-enhanced')?.textContent).toContain('auto');
+      });
+
+      it('marks a part out of date only while its pair is stale, and keeps the tab badge', async () => {
+        draft.update('workflow', 'txt2vid');
+        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        expect(rowText('ws-prompt')).not.toContain('Out of date');
+
+        type('ws-scene', 'A harbour.');
+        await settle();
+        expect(rowText('ws-prompt')).toContain('Uses enhanced Out of date Use mine');
+        // The scene is not enhanced, so what it sends is current.
+        expect(rowText('ws-scene')).toBe('');
+        expect(target.querySelector('#ws-tab-enhanced')?.textContent).toContain('Out of date');
+
+        type('ws-scene', 'A castle.');
+        await settle();
+        expect(rowText('ws-prompt')).not.toContain('Out of date');
+      });
+
+      it('empties both Enhanced boxes with Clear, and Enhance again starts from the user text', async () => {
+        enhanceApiMocks.enhancePrompt.mockResolvedValue();
+        draft.update('workflow', 'txt2vid');
+        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhancedScene: 'A castle at dusk.', enhancedPrompt: 'A knight rides in.', enhancedFrom: { scene: 'A castle.', prompt: 'a knight', mode: 'video' } });
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
+        await settle();
+        const clear = Array.from(target.querySelectorAll('.prompt-link')).find((el) => el.textContent?.trim() === 'Clear') as HTMLButtonElement;
+        clear.click();
+        await settle();
+        expect(draft.state).toMatchObject({ enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
+
+        draft.patch({ enhancedScene: 'Old.', enhancedPrompt: 'Old.' });
+        await openEnhanceRun();
+        (document.querySelector('#ws-enhance-run') as HTMLButtonElement).click();
+        await settle();
+        expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ scene: 'A castle.', prompt: 'a knight' });
+      });
+    });
+
+    describe('Enhanced placeholders', () => {
+      it('say what the job will do with auto-enhance, by Rewrite choice', async () => {
+        draft.update('workflow', 'txt2vid');
+        draft.patch({ scene: 'A castle.', prompt: 'a knight', enhanceAuto: true });
+        await mountWorkspace(withVideoEnhancer(makeContext()));
+        expect(field('ws-enhanced-scene').placeholder).toBe('Enhanced when the job runs');
+        expect(field('ws-enhanced-prompt').placeholder).toBe('Enhanced when the job runs');
+        expect(field('ws-enhanced-scene').disabled).toBe(true);
+
+        draft.patch({ enhanceSettings: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
+        await settle();
+        expect(field('ws-enhanced-scene').placeholder).toBe('Not enhanced. Generate uses your scene.');
+        expect(field('ws-enhanced-prompt').placeholder).toBe('Enhanced when the job runs');
+      });
+
     });
 
     it('fills both tabs from the Reuse params without marking them out of date', async () => {
@@ -4007,6 +4190,156 @@ describe('WorkspacePage extend', () => {
       await settle();
       expect(target.textContent).toContain('Out of date');
     });
+
+    describe('Action only', () => {
+      const rewrite = () => Array.from(document.querySelectorAll('#ws-enhance-panel [aria-labelledby="ws-enhance-rewrite-label"] [role="radio"]')) as HTMLButtonElement[];
+      const extras = (id: string) => (target.querySelector(`label[for="${id}"]`)!.closest('.label-row')!.querySelector('.label-extras')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+
+      /** The server answers an action-only run with no scene part. */
+      function answerActionOnly(): void {
+        enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+          const onFrame = rest[0] as (frame: EnhanceFrame) => void;
+          onFrame({ type: 'text', text: 'She waves sl', scene: '', prompt: 'She waves sl' });
+          onFrame({ type: 'done', scene: '', prompt: 'She waves slowly.', clamped: false });
+        });
+      }
+
+      it('is the default for an extension and is sent with the request', async () => {
+        answerActionOnly();
+        await mountExtend();
+        await chooseSource(sceneSource());
+        type('ws-prompt', 'She waves.');
+        await settle();
+        await openEnhanceRun();
+        expect(rewrite().map((el) => el.getAttribute('aria-checked'))).toEqual(['false', 'true']);
+        expect(document.querySelector('#ws-enhance-rewrite-help')?.textContent).toBe('Your scene is kept as written.');
+        (document.querySelector('#ws-enhance-run') as HTMLButtonElement).click();
+        await settle();
+        expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ scene: 'A woman on a rainy street.', prompt: 'She waves.', settings: { parts: 'action' } });
+        expect(draft.state.enhanceSettings?.partsByWorkflow?.extend).toBeUndefined();
+      });
+
+      it('leaves the Enhanced scene empty, even when an older server returns one, so an edited Scene applies', async () => {
+        enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+          (rest[0] as (frame: EnhanceFrame) => void)({ type: 'done', scene: 'A woman on a rainy street.', prompt: 'She waves slowly.', clamped: false });
+        });
+        await mountExtend();
+        await chooseSource(sceneSource());
+        type('ws-prompt', 'She waves.');
+        await settle();
+        await runEnhance();
+
+        expect(draft.state).toMatchObject({ enhancedScene: '', enhancedPrompt: 'She waves slowly.' });
+        expect(field('ws-enhanced-scene').value).toBe('');
+        expect(field('ws-enhanced-scene').placeholder).toBe('Not enhanced. Generate uses your scene.');
+        expect(extras('ws-prompt')).toBe('Uses enhanced Use mine');
+        expect(extras('ws-scene')).toBe('');
+
+        type('ws-scene', 'A woman on a sunny street.');
+        await settle();
+        const form = await submit();
+        expect(form?.get('scene')).toBe('A woman on a sunny street.');
+        expect(form?.get('prompt')).toBe('She waves slowly.');
+        expect(form?.get('scene_input')).toBe('A woman on a sunny street.');
+        expect(form?.get('prompt_input')).toBe('She waves.');
+      });
+
+      it('fills only the Action while streaming and keeps the Scene placeholder', async () => {
+        let release: () => void = () => undefined;
+        const gate = new Promise<void>((resolve) => { release = resolve; });
+        enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+          (rest[0] as (frame: EnhanceFrame) => void)({ type: 'text', text: 'She waves sl', scene: '', prompt: 'She waves sl' });
+          await gate;
+        });
+        await mountExtend();
+        await chooseSource(sceneSource());
+        await runEnhance();
+        expect(field('ws-enhanced-prompt').value).toBe('She waves sl');
+        expect(field('ws-enhanced-prompt').getAttribute('aria-busy')).toBe('true');
+        expect(field('ws-enhanced-scene').value).toBe('');
+        expect(field('ws-enhanced-scene').placeholder).toBe('Not enhanced. Generate uses your scene.');
+        release();
+        await settle();
+      });
+
+    });
+  });
+
+  describe('restoring the clip text', () => {
+    const link = (label: string) => Array.from(target.querySelectorAll('.label-extras button')).find((el) => el.textContent?.trim() === label) as HTMLButtonElement | undefined;
+    const status = () => target.querySelector('[role="status"]')?.textContent?.trim();
+
+    it('offers the clip\'s scene only while the Scene differs, and restores it with a status and focus', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource());
+      expect(link("Use the clip's scene")).toBeUndefined();
+
+      type('ws-scene', 'A woman on a sunny street.');
+      await settle();
+      const restore = link("Use the clip's scene")!;
+      expect(restore.title).toBe('Replace your scene with the one recorded in the clip');
+      restore.click();
+      await settle();
+
+      expect(field('ws-scene').value).toBe('A woman on a rainy street.');
+      expect(draft.state.scene).toBe('A woman on a rainy street.');
+      expect(status()).toBe('Scene restored from the clip.');
+      expect(document.activeElement).toBe(field('ws-scene'));
+      expect(link("Use the clip's scene")).toBeUndefined();
+    });
+
+    it('clears Out of date when the clip\'s scene is restored', async () => {
+      enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+        (rest[0] as (frame: EnhanceFrame) => void)({ type: 'done', scene: '', prompt: 'She waves slowly.', clamped: false });
+      });
+      await mountExtend();
+      await chooseSource(sceneSource());
+      type('ws-prompt', 'She waves.');
+      await settle();
+      await runEnhance();
+
+      type('ws-scene', 'A woman on a sunny street.');
+      await settle();
+      expect(target.textContent).toContain('Out of date');
+      link("Use the clip's scene")!.click();
+      await settle();
+      expect(target.textContent).not.toContain('Out of date');
+    });
+
+    it('offers the clip\'s prompt for a legacy clip, beside Action, and brings back the original-prompt warning', async () => {
+      await mountExtend();
+      await chooseSource(legacySource());
+      expect(link("Use the clip's prompt")).toBeUndefined();
+      expect(link("Use the clip's scene")).toBeUndefined();
+
+      type('ws-prompt', 'She walks away.');
+      await settle();
+      expect(target.querySelector('[data-testid="original-prompt-warning"]')).toBeNull();
+      const restore = link("Use the clip's prompt")!;
+      expect(restore.title).toBe("Replace your action with the clip's recorded prompt");
+      restore.click();
+      await settle();
+
+      expect(field('ws-prompt').value).toBe('A woman stands in the rain and says "Hello".');
+      expect(target.querySelector('[data-testid="original-prompt-warning"]')).not.toBeNull();
+      expect(link("Use the clip's prompt")).toBeUndefined();
+    });
+
+    it('offers nothing outside an extension', async () => {
+      await mountExtend();
+      await chooseSource(sceneSource({ legacy: true }));
+      type('ws-scene', 'Something else.');
+      type('ws-prompt', 'She looks up.');
+      await settle();
+      expect(link("Use the clip's scene")).toBeDefined();
+      expect(target.querySelector('[data-testid="original-prompt-warning"]')).not.toBeNull();
+
+      draft.update('workflow', 'txt2vid');
+      await settle();
+      expect(link("Use the clip's scene")).toBeUndefined();
+      expect(target.querySelector('[data-testid="original-prompt-warning"]')).toBeNull();
+    });
+
   });
 
   describe('Copy CLI command', () => {

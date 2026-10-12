@@ -2,7 +2,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import { api, errorText } from '$lib/api/client';
   import { draft } from '$lib/state/draft.svelte';
-  import { enhancedOverrideActive, submittedPair } from '$lib/state/promptEnhance';
+  import { anyEnhancedUsed, submittedPair } from '$lib/state/promptEnhance';
   import { jobStore } from '$lib/state/job.svelte';
   import { historyStore } from '$lib/state/history.svelte';
   import { router } from '$lib/state/router.svelte';
@@ -637,11 +637,11 @@
     }
     // Sync lora string
     formData.set('lora', formatLoraString(loraChips));
-    // A non-blank Enhanced prompt replaces the inline prompt (never in JSON-caption, file, or auto-enhance mode).
+    // Each part with Enhanced text is sent enhanced and the other as written (never in JSON-caption, file, or auto-enhance mode).
     if (run) {
       applyPromptRun(formData, run);
-    } else if (enhancedOverrideActive(draft.state) && formData.has('prompt')) {
-      // The Enhanced text runs; the user's own text is recorded beside it so Reuse can offer either.
+    } else if (anyEnhancedUsed(draft.state) && formData.has('prompt')) {
+      // The Enhanced parts run; the user's own text is recorded beside them so Reuse can offer either.
       const pair = submittedPair(draft.state);
       formData.set('prompt', pair.prompt);
       if (formData.has('scene')) {

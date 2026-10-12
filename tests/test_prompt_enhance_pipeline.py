@@ -330,6 +330,28 @@ class TestPromptFileEnhance:
         assert inspection.prompts_data == {"a": [("x", None), ("y", None)]}
         assert inspection.enhance_by_set == {"a": [None, None]}
 
+    def test_parts_action_is_parsed_and_a_keep_all_entry_with_it_is_kept(self):
+        """``parts: action`` always changes the prompt (the action is rewritten), so a keep-all entry is not refused as a no-op."""
+        keep = "style: keep, mood: keep, details: [], length: same, motion: []"
+        inspection = inspect_prompts_text(
+            f"a:\n  - scene: A castle.\n    prompt: x\n    enhance: {{{keep}, parts: action}}\n  - prompt: y\n    enhance: {{parts: both}}\n",
+            source_name="f.yaml",
+        )
+        assert inspection.enhance_by_set["a"][0] == EnhanceSettings(style="keep", mood="keep", details=(), length="same", motion=(), parts="action")
+        assert inspection.enhance_by_set["a"][1] == EnhanceSettings(parts="both")
+
+    def test_an_invalid_parts_value_warns_and_keeps_file_usable(self):
+        with pytest.warns(UserWarning, match="entry 0 of prompt set 'a' in f.yaml"):
+            inspection = inspect_prompts_text("a:\n  - prompt: x\n    enhance: {parts: scene}\n", source_name="f.yaml")
+        assert inspection.enhance_by_set == {"a": [None]}
+
+    def test_web_preview_writes_parts_only_when_set(self, tmp_path):
+        from zvisiongenerator.web.prompt_files import inspect_prompt_file
+
+        path = tmp_path / "p.yaml"
+        path.write_text("a:\n  - prompt: x\n    enhance: {parts: action}\n", encoding="utf-8")
+        assert inspect_prompt_file(str(path), accepted_extensions=(".yaml",)).options[0]["enhance"].endswith(",parts=action")
+
     def test_web_preview_exposes_spec(self, tmp_path):
         from zvisiongenerator.web.prompt_files import inspect_prompt_file
 
@@ -385,6 +407,30 @@ class TestCliFlags:
 
     def test_video_sound(self):
         assert _cli(["--enhance", "sound=ambient+dialogue"], mode="video").enhance.sound == ("ambient", "dialogue")
+
+    def test_video_parts(self):
+        assert _cli(["--enhance", "parts=action"], mode="video").enhance.parts == "action"
+        assert _cli(["--enhance", "style=anime,parts=both"], mode="video").enhance == EnhanceSettings(style="anime", parts="both")
+
+    def test_parts_alone_is_a_change_with_nothing_else_set(self):
+        assert _cli(["--enhance", "style=keep,details=,length=same,motion=,parts=action"], mode="video").enhance.parts == "action"
+
+    def test_parts_is_unset_by_default_so_the_job_decides(self):
+        assert _cli(["--enhance"], mode="video").enhance.parts is None
+
+    def test_parts_is_video_only_and_validated(self, capsys):
+        with pytest.raises(SystemExit):
+            _cli(["--enhance", "parts=action"], mode="image")
+        with pytest.raises(SystemExit):
+            _cli(["--enhance", "parts=scene"], mode="video")
+
+    def test_video_help_mentions_parts_and_image_help_does_not(self):
+        import argparse
+
+        video, image = argparse.ArgumentParser(prog="v"), argparse.ArgumentParser(prog="i")
+        add_enhance_arguments(video, mode="video")
+        add_enhance_arguments(image, mode="image")
+        assert "parts=action" in video.format_help() and "parts=" not in image.format_help()
 
     def test_note_implies_enhance(self):
         assert _cli(["--enhance-note", "at night,  in the rain"]).enhance == EnhanceSettings(note="at night, in the rain")

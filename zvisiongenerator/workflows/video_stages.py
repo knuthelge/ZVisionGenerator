@@ -90,16 +90,19 @@ def enhance_prompt_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
     """Apply the video scene and action rewrite planned during preflight; never fails the generation.
 
     The action alone is stored as ``metadata["enhanced_prompt"]`` and the scene alone as ``metadata["enhanced_scene"]``;
-    only ``artifacts.resolved_prompt`` (and the ``on_prompt_enhanced`` text) holds them composed. No LLM runs here.
+    only ``artifacts.resolved_prompt`` (and the ``on_prompt_enhanced`` text) holds them composed. When the rewrite
+    kept the scene (action only), there is no ``enhanced_scene`` and the resolved scene is composed with the new action.
+    No LLM runs here.
     """
     action = request.enhanced_prompt
     if action is None:
         return StageOutcome.success
     scene = request.enhanced_scene
+    kept_scene = scene if scene and scene.strip() else artifacts.metadata.get("scene")
     apply_planned_enhancement(
         request,
         artifacts,
-        resolved_prompt=compose_video_prompt(scene, action),
+        resolved_prompt=compose_video_prompt(kept_scene, action),
         extra_metadata={"enhanced_scene": scene} if scene and scene.strip() else None,
     )
     return StageOutcome.success

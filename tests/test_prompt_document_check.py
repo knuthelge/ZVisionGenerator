@@ -67,6 +67,14 @@ class TestProblems:
 
         assert _problems(_document(entry)) == [("e", "warning")]
 
+    def test_a_keep_all_entry_with_parts_action_is_not_a_no_op(self):
+        entry = DocumentEntry(id="e", prompt=_text("a"), enhance={"style": "keep", "mood": "keep", "details": [], "length": "same", "motion": [], "parts": "action"})
+
+        assert _problems(_document(entry)) == []
+
+    def test_an_invalid_parts_value_is_a_warning(self):
+        assert _problems(_document(DocumentEntry(id="e", prompt=_text("a"), enhance={"parts": "scene"}))) == [("e", "warning")]
+
     def test_set_names(self):
         entry = DocumentEntry(id="e", prompt=_text("a"))
         document = PromptDocument(sets=(DocumentSet(id="a", name="x", entries=(entry,)), DocumentSet(id="b", name="x"), DocumentSet(id="c", name="snippets"), DocumentSet(id="d", name=" ")))

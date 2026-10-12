@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
-import { enhancedOverrideActive } from './promptEnhance';
+import { anyEnhancedUsed } from './promptEnhance';
 import { draft, offeredSizes, settingDefaultsFor, videoTimingFor } from './draft.svelte';
 import type { WorkspaceContext, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
@@ -677,6 +677,15 @@ describe('draft store – prompt enhancer fields', () => {
       expect(draft.state.enhancedFrom).toEqual({ scene: 'A castle.', prompt: 'a knight', mode: 'video' });
     });
 
+    it('fills an Enhanced box only from the enhanced parameter present, never from the plain text', () => {
+      draft.loadFromUrl({ scene: 'A castle.', prompt: 'a knight', enhanced_prompt: 'A knight rides in.' }, makeContext());
+      expect(draft.state).toMatchObject({ scene: 'A castle.', prompt: 'a knight', enhancedScene: '', enhancedPrompt: 'A knight rides in.' });
+      expect(draft.state.enhancedFrom).toEqual({ scene: 'A castle.', prompt: 'a knight', mode: 'video' });
+      expect(anyEnhancedUsed(draft.state)).toBe(true);
+      draft.loadFromUrl({ scene: 'A castle.', prompt: 'a knight', enhanced_scene: 'A castle at dusk.' }, makeContext());
+      expect(draft.state).toMatchObject({ enhancedScene: 'A castle at dusk.', enhancedPrompt: '' });
+    });
+
     it('clears an earlier Enhanced pair when the reused text has none', () => {
       draft.patch({ enhancedScene: 'Old.', enhancedPrompt: 'Old.', enhancedFrom: { scene: 'x', prompt: 'y', mode: 'video' } });
       draft.loadFromUrl({ scene: 'A castle.', prompt: 'a knight' }, makeContext());
@@ -695,7 +704,7 @@ describe('draft store – prompt enhancer fields', () => {
       draft.loadFromUrl({ prompt: 'a fox' }, makeContext());
       draft.update('workflow', 'txt2vid');
       expect(draft.state).toMatchObject({ prompt: 'a fox', enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
-      expect(enhancedOverrideActive(draft.state)).toBe(false);
+      expect(anyEnhancedUsed(draft.state)).toBe(false);
     });
 
     it('survives a reset of the selections', () => {

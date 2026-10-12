@@ -672,6 +672,16 @@ class TestBuildExtendConfigPayload:
         assert payload["prompt_input"] == "she leaves" and payload["scene_input"] == "A street at night."
         assert "street" not in payload["prompt"]
 
+    @pytest.mark.parametrize("extends", [True, False], ids=["extend", "text to video"])
+    def test_an_action_only_rewrite_records_the_users_scene_and_no_enhanced_scene(self, extends):
+        """No ``enhanced_scene`` metadata: ``scene`` is the user's own and ``scene_input`` repeats it, which tells it from a rewrite of a blank scene."""
+        make_request = _make_extend_request if extends else _make_video_request
+        artifacts = VideoWorkingArtifacts(metadata={"scene": "A street at night.", "prompt_sent": "she leaves", "enhanced_prompt": "She turns and walks into the rain."})
+        payload = build_video_config_payload(make_request(prompt="she leaves", scene="A street at night."), artifacts)
+        assert payload["prompt"] == "She turns and walks into the rain."
+        assert payload["scene"] == "A street at night." == payload["scene_input"]
+        assert payload["prompt_input"] == "she leaves"
+
     def test_enhanced_empty_continuation_records_no_prompt_input(self):
         request = _make_extend_request(scene="A street at night.")
         artifacts = VideoWorkingArtifacts(metadata={"enhanced_prompt": "She keeps walking.", "enhanced_scene": "A street at night."})

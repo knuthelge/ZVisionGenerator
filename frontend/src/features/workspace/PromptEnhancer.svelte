@@ -3,7 +3,7 @@
   import { enhancePrompt } from '$lib/api/promptEnhance';
   import { extendEnhanceHint, extendGuard } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
-  import { EnhanceOptions } from '$lib/components/molecules';
+  import { EnhanceOptions, EnhanceRewrite } from '$lib/components/molecules';
   import { Icon, Toggle } from '$lib/components/atoms';
   import { popover } from '$lib/actions/popover';
   import {
@@ -15,12 +15,15 @@
     canSubmitText,
     hasAudio,
     autoSplitsPrompt,
+    actionOnlyBlocked,
     isNoOpSettings,
+    runParts,
     settingsPayload,
     splitsPrompt,
+    withRememberedParts,
     workflowMode,
   } from '$lib/state/promptEnhance';
-  import type { EnhanceSettings, PromptEnhancerContract } from '$lib/types';
+  import type { EnhanceParts, EnhanceSettings, PromptEnhancerContract } from '$lib/types';
 
   interface Props {
     contract: PromptEnhancerContract;
@@ -62,6 +65,10 @@
 
   const mode = $derived(workflowMode(draft.state.workflow));
   const settings = $derived(effectiveEnhanceSettings(draft.state, contract));
+  // A blank Scene means both parts, whatever is remembered; the file variant has no single scene to wait for.
+  const rewriteBlocked = $derived(variant === 'inline' && actionOnlyBlocked(draft.state));
+  const rewriteParts = $derived<EnhanceParts>(variant === 'inline' ? runParts(draft.state, settings.parts) : (settings.parts ?? 'both'));
+  const runSettings = $derived<EnhanceSettings>(mode === 'video' ? { ...settings, parts: rewriteParts } : settings);
   const audioSupported = $derived(contract.video_audio ?? true);
   // An extension of a silent clip is silent whatever the Audio toggle says, so the Sound axis does not apply.
   const sourceHasAudio = $derived(draft.state.workflow === 'extend' ? (draft.extendSource?.has_audio ?? null) : null);
@@ -70,8 +77,8 @@
   const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath)));
   // A video prompt without a scene is split into scene and action, so it is never a no-op. On demand that needs a prompt;
   // auto-enhance (also in file mode, where the prompt box is blank) only needs the default scene to be blank.
-  const autoNoOp = $derived(isNoOpSettings(settings, mode, audio, autoSplitsPrompt(draft.state)));
-  const noOp = $derived(isNoOpSettings(settings, mode, audio, splitsPrompt(draft.state)));
+  const autoNoOp = $derived(isNoOpSettings(runSettings, mode, audio, autoSplitsPrompt(draft.state)));
+  const noOp = $derived(isNoOpSettings(runSettings, mode, audio, splitsPrompt(draft.state)));
   const available = $derived(contract.model !== null);
 
   let panelOpen = $state(false);
@@ -88,12 +95,18 @@
       : busy ? 'Available once the job is submitted.'
       : sourceGuard.blocked ? extendEnhanceHint(sourceGuard)
       : noOp ? 'Pick a style, a mood, a detail, a length, or write a direction.'
-      : !canSubmitText(draft.state) ? (mode === 'video' ? 'Write a scene or a prompt first.' : 'Write a prompt first.')
+      : !canSubmitText(draft.state) ? (mode === 'video' ? 'Write a scene or an action first.' : 'Write a prompt first.')
       : null
   );
 
+  /** Remember *next*; the Rewrite choice of the current workflow lives in `partsByWorkflow` alone. */
   function updateSettings(next: EnhanceSettings): void {
-    draft.update('enhanceSettings', next);
+    const { parts: _derived, ...stored } = next;
+    draft.update('enhanceSettings', stored);
+  }
+
+  function updateParts(parts: EnhanceParts): void {
+    updateSettings(withRememberedParts(settings, draft.state.workflow, parts));
   }
 
   /** Run the enhancer on the current prompt; also used by the prompt box's Re-enhance link. */
@@ -101,7 +114,8 @@
     if (enhanceDisabled) return;
     onstart?.();
     const source = enhancedSourceFor(draft.state);
-    const requested = settings;
+    const requested = runSettings;
+    const parts = rewriteParts;
     enhancing = true;
     streamingText = '';
     streamingScene = '';
@@ -121,7 +135,7 @@
             streamingText = frame.prompt ?? frame.text;
             streamingScene = frame.scene ?? '';
           } else if (frame.type === 'done') {
-            draft.patch({ enhancedPrompt: frame.prompt, enhancedScene: source.mode === 'video' ? frame.scene ?? '' : '', enhancedFrom: source });
+            draft.patch({ enhancedPrompt: frame.prompt, enhancedScene: source.mode === 'video' && parts === 'both' ? frame.scene ?? '' : '', enhancedFrom: source });
             const notes = [frame.clamped ? clampedNote(requested.length) : null, frame.warning ?? null].filter((note) => note !== null);
             noteText = notes.length > 0 ? notes.join(' ') : null;
             downloadedThisSession = true;
@@ -165,6 +179,10 @@
 </script>
 
 {#snippet options()}
+  {#if mode === 'video'}
+    <EnhanceRewrite value={rewriteParts} actionOnlyBlocked={rewriteBlocked} disabled={enhancing} onchange={updateParts} />
+    <hr class="rewrite-sep" />
+  {/if}
   <EnhanceOptions axes={contract.matrix.axes} {settings} {mode} {audio} disabled={enhancing} idPrefix={`ws-enhance-${variant}`} onchange={updateSettings} />
 
   <Toggle
@@ -232,9 +250,10 @@
 
 {#if draft.state.enhanceAuto && ((variant === 'inline' && draft.state.promptSource === 'inline') || (variant === 'file' && draft.state.promptSource === 'file'))}
   <input type="hidden" name="enhance_auto" value="true" />
-  <input type="hidden" name="enhance_settings" value={JSON.stringify(settingsPayload(settings, mode, audio))} />
+  <input type="hidden" name="enhance_settings" value={JSON.stringify(settingsPayload(runSettings, mode, audio))} />
 {/if}
 
 <style>
   .enhance-popover { z-index: 70; width: 320px; padding: 12px; border-radius: var(--radius-md); }
+  .rewrite-sep { border: 0; border-top: 1px solid var(--color-border-subtle); }
 </style>

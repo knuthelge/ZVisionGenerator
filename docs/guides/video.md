@@ -50,30 +50,32 @@ ziv-video -m MODEL --scene "A knight in a grey castle courtyard, overcast, handh
 ziv-video --extend clip.mp4 --prompt "She walks through the gate."
 ```
 
-## Scene and Prompt
+## Scene and Action
 
 A video prompt holds two kinds of text, and the Web UI gives each its own box:
 
 - **Scene** is who and where, their look, the style and the camera setup. It describes the clip as a whole and stays the same from one clip to the next.
-- **Prompt** is the action: what happens, in time order, with camera moves, sound and quoted dialogue.
+- **Action** is what happens, in time order, with camera moves, sound and quoted dialogue. On the command line and in prompt files it is the prompt (`--prompt`, `prompt:`).
 
-Both boxes are optional and nothing changes if you ignore Scene: write everything in Prompt as before. Image workflows have no Scene.
+Both are optional, and you can ignore Scene and write everything in Action. Image workflows have no Scene.
 
-The model receives the scene first, then the prompt, joined by a space. With no scene, it receives the prompt exactly as you wrote it. Text to Video and Image to Video need a scene or a prompt, and a scene alone is a valid run. Both blank is an error.
+The model receives the scene first, then the action. With no scene, it receives the action exactly as you wrote it. Text to Video and Image to Video need a scene or an action, and a scene alone is a valid run.
 
-In the Web UI, Scene is the compact box above Prompt on the Text to Video, Image to Video and Extend Video workflows. The **Your text** and **Enhanced** tabs switch both boxes as a pair. From the command line, use `--scene` beside `--prompt`; in a prompt file, add `scene:` to an entry (see [Prompts](prompts.md#scenes-for-video)). A scene from `--scene` or the Workspace is the default for prompt-file entries that have none of their own.
+In the Web UI, Scene is the compact box above Action on the Text to Video, Image to Video and Extend Video workflows. The **Your text** and **Enhanced** tabs switch both boxes as a pair. From the command line, use `--scene` beside `--prompt`; in a prompt file, add `scene:` to an entry (see [Prompts](prompts.md#scenes-for-video)). A scene from `--scene` or the Workspace is the default for prompt-file entries that have none of their own.
 
 The [prompt enhancer](prompts.md#enhancing-prompts) works on the pair. One call returns a scene and an action:
 
-- **Text to Video** splits and expands what you wrote. Everything in Prompt is fine: the enhancer moves the setting, look and camera setup into the scene and the events into the action.
+- **Text to Video** splits and expands what you wrote. Writing everything in Action is fine: the enhancer moves the setting, look and camera setup into the scene and the events into the action.
 - **Image to Video** writes a short scene (style, and what the image does not show) and an action that describes the change.
-- **Extend Video** keeps your scene as it is and writes only the action. See [Extend a Video](#extend-a-video).
+- **Extend Video** keeps your scene as it is and writes only the action by default. See [Extend a Video](#extend-a-video).
 
-**Reuse settings** on a video fills both boxes. When the video was enhanced, **Your text** gets the text you typed and the **Enhanced** tab gets the rewrite; the recorded settings keep both versions.
+The **Rewrite** option chooses what is written: **Scene and action**, or **Action only**, which keeps your scene exactly as written and writes an action that fits it. It works in all three workflows (`--enhance parts=action` in `ziv-video`) and needs a scene: with none, both parts are written. See [Rewrite](prompts.md#rewrite-scene-and-action-or-action-only). In the Web UI each part is used on its own: Generate sends a part's Enhanced text when it has any and your text otherwise, and **Use mine** next to a part goes back to your text for that part.
+
+**Reuse settings** on a video fills both boxes. When the video was enhanced, **Your text** gets the text you typed and the **Enhanced** tab gets the rewrite of each part that was rewritten. A video made with Action only reuses with your scene and only the enhanced action.
 
 ## Prompt Enhancement
 
-Video prompts can be rewritten by the local [prompt enhancer](prompts.md#enhancing-prompts), which writes a scene and an action (see [Scene and Prompt](#scene-and-prompt)), adds visible motion and camera movement in time order and fits the action to the clip length. With audio on (macOS only), the **Sound** options add ambience, sound effects, dialogue or music, and sounds you wrote are always kept. Use `--enhance style=cinematic,motion=action+camera-move,sound=ambient+effects`, or the Enhance options in the Web UI. For image-to-video, the rewrite describes motion and change rather than appearance; the enhancer does not see the starting image itself. Prompts are rewritten before the video model loads, and the enhancer is unloaded first, so it adds no memory during generation. In the Web UI, **Cancel** (or `Esc` twice) stops a video job while prompts are rewritten and at the next denoising step; while the model loads, and during the Windows/Linux upscale pass, it takes effect once that finishes. Pause, Skip and Repeat are not available for video.
+Video prompts can be rewritten by the local [prompt enhancer](prompts.md#enhancing-prompts), which writes a scene and an action (see [Scene and Action](#scene-and-action)), adds visible motion and camera movement in time order and fits the action to the clip length. With audio on (macOS only), the **Sound** options add ambience, sound effects, dialogue or music, and sounds you wrote are always kept. Use `--enhance style=cinematic,motion=action+camera-move,sound=ambient+effects`, or the Enhance options in the Web UI. For image-to-video, the rewrite describes motion and change rather than appearance; the enhancer does not see the starting image itself. Prompts are rewritten before the video model loads, and the enhancer is unloaded first, so it adds no memory during generation. In the Web UI, **Cancel** (or `Esc` twice) stops a video job while prompts are rewritten and at the next denoising step; while the model loads, and during the Windows/Linux upscale pass, it takes effect once that finishes. Pause, Skip and Repeat are not available for video.
 
 ## Video Upscale & Audio
 
@@ -167,14 +169,14 @@ You set the length in seconds, at the source's frame rate, in steps of 8 frames.
 
 On the command line, `--extend-seconds` takes seconds and `--extend-frames` takes frames, rounded to a multiple of 8. A rounded value is reported when the job starts.
 
-### Scene and prompt when extending
+### Scene and action when extending
 
-- **Scene** is kept from the source and editable. Its box is filled when you choose the source, and the enhancer never rewrites it, so a chain of extensions keeps the same look.
-- **Prompt** starts empty with the hint "What happens next…". Write only the action that follows. An empty prompt continues naturally. With the enhancer on, it writes the action from your words, using the previous clip's prompt as context and without repeating its actions or its spoken lines.
-- **Older clips** that were made before the Scene field recorded one prompt only. Choosing one pre-fills Prompt with the old prompt and leaves Scene empty. While Prompt still equals the old prompt, a warning says "Still the original prompt. Change it to what happens next." Generate stays available. If you keep the old prompt anyway, the enhancer extracts a scene from it, and without the enhancer the quoted lines are dropped from the old prompt so its dialogue is not spoken again. Move the scene description into Scene to get the most from the extension.
+- **Scene** is kept from the source and editable. Its box is filled when you choose the source. The enhancer's Rewrite option is **Action only** by default when the clip has a scene, so it does not rewrite the scene and a chain of extensions keeps the same look. Choose **Scene and action** to rewrite the scene too. If you change the scene, **Use the clip's scene** puts the recorded one back.
+- **Action** starts empty with the hint "What happens next…". Write only the action that follows. An empty action continues naturally. With the enhancer on, it writes the action from your words, using the previous clip's action as context and without repeating its actions or its spoken lines.
+- **Older clips**, made before the Scene field existed, recorded one prompt only. Choosing one pre-fills Action with the old prompt and leaves Scene empty, so Rewrite uses Scene and action (Action only needs a scene). While Action still equals the old prompt, a warning says "Still the original prompt. Change it to what happens next." and **Use the clip's prompt** brings the old prompt back. Generate stays available. If you keep the old prompt anyway, the enhancer extracts a scene from it, and without the enhancer the quoted lines are dropped from the old prompt so its dialogue is not spoken again. Move the scene description into Scene to get the most from the extension.
 - **Clips with no recorded prompt** start with both boxes empty.
 
-With the enhancer off, what is sent is the scene followed by the prompt. With `ziv-video --extend`, the scene defaults to the source's recorded scene and `--scene` replaces it.
+With the enhancer off, the scene is sent followed by the action. With `ziv-video --extend`, the scene defaults to the source's recorded scene and `--scene` replaces it.
 
 ### Audio
 
@@ -182,7 +184,7 @@ Audio continues across the join. The new sound is generated from the end of the 
 
 ### The original part
 
-The original video is kept untouched when the new part can be attached to it as it is. Clips that the app made are joined this way, so the first part is identical to the source. Clips from other tools, and rotated clips, cannot be attached directly and are re-encoded once, at high quality, when joined. That is a small, one-time loss.
+The original video is kept untouched when the new part can be attached to it as it is. Clips that the app made are joined this way, so the first part is identical to the source. Rotated clips, and clips from other tools that were encoded differently, are re-encoded once at high quality when joined: a small, one-time loss.
 
 ### Chaining and batches
 
@@ -196,7 +198,6 @@ The extension generates the last second of the source again (the part carried ov
 
 - **A faint change at the join.** On very still shots, one frame at the join can look slightly different. It comes from the model's video encoder, which re-draws the carried second, and it is not smoothed over.
 - **Fading audio in long chains.** The model's sound can fade or thin out over many extensions of the same clip.
-- **macOS only.** Extend needs the MLX LTX backend.
 
 ## Video Sizes
 

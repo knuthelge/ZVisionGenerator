@@ -47,6 +47,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     enhance_context,
     enhance_options,
     enhance_prompt,
+    resolve_parts,
     settings_from_mapping,
     validate_settings,
 )
@@ -401,7 +402,7 @@ def _validate_enhance_body(body: Any) -> dict[str, Any]:
     if mode == "video" and not context.extends and not (prompt.strip() or scene.strip()):
         raise ValueError("Enter a scene or a prompt to enhance.")
     settings = settings_from_mapping(body.get("settings") or {}, mode=mode, motion_in_image="warn")
-    # An extension always writes a new action, so its settings are never a no-op.
+    # An extension always writes a new action, and so does ``parts="action"``, so neither is ever a no-op.
     validate_settings(settings, mode=mode, split=context.extends or (mode == "video" and not scene.strip() and bool(prompt.strip())))
     app_config = load_config()
     options = enhance_options(app_config)
@@ -499,7 +500,8 @@ def _enhance_for_job(job: dict[str, Any], enhancer: Any, frames: queue.Queue[dic
         return enhance_prompt(enhancer, expand_random_choices(job["prompt"]), job["settings"], mode="image", on_text=lambda text: frames.put({"type": "text", "text": text}), **common)
     scene = expand_random_choices(job.get("scene", ""))
     context = job.get("context")
-    action_only = bool(context is not None and context.extends and scene.strip())
+    # Only the action is written when the settings ask for it and there is a scene to keep: no scene text streams.
+    action_only = resolve_parts(job["settings"], scene=scene, extends=bool(context is not None and context.extends)) == "action"
 
     def _on_text(text: str) -> None:
         part_scene, part_prompt = split_scene_action(text, action_only=action_only)
@@ -509,7 +511,10 @@ def _enhance_for_job(job: dict[str, Any], enhancer: Any, frames: queue.Queue[dic
 
 
 def _enhance_done_frame(mode: str, result: EnhanceResult | EnhancePairResult) -> dict[str, Any]:
-    """Return the terminal ``done`` frame: ``{prompt, clamped}`` for images, ``{scene, prompt, clamped, warning?}`` for video."""
+    """Return the terminal ``done`` frame: ``{prompt, clamped}`` for images, ``{scene, prompt, clamped, warning?}`` for video.
+
+    A video frame's ``scene`` is ``""`` when the scene was not rewritten (action only), so the client keeps the user's scene.
+    """
     if isinstance(result, EnhancePairResult):
         frame: dict[str, Any] = {"type": "done", "scene": result.scene, "prompt": result.prompt, "clamped": result.clamped}
         if result.warning:

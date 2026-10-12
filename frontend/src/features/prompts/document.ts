@@ -225,10 +225,13 @@ export function remapOptionIds(ids: string[], map: Record<string, string>): stri
   return ids.filter((id) => id in map).map((id) => map[id]);
 }
 
-/** Full settings for the enhance picker: an entry's mapping over the defaults, ignoring unknown values. */
+/** Full settings for the enhance picker: an entry's mapping over the defaults, ignoring unknown values; `parts` is set only when the entry names it. */
 export function enhanceSettingsFor(enhance: EntryEnhance, axes: EnhanceAxis[], defaults: EnhanceSettings): EnhanceSettings {
   const settings: EnhanceSettings = { ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...(defaults.sound ?? [])], note: defaults.note ?? '' };
+  // The backend defaults carry `parts: null`; an entry's own value is the only source here.
+  delete settings.parts;
   if (enhance === null || enhance === true) return settings;
+  if (enhance.parts === 'both' || enhance.parts === 'action') settings.parts = enhance.parts;
   for (const axis of axes) {
     const raw = enhance[axis.key];
     const slugs = axis.options.map((option) => option.slug);
@@ -243,7 +246,7 @@ export function enhanceSettingsFor(enhance: EntryEnhance, axes: EnhanceAxis[], d
 export function isNoOpEnhance(settings: EnhanceSettings): boolean {
   return (
     settings.style === 'keep' && settings.mood === 'keep' && settings.details.length === 0 && settings.length === 'same'
-    && settings.motion.length === 0 && settings.sound.length === 0 && !settings.note.trim()
+    && settings.motion.length === 0 && settings.sound.length === 0 && !settings.note.trim() && settings.parts !== 'action'
   );
 }
 
@@ -266,6 +269,7 @@ function enhanceParts(enhance: Exclude<EntryEnhance, null | true>, axes: Enhance
   const label = (key: string, slug: unknown): string =>
     axes.find((axis) => axis.key === key)?.options.find((option) => option.slug === slug)?.label ?? String(slug);
   const parts: string[] = [];
+  if (enhance.parts === 'action') parts.push('Action only');
   if (enhance.style && enhance.style !== 'keep') parts.push(label('style', enhance.style));
   if (enhance.mood && enhance.mood !== 'keep') parts.push(label('mood', enhance.mood));
   if (enhance.length && enhance.length !== 'same') parts.push(label('length', enhance.length));

@@ -109,6 +109,18 @@ describe('cliCommand', () => {
     expect(cliCommand({ mode: 'image', prompt: 'a', enhance_auto: 'true' }).command).toBe('ziv image --prompt a --enhance');
   });
 
+  it('spells out the Rewrite choice only where it is not the default of the workflow', () => {
+    const settings = (parts: string) => JSON.stringify({ style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'], parts });
+    const video = { mode: 'video', prompt: 'a', enhance_auto: 'true' };
+    expect(cliCommand({ ...video, enhance_settings: settings('both') }).command).toBe('ziv video --prompt a --enhance style=keep,mood=keep,details=lighting,length=same,motion=action');
+    expect(cliCommand({ ...video, enhance_settings: settings('action') }).command).toContain('--enhance parts=action,style=keep');
+    const extend = { ...video, workflow: 'extend', source_video: '/clips/walk.mp4' };
+    expect(cliCommand({ ...extend, enhance_settings: settings('action') }).command).not.toContain('parts=');
+    expect(cliCommand({ ...extend, enhance_settings: settings('both') }).command).toContain('parts=both');
+    // An image has no scene to keep.
+    expect(cliCommand({ mode: 'image', prompt: 'a', enhance_auto: 'true', enhance_settings: settings('action') }).command).not.toContain('parts=');
+  });
+
   describe('scene', () => {
     it('adds --scene for video beside the prompt', () => {
       expect(cliCommand({ mode: 'video', prompt: 'a knight rides in', scene: 'A castle at dusk.' }).command)

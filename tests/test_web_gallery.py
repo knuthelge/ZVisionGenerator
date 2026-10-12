@@ -482,6 +482,28 @@ def test_reuse_of_an_enhanced_video_without_a_user_scene_omits_the_scene_input(t
     assert (params["enhanced_scene"], params["enhanced_prompt"]) == ("A castle at dusk.", "A knight rides in, armour clanking.")
 
 
+def test_reuse_of_an_action_only_video_carries_the_users_scene_and_only_the_enhanced_action(tmp_path):
+    """The scene was not rewritten (it equals its input), so only the action is offered as Enhanced."""
+    _payload, params = _video_reuse(
+        tmp_path,
+        {"prompt": "A knight draws his sword and raises it.", "scene": "A castle at dusk.", "scene_input": "A castle at dusk.", "prompt_input": "He draws his sword."},
+    )
+
+    assert (params["scene"], params["prompt"]) == ("A castle at dusk.", "He draws his sword.")
+    assert params["enhanced_prompt"] == "A knight draws his sword and raises it."
+    assert "enhanced_scene" not in params
+
+
+def test_reuse_offers_no_enhanced_text_for_a_part_that_equals_its_input(tmp_path):
+    _payload, params = _video_reuse(
+        tmp_path,
+        {"prompt": "He draws his sword.", "scene": "A grey castle at dusk.", "scene_input": "A castle at dusk.", "prompt_input": "He draws his sword."},
+    )
+
+    assert params["enhanced_scene"] == "A grey castle at dusk."
+    assert "enhanced_prompt" not in params
+
+
 def test_reuse_of_a_scene_only_video_carries_no_prompt_and_not_the_file_name(tmp_path):
     payload, params = _video_reuse(tmp_path, {"scene": "A castle at dusk."})
 

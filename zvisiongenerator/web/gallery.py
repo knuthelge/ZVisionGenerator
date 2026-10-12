@@ -311,10 +311,12 @@ def output_media_url(root: Path, path: Path) -> str | None:
 
 
 def _reuse_text_params(asset: GalleryAsset, *, video: bool) -> dict[str, str]:
-    """Return the Reuse query params for an asset's text: the user's own text, plus the generated pair when it was enhanced.
+    """Return the Reuse query params for an asset's text: the user's own text, plus the generated text where it differs.
 
     An enhanced video asset records its generated scene apart from its generated prompt, so the prompt params never
-    carry scene text. Without recorded inputs (plain or older assets) the recorded text is what the user wrote.
+    carry scene text. ``enhanced_scene`` and ``enhanced_prompt`` appear only for a part whose recorded text differs
+    from the recorded input of that part: a run that rewrote only the action reuses with the user's scene and the
+    enhanced action. Without recorded inputs (plain or older assets) the recorded text is what the user wrote.
     """
     if not video:
         return {"prompt": asset.prompt}
@@ -322,8 +324,8 @@ def _reuse_text_params(asset: GalleryAsset, *, video: bool) -> dict[str, str]:
         pairs = {
             "scene": asset.scene_input,
             "prompt": asset.prompt_input,
-            "enhanced_scene": asset.scene,
-            "enhanced_prompt": asset.prompt,
+            "enhanced_scene": asset.scene if asset.scene != asset.scene_input else None,
+            "enhanced_prompt": asset.prompt if asset.prompt != asset.prompt_input else None,
         }
     else:
         pairs = {"scene": asset.scene, "prompt": asset.prompt}

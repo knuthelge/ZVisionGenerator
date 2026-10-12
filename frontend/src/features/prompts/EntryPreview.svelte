@@ -20,7 +20,8 @@
     const enhance = selected?.entry.enhance ?? null;
     if (enhance === null || enhance === true) return [];
     const settings = enhanceSettingsFor(enhance, builder.axes, builder.defaults);
-    return builder.axes
+    const rewrite = settings.parts === 'action' ? [{ label: 'Rewrite', value: 'Action only' }] : [];
+    const axisRows = builder.axes
       .map((axis) => {
         const value = settings[axis.key];
         const slugs = Array.isArray(value) ? value : [value];
@@ -28,6 +29,7 @@
         return { label: axis.label, value: labels.join(', ') };
       })
       .filter((row) => row.value);
+    return [...rewrite, ...axisRows];
   });
 
   /** Split text into plain parts and `{a|b}` choices, for highlighting. */

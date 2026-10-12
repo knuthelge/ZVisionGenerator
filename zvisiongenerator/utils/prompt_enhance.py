@@ -193,13 +193,23 @@ _AXES_BY_KEY = {axis.key: axis for axis in ENHANCE_AXES}
 AUDIO_AXES = frozenset({SOUND_AXIS.key})
 NOTE_KEY = "note"
 NOTE_MAX_CHARS = 300
-_SETTING_KEYS = (*_AXES_BY_KEY, NOTE_KEY)
+# Which parts of a video prompt the rewrite writes: ``both`` (scene and action) or ``action`` (the scene is kept as written).
+# It is video only and not an option axis: ``None`` on the settings means "auto" (see ``resolve_parts``).
+PARTS_KEY = "parts"
+PARTS_OPTIONS = (("both", "Scene and action"), ("action", "Action only"))
+PARTS_VALUES = tuple(slug for slug, _label in PARTS_OPTIONS)
+_SETTING_KEYS = (*_AXES_BY_KEY, NOTE_KEY, PARTS_KEY)
 _DURATION_BEATS = ((5.0, "one continuous action"), (10.0, "two or three beats at most"))
 
 
 @dataclass(frozen=True)
 class EnhanceSettings:
-    """A choice on every axis of the option matrix."""
+    """A choice on every axis of the option matrix, plus the video-only ``parts`` choice.
+
+    ``parts`` is ``"both"`` (rewrite scene and action), ``"action"`` (keep the scene, rewrite only the action) or
+    ``None`` for auto, which ``resolve_parts`` turns into ``"action"`` when extending a clip that has a scene and
+    ``"both"`` otherwise. Image rewrites ignore it.
+    """
 
     style: str = STYLE_AXIS.default[0]
     mood: str = MOOD_AXIS.default[0]
@@ -208,6 +218,7 @@ class EnhanceSettings:
     motion: tuple[str, ...] = MOTION_AXIS.default
     sound: tuple[str, ...] = SOUND_AXIS.default
     note: str = ""
+    parts: str | None = None
 
 
 @dataclass(frozen=True)
@@ -251,8 +262,19 @@ class EnhanceResult:
 
 
 def matrix_contract() -> dict[str, Any]:
-    """Serialize the option matrix and defaults for the Web UI."""
+    """Serialize the option matrix and defaults for the Web UI.
+
+    ``parts`` describes the video-only Rewrite choice; its ``default`` is ``None`` (auto: ``action`` when extending a
+    clip that has a scene, else ``both``), and ``defaults.parts`` is ``None`` too.
+    """
     return {
+        "parts": {
+            "key": PARTS_KEY,
+            "label": "Rewrite",
+            "video_only": True,
+            "options": [{"slug": slug, "label": label} for slug, label in PARTS_OPTIONS],
+            "default": None,
+        },
         "axes": [
             {
                 "key": axis.key,
@@ -279,6 +301,7 @@ def settings_to_mapping(settings: EnhanceSettings) -> dict[str, Any]:
         "motion": list(settings.motion),
         "sound": list(settings.sound),
         "note": settings.note,
+        "parts": settings.parts,
     }
 
 
@@ -365,6 +388,15 @@ def _parse_axis_value(axis: EnhanceAxis, raw: Any) -> str | tuple[str, ...]:
     return axis.option(raw.strip()).slug
 
 
+def _parse_parts(raw: Any) -> str | None:
+    """Return the ``parts`` slug, or None (auto) for a missing value."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or raw.strip() not in PARTS_VALUES:
+        raise ValueError(f"Rewrite must be one of: {', '.join(PARTS_VALUES)}.")
+    return raw.strip()
+
+
 def _parse_note(raw: Any) -> str:
     """Return the direction note as one trimmed line."""
     if raw is None:
@@ -381,13 +413,13 @@ def settings_from_mapping(data: dict[str, Any], *, mode: str, motion_in_image: s
     """Build settings from a mapping; omitted keys keep their defaults.
 
     Args:
-        data: Mapping with any of ``style``, ``mood``, ``details``, ``length``, ``motion``, ``sound``, ``note``.
+        data: Mapping with any of ``style``, ``mood``, ``details``, ``length``, ``motion``, ``sound``, ``note``, ``parts``.
         mode: ``"image"`` or ``"video"``.
-        motion_in_image: ``"error"`` to reject the video-only axes (``motion``, ``sound``) in image mode,
+        motion_in_image: ``"error"`` to reject the video-only keys (``motion``, ``sound``, ``parts``) in image mode,
             ``"warn"`` to warn and ignore them.
 
     Raises:
-        ValueError: On unknown keys or values, or a video-only axis in image mode with ``motion_in_image="error"``.
+        ValueError: On unknown keys or values, or a video-only key in image mode with ``motion_in_image="error"``.
     """
     _check_mode(mode)
     if not isinstance(data, dict):
@@ -400,13 +432,12 @@ def settings_from_mapping(data: dict[str, Any], *, mode: str, motion_in_image: s
         if key == NOTE_KEY:
             values[key] = _parse_note(raw)
             continue
-        axis = _AXES_BY_KEY[key]
-        if axis.video_only and mode != "video":
+        if (key == PARTS_KEY or _AXES_BY_KEY[key].video_only) and mode != "video":
             if motion_in_image == "warn":
                 warnings.warn(f"'{key}' only applies to video prompts and is ignored for images.", stacklevel=2)
                 continue
             raise ValueError(f"'{key}' only applies to video prompts.")
-        values[key] = _parse_axis_value(axis, raw)
+        values[key] = _parse_parts(raw) if key == PARTS_KEY else _parse_axis_value(_AXES_BY_KEY[key], raw)
     return EnhanceSettings(**values)
 
 
@@ -434,12 +465,14 @@ def parse_enhance_spec(spec: str | None, *, mode: str) -> EnhanceSettings:
 
 
 def format_enhance_spec(settings: EnhanceSettings, *, mode: str = "video") -> str:
-    """Serialize *settings* to the CLI spec grammar (``motion`` and a non-empty ``sound`` only for video; ``note`` is left out)."""
+    """Serialize *settings* to the CLI spec grammar (``motion``, a non-empty ``sound`` and a set ``parts`` only for video; ``note`` is left out)."""
     parts = [f"style={settings.style}", f"mood={settings.mood}", f"details={'+'.join(settings.details)}", f"length={settings.length}"]
     if mode == "video":
         parts.append(f"motion={'+'.join(settings.motion)}")
         if settings.sound:
             parts.append(f"sound={'+'.join(settings.sound)}")
+        if settings.parts is not None:
+            parts.append(f"{PARTS_KEY}={settings.parts}")
     return ",".join(parts)
 
 
@@ -466,8 +499,11 @@ def validate_settings(settings: EnhanceSettings, *, mode: str, split: bool = Fal
 
     Args:
         split: Whether a video prompt has no scene, so the rewrite splits it into scene and action (never a no-op).
+            ``parts="action"`` is never a no-op either.
     """
     _check_mode(mode)
+    if settings.parts is not None and settings.parts not in PARTS_VALUES:
+        raise ValueError(f"Rewrite must be one of: {', '.join(PARTS_VALUES)}.")
     STYLE_AXIS.option(settings.style)
     MOOD_AXIS.option(settings.mood)
     LENGTH_AXIS.option(settings.length)
@@ -537,12 +573,25 @@ def entry_scene(scene_by_set: dict[str, list[str | None]] | None, set_name: str,
     return None
 
 
+def resolve_parts(settings: EnhanceSettings, *, scene: str | None, extends: bool = False) -> str:
+    """Return ``"action"`` or ``"both"``: which parts of a video prompt one rewrite writes.
+
+    An explicit ``parts`` wins, except that ``"action"`` needs a scene to keep: with a blank *scene* it falls back to
+    ``"both"`` (the text is split into scene and action), without error. With ``parts`` unset (auto), an extension of a
+    clip that has a scene writes only the action, and every other video job writes both.
+    """
+    has_scene = bool((scene or "").strip())
+    wanted = settings.parts if settings.parts is not None else ("action" if extends else "both")
+    return "action" if wanted == "action" and has_scene else "both"
+
+
 def is_noop(settings: EnhanceSettings, *, mode: str, split: bool = False) -> bool:
     """Return whether *settings* ask for no change in *mode* (keep style and mood, no details, same length, no direction, no video motion or sound).
 
-    A video prompt that *split* into scene and action (blank scene, non-blank prompt) is always a change.
+    A video prompt that *split* into scene and action (blank scene, non-blank prompt) is always a change, and so is
+    ``parts="action"``: the action is rewritten to fit the scene (or the text is split when there is no scene).
     """
-    if mode == "video" and split:
+    if mode == "video" and (split or settings.parts == "action"):
         return False
     has_video_axes = mode == "video" and bool(settings.motion or settings.sound)
     return settings.style == "keep" and settings.mood == "keep" and not settings.details and settings.length == "same" and not settings.note and not has_video_axes

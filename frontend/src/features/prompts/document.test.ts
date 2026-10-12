@@ -203,6 +203,21 @@ describe('enhance', () => {
     expect(enhanceSettingsFor(true, AXES, DEFAULTS)).toEqual(DEFAULTS);
   });
 
+  it('carries an entry Rewrite choice through, and never writes the null backend default', () => {
+    const backend = { ...DEFAULTS, parts: null } as unknown as typeof DEFAULTS;
+    expect(enhanceSettingsFor({ parts: 'action' }, AXES, backend)).toMatchObject({ parts: 'action' });
+    expect(enhanceSettingsFor({ parts: 'both' }, AXES, backend)).toMatchObject({ parts: 'both' });
+    expect('parts' in enhanceSettingsFor({ style: 'cinematic' }, AXES, backend)).toBe(false);
+    expect('parts' in enhanceSettingsFor({ parts: 'scene' }, AXES, backend)).toBe(false);
+    expect('parts' in enhanceSettingsFor(true, AXES, backend)).toBe(false);
+  });
+
+  it('counts an action-only rewrite as a change', () => {
+    const none = { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
+    expect(isNoOpEnhance({ ...none, parts: 'action' })).toBe(false);
+    expect(isNoOpEnhance({ ...none, parts: 'both' })).toBe(true);
+  });
+
   it('reads an entry direction', () => {
     expect(enhanceSettingsFor({ note: 'at dusk' }, AXES, DEFAULTS).note).toBe('at dusk');
   });
@@ -220,6 +235,7 @@ describe('enhance', () => {
   });
 
   it('summarizes an entry for its chip', () => {
+    expect(enhanceSummary({ parts: 'action', style: 'cinematic' }, AXES)).toBe('Action only · Cinematic');
     expect(enhanceSummary(true, AXES)).toBe('Default options');
     expect(enhanceSummary({ style: 'cinematic', mood: 'eerie', details: ['camera', 'lighting'], length: 'longer' }, AXES)).toBe('Cinematic · Eerie · Longer · +2 details');
     expect(enhanceSummary({ style: 'keep' }, AXES)).toBe('Custom options');

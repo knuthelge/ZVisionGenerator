@@ -89,6 +89,9 @@ Comma-separated `key=value` pairs; join several values with `+`. Omitted keys us
 | `length` | `shorter`, `same`, `longer`, `extra` | `same` |
 | `motion` (`ziv-video` only) | `action`, `camera-move`, `pacing` | `action` |
 | `sound` (`ziv-video` only, used with audio on, macOS only) | `ambient`, `effects`, `dialogue`, `music` | none |
+| `parts` (`ziv-video` only) | `both`, `action` | `action` with `--extend` when the source has a scene, otherwise `both` |
+
+`parts=action` keeps the scene exactly as written and rewrites only the action, so `style`, `mood` and `details` have no effect. It needs a scene (from `--scene`, the entry's `scene:` or the extended clip); with none, the run uses `parts=both` and warns.
 
 The free-text direction is not part of the spec; pass it with `--enhance-note`.
 

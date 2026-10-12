@@ -50,7 +50,7 @@ The Web UI's **Prompts** page (`G` then `P`) builds prompt files without typing 
 
 - **Snippets** (left) are listed with how often each is used; unused ones are dimmed. Click one to edit it, **＋** to add one, and drag one onto a prompt to add a `$reference`. Renaming a snippet updates every reference to it.
 - **Sets** (centre) are panels of prompts, one row each. Rename a set in place (the name starts the output filenames), add prompts with **＋**, and use a set's **⋯** menu to duplicate, move, turn all prompts on or off, or delete it.
-- **Entries** show `$snippets` as chips (red when undefined) and `{a|b}` choices as pills. Click the text, or press `↵` on it, to edit; typing `$` suggests snippet names. Click a pill to edit its options, one per line; an empty line is an empty option. While typing, put the caret in a choice and press `⌥↵` (or **Edit choice** under the text) to edit it the same way, select words and press `⌥↵` (**Make a random choice**) to turn them into a choice, or press `⌥↵` anywhere else (**New random choice**) to type the options of a new choice at the caret, one per line. The options box takes focus; `⌘↵` applies and `Esc` cancels, both returning you to the prompt. Each prompt has an **active** switch and **✨ Enhance**: off, the default options (`enhance: true`), or chosen style, mood, details, length and motion (motion applies to video only). Its **⋯** menu adds or removes a negative prompt, and duplicates, moves or deletes the prompt.
+- **Entries** show `$snippets` as chips (red when undefined) and `{a|b}` choices as pills. Click the text, or press `↵` on it, to edit; typing `$` suggests snippet names. Click a pill to edit its options, one per line; an empty line is an empty option. While typing, put the caret in a choice and press `⌥↵` (or **Edit choice** under the text) to edit it the same way, select words and press `⌥↵` (**Make a random choice**) to turn them into a choice, or press `⌥↵` anywhere else (**New random choice**) to type the options of a new choice at the caret, one per line. The options box takes focus; `⌘↵` applies and `Esc` cancels, both returning you to the prompt. Each prompt has an **active** switch and **✨ Enhance**: off, the default options (`enhance: true`), or chosen style, mood, details, length and motion (motion applies to video only). Its popover also has the **Rewrite** choice (Scene and action, or Action only) for video entries, saved as `parts:`. Its **⋯** menu adds or removes a negative prompt, and duplicates, moves or deletes the prompt.
 - **Text / Fields** switches a prompt between plain text and named fields (a structured prompt). Switching to fields puts the text in one field for you to name; a field without a name is a problem until you name it. Lists and nested values that the builder can't edit are shown flattened and kept exactly as written; **Convert to text** replaces one with its flattened text.
 - **Drag** a set or an entry by its ⠿ grip to reorder it; drop an entry on another set's header to move it there. The menus offer the same moves.
 - **Preview** (right) shows the selected entry as the model receives it, with snippets resolved and fields flattened, its prompt id, its enhancement and its problems. **🎲 Roll** picks one option of every choice, as a run would.
@@ -175,7 +175,7 @@ castle:
 ```
 
 - `scene:` belongs to an entry. To share one scene across a set, put it in a `$snippet` as above; there is no scene on the set itself.
-- The video model receives the scene first, then the prompt. An entry with no `scene:` uses `--scene` (or the Workspace's Default scene) if one is given, and otherwise only its prompt, as before.
+- The video model receives the scene first, then the prompt. An entry with no `scene:` uses `--scene` (or the Workspace's Default scene) if one is given, and otherwise only its prompt.
 - A `scene:` takes snippets, structured values and `{a|b}` choices like a prompt does. An entry still needs a `prompt`.
 - Image jobs ignore `scene:`, so a file can serve both.
 - Old prompt files work unchanged.
@@ -239,14 +239,32 @@ For video, one rewrite returns two parts: a **scene** and an **action** (see [Sc
 
 - **Text to video** splits and expands, so it works when you wrote everything in the prompt or gave only a scene: the setting, look and camera setup go to the scene, and events in time order, camera moves, sound and quoted dialogue go to the action.
 - **Image to video** writes a short scene (style, and what the image does not show) and an action that describes the change.
-- **Extend** keeps your scene exactly as it is and writes only the action that happens next, using the previous clip's prompt as context so it does not repeat its actions or spoken lines. From a clip made without a scene, the enhancer takes a scene from the old prompt. See [Extend a Video](video.md#extend-a-video).
-- **Length** covers the total, within the encoder's cap. When you give both a scene and a prompt, it is split in proportion to what you wrote; when one of them is empty, roughly a third goes to the scene and two thirds to the action. The action never aims below 12 words.
-- If the rewrite does not come back as a valid pair, the enhancer retries once, then uses what it wrote as the action and keeps your scene.
+- **Extend** writes the action that happens next, using the previous clip's prompt as context so it does not repeat its actions or spoken lines. From a clip made without a scene, the enhancer takes a scene from the old prompt. See [Extend a Video](video.md#extend-a-video).
+- **Length** applies to the scene and the action together.
+- If the enhancer does not return a scene and an action, it tries once more, then uses its rewrite as the action and keeps your scene, with a warning.
+
+#### Rewrite: scene and action, or action only
+
+The **Rewrite** option (`parts` in the CLI and prompt files) chooses what the enhancer writes:
+
+| Rewrite | `parts` | What you get |
+|---|---|---|
+| Scene and action | `both` | A rewritten scene and a rewritten action. With no scene, the enhancer splits your text into both. |
+| Action only | `action` | Your scene is kept exactly as written. The enhancer reads it and writes an action that fits it. |
+
+- The default depends on the workflow: **Extend Video** rewrites the action only when the clip has a scene, so a chain of extensions keeps its look. **Text to Video** and **Image to Video** rewrite both.
+- Style, Mood and Details shape the scene, so they have no effect while Rewrite is Action only. Motion, Sound, Length and Direction still shape the action.
+- With Action only and a scene, Enhance always rewrites the action, even when every other option is left at "keep".
+- **Action only needs a scene.** With a blank scene, Action only is unavailable in the Web UI, and the run rewrites both parts. On the command line it does the same and warns once.
+- Image workflows ignore Rewrite.
 
 ### In the Web UI
 
-- **Enhance**: click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. For video, the tabs are **Your text** and **Enhanced**, and each holds a Scene and a Prompt box that switch together; both enhanced boxes are editable. When that tab has text, it is what gets generated; the **used** badge shows which tab that is. Edit it, enhance again, or **Clear** it to go back to your prompt. The button is unavailable while generation jobs are running or queued.
-- If you change the prompt or switch between image and video afterwards, the Enhanced prompt is marked **Out of date**. It is still used until you **Re-enhance** or **Clear** it.
+- **Enhance**: click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. The button is unavailable while generation jobs are running or queued. Enhance again always starts from your text, and **Clear** empties the Enhanced text.
+- **Video** has a **Rewrite** choice first in the popover: **Scene and action** or **Action only** (see [Rewrite](#rewrite-scene-and-action-or-action-only)). The tabs are **Your text** and **Enhanced**, and each holds a Scene and an **Action** box (the Prompt box of a video is called Action) that switch together. The Rewrite choice is remembered for each video workflow.
+- **Each part decides on its own.** For the Scene and for the Action, Generate sends the Enhanced text when that part's Enhanced box has text, and your text otherwise. With Action only, the Enhanced Scene stays empty ("Not enhanced. Generate uses your scene.") and editing your Scene applies directly. Both Enhanced boxes are editable, and typing into an empty one makes that text the part's enhanced text.
+- A part that sends its Enhanced text shows **Uses enhanced** beside its label in both tabs, with **Use mine**, which empties that Enhanced box so Generate uses your text again. The **Enhanced** tab shows **used** while either Enhanced box has text.
+- If you change the scene or action, or switch workflows, afterwards, the Enhanced text is marked **Out of date**, and each part that uses enhanced text shows the badge too. It is still used until you choose **Use mine**, **Re-enhance** or **Clear**. Putting the text back, for example with **Use the clip's scene** when extending, clears the badge.
 - `{a|b}` choices are picked before the rewrite, so the enhancer sees one plain prompt and the Enhanced prompt has no choices left. Enhance again for a different pick, or use **Enhance each image when generating** to keep a fresh pick per image.
 - **Enhance each image when generating** rewrites every image's prompt on the server, after its `{a|b}` choices are picked, using that image's seed. It works with inline prompts and prompt files. All rewrites run before the model loads, so the first image starts once every prompt is rewritten; the progress panel shows *Enhancing prompt N of M*. A prompt that could not be enhanced, or was skipped, is marked in the panel and generated from the original prompt.
 - Enhance is unavailable while a job runs.
@@ -269,9 +287,13 @@ woman:
   - prompt: two friends talking at a cafe table
     enhance:
       sound: [ambient, dialogue]   # video with audio on
+  - scene: A fisherman on a wooden pier at dawn, mist over the water.
+    prompt: he casts his line
+    enhance:
+      parts: action                # video: keep the scene, rewrite only the action
 ```
 
-An entry's own `enhance:` that asks for no change at all (style and mood keep, no details, length same, no motion or sound, no direction) is refused when the file loads: a warning appears and that entry is not enhanced. To have the enhancer split a single prompt into scene and action, use `enhance: true` or set at least one option. Job-level `--enhance` and the Web UI accept keep-all settings when the prompt has no scene.
+An entry's own `enhance:` that asks for no change at all (style and mood keep, no details, length same, no motion or sound, no direction) is refused when the file loads: a warning appears and that entry is not enhanced. To have the enhancer split a single prompt into scene and action, use `enhance: true` or set at least one option. Job-level `--enhance` and the Web UI accept keep-all settings when the prompt has no scene. `parts: action` counts as a change, so an entry with it is kept even when every other option keeps things as they are.
 
 From the command line, `--enhance` enhances every prompt and overrides entries' `enhance:` settings; `--no-enhance` turns all enhancement off:
 
@@ -279,6 +301,7 @@ From the command line, `--enhance` enhances every prompt and overrides entries' 
 ziv-image -m klein9b --prompt "a fox in snow" --enhance
 ziv-image -m klein9b -p prompts.yaml --enhance style=photo,mood=serene,details=lighting+camera,length=longer
 ziv-video -m ltx-8 --prompt "a fox runs" --enhance style=cinematic,motion=action+camera-move,sound=ambient+effects
+ziv-video -m ltx-8 --scene "A fox in a snowy birch forest at dawn." --prompt "it runs" --enhance parts=action
 ziv-image -m klein9b --prompt "a lighthouse" --enhance-note "in a storm, at night"
 ziv-image -m klein9b -p prompts.yaml --no-enhance
 ```

@@ -51,8 +51,8 @@ function text(settings: JobSettings, key: string): string | undefined {
   return value ? value : undefined;
 }
 
-/** Serialize submitted enhancement options to the `--enhance` SPEC grammar (`motion` only for video). */
-function enhanceSpec(raw: string | undefined, isVideo: boolean): string {
+/** Serialize submitted enhancement options to the `--enhance` SPEC grammar (`parts` and `motion` only for video). */
+function enhanceSpec(raw: string | undefined, isVideo: boolean, isExtend: boolean): string {
   if (!raw) return '';
   let parsed: Record<string, unknown>;
   try {
@@ -61,6 +61,8 @@ function enhanceSpec(raw: string | undefined, isVideo: boolean): string {
     return '';
   }
   const parts: string[] = [];
+  // The CLI rewrites an extension's action only and any other video's scene and action unless told otherwise, so only the other choice is spelled out.
+  if (isVideo && parsed.parts !== undefined && parsed.parts !== (isExtend ? 'action' : 'both')) parts.push(`parts=${String(parsed.parts)}`);
   for (const key of ['style', 'mood', 'details', 'length', ...(isVideo ? ['motion'] : [])]) {
     const value = parsed[key];
     if (value === undefined || value === null) continue;
@@ -121,7 +123,7 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
     : ['--prompt', text(settings, 'prompt')];
   // An extension may continue with neither: the source's scene carries it.
   if (promptValue === undefined && (isFile || (scene === undefined && !isExtend))) {
-    throw new Error(isJson ? 'Write a JSON caption first.' : isFile ? 'Choose a prompts file first.' : isVideo ? 'Write a scene or a prompt first.' : 'Write a prompt first.');
+    throw new Error(isJson ? 'Write a JSON caption first.' : isFile ? 'Choose a prompts file first.' : isVideo ? 'Write a scene or an action first.' : 'Write a prompt first.');
   }
   if (promptValue !== undefined) args.push(promptFlag, promptValue);
   else if (isExtend && !isFile && options.extendSource?.legacy) args.push('--prompt', '');
@@ -186,7 +188,7 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
 
   // Auto-enhance rewrites every prompt before the model loads; JSON captions are never enhanced.
   if (!isJson && checked(settings, 'enhance_auto')) {
-    const spec = enhanceSpec(first(settings, 'enhance_settings'), isVideo);
+    const spec = enhanceSpec(first(settings, 'enhance_settings'), isVideo, isExtend);
     args.push('--enhance');
     if (spec) args.push(spec);
   }

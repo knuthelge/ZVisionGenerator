@@ -1,6 +1,6 @@
 <script lang="ts">
   import { popover } from '$lib/actions/popover';
-  import { EnhanceOptions } from '$lib/components/molecules';
+  import { EnhanceOptions, EnhanceRewrite } from '$lib/components/molecules';
   import type { EnhanceAxis, EnhanceSettings, EntryEnhance } from '$lib/types';
   import { enhanceSettingsFor, enhanceShortLabel, enhanceSummary, isNoOpEnhance } from './document';
 
@@ -63,6 +63,9 @@
     {#if useDefaults}
       <p class="enhance-hint">Uses the enhancer's default options (<code>enhance: true</code>).</p>
     {:else}
+      <div class="enhance-rewrite">
+        <EnhanceRewrite value={settings.parts ?? 'both'} {idPrefix} onchange={(parts) => { settings = { ...settings, parts }; }} />
+      </div>
       <EnhanceOptions {axes} {settings} mode="video" audio {idPrefix} onchange={(next) => { settings = next; }} />
       <p class="enhance-hint">Motion and Sound only apply to video (Sound only with audio on); image runs ignore them.</p>
     {/if}
@@ -84,6 +87,7 @@
   .enhance-popover { z-index: 60; width: 360px; max-height: 80vh; overflow-y: auto; padding: 10px 12px 12px; }
   .enhance-title { margin-bottom: 8px; }
   .enhance-mode { margin-bottom: 10px; }
+  .enhance-rewrite { margin-bottom: 12px; }
   .enhance-hint { margin-top: 8px; font-size: var(--text-meta); color: var(--color-text-muted); }
   .enhance-warning { margin-top: 8px; font-size: var(--text-meta); color: var(--color-warning); }
   .enhance-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }

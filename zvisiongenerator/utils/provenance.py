@@ -136,7 +136,9 @@ def _video_scene_fields(request: VideoGenerationRequest, artifacts: VideoWorking
     """Return the video payload's scene keys that apply: ``scene``, and the user's inputs when the text was enhanced.
 
     The inputs come from the request when its scene or prompt already holds a rewrite made before the job; otherwise,
-    for a rewrite made by the job, they are the scene and prompt as written.
+    for a rewrite made by the job, they are the scene and prompt as written. A job that rewrote only the action has
+    no ``enhanced_scene``: ``scene`` is the user's own and ``scene_input`` repeats it, which tells it from a rewrite
+    of a blank scene (a ``scene`` with no ``scene_input``).
     """
     metadata = artifacts.metadata
     enhanced = bool(metadata.get("enhanced_prompt"))

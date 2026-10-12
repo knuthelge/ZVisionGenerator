@@ -1,8 +1,8 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { draft } from '$lib/state/draft.svelte';
-  import { canSubmitText, enhancedOverrideActive, isEnhancedStale } from '$lib/state/promptEnhance';
-  import { isOriginalLegacyPrompt } from '$lib/state/extend';
+  import { anyEnhancedUsed, canSubmitText, enhancedPartUsed, isEnhancedStale, runParts } from '$lib/state/promptEnhance';
+  import { isOriginalLegacyPrompt, normalizePromptText } from '$lib/state/extend';
   import { autogrow } from '$lib/actions/autogrow';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { Icon } from '$lib/components/atoms';
@@ -34,7 +34,7 @@
   const promptFileMode = $derived(s.promptSource === 'file');
   const jsonMode = $derived(caps.showPromptInline && caps.supportsJsonPrompt && s.jsonPromptEnabled);
   const showTabs = $derived(caps.showPromptInline && caps.showEnhance && !jsonMode);
-  const enhancedUsed = $derived(enhancedOverrideActive(s));
+  const enhancedUsed = $derived(anyEnhancedUsed(s));
   const stale = $derived(isEnhancedStale(s));
 
   let activeTab = $state<'prompt' | 'enhanced'>('prompt');
@@ -45,6 +45,8 @@
   let errorText = $state<string | null>(null);
   let noteText = $state<string | null>(null);
   let statusText = $state<string | null>(null);
+  /** A result announced in the status line until the next edit or enhancement: a part switched to your text, a clip text restored. */
+  let noticeText = $state<string | null>(null);
   let promptEl = $state<HTMLTextAreaElement | null>(null);
 
   /** Video workflows write a Scene beside the Prompt; the tabs then switch the pair. Images keep one prompt box. */
@@ -56,7 +58,7 @@
   const visibleScene = $derived(pairMode ? (showingEnhanced ? enhancedSceneValue : s.scene) : '');
   const wordCount = $derived(countWords(`${visibleScene} ${visibleText}`));
   const hasEnhanced = $derived(s.enhancedPrompt !== '' || (pairMode && s.enhancedScene !== ''));
-  // A video needs a scene or a prompt; an Enhanced text stands in for both.
+  // A video needs a scene or an action; Enhanced text in either box stands in for both.
   const textMissing = $derived(!enhancedUsed && !canSubmitText(s));
 
   const SCENE_PLACEHOLDER = 'Who and where, look, style, camera. Kept for extensions.';
@@ -70,6 +72,24 @@
   const scenePlaceholder = $derived(legacySource ? LEGACY_SCENE_PLACEHOLDER : SCENE_PLACEHOLDER);
   // Shown from the prefill until the Prompt is edited; it never blocks Generate.
   const originalPromptShown = $derived(extending && !promptFileMode && isOriginalLegacyPrompt(s, draft.extendSource));
+  // The parts a part's Enhanced box stands for, so its placeholder tells what Generate does with it.
+  const sceneUsed = $derived(pairMode && enhancedPartUsed(s, 'scene'));
+  const actionUsed = $derived(pairMode && enhancedPartUsed(s, 'action'));
+  const rewritesScene = $derived(runParts(s) === 'both');
+  const enhancedScenePlaceholder = $derived(
+    (enhancing || s.enhanceAuto) && rewritesScene ? (enhancing ? 'Enhancing…' : 'Enhanced when the job runs') : 'Not enhanced. Generate uses your scene.'
+  );
+  const enhancedPromptPlaceholder = $derived(
+    pairMode
+      ? (enhancing ? 'Enhancing…' : s.enhanceAuto ? 'Enhanced when the job runs' : 'Not enhanced. Generate uses your action.')
+      : (s.enhanceAuto ? 'Generated per image when the job runs.' : s.prompt || 'Enhance the prompt, or type a variant here. When this has text, it is what gets generated.')
+  );
+  // An extension's clip link: put back what the clip recorded. A legacy clip recorded one prompt and no scene.
+  const clipScene = $derived(extending && pairMode ? (draft.extendSource?.scene ?? '').trim() : '');
+  const showClipScene = $derived(clipScene !== '' && s.scene.trim() !== clipScene);
+  const clipPrompt = $derived(legacySource && pairMode ? (draft.extendSource?.prompt ?? '') : '');
+  const showClipPrompt = $derived(clipPrompt.trim() !== '' && normalizePromptText(s.prompt) !== normalizePromptText(clipPrompt));
+  const OUT_OF_DATE_TITLE = 'Your text changed after this was enhanced. It is still used until you choose Use mine or re-enhance.';
   const DEFAULT_SCENE_HELP = 'Used for prompts in the file that have no scene: of their own.';
 
   function countWords(text: string): number {
@@ -78,10 +98,20 @@
 
   // A video accepts a scene in place of a prompt, so its message names both. Declarative, so it clears itself once either has text.
   $effect(() => {
-    promptEl?.setCustomValidity(pairMode && textMissing ? 'Write a prompt or a scene.' : '');
+    promptEl?.setCustomValidity(pairMode && textMissing ? 'Write an action or a scene.' : '');
   });
 
   const SOURCE_LABELS: Record<PromptSource, string> = { inline: 'Inline', file: 'Prompt file' };
+
+  function onPromptInput(value: string): void {
+    noticeText = null;
+    draft.update('prompt', value);
+  }
+
+  function onSceneInput(value: string): void {
+    noticeText = null;
+    draft.update('scene', value);
+  }
 
   function onEnhancedInput(value: string): void {
     draft.update('enhancedPrompt', value);
@@ -105,7 +135,33 @@
   function clearEnhanced(): void {
     draft.patch({ enhancedPrompt: '', enhancedScene: '', enhancedFrom: null });
     noteText = null;
+    noticeText = null;
     activeTab = 'prompt';
+  }
+
+  /** Bring a field forward on the tab that shows it, then focus it. */
+  async function focusField(id: string, tab: 'prompt' | 'enhanced'): Promise<void> {
+    if (showTabs) activeTab = tab;
+    await tick();
+    document.getElementById(id)?.focus();
+  }
+
+  /** Empty one part's Enhanced box, so Generate sends your text for it. */
+  function useMine(part: 'scene' | 'action'): void {
+    const scene = part === 'scene' ? '' : s.enhancedScene;
+    const action = part === 'action' ? '' : s.enhancedPrompt;
+    draft.patch({ enhancedScene: scene, enhancedPrompt: action, ...(scene.trim() === '' && action.trim() === '' ? { enhancedFrom: null } : {}) });
+    noticeText = part === 'scene' ? 'Scene now uses your text.' : 'Action now uses your text.';
+    void focusField(showingEnhanced ? `ws-enhanced-${part === 'scene' ? 'scene' : 'prompt'}` : part === 'scene' ? 'ws-scene' : 'ws-prompt', showingEnhanced ? 'enhanced' : 'prompt');
+  }
+
+  /** Replace the Scene or Prompt with the text the clip recorded. */
+  function restoreClip(part: 'scene' | 'prompt'): void {
+    const recorded = draft.extendSource?.[part];
+    if (!recorded) return;
+    draft.update(part, recorded);
+    noticeText = `${part === 'scene' ? 'Scene' : 'Prompt'} restored from the clip.`;
+    void focusField(`ws-${part}`, 'prompt');
   }
 
   function selectTab(tab: 'prompt' | 'enhanced', event: KeyboardEvent | MouseEvent): void {
@@ -149,7 +205,7 @@
       tabindex={activeTab === 'prompt' ? 0 : -1}
       onclick={(e) => selectTab('prompt', e)}
       onkeydown={onTabKeydown}
-    >{pairMode ? 'Your text' : 'Prompt'}{#if !enhancedUsed}<span class="ui-badge ui-badge-info used-pill">used</span>{/if}</button>
+    >{pairMode ? 'Your text' : 'Prompt'}{#if !pairMode && !enhancedUsed}<span class="ui-badge ui-badge-info used-pill">used</span>{/if}</button>
     <button
       type="button"
       role="tab"
@@ -160,7 +216,33 @@
       tabindex={activeTab === 'enhanced' ? 0 : -1}
       onclick={(e) => selectTab('enhanced', e)}
       onkeydown={onTabKeydown}
-    >Enhanced{#if enhancedUsed}<span class="ui-badge ui-badge-info used-pill">used</span>{/if}{#if stale && !s.enhanceAuto}<span class="ui-badge ui-badge-warning used-pill" title={pairMode ? 'Your text or the settings changed after this was enhanced. It is still used until you clear it.' : 'The prompt or workflow changed after this was enhanced. It is still used until you clear it.'}>Out of date</span>{/if}</button>
+    >Enhanced{#if enhancedUsed}<span class="ui-badge ui-badge-info used-pill">used</span>{:else if pairMode && s.enhanceAuto}<span class="ui-badge ui-badge-info used-pill">auto</span>{/if}{#if stale && !s.enhanceAuto}<span class="ui-badge ui-badge-warning used-pill" title={pairMode ? 'Your text or the settings changed after this was enhanced. It is still used until you clear it.' : 'The prompt or workflow changed after this was enhanced. It is still used until you clear it.'}>Out of date</span>{/if}</button>
+  </div>
+{/snippet}
+
+{#snippet partLabel(part: 'scene' | 'action')}
+  {@const used = part === 'scene' ? sceneUsed : actionUsed}
+  {@const name = part === 'scene' ? 'Scene' : 'Action'}
+  {@const mine = part === 'scene' ? 'ws-scene' : 'ws-prompt'}
+  <div class="label-row">
+    <label class="ui-label" for={mine} hidden={showingEnhanced}>{name}</label>
+    {#if showTabs}<label class="ui-label" for={`ws-enhanced-${part === 'scene' ? 'scene' : 'prompt'}`} hidden={!showingEnhanced}>{name}</label>{/if}
+    {#if (part === 'scene' ? showClipScene : showClipPrompt) || used}
+      <span class="label-extras">
+        {#if part === 'scene' && showClipScene}
+          <button type="button" class="prompt-link" title="Replace your scene with the one recorded in the clip" onclick={() => restoreClip('scene')}>Use the clip's scene</button>
+        {:else if part === 'action' && showClipPrompt}
+          <button type="button" class="prompt-link" title="Replace your action with the clip's recorded prompt" onclick={() => restoreClip('prompt')}>Use the clip's prompt</button>
+        {/if}
+        {#if used}
+          <span id={`ws-${part}-marker`} class="label-marker">
+            <span class="ui-badge ui-badge-info" title={`Generate uses the enhanced ${part}`}>Uses enhanced</span>
+            {#if stale}<span class="ui-badge ui-badge-warning" title={OUT_OF_DATE_TITLE}>Out of date</span>{/if}
+          </span>
+          <button type="button" class="prompt-link" title={`Clear the enhanced ${part}; Generate uses yours`} onclick={() => useMine(part)}>Use mine</button>
+        {/if}
+      </span>
+    {/if}
   </div>
 {/snippet}
 
@@ -186,13 +268,13 @@
       role={showTabs && !pairMode ? 'tabpanel' : undefined}
       aria-labelledby={showTabs && !pairMode ? 'ws-tab-prompt' : undefined}
       placeholder={promptPlaceholder}
-      aria-describedby={originalPromptShown ? 'ws-prompt-original' : undefined}
+      aria-describedby={[originalPromptShown ? 'ws-prompt-original' : '', actionUsed ? 'ws-action-marker' : ''].filter(Boolean).join(' ') || undefined}
       required={textMissing}
       hidden={showingEnhanced}
       oninvalid={showPromptForValidation}
       value={s.prompt}
       use:autogrow={[s.prompt, showingEnhanced]}
-      oninput={(e) => draft.update('prompt', e.currentTarget.value)}
+      oninput={(e) => onPromptInput(e.currentTarget.value)}
     ></textarea>
     {#if showTabs}
       <textarea
@@ -201,7 +283,8 @@
         role={pairMode ? undefined : 'tabpanel'}
         aria-labelledby={pairMode ? undefined : 'ws-tab-enhanced'}
         hidden={!showingEnhanced}
-        placeholder={s.enhanceAuto ? 'Generated per image when the job runs.' : s.prompt || 'Enhance the prompt, or type a variant here. When this has text, it is what gets generated.'}
+        placeholder={enhancedPromptPlaceholder}
+        aria-describedby={actionUsed ? 'ws-action-marker' : undefined}
         disabled={s.enhanceAuto}
         readonly={enhancing}
         aria-busy={enhancing}
@@ -229,7 +312,7 @@
         {busy}
         {jobsActive}
         maxWords={caps.enhanceMaxWords}
-        onstart={() => { activeTab = 'enhanced'; }}
+        onstart={() => { activeTab = 'enhanced'; noticeText = null; }}
       />
     {/if}
     {#if caps.supportsJsonPrompt}
@@ -251,9 +334,8 @@
         <button type="button" class="prompt-link" onclick={clearEnhanced}>Clear</button>
       {/if}
     {/if}
-    {#if statusText}
-      <span class="prompt-status" role="status">{statusText}</span>
-    {/if}
+    <!-- The region stays in the page, hidden visually while empty, so assistive technology announces what fills it. -->
+    <span class="prompt-status" class:sr-only={!(statusText ?? noticeText)} role="status">{statusText ?? noticeText ?? ''}</span>
     <span class="word-count">{wordCount} words</span>
   </div>
 {/snippet}
@@ -289,29 +371,28 @@
         role={showTabs ? 'tabpanel' : undefined}
         aria-labelledby={showTabs ? (showingEnhanced ? 'ws-tab-enhanced' : 'ws-tab-prompt') : undefined}
       >
-        <div class="field" hidden={showingEnhanced}>
-          <label class="ui-label mb-1" for="ws-scene">Scene</label>
-          <div class="ui-prompt-box">
+        <div class="field">
+          {@render partLabel('scene')}
+          <div class="ui-prompt-box" hidden={showingEnhanced}>
             <textarea
               id="ws-scene"
               name="scene"
               class="prompt-text scene-text"
               class:scene-legacy={legacySource && s.scene === ''}
               placeholder={scenePlaceholder}
+              aria-describedby={sceneUsed ? 'ws-scene-marker' : undefined}
               value={s.scene}
               use:autogrow={[s.scene, showingEnhanced]}
-              oninput={(e) => draft.update('scene', e.currentTarget.value)}
+              oninput={(e) => onSceneInput(e.currentTarget.value)}
             ></textarea>
           </div>
-        </div>
-        {#if showTabs}
-          <div class="field" hidden={!showingEnhanced}>
-            <label class="ui-label mb-1" for="ws-enhanced-scene">Scene</label>
-            <div class="ui-prompt-box">
+          {#if showTabs}
+            <div class="ui-prompt-box" hidden={!showingEnhanced}>
               <textarea
                 id="ws-enhanced-scene"
                 class="prompt-text scene-text"
-                placeholder={s.enhanceAuto ? 'Generated per image when the job runs.' : s.scene || 'Enhance, or type a scene here.'}
+                placeholder={enhancedScenePlaceholder}
+                aria-describedby={sceneUsed ? 'ws-scene-marker' : undefined}
                 disabled={s.enhanceAuto}
                 readonly={enhancing}
                 aria-busy={enhancing}
@@ -320,11 +401,10 @@
                 oninput={(e) => onEnhancedSceneInput(e.currentTarget.value)}
               ></textarea>
             </div>
-          </div>
-        {/if}
+          {/if}
+        </div>
         <div class="field">
-          <label class="ui-label mb-1" for="ws-prompt" hidden={showingEnhanced}>Prompt</label>
-          {#if showTabs}<label class="ui-label mb-1" for="ws-enhanced-prompt" hidden={!showingEnhanced}>Prompt</label>{/if}
+          {@render partLabel('action')}
           <div class="ui-prompt-box">
             {@render promptFields()}
             {@render toolsRow()}
@@ -355,8 +435,8 @@
     {/if}
     {#if noteText}
       <p class="ui-help">{noteText}</p>
-    {:else if enhancedUsed}
-      <p class="ui-help">{pairMode ? 'The Enhanced text is generated instead of your text.' : 'The Enhanced text is generated instead of the prompt.'}</p>
+    {:else if enhancedUsed && !pairMode}
+      <p class="ui-help">The Enhanced text is generated instead of the prompt.</p>
     {/if}
   {/if}
 
@@ -373,7 +453,7 @@
           aria-describedby="ws-scene-help"
           value={s.scene}
           use:autogrow={[s.scene, showingEnhanced]}
-          oninput={(e) => draft.update('scene', e.currentTarget.value)}
+          oninput={(e) => onSceneInput(e.currentTarget.value)}
         ></textarea>
       </div>
       <p id="ws-scene-help" class="sr-only">{DEFAULT_SCENE_HELP}</p>
@@ -438,7 +518,11 @@
   /* Video: the tabs sit above the Scene and Prompt boxes and line up with them. */
   .pair-tabs { margin: 0 -4px; }
   .text-pair { display: flex; flex-direction: column; gap: 8px; }
-  .field[hidden], .field label[hidden] { display: none; }
+  .field label[hidden] { display: none; }
+  /* The label sits left; clip links and the enhanced marker are pushed right and wrap rather than being cut. */
+  .label-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-height: 22px; margin-bottom: 4px; }
+  .label-extras { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 4px 6px; margin-left: auto; }
+  .label-marker { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
   .prompt-text { display: block; width: 100%; min-height: 88px; max-height: 180px; overflow-y: auto; resize: none; padding: 9px 10px; border: 0; background: transparent; font-size: var(--text-content); line-height: 1.5; color: var(--color-text-primary); }
   .prompt-text[hidden] { display: none; }
   /* The focus ring belongs to the prompt box, not the textarea. */

@@ -30,6 +30,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     normalize_text,
     perception_rule,
     plan_length,
+    resolve_parts,
     strip_reasoning,
     validate_settings,
     word_count,
@@ -41,6 +42,7 @@ if TYPE_CHECKING:
 PAIR_ACTION_FLOOR_WORDS = 12
 SCENE_HEAVY_RATIO = 0.8
 SCENE_HEAVY_WARNING = "The scene uses most of the word budget; the action may be cut short."
+PARTS_FALLBACK_WARNING = "parts=action needs a scene to keep; with no scene the prompt is split into scene and action (parts=both)."
 PAIR_FALLBACK_WARNING = "The enhancer did not return a scene and an action in the requested format; its rewrite is used as the action and the scene is left as written."
 
 # A marker starts a line or follows whitespace, ``*``, ``#`` or ``-`` (so ``**Scene:**`` and ``## Scene:`` both count).
@@ -61,13 +63,20 @@ _PREVIOUS_CLOSENESS = 0.9
 # A quoted line of at least this many words also counts as repeated when a longer new line contains it.
 _MIN_CONTAINED_LINE_WORDS = 3
 
+# Action-only rewrites see the scene as context; small models tend to repeat its details unless told exactly how to refer to it.
+_KEEP_SCENE_OUT_RULE = (
+    'Refer to people and things already in the scene by a pronoun or a short reference ("she", "the dog"). Never repeat their clothing, appearance or the setting; the scene already says it.'
+)
+
 
 @dataclass(frozen=True)
 class EnhancePairResult:
     """The enhanced scene and action of a video prompt, whether the length request was clamped, and an optional notice.
 
-    ``format_fallback`` is set when the model did not answer in the requested scene and action format and its rewrite
-    was used as the action; ``warning`` then ends with ``PAIR_FALLBACK_WARNING``.
+    ``scene`` is ``""`` when the scene was not rewritten (an action-only run, or the format fallback): callers then keep
+    the user's scene and never copy it into an enhanced field. ``format_fallback`` is set when the model did not answer
+    in the requested scene and action format and its rewrite was used as the action; ``warning`` then ends with
+    ``PAIR_FALLBACK_WARNING``.
     """
 
     scene: str
@@ -159,7 +168,7 @@ def build_pair_messages(scene: str, prompt: str, settings: EnhanceSettings, *, p
         *context_rules("video", replace(context, reference_image=False, seconds=None if context.extends else context.seconds)),
         "SCENE: who and where, their look, the style and the camera setup. No events, no camera moves, no quoted speech.",
         action_role,
-        *(_extend_pair_rules(context) if context.extends else [_pair_workflow_rule(context)]),
+        *(_extend_pair_rules(context, scene=scene) if context.extends else [_pair_workflow_rule(context)]),
         f"For the SCENE: {STYLE_AXIS.option(settings.style).instruction}",
         f"For the SCENE: {MOOD_AXIS.option(settings.mood).instruction}",
     ]
@@ -176,7 +185,9 @@ def build_pair_messages(scene: str, prompt: str, settings: EnhanceSettings, *, p
         rules.append("Apply the style, mood and details; don't return the input unchanged.")
     system = "You rewrite prompts for a text-to-video model. The user gives a Scene and a Prompt; you write a SCENE and an ACTION.\nRules:\n" + "\n".join(f"- {rule}" for rule in rules)
     system += "\nReply with `SCENE:` then `ACTION:`, each followed by plain prose: no preamble, no headings, no quotes around a part."
-    if context.extends:
+    if context.extends and scene.strip():
+        user = f"Scene: {scene.strip()}\nWhat happens next: {_extend_user_message(prompt, context)}"
+    elif context.extends:
         user = _extend_user_message(prompt, context)
     else:
         user = f"Scene: {scene.strip() or '(none)'}\nPrompt: {prompt.strip() or '(none)'}"
@@ -217,18 +228,44 @@ def _extend_rules(context: EnhanceContext) -> list[str]:
     return rules
 
 
-def _extend_pair_rules(context: EnhanceContext) -> list[str]:
-    """Return the scene-and-action rules for an extension whose scene the user did not give."""
+def _extend_pair_rules(context: EnhanceContext, *, scene: str = "") -> list[str]:
+    """Return the scene-and-action rules for an extension: the scene is the user's, or extracted from the earlier prompt when blank."""
     rules = []
-    if context.extract_from:
+    has_scene = bool(scene.strip())
+    if has_scene:
+        rules.append("The user's Scene is the clip's scene: rewrite it, keeping its facts, and write the ACTION for what happens next. Do not repeat the earlier action or quoted lines.")
+    elif context.extract_from:
         rules.append(
             f"Extract the scene (who, where, look, style, camera) from this earlier prompt: {context.extract_from.strip()}. "
             "Write the action for what happens next. Do not repeat the earlier prompt's actions or quoted lines."
         )
     previous = _previous_rule(context)
-    if previous is not None and (context.previous or "").strip() != (context.extract_from or "").strip():
+    if previous is not None and (has_scene or (context.previous or "").strip() != (context.extract_from or "").strip()):
         rules.append(previous)
     return [*rules, *_extend_rules(context)]
+
+
+def _action_only_messages(preamble: list[str], situation: list[str], settings: EnhanceSettings, plan: LengthPlan, context: EnhanceContext, user: str) -> list[dict[str, str]]:
+    """Build the system + user chat messages of a rewrite that writes only the action beside a kept scene.
+
+    Args:
+        preamble: The opening lines of the system message: the task and the kept scene.
+        situation: The rules about the clip the action is written for, between the shared opening rules and the motion, sound and direction rules.
+        user: The user message.
+    """
+    rules = [
+        "Keep the user's intent and every element they mention.",
+        "Never add new people, animals, characters or major objects.",
+        _KEEP_SCENE_OUT_RULE,
+        perception_rule("video", context),
+        *situation,
+        *action_rules(settings, context),
+        *direction_rules(settings),
+        length_instruction(plan, "Length"),
+    ]
+    system = "\n".join(preamble) + "\nRules:\n" + "\n".join(f"- {rule}" for rule in rules)
+    system += "\nOutput only the action as plain prose: no preamble, no headings, no scene description, no quotes around it."
+    return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
 def build_extend_messages(scene: str, prompt: str, settings: EnhanceSettings, *, plan: LengthPlan, context: EnhanceContext) -> list[dict[str, str]]:
@@ -238,25 +275,30 @@ def build_extend_messages(scene: str, prompt: str, settings: EnhanceSettings, *,
     just happened"; neither is in the user message, which is the user's *prompt* or ``CONTINUE_NATURALLY``.
     Motion, sound and the direction shape the action; style, mood and details belong to the kept scene and are left out.
     """
-    rules = [
-        "Keep the user's intent and every element they mention.",
-        "Never add new people, animals, characters or major objects.",
-        perception_rule("video", context),
-        *_extend_rules(context),
-        *action_rules(settings, context),
-        *direction_rules(settings),
-        length_instruction(plan, "Length"),
-    ]
-    lines = [
+    preamble = [
         "You write only the action for the next part of a clip for a text-to-video model. The user tells you what happens next.",
         f"The scene (kept as is, do not restate): {scene.strip()}",
     ]
     previous = _previous_rule(context)
     if previous is not None:
-        lines.append(previous)
-    system = "\n".join(lines) + "\nRules:\n" + "\n".join(f"- {rule}" for rule in rules)
-    system += "\nOutput only the action as plain prose: no preamble, no headings, no scene description, no quotes around it."
-    return [{"role": "system", "content": system}, {"role": "user", "content": _extend_user_message(prompt, context)}]
+        preamble.append(previous)
+    return _action_only_messages(preamble, _extend_rules(context), settings, plan, context, _extend_user_message(prompt, context))
+
+
+def build_action_messages(scene: str, prompt: str, settings: EnhanceSettings, *, plan: LengthPlan, context: EnhanceContext) -> list[dict[str, str]]:
+    """Build the system + user chat messages that ask for only the action of a video that is not an extension, beside a kept scene.
+
+    The *scene* is fixed context the model must not restate or change. The user message is the user's *prompt*, or a
+    request for an action that suits the scene when it is blank. With a reference image the action describes the
+    change from that first frame. Motion, sound and the direction shape the action; style, mood and details belong
+    to the kept scene and are left out.
+    """
+    preamble = [
+        "You write only the action of a clip for a text-to-video model. The user tells you what happens.",
+        f"The scene (kept exactly as written, do not restate or change it): {scene.strip()}",
+    ]
+    situation = [*context_rules("video", context), "Write what happens in time order, fitted to the scene."]
+    return _action_only_messages(preamble, situation, settings, plan, context, prompt.strip() or "(none): write an action that suits the scene.")
 
 
 def _pair_workflow_rule(context: EnhanceContext) -> str:
@@ -388,17 +430,22 @@ def enhance_video_prompt(
     no better, its action (see ``_fallback_action``) is used with the user's scene kept, and the result carries a warning.
     Expand ``{a|b}`` choices before calling.
 
+    ``settings.parts`` (see ``resolve_parts``) picks what is written. For ``"action"`` with a *scene*, the scene is kept
+    exactly and the model writes only an action that fits it, as plain text with no markers, and the result's ``scene``
+    is ``""`` (it was not rewritten). Otherwise the output is a ``SCENE:``/``ACTION:`` pair; a blank *scene* is
+    extracted or written new, so ``"action"`` without one falls back to this. Unset ``parts`` means ``"action"`` when
+    extending a clip that has a scene and ``"both"`` otherwise.
+
     When ``context.extends`` the video continues an existing clip and both inputs may be blank (the model then
-    continues the scene naturally). With a *scene*, it is kept as is and the model writes only the action, as plain
-    text with no markers; without one, the scene is extracted from ``context.extract_from`` (or written new) and the
-    output is a ``SCENE:``/``ACTION:`` pair as usual. Output that repeats ``context.previous`` is retried.
+    continues the scene naturally). The model then also gets the clip's previous prompt, and output that repeats
+    ``context.previous`` is retried.
 
     Args:
         scene: Who and where, look, style and camera; may be blank (the prompt is then split into both parts).
         prompt: What happens; may be blank when *scene* is not.
         context: Job facts (audio track, clip length, frame shape, reference image, extension).
         on_text: Receives the full in-progress raw text (``SCENE: … ACTION: …``; see ``split_scene_action``, with
-            ``action_only=True`` when extending with a scene) at most every ``TEXT_UPDATE_INTERVAL_SECONDS``,
+            ``action_only=True`` when only the action is written) at most every ``TEXT_UPDATE_INTERVAL_SECONDS``,
             then the final text; a retry starts over from an empty string.
         cancelled: Polled per token; when it returns True generation stops and ``RuntimeError`` is raised.
 
@@ -413,7 +460,7 @@ def enhance_video_prompt(
     if not extends and not scene and not prompt:
         raise ValueError("Enter a scene or a prompt to enhance.")
     validate_settings(settings, mode="video", split=extends or not scene)
-    if extends and scene:
+    if resolve_parts(settings, scene=scene, extends=extends) == "action":
         return _enhance_action_only(
             enhancer, scene, prompt, settings, seed=seed, ceiling=ceiling, context=context, length_cfg=length_cfg, temperature=temperature, max_tokens=max_tokens, on_text=on_text, cancelled=cancelled
         )
@@ -437,7 +484,7 @@ def enhance_video_prompt(
     action = _fallback_action(raw)
     if is_unusable(action, echo) or _repeats(action, previous):
         raise RuntimeError(NO_USABLE_MESSAGE)
-    return EnhancePairResult(scene=scene, prompt=action, clamped=plan.total.clamped, warning=" ".join(part for part in (warning, PAIR_FALLBACK_WARNING) if part), format_fallback=True)
+    return EnhancePairResult(scene="", prompt=action, clamped=plan.total.clamped, warning=" ".join(part for part in (warning, PAIR_FALLBACK_WARNING) if part), format_fallback=True)
 
 
 def _pair_word_counts(scene: str, prompt: str, context: EnhanceContext) -> tuple[int, int]:
@@ -452,17 +499,22 @@ def _pair_word_counts(scene: str, prompt: str, context: EnhanceContext) -> tuple
     return word_count(scene), word_count(prompt)
 
 
-def _action_only_plan(scene_words: int, prompt_words: int, length: str, *, ceiling: int, length_cfg: dict[str, Any] | None) -> tuple[LengthPlan, bool]:
+def _kept_scene_action_plan(scene_words: int, prompt_words: int, length: str, *, ceiling: int, length_cfg: dict[str, Any] | None, extends: bool) -> tuple[LengthPlan, bool]:
     """Return the word plan of an action written beside a kept scene, and whether the scene crowds it out.
 
-    The action gets two thirds of the total, at least ``PAIR_ACTION_FLOOR_WORDS`` words, and no more than what
-    the scene leaves under *ceiling*.
+    The action is at least ``PAIR_ACTION_FLOOR_WORDS`` words and no more than what the scene leaves under *ceiling*.
+    Its wanted size is two thirds of the total for the action that follows a clip (*extends*), and otherwise the share
+    of the total that a scene-and-action rewrite would give it.
     """
-    total = plan_length(scene_words + prompt_words, length, ceiling=ceiling, length_cfg=length_cfg)
+    if extends:
+        total = plan_length(scene_words + prompt_words, length, ceiling=ceiling, length_cfg=length_cfg)
+        wanted = round(2 * total.target / 3)
+    else:
+        pair = plan_pair_length(scene_words, prompt_words, length, ceiling=ceiling, length_cfg=length_cfg)
+        total, wanted = pair.total, pair.action.target
     room = ceiling - scene_words
-    target = max(PAIR_ACTION_FLOOR_WORDS, min(round(2 * total.target / 3), room))
-    plan = _part_plan(length, target, hi_cap=max(room, target), clamped=total.clamped)
-    return plan, scene_words >= SCENE_HEAVY_RATIO * ceiling
+    target = max(PAIR_ACTION_FLOOR_WORDS, min(wanted, room))
+    return _part_plan(length, target, hi_cap=max(room, target), clamped=total.clamped), scene_words >= SCENE_HEAVY_RATIO * ceiling
 
 
 def _strip_action_marker(text: str) -> str:
@@ -498,21 +550,24 @@ def _enhance_action_only(
     on_text: Callable[[str], None] | None,
     cancelled: Callable[[], bool] | None,
 ) -> EnhancePairResult:
-    """Write only the action that follows an existing clip, keeping *scene* as is; retry once on an unusable or repeating output.
+    """Write only the action (the one that follows an existing clip, when extending), keeping *scene* as is; retry once on an unusable or repeating output.
+
+    The result's ``scene`` is ``""``: the scene was not rewritten.
 
     Raises:
         RuntimeError: When cancelled, or when both attempts are unusable.
     """
-    plan, scene_heavy = _action_only_plan(word_count(scene), word_count(prompt), settings.length, ceiling=ceiling, length_cfg=length_cfg)
+    plan, scene_heavy = _kept_scene_action_plan(word_count(scene), word_count(prompt), settings.length, ceiling=ceiling, length_cfg=length_cfg, extends=context.extends)
     warning = SCENE_HEAVY_WARNING if scene_heavy else None
     if warning is not None:
         warnings.warn(warning, stacklevel=3)
-    messages = build_extend_messages(scene, prompt, settings, plan=plan, context=context)
+    build = build_extend_messages if context.extends else build_action_messages
+    messages = build(scene, prompt, settings, plan=plan, context=context)
     for attempt in range(2):
         raw = generate_raw(enhancer, messages, seed=seed + attempt, max_tokens=max_tokens, temperature=temperature, on_text=on_text, cancelled=cancelled)
         output = _action_only_output(raw)
         if not (is_unusable(output, prompt) or _repeats(output, context.previous)):
             if on_text is not None:
                 on_text(output)
-            return EnhancePairResult(scene=scene, prompt=output, clamped=plan.clamped, warning=warning)
+            return EnhancePairResult(scene="", prompt=output, clamped=plan.clamped, warning=warning)
     raise RuntimeError(NO_USABLE_MESSAGE)

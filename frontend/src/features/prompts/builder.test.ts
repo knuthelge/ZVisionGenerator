@@ -45,6 +45,12 @@ describe('PromptBuilder', () => {
     vi.useRealTimers();
   });
 
+  it('keeps an entry Rewrite choice when its enhance mapping is set and saved', () => {
+    builder.setEnhance('s0.e0', { parts: 'action', style: 'cinematic' });
+    const saved = JSON.parse(builder.snapshot()) as PromptDocument;
+    expect(saved.sets[0].entries[0].enhance).toEqual({ parts: 'action', style: 'cinematic' });
+  });
+
   it('loads a document clean, selects the first entry and previews it', async () => {
     expect(builder.dirty).toBe(false);
     expect(builder.selectedId).toBe('s0.e0');

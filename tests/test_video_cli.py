@@ -360,6 +360,7 @@ class TestVideoCliPreflight:
         assert captured["plan"].has_rewrites and workflows == [True]
 
     def test_scene_reaches_the_rewrite(self, monkeypatch, tmp_path):
+        """The reply has no markers, so the scene is not rewritten: the plan carries no enhanced scene (it once echoed the scene)."""
         order: list[str] = []
         video_cli, captured, _workflows = self._patch(monkeypatch, order)
         with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--scene", "A sunlit beach.", "--prompt", "a dog runs", "--enhance", "-o", str(tmp_path)]):
@@ -368,7 +369,7 @@ class TestVideoCliPreflight:
                 video_cli.main()
         (iteration,) = captured["plan"].iterations
         assert iteration.enhanced_prompt == "A dog sprints across a sunlit beach, camera tracking low."
-        assert iteration.enhanced_scene == "A sunlit beach."
+        assert iteration.enhanced_scene is None and iteration.scene == "A sunlit beach."
 
     def test_enhancer_load_error_exits_before_model_load(self, monkeypatch, tmp_path):
         order: list[str] = []
@@ -666,6 +667,22 @@ class TestVideoCliExtend:
         self._preflight_spy(monkeypatch)
         args = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a fox", "--enhance", self._KEEP_ALL])["args"]
         assert args.enhance == EnhanceSettings(style="keep", mood="keep", details=(), length="same", motion=(), sound=())
+
+    def test_parts_action_is_parsed_and_is_not_a_noop_with_a_scene(self, monkeypatch, tmp_path):
+        self._preflight_spy(monkeypatch)
+        argv = ["-m", "ltx-8", "--scene", "A castle.", "--prompt", "a fox", "--enhance", f"{self._KEEP_ALL},parts=action"]
+        assert self._main(monkeypatch, tmp_path, argv)["args"].enhance.parts == "action"
+
+    def test_parts_stays_auto_so_an_extension_with_a_scene_writes_the_action(self, monkeypatch, tmp_path):
+        """The default is resolved per job (see ``resolve_parts``): the settings stay unset (auto) and an extension picks the action."""
+        self._preflight_spy(monkeypatch)
+        args = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "--prompt", "she waves", "--enhance"])["args"]
+        assert args.enhance.parts is None
+
+    def test_an_invalid_parts_value_is_refused(self, monkeypatch, tmp_path, capsys):
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a fox", "--enhance", "parts=scene"])
+        assert "both, action" in capsys.readouterr().err
 
     def test_keep_everything_is_refused_as_a_noop_with_a_scene(self, monkeypatch, tmp_path, capsys):
         with pytest.raises(SystemExit, match="2"):

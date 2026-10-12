@@ -396,12 +396,38 @@ class TestVideoScene:
         assert plan.iterations[0].enhanced_prompt == "A red fox runs across it."
 
     def test_unformatted_reply_keeps_the_scene_and_warns(self):
+        """The fallback does not rewrite the scene, so no enhanced scene is planned (it once echoed the user's scene)."""
         reply = "A fox sprints across the snow and the camera follows."
         enhancer = _FakeEnhancer([], texts=[reply, reply])
         with pytest.warns(UserWarning, match="did not return a scene and an action"):
             plan, *_ = _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video", scene="A snowy field.")
-        assert plan.iterations[0].enhanced_scene == "A snowy field."
+        assert plan.iterations[0].enhanced_scene is None
         assert plan.iterations[0].enhanced_prompt == reply
+
+    def test_action_only_keeps_the_scene_and_plans_no_enhanced_scene(self):
+        action = "A red fox sprints across the snow, the camera tracking low beside it."
+        enhancer = _FakeEnhancer([], texts=[action])
+        args = _args(enhance=EnhanceSettings(parts="action"))
+        plan, *_ = _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video", args=args, scene="A snowy field.")
+        (iteration,) = plan.iterations
+        assert iteration.enhance_status is EnhanceStatus.ENHANCED
+        assert iteration.enhanced_scene is None and iteration.enhanced_prompt == action
+        assert iteration.scene == "A snowy field." and enhancer.prompts[0] == "a fox runs"
+        assert "A snowy field." in enhancer.systems[0]
+
+    def test_action_only_with_a_blank_scene_splits_and_warns_once_per_iteration(self):
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
+        args = _args(enhance=EnhanceSettings(parts="action"))
+        with pytest.warns(UserWarning, match="parts=action needs a scene"):
+            plan, *_ = _run({"v": [("a fox runs in a snowy field", None)]}, enhancer=enhancer, mode="video", args=args)
+        assert plan.iterations[0].enhanced_scene == "A snowy field at dusk, soft light."
+        assert plan.iterations[0].enhanced_prompt == "A red fox runs across it."
+
+    def test_both_rewrites_the_scene_whatever_the_workflow(self):
+        enhancer = _FakeEnhancer([], texts=[_PAIR_TEXT])
+        args = _args(enhance=EnhanceSettings(parts="both"))
+        plan, *_ = _run({"v": [("a fox runs", None)]}, enhancer=enhancer, mode="video", args=args, scene="A snowy field.")
+        assert plan.iterations[0].enhanced_scene == "A snowy field at dusk, soft light."
 
     def test_failed_rewrite_leaves_the_scene_unenhanced(self):
         enhancer = _FakeEnhancer([], texts=[TypeError("template rejected")])
@@ -471,11 +497,12 @@ class TestVideoExtend:
     # -- the rewrite -------------------------------------------------------
 
     def test_scene_is_kept_and_only_the_action_is_written(self):
+        """The kept scene is not an enhanced scene: the plan carries none, so the user's scene is the one used."""
         enhancer = _FakeEnhancer([], texts=[self._ACTION_TEXT])
         plan, *_ = _run({"v": [("she leaves", None)]}, enhancer=enhancer, mode="video", args=self._extend_args(), scene=self._SCENE)
         (iteration,) = plan.iterations
         assert iteration.enhance_status is EnhanceStatus.ENHANCED
-        assert iteration.enhanced_scene == self._SCENE and iteration.enhanced_prompt == self._ACTION_TEXT
+        assert iteration.enhanced_scene is None and iteration.enhanced_prompt == self._ACTION_TEXT
         assert enhancer.prompts[0] == "she leaves"
         assert self._SCENE in enhancer.systems[0] and "She opens a black umbrella." in enhancer.systems[0]
 

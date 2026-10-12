@@ -202,11 +202,15 @@ class TestEnhancePromptStage:
         assert arts.metadata["enhanced_scene"] == "A castle at dusk."
         assert seen == ["A castle at dusk. A knight rides in."]
 
-    def test_action_without_a_scene_behaves_like_a_plain_rewrite(self):
-        req = _req(enhanced_prompt="A fox sprints.")
-        arts = VideoWorkingArtifacts()
+    @pytest.mark.parametrize(("metadata", "composed"), [({"scene": "A castle at dusk."}, "A castle at dusk. A knight rides in."), ({}, "A knight rides in.")], ids=["with a scene", "without a scene"])
+    def test_an_action_only_rewrite_composes_the_resolved_scene_and_records_no_enhanced_scene(self, metadata, composed):
+        seen: list[str] = []
+        req = _req(enhanced_prompt="A knight rides in.", on_prompt_enhanced=seen.append)
+        arts = VideoWorkingArtifacts(resolved_prompt="A castle. a knight", metadata=dict(metadata))
         enhance_prompt_stage(req, arts)
-        assert arts.resolved_prompt == "A fox sprints." and arts.metadata == {"enhanced_prompt": "A fox sprints."}
+        assert arts.resolved_prompt == composed
+        assert arts.metadata == {**metadata, "enhanced_prompt": "A knight rides in."}
+        assert seen == [composed]
 
 
 # ---------------------------------------------------------------------------

@@ -229,6 +229,9 @@ export interface WorkspaceContext {
 
 export type EnhanceAxisKey = 'style' | 'mood' | 'details' | 'length' | 'motion' | 'sound';
 
+/** Which parts of a video prompt an enhancement writes: the scene and the action, or only the action (the scene is kept as written). */
+export type EnhanceParts = 'both' | 'action';
+
 export interface EnhanceSettings {
   style: string;
   mood: string;
@@ -238,6 +241,10 @@ export interface EnhanceSettings {
   sound: string[];
   /** Free-text direction for the enhancer; empty for none. */
   note: string;
+  /** Video only. In the effective settings it is the choice for the current workflow; never stored (see `partsByWorkflow`). */
+  parts?: EnhanceParts;
+  /** The Rewrite choice remembered for each video workflow; a workflow with none uses its own default. */
+  partsByWorkflow?: Partial<Record<Workflow, EnhanceParts>>;
 }
 
 /** Facts about the job that shape a rewrite, sent with an on-demand enhancement. */
@@ -338,7 +345,7 @@ export interface PromptField {
 }
 
 /** An entry's `enhance:` value: off, default options, or the mapping as written. */
-export type EntryEnhance = null | true | Partial<Record<EnhanceAxisKey | 'note', string | string[]>>;
+export type EntryEnhance = null | true | Partial<Record<EnhanceAxisKey | 'note' | 'parts', string | string[]>>;
 
 export interface DocumentEntry {
   id: string;
