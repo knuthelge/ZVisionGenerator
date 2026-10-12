@@ -168,6 +168,14 @@ def _make_mock_video_backend(name="ltx"):
     return mock
 
 
+@pytest.fixture(autouse=True)
+def _no_real_memory_budget(monkeypatch):
+    """Keep ziv-video from querying the real accelerator when it checks a clip against memory; tests that care patch it again."""
+    import zvisiongenerator.video_cli as video_cli
+
+    monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: None)
+
+
 @pytest.fixture()
 def fake_peft_no_match(monkeypatch):
     """Install a fake ``peft`` module and return its ``NoMatchingPeftModuleError`` (a ``ValueError``, as in peft 0.21)."""

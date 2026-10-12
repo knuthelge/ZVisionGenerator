@@ -360,6 +360,21 @@ def select_ratio_size_defaults(
     return ratio, size
 
 
+def validate_video_size_choice(config: dict[str, Any], ratio: str | None, size: str | None) -> None:
+    """Check that the config's video size table offers *ratio* and *size*; a config without a table accepts any.
+
+    Raises:
+        ValueError: If the ratio or the size is not in the table.
+    """
+    video_sizes = config.get("video_sizes", {})
+    if not video_sizes:
+        return
+    if ratio not in video_sizes:
+        raise ValueError(f"Unknown ratio '{ratio}'. Valid: {list(video_sizes.keys())}")
+    if size not in video_sizes.get(ratio, {}):
+        raise ValueError(f"Unknown size '{size}' for ratio '{ratio}'. Valid: {list(video_sizes.get(ratio, {}).keys())}")
+
+
 def resolve_video_defaults(
     model_family: str,
     config: dict,

@@ -3,8 +3,9 @@
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
   import { ActionBar, InspectorRow, InspectorSection } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
-  import { MEMORY_FIT_CONSEQUENCES } from '$lib/components/molecules/ModelStatusBadges.svelte';
-  import { extendGuard, extendMemoryNote } from '$lib/state/extend';
+  import { extendGuard } from '$lib/state/extend';
+  import { clipMemory } from '$lib/state/clipMemory.svelte';
+  import { MEMORY_FIT_CONSEQUENCES, memoryFitNote, type MemoryNote } from '$lib/state/memoryFit';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import type { NumberSpec, ScrubOptions } from '$lib/actions/scrub';
   import type { WorkspaceContext } from '$lib/types';
@@ -91,7 +92,8 @@
   const shownExtendSeconds = $derived(sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null);
   const extendLength = $derived(info && sourceFps && info.frame_count !== null && s.extendFrames !== null ? extendTotal(info.frame_count, s.extendFrames, sourceFps) : null);
   const extendDefaultFrames = $derived(sourceFps ? defaultExtendFrames(sourceFps) : null);
-  const memoryNote = $derived(extendMemoryNote(info?.memory_fit ?? null));
+  const memoryNote = $derived(memoryFitNote(info?.memory_fit ?? null, 'extension'));
+  const clipNote = $derived(memoryFitNote(clipMemory.fit, 'clip'));
 
   function setExtendSeconds(seconds: number | null): void {
     if (seconds !== null && sourceFps) draft.update('extendFrames', extendFramesFromSeconds(seconds, sourceFps));
@@ -241,6 +243,12 @@
   }
 </script>
 
+{#snippet memoryNoteLine(note: MemoryNote, testid: string)}
+  <p class="row-hint ui-help-warning memory-note" data-testid={testid} data-status={note.status} title="{note.text}&#10;{MEMORY_FIT_CONSEQUENCES.unified[note.status]}">
+    <Icon name="alert" size={12} />{note.text}
+  </p>
+{/snippet}
+
 <section class="settings-pane" aria-labelledby="ws-settings-title">
   <div class="settings-head">
     <h2 id="ws-settings-title" class="ui-area-label">Settings</h2>
@@ -304,6 +312,9 @@
           <span class="frame-count">{s.frameCount} frames</span>
           <input type="hidden" name="frames" value={s.frameCount}>
         </InspectorRow>
+        <div aria-live="polite">
+          {#if clipNote}{@render memoryNoteLine(clipNote, 'clip-memory-note')}{/if}
+        </div>
       {/if}
       {#if caps.showExtendLength}
         <InspectorRow
@@ -321,11 +332,7 @@
           <span class="extend-total" data-testid="extend-total">{extendLength ? `${extendLength.seconds.toFixed(2)} s · ${extendLength.frames} frames` : '—'}</span>
         </InspectorRow>
         <div aria-live="polite">
-          {#if memoryNote}
-            <p class="row-hint ui-help-warning memory-note" data-testid="extend-memory-note" title="{memoryNote.text}&#10;{MEMORY_FIT_CONSEQUENCES.unified[memoryNote.status]}">
-              <Icon name="alert" size={12} />{memoryNote.text}
-            </p>
-          {/if}
+          {#if memoryNote}{@render memoryNoteLine(memoryNote, 'extend-memory-note')}{/if}
         </div>
       {/if}
       {#if caps.showSteps}

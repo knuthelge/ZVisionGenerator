@@ -1,5 +1,6 @@
 <script lang="ts" module>
-  import type { MemoryFit, MemoryFitEstimate, MemoryFitStatus, MemoryKind } from '$lib/types';
+  import { MEMORY_FIT_CONSEQUENCES } from '$lib/state/memoryFit';
+  import type { MemoryFit, MemoryFitEstimate, MemoryFitStatus } from '$lib/types';
 
   export const MEMORY_FIT_LABELS: Record<MemoryFitStatus, string> = {
     fits: 'Fits',
@@ -9,18 +10,6 @@
 
   export const DOWNLOADED_TOOLTIP = 'Downloaded: the model files are on this machine.';
   export const NOT_DOWNLOADED_TOOLTIP = 'Not downloaded: it downloads the first time you generate with it.';
-
-  /** What each fit level means in practice on each kind of memory; fits needs no explanation. */
-  export const MEMORY_FIT_CONSEQUENCES: Record<MemoryKind, Partial<Record<MemoryFitStatus, string>>> = {
-    unified: {
-      tight: 'It runs, but macOS compresses or swaps other memory to make room, so the Mac can slow down while generating.',
-      too_large: 'More than MLX will try to fit (1.5× the recommendation): expect heavy swapping or an out-of-memory error.'
-    },
-    discrete: {
-      tight: 'It runs, but slowly: the weights do not fit in system memory and partly stream from disk, or the GPU is nearly full.',
-      too_large: "More than this GPU's memory: expect an out-of-memory error. Try a lower quant."
-    }
-  };
 
   function needLine(fit: MemoryFit, estimate: MemoryFitEstimate): string {
     if (fit.kind !== 'discrete') return `Needs ~${estimate.required_gb} GB; this Mac recommends up to ~${fit.budget_gb} GB for the GPU.`;

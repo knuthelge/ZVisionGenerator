@@ -1,4 +1,4 @@
-import type { DraftState, ExtendMemoryFit, ExtendSourceInfo } from '$lib/types';
+import type { DraftState, ExtendSourceInfo } from '$lib/types';
 import { submittedPair } from './promptEnhance';
 
 /** Form fields that choose the size or length of a non-extend clip; an extension takes both from its source. */
@@ -122,12 +122,4 @@ export function extendSourceFacts(info: ExtendSourceInfo): SourceFact[] {
   if (info.has_audio !== null) facts.push({ key: 'audio', text: info.has_audio ? 'Audio' : 'No audio' });
   if (!info.scene && !info.prompt) facts.push({ key: 'no-prompt', text: 'No prompt recorded' });
   return facts;
-}
-
-/** The memory note of an extension: shown for tight and too-large fits only, which never block Generate. */
-export function extendMemoryNote(fit: ExtendMemoryFit | null): { status: 'tight' | 'too_large'; text: string } | null {
-  if (fit === null) return null;
-  if (fit.status === 'tight') return { status: 'tight', text: `Tight: needs ~${fit.required_gb} GB of ${fit.budget_gb} GB. The Mac may slow down while generating.` };
-  if (fit.status === 'too_large') return { status: 'too_large', text: `Too large: needs ~${fit.required_gb} GB of ${fit.budget_gb} GB. Expect heavy swapping or an out-of-memory error.` };
-  return null;
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -14,6 +15,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "create_prompt_enhancer",
+    "accelerator_memory_budget_or_none",
     "get_accelerator_memory_budget",
     "get_backend",
     "get_backend_name",
@@ -157,10 +159,10 @@ def get_accelerator_memory_budget() -> MemoryBudget | None:
     from zvisiongenerator.utils.model_memory import MemoryBudget
 
     if sys.platform == "darwin":
-        from zvisiongenerator.backends.memory_mac import memory_budget_bytes
+        from zvisiongenerator.backends.memory_mac import memory_budget_bytes, memory_size_bytes
 
         budget = memory_budget_bytes()
-        return MemoryBudget(budget) if budget else None
+        return MemoryBudget(budget, unified_bytes=memory_size_bytes()) if budget else None
     if sys.platform in ("win32", "linux"):
         from zvisiongenerator.backends.memory_cuda import memory_sizes
 
@@ -172,6 +174,15 @@ def get_accelerator_memory_budget() -> MemoryBudget | None:
 def supports_stored_quants() -> bool:
     """Return whether this platform's image backend saves quantized models for reuse (every supported platform)."""
     return sys.platform in _IMAGE_BACKENDS_MAP
+
+
+@functools.cache
+def accelerator_memory_budget_or_none() -> "MemoryBudget | None":
+    """Return this machine's memory budget, read once per process (it is fixed hardware), or ``None`` when unknown or the probe fails."""
+    try:
+        return get_accelerator_memory_budget()
+    except Exception:  # noqa: BLE001 - a missing or broken MLX or CUDA install means no budget, never a failed run
+        return None
 
 
 def _video_backend_is_ltx_mlx() -> bool:

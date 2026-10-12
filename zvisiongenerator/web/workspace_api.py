@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import get_backend_name, supports_stored_quants, supports_video_audio
+from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, get_backend_name, supports_stored_quants, supports_video_audio
 from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
 from zvisiongenerator.utils.config import resolve_defaults, resolve_enhancer_model, resolve_video_defaults
@@ -22,7 +22,7 @@ from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
 from zvisiongenerator.web.model_delete import installed_models_linking_to, model_delete_target
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
-from zvisiongenerator.web.model_status import describe_model_status, memory_budget
+from zvisiongenerator.web.model_status import describe_model_status
 
 
 _UNKNOWN_STATUS: dict[str, Any] = {"downloaded": None, "memory_fit": None}

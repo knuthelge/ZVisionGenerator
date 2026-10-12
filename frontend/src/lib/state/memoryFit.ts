@@ -1,0 +1,89 @@
+import type { ClipMemoryFit, DraftState, MemoryFitStatus, MemoryKind } from '$lib/types';
+import { alignFrameCount } from './videoDuration';
+
+/** What each fit level means in practice on each kind of memory; fits needs no explanation. */
+export const MEMORY_FIT_CONSEQUENCES: Record<MemoryKind, Partial<Record<MemoryFitStatus, string>>> = {
+  unified: {
+    tight: 'It runs, but macOS compresses or swaps other memory to make room, so the Mac can slow down while generating.',
+    too_large: 'More than MLX will try to fit (1.5× the recommendation): expect heavy swapping or an out-of-memory error.'
+  },
+  discrete: {
+    tight: 'It runs, but slowly: the weights do not fit in system memory and partly stream from disk, or the GPU is nearly full.',
+    too_large: "More than this GPU's memory: expect an out-of-memory error. Try a lower quant."
+  }
+};
+
+/** What the memory note describes: a Text to Video or Image to Video clip, or the window an extension generates. */
+export type MemoryFitContext = 'clip' | 'extension';
+
+/** A memory note, shown for tight and too-large fits only. */
+export interface MemoryNote {
+  status: 'tight' | 'too_large';
+  text: string;
+}
+
+const LEAD: Record<MemoryFitContext, Record<MemoryNote['status'], string>> = {
+  clip: { tight: 'At this size and length: needs', too_large: 'At this size and length: needs' },
+  extension: { tight: 'Tight: needs', too_large: 'Too large: needs' },
+};
+const CONSEQUENCE: Record<MemoryNote['status'], string> = {
+  tight: 'The Mac may slow down while generating.',
+  too_large: 'Expect heavy swapping or an out-of-memory error.',
+};
+
+/** The memory note of a clip or an extension: shown for tight and too-large fits only, which never block Generate. */
+export function memoryFitNote(fit: ClipMemoryFit | null, context: MemoryFitContext): MemoryNote | null {
+  if (fit === null || (fit.status !== 'tight' && fit.status !== 'too_large')) return null;
+  return { status: fit.status, text: `${LEAD[context][fit.status]} ~${fit.required_gb} GB of ${fit.budget_gb} GB. ${CONSEQUENCE[fit.status]}` };
+}
+
+/** The fields of `POST /api/video/memory-fit`: what the video job form submits for size and length. */
+export interface ClipMemoryRequest {
+  model: string;
+  /** A preset size: the ratio and size names. Absent for a custom size. */
+  ratio?: string;
+  size?: string;
+  /** A custom size in pixels. Absent for a preset size. */
+  width?: number;
+  height?: number;
+  /** The frame count the job would use (8k + 1). */
+  frames: number;
+  low_memory: boolean;
+  /** The upscale factor, or null when the clip is not upscaled. */
+  upscale: number | null;
+}
+
+/** Which video controls the model offers, as they decide what the job form submits. */
+export interface ClipMemoryControls {
+  frameAlignment: number;
+  /** The Low memory toggle is shown; without it the server's default (on) applies. */
+  lowMemory: boolean;
+  /** The Upscale toggle is shown. */
+  upscale: boolean;
+}
+
+/**
+ * The memory check of the clip the form would submit, or null when there is nothing to check.
+ *
+ * Only Text to Video and Image to Video are checked here; an extension has its own check with its source. A custom
+ * size that is not complete yet, or a missing model or length, has nothing to check either.
+ */
+export function clipMemoryRequest(state: DraftState, controls: ClipMemoryControls): ClipMemoryRequest | null {
+  if (state.workflow !== 'txt2vid' && state.workflow !== 'img2vid') return null;
+  if (!state.model || !(state.frameCount > 0)) return null;
+  let size: Pick<ClipMemoryRequest, 'ratio' | 'size' | 'width' | 'height'>;
+  if (state.dimensionMode === 'custom') {
+    if (!(state.width > 0 && state.height > 0)) return null;
+    size = { width: state.width, height: state.height };
+  } else {
+    if (!state.ratio || !state.size) return null;
+    size = { ratio: state.ratio, size: state.size };
+  }
+  return {
+    model: state.model,
+    ...size,
+    frames: alignFrameCount(state.frameCount, controls.frameAlignment),
+    low_memory: controls.lowMemory ? state.lowMemory : true,
+    upscale: controls.upscale && state.videoUpscaleEnabled ? state.videoUpscaleFactor : null,
+  };
+}

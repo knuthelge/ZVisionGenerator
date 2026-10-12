@@ -101,6 +101,30 @@ class TestBackendRegistryLookup:
 
         assert backends.supports_video_extend() is expected
 
+    def test_a_failing_memory_probe_means_no_budget(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+
+        monkeypatch.setattr(backends, "get_accelerator_memory_budget", MagicMock(side_effect=RuntimeError("probe failed")))
+        backends.accelerator_memory_budget_or_none.cache_clear()
+        try:
+            assert backends.accelerator_memory_budget_or_none() is None
+        finally:
+            backends.accelerator_memory_budget_or_none.cache_clear()
+
+    def test_the_memory_budget_is_probed_once_per_process(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+        from zvisiongenerator.utils.model_memory import MemoryBudget
+
+        probe = MagicMock(return_value=MemoryBudget(10))
+        monkeypatch.setattr(backends, "get_accelerator_memory_budget", probe)
+        backends.accelerator_memory_budget_or_none.cache_clear()
+        try:
+            assert backends.accelerator_memory_budget_or_none() == backends.accelerator_memory_budget_or_none() == MemoryBudget(10)
+        finally:
+            backends.accelerator_memory_budget_or_none.cache_clear()
+
+        probe.assert_called_once()
+
     def test_an_unregistered_platform_cannot_extend_a_clip(self, monkeypatch):
         import zvisiongenerator.backends as backends
 
@@ -118,6 +142,27 @@ class TestBackendRegistryLookup:
         monkeypatch.setattr(memory_cuda, "memory_sizes", lambda: (10, 30))
 
         assert backends.get_accelerator_memory_budget() == MemoryBudget(10, 30)
+
+    def test_mac_memory_budget_is_the_recommended_working_set_with_the_unified_memory(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+        from zvisiongenerator.backends import memory_mac
+        from zvisiongenerator.utils.model_memory import MemoryBudget
+
+        monkeypatch.setattr(backends.sys, "platform", "darwin")
+        monkeypatch.setattr(memory_mac, "memory_budget_bytes", lambda: 24)
+        monkeypatch.setattr(memory_mac, "memory_size_bytes", lambda: 32)
+
+        assert backends.get_accelerator_memory_budget() == MemoryBudget(24, unified_bytes=32)
+
+    def test_mac_without_a_working_set_size_has_no_budget(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+        from zvisiongenerator.backends import memory_mac
+
+        monkeypatch.setattr(backends.sys, "platform", "darwin")
+        monkeypatch.setattr(memory_mac, "memory_budget_bytes", lambda: None)
+        monkeypatch.setattr(memory_mac, "memory_size_bytes", lambda: 32)
+
+        assert backends.get_accelerator_memory_budget() is None
 
     @pytest.mark.parametrize("platform", ["win32", "linux"])
     def test_cuda_platforms_release_finished_models(self, monkeypatch, platform):

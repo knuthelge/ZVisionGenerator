@@ -10,6 +10,7 @@ import pytest
 from conftest import make_extend_source
 
 from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
+from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_cli import _build_video_parser
 
@@ -416,8 +417,16 @@ def _run_cli(
     monkeypatch.setattr(video_cli, "detect_video_model", lambda _model: model_info)
     monkeypatch.setattr(video_cli, "resolve_video_defaults", lambda _family, _config, cli_overrides: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
     monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
-    monkeypatch.setattr(video_cli, "get_accelerator_memory_budget", lambda: MagicMock(gpu_bytes=16 * 1024**3))
-    monkeypatch.setattr(video_cli, "window_memory_fit", memory)
+    monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: MemoryBudget(16 * 1024**3))
+    monkeypatch.setattr(video_cli, "clip_memory_fit", memory)
+    fits: list = []
+    real_clip_fit = video_cli._clip_fit
+
+    def _spy_clip_fit(args, *, upscale):
+        fits.append(real_clip_fit(args, upscale=upscale))
+        return fits[-1]
+
+    monkeypatch.setattr(video_cli, "_clip_fit", _spy_clip_fit)
     monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args, **_kwargs: object())
     loaded: list[str] = []
 
@@ -428,7 +437,7 @@ def _run_cli(
         return source or _cli_source()
 
     monkeypatch.setattr(video_cli, "load_extend_source", _load_source)
-    captured: dict = {"backend": backend, "memory": memory, "loaded": loaded}
+    captured: dict = {"backend": backend, "memory": memory, "loaded": loaded, "fits": fits}
 
     def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, skip_signal=None):
         captured.update(prompts_data=prompts_data, args=args, plan=plan)
@@ -830,11 +839,18 @@ class TestVideoCliExtend:
         fit = {"status": "too_large", "required_gb": 40.2, "budget_gb": 16.0}
         captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4", "-m", "org/recorded-model"], fit=fit)
         (warning,) = captured["memory_warnings"]
-        assert "40.2 GB" in warning and "too large" in warning and "--extend-seconds" in warning and "--extend-frames" in warning
+        assert captured["fits"][0]["status"] == "too_large" and "--extend-seconds" in warning and "--extend-frames" in warning
         assert "args" in captured
         call = captured["memory"].call_args
         assert call.args == ("org/recorded-model",)
-        assert (call.kwargs["width"], call.kwargs["height"], call.kwargs["frames"], call.kwargs["low_memory"], call.kwargs["budget_bytes"]) == (512, 288, 73, True, 16 * 1024**3)
+        assert (call.kwargs["width"], call.kwargs["height"], call.kwargs["frames"], call.kwargs["low_memory"], call.kwargs["upscale"], call.kwargs["budget"]) == (
+            512,
+            288,
+            73,
+            True,
+            False,
+            MemoryBudget(16 * 1024**3),
+        )
 
     def test_a_window_that_fits_does_not_warn(self, monkeypatch, tmp_path):
         captured = self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], fit={"status": "fits", "required_gb": 9.0, "budget_gb": 16.0})
@@ -872,6 +888,104 @@ class TestVideoCliExtend:
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["--prompt", "a dog"])
         assert "--model is required" in capsys.readouterr().err
+
+
+class TestVideoCliClipMemory:
+    """A text-to-video or image-to-video run checks its aligned size and length against memory once and warns; it never stops."""
+
+    _main = TestVideoCliExtend._main
+    _source = staticmethod(TestVideoCliExtend._source)
+    _TOO_LARGE = {"status": "too_large", "required_gb": 40.2, "budget_gb": 16.0}
+
+    def test_a_clip_that_does_not_fit_warns_once_and_the_run_continues(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog", "--runs", "3"], fit=self._TOO_LARGE)
+
+        assert [fit["status"] for fit in captured["fits"]] == ["too_large"]
+        assert len(captured["memory_warnings"]) == 1
+        assert "args" in captured
+
+    def test_a_tight_clip_is_reported_as_tight(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], fit={"status": "tight", "required_gb": 18.0, "budget_gb": 16.0})
+
+        assert [fit["status"] for fit in captured["fits"]] == ["tight"]
+        assert len(captured["memory_warnings"]) == 1
+
+    @pytest.mark.parametrize(("flags", "advised"), [([], False), (["--no-low-memory"], True)])
+    def test_the_warning_points_at_low_memory_only_when_it_is_off(self, monkeypatch, tmp_path, flags, advised):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog", *flags], fit=self._TOO_LARGE)
+
+        (warning,) = captured["memory_warnings"]
+        assert ("--low-memory" in warning) is advised
+        assert "--frames" in warning and "--size" in warning
+
+    @pytest.mark.parametrize("fit", [{"status": "fits", "required_gb": 9.0, "budget_gb": 16.0}, None])
+    def test_a_clip_that_fits_or_is_not_estimated_does_not_warn(self, monkeypatch, tmp_path, fit):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog"], fit=fit)
+
+        assert captured["memory_warnings"] == []
+
+    def test_the_check_sees_the_aligned_size_and_length(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog", "-W", "700", "-H", "450", "--frames", "50"])
+
+        call = captured["memory"].call_args
+        assert call.args == ("ltx-8",)
+        assert (call.kwargs["width"], call.kwargs["height"], call.kwargs["frames"]) == (704, 448, 49)
+        assert (call.kwargs["low_memory"], call.kwargs["upscale"], call.kwargs["budget"]) == (True, False, MemoryBudget(16 * 1024**3))
+
+    def test_an_upscaled_clip_is_checked_at_its_final_64_aligned_size(self, monkeypatch, tmp_path):
+        captured = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a dog", "--upscale", "2", "-W", "700", "-H", "450"])
+
+        call = captured["memory"].call_args
+        assert (call.kwargs["width"], call.kwargs["height"], call.kwargs["upscale"]) == (704, 448, True)
+
+
+# ---------------------------------------------------------------------------
+# aligned_video_dims
+# ---------------------------------------------------------------------------
+
+
+class TestAlignedVideoDims:
+    """One helper rounds the size and length of every video job (CLI and Web UI)."""
+
+    _MODEL = {"resolution_alignment": 32, "frame_alignment": 8, "family": "LTX"}
+
+    def _aligned(self, width, height, frames, **overrides):
+        from zvisiongenerator.utils.alignment import aligned_video_dims
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            return aligned_video_dims(width, height, frames, **{"upscale": False, **self._MODEL, **overrides})
+
+    def test_uses_the_models_alignment(self):
+        assert self._aligned(720, 450, 52) == (736, 448, 49)
+
+    def test_an_upscaled_clip_uses_64_alignment(self):
+        assert self._aligned(720, 450, 52, upscale=True) == (704, 448, 49)
+
+    def test_matches_the_single_step_helpers(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            expected = (*align_resolution(700, 475, 32, "LTX"), align_ltx_frames(100, 8))
+
+        assert self._aligned(700, 475, 100) == expected
+
+    def test_warns_about_each_correction(self):
+        from zvisiongenerator.utils.alignment import aligned_video_dims
+
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("always")
+            aligned_video_dims(720, 450, 52, upscale=False, **self._MODEL)
+
+        assert len(seen) == 2
+
+    def test_an_aligned_clip_is_unchanged_and_silent(self):
+        from zvisiongenerator.utils.alignment import aligned_video_dims
+
+        with warnings.catch_warnings(record=True) as seen:
+            warnings.simplefilter("always")
+            assert aligned_video_dims(704, 448, 121, upscale=False, **self._MODEL) == (704, 448, 121)
+
+        assert seen == []
 
 
 # ---------------------------------------------------------------------------

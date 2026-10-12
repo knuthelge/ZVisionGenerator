@@ -11,16 +11,16 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends import get_accelerator_memory_budget, get_video_backend, supports_video_audio, supports_video_extend, supports_video_upscale_review
+from zvisiongenerator.backends import accelerator_memory_budget_or_none, get_video_backend, supports_video_audio, supports_video_extend, supports_video_upscale_review
 from zvisiongenerator.preflight import run_preflight
-from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
+from zvisiongenerator.utils.alignment import aligned_video_dims
 from zvisiongenerator.utils.app_log import setup_logging
-from zvisiongenerator.utils.config import load_config, resolve_video_defaults, select_ratio_size_defaults
+from zvisiongenerator.utils.config import load_config, resolve_video_defaults, select_ratio_size_defaults, validate_video_size_choice
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import parse_lora_arg, resolve_lora_references
 from zvisiongenerator.utils.model_files import find_local_model_dir
-from zvisiongenerator.utils.model_memory import window_memory_fit
+from zvisiongenerator.utils.model_memory import clip_memory_fit
 from zvisiongenerator.utils.paths import resolve_lora_path, resolve_model_path
 from zvisiongenerator.utils.prompt_compose import is_original_prompt
 from zvisiongenerator.utils.prompt_enhance import enhance_by_set_for_mode
@@ -226,23 +226,34 @@ def _warn_if_still_original_prompt(prompt: str | None, source: ExtendSource) -> 
         warnings.warn("Still the original prompt. Change it to what happens next.", stacklevel=2)
 
 
-def _warn_if_window_too_large(args: argparse.Namespace) -> None:
-    """Warn when the extension window may not fit in memory; the run continues either way."""
-    budget = get_accelerator_memory_budget()
-    fit = window_memory_fit(
+def _clip_fit(args: argparse.Namespace, *, upscale: bool) -> dict[str, Any] | None:
+    """Return how the run's clip fits this machine's memory (``status``, ``required_gb``, ``budget_gb``), or ``None`` when unknown."""
+    return clip_memory_fit(
         args.model,
         width=args.width,
         height=args.height,
         frames=args.num_frames,
         low_memory=args.low_memory,
-        budget_bytes=budget.gpu_bytes if budget else None,
+        upscale=upscale,
+        budget=accelerator_memory_budget_or_none(),
     )
-    if fit is not None and fit["status"] != "fits":
-        warnings.warn(
-            f"The {args.num_frames}-frame extension window needs about {fit['required_gb']:g} GB; this machine's budget is {fit['budget_gb']:g} GB "
-            f"({fit['status'].replace('_', ' ')}). Continuing; it may be slow or fail. Use --extend-seconds or --extend-frames for a shorter extension.",
-            stacklevel=2,
-        )
+
+
+def _warn_if_too_large(args: argparse.Namespace, *, extending: bool) -> None:
+    """Warn when the clip, or the window of an extension, may not fit in memory; the run continues either way."""
+    fit = _clip_fit(args, upscale=bool(args.upscale))
+    if fit is None or fit["status"] == "fits":
+        return
+    if extending:
+        subject = f"The {args.num_frames}-frame extension window"
+        advice = "Use --extend-seconds or --extend-frames for a shorter extension"
+    else:
+        subject = f"At {args.width}x{args.height}, {args.num_frames} frames this clip"
+        advice = "Use fewer --frames or a smaller --size" + ("" if args.low_memory else ", and keep --low-memory on")
+    warnings.warn(
+        f"{subject} needs about {fit['required_gb']:g} GB; this machine's budget is {fit['budget_gb']:g} GB ({fit['status'].replace('_', ' ')}). Continuing; it may be slow or fail. {advice}.",
+        stacklevel=2,
+    )
 
 
 def _apply_ratio_size_defaults(parser: argparse.ArgumentParser, args: argparse.Namespace, config: dict[str, Any]) -> None:
@@ -263,11 +274,10 @@ def _apply_ratio_size_defaults(parser: argparse.ArgumentParser, args: argparse.N
         args.size = default_size
 
     # Validate ratio/size from flat video size config. Model family remains authoritative for presets/backend behavior.
-    if vsizes:
-        if args.ratio not in vsizes:
-            parser.error(f"Unknown ratio '{args.ratio}'. Valid: {list(vsizes.keys())}")
-        if args.size not in vsizes.get(args.ratio, {}):
-            parser.error(f"Unknown size '{args.size}' for ratio '{args.ratio}'. Valid: {list(vsizes.get(args.ratio, {}).keys())}")
+    try:
+        validate_video_size_choice(config, args.ratio, args.size)
+    except ValueError as e:
+        parser.error(str(e))
 
 
 def _unknown_video_model_guidance(platform_key: str) -> str:
@@ -427,16 +437,16 @@ def main(*, prog: str = "ziv-video") -> None:
         args.num_frames = defaults["num_frames"]
         args.fps = model_info.default_fps
 
-        # Alignment corrections using model metadata
-        # When upscaling, use 64-alignment so half-res (dim//2) stays 32-aligned
-        alignment = 64 if args.upscale else model_info.resolution_alignment
-        args.width, args.height = align_resolution(
+        # Alignment corrections using model metadata (an upscaled clip uses 64-alignment so its half-size stage stays 32-aligned)
+        args.width, args.height, args.num_frames = aligned_video_dims(
             args.width,
             args.height,
-            alignment,
-            model_info.family.upper(),
+            args.num_frames,
+            upscale=bool(args.upscale),
+            resolution_alignment=model_info.resolution_alignment,
+            frame_alignment=model_info.frame_alignment,
+            family=model_info.family.upper(),
         )
-        args.num_frames = align_ltx_frames(args.num_frames, model_info.frame_alignment)
 
         if args.width < 64 or args.height < 64:
             parser.error(f"Resolved dimensions {args.width}x{args.height} are too small (minimum 64x64)")
@@ -450,8 +460,7 @@ def main(*, prog: str = "ziv-video") -> None:
     except RuntimeError as e:
         parser.error(str(e))
 
-    if source is not None:
-        _warn_if_window_too_large(args)
+    _warn_if_too_large(args, extending=source is not None)
 
     # Determine mode hint
     mode = "extend" if source is not None else "i2v" if args.image_path else "t2v"

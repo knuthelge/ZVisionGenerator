@@ -211,6 +211,27 @@ def test_ltx_transformer_file_follows_the_pipeline_choice(tmp_path, present, exp
     assert (found.name if found else None) == expected
 
 
+@pytest.mark.parametrize(
+    ("present", "expected"),
+    [
+        (["spatial_upscaler_x2_v1_1.safetensors"], "spatial_upscaler_x2_v1_1.safetensors"),
+        (["ltx-2.3-spatial-upscaler-x2.safetensors"], "ltx-2.3-spatial-upscaler-x2.safetensors"),
+        (["spatial_upscaler_x2_v1_0.safetensors"], "spatial_upscaler_x2_v1_0.safetensors"),
+        (["spatial_upscaler_x2_v1_1-1.0.safetensors", "spatial_upscaler_x2_v1_1-1.1.safetensors"], "spatial_upscaler_x2_v1_1-1.1.safetensors"),
+        (["spatial_upscaler_x2_v1_1.safetensors", "ltx-2.3-spatial-upscaler-x2.safetensors"], "ltx-2.3-spatial-upscaler-x2.safetensors"),
+        (["transformer.safetensors", "connector.safetensors"], None),
+        ([], None),
+    ],
+)
+def test_ltx_upsampler_file_follows_the_pipeline_names(tmp_path, present, expected):
+    for name in present:
+        _touch(tmp_path / name)
+
+    found = model_files.ltx_mlx_upsampler_file(tmp_path)
+
+    assert (found.name if found else None) == expected
+
+
 def test_precision_variants_are_ignored_next_to_plain_weights(tmp_path):
     _touch(tmp_path / "transformer" / "diffusion_pytorch_model.safetensors")
     _touch(tmp_path / "transformer" / "diffusion_pytorch_model.fp16.safetensors")

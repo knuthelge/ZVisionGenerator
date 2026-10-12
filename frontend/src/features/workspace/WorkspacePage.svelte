@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick, untrack } from 'svelte';
   import { api, errorText } from '$lib/api/client';
-  import { draft } from '$lib/state/draft.svelte';
+  import { draft, videoTimingFor } from '$lib/state/draft.svelte';
   import { anyEnhancedUsed, submittedPair } from '$lib/state/promptEnhance';
   import { jobStore } from '$lib/state/job.svelte';
   import { historyStore } from '$lib/state/history.svelte';
@@ -27,7 +27,9 @@
   import { cliCommand, formSettings, type CliCaveat, type CliCommand } from '$lib/state/cliCommand';
   import { extendGuard, finalizeSceneFields, type ExtendGuard } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
+  import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
+  import { clipMemoryRequest } from '$lib/state/memoryFit';
   import { formatLoraString, loraLabel, parseLoraString, type LoraChip } from '$lib/state/loras';
   import QueuePanel from './QueuePanel.svelte';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
@@ -35,6 +37,7 @@
   import HistoryStrip from './HistoryStrip.svelte';
   import { fitOutputGrid } from './outputGrid';
   import { randomSeed } from './seed';
+  import { workspaceCapabilities } from './capabilities';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { startUpscale } from '$lib/state/upscale';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
@@ -496,6 +499,19 @@
     return () => clearTimeout(timer);
   });
 
+  // The memory note of a Text to Video or Image to Video clip follows its model, size, length and memory settings.
+  // An extension is checked with its source instead, so it, like an image workflow, has nothing to ask here.
+  $effect(() => {
+    const state = draft.state;
+    if (!authorityReady || context === null) {
+      clipMemory.watch(null);
+      return;
+    }
+    const caps = workspaceCapabilities(context, state);
+    const { frameAlignment } = videoTimingFor(context, state.model);
+    clipMemory.watch(clipMemoryRequest(state, { frameAlignment, lowMemory: caps.showLowMemory, upscale: caps.showVideoUpscale }));
+  });
+
   onMount(() => {
     const unsubscribeLifecycle = jobStore.subscribeLifecycle({
       onComplete: handleJobComplete,
@@ -510,6 +526,7 @@
     // Load stored draft as the baseline state.
     draft.loadDraft();
     extendInspection.reset();
+    clipMemory.reset();
 
     let cancelled = false;
     let historyTimer: ReturnType<typeof setTimeout> | undefined;
@@ -602,6 +619,7 @@
       clearInterval(drowsyTimer);
       activityEvents.forEach((type) => document.removeEventListener(type, markActive));
       cancelled = true;
+      clipMemory.reset();
       stopJobSync();
       unsubscribeLifecycle();
       if (historyTimer) clearTimeout(historyTimer);

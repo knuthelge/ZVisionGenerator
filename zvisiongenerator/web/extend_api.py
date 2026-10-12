@@ -7,17 +7,16 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import supports_video_audio, supports_video_extend
+from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, supports_video_audio, supports_video_extend
 from zvisiongenerator.core.video_types import ExtendSource
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
-from zvisiongenerator.utils.model_memory import window_memory_fit
+from zvisiongenerator.utils.model_memory import clip_memory_fit
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import EnhanceContext
 from zvisiongenerator.utils.video_extend import ExtendInspection, extend_enhance_context, inspect_extend_source, recorded_prompts, require_extend_source, resolve_extend_frames, window_frames
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.gallery import output_media_url
 from zvisiongenerator.web.json_fields import json_field
-from zvisiongenerator.web.model_status import memory_budget
 from zvisiongenerator.web.path_picker import SOURCE_VIDEO_EXTENSIONS
 
 
@@ -165,7 +164,7 @@ def _extend_memory_fit(model: str | None, source: ExtendSource, window: int, low
         resolved = resolve_model_path(model, aliases=web_config.app_config.get("model_aliases", {}), platform_key=sys.platform)
     except KeyError, ValueError:
         return None
-    return window_memory_fit(resolved, width=source.width, height=source.height, frames=window, low_memory=low_memory, budget_bytes=budget.gpu_bytes)
+    return clip_memory_fit(resolved, width=source.width, height=source.height, frames=window, low_memory=low_memory, budget=budget)
 
 
 def extend_context_from_body(raw: dict[str, Any], prompt: str) -> EnhanceContext:

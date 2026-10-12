@@ -24,6 +24,7 @@ from zvisiongenerator.web import extend_api as extend_api_module
 from zvisiongenerator.web import model_inventory as model_inventory_module
 from zvisiongenerator.web import path_picker as path_picker_module
 from zvisiongenerator.web import server as web_server
+from zvisiongenerator.web import video_clip as video_clip_module
 from zvisiongenerator.web import workspace_api as workspace_api_module
 from zvisiongenerator.web.gallery import list_gallery_assets
 from zvisiongenerator.web.config import WebUiDefaultModels
@@ -31,7 +32,7 @@ from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInven
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils import video_extend as video_extend_module
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
-from zvisiongenerator.utils.model_memory import MemoryBudget
+from zvisiongenerator.utils.model_memory import MemoryBudget, clip_memory_fit as real_clip_memory_fit
 from zvisiongenerator.utils.provenance import embed_png_config
 
 
@@ -1031,14 +1032,13 @@ def test_video_submission_missing_ffmpeg_returns_422_before_job_registration(mon
     web_config = _make_web_config()
     submitted: list[dict[str, object]] = []
     monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
-    monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(video_clip_module, "resolve_model_path", lambda model, **_: model)
     monkeypatch.setattr(
-        web_server,
+        video_clip_module,
         "detect_video_model",
         lambda _model: SimpleNamespace(family="ltx", supports_i2v=True, resolution_alignment=64, frame_alignment=8, default_fps=24),
     )
-    monkeypatch.setattr(web_server, "resolve_video_defaults", lambda *_args: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
-    monkeypatch.setattr(web_server, "_normalize_video_args", lambda *_args: None)
+    monkeypatch.setattr(video_clip_module, "resolve_video_defaults", lambda *_args: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
     monkeypatch.setattr(web_server, "require_ffmpeg", lambda: (_ for _ in ()).throw(RuntimeError("ffmpeg is missing; install it and retry")))
     monkeypatch.setattr(web_server.web_runner, "submit_video_request_job", lambda **kwargs: submitted.append(kwargs) or "job-123")
 
@@ -1058,14 +1058,13 @@ def _stub_video_submission(monkeypatch, tmp_path) -> list[dict[str, object]]:
     web_config.output_dir = str(tmp_path)
     submitted: list[dict[str, object]] = []
     monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
-    monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(video_clip_module, "resolve_model_path", lambda model, **_: model)
     monkeypatch.setattr(
-        web_server,
+        video_clip_module,
         "detect_video_model",
         lambda _model: SimpleNamespace(family="ltx", supports_i2v=True, resolution_alignment=64, frame_alignment=8, default_fps=24),
     )
-    monkeypatch.setattr(web_server, "resolve_video_defaults", lambda *_args: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
-    monkeypatch.setattr(web_server, "_normalize_video_args", lambda *_args: None)
+    monkeypatch.setattr(video_clip_module, "resolve_video_defaults", lambda *_args: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
     monkeypatch.setattr(web_server, "require_ffmpeg", lambda: None)
     monkeypatch.setattr(web_server.web_runner, "submit_video_request_job", lambda **kwargs: submitted.append(kwargs) or "job-123")
     return submitted
@@ -1707,14 +1706,13 @@ def test_workspace_contract_offers_the_image_review_control_for_image_workflows_
 
 
 def _patch_video_submit_dependencies(monkeypatch, *, review_supported: bool, submitted: list[dict[str, object]]) -> None:
-    monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(video_clip_module, "resolve_model_path", lambda model, **_: model)
     monkeypatch.setattr(
-        web_server,
+        video_clip_module,
         "detect_video_model",
         lambda _model: SimpleNamespace(family="ltx", supports_i2v=True, resolution_alignment=64, frame_alignment=8, default_fps=24),
     )
-    monkeypatch.setattr(web_server, "resolve_video_defaults", lambda *_args: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
-    monkeypatch.setattr(web_server, "_normalize_video_args", lambda *_args: None)
+    monkeypatch.setattr(video_clip_module, "resolve_video_defaults", lambda *_args: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
     monkeypatch.setattr(web_server, "require_ffmpeg", lambda: None)
     monkeypatch.setattr(web_server, "supports_video_upscale_review", lambda: review_supported)
     monkeypatch.setattr(web_server.web_runner, "submit_video_request_job", lambda **kwargs: submitted.append(kwargs) or "job-123")
@@ -2541,19 +2539,19 @@ def test_inspect_route_adds_the_memory_fit_of_the_window(clip, monkeypatch):
 
     monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
     monkeypatch.setattr(extend_api_module, "resolve_model_path", lambda model, **_: f"/models/{model}")
-    monkeypatch.setattr(extend_api_module, "window_memory_fit", _fit)
+    monkeypatch.setattr(extend_api_module, "clip_memory_fit", _fit)
 
     payload = _inspect({"path": str(clip.path), "extend_frames": 48, "low_memory": False}).json()
 
     assert payload["memory_fit"] == {"status": "tight", "required_gb": 21.0, "budget_gb": 24.0}
-    assert calls == [{"model": "/models/ltx-8", "width": 512, "height": 256, "frames": 73, "low_memory": False, "budget_bytes": 24 * 2**30}]
+    assert calls == [{"model": "/models/ltx-8", "width": 512, "height": 256, "frames": 73, "low_memory": False, "budget": MemoryBudget(24 * 2**30)}]
 
 
 def test_inspect_route_uses_the_requested_model_and_defaults_low_memory_on(clip, monkeypatch):
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
     monkeypatch.setattr(extend_api_module, "resolve_model_path", lambda model, **_: f"/models/{model}")
-    monkeypatch.setattr(extend_api_module, "window_memory_fit", lambda model, **kwargs: calls.append({"model": model, **kwargs}))
+    monkeypatch.setattr(extend_api_module, "clip_memory_fit", lambda model, **kwargs: calls.append({"model": model, **kwargs}))
 
     payload = _inspect({"path": str(clip.path), "model": "other"}).json()
 
@@ -2564,7 +2562,7 @@ def test_inspect_route_uses_the_requested_model_and_defaults_low_memory_on(clip,
 def test_inspect_route_skips_the_memory_fit_for_a_source_with_problems(clip, monkeypatch):
     clip.probe = {"field_order": "tt"}
     monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
-    monkeypatch.setattr(extend_api_module, "window_memory_fit", lambda *_args, **_kwargs: pytest.fail("memory fit asked for a source with problems"))
+    monkeypatch.setattr(extend_api_module, "clip_memory_fit", lambda *_args, **_kwargs: pytest.fail("memory fit asked for a source with problems"))
 
     assert _inspect({"path": str(clip.path)}).json()["memory_fit"] is None
 
@@ -2659,7 +2657,7 @@ def _post_extend(data: dict[str, object]):
 
 def _stub_extend_submission(monkeypatch, tmp_path, clip) -> list[dict[str, object]]:
     submitted = _stub_video_submission(monkeypatch, tmp_path)
-    monkeypatch.setattr(web_server, "_normalize_video_args", lambda *_args: pytest.fail("an extension must not be aligned"))
+    monkeypatch.setattr(web_server, "resolve_video_clip", lambda *_args, **_kwargs: pytest.fail("an extension must not be aligned"))
     return submitted
 
 
@@ -2914,3 +2912,157 @@ def test_inspect_route_resolves_the_path_it_reports(clip, tmp_path):
 
     assert payload["path"] == str(clip.path.resolve())
     assert payload["media_url"] == "/media/clip.mp4"
+
+
+# ─── POST /api/video/memory-fit ──────────────────────────────────────────────
+
+_UNALIGNED_CLIP = {"steps": 8, "width": 720, "height": 450, "num_frames": 52}
+
+
+@pytest.fixture
+def clip_fit(monkeypatch, tmp_path):
+    """Stub the model and budget behind ``POST /api/video/memory-fit`` and record what the memory check receives."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    calls: list[dict[str, object]] = []
+
+    def _fit(model, **kwargs):
+        calls.append({"model": model, **kwargs})
+        return {"status": "tight", "required_gb": 21.0, "budget_gb": 24.0}
+
+    monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    monkeypatch.setattr(video_clip_module, "resolve_model_path", lambda model, **_: f"/models/{model}")
+    monkeypatch.setattr(video_clip_module, "detect_video_model", lambda _model: SimpleNamespace(family="ltx", supports_i2v=True, resolution_alignment=32, frame_alignment=8, default_fps=24))
+    monkeypatch.setattr(video_clip_module, "resolve_video_defaults", lambda *_args: dict(_UNALIGNED_CLIP))
+    monkeypatch.setattr(web_server, "memory_budget", lambda: MemoryBudget(24 * 2**30, unified_bytes=32 * 2**30))
+    monkeypatch.setattr(web_server, "clip_memory_fit", _fit)
+    monkeypatch.setattr(web_server.web_runner, "submit_video_request_job", lambda **_kwargs: pytest.fail("the memory check queued a job"))
+    return SimpleNamespace(calls=calls, web_config=web_config)
+
+
+def _memory_fit(body):
+    with TestClient(web_server.app) as client:
+        return client.post("/api/video/memory-fit", json=body)
+
+
+def test_memory_fit_route_checks_the_aligned_clip_against_the_budget(clip_fit):
+    response = _memory_fit({"model": "ltx-8", "ratio": "16:9", "size": "m", "frames": 52, "low_memory": False, "upscale": None})
+
+    assert response.status_code == 200
+    assert response.json() == {"memory_fit": {"status": "tight", "required_gb": 21.0, "budget_gb": 24.0}, "width": 736, "height": 448, "frames": 49}
+    assert clip_fit.calls == [
+        {
+            "model": "/models/ltx-8",
+            "width": 736,
+            "height": 448,
+            "frames": 49,
+            "low_memory": False,
+            "upscale": False,
+            "budget": MemoryBudget(24 * 2**30, unified_bytes=32 * 2**30),
+        }
+    ]
+
+
+def test_memory_fit_route_defaults_the_model_and_turns_low_memory_on(clip_fit):
+    assert _memory_fit({}).status_code == 200
+
+    assert (clip_fit.calls[0]["model"], clip_fit.calls[0]["low_memory"]) == ("/models/ltx-8", True)
+
+
+def test_memory_fit_route_checks_an_upscaled_clip_as_upscaled(clip_fit):
+    _memory_fit({"upscale": 2})
+
+    assert clip_fit.calls[0]["upscale"] is True
+
+
+def test_memory_fit_route_sends_the_form_fields_to_the_defaults_like_a_job(clip_fit, monkeypatch):
+    seen: list[dict[str, object]] = []
+    monkeypatch.setattr(video_clip_module, "resolve_video_defaults", lambda family, _config, overrides: seen.append({"family": family, **overrides}) or dict(_UNALIGNED_CLIP))
+
+    _memory_fit({"ratio": "16:9", "size": "m", "width": 640, "height": 384, "frames": 97})
+
+    assert seen == [{"family": "ltx", "ratio": "16:9", "size": "m", "width": 640, "height": 384, "num_frames": 97}]
+
+
+@pytest.mark.filterwarnings("ignore:.*Adjusted")
+@pytest.mark.parametrize("upscale", [None, 2])
+def test_memory_fit_route_resolves_the_size_and_length_a_job_gets(clip_fit, monkeypatch, upscale):
+    """The route and ``POST /api/generate`` align the same request the same way."""
+    jobs: list[dict[str, object]] = []
+    monkeypatch.setattr(web_server, "require_ffmpeg", lambda: None)
+    monkeypatch.setattr(web_server.web_runner, "submit_video_request_job", lambda **kwargs: jobs.append(kwargs) or "job-123")
+    fields = {"ratio": "16:9", "size": "m", "frames": 52, **({"upscale": upscale} if upscale else {})}
+
+    with TestClient(web_server.app) as client:
+        form = {"mode": "video", "model": "ltx-8", "prompt": "a lake", **{key: str(value) for key, value in fields.items()}}
+        assert client.post("/api/generate", data=form).status_code == 200
+    payload = _memory_fit(fields).json()
+
+    (job,) = jobs
+    assert (payload["width"], payload["height"], payload["frames"]) == (job["args"].width, job["args"].height, job["args"].num_frames)
+    assert (payload["width"], payload["height"], payload["frames"]) == ((704, 448, 49) if upscale else (736, 448, 49))
+
+
+def test_memory_fit_route_gives_no_fit_without_a_budget(clip_fit, monkeypatch):
+    monkeypatch.setattr(web_server, "memory_budget", lambda: None)
+    monkeypatch.setattr(web_server, "clip_memory_fit", real_clip_memory_fit)
+
+    payload = _memory_fit({"frames": 97}).json()
+
+    assert payload["memory_fit"] is None
+    assert (payload["width"], payload["height"], payload["frames"]) == (736, 448, 49)
+
+
+def test_memory_fit_route_gives_no_fit_for_a_model_that_cannot_be_estimated(clip_fit, monkeypatch):
+    """Not LTX MLX, not downloaded, or the text encoder missing: the memory check finds nothing to estimate."""
+    monkeypatch.setattr(web_server, "clip_memory_fit", lambda *_args, **_kwargs: None)
+
+    response = _memory_fit({})
+
+    assert response.status_code == 200
+    assert response.json()["memory_fit"] is None
+
+
+def test_memory_fit_route_answers_while_a_job_runs(clip_fit, monkeypatch):
+    monkeypatch.setattr(web_server.web_runner, "has_active_jobs", lambda: True)
+
+    assert _memory_fit({}).status_code == 200
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        [1, 2],
+        {"model": 5},
+        {"ratio": 5},
+        {"ratio": "3:1"},
+        {"size": "huge"},
+        {"width": "704"},
+        {"width": 0},
+        {"width": 7.5},
+        {"height": True},
+        {"frames": -9},
+        {"low_memory": "yes"},
+        {"upscale": 4},
+        {"upscale": True},
+    ],
+)
+def test_memory_fit_route_refuses_a_malformed_body(clip_fit, body):
+    response = _memory_fit(body)
+
+    assert response.status_code == 422
+    assert set(response.json()) == {"detail"}
+    assert clip_fit.calls == []
+
+
+def test_memory_fit_route_refuses_a_body_that_is_not_json(clip_fit):
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/video/memory-fit", content=b"not json", headers={"content-type": "application/json"})
+
+    assert response.status_code == 422
+
+
+def test_memory_fit_route_refuses_a_size_that_is_too_small(clip_fit, monkeypatch):
+    monkeypatch.setattr(video_clip_module, "resolve_video_defaults", lambda *_args: {"steps": 8, "width": 16, "height": 448, "num_frames": 49})
+
+    assert _memory_fit({}).status_code == 422

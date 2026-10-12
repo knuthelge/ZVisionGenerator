@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import functools
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import get_accelerator_memory_budget
 from zvisiongenerator.utils.model_files import find_local_model_dir, is_ltx_mlx_layout, ltx_mlx_text_encoder_repo
 from zvisiongenerator.utils.model_memory import (
     GIB,
@@ -17,13 +15,15 @@ from zvisiongenerator.utils.model_memory import (
     classify_memory_fit,
     estimate_cuda_image_memory,
     estimate_image_memory,
-    estimate_ltx_mlx_memory,
+    estimate_ltx_mlx_clip_memory,
 )
 
 NO_QUANTIZE_KEY = "none"
 UNIFIED_MEMORY = "unified"
 DISCRETE_MEMORY = "discrete"
-VIDEO_ESTIMATE_NOTE = "Excludes the optional upscale pass, which needs more."
+VIDEO_ESTIMATE_NOTE = "Estimated for a 5 s clip at 704x448. The Workspace checks the size and length you choose."
+# The clip the badge is estimated for: 5 s at 24 fps, no upscale.
+_REFERENCE_CLIP = {"width": 704, "height": 448, "frames": 121}
 
 
 def describe_model_status(
@@ -65,19 +65,10 @@ def describe_model_status(
         if budget.system_bytes is not None:
             memory_fit = _cuda_image_memory_fit(model_dir, levels, budget) if kind == "image" else None
         elif kind == "video":
-            memory_fit = _video_memory_fit(model_dir, text_encoder_dir, budget.gpu_bytes)
+            memory_fit = _video_memory_fit(model_dir, text_encoder_dir, budget)
         else:
             memory_fit = _unified_image_memory_fit(model_dir, levels, budget.gpu_bytes)
     return {"downloaded": downloaded, "memory_fit": memory_fit}
-
-
-@functools.cache
-def memory_budget() -> MemoryBudget | None:
-    """Return this machine's memory budget, read once per process (it is fixed hardware)."""
-    try:
-        return get_accelerator_memory_budget()
-    except Exception:  # noqa: BLE001 - a missing or broken MLX or CUDA install simply disables the badge
-        return None
 
 
 def _unified_image_memory_fit(model_dir: Path, levels: tuple[int | None, ...], budget_bytes: int) -> dict[str, Any] | None:
@@ -100,11 +91,12 @@ def _cuda_image_memory_fit(model_dir: Path, levels: tuple[int | None, ...], budg
     }
 
 
-def _video_memory_fit(model_dir: Path, text_encoder_dir: Path | None, budget_bytes: int) -> dict[str, Any] | None:
+def _video_memory_fit(model_dir: Path, text_encoder_dir: Path | None, budget: MemoryBudget) -> dict[str, Any] | None:
     if text_encoder_dir is None:
         return None
-    staged = estimate_ltx_mlx_memory(model_dir, text_encoder_dir, low_memory=True)
-    resident = estimate_ltx_mlx_memory(model_dir, text_encoder_dir, low_memory=False)
+    budget_bytes = budget.gpu_bytes
+    staged = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, low_memory=True, unified_bytes=budget.unified_bytes, **_REFERENCE_CLIP)
+    resident = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, low_memory=False, unified_bytes=budget.unified_bytes, **_REFERENCE_CLIP)
     if staged is None or resident is None:
         return None
     return {

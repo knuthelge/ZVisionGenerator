@@ -112,7 +112,7 @@ zvisiongenerator/
 ├── schedulers/
 │   └── beta_scheduler.py          Beta-distribution sigma scheduler
 ├── utils/
-│   ├── alignment.py               Pixel-alignment helpers for resolution
+│   ├── alignment.py               Pixel-alignment helpers for resolution, and the size and frame alignment of a video job
 │   ├── app_log.py                 Error log file, cleared on every start
 │   ├── atomic_write.py            Atomic file replacement for config and prompt-file writers
 │   ├── config.py                  Config loading (image + video)
@@ -123,7 +123,7 @@ zvisiongenerator/
 │   ├── interactive.py             Keyboard interrupt handling and review state
 │   ├── lora.py                    LoRA CLI argument parsing
 │   ├── model_files.py             Offline check for fully downloaded model weights
-│   ├── model_memory.py            Header-only memory estimates (MLX unified memory; CUDA GPU and system memory)
+│   ├── model_memory.py            Header-only memory estimates (MLX unified memory, with a per-stage LTX clip estimate by size and length; CUDA GPU and system memory)
 │   ├── paths.py                   ~/.ziv/ model store resolution
 │   ├── platform.py                Platform metadata and platform-aware alias values
 │   ├── prompt_compose.py          Structured prompt flattening & snippets; video scene helpers (compose scene + prompt, quoted-line stripping, original-prompt check)
@@ -157,6 +157,7 @@ zvisiongenerator/
 │   ├── prompt_files.py            Read and atomically update host-local prompt files
 │   ├── request_guard.py           DNS-rebinding and cross-site request protection
 │   ├── upscale_api.py             Plan a viewer upscale job: refinement model, carried settings, limits
+│   ├── video_clip.py              Resolve the model, steps, size and length a video job runs at, shared by the job and its memory estimate
 │   ├── web_runner.py              Background workers for generation batches
 │   ├── workspace_api.py           Shared SPA payloads for workspace and models routes
 │   ├── workspace_contract.py      Workflow aliases and static workspace capabilities

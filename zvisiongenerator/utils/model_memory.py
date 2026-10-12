@@ -2,7 +2,8 @@
 
 Estimates read only safetensors headers (tensor dtypes and shapes), never the weights, and mirror how
 each backend holds each component in memory. They are deliberately rough: a fixed working-memory
-margin stands in for activations, which vary with resolution, frame count, and LoRAs.
+margin stands in for activations in image models, and the LTX MLX clip estimate uses working-memory
+curves measured over the clip's size and length. LoRAs are not counted.
 """
 
 from __future__ import annotations
@@ -10,9 +11,10 @@ from __future__ import annotations
 import functools
 import json
 import math
+import os
 import struct
 from dataclasses import dataclass
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -23,15 +25,13 @@ from zvisiongenerator.utils.model_files import (
     is_ltx_mlx_layout,
     ltx_mlx_text_encoder_repo,
     ltx_mlx_transformer_file,
+    ltx_mlx_upsampler_file,
     model_weight_files,
 )
 from zvisiongenerator.utils.stored_quant import stored_quant_bits
 
 GIB = 1024**3
 _IMAGE_WORKING_BYTES = int(1.5 * GIB)
-_VIDEO_WORKING_BYTES = 3 * GIB
-# Video tokens of the extension window the working-memory allowance was measured on (73 frames at 704x448).
-_REFERENCE_TOKENS = 3080
 # Apple's recommended working set is conservative: a modest overshoot is absorbed by memory compression
 # without a noticeable slowdown.
 _FITS_RATIO = 1.1
@@ -75,7 +75,25 @@ _QUANT_GROUP_OVERHEAD_BYTES = 4 / 64
 # Diffusion pipelines read text-encoder hidden states, never logits, so mflux does not load the LM head.
 _TEXT_ENCODER_SKIPPED_PREFIXES = ("lm_head.",)
 _LTX_MLX_CONNECTOR_FILE = "connector.safetensors"
-_LTX_MLX_DECODER_FILES = ("vae_decoder.safetensors", "vae_encoder.safetensors", "audio_vae.safetensors", "vocoder.safetensors")
+# The decoders loaded for a decode: the VAE tiler's budget limits only its activations, not these weights.
+_LTX_MLX_DECODER_FILES = ("vae_decoder.safetensors", "audio_vae.safetensors", "vocoder.safetensors")
+# LTX MLX working memory beyond the weights, in GiB, from per-stage peak memory measured with ``mx.get_peak_memory``
+# (one fresh process per clip). Fit on the q4 distilled LTX 2.3 model with its Gemma 4-bit text
+# encoder on a 32 GiB Apple Silicon Mac, where the transformer is not streamed; Macs with 24 GiB or less stream
+# it, so the estimate is conservative there. Each term is a measured absolute curve, not scaled by model.
+_LTX_PROMPT_WORKING_GIB = 0.85  # Gemma + connector while the prompt is encoded.
+_LTX_DENOISE_FLOOR_GIB = 1.6  # Transformer working memory at small clips.
+_LTX_DENOISE_AT_REFERENCE_GIB = 1.7  # ... at _LTX_REFERENCE_TOKENS tokens,
+_LTX_DENOISE_GIB_PER_TOKEN = 0.000205  # ... and growing by this per token.
+_LTX_REFERENCE_TOKENS = 4928  # 704x448 at 121 frames.
+_LTX_DECODE_BASE_GIB = 12.9  # Peak of a VAE decode (decoder weights included) up to _LTX_DECODE_KNEE_TOKENS tokens,
+_LTX_DECODE_KNEE_TOKENS = 2048
+_LTX_DECODE_GIB_PER_TOKEN = 0.00067  # ... growing by this per token beyond it, until the tiler's budget caps it.
+_LTX_UPSAMPLE_WORKING_GIB = 0.5  # Transformer + spatial upsampler + this, before the second denoise stage.
+_LTX_DECODE_RELEASED_GIB = 2.83  # With Low memory off, the decode peak includes weights that stay resident anyway.
+_LTX_VAE_DECODE_BUDGET_ENV = "LTX2_VAE_DECODE_BUDGET_GB"  # Mirrors ltx_core_mlx's decode_budget_bytes().
+_LTX_TOKEN_FRAME_STEP = 8
+_LTX_TOKEN_PIXELS = 32
 
 
 @dataclass(frozen=True)
@@ -84,11 +102,12 @@ class MemoryBudget:
 
     On Apple Silicon (unified memory) *gpu_bytes* is Apple's recommended GPU working set and *system_bytes* is
     ``None``. On a discrete GPU (CUDA) *gpu_bytes* is the VRAM and *system_bytes* the system memory that
-    offloaded weights stream from.
+    offloaded weights stream from. *unified_bytes* is the total unified memory on Apple Silicon, when known.
     """
 
     gpu_bytes: int
     system_bytes: int | None = None
+    unified_bytes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -220,97 +239,145 @@ def estimate_cuda_image_memory(model_dir: Path, quantize_levels: tuple[int | Non
     return {level: _cuda_level_estimate(components, stored_bits or level, text_encoder_offloaded) for level in quantize_levels}
 
 
-def estimate_ltx_mlx_memory(model_dir: Path, text_encoder_dir: Path, *, low_memory: bool = True) -> int | None:
-    """Estimate peak memory for ltx-pipelines-mlx.
+def ltx_video_tokens(width: int, height: int, frames: int) -> int:
+    """Return the video tokens of an LTX clip: latent frames (8 frames each, plus one) times 32-pixel cells."""
+    return ((frames - 1) // _LTX_TOKEN_FRAME_STEP + 1) * (width // _LTX_TOKEN_PIXELS) * (height // _LTX_TOKEN_PIXELS)
 
-    In ``low_memory`` mode (the default) the pipeline frees Gemma before loading the transformer and
-    decoders, but the connector stays loaded alongside them, so the peak is the larger of Gemma + connector
-    and connector + transformer + decoders. Without it every component stays loaded. The optional upscale
-    pass (spatial upsampler plus a second denoise stage) is not included.
+
+def ltx_decode_budget_bytes(unified_bytes: int | None, env: Mapping[str, str]) -> int | None:
+    """Return the peak-memory budget of an LTX VAE decode, mirroring ltx_core_mlx's ``decode_budget_bytes``.
+
+    Args:
+        unified_bytes: The machine's unified memory, or ``None`` when unknown.
+        env: The environment; ``LTX2_VAE_DECODE_BUDGET_GB`` (GiB) overrides the default of half of unified memory.
+
+    Returns:
+        The budget in bytes, or ``None`` when the environment sets none and unified memory is unknown.
+    """
+    configured = env.get(_LTX_VAE_DECODE_BUDGET_ENV)
+    if configured is not None:
+        try:
+            return int(float(configured) * GIB)
+        except ValueError:
+            pass  # An unusable value: the pipeline would fail on it, the estimate falls back to the default.
+    return unified_bytes // 2 if unified_bytes else None
+
+
+def estimate_ltx_mlx_clip_memory(
+    model_dir: Path,
+    text_encoder_dir: Path,
+    *,
+    width: int,
+    height: int,
+    frames: int,
+    low_memory: bool,
+    upscale: bool = False,
+    unified_bytes: int | None = None,
+    env: Mapping[str, str] | None = None,
+) -> int | None:
+    """Estimate peak memory for generating a clip with ltx-pipelines-mlx.
+
+    The peak is the largest stage. Weights are read from safetensors headers (bfloat16 bytes of Gemma *G*,
+    connector *C*, transformer *T*, spatial upsampler *U* and decoders *D*: video VAE, audio VAE, vocoder). The
+    working memory of each stage is a measured curve (the ``_LTX_*_GIB`` constants) over the video tokens of the
+    final output size, which is stage 2 when upscaling::
+
+        prompt   = G + C + prompt working memory
+        denoise  = T + denoise working memory(tokens)
+        decode   = min(decode budget + D, decode peak(tokens))   # the decode peak includes D
+        upsample = T + U + upsample working memory              # upscale only
+
+    With ``low_memory`` the stages run one after another and the peak is their maximum. Without it Gemma, the
+    connector, the transformer and the upsampler stay resident, so their weights add to the larger of the
+    denoise working memory and the decode peak less the weights it already counts. The decode budget is the VAE
+    tiler's (half of unified memory, or ``LTX2_VAE_DECODE_BUDGET_GB``); it limits activations, not weights.
+
+    The working constants were fit on the q4 distilled model on a 32 GiB Mac. Macs with 24 GiB or less stream
+    the transformer, so the estimate is conservative there. It ignores memory used by other apps.
 
     Args:
         model_dir: The LTX MLX model directory.
         text_encoder_dir: The Gemma text-encoder directory.
+        width: Output width in pixels, as aligned for the job.
+        height: Output height in pixels, as aligned for the job.
+        frames: Output frame count, as aligned for the job.
         low_memory: Whether the pipeline frees Gemma before loading the transformer.
+        upscale: Whether the clip is upscaled 2x. Without an upsampler file in *model_dir* the upsampler is left out.
+        unified_bytes: The machine's unified memory; without it the decode peak is not capped.
+        env: The environment to read the decode budget from; the process environment when omitted.
 
     Returns:
         Estimated peak bytes, or ``None`` when the layout is not LTX MLX or weights are unreadable.
     """
-    transformer = ltx_mlx_transformer_file(model_dir)
-    if not is_ltx_mlx_layout(model_dir) or transformer is None:
+    transformer_file = ltx_mlx_transformer_file(model_dir)
+    if not is_ltx_mlx_layout(model_dir) or transformer_file is None:
         return None
+    upsampler_file = ltx_mlx_upsampler_file(model_dir) if upscale else None
     try:
-        gemma = _files_bfloat16_bytes(model_weight_files(text_encoder_dir))
-        connector = _files_bfloat16_bytes([model_dir / _LTX_MLX_CONNECTOR_FILE])
-        denoise = _files_bfloat16_bytes([transformer, *(model_dir / name for name in _LTX_MLX_DECODER_FILES)])
+        gemma = _files_bfloat16_bytes(model_weight_files(text_encoder_dir)) / GIB
+        connector = _files_bfloat16_bytes([model_dir / _LTX_MLX_CONNECTOR_FILE]) / GIB
+        transformer = _files_bfloat16_bytes([transformer_file]) / GIB
+        upsampler = _files_bfloat16_bytes([upsampler_file]) / GIB if upsampler_file is not None else 0.0
+        decoders = _files_bfloat16_bytes([model_dir / name for name in _LTX_MLX_DECODER_FILES]) / GIB
     except OSError, ValueError, KeyError, TypeError:
         return None
-    peak = max(gemma, denoise) + connector if low_memory else gemma + connector + denoise
-    return peak + _VIDEO_WORKING_BYTES
+    tokens = ltx_video_tokens(width, height, frames)
+    denoise_work = max(_LTX_DENOISE_FLOOR_GIB, _LTX_DENOISE_AT_REFERENCE_GIB + _LTX_DENOISE_GIB_PER_TOKEN * (tokens - _LTX_REFERENCE_TOKENS))
+    decode = _LTX_DECODE_BASE_GIB + _LTX_DECODE_GIB_PER_TOKEN * max(0, tokens - _LTX_DECODE_KNEE_TOKENS)
+    decode_budget = ltx_decode_budget_bytes(unified_bytes, os.environ if env is None else env)
+    if decode_budget is not None:
+        decode = min(decode, decode_budget / GIB + decoders)
+    if low_memory:
+        stages = [gemma + connector + _LTX_PROMPT_WORKING_GIB, transformer + denoise_work, decode]
+        if upsampler_file is not None:
+            stages.append(transformer + upsampler + _LTX_UPSAMPLE_WORKING_GIB)
+        peak = max(stages)
+    else:
+        peak = gemma + connector + transformer + upsampler + max(denoise_work, decode - _LTX_DECODE_RELEASED_GIB)
+    return int(peak * GIB)
 
 
-def estimate_ltx_mlx_window_memory(model_dir: Path, text_encoder_dir: Path, *, width: int, height: int, frames: int, low_memory: bool = True) -> int | None:
-    """Estimate peak memory for generating an extension window with ltx-pipelines-mlx.
-
-    The weights are those of ``estimate_ltx_mlx_memory``. Its working-memory allowance was measured on a
-    window of ``_REFERENCE_TOKENS`` video tokens; a larger window scales the allowance by its token count,
-    and a smaller one keeps it, since the prompt encode sets the floor.
-
-    Args:
-        model_dir: The LTX MLX model directory.
-        text_encoder_dir: The Gemma text-encoder directory.
-        width: Output width in pixels.
-        height: Output height in pixels.
-        frames: Frames in the window, carried frames included (25 + 8n).
-        low_memory: Whether the pipeline frees Gemma before loading the transformer.
-
-    Returns:
-        Estimated peak bytes, or ``None`` when the layout is not LTX MLX or weights are unreadable.
-    """
-    base = estimate_ltx_mlx_memory(model_dir, text_encoder_dir, low_memory=low_memory)
-    if base is None:
-        return None
-    tokens = ((frames - 1) // 8 + 1) * (width // 32) * (height // 32)
-    return base - _VIDEO_WORKING_BYTES + int(_VIDEO_WORKING_BYTES * max(1.0, tokens / _REFERENCE_TOKENS))
-
-
-def window_memory_fit(
+def clip_memory_fit(
     resolved_model: str,
     *,
     width: int,
     height: int,
     frames: int,
     low_memory: bool,
-    budget_bytes: int | None,
+    upscale: bool = False,
+    budget: MemoryBudget | None,
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
+    env: Mapping[str, str] | None = None,
 ) -> dict[str, Any] | None:
-    """Check an extension window against the memory budget; callers warn on ``tight`` or ``too_large`` and never block.
+    """Check a clip against the memory budget; callers warn on ``tight`` or ``too_large`` and never block.
 
     Args:
         resolved_model: The resolved model reference (a local directory or a Hugging Face repo id).
-        width: Output width in pixels.
-        height: Output height in pixels.
-        frames: Frames in the window, carried frames included.
+        width: Output width in pixels, as aligned for the job.
+        height: Output height in pixels, as aligned for the job.
+        frames: Output frame count, as aligned for the job (an extension window carries its carried frames).
         low_memory: Whether the pipeline frees Gemma before loading the transformer.
-        budget_bytes: The accelerator's memory budget, or ``None`` when unknown.
+        upscale: Whether the clip is upscaled 2x.
+        budget: The accelerator's memory budget, or ``None`` when unknown.
         find_local_dir: Locates a downloaded model directory.
+        env: The environment to read the decode budget from; the process environment when omitted.
 
     Returns:
-        ``{"status", "required_gb", "budget_gb"}``, or ``None`` when there is no budget or the model is not a
-        downloaded LTX MLX model with its text encoder.
+        ``{"status", "required_gb", "budget_gb"}``, or ``None`` when there is no unified-memory budget (none known, or a
+        discrete GPU's) or the model is not a downloaded LTX MLX model with its text encoder.
     """
-    if not budget_bytes:
-        return None
+    if budget is None or budget.system_bytes is not None or not budget.gpu_bytes:
+        return None  # Only unified memory (Apple Silicon) is estimated; a discrete GPU never reaches the filesystem.
     model_dir = find_local_dir(resolved_model)
     if model_dir is None or not is_ltx_mlx_layout(model_dir):
         return None
     text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo())
     if text_encoder_dir is None:
         return None
-    required = estimate_ltx_mlx_window_memory(model_dir, text_encoder_dir, width=width, height=height, frames=frames, low_memory=low_memory)
+    required = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, width=width, height=height, frames=frames, low_memory=low_memory, upscale=upscale, unified_bytes=budget.unified_bytes, env=env)
     if required is None:
         return None
-    return {"status": classify_memory_fit(required, budget_bytes), "required_gb": round(required / GIB, 1), "budget_gb": round(budget_bytes / GIB, 1)}
+    return {"status": classify_memory_fit(required, budget.gpu_bytes), "required_gb": round(required / GIB, 1), "budget_gb": round(budget.gpu_bytes / GIB, 1)}
 
 
 def classify_memory_fit(required_bytes: int, budget_bytes: int) -> str:

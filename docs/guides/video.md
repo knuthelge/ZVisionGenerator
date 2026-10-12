@@ -217,11 +217,20 @@ Use `-W` / `-H` to override with exact pixel dimensions.
 LTX-2.3 has specific alignment requirements that are auto-corrected with a warning:
 
 - **Resolution**: width and height must be divisible by 32 (64 when using `--upscale`)
-- **Frames**: must follow 8k+1 pattern (9, 17, 25, 33, 41, 49, ..., 97, 121). In the Web UI you set **Duration (s)** instead: it snaps to the nearest valid frame count at the model's frame rate (5 s at 24 fps is 121 frames), shows that count next to it, and has no upper limit. Longer clips need more memory
+- **Frames**: must follow 8k+1 pattern (9, 17, 25, 33, 41, 49, ..., 97, 121). In the Web UI you set **Duration (s)** instead: it snaps to the nearest valid frame count at the model's frame rate (5 s at 24 fps is 121 frames), shows that count next to it, and has no upper limit. Longer clips need more memory (see [Memory Check](#memory-check))
 - **macOS MLX Q4 baseline**: `ltx-4`, 704×448, ≤49 frames with `--low-memory`
 - **macOS low memory**: `--low-memory` (the default) frees each model component once it has run. On Macs with 24 GB of memory or less it also streams the transformer from disk during generation, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. `--no-low-memory` (or **Low memory** off in the Web UI) turns off both, keeping every component loaded
 
 Windows and Linux use the configurable diffusers repository behind `ltx-2.3` instead of shipped Q4/Q8 aliases.
+
+## Memory Check
+
+On macOS, Text to Video and Image to Video check the clip's size and length against the Mac's memory before generating, and Extend Video checks the extension the same way (see [Memory](#memory)). The check never blocks a job; it warns when the clip may run slowly or fail.
+
+- **Web UI**: under **Duration (s)**, a note appears when the clip is **tight** (the Mac may slow down while generating) or **too large** (expect heavy swapping or an out-of-memory error). It follows the model, size, duration, **Low memory** and **Upscale**, and stays hidden while the clip fits. The memory badge on a video model is the estimate for a 5 s clip at 704×448 without upscale.
+- **Command line**: `ziv-video` prints one warning at the start of a run and carries on. Shorten the clip with `--frames`, use a smaller `--size`, and keep `--low-memory` on.
+
+The estimate grows with the number of frames and the pixels per frame. It was measured with `ltx-4` on a Mac with 32 GB of memory, for clips up to about 10 s at `m`; far beyond that it is extrapolated. Macs with 24 GB or less stream the transformer from disk, so the estimate is on the high side there. It does not count memory already used by other apps or by an image model that is still loaded.
 
 ## Model Detection
 

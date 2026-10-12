@@ -47,14 +47,20 @@ class TestDescribeModelStatus:
         model_dir = tmp_path / "ltx"
         model_dir.mkdir()
         (model_dir / "connector.safetensors").write_bytes(b"")
-        monkeypatch.setattr(model_status, "estimate_ltx_mlx_memory", lambda model_dir, text_encoder_dir, *, low_memory: (16 if low_memory else 24) * _GIB)
+        calls: list[dict] = []
+
+        def _estimate(model_dir, text_encoder_dir, *, low_memory, **clip):
+            calls.append({"low_memory": low_memory, **clip})
+            return (16 if low_memory else 24) * _GIB
+
+        monkeypatch.setattr(model_status, "estimate_ltx_mlx_clip_memory", _estimate)
         monkeypatch.setattr(model_status, "ltx_mlx_text_encoder_repo", lambda: "org/gemma")
 
         without_encoder = describe_model_status("owner/ltx", kind="video", budget=MemoryBudget(10 * _GIB), find_local_dir=_finder({"owner/ltx": model_dir}))
         with_encoder = describe_model_status(
             "owner/ltx",
             kind="video",
-            budget=MemoryBudget(10 * _GIB),
+            budget=MemoryBudget(10 * _GIB, unified_bytes=32 * _GIB),
             find_local_dir=_finder({"owner/ltx": model_dir, "org/gemma": tmp_path / "gemma"}),
         )
 
@@ -63,6 +69,9 @@ class TestDescribeModelStatus:
         assert with_encoder["memory_fit"]["by_quantize"] == {"none": {"status": "too_large", "required_gb": 16.0}}
         assert with_encoder["memory_fit"]["without_low_memory"] == {"status": "too_large", "required_gb": 24.0}
         assert with_encoder["memory_fit"]["note"] == VIDEO_ESTIMATE_NOTE
+        # Both estimates are for the reference clip: 704x448, 121 frames (5 s), no upscale; staged is Low memory on.
+        reference = {"width": 704, "height": 448, "frames": 121, "unified_bytes": 32 * _GIB}
+        assert calls == [{"low_memory": True, **reference}, {"low_memory": False, **reference}]
 
 
 class TestDescribeCudaModelStatus:

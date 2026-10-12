@@ -15,6 +15,8 @@ _LTX_MLX_MARKER = "connector.safetensors"
 _LTX_MLX_TRANSFORMER = "transformer.safetensors"
 _LTX_MLX_DISTILLED_GLOB = "transformer-distilled-*.safetensors"
 _LTX_MLX_DISTILLED_UNVERSIONED = "transformer-distilled.safetensors"
+# The spatial upsampler names ltx-pipelines-mlx looks for (``_resolve_upsampler_path``), 2.5 packs first.
+_LTX_MLX_UPSAMPLER_STEMS = ("spatial_upscaler_x2_v1_0", "ltx-2.3-spatial-upscaler-x2", "spatial_upscaler_x2_v1_1")
 _WEIGHTLESS_CLASS_HINTS = ("Tokenizer", "Scheduler", "Processor", "FeatureExtractor")
 _TRANSFORMER_COMPONENT = "transformer"
 _SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d+)-of-(?P<total>\d+)\.safetensors$")
@@ -63,6 +65,22 @@ def ltx_mlx_transformer_file(model_dir: Path) -> Path | None:
         return versioned[-1]
     unversioned = model_dir / _LTX_MLX_DISTILLED_UNVERSIONED
     return unversioned if unversioned.is_file() else None
+
+
+def ltx_mlx_upsampler_file(model_dir: Path) -> Path | None:
+    """Return the spatial upsampler file ltx-pipelines-mlx loads from *model_dir* for an upscaled clip, if present.
+
+    Mirrors the pipeline's lookup: for each known name, the lexicographically last versioned file
+    (``{name}-*.safetensors``), else ``{name}.safetensors``.
+    """
+    for stem in _LTX_MLX_UPSAMPLER_STEMS:
+        versioned = sorted(path for path in model_dir.glob(f"{stem}-*.safetensors") if path.is_file())
+        if versioned:
+            return versioned[-1]
+        plain = model_dir / f"{stem}.safetensors"
+        if plain.is_file():
+            return plain
+    return None
 
 
 def find_local_model_dir(reference: str) -> Path | None:

@@ -7,12 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
+- Video (macOS): Text to Video and Image to Video warn when the chosen size and length may not fit in memory. The Web UI shows a note under **Duration (s)** as you change the model, size, duration, **Low memory** or **Upscale**, and `ziv-video` prints one warning at the start of a run. The job is never blocked
 - Review before upscaling: approve or discard each small render before the full-size pass, for images and video (video on macOS). In the Web UI, turn on **Review** under Upscale; on the command line, use `--review` with `--upscale`
 - Video: an optional **Scene** (who and where, look, style, camera) beside the action. The Web UI has a Scene box above the **Action** box on Text to Video, Image to Video and Extend Video. The CLI has `--scene`, and prompt-file entries take `scene:` (use a `$snippet` to share one). The model receives the scene first. A scene alone is enough to generate, and without one nothing changes. The prompt enhancer writes both parts in one rewrite: style, mood and details shape the scene, motion and sound shape the action, and the direction applies to both. Its **Rewrite** option (`parts=` in `--enhance`, `parts:` in prompt files) can keep your scene as written and rewrite only the action, which is the default when extending. In the Web UI each part uses its enhanced text on its own, marked **Uses enhanced** with **Use mine** to go back to yours
 - Extend a video (macOS): continue a clip from its last second, with audio, from the **Extend Video** tab, the **Extend** action in the viewer and menus (`E`), or `ziv-video --extend SRC` with `--extend-seconds` or `--extend-frames`. The scene is kept and you write only what happens next. The original part stays untouched when it can be stream-copied (other clips are re-encoded once, at high quality). Phone clips stored sideways work, a silent clip stays silent, and an extension can be extended again
 - Docs: a Linux troubleshooting note for when `systemd-oomd` closes the terminal or editor while a large model loads, with an optional drop-in that relaxes its limit
 
 ### Changed
+- Video (macOS): more accurate memory estimates. The Extend note and the video model badge were too high with **Low memory** on and too low with it off; the badge now estimates a 5 s clip at 704×448
 - Web UI: for video, the prompt box is called **Action** ("What happens: action, camera moves, sound, dialogue."), and the **Prompt** and **Enhanced** tabs are **Your text** and **Enhanced** and switch the Scene and Action boxes together
 - Web UI: video length is set in seconds (**Duration (s)**) instead of frames. It snaps to a frame count the model accepts (8k+1 for LTX), shows that count, and is no longer capped at 256 frames
 - Web UI: stopping the server (Ctrl-C on `ziv ui`) cancels the running job instead of waiting for it

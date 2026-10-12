@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
 import { reactiveProps } from '../../test-utils/reactiveProps.svelte';
 import { draft } from '$lib/state/draft.svelte';
+import { clipMemory } from '$lib/state/clipMemory.svelte';
 import { extendInspection } from '$lib/state/extendInspection.svelte';
 import { legacySource, sceneSource, sourceInfo } from '$lib/state/extend.fixtures';
 import { historyStore } from '$lib/state/history.svelte';
@@ -38,6 +39,12 @@ const extendApiMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('$lib/api/extend', () => ({ inspectExtendSource: extendApiMocks.inspectExtendSource }));
+
+const videoMemoryApiMocks = vi.hoisted(() => ({
+  checkVideoMemoryFit: vi.fn<(body: Record<string, unknown>) => Promise<{ memory_fit: { status: string; required_gb: number; budget_gb: number } | null; width: number; height: number; frames: number }>>(),
+}));
+
+vi.mock('$lib/api/videoMemory', () => ({ checkVideoMemoryFit: videoMemoryApiMocks.checkVideoMemoryFit }));
 
 vi.mock('$lib/api/workspace', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/workspace')>();
@@ -92,6 +99,7 @@ beforeEach(() => {
   sessionStorage.clear();
   draft.reset();
   extendInspection.reset();
+  clipMemory.reset();
   historyStore.seedHistory([]);
   jobStore.clearJob();
   toasts.splice(0, toasts.length);
@@ -99,7 +107,7 @@ beforeEach(() => {
     workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.getJobSnapshot,
     workspaceApiMocks.getHistory, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.listJobs, promptFileApiMocks.openPathPicker,
     promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, extendApiMocks.inspectExtendSource, enhanceApiMocks.enhancePrompt,
-    galleryApiMocks.deleteAsset,
+    videoMemoryApiMocks.checkVideoMemoryFit, galleryApiMocks.deleteAsset,
   ]) mock.mockReset();
   workspaceApiMocks.clearQueue.mockClear();
   workspaceApiMocks.cancelJob.mockClear();
@@ -416,7 +424,7 @@ function type(id: string, value: string): void {
   el.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-/** Wait out the 300 ms input debounce of the source check. */
+/** Wait out the 300 ms input debounce of the memory check and the source check. */
 async function waitDebounce(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 340));
   await settle();
@@ -4011,7 +4019,7 @@ describe('WorkspacePage extend', () => {
 
       expect(extendApiMocks.inspectExtendSource).toHaveBeenCalledTimes(2);
       expect(lastInspect()).toMatchObject({ path: SOURCE, extend_frames: 72 });
-      expect(text('[data-testid="extend-memory-note"]')).toContain('Tight: needs ~21 GB of 24 GB.');
+      expect(target.querySelector('[data-testid="extend-memory-note"]')?.getAttribute('data-status')).toBe('tight');
     });
 
     it('checks a saved source once on load and leaves the text it was reused with', async () => {
@@ -4050,13 +4058,10 @@ describe('WorkspacePage extend', () => {
       expect(text('[data-testid="extend-total"]')).toBe('5.13 s · 154 frames');
     });
 
-    it.each([
-      ['tight', 'Tight: needs ~21 GB of 24 GB. The Mac may slow down while generating.'],
-      ['too_large', 'Too large: needs ~40 GB of 24 GB. Expect heavy swapping or an out-of-memory error.'],
-    ])('notes a %s fit without blocking Generate', async (status, note) => {
+    it('notes a too-large fit without blocking Generate', async () => {
       await mountExtend();
-      await chooseSource(sceneSource({ memory_fit: { status, required_gb: status === 'tight' ? 21 : 40, budget_gb: 24 } }));
-      expect(text('[data-testid="extend-memory-note"]')).toBe(note);
+      await chooseSource(sceneSource({ memory_fit: { status: 'too_large', required_gb: 40, budget_gb: 24 } }));
+      expect(target.querySelector('[data-testid="extend-memory-note"]')?.getAttribute('data-status')).toBe('too_large');
       expect(target.querySelector('[data-testid="extend-memory-note"]')?.closest('[aria-live="polite"]')).not.toBeNull();
       expect(button('ws-submit').disabled).toBe(false);
     });
@@ -4505,4 +4510,67 @@ describe('WorkspacePage extend', () => {
       expect(toasts.map((toast) => toast.message)).toContain('Choose a video to extend.');
     });
   });
+});
+
+
+describe('WorkspacePage clip memory note', () => {
+  const fit = (status: string, required_gb = 21) => ({ memory_fit: { status, required_gb, budget_gb: 24 }, width: 704, height: 448, frames: 49 });
+  const note = () => target.querySelector('[data-testid="clip-memory-note"]');
+  const lastRequest = () => videoMemoryApiMocks.checkVideoMemoryFit.mock.calls.at(-1)?.[0];
+
+  async function mountVideo(workflow: 'txt2vid' | 'img2vid' | 'extend' = 'txt2vid'): Promise<void> {
+    const context = makeContext();
+    context.workflow_contract.values = [...context.workflow_contract.values, 'extend'];
+    workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
+    draft.update('workflow', workflow);
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+    await waitDebounce();
+  }
+
+
+  it('notes a tight clip under Duration without blocking Generate', async () => {
+    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('tight'));
+
+    await mountVideo();
+
+    expect(note()?.getAttribute('data-status')).toBe('tight');
+    expect(note()?.closest('[aria-live="polite"]')).not.toBeNull();
+    expect((target.querySelector('#ws-submit') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("asks about the form's model, size, length, Low memory and upscale", async () => {
+    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('fits'));
+
+    await mountVideo();
+
+    expect(lastRequest()).toEqual({ model: 'ltx-8', ratio: expect.any(String), size: expect.any(String), frames: draft.state.frameCount, low_memory: draft.state.lowMemory, upscale: null });
+  });
+
+  it('asks again when the length changes, and follows the answer', async () => {
+    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('fits'));
+    await mountVideo();
+    expect(note()).toBeNull();
+    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('tight'));
+
+    draft.update('frameCount', 241);
+    await settle();
+    expect(videoMemoryApiMocks.checkVideoMemoryFit).toHaveBeenCalledTimes(1);
+    await waitDebounce();
+
+    expect(lastRequest()).toMatchObject({ frames: 241 });
+    expect(note()?.getAttribute('data-status')).toBe('tight');
+  });
+
+  it('drops the note at once when the workflow leaves video', async () => {
+    videoMemoryApiMocks.checkVideoMemoryFit.mockResolvedValue(fit('tight'));
+    await mountVideo();
+    expect(note()).not.toBeNull();
+
+    draft.update('workflow', 'txt2img');
+    await settle();
+
+    expect(note()).toBeNull();
+  });
+
 });

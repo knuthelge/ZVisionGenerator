@@ -26,18 +26,25 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from PIL import Image, UnidentifiedImageError
 
-from zvisiongenerator.backends import get_backend_name, get_prompt_enhancer_session, supports_video_audio, supports_video_extend, supports_video_upscale_review
+from zvisiongenerator.backends import (
+    accelerator_memory_budget_or_none as memory_budget,
+    get_backend_name,
+    get_prompt_enhancer_session,
+    supports_video_audio,
+    supports_video_extend,
+    supports_video_upscale_review,
+)
 from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu
 from zvisiongenerator.converters.convert_checkpoint import MODEL_TYPES
 from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_local
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
-from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
-from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_enhancer_model, resolve_upscale_steps, resolve_video_defaults, validate_scheduler, validate_sharpen_amount
+from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_enhancer_model, resolve_upscale_steps, validate_scheduler, validate_sharpen_amount
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
+from zvisiongenerator.utils.model_memory import clip_memory_fit
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
 from zvisiongenerator.utils.prompt_enhance import (
     EnhanceContext,
@@ -56,7 +63,7 @@ from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_se
 from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
 from zvisiongenerator.upscale_runner import read_upscale_source
 from zvisiongenerator.utils.video_extend import apply_extend_args
-from zvisiongenerator.utils.video_model_detect import detect_video_model
+from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.workflows import build_upscale_workflow
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response, huggingface_token_env_var
@@ -72,9 +79,11 @@ from zvisiongenerator.web.gallery import (
     list_gallery_assets,
     resolve_output_asset_path,
 )
+from zvisiongenerator.web.json_fields import json_field
 from zvisiongenerator.web.path_picker import pick_path
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
 from zvisiongenerator.web.upscale_api import plan_upscale, upscale_json_request, upscale_size_label
+from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
 from zvisiongenerator.web.model_delete import delete_lora, delete_model, model_delete_target
@@ -207,6 +216,19 @@ async def api_extend_source(request: Request) -> dict[str, Any]:
         return await run_in_threadpool(extend_source_response, payload, load_web_config(), _media_output_root())
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/video/memory-fit")
+async def api_video_memory_fit(request: Request) -> dict[str, Any]:
+    """Check whether a Text to Video or Image to Video clip of the given size and length fits this machine's memory; queues nothing."""
+    try:
+        payload = await request.json()
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Request body must be JSON.") from exc
+    try:
+        return await run_in_threadpool(_video_memory_fit_response, payload, load_web_config())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -996,13 +1018,10 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     extend = workflow == "extend"
     if extend and not supports_video_extend():
         raise ValueError(EXTEND_UNAVAILABLE_MESSAGE)
-    model_name = _text_or_default(form, "model", web_config.default_models.video)
-    if not model_name:
-        raise ValueError("A video model is required.")
+    model_name = _video_model_name(form, web_config)
 
     # An extension takes its size, frame rate and length from the source clip, so the size and reference-image fields are ignored.
-    ratio = None if extend else _choice_or_default(form, "ratio", web_config.video_ratios, app_config.get("video_generation", {}).get("default_ratio", "16:9"))
-    size = None if extend else _resolve_video_size(form, web_config, ratio)
+    ratio, size = (None, None) if extend else _video_ratio_and_size(form, web_config)
     output_dir = _resolve_output_dir(web_config.output_dir)
     image_path = None if extend else _resolve_reference_image(form, output_dir)
     # The source is checked again here: the file may have changed since the Workspace inspected it.
@@ -1051,45 +1070,20 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         raise ValueError("Image-to-video requires a reference image.")
     _validate_video_args(args)
 
-    resolved_model = resolve_model_path(args.model, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
-    model_info = detect_video_model(resolved_model)
-    if model_info.family == "unknown":
-        raise ValueError(f"Could not detect a supported video model for '{model_name}'.")
+    resolved_model, model_info = resolve_video_model(app_config, model_name)
     if image_path and not model_info.supports_i2v:
         raise ValueError(f"Model '{model_name}' does not support image-to-video.")
 
-    video_sizes = app_config.get("video_sizes", {})
-    if video_sizes and not extend:
-        if args.ratio not in video_sizes:
-            raise ValueError(f"Unknown ratio '{args.ratio}'. Valid: {list(video_sizes.keys())}")
-        if args.size not in video_sizes.get(args.ratio, {}):
-            raise ValueError(f"Unknown size '{args.size}' for ratio '{args.ratio}'. Valid: {list(video_sizes.get(args.ratio, {}).keys())}")
-
     args.lora_paths, args.lora_weights = _resolve_loras(form, require_file=False)
-    cli_overrides = {
-        key: value
-        for key, value in {
-            "ratio": args.ratio,
-            "size": args.size,
-            "steps": args.steps,
-            "width": args.width,
-            "height": args.height,
-            "num_frames": args.frames,
-        }.items()
-        if value is not None
-    }
-    defaults = resolve_video_defaults(model_info.family, app_config, cli_overrides)
-    args.steps = defaults["steps"]
     if source is not None:
         # The window keeps the source's size and frame rate; no resolution or frame alignment applies.
+        args.steps = clip_defaults(app_config, model_info, steps=args.steps)["steps"]
         apply_extend_args(args, source, requested_extend_frames(_optional_int(form, "extend_frames"), _optional_float(form, "extend_seconds"), source.fps))
-        _normalize_video_steps(args, app_config, model_info)
     else:
-        args.width = defaults["width"]
-        args.height = defaults["height"]
-        args.num_frames = defaults["num_frames"]
+        clip = resolve_video_clip(app_config, model_info, ratio=args.ratio, size=args.size, steps=args.steps, width=args.width, height=args.height, frames=args.frames, upscale=bool(args.upscale))
+        args.steps, args.width, args.height, args.num_frames = clip.steps, clip.width, clip.height, clip.num_frames
         args.fps = model_info.default_fps
-        _normalize_video_args(args, app_config, model_info)
+    _normalize_video_steps(args, app_config, model_info)
 
     request = VideoGenerationRequest(
         backend=None,
@@ -1297,6 +1291,32 @@ def _optional_path(form: Any, key: str) -> str | None:
     return str(path.resolve())
 
 
+def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[str, Any]:
+    """Build the ``POST /api/video/memory-fit`` response: the size and length a video job would use, and how that clip fits memory.
+
+    The size and length resolve exactly as in a Text to Video or Image to Video job. ``memory_fit`` is ``None`` when
+    this machine has no unified-memory budget or the model is not a downloaded LTX MLX model with its text encoder.
+
+    Raises:
+        ValueError: If the body, model, ratio, size or upscale is invalid.
+    """
+    if not isinstance(payload, dict):
+        raise ValueError("Request body must be a JSON object.")
+    for key in ("model", "ratio", "size"):
+        json_field(payload, key, str, "a string")
+    width, height, frames, upscale = (json_field(payload, key, int, "a positive integer", minimum=1) for key in ("width", "height", "frames", "upscale"))
+    low_memory = json_field(payload, "low_memory", bool, "a boolean")
+
+    app_config = web_config.app_config
+    model_name = _video_model_name(payload, web_config)
+    ratio, size = _video_ratio_and_size(payload, web_config)
+    require_upscale_factor(upscale)
+    resolved_model, model_info = resolve_video_model(app_config, model_name)
+    clip = resolve_video_clip(app_config, model_info, ratio=ratio, size=size, steps=None, width=width, height=height, frames=frames, upscale=bool(upscale), quiet=True)
+    memory_fit = clip_memory_fit(resolved_model, width=clip.width, height=clip.height, frames=clip.num_frames, low_memory=low_memory is not False, upscale=bool(upscale), budget=memory_budget())
+    return {"memory_fit": memory_fit, "width": clip.width, "height": clip.height, "frames": clip.num_frames}
+
+
 def _required_path(form: Any, key: str) -> str:
     """Return a validated path field or raise a field-specific error."""
     value = _optional_path(form, key)
@@ -1442,11 +1462,32 @@ def _validate_video_args(args: argparse.Namespace) -> None:
         raise ValueError("Runs must be at least 1.")
     if args.steps is not None and args.steps < 1:
         raise ValueError("Steps must be at least 1.")
-    if args.upscale is not None and args.upscale != 2:
-        raise ValueError("Upscale only supports factor 2 (LTX spatial upscaler).")
+    require_upscale_factor(args.upscale)
 
 
-def _normalize_video_steps(args: argparse.Namespace, config: dict[str, Any], model_info: Any) -> None:
+def _video_model_name(form: Any, web_config: WebUiConfig) -> str:
+    """Return the video model a request names, else the configured default.
+
+    Raises:
+        ValueError: If neither names one.
+    """
+    model_name = _text_or_default(form, "model", web_config.default_models.video)
+    if not model_name:
+        raise ValueError("A video model is required.")
+    return model_name
+
+
+def _video_ratio_and_size(form: Any, web_config: WebUiConfig) -> tuple[str, str]:
+    """Return the ratio and size a request names, else the configured defaults.
+
+    Raises:
+        ValueError: If a value is not one the Web UI offers.
+    """
+    ratio = _choice_or_default(form, "ratio", web_config.video_ratios, web_config.app_config.get("video_generation", {}).get("default_ratio", "16:9"))
+    return ratio, _resolve_video_size(form, web_config, ratio)
+
+
+def _normalize_video_steps(args: argparse.Namespace, config: dict[str, Any], model_info: VideoModelInfo) -> None:
     """Settle the step counts of a video job: upscale steps, and LTX's cap of 8 steps."""
     steps_explicitly_set = args.steps is not None
     if args.upscale:
@@ -1464,15 +1505,6 @@ def _normalize_video_steps(args: argparse.Namespace, config: dict[str, Any], mod
         args.steps = 8
         if args.upscale_steps is not None:
             args.upscale_steps = args.steps
-
-
-def _normalize_video_args(args: argparse.Namespace, config: dict[str, Any], model_info: Any) -> None:
-    _normalize_video_steps(args, config, model_info)
-    alignment = 64 if args.upscale else model_info.resolution_alignment
-    args.width, args.height = align_resolution(args.width, args.height, alignment, model_info.family.upper())
-    args.num_frames = align_ltx_frames(args.num_frames, model_info.frame_alignment)
-    if args.width < 64 or args.height < 64:
-        raise ValueError(f"Resolved dimensions {args.width}x{args.height} are too small (minimum 64x64)")
 
 
 def _persist_web_config(form: Any) -> None:

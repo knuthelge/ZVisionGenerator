@@ -11,6 +11,7 @@ from zvisiongenerator.utils.config import (
     model_capabilities,
     resolve_defaults,
     resolve_video_defaults,
+    validate_video_size_choice,
 )
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.paths import resolve_model_path
@@ -944,3 +945,23 @@ def test_model_capabilities_match_resolve_defaults():
     assert capabilities == {key: resolved[key] for key in capabilities}
     assert capabilities["dimension_max"] == 2048
     assert model_capabilities(config, "unknown")["supports_upscale"] is True
+
+
+# ---------------------------------------------------------------------------
+# validate_video_size_choice
+# ---------------------------------------------------------------------------
+
+
+class TestValidateVideoSizeChoice:
+    _CONFIG = {"video_sizes": {"16:9": {"m": {}, "l": {}}, "1:1": {"m": {}}}}
+
+    def test_a_listed_ratio_and_size_pass(self):
+        validate_video_size_choice(self._CONFIG, "16:9", "l")
+
+    @pytest.mark.parametrize(("ratio", "size", "match"), [("4:3", "m", "ratio"), ("1:1", "l", "size")])
+    def test_an_unlisted_ratio_or_size_is_refused(self, ratio, size, match):
+        with pytest.raises(ValueError, match=match):
+            validate_video_size_choice(self._CONFIG, ratio, size)
+
+    def test_a_config_without_a_size_table_accepts_anything(self):
+        validate_video_size_choice({}, "4:3", "xl")

@@ -74,11 +74,19 @@ export interface ExtendProblem {
   message: string;
 }
 
-/** How an extension window fits this machine's memory; null in `ExtendSourceInfo` when it cannot be told. */
-export interface ExtendMemoryFit {
+/** How a clip or an extension window fits this machine's memory; null where the server cannot tell. */
+export interface ClipMemoryFit {
   status: string;
   required_gb: number;
   budget_gb: number;
+}
+
+/** What `POST /api/video/memory-fit` reports: the size and length a video job would use, and how that clip fits memory. */
+export interface VideoMemoryFitInfo {
+  memory_fit: ClipMemoryFit | null;
+  width: number;
+  height: number;
+  frames: number;
 }
 
 /**
@@ -111,7 +119,7 @@ export interface ExtendSourceInfo {
   /** The new frames, snapped to a multiple of 8 (a 2 s default when none was requested); null when the frame rate is unknown. */
   extend_frames: number | null;
   window_frames: number | null;
-  memory_fit: ExtendMemoryFit | null;
+  memory_fit: ClipMemoryFit | null;
 }
 
 /** How a saved asset was made, as recorded in its embedded settings. */
@@ -173,7 +181,7 @@ export interface MemoryFit {
   by_quantize: Record<string, MemoryFitEstimate>;
   /** LTX MLX video only: the estimate when low-memory mode is off and every component stays loaded. */
   without_low_memory?: MemoryFitEstimate;
-  /** Caveat to show with the estimate, e.g. that video excludes the upscale pass. */
+  /** Caveat to show with the estimate, e.g. the clip a video estimate is for. */
   note?: string;
 }
 

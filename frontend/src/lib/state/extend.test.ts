@@ -3,10 +3,11 @@ import { describe, expect, it } from 'vitest';
 import type { DraftState, ExtendSourceInfo } from '$lib/types';
 import sourceFixture from '../../../../tests/fixtures/extend_source_response.json';
 import {
-  CHOOSE_SOURCE_NOTE, REJECTED_SOURCE_NOTE, extendEnhanceHint, extendGuard, extendMemoryNote, extendPrefillFor, extendSourceFacts, extendSourceUsable,
+  CHOOSE_SOURCE_NOTE, REJECTED_SOURCE_NOTE, extendEnhanceHint, extendGuard, extendPrefillFor, extendSourceFacts, extendSourceUsable,
   finalizeSceneFields, isOriginalLegacyPrompt,
 } from './extend';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
+import { memoryFitNote } from './memoryFit';
 
 describe('extendPrefillFor', () => {
   it('copies a recorded scene and leaves the prompt for what happens next', () => {
@@ -173,18 +174,6 @@ describe('extendSourceFacts', () => {
   });
 });
 
-describe('extendMemoryNote', () => {
-  it('words a tight and a too-large fit', () => {
-    expect(extendMemoryNote({ status: 'tight', required_gb: 21, budget_gb: 24 })).toEqual({ status: 'tight', text: 'Tight: needs ~21 GB of 24 GB. The Mac may slow down while generating.' });
-    expect(extendMemoryNote({ status: 'too_large', required_gb: 40, budget_gb: 24 })?.text).toBe('Too large: needs ~40 GB of 24 GB. Expect heavy swapping or an out-of-memory error.');
-  });
-
-  it('has nothing to say when it fits or is unknown', () => {
-    expect(extendMemoryNote({ status: 'fits', required_gb: 10, budget_gb: 24 })).toBeNull();
-    expect(extendMemoryNote(null)).toBeNull();
-  });
-});
-
 // tests/fixtures/extend_source_response.json is also checked by pytest against the inspect route's answer.
 describe('the inspect route response', () => {
   const info: ExtendSourceInfo = sourceFixture;
@@ -197,7 +186,7 @@ describe('the inspect route response', () => {
     expect(extendSourceUsable(info)).toBe(true);
     expect(extendPrefillFor(info)).toEqual({ scene: 'A woman in a red raincoat on a rainy street at night.', prompt: '' });
     expect(extendSourceFacts(info).map((fact) => fact.text)).toEqual(['512 × 256', '24 fps', '4.04 s', '97 frames', 'Audio']);
-    expect(extendMemoryNote(info.memory_fit)).toBeNull();
+    expect(memoryFitNote(info.memory_fit, 'extension')).toBeNull();
     expect(isOriginalLegacyPrompt({ prompt: info.prompt ?? '' }, info)).toBe(false);
   });
 });
