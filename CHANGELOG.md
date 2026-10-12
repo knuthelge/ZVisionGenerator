@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 - Review before upscaling: approve or discard each small render before the full-size pass, for images and video (video on macOS). In the Web UI, turn on **Review** under Upscale; on the command line, use `--review` with `--upscale`
+- Docs: a Linux troubleshooting note for when `systemd-oomd` closes the terminal or editor while a large model loads, with an optional drop-in that relaxes its limit
 
 ### Changed
 - Web UI: stopping the server (Ctrl-C on `ziv ui`) cancels the running job instead of waiting for it

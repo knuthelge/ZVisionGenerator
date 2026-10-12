@@ -256,3 +256,29 @@ ziv-image -m my-model --prompt "a landscape"
 ### Error Log
 
 Each command records warnings and errors, with full tracebacks, in `~/.ziv/logs/<command>.log` (`ui.log`, `image.log`, `video.log` or `model.log`). The file is cleared every time the command starts, so it only covers the latest run, and stays empty when nothing goes wrong. If the logs folder cannot be written, the log goes to the system temp folder instead; `ziv ui` prints the file's location at startup. Set `ZIV_LOG=off` to turn the log off.
+
+## Troubleshooting
+
+### Linux: the terminal or editor closes while a model loads
+
+On Linux distributions that run `systemd-oomd`, such as Ubuntu, loading a large model can close the terminal or editor that started the job, and the job with it, even when there is enough memory for the load to finish. `systemd-oomd` reacts to memory pressure (the time spent waiting for memory to be reclaimed), not to running out of memory. Loading 15–35 GB of weights on a machine with about 32 GB of RAM fills the page cache and can keep pressure above Ubuntu's limit of 50% for 20 seconds. oomd then stops the whole terminal or editor the job runs in. `journalctl -u systemd-oomd` lists each time it did.
+
+To relax the limit for your user session, create `/etc/systemd/system/user@.service.d/99-oomd-relax.conf` with sudo:
+
+```ini
+[Service]
+ManagedOOMMemoryPressureLimit=80%
+ManagedOOMMemoryPressureDurationSec=60s
+```
+
+- **Apply:** run `sudo systemctl daemon-reload`, then log out and back in, or reboot.
+- **Verify:** `systemctl show user@$(id -u).service -p ManagedOOMMemoryPressureLimit` prints `80%`, and `oomctl` lists the new limit.
+- **Revert:** delete the file and repeat the reload and re-login.
+
+80% for 60 seconds still stops runaway memory use, but lets typical model loads finish. The largest loads, such as Krea 2 without quantization, can still go over it; use `-q 8` or `-q 4` on these machines. ZVisionGenerator never changes this setting itself.
+
+To protect your editor when oomd does act, start heavy jobs in their own unit, so oomd stops the job rather than the editor:
+
+```bash
+systemd-run --user --collect --same-dir -p OOMScoreAdjust=500 ziv-image -m my-model --prompt "a landscape"
+```
