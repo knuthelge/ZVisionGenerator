@@ -67,8 +67,10 @@ zvisiongenerator/
 ├── enhance_cli.py                 Shared --enhance / --no-enhance / --enhance-model CLI handling
 ├── preflight.py                   Preflight phase: plan seeds and prompts, rewrite them before the model loads
 ├── image_model_loader.py          Image model loading through stored quants (reuse, or save on first use)
+├── image_review.py                Review of an image's small render before the upscale
 ├── image_runner.py                Image generation run orchestration
 ├── upscale_runner.py              Upscale one existing image: read its recorded settings, run the upscale workflow
+├── review.py                      Shared wait for a review decision
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/
@@ -117,7 +119,7 @@ zvisiongenerator/
 │   ├── ffmpeg.py                  ffmpeg availability check and install
 │   ├── filename.py                Output filenames ({set}_{timestamp}) and collision counters
 │   ├── image_model_detect.py      Image model type detection
-│   ├── interactive.py             Keyboard interrupt handling
+│   ├── interactive.py             Keyboard interrupt handling and review state
 │   ├── lora.py                    LoRA CLI argument parsing
 │   ├── model_files.py             Offline check for fully downloaded model weights
 │   ├── model_memory.py            Header-only memory estimates (MLX unified memory; CUDA GPU and system memory)
@@ -176,6 +178,10 @@ The Windows/Linux diffusers image backend is also CUDA-only. Validation happens 
 ### Workflow Stages
 
 Image stage functions in `workflows/image_stages.py` have the uniform signature `(ImageGenerationRequest, ImageWorkingArtifacts) -> StageOutcome`. Video stage functions in `workflows/video_stages.py` have the signature `(VideoGenerationRequest, VideoWorkingArtifacts) -> StageOutcome`. Stages are composed dynamically by `build_workflow()` and `build_video_workflow()`. `build_upscale_workflow()` upscales an existing image (`load_source_stage` → `upscale_stage` → `sharpen_stage` → `save_image_stage`); the Web UI runs it through `WebRunner.submit_upscale_job` and `upscale_runner.run_upscale`, which emits the same events as a one-image batch, without preflight or the batch loop.
+
+### Review Before Upscaling
+
+`--review` pauses a generation after the small render of an upscale until the user approves or discards it. The review state lives in `SkipSignal` (`utils/interactive.py`), the shared wait in `review.py`, and images pass through `review_stage` before `upscale_stage`. Video passes a `review` keyword to the backend: only `video_mac` honours it, `video_diffusers` refuses, and `supports_video_upscale_review()` in `backends/__init__.py` tells the form, server and CLI whether to offer it. The Web UI sends approve and discard through the job controls and shows a video review from `GET /jobs/{id}/review`. Everything stays in memory while the review waits, so an approved output equals one made without review.
 
 ### Job Phases: Preflight and Generation
 
@@ -273,6 +279,7 @@ Mock heavy image and video dependencies in tests. Diffusers backend tests patch 
     - `utils._orchestration.combined_image_conditionings`, `utils.args.ImageConditioningInput`, and `utils.helpers.create_noised_state(legacy_scalar_blend=True)`
     - `ltx_core_mlx`'s `X0Model`, `snap_output_dimensions(two_stage=)`, `compute_video_latent_shape`, `compute_audio_token_count`, `compute_audio_positions`, `compute_video_positions` and `aggressive_cleanup`
     - `scheduler.shorten_schedule`, `DISTILLED_SIGMAS` and `STAGE_2_SIGMAS`, and `utils.samplers.denoise_loop` with its `on_step(step_idx, total, video_x0, sigma)` signature
+    - for review before upscaling: `_stage1` (shadowed per call), `Stage1Result.video_tokens`/`audio_tokens`/`latent_dims`, `_load_decoders`, `dit`/`_loaded` (restored after the preview decode), and the model state released after an aborted generation
     - `DistilledPipeline.generate_and_save` for upscale, and `BasePipeline`'s `gemma_model_id` default, the transformer-file preference order and the `low_memory` and `low_ram_streaming` constructor arguments
 - **Cache limit.** `low_ram_streaming` makes the pipeline set the MLX buffer-cache limit to 0 for the whole process. `backends/memory_mac.mlx_cache_limit` scopes that to model construction and each generation, then restores the previous limit.
 

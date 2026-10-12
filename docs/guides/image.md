@@ -159,6 +159,16 @@ ziv-image -m my-model --prompt "a landscape" --upscale 2 --no-upscale-sharpen
 | `--upscale-sharpen` | `True` | CAS sharpening step before upscale refinement (`--no-upscale-sharpen` to disable) |
 | `--upscale-save-pre` | `False` | Save pre-upscale image alongside final |
 
+### Review before upscaling
+
+With a review, each generation pauses after the small render, before the upscale. **Approve** upscales it; **Discard** skips the image and saves nothing. In the Web UI, turn on the **Review** row under **Upscale** and press **Y** to approve or **N** to discard. On the command line, add `--review` to `--upscale`. It needs a terminal and prints the path of the small render; press `y` to approve, `n` to discard or `q` to quit.
+
+```bash
+ziv-image -m my-model --prompt "a landscape" --upscale 2 --review
+```
+
+In a batch every image pauses. A Pause, Repeat or Next queued before the review still applies: pause and repeat take effect after the current image, and Next skips it.
+
 ### Upscaling an existing image (Web UI)
 
 To upscale an image you already have, choose **Upscale → 2×** or **4×** in the asset viewer (Gallery or Workspace) or in the **⋯** menu on its thumbnail. In the viewer you can also press **X** then **2** or **4**. Each option shows the output size, e.g. `2× → 1664×2432`. The job runs in the Workspace job panel, or joins the queue when another job is running; starting it from the Gallery takes you there.

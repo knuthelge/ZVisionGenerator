@@ -63,6 +63,7 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `--upscale-guidance` | same as `--guidance` | Override guidance scale for the upscale refine pass only |
 | `--upscale-sharpen` | `True` | CAS sharpening step before upscale refinement (`--no-upscale-sharpen` to disable) |
 | `--upscale-save-pre` | `False` | Save pre-upscale image alongside final |
+| `--review` | `False` | Pause after each small render to approve (`y`) or discard (`n`) the upscale. Needs `--upscale` and a terminal |
 | `--sharpen [AMOUNT]` / `--no-sharpen` | enabled | Apply CAS sharpening. Optional amount overrides config (0.0–1.5) |
 | `--contrast [AMOUNT]` / `--no-contrast` | disabled | Apply contrast adjustment. Optional amount (1.0 = no change) |
 | `--saturation [AMOUNT]` / `--no-saturation` | disabled | Apply saturation adjustment. Optional amount (1.0 = no change) |
@@ -119,6 +120,7 @@ Platform-aware aliases:
 | `--seed` | `None` (random) | Seed for reproducible video generation |
 | `--low-memory` / `--no-low-memory` | enabled | Low-memory mode for LTX. On macOS with 24 GB of memory or less it also streams the transformer from disk, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. `--no-low-memory` turns that off too |
 | `--upscale` | disabled | Upscale factor: `2` only. Fails explicitly when the active backend cannot provide the LTX latent upscaler. |
+| `--review` | `False` | Pause after each small render to approve (`y`) or discard (`n`) the upscale. Needs `--upscale` and a terminal. macOS only for now |
 | `--audio` / `--no-audio` | enabled | Include or strip audio in video output. macOS only; Windows/Linux videos have no audio track |
 | `--lora` | `None` | Comma-separated LoRAs with optional weights: `name:0.8,name2:0.5`. Windows/Linux require diffusers-compatible LTX LoRA adapters. |
 | `-r`, `--runs` | `1` | Number of batch runs |

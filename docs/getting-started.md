@@ -158,8 +158,9 @@ Workspace:
 | `Alt+⇧+3` | Show or hide the history strip (focuses the newest tile when shown) |
 | `Esc` `Esc` | Stop the running job (press twice) |
 | `P` | Pause or resume the running job |
-| `N` | Skip to the next image |
+| `N` | Skip to the next image; during a review, discard the small render |
 | `R` | Repeat the current image |
+| `Y` | Approve the small render for upscaling (during a review) |
 
 Prompts:
 

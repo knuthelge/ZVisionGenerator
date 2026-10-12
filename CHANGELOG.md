@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- Review before upscaling: approve or discard each small render before the full-size pass, for images and video (video on macOS). In the Web UI, turn on **Review** under Upscale; on the command line, use `--review` with `--upscale`
+
+### Changed
+- Web UI: stopping the server (Ctrl-C on `ziv ui`) cancels the running job instead of waiting for it
+
 ## [0.13.0b19] - 2026-10-11
 
 ### Added

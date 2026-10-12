@@ -75,6 +75,10 @@ Windows and Linux video generation require CUDA. CPU fallback is not available f
 
 Each video records the settings it was made with, as images do (see [Output Files](image.md#output-files)); **Reuse settings** in the Web UI loads them.
 
+### Review before upscaling
+
+`--review` works as for images (see [Review before upscaling](image.md#review-before-upscaling)) and is macOS only for now: Windows and Linux refuse `--review` and hide the option. The sound may change slightly after upscaling.
+
 ## Video LoRA
 
 ```bash
