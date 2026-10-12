@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 from urllib.parse import quote
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
@@ -1508,6 +1509,152 @@ def test_submit_image_job_uses_preset_upscale_steps_default(monkeypatch, tmp_pat
 
 
 @pytest.mark.parametrize(
+    ("form", "review", "controls"),
+    [
+        ({"upscale": "2", "review": "on"}, True, ["next", "pause", "resume", "repeat", "approve", "discard", "quit"]),
+        ({"upscale": "2"}, False, ["next", "pause", "resume", "repeat", "quit"]),
+        ({"review": "on"}, False, ["next", "pause", "resume", "repeat", "quit"]),
+        ({"upscale": "2", "review": "off"}, False, ["next", "pause", "resume", "repeat", "quit"]),
+    ],
+)
+def test_submit_image_job_review_needs_upscale(monkeypatch, tmp_path, form, review, controls):
+    """Review is carried only with upscale on, and only then do approve and discard become controls."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    _patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None), defaults=_make_resolved_image_defaults(), submitted=submitted)
+
+    response = web_server._submit_image_job({"model": "zit", "prompt": "hello", **form}, web_config)
+
+    assert submitted[0]["args"].review is review
+    assert list(response["supported_controls"]) == controls
+
+
+def test_workspace_contract_offers_the_image_review_control_for_image_workflows_only():
+    definitions = web_server._build_workflow_contract()["definitions"]
+
+    assert "image_upscale_review" in definitions["txt2img"]["visible_controls"]
+    assert "image_upscale_review" in definitions["img2img"]["visible_controls"]
+    assert "image_upscale_review" not in definitions["txt2vid"]["visible_controls"]
+    assert "image_upscale_review" not in definitions["img2vid"]["visible_controls"]
+
+
+def _patch_video_submit_dependencies(monkeypatch, *, review_supported: bool, submitted: list[dict[str, object]]) -> None:
+    monkeypatch.setattr(web_server, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(
+        web_server,
+        "detect_video_model",
+        lambda _model: SimpleNamespace(family="ltx", supports_i2v=True, resolution_alignment=64, frame_alignment=8, default_fps=24),
+    )
+    monkeypatch.setattr(web_server, "resolve_video_defaults", lambda *_args: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
+    monkeypatch.setattr(web_server, "_normalize_video_args", lambda *_args: None)
+    monkeypatch.setattr(web_server, "require_ffmpeg", lambda: None)
+    monkeypatch.setattr(web_server, "supports_video_upscale_review", lambda: review_supported)
+    monkeypatch.setattr(web_server.web_runner, "submit_video_request_job", lambda **kwargs: submitted.append(kwargs) or "job-123")
+
+
+@pytest.mark.parametrize(
+    ("form", "review", "controls"),
+    [
+        ({"upscale": "2", "review": "on"}, True, ["approve", "discard", "quit"]),
+        ({"upscale": "2"}, False, ["quit"]),
+        ({"review": "on"}, False, ["quit"]),
+        ({"upscale": "2", "review": "off"}, False, ["quit"]),
+    ],
+)
+def test_submit_video_job_review_needs_upscale(monkeypatch, tmp_path, form, review, controls):
+    """A video review is carried only with upscale on, and only then do approve and discard become controls."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=submitted)
+
+    response = web_server._submit_video_job({"model": "ltx-8", "prompt": "a lake", **form}, web_config)
+
+    assert submitted[0]["args"].review is review
+    assert list(response["supported_controls"]) == controls
+
+
+def test_submit_video_job_refuses_review_where_the_platform_cannot_pause(monkeypatch, tmp_path):
+    """A review request for video on a platform without support is a 400 and queues nothing; without upscale it is ignored."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    _patch_video_submit_dependencies(monkeypatch, review_supported=False, submitted=submitted)
+
+    with pytest.raises(HTTPException) as refused:
+        web_server._submit_video_job({"model": "ltx-8", "prompt": "a lake", "upscale": "2", "review": "on"}, web_config)
+    assert refused.value.status_code == 400
+    assert submitted == []
+
+    web_server._submit_video_job({"model": "ltx-8", "prompt": "a lake", "review": "on"}, web_config)
+    assert submitted[0]["args"].review is False
+
+
+@pytest.mark.parametrize("supported", [True, False])
+def test_workspace_contract_hides_the_video_review_control_where_unsupported(monkeypatch, supported):
+    monkeypatch.setattr(web_server, "supports_video_upscale_review", lambda: supported)
+    definitions = web_server._build_workflow_contract()["definitions"]
+
+    for workflow in ("txt2vid", "img2vid"):
+        assert ("video_upscale_review" in definitions[workflow]["visible_controls"]) is supported
+        assert "video_upscale_enabled" in definitions[workflow]["visible_controls"]
+    for workflow in ("txt2img", "img2img"):
+        assert "video_upscale_review" not in definitions[workflow]["visible_controls"]
+        assert "image_upscale_review" in definitions[workflow]["visible_controls"]
+
+
+class TestJobReviewRoute:
+    """GET /jobs/{id}/review serves the recorded small render of a pending video review."""
+
+    @staticmethod
+    def _patch_review_paths(monkeypatch, paths: dict[str, str | None]) -> None:
+        def _get_job_review_path(job_id):
+            if job_id not in paths:
+                raise KeyError(job_id)
+            return paths[job_id]
+
+        monkeypatch.setattr(web_server.web_runner, "get_job_review_path", _get_job_review_path)
+
+    def test_serves_the_recorded_file_as_uncached_mp4(self, monkeypatch, tmp_path):
+        render = tmp_path / "small.mp4"
+        render.write_bytes(b"0123456789")
+        self._patch_review_paths(monkeypatch, {"job-1": str(render)})
+
+        with TestClient(web_server.app) as client:
+            ok = client.get("/jobs/job-1/review?v=1")
+            ranged = client.get("/jobs/job-1/review?v=1", headers={"Range": "bytes=2-5"})
+
+        assert ok.status_code == 200
+        assert ok.headers["content-type"] == "video/mp4"
+        assert ok.headers["cache-control"] == "no-store"
+        assert ok.content == b"0123456789"
+        assert ranged.status_code == 206
+        assert ranged.content == b"2345"
+        assert ranged.headers["cache-control"] == "no-store"
+
+    def test_never_takes_the_path_from_the_request(self, monkeypatch, tmp_path):
+        render = tmp_path / "small.mp4"
+        render.write_bytes(b"recorded")
+        secret = tmp_path / "secret.txt"
+        secret.write_bytes(b"secret")
+        self._patch_review_paths(monkeypatch, {"job-1": str(render)})
+
+        with TestClient(web_server.app) as client:
+            response = client.get("/jobs/job-1/review", params={"v": "1", "path": str(secret), "review_path": str(secret)})
+
+        assert response.content == b"recorded"
+
+    def test_is_404_without_a_pending_review_a_file_or_a_job(self, monkeypatch, tmp_path):
+        self._patch_review_paths(monkeypatch, {"idle": None, "gone": str(tmp_path / "gone.mp4")})
+
+        with TestClient(web_server.app) as client:
+            responses = [client.get(f"/jobs/{job_id}/review?v=1") for job_id in ("idle", "gone", "unknown")]
+
+        assert [response.status_code for response in responses] == [404, 404, 404]
+
+
+@pytest.mark.parametrize(
     ("lora", "message"),
     [
         ("some-org/some-lora:0.8", "Remote HuggingFace LoRA references are not supported"),
@@ -1965,3 +2112,43 @@ def test_generate_rejects_sharpen_amounts_outside_the_safe_range(amount):
 
     with pytest.raises(ValueError, match="Sharpen amount must be between 0 and 1.5"):
         web_server._validate_image_args(_make_args(sharpen=amount, image_strength=0.5, quantize=None, runs=1))
+
+
+def test_generate_endpoint_answers_400_for_a_video_review_the_platform_cannot_pause(monkeypatch, tmp_path):
+    """The 400 reaches the HTTP client of POST /api/generate, and nothing is queued."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    submitted: list[dict[str, object]] = []
+    _patch_video_submit_dependencies(monkeypatch, review_supported=False, submitted=submitted)
+
+    with TestClient(web_server.app) as client:
+        refused = client.post("/api/generate", data={"mode": "video", "model": "ltx-8", "prompt": "a lake", "upscale": "2", "review": "true"})
+        ignored = client.post("/api/generate", data={"mode": "video", "model": "ltx-8", "prompt": "a lake", "review": "true"})
+
+    assert refused.status_code == 400
+    assert ignored.status_code == 200
+    assert ignored.json()["supported_controls"] == ["quit"]
+    assert len(submitted) == 1
+
+
+def test_review_route_is_404_when_the_file_vanishes_before_it_is_served(monkeypatch, tmp_path):
+    render = tmp_path / "small.mp4"
+    render.write_bytes(b"0123456789")
+
+    def _review_path_then_vanish(_job_id):
+        path = str(render)
+        render.unlink()  # the job resumed and its temporary directory was cleaned up right after the lookup
+        return path
+
+    monkeypatch.setattr(web_server.web_runner, "get_job_review_path", _review_path_then_vanish)
+
+    with TestClient(web_server.app, raise_server_exceptions=False) as client:
+        assert client.get("/jobs/job-1/review?v=1").status_code == 404
+
+
+def test_review_route_is_404_when_the_path_is_not_a_regular_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(web_server.web_runner, "get_job_review_path", lambda _job_id: str(tmp_path))
+
+    with TestClient(web_server.app, raise_server_exceptions=False) as client:
+        assert client.get("/jobs/job-1/review?v=1").status_code == 404

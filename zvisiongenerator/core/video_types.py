@@ -40,6 +40,8 @@ class VideoGenerationRequest:
     # Upscale params
     upscale: int | None = None
     upscale_steps: int | None = None
+    # Called with the path of a temporary video of the half-size render, between the two upscale stages; only with upscale.
+    review: Callable[[Path], None] | None = None
 
     # Audio
     no_audio: bool = False
@@ -62,6 +64,8 @@ class VideoWorkingArtifacts:
     resolved_prompt: str | None = None
     video_path: Path | None = None
     generation_time: float = 0.0
+    # Seconds spent waiting on a review; not part of ``generation_time``.
+    review_wait: float = 0.0
     filename: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 

@@ -32,6 +32,7 @@ from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.image_model_loader import load_image_model
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.preflight import run_preflight
+from zvisiongenerator.review import review_enabled
 from zvisiongenerator.upscale_runner import run_upscale
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal
@@ -42,15 +43,16 @@ from zvisiongenerator.web.gallery import gallery_asset_for_output_path, gallery_
 from zvisiongenerator.web.job_contract import (
     CANCELLED_TERMINAL_EVENT,
     FAILED_TERMINAL_EVENT,
-    IMAGE_SUPPORTED_CONTROLS,
     QUEUED_STATUS,
     REMOVED_REASON,
+    REVIEW_DECISION_CONTROLS,
     STARTED_EVENT,
     SUCCESS_TERMINAL_EVENT,
     TERMINAL_EVENT_TYPES,
     TERMINAL_STATUSES,
     UPSCALE_SUPPORTED_CONTROLS,
-    VIDEO_SUPPORTED_CONTROLS,
+    image_supported_controls,
+    video_supported_controls,
     public_job_snapshot,
 )
 from zvisiongenerator.video_runner import run_video_batch
@@ -63,6 +65,9 @@ logger = logging.getLogger(__name__)
 # Events that end the generation a live preview belongs to, so the stale preview is dropped. A new workflow stage
 # (e.g. the upscale pass) keeps the previous stage's preview until it sends its own.
 _PREVIEW_RESET_EVENT_TYPES = frozenset({"prompt_started", "generation_finished", *TERMINAL_EVENT_TYPES})
+
+
+_REVIEW_RESET_EVENT_TYPES = frozenset({"job_resumed", "prompt_started", "generation_finished", *TERMINAL_EVENT_TYPES})
 
 
 class JobConflictError(RuntimeError):
@@ -200,6 +205,11 @@ class _JobRecord:
     result_path: str | None = None
     outputs: list[dict[str, Any]] = field(default_factory=list)
     paused: bool = False
+    # ``{"iteration": n}`` from the pause of a render until ``job_resumed``; reconnecting browsers see it in the snapshot.
+    review: dict[str, Any] | None = None
+    review_decided: bool = False
+    # Temporary video of the small render under review; server-side only, never in events or snapshots.
+    review_path: str | None = None
     last_eta_secs: float | None = None
     preview_jpeg: bytes | None = None
     preview_version: int = 0
@@ -253,14 +263,18 @@ class WebRunner:
         enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
         admission_check: Callable[[], None] | None = None,
         context: dict[str, Any] | None = None,
+        supported_controls: tuple[str, ...] | None = None,
     ) -> str:
-        """Queue the image job; the worker loads the model and runs the batch loop."""
+        """Queue the image job; the worker loads the model and runs the batch loop.
+
+        *supported_controls* defaults to the controls the job's ``args`` imply, with a review when one is requested.
+        """
         control_signal = SkipSignal()
         return self._submit_job(
             job_type="image",
             exclusive=True,
             control_signal=control_signal,
-            supported_controls=IMAGE_SUPPORTED_CONTROLS,
+            supported_controls=supported_controls if supported_controls is not None else image_supported_controls(review=review_enabled(args)),
             context={"output_dir": getattr(args, "output", None), **(context or {})},
             admission_check=admission_check,
             target_factory=lambda progress_callback: self._run_image_request(
@@ -287,14 +301,19 @@ class WebRunner:
         enhance_by_set: dict[str, list[EnhanceSettings | None]] | None = None,
         admission_check: Callable[[], None] | None = None,
         context: dict[str, Any] | None = None,
+        supported_controls: tuple[str, ...] | None = None,
     ) -> str:
-        """Queue the video job; the worker loads the model and runs the batch loop. Only Quit is supported."""
+        """Queue the video job; the worker loads the model and runs the batch loop.
+
+        Quit is supported, and with a review also approve and discard. *supported_controls* defaults to the controls
+        the job's ``args`` imply.
+        """
         control_signal = SkipSignal()
         return self._submit_job(
             job_type="video",
             exclusive=True,
             control_signal=control_signal,
-            supported_controls=VIDEO_SUPPORTED_CONTROLS,
+            supported_controls=supported_controls if supported_controls is not None else video_supported_controls(review=review_enabled(args)),
             context={"output_dir": getattr(args, "output", None), **(context or {})},
             admission_check=admission_check,
             target_factory=lambda progress_callback: self._run_video_request(
@@ -446,6 +465,7 @@ class WebRunner:
                 event_count=record.event_count,
                 last_event=last_event,
                 paused=record.paused,
+                review=record.review,
                 result_path=record.result_path,
                 outputs=[dict(output) for output in record.outputs],
                 preview_version=record.preview_version if record.preview_jpeg is not None else 0,
@@ -458,6 +478,12 @@ class WebRunner:
         record = self._get_job(job_id)
         with record.lock:
             return record.result_path
+
+    def get_job_review_path(self, job_id: str) -> str | None:
+        """Return the temporary video of the small render under review, or ``None`` when no review of this job is pending."""
+        record = self._get_job(job_id)
+        with record.lock:
+            return record.review_path if record.review is not None else None
 
     def get_job_preview(self, job_id: str) -> bytes | None:
         """Return the latest in-memory live preview JPEG for a job, if one is current."""
@@ -492,8 +518,24 @@ class WebRunner:
                 raise UnsupportedJobControlError("This job is no longer running.")
             if record.status == QUEUED_STATUS:
                 raise UnsupportedJobControlError("This job has not started yet.")
-            if normalized == "resume":
-                if normalized not in record.supported_controls or not record.paused or record.control_signal is None:
+            if record.review is not None and not record.review_decided:
+                if normalized not in (*REVIEW_DECISION_CONTROLS, "quit"):
+                    raise UnsupportedJobControlError("A render is waiting for review: approve or discard it, or quit.")
+                if record.control_signal is None or normalized not in record.supported_controls:
+                    raise UnsupportedJobControlError(f"'{action}' is not available for this job.")
+                # The first decision latches, so any later one is a conflict. The review itself stays on the record
+                # until job_resumed, so a snapshot taken in between still shows the render instead of a plain pause.
+                record.review_decided = True
+                if normalized == "quit":
+                    record.control_signal.queue_action("quit")
+                else:
+                    record.control_signal.set_review_decision(normalized)
+            elif normalized in REVIEW_DECISION_CONTROLS:
+                if record.review is not None:
+                    raise UnsupportedJobControlError("This review has already been decided.")
+                raise UnsupportedJobControlError("No render is waiting for review.")
+            elif normalized == "resume":
+                if normalized not in record.supported_controls or not record.paused or record.review is not None or record.control_signal is None:
                     raise UnsupportedJobControlError("This job is not paused.")
                 record.control_signal.resume()
             else:
@@ -550,11 +592,15 @@ class WebRunner:
                     record.subscribers.discard(subscriber)
 
     def shutdown(self) -> None:
-        """Stop accepting work, cancel queued jobs, and tear down worker threads; a running job is left alone."""
+        """Stop accepting work, cancel queued jobs, and tell the running job to quit; a paused or reviewing job is woken so it can end."""
         with self._jobs_lock:
             removed = [(job_id, self._jobs[job_id].future) for job_id in self._queue]
             self._queue.clear()
+            running = self._jobs.get(self._claimed_job_id) if self._claimed_job_id is not None else None
         self._finish_removed(removed)
+        if running is not None and running.control_signal is not None:
+            running.control_signal.queue_action("quit")
+            running.control_signal.resume()
         self._executor.shutdown(wait=False, cancel_futures=True)
 
     def _submit_job(
@@ -763,6 +809,11 @@ class WebRunner:
         if "preview" in event:
             event = dict(event)
             preview_jpeg = _encode_preview_jpeg(event.pop("preview"))
+        review_path = None
+        if "review_path" in event:
+            # A private key of the video runner: the file stays on the record and is never published.
+            event = dict(event)
+            review_path = event.pop("review_path")
         with record.lock:
             event = self._normalize_event(event)
             timestamp = time.time()
@@ -772,6 +823,14 @@ class WebRunner:
                 event["preview_version"] = record.preview_version
             elif event["type"] in _PREVIEW_RESET_EVENT_TYPES:
                 record.preview_jpeg = None
+            record.review = self._review_after_event(record.review, event)
+            if record.review is None:
+                record.review_path = None
+                record.review_decided = False
+            elif event["type"] == "job_paused":
+                record.review_decided = False
+                if review_path is not None:
+                    record.review_path = review_path
             if event["type"] == "prompt_started":
                 record.prompt_progress = {key: event[key] for key in ("prompt", "run_index", "total_runs", "ran_iterations", "total_iterations", "enhance_status") if key in event}
             elif event["type"] == "prompt_enhanced" and "enhanced_prompt" in event:
@@ -824,6 +883,15 @@ class WebRunner:
                 if self._claimed_job_id == job_id:
                     self._claimed_job_id = None
                 self._prune_terminal_jobs_locked(exclude_job_id=job_id)
+
+    @staticmethod
+    def _review_after_event(current: dict[str, Any] | None, event: EventPayload) -> dict[str, Any] | None:
+        """Return the review a job shows after *event*: ``job_paused`` may start one; the events that end the paused render clear it."""
+        if event["type"] == "job_paused" and isinstance(event.get("review"), dict):
+            return dict(event["review"])
+        if event["type"] in _REVIEW_RESET_EVENT_TYPES:
+            return None
+        return current
 
     def _get_job(self, job_id: str) -> _JobRecord:
         """Look up a job record or raise KeyError."""

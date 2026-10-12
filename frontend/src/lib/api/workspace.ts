@@ -23,6 +23,11 @@ export function jobPreviewUrl(jobId: string, version: number): string {
   return `/jobs/${jobId}/preview?v=${version}`;
 }
 
+/** URL of the small render of a video that waits for review; `iteration` makes each video of a batch load fresh. */
+export function jobReviewUrl(jobId: string, iteration: number): string {
+  return `/jobs/${jobId}/review?v=${iteration}`;
+}
+
 export function cancelJob(jobId: string): Promise<void> {
   return api.post(`/api/jobs/${jobId}/cancel`);
 }

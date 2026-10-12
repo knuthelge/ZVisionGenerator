@@ -6,6 +6,7 @@ import os
 from argparse import Namespace
 from unittest.mock import MagicMock
 
+import pytest
 from PIL import Image
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
@@ -471,3 +472,78 @@ class TestSharpenStageUnit:
             outcome = sharpen_stage(request, artifacts)
         assert outcome is StageOutcome.success
         mock_cas.assert_called_once_with(img, amount=0.5)
+
+
+class TestReviewStage:
+    """review_stage sits between the small render and the upscale, and only exists with both upscale and review."""
+
+    @staticmethod
+    def _request(review):
+        return ImageGenerationRequest(backend=MagicMock(), model="fake", prompt="a cat", review=review)
+
+    def test_build_workflow_adds_review_between_render_and_upscale(self):
+        from zvisiongenerator.workflows.image_stages import review_stage
+
+        wf = build_workflow(_default_args(upscale=2, review=True, sharpen=False))
+        assert wf.stages.index(text_to_image_stage) + 1 == wf.stages.index(review_stage)
+        assert wf.stages.index(review_stage) + 1 == wf.stages.index(upscale_stage)
+
+    @pytest.mark.parametrize("args", [dict(upscale=None, review=True), dict(upscale=2, review=False), dict(upscale=2)])
+    def test_build_workflow_omits_review_otherwise(self, args):
+        from zvisiongenerator.workflows.image_stages import review_stage
+
+        assert review_stage not in build_workflow(_default_args(**args)).stages
+
+    def test_approve_continues_to_the_upscale(self, tmp_path):
+        backend = _make_mock_backend()
+        review = MagicMock(return_value=True)
+        request = ImageGenerationRequest(
+            backend=backend,
+            model="fake",
+            prompt="a cat",
+            width=64,
+            height=64,
+            upscale_factor=2,
+            upscale_denoise=0.3,
+            output_dir=str(tmp_path),
+            filename_base="test",
+            review=review,
+        )
+        artifacts = ImageWorkingArtifacts(filename="test")
+
+        outcome = build_workflow(_default_args(upscale=2, review=True)).run(request, artifacts)
+
+        assert outcome is StageOutcome.success
+        review.assert_called_once()
+        assert review.call_args.args[0].size == (64, 64)
+        backend.image_to_image.assert_called_once()
+        assert artifacts.was_upscaled is True
+
+    def test_discard_skips_without_upscaling_or_saving(self, tmp_path):
+        backend = _make_mock_backend()
+        request = ImageGenerationRequest(
+            backend=backend,
+            model="fake",
+            prompt="a cat",
+            width=64,
+            height=64,
+            upscale_factor=2,
+            upscale_denoise=0.3,
+            output_dir=str(tmp_path),
+            filename_base="test",
+            review=MagicMock(return_value=False),
+        )
+        artifacts = ImageWorkingArtifacts(filename="test")
+
+        outcome = build_workflow(_default_args(upscale=2, review=True)).run(request, artifacts)
+
+        assert outcome is StageOutcome.skipped
+        backend.image_to_image.assert_not_called()
+        assert artifacts.was_upscaled is False
+        assert list(tmp_path.iterdir()) == []
+
+    def test_stage_is_a_noop_without_a_review_callable(self):
+        from zvisiongenerator.workflows.image_stages import review_stage
+
+        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (8, 8)))
+        assert review_stage(self._request(None), artifacts) is StageOutcome.success

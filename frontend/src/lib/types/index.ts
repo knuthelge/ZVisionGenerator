@@ -527,8 +527,12 @@ export interface DraftState {
   upscaleSteps: number | null;
   upscaleGuidance: number | null;
   upscaleSharpen: boolean;
+  /** Pause after the small render, to approve or discard it before the upscale. */
+  upscaleReview: boolean;
   videoUpscaleEnabled: boolean;
   videoUpscaleFactor: number;
+  /** Pause after the half-size video render, to approve or discard it before the upscale. */
+  videoUpscaleReview: boolean;
   /** Text from the Enhance button (or typed); when non-blank it is the inline prompt that gets generated. */
   enhancedPrompt: string;
   enhancedFrom: EnhancedSource | null;
@@ -556,10 +560,18 @@ export interface JobContext {
   supported_controls?: string[];
   /** Size label, e.g. "2:3 · m · 8 steps". */
   meta?: string;
+  /** Form fields the job was submitted with; the submit response omits them, so the Workspace adds them. */
+  settings?: JobSettings;
   /** 1-based place in the queue; null once the job is the active one. */
   queue_position?: number | null;
   /** Short notes about how the job deviates from what was asked, e.g. "original settings unknown". */
   notices?: string[];
+}
+
+/** A small render that waits for the user to approve or discard it before its upscale. */
+export interface JobReview {
+  /** 1-based position of the generation under review within the job. */
+  iteration: number;
 }
 
 /** Form fields a job was submitted with; a field sent more than once is a list. */
@@ -579,7 +591,8 @@ export interface JobSnapshot extends JobContext {
   /** Version of the job's current live preview; 0 when none is available. */
   preview_version?: number;
   started_at?: number | null;
-  settings?: JobSettings;
+  /** The render waiting for approve or discard before its upscale; null otherwise. */
+  review?: JobReview | null;
 }
 
 /** The active generation job and the queued ones, oldest first; a job is never in both. */
@@ -605,6 +618,8 @@ export interface ActiveJobState extends JobContext {
   outputs: GalleryAsset[];
   /** URL of the latest live preview of the current generation; null when none is available. */
   previewUrl: string | null;
+  /** The render under review (shown as `previewUrl`); the job waits for approve or discard while this is set. */
+  review?: JobReview | null;
   /** Auto-enhanced prompt of the current generation, when the job enhances prompts. */
   enhancedPrompt?: string;
   /** Outcome of auto enhancement for the current generation, planned before the model loaded. */
@@ -647,7 +662,7 @@ export interface PhaseMarks {
 }
 
 /** A job control the server accepts (`POST /jobs/{id}/controls/{action}`). */
-export type JobControlAction = 'pause' | 'resume' | 'next' | 'repeat' | 'quit';
+export type JobControlAction = 'pause' | 'resume' | 'next' | 'repeat' | 'approve' | 'discard' | 'quit';
 
 /** Per-iteration auto-enhancement outcome reported on `prompt_started`. */
 export type EnhanceStatus = 'off' | 'enhanced' | 'failed' | 'skipped';
@@ -731,6 +746,9 @@ export interface ProgressTextEvent {
 export interface JobPausedEvent {
   type: 'job_paused';
   job_id: string;
+  /** Set when the pause is a review before upscaling; the small render is the job preview at `preview_version`. */
+  review?: JobReview;
+  preview_version?: number;
 }
 
 export interface JobResumedEvent {

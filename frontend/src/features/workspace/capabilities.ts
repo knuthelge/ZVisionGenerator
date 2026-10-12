@@ -34,6 +34,8 @@ export interface WorkspaceCapabilities {
   showUpscaleSteps: boolean;
   showUpscaleGuidance: boolean;
   showUpscaleSharpen: boolean;
+  showUpscaleReview: boolean;
+  showVideoUpscaleReview: boolean;
   showAudio: boolean;
   showLowMemory: boolean;
   showVideoUpscale: boolean;
@@ -92,9 +94,11 @@ export function workspaceCapabilities(context: WorkspaceContext | null, state: D
     showUpscaleSteps: showImageUpscale && visible.has('image_upscale_steps'),
     showUpscaleGuidance: showImageUpscale && visible.has('image_upscale_guidance'),
     showUpscaleSharpen: showImageUpscale && visible.has('image_upscale_sharpen'),
+    showUpscaleReview: showImageUpscale && visible.has('image_upscale_review'),
     showAudio: visible.has('audio'),
     showLowMemory: visible.has('low_memory'),
     showVideoUpscale: visible.has('video_upscale_enabled'),
     showVideoUpscaleFactor: visible.has('video_upscale_factor'),
+    showVideoUpscaleReview: visible.has('video_upscale_enabled') && visible.has('video_upscale_review'),
   };
 }

@@ -7,6 +7,7 @@ export { default as Toast } from './Toast.svelte';
 export { default as ToastContainer } from './ToastContainer.svelte';
 export { default as Modal } from './Modal.svelte';
 export { default as JobCard } from './JobCard.svelte';
+export { default as ReviewStage } from './ReviewStage.svelte';
 export { default as ModelStatusBadges } from './ModelStatusBadges.svelte';
 export { default as PathField } from './PathField.svelte';
 export { default as PromptFileField } from './PromptFileField.svelte';

@@ -58,6 +58,8 @@ class ImageGenerationRequest:
     upscale_save_pre: bool = False
     # Existing image an upscale job refines; set only by the upscale workflow.
     upscale_source: str | None = None
+    # Shows the small render before the upscale and returns whether to go on; set only when review is on.
+    review: Callable[[Image.Image], bool] | None = None
 
     # Reference image params
     image_path: str | None = None

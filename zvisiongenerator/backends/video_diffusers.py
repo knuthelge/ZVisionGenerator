@@ -205,6 +205,17 @@ def _filter_supported_kwargs(callable_obj: Any, kwargs: dict[str, Any]) -> dict[
     return {key: value for key, value in kwargs.items() if key in parameters}
 
 
+def _refuse_review(kwargs: dict[str, Any]) -> None:
+    """Raise when a review before upscaling is requested: the diffusers upscale has no half-size render to pause at.
+
+    Raises:
+        ValueError: If *kwargs* carries a ``review`` callable.
+    """
+
+    if kwargs.get("review") is not None:
+        raise ValueError("Review before upscaling is not supported by the diffusers video backend.")
+
+
 def _make_generator(torch: Any, seed: int | None) -> Any | None:
     """Create a deterministic generator when a seed is provided."""
 
@@ -444,6 +455,7 @@ class DiffusersVideoBackend:
         if model.text_to_video is None:
             raise RuntimeError("This loaded video model does not include a text-to-video pipeline.")
 
+        _refuse_review(kwargs)
         stage1_steps = kwargs.get("stage1_steps")
         if model.latent_upscaler is not None and stage1_steps is None:
             raise ValueError("stage1_steps must be provided when upscale is enabled")
@@ -502,6 +514,7 @@ class DiffusersVideoBackend:
         if model.image_to_video is None:
             raise RuntimeError("This loaded video model does not include an image-to-video pipeline.")
 
+        _refuse_review(kwargs)
         stage1_steps = kwargs.get("stage1_steps")
         if model.latent_upscaler is not None and stage1_steps is None:
             raise ValueError("stage1_steps must be provided when upscale is enabled")

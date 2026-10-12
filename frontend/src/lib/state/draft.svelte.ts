@@ -59,8 +59,10 @@ const DEFAULT_DRAFT: DraftState = {
   upscaleSteps: null,
   upscaleGuidance: null,
   upscaleSharpen: true,
+  upscaleReview: false,
   videoUpscaleEnabled: false,
   videoUpscaleFactor: 2,
+  videoUpscaleReview: false,
   enhancedPrompt: '',
   enhancedFrom: null,
   enhanceSettings: null,
@@ -174,8 +176,8 @@ export const SETTING_KEYS = [
   'seed', 'scheduler', 'firstSigma',
   'postprocessSharpenEnabled', 'postprocessSharpenAmount', 'postprocessContrastEnabled', 'postprocessContrastAmount',
   'postprocessSaturationEnabled', 'postprocessSaturationAmount',
-  'upscaleEnabled', 'upscaleFactor', 'upscaleDenoise', 'upscaleSteps', 'upscaleGuidance', 'upscaleSharpen',
-  'audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleFactor',
+  'upscaleEnabled', 'upscaleFactor', 'upscaleDenoise', 'upscaleSteps', 'upscaleGuidance', 'upscaleSharpen', 'upscaleReview',
+  'audio', 'lowMemory', 'videoUpscaleEnabled', 'videoUpscaleFactor', 'videoUpscaleReview',
 ] as const satisfies readonly (keyof DraftState)[];
 
 export type SettingKey = (typeof SETTING_KEYS)[number];

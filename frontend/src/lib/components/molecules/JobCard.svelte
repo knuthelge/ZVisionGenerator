@@ -55,7 +55,7 @@
 
   // ── Controls ─────────────────────────────────────────
 
-  const callbacks = $derived<Record<JobControlAction, ControlCallback | undefined>>({
+  const callbacks = $derived<Partial<Record<JobControlAction, ControlCallback>>>({
     pause: onpause, resume: onresume, next: onnext, repeat: onrepeat, quit: oncancel
   });
   const names = $derived<Record<JobControlAction, string>>({
@@ -64,6 +64,8 @@
     next: phase === 'enhance' ? 'Skip this rewrite'
       : job.stageName === 'upscale' && stageBars(job).length ? `Skip this ${noun} (the base ${noun} is discarded too)` : `Skip this ${noun}`,
     repeat: `Repeat this ${noun}`,
+    approve: 'Approve and upscale',
+    discard: `Discard this ${noun}`,
     quit: 'Cancel job'
   });
 

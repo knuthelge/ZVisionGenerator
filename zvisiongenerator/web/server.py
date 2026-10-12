@@ -6,8 +6,10 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import queue
 import random
+import stat
 import subprocess
 import threading
 import sys
@@ -24,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from PIL import Image, UnidentifiedImageError
 
-from zvisiongenerator.backends import get_backend_name, get_prompt_enhancer_session, supports_video_audio
+from zvisiongenerator.backends import get_backend_name, get_prompt_enhancer_session, supports_video_audio, supports_video_upscale_review
 from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu
 from zvisiongenerator.converters.convert_checkpoint import MODEL_TYPES
 from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_local
@@ -70,7 +72,8 @@ from zvisiongenerator.web.upscale_api import plan_upscale, upscale_json_request,
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
 from zvisiongenerator.web.model_delete import delete_lora, delete_model, model_delete_target
-from zvisiongenerator.web.job_contract import IMAGE_SUPPORTED_CONTROLS, UPSCALE_SUPPORTED_CONTROLS, VIDEO_SUPPORTED_CONTROLS
+from zvisiongenerator.review import review_enabled
+from zvisiongenerator.web.job_contract import UPSCALE_SUPPORTED_CONTROLS, image_supported_controls, video_supported_controls
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner, worker_runtime_context
 from zvisiongenerator.web.workspace_api import build_models_response, build_workspace_bootstrap_view, build_workspace_response
 from zvisiongenerator.web.workspace_contract import (
@@ -635,6 +638,22 @@ async def get_job_preview(job_id: str) -> Response:
     return Response(content=preview, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
+@app.get("/jobs/{job_id}/review")
+async def get_job_review(job_id: str) -> Response:
+    """Serve the small render of a video that waits for review as an mp4; ``v`` only busts the browser cache."""
+    try:
+        path = web_runner.get_job_review_path(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown job: {job_id}") from exc
+    try:
+        file_stat = os.stat(path) if path is not None else None
+    except FileNotFoundError, NotADirectoryError:  # the job resumed and removed its temporary files
+        file_stat = None
+    if file_stat is None or not stat.S_ISREG(file_stat.st_mode):
+        raise HTTPException(status_code=404, detail="No render is waiting for review.")
+    return FileResponse(path, stat_result=file_stat, media_type="video/mp4", headers={"Cache-Control": "no-store"})
+
+
 @app.get("/jobs/{job_id}/events")
 async def stream_job_events(job_id: str, request: Request) -> StreamingResponse:
     """Stream job progress as SSE frames for browser and programmatic consumers."""
@@ -713,7 +732,7 @@ def _default_workflow_for_mode(mode: str) -> str:
 
 
 def _build_workflow_contract() -> dict[str, Any]:
-    return build_workflow_contract(video_audio=supports_video_audio())
+    return build_workflow_contract(video_audio=supports_video_audio(), video_upscale_review=supports_video_upscale_review())
 
 
 def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
@@ -727,6 +746,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     # Workspace form lets a stale browser tab write to one root while Gallery and
     # /media serve another, which breaks previews and makes new assets disappear.
     output_dir = _resolve_output_dir(web_config.output_dir)
+    upscale = _optional_int(form, "upscale")
     args = argparse.Namespace(
         ratio=_choice_or_default(form, "ratio", web_config.image_ratios, app_config["generation"].get("default_ratio", "2:3")),
         size=None,
@@ -737,12 +757,13 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         steps=_optional_int(form, "steps"),
         guidance=_optional_float(form, "guidance"),
         scheduler=_optional_text(form, "scheduler"),
-        upscale=_optional_int(form, "upscale"),
+        upscale=upscale,
         upscale_denoise=_optional_float(form, "upscale_denoise"),
         upscale_steps=_optional_int(form, "upscale_steps"),
         upscale_guidance=_optional_float(form, "upscale_guidance"),
         upscale_sharpen=_checkbox(form, "upscale_sharpen", default=True),
         upscale_save_pre=_checkbox(form, "upscale_save_pre"),
+        review=bool(upscale) and _checkbox(form, "review"),
         image_path=_resolve_reference_image(form, output_dir),
         image_strength=_optional_float(form, "image_strength"),
         output=output_dir,
@@ -875,6 +896,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         output_dir=args.output,
         image_path=args.image_path,
     )
+    supported_controls = image_supported_controls(review=review_enabled(args))
     job_id = web_runner.submit_image_request_job(
         request=request,
         prompts_data=prompts_data,
@@ -885,11 +907,12 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         enhance_by_set=enhance_by_set,
         admission_check=_reject_while_busy,
         context=context,
+        supported_controls=supported_controls,
     )
     return {
         "job_id": job_id,
         "context": context,
-        "supported_controls": IMAGE_SUPPORTED_CONTROLS,
+        "supported_controls": supported_controls,
     }
 
 
@@ -907,6 +930,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     audio_enabled = _checkbox(form, "audio", default=True) and supports_video_audio()
     _prompt_source, prompt, _negative_prompt, prompts_data, enhance_by_set = _resolve_prompt_submission_with_enhance(form)
     enhance_by_set = enhance_by_set_for_mode(enhance_by_set, mode="video")
+    upscale = _optional_int(form, "upscale")
     args = argparse.Namespace(
         model=model_name,
         prompt=prompt,
@@ -927,11 +951,14 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         lora=None,
         lora_paths=[],
         lora_weights=[],
-        upscale=_optional_int(form, "upscale"),
+        upscale=upscale,
         upscale_steps=None,
         no_audio=not audio_enabled,
         audio=audio_enabled,
+        review=bool(upscale) and _checkbox(form, "review"),
     )
+    if review_enabled(args) and not supports_video_upscale_review():
+        raise HTTPException(status_code=400, detail="Review before upscaling is not available for video on this platform.")
     _apply_enhance_submission(args, form, mode="video", json_caption=False)
     if _WORKFLOW_DEFINITIONS[workflow]["requires_reference_image"] and image_path is None:
         raise ValueError("Image-to-video requires a reference image.")
@@ -1008,6 +1035,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         output_dir=args.output,
         image_path=image_path,
     )
+    supported_controls = video_supported_controls(review=review_enabled(args))
     job_id = web_runner.submit_video_request_job(
         request=request,
         prompts_data=prompts_data,
@@ -1017,11 +1045,12 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         enhance_by_set=enhance_by_set,
         admission_check=_reject_while_busy,
         context=context,
+        supported_controls=supported_controls,
     )
     return {
         "job_id": job_id,
         "context": context,
-        "supported_controls": VIDEO_SUPPORTED_CONTROLS,
+        "supported_controls": supported_controls,
     }
 
 

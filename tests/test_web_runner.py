@@ -632,6 +632,378 @@ class TestWebRunner:
         finally:
             runner.shutdown()
 
+    def test_shutdown_before_a_pause_still_ends_the_job(self, monkeypatch):
+        """A job that pauses right after shutdown must not block forever: the queued quit ends the pause."""
+        started = threading.Event()
+        proceed = threading.Event()
+        actions: list[str | None] = []
+
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+            progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
+            started.set()
+            assert proceed.wait(timeout=2.0)
+            skip_signal.wait_for_key()
+            actions.append(skip_signal.consume())
+            progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
+
+        monkeypatch.setattr(web_runner_module, "run_batch", _fake_run_batch)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
+            assert started.wait(timeout=1.0)
+
+            runner.shutdown()
+            proceed.set()
+
+            snapshot = _wait_for_status(runner, job_id, "cancelled", timeout=2.0)
+            assert snapshot["status"] == "cancelled"
+            assert actions == ["quit"]
+        finally:
+            proceed.set()
+            runner.shutdown()
+
+    @staticmethod
+    def _review_batch(reached: threading.Event, decisions: list[str], *, rounds: int = 1):
+        """Return a fake run_batch that waits for the review decision as the image runner does."""
+
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+            progress_callback({"type": "batch_started", "mode": "image", "total_iterations": rounds, "total_runs": 1})
+            for iteration in range(1, rounds + 1):
+                progress_callback({"type": "prompt_started", "mode": "image", "ran_iterations": iteration, "total_iterations": rounds, "prompt": "p"})
+                skip_signal.begin_review()
+                progress_callback(
+                    {"type": "job_paused", "mode": "image", "completed_iterations": iteration - 1, "total_iterations": rounds, "review": {"iteration": iteration}, "preview": Image.new("RGB", (8, 8))}
+                )
+                reached.set()
+                decision = skip_signal.wait_for_review()
+                decisions.append(decision)
+                progress_callback({"type": "job_resumed", "mode": "image", "completed_iterations": iteration - 1, "total_iterations": rounds})
+                if decision == "quit":
+                    progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": iteration - 1, "total_iterations": rounds})
+                    return
+                progress_callback({"type": "generation_finished", "mode": "image", "status": "skipped" if decision == "discard" else "success", "ran_iterations": iteration})
+            progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": rounds, "total_iterations": rounds})
+
+        return _fake_run_batch
+
+    def test_review_job_lists_approve_and_discard_in_its_controls(self, monkeypatch):
+        monkeypatch.setattr(web_runner_module, "run_batch", lambda *a, **kw: None)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            plain = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2))
+            reviewed = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2, review=True))
+            no_upscale = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(review=True))
+
+            assert runner.get_job_snapshot(plain)["supported_controls"] == ["next", "pause", "resume", "repeat", "quit"]
+            assert runner.get_job_snapshot(reviewed)["supported_controls"] == ["next", "pause", "resume", "repeat", "approve", "discard", "quit"]
+            assert "approve" not in runner.get_job_snapshot(no_upscale)["supported_controls"]
+        finally:
+            runner.shutdown()
+
+    def test_decisions_are_refused_while_no_review_waits(self, monkeypatch):
+        started = threading.Event()
+        release = threading.Event()
+
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+            progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
+            started.set()
+            release.wait(timeout=1.0)
+
+        monkeypatch.setattr(web_runner_module, "run_batch", _fake_run_batch)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2, review=True))
+            assert started.wait(timeout=1.0)
+
+            for action in ("approve", "discard"):
+                with pytest.raises(web_runner_module.UnsupportedJobControlError, match="No render is waiting"):
+                    runner.queue_job_control(job_id, action)
+            assert runner.get_job_snapshot(job_id)["review"] is None
+        finally:
+            release.set()
+            runner.shutdown()
+
+    @pytest.mark.parametrize(("action", "decision"), [("approve", "approve"), ("discard", "discard")])
+    def test_a_decision_ends_the_review_and_the_second_one_conflicts(self, monkeypatch, action, decision):
+        reached = threading.Event()
+        decisions: list[str] = []
+        monkeypatch.setattr(web_runner_module, "run_batch", self._review_batch(reached, decisions))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2, review=True))
+            assert reached.wait(timeout=1.0)
+            snapshot = runner.get_job_snapshot(job_id)
+            assert snapshot["status"] == "paused"
+            assert snapshot["paused"] is True
+            assert snapshot["review"] == {"iteration": 1}
+            assert snapshot["preview_version"] == 1
+            assert runner.get_job_preview(job_id) is not None
+
+            assert runner.queue_job_control(job_id, action) == {"job_id": job_id, "action": action, "status": "queued"}
+            with pytest.raises(web_runner_module.UnsupportedJobControlError):
+                runner.queue_job_control(job_id, "discard" if action == "approve" else "approve")
+
+            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+            assert decisions == [decision]
+            assert runner.get_job_snapshot(job_id)["review"] is None
+        finally:
+            runner.shutdown()
+
+    def test_only_decisions_and_quit_are_accepted_during_a_review(self, monkeypatch):
+        reached = threading.Event()
+        decisions: list[str] = []
+        monkeypatch.setattr(web_runner_module, "run_batch", self._review_batch(reached, decisions))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2, review=True))
+            assert reached.wait(timeout=1.0)
+
+            for action in ("resume", "next", "pause", "repeat"):
+                with pytest.raises(web_runner_module.UnsupportedJobControlError):
+                    runner.queue_job_control(job_id, action)
+            assert runner.get_job_snapshot(job_id)["review"] == {"iteration": 1}
+            assert decisions == []
+
+            runner.queue_job_control(job_id, "approve")
+            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+        finally:
+            runner.shutdown()
+
+    def test_quit_ends_a_review_and_latches_it(self, monkeypatch):
+        reached = threading.Event()
+        decisions: list[str] = []
+        monkeypatch.setattr(web_runner_module, "run_batch", self._review_batch(reached, decisions))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2, review=True))
+            assert reached.wait(timeout=1.0)
+
+            runner.queue_job_control(job_id, "quit")
+            with pytest.raises(web_runner_module.UnsupportedJobControlError):
+                runner.queue_job_control(job_id, "approve")
+
+            assert _wait_for_status(runner, job_id, "cancelled")["status"] == "cancelled"
+            assert decisions == ["quit"]
+        finally:
+            runner.shutdown()
+
+    def test_each_review_of_a_batch_waits_for_its_own_decision(self, monkeypatch):
+        reached = threading.Event()
+        decisions: list[str] = []
+        monkeypatch.setattr(web_runner_module, "run_batch", self._review_batch(reached, decisions, rounds=2))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2, review=True))
+            assert reached.wait(timeout=1.0)
+            reached.clear()
+            runner.queue_job_control(job_id, "discard")
+            assert reached.wait(timeout=1.0)
+            deadline = time.monotonic() + 1.0
+            while runner.get_job_snapshot(job_id)["review"] != {"iteration": 2} and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert runner.get_job_snapshot(job_id)["review"] == {"iteration": 2}
+            runner.queue_job_control(job_id, "approve")
+
+            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+            assert decisions == ["discard", "approve"]
+        finally:
+            runner.shutdown()
+
+    def test_snapshot_and_events_carry_no_filesystem_path_for_a_review(self, monkeypatch, tmp_path):
+        reached = threading.Event()
+        monkeypatch.setattr(web_runner_module, "run_batch", self._review_batch(reached, []))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2, review=True, output=str(tmp_path)))
+            assert reached.wait(timeout=1.0)
+
+            paused = runner.get_job_snapshot(job_id)["last_event"]
+            assert paused["type"] == "job_paused"
+            assert paused["review"] == {"iteration": 1}
+            assert "preview" not in paused
+            assert paused["preview_version"] == 1
+            assert str(tmp_path) not in json.dumps(runner.get_job_snapshot(job_id)["review"])
+        finally:
+            runner.shutdown()
+
+    def test_a_video_review_path_stays_on_the_record_and_out_of_events_and_snapshots(self, monkeypatch, tmp_path):
+        reached = threading.Event()
+        decisions: list[str] = []
+        small_render = str(tmp_path / "ziv-review-x" / "small-render.mp4")
+
+        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, progress_callback, skip_signal):
+            progress_callback({"type": "batch_started", "mode": "video", "total_iterations": 1, "total_runs": 1})
+            skip_signal.begin_review()
+            progress_callback({"type": "job_paused", "mode": "video", "completed_iterations": 0, "total_iterations": 1, "review": {"iteration": 1}, "review_path": small_render})
+            reached.set()
+            decisions.append(skip_signal.wait_for_review())
+            progress_callback({"type": "job_resumed", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
+            progress_callback({"type": "generation_finished", "mode": "video", "status": "skipped"})
+            progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
+
+        monkeypatch.setattr(web_runner_module, "run_video_batch", _fake_run_video_batch)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args(upscale=2, review=True, output=str(tmp_path)))
+            assert reached.wait(timeout=1.0)
+
+            snapshot = runner.get_job_snapshot(job_id)
+            assert snapshot["review"] == {"iteration": 1}
+            assert snapshot["last_event"]["type"] == "job_paused"
+            assert "review_path" not in snapshot["last_event"]
+            assert small_render not in json.dumps(snapshot)
+            assert runner._get_job(job_id).review_path == small_render
+
+            runner._get_job(job_id).control_signal.set_review_decision("discard")
+            final = _wait_for_status(runner, job_id, "completed")
+
+            assert decisions == ["discard"]
+            assert runner._get_job(job_id).review_path is None
+            assert small_render not in json.dumps(final)
+            assert all("review_path" not in event for event in runner._get_job(job_id).history)
+        finally:
+            runner.shutdown()
+
+    def test_the_review_stays_in_the_snapshot_between_the_decision_and_job_resumed(self, monkeypatch):
+        """A browser reconnecting after the first decision still shows the review, not a plain pause."""
+        reached = threading.Event()
+        proceed = threading.Event()
+
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+            progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
+            skip_signal.begin_review()
+            progress_callback({"type": "job_paused", "mode": "image", "completed_iterations": 0, "total_iterations": 1, "review": {"iteration": 1}, "preview": Image.new("RGB", (8, 8))})
+            reached.set()
+            skip_signal.wait_for_review()
+            proceed.wait(timeout=2.0)
+            progress_callback({"type": "job_resumed", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
+            progress_callback({"type": "generation_finished", "mode": "image", "status": "success", "ran_iterations": 1})
+            progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
+
+        monkeypatch.setattr(web_runner_module, "run_batch", _fake_run_batch)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2, review=True))
+            assert reached.wait(timeout=1.0)
+            runner.queue_job_control(job_id, "approve")
+
+            snapshot = runner.get_job_snapshot(job_id)
+            assert snapshot["paused"] is True
+            assert snapshot["review"] == {"iteration": 1}
+            with pytest.raises(web_runner_module.UnsupportedJobControlError):
+                runner.queue_job_control(job_id, "discard")
+            with pytest.raises(web_runner_module.UnsupportedJobControlError):
+                runner.queue_job_control(job_id, "resume")
+
+            proceed.set()
+            assert _wait_for_status(runner, job_id, "completed")["review"] is None
+        finally:
+            proceed.set()
+            runner.shutdown()
+
+    def test_the_next_review_of_a_batch_opens_a_fresh_latch(self, monkeypatch):
+        reached = threading.Event()
+        decisions: list[str] = []
+        monkeypatch.setattr(web_runner_module, "run_batch", self._review_batch(reached, decisions, rounds=2))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2, review=True))
+            assert reached.wait(timeout=1.0)
+            runner.queue_job_control(job_id, "approve")
+            deadline = time.monotonic() + 1.0
+            while runner.get_job_snapshot(job_id)["review"] != {"iteration": 2} and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert runner._get_job(job_id).review_decided is False
+
+            runner.queue_job_control(job_id, "discard")
+            assert _wait_for_status(runner, job_id, "completed")["status"] == "completed"
+            assert decisions == ["approve", "discard"]
+        finally:
+            runner.shutdown()
+
+    def test_video_job_lists_approve_and_discard_with_a_review(self, monkeypatch):
+        monkeypatch.setattr(web_runner_module, "run_video_batch", lambda *a, **kw: None)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            plain = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args(upscale=2))
+            reviewed = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args(upscale=2, review=True))
+            no_upscale = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args(review=True))
+
+            assert runner.get_job_snapshot(plain)["supported_controls"] == ["quit"]
+            assert runner.get_job_snapshot(reviewed)["supported_controls"] == ["approve", "discard", "quit"]
+            assert runner.get_job_snapshot(no_upscale)["supported_controls"] == ["quit"]
+        finally:
+            runner.shutdown()
+
+    def test_the_review_path_is_available_only_while_the_review_is_pending(self, monkeypatch, tmp_path):
+        reached = threading.Event()
+        proceed = threading.Event()
+        small_render = str(tmp_path / "small-render.mp4")
+
+        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, progress_callback, skip_signal):
+            progress_callback({"type": "batch_started", "mode": "video", "total_iterations": 1, "total_runs": 1})
+            skip_signal.begin_review()
+            progress_callback({"type": "job_paused", "mode": "video", "completed_iterations": 0, "total_iterations": 1, "review": {"iteration": 1}, "review_path": small_render})
+            reached.set()
+            skip_signal.wait_for_review()
+            proceed.wait(timeout=2.0)
+            progress_callback({"type": "job_resumed", "mode": "video", "completed_iterations": 0, "total_iterations": 1})
+            progress_callback({"type": "generation_finished", "mode": "video", "status": "skipped"})
+            progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
+
+        monkeypatch.setattr(web_runner_module, "run_video_batch", _fake_run_video_batch)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args(upscale=2, review=True, output=str(tmp_path)))
+            assert reached.wait(timeout=1.0)
+            assert runner.get_job_review_path(job_id) == small_render
+
+            runner.queue_job_control(job_id, "discard")
+            assert runner.get_job_review_path(job_id) == small_render  # the file lives until job_resumed
+
+            proceed.set()
+            _wait_for_status(runner, job_id, "completed")
+            assert runner.get_job_review_path(job_id) is None
+            with pytest.raises(KeyError):
+                runner.get_job_review_path("nope")
+        finally:
+            proceed.set()
+            runner.shutdown()
+
+    def test_shutdown_ends_a_waiting_review(self, monkeypatch):
+        reached = threading.Event()
+        decisions: list[str] = []
+        monkeypatch.setattr(web_runner_module, "run_batch", self._review_batch(reached, decisions))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args(upscale=2, review=True))
+        assert reached.wait(timeout=1.0)
+
+        runner.shutdown()
+
+        assert _wait_for_status(runner, job_id, "cancelled")["status"] == "cancelled"
+        assert decisions == ["quit"]
+
+    def test_shutdown_ends_a_paused_image_job(self, monkeypatch):
+        paused = threading.Event()
+
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+            progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
+            progress_callback({"type": "job_paused", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
+            paused.set()
+            skip_signal.wait_for_key()
+            if skip_signal.consume() == "quit":
+                progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
+
+        monkeypatch.setattr(web_runner_module, "run_batch", _fake_run_batch)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
+        assert paused.wait(timeout=1.0)
+
+        runner.shutdown()
+
+        assert _wait_for_status(runner, job_id, "cancelled")["status"] == "cancelled"
+
     def test_video_jobs_accept_quit_and_refuse_other_controls(self, monkeypatch):
         """A running video job can be cancelled; its batch sees the queued Quit and ends the job."""
         started = threading.Event()
@@ -1166,3 +1538,63 @@ def test_shutdown_cancels_queued_jobs_without_running_them():
         snapshot = runner.get_job_snapshot(job_id)
         assert snapshot["status"] == "cancelled"
         assert snapshot["last_event"]["reason"] == "removed"
+
+
+def test_a_video_review_over_http_serves_the_small_render_until_the_job_resumes(monkeypatch, tmp_path):
+    """Drive two reviews of one batch through the real routes: serve, reconnect, refuse a second decision, then 404."""
+    renders = [tmp_path / "first.mp4", tmp_path / "second.mp4"]
+    renders[0].write_bytes(b"first-render")
+    renders[1].write_bytes(b"second-render")
+    reached = [threading.Event(), threading.Event()]
+    proceed = [threading.Event(), threading.Event()]
+    decisions: list[str] = []
+
+    def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, progress_callback, skip_signal):
+        progress_callback({"type": "batch_started", "mode": "video", "total_iterations": 2, "total_runs": 1})
+        for index, render in enumerate(renders):
+            skip_signal.begin_review()
+            progress_callback({"type": "job_paused", "mode": "video", "completed_iterations": index, "total_iterations": 2, "review": {"iteration": index + 1}, "review_path": str(render)})
+            reached[index].set()
+            decisions.append(skip_signal.wait_for_review())
+            proceed[index].wait(timeout=2.0)
+            progress_callback({"type": "job_resumed", "mode": "video", "completed_iterations": index, "total_iterations": 2})
+            progress_callback({"type": "generation_finished", "mode": "video", "status": "skipped"})
+        progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 2, "total_iterations": 2})
+
+    monkeypatch.setattr(web_runner_module, "run_video_batch", _fake_run_video_batch)
+    runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+    monkeypatch.setattr(web_server, "web_runner", runner)
+    try:
+        job_id = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args(upscale=2, review=True, output=str(tmp_path)))
+        with TestClient(web_server.app) as client:
+            assert reached[0].wait(timeout=1.0)
+            first = client.get(f"/jobs/{job_id}/review?v=1")
+            assert (first.status_code, first.content, first.headers["cache-control"]) == (200, b"first-render", "no-store")
+            # A reconnecting browser sees the review in the snapshot, without any filesystem path.
+            snapshot = client.get(f"/jobs/{job_id}")
+            assert snapshot.json()["review"] == {"iteration": 1}
+            assert str(tmp_path) not in snapshot.text
+            assert client.post(f"/jobs/{job_id}/controls/resume").status_code == 409
+            assert client.post(f"/jobs/{job_id}/controls/pause").status_code == 409
+
+            assert client.post(f"/jobs/{job_id}/controls/approve").status_code == 200
+            assert client.post(f"/jobs/{job_id}/controls/discard").status_code == 409
+            assert client.get(f"/jobs/{job_id}/review?v=1").content == b"first-render"
+            assert client.get(f"/jobs/{job_id}").json()["review"] == {"iteration": 1}
+
+            proceed[0].set()
+            assert reached[1].wait(timeout=1.0)
+            second = client.get(f"/jobs/{job_id}/review?v=2")
+            assert second.content == b"second-render"
+            assert client.get(f"/jobs/{job_id}").json()["review"] == {"iteration": 2}
+
+            assert client.post(f"/jobs/{job_id}/controls/discard").status_code == 200
+            proceed[1].set()
+            assert _wait_for_status(runner, job_id, "completed")["review"] is None
+            assert client.get(f"/jobs/{job_id}/review?v=2").status_code == 404
+            assert client.get("/jobs/unknown-job/review").status_code == 404
+        assert decisions == ["approve", "discard"]
+    finally:
+        proceed[0].set()
+        proceed[1].set()
+        runner.shutdown()

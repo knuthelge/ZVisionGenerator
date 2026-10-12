@@ -116,6 +116,8 @@ export const APP_SHORTCUTS: readonly ShortcutGroup[] = [
       { keys: ['P'], label: 'Pause or resume the running job' },
       { keys: ['N'], label: 'Skip to the next image' },
       { keys: ['R'], label: 'Repeat the current image' },
+      { keys: ['Y'], label: 'Approve the small render for upscaling (during a review)' },
+      { keys: ['N'], label: 'Discard the small render (during a review)' },
     ],
   },
   {

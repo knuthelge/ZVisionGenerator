@@ -1,6 +1,9 @@
 <script lang="ts">
   import { router } from '$lib/state/router.svelte';
   import { draft } from '$lib/state/draft.svelte';
+  import { jobStore } from '$lib/state/job.svelte';
+  import { isReviewing } from '$lib/state/jobView';
+  import { Badge } from '$lib/components/atoms';
   import type { PageId, Workflow } from '$lib/types';
 
   interface Props {
@@ -22,6 +25,8 @@
     { id: 'img2vid', label: 'Image to Video' },
     { id: 'txt2vid', label: 'Text to Video' }
   ];
+
+  const reviewWaiting = $derived(isReviewing(jobStore.current));
 
   const logoSrc = '/app-static/ziv-icon.svg';
 </script>
@@ -60,6 +65,7 @@
         onclick={() => router.navigate(item.id)}
       >
         {item.label}
+        {#if item.id === 'workspace' && reviewWaiting}<Badge variant="warning">Review</Badge>{/if}
       </button>
     {/each}
   </nav>
@@ -74,7 +80,7 @@
   .workflow-tabs { overflow-x: auto; }
   .main-tabs { flex-shrink: 0; }
   .brand { color: var(--color-text-primary); font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; letter-spacing: -0.01em; }
-  .nav-tab { display: flex; align-items: center; padding: 0 10px; border-bottom: 2px solid transparent; white-space: nowrap; font-size: var(--text-ui); font-weight: 600; color: var(--color-text-muted); transition: color 0.12s ease, border-color 0.12s ease; }
+  .nav-tab { display: flex; align-items: center; gap: 6px; padding: 0 10px; border-bottom: 2px solid transparent; white-space: nowrap; font-size: var(--text-ui); font-weight: 600; color: var(--color-text-muted); transition: color 0.12s ease, border-color 0.12s ease; }
   .nav-tab:hover { color: var(--color-text-primary); }
   .nav-tab:focus-visible { outline-offset: -2px; }
   .nav-tab.active { border-color: var(--color-primary-main); color: var(--color-text-primary); }

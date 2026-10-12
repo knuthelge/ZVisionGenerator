@@ -3,6 +3,8 @@
   import { router } from '$lib/state/router.svelte';
   import { getConfig } from '$lib/api/config';
   import { shouldApplyStartupView } from './startupRouting';
+  import { jobStore } from '$lib/state/job.svelte';
+  import { documentTitle, isReviewing } from '$lib/state/jobView';
   import type { PageId } from '$lib/types';
   import Spinner from '$lib/components/atoms/Spinner.svelte';
   import TopNav from '$lib/components/organisms/TopNav.svelte';
@@ -17,6 +19,11 @@
   const _validPages: PageId[] = ['workspace', 'prompts', 'gallery', 'config', 'models'];
 
   let ready = $state(false);
+
+  const baseTitle = document.title;
+  $effect(() => {
+    document.title = documentTitle(baseTitle, isReviewing(jobStore.current));
+  });
 
   onMount(async () => {
     // Only apply startup_view when no explicit URL destination was specified

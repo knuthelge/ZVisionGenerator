@@ -144,7 +144,9 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
   if (isVideo) {
     if (settings.audio !== undefined && !checked(settings, 'audio')) args.push('--no-audio');
     if (settings.low_memory !== undefined && !checked(settings, 'low_memory')) args.push('--no-low-memory');
-    flag('--upscale', text(settings, 'video_upscale_factor') ?? text(settings, 'upscale'));
+    const upscale = text(settings, 'video_upscale_factor') ?? text(settings, 'upscale');
+    flag('--upscale', upscale);
+    if (upscale !== undefined && checked(settings, 'review')) args.push('--review');
   } else {
     amountToggle(args, settings, 'sharpen', true);
     amountToggle(args, settings, 'contrast', false);
@@ -156,6 +158,7 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
       flag('--upscale-steps', text(settings, 'upscale_steps'));
       flag('--upscale-guidance', text(settings, 'upscale_guidance'));
       if (first(settings, 'upscale_sharpen') === 'false') args.push('--no-upscale-sharpen');
+      if (checked(settings, 'review')) args.push('--review');
     }
   }
 

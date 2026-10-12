@@ -101,3 +101,9 @@ if (!('ResizeObserver' in globalThis)) {
   }
   (globalThis as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver = MockResizeObserver;
 }
+
+// jsdom does not implement media playback; its stubs only log "Not implemented". Quiet no-ops keep test output clean.
+if (typeof HTMLMediaElement !== 'undefined') {
+  HTMLMediaElement.prototype.pause = function pause(): void {};
+  HTMLMediaElement.prototype.load = function load(): void {};
+}

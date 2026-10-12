@@ -199,6 +199,18 @@ def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorking
     return StageOutcome.success
 
 
+def review_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
+    """Show the small render for review before the upscale; a discard skips the generation.
+
+    No-op if request.review is None or no image exists.
+    """
+    if request.review is None or artifacts.image is None:
+        return StageOutcome.success
+    if not request.review(artifacts.image):
+        return StageOutcome.skipped
+    return StageOutcome.success
+
+
 def upscale_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> StageOutcome:
     """Lanczos resize + optional CAS pre-sharpen + i2i refinement.
 

@@ -1,5 +1,7 @@
 import type { ActiveJobState, JobControlAction, JobPhase } from '$lib/types';
+import { jobReviewUrl } from '$lib/api/workspace';
 import { phaseSeconds } from './jobPhases';
+import { checked } from './jobSettings';
 
 /** What the job card says about a job, derived from its state. Every function here is pure. */
 
@@ -60,10 +62,12 @@ export function isSteppedStage(name: string): boolean {
 }
 
 /**
- * What the current item is doing: getting ready for its first step (or for the next pass), running steps, or
- * finishing up after its last step (decoding, post-processing and writing the file).
+ * What the current item is doing: getting ready for its first step (or for the next pass), running steps,
+ * finishing up after its last step (decoding, post-processing and writing the file), or waiting for the user to
+ * review its small render. A waiting review wins over finishing, which its `review` stage would otherwise give.
  */
-export function itemActivity(job: ActiveJobState): 'starting' | 'stepping' | 'finishing' {
+export function itemActivity(job: ActiveJobState): 'starting' | 'stepping' | 'finishing' | 'reviewing' {
+  if (job.review) return 'reviewing';
   const stepped = (job.stageNames ?? []).filter(isSteppedStage);
   const stepsRan = Object.keys(job.stageSteps ?? {}).length > 0;
   // A later non-stepped stage (contrast, sharpen, save) after the denoising passes.
@@ -203,6 +207,7 @@ export function headline(job: ActiveJobState): string {
   if (tone === 'completed') return total > 1 ? `Finished ${total} ${noun}s` : 'Finished';
   if (tone === 'stale') return 'Reconnecting…';
   if (tone === 'paused') {
+    if (job.review) return 'Waiting for your review';
     if (!generating) return phase === 'enhance' ? 'Paused while enhancing prompts' : 'Paused';
     if (total === 1) return 'Paused';
     return job.itemFinished ? `Paused after ${noun} ${index + 1} of ${total}` : `Paused before ${noun} ${index + 1} of ${total}`;
@@ -238,6 +243,7 @@ function supports(job: ActiveJobState, action: JobControlAction): boolean {
  */
 export function jobControls(job: ActiveJobState): JobControls {
   if (!isActive(job)) return { job: [], item: [] };
+  if (job.review) return { job: supports(job, 'quit') ? ['quit'] : [], item: [] };
   const phase = jobPhase(job);
   const started = job.status !== 'queued' && phase !== 'queue';
   const jobScope: JobControlAction[] = [];
@@ -257,6 +263,59 @@ export function jobControls(job: ActiveJobState): JobControls {
     }
   }
   return { job: jobScope, item };
+}
+
+/** Whether the job is waiting for the user to approve or discard a small render. */
+export function isReviewing(job: ActiveJobState | null | undefined): boolean {
+  return !!job && isActive(job) && !!job.review;
+}
+
+/** The decisions the user can make now about the render under review, in display order; empty outside a review. */
+export function reviewDecisions(job: ActiveJobState): ('approve' | 'discard')[] {
+  if (!isReviewing(job)) return [];
+  return (['approve', 'discard'] as const).filter((action) => supports(job, action));
+}
+
+/** Pixel size of a render, as shown in the review line. */
+export interface ReviewSize {
+  width: number;
+  height: number;
+}
+
+/** The factor an image job upscales by, read from the settings it was submitted with. */
+export function reviewFactor(job: ActiveJobState): number | null {
+  const value = job.settings?.upscale;
+  const factor = Number(Array.isArray(value) ? value[0] : value);
+  return Number.isFinite(factor) && factor > 0 ? factor : null;
+}
+
+/** The video under review, served by the job's review route; null for an image, whose render is the job preview. */
+export function reviewVideoUrl(job: ActiveJobState): string | null {
+  if (!isReviewing(job) || !isVideo(job)) return null;
+  return jobReviewUrl(job.job_id, job.review?.iteration ?? 0);
+}
+
+/** Whether the video under review keeps its sound: only when the job was submitted with Audio on. */
+export function reviewHasSound(job: ActiveJobState): boolean {
+  return !!job.settings && job.settings.audio !== undefined && checked(job.settings, 'audio');
+}
+
+/**
+ * The line under the render being reviewed: its position in the job, then the small size and the size it upscales to.
+ *
+ * A size that is not known yet is left out, so the line never shows a guess.
+ */
+export function reviewLine(job: ActiveJobState, size: ReviewSize | null): string {
+  const position = `Review ${job.review?.iteration ?? iterations(job).index + 1} of ${iterations(job).total}`;
+  if (!size || !(size.width > 0) || !(size.height > 0)) return position;
+  const factor = reviewFactor(job);
+  const small = `${size.width}×${size.height}`;
+  return factor ? `${position} · ${small} → ${size.width * factor}×${size.height * factor}` : `${position} · ${small}`;
+}
+
+/** The browser tab title: the review marker first while a render waits, otherwise the base title. */
+export function documentTitle(base: string, reviewing: boolean): string {
+  return reviewing ? `⏸ Review · ${base}` : base;
 }
 
 function generateLabel(job: ActiveJobState): string {

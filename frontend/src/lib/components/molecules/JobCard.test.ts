@@ -376,6 +376,30 @@ describe('JobCard', () => {
       expect(handlers[handler]).toHaveBeenCalledWith('job-card');
     });
 
+    describe('while a review waits', () => {
+      const REVIEW_CONTROLS = ['next', 'pause', 'resume', 'repeat', 'approve', 'discard', 'quit'];
+      const reviewing = { status: 'paused', paused: true, review: { iteration: 2 }, supported_controls: REVIEW_CONTROLS } as const;
+
+      it('keeps only Stop on the card', () => {
+        mountCard({ ...reviewing });
+        expect(control('quit')).not.toBeNull();
+        for (const name of ['pause-resume', 'next', 'repeat', 'approve', 'discard']) expect(control(name)).toBeNull();
+      });
+
+      it.each(['p', 'r', 'n', 'y'])('does nothing for %s', (key) => {
+        const handlers = mountCard({ ...reviewing });
+        press(key);
+        for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
+      });
+
+      it('still stops the job with Esc twice', () => {
+        const handlers = mountCard({ ...reviewing });
+        press('Escape');
+        press('Escape');
+        expect(handlers.oncancel).toHaveBeenCalledWith('job-card');
+      });
+    });
+
     it('resumes a paused job with P', () => {
       const handlers = mountCard({ status: 'paused', paused: true });
       press('p');

@@ -23,6 +23,8 @@ from zvisiongenerator.core.progress_events import make_prompt_enhanced_callback 
 from zvisiongenerator.core.progress_events import make_step_progress_callback as _make_step_progress_callback
 from zvisiongenerator.core.progress_events import run_workflow_with_progress as _run_workflow_with_progress
 from zvisiongenerator.core.types import StageOutcome
+from zvisiongenerator.image_review import make_image_review
+from zvisiongenerator.review import ReviewOutcome, review_enabled
 from zvisiongenerator.utils import generate_filename, format_generation_info
 from zvisiongenerator.utils.alignment import round_to_alignment
 from zvisiongenerator.utils.config import resolve_scheduler_class, sharpening_amounts
@@ -40,6 +42,30 @@ class _QuitBatch(Exception):
     level in run_batch(). This pattern exists because Python has no
     labeled break — the exception provides clean multi-level loop exit.
     """
+
+
+def _active_seconds(started: float, review: ReviewOutcome) -> float:
+    """Return the seconds since *started* without the time spent waiting on a review."""
+    return time.time() - started - review.wait_seconds
+
+
+def _pause_until_resumed(skip: SkipSignal, progress_callback: ProgressCallback | None, completed_iterations: int, total_iterations: int) -> str | None:
+    """Pause the job until a key press or Resume, and return the action queued while it was paused (``"quit"`` or ``None``)."""
+    _emit_progress(progress_callback, "job_paused", mode="image", completed_iterations=completed_iterations, total_iterations=total_iterations)
+    print("\n⏸ Paused. Press any key to continue...")
+    skip.wait_for_key()
+    resume_action = skip.consume()
+    _emit_progress(progress_callback, "job_resumed", mode="image", completed_iterations=completed_iterations, total_iterations=total_iterations)
+    print("▶ Resumed.\n")
+    return resume_action
+
+
+def _announce_repeat(progress_callback: ProgressCallback | None, completed_iterations: int, total_iterations: int, seed_min: int, seed_max: int) -> int:
+    """Announce a repeat of the current prompt and return the new seed to draw it with."""
+    seed = random.randint(seed_min, seed_max)
+    _emit_progress(progress_callback, "generation_repeat", mode="image", completed_iterations=completed_iterations, total_iterations=total_iterations)
+    print("\n🔁 Repeating prompt with new seed...\n")
+    return seed
 
 
 def run_batch(
@@ -68,7 +94,8 @@ def run_batch(
         skip_signal: The job's control signal; the caller owns its key listener (``start``/``stop``).
 
     Raises:
-        ValueError: When *plan* was cancelled or does not match the batch size.
+        ValueError: When *plan* was cancelled or does not match the batch size, or a review is requested without
+            *skip_signal*.
         RuntimeError: When *plan*'s iteration order differs from the batch loop.
     """
 
@@ -124,6 +151,8 @@ def run_batch(
     # Calculate total iterations for progress tracking
     total_iterations = args.runs * sum(len(prompts) for prompts in prompts_data.values())
     plan.require_runnable(total_iterations)
+    if review_enabled(args) and skip_signal is None:
+        raise ValueError("A review before upscaling needs a skip_signal to carry the decision.")
     if total_iterations == 0:
         print("No active prompt sets found. Exiting.")
         _emit_progress(progress_callback, "batch_completed", mode="image", total_iterations=0, completed_iterations=0)
@@ -248,17 +277,13 @@ def run_batch(
                         # skip/repeat have no generation to act on yet, so they are dropped.
                         pending_action = skip.consume()
                         if pending_action == "pause":
-                            _emit_progress(progress_callback, "job_paused", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
-                            print("\n⏸ Paused. Press any key to continue...")
-                            skip.wait_for_key()
-                            pending_action = skip.consume()
-                            _emit_progress(progress_callback, "job_resumed", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
-                            print("▶ Resumed.\n")
+                            pending_action = _pause_until_resumed(skip, progress_callback, len(image_times), total_iterations)
                         if pending_action == "quit":
                             print("\n⏹ Quitting batch...")
                             _emit_progress(progress_callback, "batch_cancelled", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
                             raise _QuitBatch()
                         _img_start = time.time()
+                        review_outcome = ReviewOutcome()
                         _emit_progress(
                             progress_callback,
                             "generation_started",
@@ -310,6 +335,18 @@ def run_batch(
                             first_sigma=getattr(args, "first_sigma", None),
                             json_prompt=getattr(args, "json_prompt_enabled", False),
                             skip_signal=skip,
+                            review=(
+                                make_image_review(
+                                    skip,
+                                    review_outcome,
+                                    progress_callback=progress_callback,
+                                    ran_iterations=ran_iterations,
+                                    completed_iterations=lambda: len(image_times),
+                                    total_iterations=total_iterations,
+                                )
+                                if review_enabled(args)
+                                else None
+                            ),
                             step_callback=_make_step_progress_callback(
                                 progress_callback,
                                 mode="image",
@@ -381,14 +418,26 @@ def run_batch(
                                 event_context=event_context,
                                 status="skipped",
                                 filename=artifacts.filename,
-                                generation_time=time.time() - _img_start,
+                                generation_time=_active_seconds(_img_start, review_outcome),
                                 output_path=artifacts.filepath,
                             )
-                            warnings.warn("Generation skipped by workflow stage.")
-                            image_times.append(time.time() - _img_start)
-                            if skip.consume() == "quit":
+                            if not review_outcome.declined:
+                                warnings.warn("Generation skipped by workflow stage.")
+                            image_times.append(_active_seconds(_img_start, review_outcome))
+                            skipped_action = skip.consume()
+                            if skipped_action == "quit":
                                 _emit_progress(progress_callback, "batch_cancelled", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
                                 raise _QuitBatch()
+                            # A discarded render ends the image like a finished one: a Pause or Repeat queued
+                            # meanwhile takes effect now, as after a saved image.
+                            if review_outcome.decision == "discard" and skipped_action == "pause":
+                                if _pause_until_resumed(skip, progress_callback, len(image_times), total_iterations) == "quit":
+                                    _emit_progress(progress_callback, "batch_cancelled", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
+                                    raise _QuitBatch()
+                            elif review_outcome.decision == "discard" and skipped_action == "repeat":
+                                retries = 0
+                                seed = _announce_repeat(progress_callback, len(image_times), total_iterations, seed_min, seed_max)
+                                continue
                             break
                         elif outcome is StageOutcome.failed:
                             _emit_generation_finished(
@@ -396,12 +445,12 @@ def run_batch(
                                 event_context=event_context,
                                 status="failed",
                                 filename=artifacts.filename,
-                                generation_time=time.time() - _img_start,
+                                generation_time=_active_seconds(_img_start, review_outcome),
                                 output_path=artifacts.filepath,
                             )
                             failed_generations += 1
                             warnings.warn("Generation failed in workflow stage.")
-                            image_times.append(time.time() - _img_start)
+                            image_times.append(_active_seconds(_img_start, review_outcome))
                             if skip.consume() == "quit":
                                 _emit_progress(progress_callback, "batch_cancelled", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
                                 raise _QuitBatch()
@@ -428,18 +477,18 @@ def run_batch(
                                     event_context=event_context,
                                     status="failed",
                                     filename=artifacts.filename,
-                                    generation_time=time.time() - _img_start,
+                                    generation_time=_active_seconds(_img_start, review_outcome),
                                     output_path=artifacts.filepath,
                                 )
                                 failed_generations += 1
                                 warnings.warn(f"Generation failed after {max_retries} retries; skipping.")
-                                image_times.append(time.time() - _img_start)
+                                image_times.append(_active_seconds(_img_start, review_outcome))
                                 break
                             warnings.warn(f"Workflow stage requested retry ({retries}/{max_retries}).")
                             continue
 
                         retries = 0
-                        generation_time = time.time() - _img_start
+                        generation_time = _active_seconds(_img_start, review_outcome)
                         _emit_generation_finished(
                             progress_callback,
                             event_context=event_context,
@@ -455,28 +504,20 @@ def run_batch(
                             _emit_progress(progress_callback, "batch_cancelled", mode="image", completed_iterations=len(image_times) + 1, total_iterations=total_iterations)
                             raise _QuitBatch()
                         elif action == "pause":
-                            image_times.append(time.time() - _img_start)
-                            _emit_progress(progress_callback, "job_paused", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
-                            print("\n⏸ Paused. Press any key to continue...")
-                            skip.wait_for_key()
-                            resume_action = skip.consume()
-                            _emit_progress(progress_callback, "job_resumed", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
-                            print("▶ Resumed.\n")
-                            if resume_action == "quit":
+                            image_times.append(_active_seconds(_img_start, review_outcome))
+                            if _pause_until_resumed(skip, progress_callback, len(image_times), total_iterations) == "quit":
                                 _emit_progress(progress_callback, "batch_cancelled", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
                                 raise _QuitBatch()
                             break
                         elif action == "repeat":
-                            image_times.append(time.time() - _img_start)
-                            seed = random.randint(seed_min, seed_max)
-                            _emit_progress(progress_callback, "generation_repeat", mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
-                            print("\n🔁 Repeating prompt with new seed...\n")
+                            image_times.append(_active_seconds(_img_start, review_outcome))
+                            seed = _announce_repeat(progress_callback, len(image_times), total_iterations, seed_min, seed_max)
                             continue
                         elif action == "skip":
-                            image_times.append(time.time() - _img_start)
+                            image_times.append(_active_seconds(_img_start, review_outcome))
                             break
                         else:
-                            image_times.append(time.time() - _img_start)
+                            image_times.append(_active_seconds(_img_start, review_outcome))
                             break
             print(f"\nCompleted run {run_idx + 1}/{args.runs}\n{'#' * 30}\n")
         print("\nAll runs completed!\n")

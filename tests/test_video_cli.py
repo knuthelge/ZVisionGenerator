@@ -299,7 +299,7 @@ class TestVideoCliExecution:
         monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
         monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args, **_kwargs: object())
 
-        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan):
+        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, skip_signal=None):
             captured["steps"] = args.steps
             captured["upscale_steps"] = args.upscale_steps
 
@@ -364,7 +364,7 @@ class TestVideoCliPreflight:
         monkeypatch.setattr("zvisiongenerator.preflight.release_accelerator_memory", lambda: order.append("release_memory"))
         captured: dict = {}
 
-        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan):
+        def _fake_run_video_batch(backend, model, model_info, workflow, prompts_data, config, args, *, plan, skip_signal=None):
             order.append("run_video_batch")
             captured["plan"] = plan
 

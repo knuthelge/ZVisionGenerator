@@ -49,6 +49,26 @@ describe('jobPhases', () => {
     expect(settleControl('quit', 'generation_finished')).toBe('quit');
   });
 
+  it('keeps a queued pause through the pause a review starts, and settles it on a plain pause', () => {
+    expect(settleControl('pause', 'job_paused', { review: { iteration: 1 } })).toBe('pause');
+    expect(settleControl('pause', 'job_paused', {})).toBeNull();
+    expect(settleControl('pause', 'job_paused')).toBeNull();
+  });
+
+  it('keeps a pending pause, next or repeat through a review and its decision', () => {
+    for (const queued of ['pause', 'next', 'repeat'] as const) {
+      let state = job({ controlQueued: queued });
+      state = trackJobEvent(state, 'job_paused', { review: { iteration: 1 } }, 0);
+      expect(state.controlQueued).toBe(queued);
+      state = trackJobEvent(state, 'control_queued', { action: 'approve' }, 0);
+      expect(state.controlQueued).toBe(queued);
+      state = trackJobEvent(state, 'control_queued', { action: 'discard' }, 0);
+      expect(state.controlQueued).toBe(queued);
+      state = trackJobEvent(state, 'job_resumed', {}, 0);
+      expect(state.controlQueued).toBe(queued);
+    }
+  });
+
   it('closes the phase a job ended in, so its duration still shows', () => {
     const loading = trackJobEvent(job({ phase: 'load', phaseMarks: { load: { start: 10 } } }), 'job_failed', { timestamp: 40 }, 0);
     expect(phaseSeconds(loading.phaseMarks, 'load')).toBe(30);

@@ -11,6 +11,7 @@ from __future__ import annotations
 import subprocess
 import time
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 
 from zvisiongenerator.core.types import StageOutcome
@@ -19,6 +20,38 @@ from zvisiongenerator.utils.ffmpeg import strip_audio
 from zvisiongenerator.utils.provenance import build_video_config_payload, embed_mp4_config
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
 from zvisiongenerator.workflows.enhance_stage import apply_planned_enhancement
+
+
+def _upscale_kwargs(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> dict[str, object]:
+    """Return the backend keyword arguments of the upscale: ``stage1_steps``, and ``review`` when one is set.
+
+    The review callable is wrapped so that the time it blocks is added to ``artifacts.review_wait``.
+
+    Raises:
+        ValueError: If upscale is on without ``upscale_steps``.
+    """
+    if not request.upscale:
+        return {}
+    if request.upscale_steps is None:
+        msg = "upscale_steps must be set when upscale is enabled"
+        raise ValueError(msg)
+    kwargs: dict[str, object] = {"stage1_steps": request.upscale_steps}
+    if request.review is not None:
+        kwargs["review"] = _timed_review(request.review, artifacts)
+    return kwargs
+
+
+def _timed_review(review: Callable[[Path], None], artifacts: VideoWorkingArtifacts) -> Callable[[Path], None]:
+    """Wrap *review* so the seconds it blocks, also when it raises, are added to ``artifacts.review_wait``."""
+
+    def _timed(path: Path) -> None:
+        started = time.monotonic()
+        try:
+            review(path)
+        finally:
+            artifacts.review_wait += time.monotonic() - started
+
+    return _timed
 
 
 def resolve_prompt_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArtifacts) -> StageOutcome:
@@ -48,12 +81,7 @@ def text_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorking
     prompt_one_line = " ".join(prompt.split())
     print(f"  Prompt: {prompt_one_line[:100]}{'...' if len(prompt_one_line) > 100 else ''}")
     output_path = str(Path(request.output_dir) / artifacts.filename)
-    kwargs: dict[str, object] = {}
-    if request.upscale:
-        if request.upscale_steps is None:
-            msg = "upscale_steps must be set when upscale is enabled"
-            raise ValueError(msg)
-        kwargs["stage1_steps"] = request.upscale_steps
+    kwargs = _upscale_kwargs(request, artifacts)
     t0 = time.monotonic()
     result = request.backend.text_to_video(
         model=request.model,
@@ -67,7 +95,7 @@ def text_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorking
         step_callback=request.step_callback,
         **kwargs,
     )
-    artifacts.generation_time = time.monotonic() - t0
+    artifacts.generation_time = time.monotonic() - t0 - artifacts.review_wait
     if result is None:
         return StageOutcome.failed
     artifacts.video_path = result
@@ -83,12 +111,7 @@ def image_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
     prompt_one_line = " ".join(prompt.split())
     print(f"  Prompt: {prompt_one_line[:100]}{'...' if len(prompt_one_line) > 100 else ''}")
     output_path = str(Path(request.output_dir) / artifacts.filename)
-    kwargs: dict[str, object] = {}
-    if request.upscale:
-        if request.upscale_steps is None:
-            msg = "upscale_steps must be set when upscale is enabled"
-            raise ValueError(msg)
-        kwargs["stage1_steps"] = request.upscale_steps
+    kwargs = _upscale_kwargs(request, artifacts)
     t0 = time.monotonic()
     result = request.backend.image_to_video(
         model=request.model,
@@ -103,7 +126,7 @@ def image_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
         step_callback=request.step_callback,
         **kwargs,
     )
-    artifacts.generation_time = time.monotonic() - t0
+    artifacts.generation_time = time.monotonic() - t0 - artifacts.review_wait
     if result is None:
         return StageOutcome.failed
     artifacts.video_path = result

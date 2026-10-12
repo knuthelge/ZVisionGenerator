@@ -64,6 +64,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "image_upscale_steps",
             "image_upscale_guidance",
             "image_upscale_sharpen",
+            "image_upscale_review",
         ],
         "supports_reference_image": False,
         "requires_reference_image": False,
@@ -107,6 +108,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "image_upscale_steps",
             "image_upscale_guidance",
             "image_upscale_sharpen",
+            "image_upscale_review",
         ],
         "supports_reference_image": True,
         "requires_reference_image": True,
@@ -138,6 +140,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "low_memory",
             "video_upscale_enabled",
             "video_upscale_factor",
+            "video_upscale_review",
         ],
         "supports_reference_image": False,
         "requires_reference_image": False,
@@ -190,6 +193,7 @@ WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
             "low_memory",
             "video_upscale_enabled",
             "video_upscale_factor",
+            "video_upscale_review",
         ],
         "supports_reference_image": True,
         "requires_reference_image": True,
@@ -232,15 +236,17 @@ def workflow_mode(workflow: str) -> str:
     return "video" if workflow in {"txt2vid", "img2vid"} else "image"
 
 
-def build_workflow_contract(*, video_audio: bool = True) -> dict[str, Any]:
+def build_workflow_contract(*, video_audio: bool = True, video_upscale_review: bool = True) -> dict[str, Any]:
     """Build the backend-owned workflow and control visibility contract.
 
     Args:
         video_audio: Whether the video backend writes an audio track; without one the Audio control is hidden.
+        video_upscale_review: Whether the video backend can pause for review after the half-size render; without it the video Review control is hidden.
     """
+    hidden = frozenset(name for name, hide in (("audio", not video_audio), ("video_upscale_review", not video_upscale_review)) if hide)
     return {
         "values": list(CANONICAL_WORKFLOW_VALUES),
-        "definitions": {name: _definition_for_platform(value, video_audio=video_audio) for name, value in WORKFLOW_DEFINITIONS.items()},
+        "definitions": {name: _definition_for_platform(value, hidden=hidden) for name, value in WORKFLOW_DEFINITIONS.items()},
         "field_precedence": {
             "defaults": ["cli", "model_variant", "model_family", "global"],
             "dimensions": "explicit_width_height_overrides_ratio_size",
@@ -248,8 +254,8 @@ def build_workflow_contract(*, video_audio: bool = True) -> dict[str, Any]:
     }
 
 
-def _definition_for_platform(definition: dict[str, Any], *, video_audio: bool) -> dict[str, Any]:
-    """Copy a workflow definition, dropping the Audio control when the video backend writes no audio."""
-    if video_audio:
+def _definition_for_platform(definition: dict[str, Any], *, hidden: frozenset[str]) -> dict[str, Any]:
+    """Copy a workflow definition, dropping the *hidden* controls the platform's video backend cannot honour."""
+    if not hidden:
         return dict(definition)
-    return {**definition, "visible_controls": [control for control in definition["visible_controls"] if control != "audio"]}
+    return {**definition, "visible_controls": [control for control in definition["visible_controls"] if control not in hidden]}

@@ -21,7 +21,8 @@
     mascotTool as pickMascotTool,
     type MascotReaction,
   } from '$lib/state/mascot';
-  import { ActionMenu, AssetTile, AssetViewer, JobCard, ModelStatusBadges, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
+  import { ActionMenu, AssetTile, AssetViewer, JobCard, ModelStatusBadges, ReviewStage, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
+  import { isReviewing } from '$lib/state/jobView';
   import { jobSettingsPrefill } from '$lib/state/jobSettings';
   import { cliCommand, formSettings, type CliCaveat, type CliCommand } from '$lib/state/cliCommand';
   import { formatLoraString, loraLabel, parseLoraString, type LoraChip } from '$lib/state/loras';
@@ -34,7 +35,7 @@
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { startUpscale } from '$lib/state/upscale';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
-  import type { DraftState, GalleryAsset, JobSnapshot, UpscaleFactor, WorkspaceContext, Workflow } from '$lib/types';
+  import type { DraftState, GalleryAsset, JobControlAction, JobSnapshot, UpscaleFactor, WorkspaceContext, Workflow } from '$lib/types';
 
   let context = $state<WorkspaceContext | null>(null);
   let loadError = $state<string | null>(null);
@@ -81,6 +82,7 @@
     MIN_OUTPUT_CELL_PX
   ));
   const hasCompletedOutputs = $derived(jobStore.current?.status === 'completed' && jobOutputs.length > 0);
+  const reviewing = $derived(isReviewing(jobStore.current));
   const previewView = $derived<'error' | 'outputs' | 'job' | 'latest' | 'empty'>(
     loadError ? 'error'
       : hasCompletedOutputs ? 'outputs'
@@ -636,6 +638,11 @@
     addToast(`CLI command copied. ${caveats.map((caveat) => CLI_CAVEAT_NOTES[caveat]).join(' ')}`, 'info', { timeout: 10000 });
   }
 
+  /** Send a job control; the job's events show what it did. */
+  function sendControl(action: JobControlAction): (jobId: string) => Promise<unknown> {
+    return (jobId) => api.post(`/jobs/${encodeURIComponent(jobId)}/controls/${action}`);
+  }
+
   async function handleSubmit(e: Event): Promise<void> {
     e.preventDefault();
     await submitForm(null);
@@ -652,8 +659,10 @@
     draft.saveDraft();
 
     try {
-      const jobCtx = await submitGenerate(buildFormData(formEl, run));
-      jobStore.jobSubmitted(jobCtx);
+      const formData = buildFormData(formEl, run);
+      const jobCtx = await submitGenerate(formData);
+      // The response omits the settings; the review line needs the upscale factor.
+      jobStore.jobSubmitted({ ...jobCtx, settings: formSettings(formData) });
       if (jobCtx.queue_position) {
         react('nodding');
         addToast(`${run ? `Queued ${run.optionId}` : 'Added to the queue'} as #${jobCtx.queue_position}.`, 'info');
@@ -846,7 +855,7 @@
     <section class="workspace-preview relative z-0 flex min-h-0 min-w-0 flex-col bg-bg-base">
       <div class="ui-pane-header flex h-10 shrink-0 items-center justify-between px-3">
         <h2 class="ui-area-label">Preview</h2>
-        <span class="text-meta text-text-muted">{jobStore.isRunning ? 'Generating…' : hasCompletedOutputs || historyStore.assets.length ? 'Latest output' : 'Ready'}</span>
+        <span class="text-meta text-text-muted">{reviewing ? 'Review' : jobStore.isRunning ? 'Generating…' : hasCompletedOutputs || historyStore.assets.length ? 'Latest output' : 'Ready'}</span>
       </div>
       <div class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
         {#if loadError}
@@ -918,11 +927,11 @@
               <MascotSpot mood={mascotMood} tool={mascotTool} size={112} class="mx-auto mb-2 w-fit" />
               <JobCard
                 job={jobStore.current!}
-                oncancel={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/quit`)}
-                onpause={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/pause`)}
-                onresume={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/resume`)}
-                onnext={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/next`)}
-                onrepeat={(id) => api.post(`/jobs/${encodeURIComponent(id)}/controls/repeat`)}
+                oncancel={sendControl('quit')}
+                onpause={sendControl('pause')}
+                onresume={sendControl('resume')}
+                onnext={sendControl('next')}
+                onrepeat={sendControl('repeat')}
               />
               <QueuePanel jobs={jobStore.queuedJobs} onremove={removeQueuedJob} onload={loadQueuedSettings} onclear={clearQueuedJobs} />
             </div>
@@ -964,6 +973,15 @@
                 <p class="mt-1 text-ui text-text-muted">Write a prompt and press Generate to get started</p>
               </div>
             {/if}
+          </div>
+        {/if}
+        {#if reviewing && jobStore.current}
+          {@const job = jobStore.current}
+          <!-- Scoped to the preview area: settings, history, navigation and menus stay usable. The job card stays under the backdrop. -->
+          <div class="review-overlay absolute inset-0 z-20 flex items-center justify-center bg-scrim p-3 sm:p-6" data-testid="review-overlay">
+            <div class="ui-overlay flex h-full w-full max-w-4xl min-h-0 min-w-0 flex-col">
+              <ReviewStage {job} onapprove={sendControl('approve')} ondiscard={sendControl('discard')} />
+            </div>
           </div>
         {/if}
         {#if dockMascot}

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { ActiveJobState } from '$lib/types';
 import {
-  etaLabel, formatClock, headline, itemActivity, itemFraction, iterations, jobBar, jobControls, jobTone, outcome, phaseRows, positionLabel,
-  readySummary, stageBars, timeLeft
+  documentTitle, etaLabel, formatClock, headline, isReviewing, itemActivity, itemFraction, iterations, jobBar, jobControls, jobTone, outcome,
+  phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine, reviewVideoUrl, stageBars, timeLeft
 } from './jobView';
 
 const IMAGE_CONTROLS = ['next', 'pause', 'resume', 'repeat', 'quit'];
@@ -181,5 +181,87 @@ describe('jobView', () => {
     expect(formatClock(75)).toBe('1:15');
     expect(formatClock(3725)).toBe('1:02:05');
     expect(formatClock(Number.NaN)).toBe('0:00');
+  });
+});
+
+describe('review before upscaling', () => {
+  const REVIEW_CONTROLS = [...IMAGE_CONTROLS.slice(0, -1), 'approve', 'discard', 'quit'];
+  const reviewing = (overrides: Partial<ActiveJobState> = {}) => batch({
+    status: 'paused', paused: true, review: { iteration: 3 }, supported_controls: REVIEW_CONTROLS, stageName: 'review',
+    stageNames: ['text_to_image', 'review', 'upscale'], stageSteps: { text_to_image: 8 }, currentStep: 8, totalSteps: 8,
+    settings: { upscale: '2' }, ...overrides,
+  });
+
+  it('offers only Stop with the job while a review waits', () => {
+    expect(jobControls(reviewing())).toEqual({ job: ['quit'], item: [] });
+    expect(jobControls(reviewing({ supported_controls: ['approve', 'discard'] }))).toEqual({ job: [], item: [] });
+  });
+
+  it('offers the decisions the job lists, only while a review waits', () => {
+    expect(reviewDecisions(reviewing())).toEqual(['approve', 'discard']);
+    expect(reviewDecisions(reviewing({ supported_controls: ['quit'] }))).toEqual([]);
+    expect(reviewDecisions(reviewing({ review: null }))).toEqual([]);
+    expect(isReviewing(reviewing({ status: 'cancelled' }))).toBe(false);
+    expect(isReviewing(null)).toBe(false);
+  });
+
+  it('puts the review ahead of finishing, which the review stage would otherwise give', () => {
+    const waiting = reviewing();
+    expect(itemActivity({ ...waiting, review: null, status: 'running', paused: false })).toBe('finishing');
+    expect(itemActivity(waiting)).toBe('reviewing');
+    expect(itemFraction(waiting)).toBeLessThan(1);
+    expect(headline(waiting)).toBe('Waiting for your review');
+    expect(jobTone(waiting)).toBe('paused');
+  });
+
+  it('describes the render by its position and its sizes before and after the upscale', () => {
+    const waiting = reviewing();
+    expect(reviewLine(waiting, { width: 832, height: 1216 })).toBe('Review 3 of 24 · 832×1216 → 1664×2432');
+    expect(reviewLine(reviewing({ settings: { upscale: '4' } }), { width: 100, height: 50 })).toBe('Review 3 of 24 · 100×50 → 400×200');
+  });
+
+  it('leaves out what is not known', () => {
+    expect(reviewLine(reviewing(), null)).toBe('Review 3 of 24');
+    expect(reviewLine(reviewing({ settings: undefined }), { width: 832, height: 1216 })).toBe('Review 3 of 24 · 832×1216');
+    expect(reviewFactor(reviewing({ settings: { upscale: ['2', '2'] } }))).toBe(2);
+    expect(reviewFactor(reviewing({ settings: { upscale: 'x' } }))).toBeNull();
+  });
+
+  describe('for a video', () => {
+    const video = (overrides: Partial<ActiveJobState> = {}) => reviewing({ workflow: 'txt2vid', supported_controls: ['approve', 'discard', 'quit'], settings: { upscale: '2', audio: ['on', 'false'] }, ...overrides });
+
+    it('serves the render from the review route, one URL per video of the batch', () => {
+      expect(reviewVideoUrl(video())).toBe('/jobs/j/review?v=3');
+      expect(reviewVideoUrl(video({ review: { iteration: 4 } }))).toBe('/jobs/j/review?v=4');
+    });
+
+    it('has no video URL for an image, outside a review, or after the job ended', () => {
+      expect(reviewVideoUrl(reviewing())).toBeNull();
+      expect(reviewVideoUrl(video({ review: null }))).toBeNull();
+      expect(reviewVideoUrl(video({ status: 'cancelled' }))).toBeNull();
+    });
+
+    it('offers Approve and Discard, and only Stop with the job', () => {
+      expect(reviewDecisions(video())).toEqual(['approve', 'discard']);
+      expect(jobControls(video())).toEqual({ job: ['quit'], item: [] });
+      expect(itemActivity(video())).toBe('reviewing');
+      expect(headline(video())).toBe('Waiting for your review');
+    });
+
+    it('keeps the sound only when the job was submitted with Audio on', () => {
+      expect(reviewHasSound(video())).toBe(true);
+      expect(reviewHasSound(video({ settings: { upscale: '2', audio: 'false' } }))).toBe(false);
+      expect(reviewHasSound(video({ settings: { upscale: '2' } }))).toBe(false);
+      expect(reviewHasSound(video({ settings: undefined }))).toBe(false);
+    });
+
+    it('describes the video by its position and its sizes before and after the upscale', () => {
+      expect(reviewLine(video(), { width: 704, height: 448 })).toBe('Review 3 of 24 · 704×448 → 1408×896');
+    });
+  });
+
+  it('marks the tab title only while a review waits', () => {
+    expect(documentTitle('ZVision Generator', true)).toBe('⏸ Review · ZVision Generator');
+    expect(documentTitle('ZVision Generator', false)).toBe('ZVision Generator');
   });
 });

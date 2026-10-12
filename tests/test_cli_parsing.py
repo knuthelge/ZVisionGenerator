@@ -133,6 +133,26 @@ class TestCLIValidation:
         with pytest.raises(SystemExit, match="2"):
             self._run_main(["--upscale", "3", "-m", "fake"])
 
+    def test_review_without_upscale_exits(self):
+        with patch("sys.stdin.isatty", create=True, return_value=True), pytest.raises(SystemExit, match="2"):
+            self._run_main(["--review", "-m", "fake"])
+
+    def test_review_without_a_terminal_exits(self):
+        with patch("sys.stdin") as stdin, pytest.raises(SystemExit, match="2"):
+            stdin.isatty.return_value = False
+            self._run_main(["--review", "--upscale", "2", "-m", "fake"])
+
+    def test_review_with_upscale_in_a_terminal_reaches_the_batch(self):
+        run_batch = MagicMock()
+        with patch("sys.stdin") as stdin:
+            stdin.isatty.return_value = True
+            stdin.fileno.side_effect = OSError("no fd")  # the key listener gives up quietly instead of dying on the mock
+            self._run_main_with_overrides(["--review", "--upscale", "2", "-m", "fake"], run_batch=run_batch)
+        assert run_batch.call_args.args[4].review is True
+
+    def test_review_is_off_by_default(self):
+        assert _build_parser().parse_args([]).review is False
+
     def test_upscale_guidance_negative_rejected(self):
         """--upscale-guidance with negative value must be rejected by the CLI."""
         with pytest.raises(SystemExit):

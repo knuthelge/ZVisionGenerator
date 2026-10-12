@@ -54,7 +54,15 @@ class VideoBackend(Protocol):
         step_callback: Any | None = None,
         **kwargs: Any,
     ) -> Path | None:
-        """Generate video from text. Returns output path or None if failed."""
+        """Generate video from text. Returns output path or None if failed.
+
+        Optional keyword arguments:
+        - ``stage1_steps``: run the two-stage upscale with this many half-resolution steps.
+        - ``review``: ``Callable[[Path], None]``, valid only with ``stage1_steps``. The backend decodes the
+          half-resolution result to a temporary video file, calls ``review(path)`` and continues with the upscale
+          when it returns; the file is deleted afterwards. ``review`` may raise to end the generation. A backend
+          that cannot pause after the half-size render raises ``ValueError`` (see ``supports_video_upscale_review``).
+        """
         ...
 
     def image_to_video(
@@ -71,5 +79,8 @@ class VideoBackend(Protocol):
         step_callback: Any | None = None,
         **kwargs: Any,
     ) -> Path | None:
-        """Generate video from image + text. Returns output path or None if failed."""
+        """Generate video from image + text. Returns output path or None if failed.
+
+        Takes the same optional ``stage1_steps`` and ``review`` keyword arguments as ``text_to_video``.
+        """
         ...

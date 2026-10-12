@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 
 from zvisiongenerator.core.workflow import GenerationWorkflow
+from zvisiongenerator.review import review_enabled
 from zvisiongenerator.workflows.image_stages import (
     enhance_prompt_stage,
     resolve_prompt_stage,
     suppress_negative_stage,
     load_reference_stage,
     load_source_stage,
+    review_stage,
     text_to_image_stage,
     upscale_stage,
     contrast_stage,
@@ -29,6 +31,8 @@ def build_workflow(args: argparse.Namespace, *, enhance: bool = False) -> Genera
         stages.append(enhance_prompt_stage)
     stages += [suppress_negative_stage, load_reference_stage, text_to_image_stage]
     if args.upscale:
+        if review_enabled(args):
+            stages.append(review_stage)
         stages.append(upscale_stage)
     if args.contrast is not False:
         stages.append(contrast_stage)

@@ -1,7 +1,7 @@
 <script lang="ts" module>
   import type { JobControlAction } from '$lib/types';
 
-  export const CONTROL_KEYS: Record<JobControlAction, string> = { pause: 'P', resume: 'P', next: 'N', repeat: 'R', quit: 'Esc' };
+  export const CONTROL_KEYS: Record<JobControlAction, string> = { pause: 'P', resume: 'P', next: 'N', repeat: 'R', approve: 'Y', discard: 'N', quit: 'Esc' };
 </script>
 
 <script lang="ts">
@@ -25,7 +25,7 @@
 
   let { controls, label, names, pending = null, disabled = false, cancelArmed = false, onsend }: Props = $props();
 
-  const ICONS: Record<JobControlAction, IconName> = { pause: 'pause', resume: 'play', next: 'skip', repeat: 'reuse', quit: 'close' };
+  const ICONS: Record<JobControlAction, IconName> = { pause: 'pause', resume: 'play', next: 'skip', repeat: 'reuse', approve: 'check', discard: 'close', quit: 'close' };
   const main = $derived(controls.filter((action) => action !== 'quit'));
   const hasQuit = $derived(controls.includes('quit'));
 

@@ -101,10 +101,12 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
     patch.videoUpscaleEnabled = settings.video_upscale_factor !== undefined;
     const factor = numberOrNull(first(settings, 'video_upscale_factor'));
     if (factor !== null) patch.videoUpscaleFactor = factor;
+    patch.videoUpscaleReview = patch.videoUpscaleEnabled && checked(settings, 'review');
   } else {
     patch.upscaleEnabled = settings.upscale !== undefined;
     const factor = numberOrNull(first(settings, 'upscale'));
     if (factor !== null) patch.upscaleFactor = factor;
+    patch.upscaleReview = patch.upscaleEnabled && checked(settings, 'review');
     if (patch.upscaleEnabled) {
       patch.upscaleDenoise = numberOrNull(first(settings, 'upscale_denoise'));
       patch.upscaleSteps = numberOrNull(first(settings, 'upscale_steps'));

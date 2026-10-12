@@ -18,7 +18,7 @@ from zvisiongenerator.image_model_loader import SAVING_QUANT_PHASE, load_image_m
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.config import MAX_SHARPEN_AMOUNT, load_config, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
 from zvisiongenerator.utils.image_model_detect import detect_image_model
-from zvisiongenerator.utils.interactive import SkipSignal
+from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import enhance_by_set_for_mode
@@ -69,6 +69,12 @@ def _build_parser(*, prog: str = "ziv-image") -> argparse.ArgumentParser:
     parser.add_argument("--upscale-save-pre", action=argparse.BooleanOptionalAction, default=False, help="Save the image before upscaling (with '_pre' suffix).")
     parser.add_argument("--upscale-guidance", type=float, default=None, help="Override guidance scale for the upscale refinement step (float). Falls back to --guidance when not set.")
     parser.add_argument("--upscale-sharpen", action=argparse.BooleanOptionalAction, default=True, help="Apply contrast-adaptive sharpening before upscale refinement.")
+    parser.add_argument(
+        "--review",
+        action="store_true",
+        default=False,
+        help="Pause after each small render, before the upscale: press y to upscale it, n to discard it or q to quit. Needs --upscale and a terminal.",
+    )
     parser.add_argument("--sharpen", nargs="?", const=True, type=float, default=True, help="Apply CAS sharpening. Optional amount overrides config (default: enabled).")
     parser.add_argument("--no-sharpen", dest="sharpen", action="store_const", const=False, help="Disable CAS sharpening.")
     parser.add_argument("--contrast", nargs="?", const=True, type=float, default=False, help="Apply contrast adjustment. Optional amount (1.0 = no change). Default: disabled.")
@@ -101,6 +107,10 @@ def main(*, prog: str = "ziv-image") -> None:
         parser.error(f"--height must be a multiple of 16 (got {args.height})")
     if args.upscale is not None and args.upscale not in (2, 4):
         parser.error("--upscale must be 2 or 4")
+    if args.review and args.upscale is None:
+        parser.error("--review needs --upscale: without an upscale there is no small render to review.")
+    if args.review and not stdin_is_interactive():
+        parser.error("--review needs an interactive terminal to ask for each decision.")
     if args.upscale_denoise is not None and not (0.0 <= args.upscale_denoise <= 1.0):
         parser.error("--upscale-denoise must be between 0.0 and 1.0")
     if args.steps is not None and args.steps < 1:

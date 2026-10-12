@@ -109,6 +109,7 @@
       caps.showPostprocessContrast && changed('postprocessContrastEnabled', 'postprocessContrastAmount'),
       caps.showPostprocessSaturation && changed('postprocessSaturationEnabled', 'postprocessSaturationAmount'),
       caps.showImageUpscale && changed('upscaleEnabled', 'upscaleFactor'),
+      caps.showUpscaleReview && s.upscaleEnabled && changed('upscaleReview'),
       caps.showUpscaleDenoise && s.upscaleEnabled && changed('upscaleDenoise'),
       caps.showUpscaleSteps && s.upscaleEnabled && changed('upscaleSteps'),
       caps.showUpscaleGuidance && s.upscaleEnabled && changed('upscaleGuidance'),
@@ -116,6 +117,7 @@
       caps.showAudio && changed('audio'),
       caps.showLowMemory && changed('lowMemory'),
       caps.showVideoUpscale && changed('videoUpscaleEnabled', 'videoUpscaleFactor'),
+      caps.showVideoUpscaleReview && s.videoUpscaleEnabled && changed('videoUpscaleReview'),
     ].filter(Boolean).length
   );
 
@@ -133,9 +135,19 @@
     [s.postprocessSharpenEnabled, s.postprocessContrastEnabled, s.postprocessSaturationEnabled].filter(Boolean).length
   );
   const showPostprocess = $derived(caps.showPostprocessSharpen || caps.showPostprocessContrast || caps.showPostprocessSaturation);
+  const upscaleReviewOn = $derived(caps.showUpscaleReview && s.upscaleEnabled && s.upscaleReview);
+  const upscaleSummary = $derived(
+    s.upscaleEnabled ? [`${s.upscaleFactor}×`, upscaleReviewOn ? 'Review' : null].filter(Boolean).join(' · ') : 'Off'
+  );
   const showVideo = $derived(caps.showAudio || caps.showLowMemory || caps.showVideoUpscale);
+  const videoUpscaleReviewOn = $derived(caps.showVideoUpscaleReview && s.videoUpscaleEnabled && s.videoUpscaleReview);
   const videoSummary = $derived(
-    [s.audio ? 'Audio' : null, s.lowMemory ? 'Low memory' : null, s.videoUpscaleEnabled ? `${s.videoUpscaleFactor}× upscale` : null]
+    [
+      s.audio ? 'Audio' : null,
+      s.lowMemory ? 'Low memory' : null,
+      s.videoUpscaleEnabled ? `${s.videoUpscaleFactor}× upscale` : null,
+      videoUpscaleReviewOn ? 'Review' : null,
+    ]
       .filter(Boolean).join(' · ') || 'Off'
   );
 
@@ -406,7 +418,7 @@
     {/if}
 
     {#if caps.showImageUpscale}
-      <InspectorSection id="upscale" title="Upscale" summary={s.upscaleEnabled ? `${s.upscaleFactor}×` : 'Off'} active={s.upscaleEnabled}>
+      <InspectorSection id="upscale" title="Upscale" summary={upscaleSummary} active={s.upscaleEnabled}>
         <InspectorRow label="Upscale" changed={changed('upscaleEnabled', 'upscaleFactor')} onreset={() => reset('upscaleEnabled', 'upscaleFactor')}>
           <Toggle id="ws-upscale-enabled" ariaLabel="Enable upscale" checked={s.upscaleEnabled} disabled={busy} onchange={(e) => draft.update('upscaleEnabled', (e.currentTarget as HTMLInputElement).checked)} />
           <div class="ui-segmented ui-segmented-sm ui-segmented-mono mini-seg factor" role="group" aria-label="Upscale factor">
@@ -419,6 +431,21 @@
           {/if}
         </InspectorRow>
         {#if s.upscaleEnabled}
+          {#if caps.showUpscaleReview}
+            <InspectorRow sub label="Review" changed={changed('upscaleReview')} onreset={() => reset('upscaleReview')}>
+              <Toggle
+                id="ws-upscale-review"
+                ariaLabel="Review before upscaling"
+                title="Pauses after the small render. Approve to upscale it or Discard to skip it."
+                checked={s.upscaleReview}
+                disabled={busy}
+                onchange={(e) => draft.update('upscaleReview', (e.currentTarget as HTMLInputElement).checked)}
+              />
+              {#if s.upscaleReview}
+                <input type="hidden" name="review" value="true">
+              {/if}
+            </InspectorRow>
+          {/if}
           {#if caps.showUpscaleDenoise}
             <InspectorRow sub label="Denoise" forId="ws-upscale-denoise" scrubber={scrubber(s.upscaleDenoise, SPEC.upscaleDenoise, (v) => draft.update('upscaleDenoise', v))} changed={changed('upscaleDenoise')} onreset={() => reset('upscaleDenoise')}>
               <InspectorNumber id="ws-upscale-denoise" name="upscale_denoise" value={s.upscaleDenoise} {...SPEC.upscaleDenoise} nullable placeholder="auto" onchange={(v) => draft.update('upscaleDenoise', v)} />
@@ -477,6 +504,21 @@
               <input type="hidden" name="video_upscale_factor" value={String(s.videoUpscaleFactor)}>
             {/if}
           </InspectorRow>
+          {#if s.videoUpscaleEnabled && caps.showVideoUpscaleReview}
+            <InspectorRow sub label="Review" changed={changed('videoUpscaleReview')} onreset={() => reset('videoUpscaleReview')}>
+              <Toggle
+                id="ws-video-upscale-review"
+                ariaLabel="Review before upscaling"
+                title="Pauses after the small render. Approve to upscale it or Discard to skip it. Sound may change slightly after upscaling."
+                checked={s.videoUpscaleReview}
+                disabled={busy}
+                onchange={(e) => draft.update('videoUpscaleReview', (e.currentTarget as HTMLInputElement).checked)}
+              />
+              {#if s.videoUpscaleReview}
+                <input type="hidden" name="review" value="true">
+              {/if}
+            </InspectorRow>
+          {/if}
         {/if}
       </InspectorSection>
     {/if}

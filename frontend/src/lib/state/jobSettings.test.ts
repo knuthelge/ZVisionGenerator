@@ -58,4 +58,18 @@ describe('jobSettingsPrefill', () => {
     const { patch } = jobSettingsPrefill({ mode: 'image', json_prompt: '{"high_level_description":"x"}' });
     expect(patch).toMatchObject({ jsonPromptEnabled: true, jsonPrompt: '{"high_level_description":"x"}' });
   });
+
+  it('restores the review choice of an upscaled image job', () => {
+    expect(jobSettingsPrefill({ mode: 'image', prompt: 'a lake', upscale: '2', review: 'true' }).patch).toMatchObject({ upscaleEnabled: true, upscaleReview: true });
+    expect(jobSettingsPrefill({ mode: 'image', prompt: 'a lake', upscale: '2' }).patch.upscaleReview).toBe(false);
+    expect(jobSettingsPrefill({ mode: 'image', prompt: 'a lake', review: 'true' }).patch.upscaleReview).toBe(false);
+  });
+
+  it('restores the review choice of an upscaled video job', () => {
+    const video = { mode: 'video', prompt: 'waves', video_upscale_factor: '2', upscale: '2' };
+    expect(jobSettingsPrefill({ ...video, review: 'true' }).patch).toMatchObject({ videoUpscaleEnabled: true, videoUpscaleReview: true });
+    expect(jobSettingsPrefill(video).patch.videoUpscaleReview).toBe(false);
+    expect(jobSettingsPrefill({ mode: 'video', prompt: 'waves', review: 'true' }).patch.videoUpscaleReview).toBe(false);
+    expect(jobSettingsPrefill({ ...video, review: 'true' }).patch.upscaleReview).toBeUndefined();
+  });
 });

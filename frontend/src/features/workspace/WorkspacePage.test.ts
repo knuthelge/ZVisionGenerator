@@ -219,7 +219,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
             'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'seed', 'scheduler',
             'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation',
             'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',
-            'image_upscale_guidance', 'image_upscale_sharpen'
+            'image_upscale_guidance', 'image_upscale_sharpen', 'image_upscale_review'
           ],
           supports_reference_image: false,
           requires_reference_image: false,
@@ -235,7 +235,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
             'ratio', 'size', 'custom_dimensions', 'runs', 'steps', 'guidance', 'image_strength', 'seed', 'scheduler',
             'postprocess_sharpen', 'postprocess_contrast', 'postprocess_saturation',
             'image_upscale_enabled', 'image_upscale_factor', 'image_upscale_denoise', 'image_upscale_steps',
-            'image_upscale_guidance', 'image_upscale_sharpen'
+            'image_upscale_guidance', 'image_upscale_sharpen', 'image_upscale_review'
           ],
           supports_reference_image: true,
           requires_reference_image: true,
@@ -248,7 +248,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
             'workflow', 'model', 'loras', 'prompt_source', 'prompt_inline',
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
-            'video_upscale_enabled', 'video_upscale_factor'
+            'video_upscale_enabled', 'video_upscale_factor', 'video_upscale_review'
           ],
           supports_reference_image: false,
           requires_reference_image: false,
@@ -262,7 +262,7 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
             'prompt_file_path', 'prompt_file_option', 'prompt_file_preview', 'prompt_file_edit',
             'reference_image', 'reference_image_path', 'reference_image_clear',
             'ratio', 'size', 'custom_dimensions', 'runs', 'frame_count', 'steps', 'seed', 'audio', 'low_memory',
-            'video_upscale_enabled', 'video_upscale_factor'
+            'video_upscale_enabled', 'video_upscale_factor', 'video_upscale_review'
           ],
           supports_reference_image: true,
           requires_reference_image: true,
@@ -797,6 +797,310 @@ describe('WorkspacePage', () => {
       await mountWorkspace(queueContext([jobSnap('job-2', 'queued', { queue_position: 1 })]));
       expect(target.querySelector('[data-testid="strip-queue-count"]')?.textContent).toBe('1');
       expect(target.querySelector('[data-testid="sidebar-strip"] button[type="submit"]')?.getAttribute('aria-label')).toBe('Add to queue');
+    });
+  });
+
+  describe('review before upscaling', () => {
+    function reviewSnapshot(extra: Partial<JobSnapshot> = {}): JobSnapshot {
+      return jobSnap('job-review', 'paused', {
+        paused: true,
+        review: { iteration: 3 },
+        preview_version: 4,
+        runs: 8,
+        supported_controls: ['next', 'pause', 'resume', 'repeat', 'approve', 'discard', 'quit'],
+        settings: { upscale: '2' },
+        last_event: { type: 'job_paused', event_id: 9, review: { iteration: 3 }, preview_version: 4 },
+        ...extra,
+      });
+    }
+
+    function withoutReviewControl(): WorkspaceContext {
+      const context = makeContext();
+      for (const definition of Object.values(context.workflow_contract.definitions)) {
+        definition.visible_controls = definition.visible_controls.filter((id) => id !== 'image_upscale_review');
+      }
+      return context;
+    }
+
+    const reviewToggle = () => target.querySelector<HTMLInputElement>('#ws-upscale-review');
+    const summary = () => target.querySelector('[data-section="upscale"] .inspector-summary')?.textContent ?? '';
+
+    it('offers the Review toggle only while upscale is on, and posts the review field only when it is on', async () => {
+      await mountWorkspace(makeContext());
+      expect(reviewToggle()).toBeNull();
+
+      draft.update('upscaleEnabled', true);
+      await settle();
+      expect(reviewToggle()).not.toBeNull();
+      expect(summary()).toBe('2×');
+      expect(new FormData(target.querySelector('form')!).has('review')).toBe(false);
+
+      draft.update('upscaleReview', true);
+      await settle();
+      expect(summary()).toBe('2× · Review');
+      expect(new FormData(target.querySelector('form')!).get('review')).toBe('true');
+
+      draft.update('upscaleEnabled', false);
+      await settle();
+      expect(reviewToggle()).toBeNull();
+      expect(new FormData(target.querySelector('form')!).has('review')).toBe(false);
+    });
+
+    it('keeps the Review choice with the other draft settings', async () => {
+      await mountWorkspace(makeContext());
+      draft.update('upscaleEnabled', true);
+      await settle();
+      reviewToggle()!.click();
+      await settle();
+      expect(draft.state.upscaleReview).toBe(true);
+      expect(JSON.parse(localStorage.getItem('ziv-workspace-draft-v1') ?? '{}').upscaleReview).toBe(true);
+    });
+
+    it('hides the Review toggle when the workflow contract does not list it', async () => {
+      draft.update('upscaleEnabled', true);
+      await mountWorkspace(withoutReviewControl());
+      expect(target.querySelector('#ws-upscale-enabled')).not.toBeNull();
+      expect(reviewToggle()).toBeNull();
+    });
+
+    it('shows the review over the preview area, leaving the job card and the rest of the page in place', async () => {
+      workspaceApiMocks.listJobs.mockResolvedValue({ active_job: reviewSnapshot(), queued_jobs: [] });
+      await mountWorkspace(makeContext({ active_job: reviewSnapshot() }));
+
+      const preview = target.querySelector<HTMLElement>('.workspace-preview')!;
+      const overlay = target.querySelector<HTMLElement>('[data-testid="review-overlay"]')!;
+      expect(preview.contains(overlay)).toBe(true);
+      const dialog = overlay.querySelector('[role="dialog"]')!;
+      expect(dialog.getAttribute('aria-label')).toBe('Review');
+      expect(overlay.querySelector('img')?.getAttribute('src')).toBe('/jobs/job-review/preview?v=4');
+      expect(overlay.querySelector('.review-line')?.textContent).toContain('Review 3 of 8');
+      expect(overlay.querySelector('[data-decision="approve"]')).not.toBeNull();
+      expect(overlay.querySelector('[data-decision="discard"]')).not.toBeNull();
+      expect([...overlay.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'))).toEqual(['Approve', 'Discard']);
+
+      // The running-job view is still there under the overlay, with only Cancel.
+      const card = preview.querySelector<HTMLElement>('.job-card')!;
+      expect(card.contains(overlay)).toBe(false);
+      expect(card.querySelector('button[data-control="quit"]')).not.toBeNull();
+      for (const control of ['pause-resume', 'next', 'repeat']) expect(card.querySelector(`button[data-control="${control}"]`)).toBeNull();
+    });
+
+    it('sends the decision from the buttons, once', async () => {
+      workspaceApiMocks.listJobs.mockResolvedValue({ active_job: reviewSnapshot(), queued_jobs: [] });
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        await mountWorkspace(makeContext({ active_job: reviewSnapshot() }));
+        target.querySelector<HTMLButtonElement>('[data-decision="approve"]')!.click();
+        await settle();
+        expect(fetchMock).toHaveBeenCalledWith('/jobs/job-review/controls/approve', expect.objectContaining({ method: 'POST' }));
+        // Both buttons wait for the server to resume the job.
+        expect(target.querySelector<HTMLButtonElement>('[data-decision="discard"]')!.disabled).toBe(true);
+        target.querySelector<HTMLButtonElement>('[data-decision="discard"]')!.click();
+        pressKey('n');
+        await settle();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it.each([
+      ['y', 'approve'],
+      ['n', 'discard'],
+    ])('sends %s as %s', async (key, action) => {
+      workspaceApiMocks.listJobs.mockResolvedValue({ active_job: reviewSnapshot(), queued_jobs: [] });
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        await mountWorkspace(makeContext({ active_job: reviewSnapshot() }));
+        pressKey(key);
+        await settle();
+        expect(fetchMock).toHaveBeenCalledWith(`/jobs/job-review/controls/${action}`, expect.objectContaining({ method: 'POST' }));
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it('returns to the job card once the review is over', async () => {
+      workspaceApiMocks.listJobs.mockResolvedValue({ active_job: reviewSnapshot(), queued_jobs: [] });
+      await mountWorkspace(makeContext({ active_job: reviewSnapshot() }));
+      expect(target.querySelector('[data-testid="review-overlay"]')).not.toBeNull();
+
+      const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+      source.emit('job_resumed', { type: 'job_resumed', event_id: 10 });
+      await settle();
+      expect(target.querySelector('[data-testid="review-overlay"]')).toBeNull();
+      expect(target.querySelector('.job-card')).not.toBeNull();
+    });
+
+    it('does not post review when the draft holds it but the contract no longer lists the control', async () => {
+      await mountWorkspace(withoutReviewControl());
+      draft.update('upscaleEnabled', true);
+      draft.update('upscaleReview', true);
+      await settle();
+      expect(target.querySelector('#ws-upscale-enabled')).not.toBeNull();
+      expect(new FormData(target.querySelector('form')!).has('review')).toBe(false);
+      expect(summary()).toBe('2×');
+    });
+
+    it.each(['y', 'n'])('does not decide a plain pause with %s', async (key) => {
+      const plain = jobSnap('job-plain', 'paused', {
+        paused: true,
+        review: null,
+        supported_controls: ['next', 'pause', 'resume', 'repeat', 'approve', 'discard', 'quit'],
+        last_event: { type: 'job_paused', event_id: 4 },
+      });
+      workspaceApiMocks.listJobs.mockResolvedValue({ active_job: plain, queued_jobs: [] });
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        await mountWorkspace(makeContext({ active_job: plain }));
+        expect(target.querySelector('[data-testid="review-overlay"]')).toBeNull();
+        expect(target.querySelector('[data-decision]')).toBeNull();
+        pressKey(key);
+        await settle();
+        const decisions = fetchMock.mock.calls.filter(([url]) => /\/controls\/(approve|discard)$/.test(String(url)));
+        expect(decisions).toHaveLength(0);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    describe('for a video', () => {
+      const videoToggle = () => target.querySelector<HTMLInputElement>('#ws-video-upscale-review');
+      const videoSummary = () => target.querySelector('[data-section="video"] .inspector-summary')?.textContent ?? '';
+
+      function withoutVideoReviewControl(): WorkspaceContext {
+        const context = makeContext();
+        for (const definition of Object.values(context.workflow_contract.definitions)) {
+          definition.visible_controls = definition.visible_controls.filter((id) => id !== 'video_upscale_review');
+        }
+        return context;
+      }
+
+      function videoReviewSnapshot(extra: Partial<JobSnapshot> = {}): JobSnapshot {
+        return jobSnap('job-vreview', 'paused', {
+          workflow: 'txt2vid', job_type: 'Text to Video', model: 'ltx-8', paused: true, review: { iteration: 2 }, runs: 4,
+          supported_controls: ['approve', 'discard', 'quit'], settings: { upscale: '2', audio: ['on', 'false'] },
+          last_event: { type: 'job_paused', event_id: 9, review: { iteration: 2 } },
+          ...extra,
+        });
+      }
+
+      beforeEach(() => {
+        draft.update('workflow', 'txt2vid');
+        draft.update('model', 'ltx-8');
+      });
+
+      it('offers the Review toggle under the factor only while upscale is on, and posts the review field only when it is on', async () => {
+        await mountWorkspace(makeContext());
+        await settle();
+        expect(videoToggle()).toBeNull();
+
+        draft.update('videoUpscaleEnabled', true);
+        await settle();
+        expect(videoToggle()).not.toBeNull();
+        expect(new FormData(target.querySelector('form')!).has('review')).toBe(false);
+
+        videoToggle()!.click();
+        await settle();
+        expect(draft.state.videoUpscaleReview).toBe(true);
+        expect(new FormData(target.querySelector('form')!).get('review')).toBe('true');
+        expect(videoSummary()).toContain('Review');
+
+        draft.update('videoUpscaleEnabled', false);
+        await settle();
+        expect(videoToggle()).toBeNull();
+        expect(new FormData(target.querySelector('form')!).has('review')).toBe(false);
+        expect(videoSummary()).not.toContain('Review');
+      });
+
+      it('hides the Review toggle and posts no review when the contract does not list it', async () => {
+        draft.update('videoUpscaleEnabled', true);
+        draft.update('videoUpscaleReview', true);
+        await mountWorkspace(withoutVideoReviewControl());
+        await settle();
+        expect(target.querySelector('#ws-video-upscale')).not.toBeNull();
+        expect(videoToggle()).toBeNull();
+        expect(new FormData(target.querySelector('form')!).has('review')).toBe(false);
+        expect(videoSummary()).not.toContain('Review');
+      });
+
+      it('keeps the image Review choice apart from the video one', async () => {
+        draft.update('upscaleReview', true);
+        draft.update('videoUpscaleEnabled', true);
+        await mountWorkspace(makeContext());
+        await settle();
+        expect(videoToggle()!.checked).toBe(false);
+        expect(new FormData(target.querySelector('form')!).has('review')).toBe(false);
+      });
+
+      it('shows the paused video in the overlay, with Approve and Discard and only Stop on the job card under it', async () => {
+        workspaceApiMocks.listJobs.mockResolvedValue({ active_job: videoReviewSnapshot(), queued_jobs: [] });
+        await mountWorkspace(makeContext({ active_job: videoReviewSnapshot() }));
+
+        const region = target.querySelector<HTMLElement>('[data-testid="review-overlay"]')!;
+        const video = region.querySelector('video')!;
+        expect(video.getAttribute('src')).toBe('/jobs/job-vreview/review?v=2');
+        expect(video.autoplay).toBe(false);
+        expect(video.controls).toBe(true);
+        expect(video.muted).toBe(false);
+        expect(region.querySelector('.review-line')?.textContent).toContain('Review 2 of 4');
+        expect(region.querySelector('[data-decision="approve"]')).not.toBeNull();
+        expect(region.querySelector('[data-decision="discard"]')).not.toBeNull();
+        const card = target.querySelector<HTMLElement>('.workspace-preview .job-card')!;
+        expect(region.contains(card)).toBe(false);
+        expect(card.querySelector('button[data-control="quit"]')).not.toBeNull();
+        for (const control of ['pause-resume', 'next', 'repeat']) expect(card.querySelector(`button[data-control="${control}"]`)).toBeNull();
+      });
+
+      it('mutes the video and drops the native controls when the job has Audio off', async () => {
+        const snapshot = videoReviewSnapshot({ settings: { upscale: '2', audio: 'false' } });
+        workspaceApiMocks.listJobs.mockResolvedValue({ active_job: snapshot, queued_jobs: [] });
+        await mountWorkspace(makeContext({ active_job: snapshot }));
+
+        const video = target.querySelector<HTMLVideoElement>('[data-testid="review-overlay"] video')!;
+        expect(video.muted).toBe(true);
+        expect(video.controls).toBe(false);
+        expect(target.querySelector('button[data-playback]')).not.toBeNull();
+      });
+
+      it.each([
+        ['y', 'approve'],
+        ['n', 'discard'],
+      ])('sends %s as %s', async (key, action) => {
+        workspaceApiMocks.listJobs.mockResolvedValue({ active_job: videoReviewSnapshot(), queued_jobs: [] });
+        const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+        vi.stubGlobal('fetch', fetchMock);
+        try {
+          await mountWorkspace(makeContext({ active_job: videoReviewSnapshot() }));
+          pressKey(key);
+          await settle();
+          expect(fetchMock).toHaveBeenCalledWith(`/jobs/job-vreview/controls/${action}`, expect.objectContaining({ method: 'POST' }));
+        } finally {
+          vi.unstubAllGlobals();
+        }
+      });
+    });
+
+    it('does not decide anything with Y or N while a job runs without a review', async () => {
+      const running = jobSnap('job-run', 'running', {
+        supported_controls: ['next', 'pause', 'resume', 'repeat', 'approve', 'discard', 'quit'],
+        last_event: { type: 'step_progress', event_id: 4 },
+      });
+      workspaceApiMocks.listJobs.mockResolvedValue({ active_job: running, queued_jobs: [] });
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        await mountWorkspace(makeContext({ active_job: running }));
+        pressKey('y');
+        await settle();
+        const decisions = fetchMock.mock.calls.filter(([url]) => /\/controls\/(approve|discard)$/.test(String(url)));
+        expect(decisions).toHaveLength(0);
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
   });
 

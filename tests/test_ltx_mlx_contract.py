@@ -6,6 +6,7 @@ Introspection only: no pipeline is constructed and no weights are loaded. A fail
 
 from __future__ import annotations
 
+import dataclasses
 import inspect
 
 import pytest
@@ -18,6 +19,7 @@ from ltx_core_mlx.model.transformer.model import X0Model  # noqa: E402
 from ltx_core_mlx.utils.memory import aggressive_cleanup  # noqa: E402
 from ltx_core_mlx.utils.positions import compute_audio_positions, compute_audio_token_count, compute_video_positions  # noqa: E402
 from ltx_pipelines_mlx import BasePipeline, DistilledPipeline  # noqa: E402
+from ltx_pipelines_mlx.distilled import Stage1Result  # noqa: E402
 from ltx_pipelines_mlx.scheduler import DISTILLED_SIGMAS, STAGE_2_SIGMAS, shorten_schedule  # noqa: E402
 from ltx_pipelines_mlx.utils._orchestration import combined_image_conditionings  # noqa: E402
 from ltx_pipelines_mlx.utils.args import ImageConditioningInput  # noqa: E402
@@ -81,6 +83,56 @@ class TestBasePipelineContract:
     def test_distilled_generate_and_save_keywords(self):
         _assert_params(DistilledPipeline.generate_and_save, "prompt", "output_path", "height", "width", "num_frames", "stage1_steps", "image")
         _assert_keyword_only(DistilledPipeline.generate_and_save, "frame_rate", "seed", "stage1_steps", "image")
+
+
+class TestReviewContract:
+    """What the review before upscaling relies on: it shadows ``_stage1`` and decodes its half-size result."""
+
+    def test_two_stage_generation_calls_stage1_through_the_instance(self):
+        source = inspect.getsource(DistilledPipeline.generate_two_stage)
+        assert "self._stage1(" in source
+
+    def test_generate_and_save_runs_generate_two_stage(self):
+        source = inspect.getsource(DistilledPipeline.generate_and_save)
+        assert "self.generate_two_stage(" in source
+
+    def test_stage1_returns_the_result_first_and_takes_the_generation_arguments(self):
+        _assert_params(DistilledPipeline._stage1, "prompt", "height", "width", "num_frames", "frame_rate", "seed", "stage1_steps", "image")
+        assert "Stage1Result" in str(inspect.signature(DistilledPipeline._stage1).return_annotation)
+
+    def test_stage1_result_fields_used_for_the_preview(self):
+        fields = {field.name for field in dataclasses.fields(Stage1Result)}
+        assert {"video_tokens", "audio_tokens", "latent_dims"} <= fields
+
+    def test_load_decoders_takes_no_arguments(self):
+        assert list(_params(BasePipeline._load_decoders)) == ["self"]
+
+    def test_patchifiers_unpatchify_the_stage1_tokens(self):
+        source = inspect.getsource(DistilledPipeline.generate_two_stage)
+        assert "self.video_patchifier.unpatchify(stage1.video_tokens, stage1.latent_dims)" in source
+        assert "audio_patchifier" in inspect.getsource(BasePipeline.__init__)
+
+    def test_stage1_result_comes_first_in_the_returned_tuple(self):
+        """The wrapper returns ``_stage1``'s tuple unchanged and reads the result as ``[0]``."""
+        assert "stage1, num_frames, height, width = self._stage1(" in inspect.getsource(DistilledPipeline.generate_two_stage)
+        assert str(inspect.signature(DistilledPipeline._stage1).return_annotation).startswith("tuple[Stage1Result")
+
+    def test_audio_tokens_unpatchify_without_dims(self):
+        assert "self.audio_patchifier.unpatchify(output_2.audio_latent)" in inspect.getsource(DistilledPipeline._stage2)
+
+    def test_stage_two_reads_the_dit_slot(self):
+        """Why ``dit`` is restored after the preview decode: sparse attention and tiling read it in stage 2."""
+        source = inspect.getsource(DistilledPipeline._stage2) + inspect.getsource(DistilledPipeline._start_stage2_sparse_attention)
+        assert "self.dit" in source
+
+    def test_generate_and_save_loads_the_decoders_itself(self):
+        """The preview may leave the decoders freed: the final decode loads them on demand."""
+        assert "self._load_decoders()" in inspect.getsource(DistilledPipeline.generate_and_save)
+
+    def test_low_memory_decode_empties_the_dit_slot(self):
+        """The wrapper restores ``dit`` and ``_loaded`` because the decode clears them."""
+        source = inspect.getsource(BasePipeline._decode_and_save_video)
+        assert "self.dit = None" in source and "self._loaded = False" in source
 
 
 class TestBlockContract:

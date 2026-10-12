@@ -1,4 +1,4 @@
-import type { ActiveJobState, EnhanceStatus, JobContext, JobSnapshot, GalleryAsset, StepEvent, SSEEvent } from '$lib/types';
+import type { ActiveJobState, EnhanceStatus, JobContext, JobReview, JobSnapshot, GalleryAsset, StepEvent, SSEEvent } from '$lib/types';
 import { connectJobSSE } from '$lib/api/sse';
 import type { SSESubscription } from '$lib/api/sse';
 import { ApiError } from '$lib/api/client';
@@ -27,6 +27,8 @@ export const QUEUE_SYNC_ACTIVE_MS = 4000;
 export const QUEUE_SYNC_IDLE_MS = 15000;
 /** `reason` of a `job_cancelled` event for a job removed from the queue before it started. */
 const REMOVED_REASON = 'removed';
+const PAUSED_MESSAGE = 'Job paused. Resume to continue.';
+const REVIEW_MESSAGE = 'Review: approve to upscale, or discard.';
 
 export type JobLifecycleCallbacks = {
   onComplete?: (outputs: GalleryAsset[]) => void | Promise<void>;
@@ -54,6 +56,14 @@ function eventFieldNumber(event: Record<string, unknown> | null | undefined, key
 function eventFieldString(event: Record<string, unknown> | null | undefined, key: string): string {
   const value = event?.[key];
   return typeof value === 'string' ? value : '';
+}
+
+/** The review a `job_paused` event starts; null for a plain pause. */
+function eventReview(event: Record<string, unknown> | null | undefined): JobReview | null {
+  const value = event?.review;
+  if (!value || typeof value !== 'object') return null;
+  const iteration = (value as { iteration?: unknown }).iteration;
+  return { iteration: typeof iteration === 'number' && Number.isFinite(iteration) ? iteration : 0 };
 }
 
 const ENHANCE_STATUSES: ReadonlySet<string> = new Set(['off', 'enhanced', 'failed', 'skipped']);
@@ -185,6 +195,7 @@ function makeInitialJobState(ctx: JobContext): ActiveJobState {
     batchLabel: '',
     batchIndex: 0,
     paused: false,
+    review: null,
     message: 'Waiting for worker allocation...',
     outputs: [],
     previewUrl: null,
@@ -196,6 +207,7 @@ function makeInitialJobState(ctx: JobContext): ActiveJobState {
 function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
   const lastEvent = snapshot.last_event ?? null;
   const isPaused = snapshot.paused || snapshot.status === 'paused';
+  const review = isPaused && snapshot.review ? { iteration: snapshot.review.iteration } : null;
   const batchIndex = eventFieldNumber(lastEvent, 'run_index');
   const completedIterations = eventFieldNumber(lastEvent, 'completed_iterations');
   const totalIterations = eventFieldNumber(lastEvent, 'total_iterations');
@@ -213,6 +225,7 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     created_at: String(snapshot.created_at),
     supported_controls: snapshot.supported_controls ?? [],
     notices: snapshot.notices ?? [],
+    settings: snapshot.settings,
     status: snapshot.status,
     currentStep: eventFieldNumber(lastEvent, 'current_step'),
     totalSteps: eventFieldNumber(lastEvent, 'total_steps'),
@@ -223,7 +236,8 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     batchLabel,
     batchIndex,
     paused: isPaused,
-    message: isPaused ? 'Job paused. Resume to continue.' : (statusMessage || 'Reconnected to active job.'),
+    review,
+    message: review ? REVIEW_MESSAGE : isPaused ? PAUSED_MESSAGE : (statusMessage || 'Reconnected to active job.'),
     ...promptProgress(lastEvent),
     outputs: dedupeOutputs(snapshot.outputs ?? []),
     previewUrl: previewUrlFor(snapshot.job_id ?? snapshot.id, snapshot.preview_version),
@@ -277,6 +291,7 @@ function applyStatusEvent(type: string, event: SSEEvent): void {
     ...promptProgress(data),
     ...(msg ? { message: msg } : {}),
     ...(type === 'prompt_started' ? { currentStep: 0, totalSteps: 0, stageName: '', stageIndex: 0, message: 'Preparing generation.', enhancedPrompt: undefined, enhanceStatus: eventEnhanceStatus(data) } : {}),
+    ...(type === 'prompt_started' && !isReplayedBeforeSnapshot(data) ? { review: null } : {}),
     ...(type === 'prompts_enhancing' ? { stageName: 'enhancing_prompts', currentStep: Math.max(0, eventFieldNumber(data, 'index') - 1), totalSteps: eventFieldNumber(data, 'total') } : {}),
     ...(type === 'preflight_finished' ? { currentStep: 0, totalSteps: 0, stageName: '' } : {}),
     // A new denoising pass (e.g. the upscale) starts its own step count; the last pass's count must not show as its own.
@@ -354,6 +369,7 @@ function attachJobEvents(jobId: string): void {
         outputs,
         batchIndex: typeof event.run_index === 'number' ? event.run_index : _job.batchIndex,
         previewUrl: isReplayedBeforeSnapshot(event as unknown as Record<string, unknown>) ? _job.previewUrl : null,
+        review: isReplayedBeforeSnapshot(event as unknown as Record<string, unknown>) ? _job.review : null,
       };
     },
     onBatchCompleted(event) {
@@ -382,12 +398,20 @@ function attachJobEvents(jobId: string): void {
     onJobPaused(event) {
       if (!_job) return;
       track('job_paused', event);
-      _job = { ..._job, status: 'paused', paused: true, message: 'Job paused. Resume to continue.' };
+      const data = event as unknown as Record<string, unknown>;
+      const review = eventReview(data);
+      // The small render under review is the job preview at the version this event bumped. A replayed event is
+      // already reflected by the snapshot the tab reconnected from.
+      const shown = review && !isReplayedBeforeSnapshot(data)
+        ? { review, previewUrl: previewUrlFor(_job.job_id, eventFieldNumber(data, 'preview_version')) ?? _job.previewUrl }
+        : {};
+      _job = { ..._job, status: 'paused', paused: true, message: review ? REVIEW_MESSAGE : PAUSED_MESSAGE, ...shown };
     },
     onJobResumed(event) {
       if (!_job) return;
       track('job_resumed', event);
-      _job = { ..._job, status: 'running', paused: false, message: 'Job resumed.' };
+      const replayed = isReplayedBeforeSnapshot(event as unknown as Record<string, unknown>);
+      _job = { ..._job, status: 'running', paused: false, review: replayed ? _job.review : null, message: 'Job resumed.' };
     },
     onStatus(type, event) {
       _recoveryAttempts = 0;
@@ -409,7 +433,7 @@ function attachJobEvents(jobId: string): void {
 function finishCompleted(outputs: unknown): void {
   if (!_job) return;
   const terminalOutputs = validTerminalOutputs(outputs);
-  _job = { ..._job, status: 'completed', paused: false, outputs: dedupeOutputs(terminalOutputs ?? _job.outputs), message: 'Job completed.' };
+  _job = { ..._job, status: 'completed', paused: false, review: null, outputs: dedupeOutputs(terminalOutputs ?? _job.outputs), message: 'Job completed.' };
   clearActiveJobId(_job.job_id);
   notifyLifecycle('onComplete', _job.outputs);
   void refreshJobs();
@@ -417,7 +441,7 @@ function finishCompleted(outputs: unknown): void {
 
 function finishFailed(message: string): void {
   if (!_job) return;
-  _job = { ..._job, status: 'failed', paused: false, message };
+  _job = { ..._job, status: 'failed', paused: false, review: null, message };
   clearActiveJobId(_job.job_id);
   notifyLifecycle('onFailed');
   void refreshJobs();
@@ -425,7 +449,7 @@ function finishFailed(message: string): void {
 
 function finishCancelled(): void {
   if (!_job) return;
-  _job = { ..._job, status: 'cancelled', paused: false, message: 'Job stopped.' };
+  _job = { ..._job, status: 'cancelled', paused: false, review: null, message: 'Job stopped.' };
   clearActiveJobId(_job.job_id);
   notifyLifecycle('onCancelled');
   void refreshJobs();
@@ -434,7 +458,7 @@ function finishCancelled(): void {
 /** The followed job was taken off the queue before it started: not a stop, so no lifecycle callbacks. */
 function finishRemoved(): void {
   if (!_job) return;
-  _job = { ..._job, status: 'cancelled', paused: false, message: 'Removed from the queue.' };
+  _job = { ..._job, status: 'cancelled', paused: false, review: null, message: 'Removed from the queue.' };
   clearActiveJobId(_job.job_id);
   void refreshJobs();
 }
@@ -486,6 +510,7 @@ function finishLost(): void {
     ..._job,
     status: 'unknown',
     paused: false,
+    review: null,
     outputs: dedupeOutputs(_job.outputs),
     message: 'Outcome unknown: the server restarted and no longer has this job. Check the gallery for its results.',
   };

@@ -55,7 +55,7 @@
   const lastOutput = $derived(job.outputs[job.outputs.length - 1]);
   let failedPreviewUrl = $state<string | null>(null);
   const previewSrc = $derived(pausedBetween ? (lastOutput?.thumbnail_url ?? null) : job.previewUrl);
-  const showMedia = $derived(active && generating && !isVideo(job));
+  const showMedia = $derived(active && generating && !isVideo(job) && !job.review);
   // Some models render no live preview; once well past the first one, say so instead of promising it.
   const previewNote = $derived(activity === 'stepping' && stepFraction(job) > FIRST_PREVIEW_AT + 0.15
     ? 'No live preview for this model' : `First preview at ${FIRST_PREVIEW_AT * 100}%`);
@@ -116,6 +116,8 @@
           <span>Finishing up…</span><span class="num">100%</span>
         {:else if activity === 'starting'}
           <span>Starting…</span>
+        {:else if activity === 'reviewing'}
+          <span>Waiting for your review</span>
         {:else}
           <span>Step {job.currentStep} of {job.totalSteps}</span><span class="num">{stepPct}%</span>
         {/if}

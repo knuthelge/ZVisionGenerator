@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { readActiveJobId } from './activeJobStorage';
 import { jobStore } from './job.svelte';
+import { reviewVideoUrl } from './jobView';
 
 describe('jobStore reconnect contract', () => {
   beforeEach(() => {
@@ -829,6 +830,21 @@ describe('jobStore job card bookkeeping', () => {
     expect(jobStore.current?.controlQueued).toBeNull();
   });
 
+  it('keeps a queued pause, next or repeat through a review and its decision', () => {
+    for (const action of ['pause', 'next', 'repeat']) {
+      source().emit('control_queued', { type: 'control_queued', action });
+      source().emit('job_paused', { type: 'job_paused', review: { iteration: 1 } });
+      expect(jobStore.current).toMatchObject({ review: { iteration: 1 }, controlQueued: action });
+      source().emit('control_queued', { type: 'control_queued', action: 'approve' });
+      expect(jobStore.current?.controlQueued).toBe(action);
+      source().emit('job_resumed', { type: 'job_resumed' });
+      expect(jobStore.current).toMatchObject({ review: null, controlQueued: action });
+      source().emit('job_paused', { type: 'job_paused' });
+      source().emit('prompt_started', { type: 'prompt_started', prompt: 'Next' });
+      expect(jobStore.current?.controlQueued).toBeNull();
+    }
+  });
+
   it('learns the stages of each image and the steps of those that ran', () => {
     source().emit('workflow_started', { type: 'workflow_started', stage_names: ['text_to_image', 'upscale'] });
     source().emit('step_progress', { type: 'step_progress', current_step: 28, total_steps: 28, elapsed_secs: 1, workflow_stage_name: 'text_to_image' });
@@ -845,5 +861,133 @@ describe('jobStore job card bookkeeping', () => {
     expect(jobStore.current?.connection).toBe('reconnecting');
     source().emit('step_progress', { type: 'step_progress', current_step: 1, total_steps: 8, elapsed_secs: 1 });
     expect(jobStore.current?.connection).toBe('live');
+  });
+});
+
+describe('jobStore review before upscaling', () => {
+  type Source = { emit: (type: string, data: unknown) => void };
+  const source = (): Source => (globalThis.EventSource as unknown as { lastInstance: Source }).lastInstance;
+  const reviewPause = { type: 'job_paused', mode: 'image', review: { iteration: 2 }, preview_version: 6 };
+
+  beforeEach(() => {
+    sessionStorage.clear();
+    jobStore.clearJob();
+    jobStore.startJob({ job_id: 'job-review', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 3, created_at: '' });
+  });
+
+  it('shows the small render of a review pause as the job preview', () => {
+    source().emit('job_paused', reviewPause);
+    expect(jobStore.current).toMatchObject({ status: 'paused', paused: true, review: { iteration: 2 }, previewUrl: '/jobs/job-review/preview?v=6' });
+  });
+
+  it('does not start a review for a plain pause', () => {
+    source().emit('job_paused', { type: 'job_paused' });
+    expect(jobStore.current).toMatchObject({ status: 'paused', paused: true, review: null });
+  });
+
+  it.each([
+    ['job_resumed', { type: 'job_resumed' }],
+    ['generation_finished', { type: 'generation_finished', status: 'skipped' }],
+    ['prompt_started', { type: 'prompt_started', prompt: 'Next' }],
+    ['job_completed', { type: 'job_completed', outputs: [] }],
+    ['job_failed', { type: 'job_failed', message: 'boom' }],
+    ['job_cancelled', { type: 'job_cancelled' }],
+  ])('clears the review on %s', (type, event) => {
+    source().emit('job_paused', reviewPause);
+    source().emit(type, event);
+    expect(jobStore.current?.review).toBeNull();
+  });
+
+  it('follows consecutive reviews, each with its own render', () => {
+    source().emit('job_paused', reviewPause);
+    source().emit('job_resumed', { type: 'job_resumed' });
+    source().emit('job_paused', { ...reviewPause, review: { iteration: 3 }, preview_version: 8 });
+    expect(jobStore.current).toMatchObject({ review: { iteration: 3 }, previewUrl: '/jobs/job-review/preview?v=8' });
+  });
+
+  it('restores a waiting review from a reconnect snapshot, and ignores history replayed up to it', async () => {
+    jobStore.clearJob();
+    await jobStore.reconnectActiveJob({ snapshot: {
+      id: 'job-snap', job_id: 'job-snap', workflow: 'txt2img', job_type: 'txt2img', status: 'paused', prompt: 'P', model: 'zit', runs: 3,
+      created_at: '', event_count: 12, paused: true, preview_version: 5, review: { iteration: 2 }, settings: { upscale: '2' },
+      supported_controls: ['approve', 'discard', 'quit'],
+      last_event: { type: 'job_paused', event_id: 12, review: { iteration: 2 }, preview_version: 5 },
+    } });
+    expect(jobStore.current).toMatchObject({ paused: true, review: { iteration: 2 }, previewUrl: '/jobs/job-snap/preview?v=5', settings: { upscale: '2' } });
+
+    // Earlier events of the replayed history must not end or restart the review the snapshot already shows.
+    source().emit('job_resumed', { type: 'job_resumed', event_id: 8 });
+    source().emit('generation_finished', { type: 'generation_finished', event_id: 9, status: 'success' });
+    source().emit('job_paused', { type: 'job_paused', event_id: 10, review: { iteration: 1 }, preview_version: 2 });
+    expect(jobStore.current).toMatchObject({ review: { iteration: 2 }, previewUrl: '/jobs/job-snap/preview?v=5' });
+
+    source().emit('job_resumed', { type: 'job_resumed', event_id: 13 });
+    expect(jobStore.current?.review).toBeNull();
+  });
+
+  it('shows no review for a snapshot without one', async () => {
+    jobStore.clearJob();
+    await jobStore.reconnectActiveJob({ snapshot: {
+      id: 'job-plain', job_id: 'job-plain', workflow: 'txt2img', job_type: 'txt2img', status: 'paused', prompt: 'P', model: 'zit', runs: 1,
+      created_at: '', event_count: 3, paused: true, review: null, last_event: { type: 'job_paused', event_id: 3 },
+    } });
+    expect(jobStore.current).toMatchObject({ paused: true, review: null });
+  });
+
+  it('does not show the previous iteration\'s render for the next review of a batch', () => {
+    source().emit('job_paused', reviewPause);
+    source().emit('job_resumed', { type: 'job_resumed' });
+    source().emit('generation_finished', { type: 'generation_finished', status: 'success' });
+    expect(jobStore.current).toMatchObject({ review: null, previewUrl: null });
+    source().emit('prompt_started', { type: 'prompt_started', prompt: 'Next' });
+    // A review pause that carries no new preview must not fall back to the render that was already decided.
+    source().emit('job_paused', { type: 'job_paused', review: { iteration: 3 } });
+    expect(jobStore.current).toMatchObject({ review: { iteration: 3 }, previewUrl: null });
+    source().emit('job_resumed', { type: 'job_resumed' });
+    source().emit('job_paused', { ...reviewPause, review: { iteration: 3 }, preview_version: 11 });
+    expect(jobStore.current?.previewUrl).toBe('/jobs/job-review/preview?v=11');
+  });
+
+  it('shows a plain pause after a review as a plain pause', () => {
+    source().emit('job_paused', reviewPause);
+    source().emit('job_resumed', { type: 'job_resumed' });
+    source().emit('job_paused', { type: 'job_paused' });
+    expect(jobStore.current).toMatchObject({ paused: true, review: null });
+  });
+
+  describe('for a video', () => {
+    const videoPause = { type: 'job_paused', mode: 'video', review: { iteration: 2 } };
+
+    beforeEach(() => {
+      jobStore.clearJob();
+      jobStore.startJob({ job_id: 'job-video', workflow: 'txt2vid', prompt: 'P', model: 'ltx', runs: 3, created_at: '', settings: { upscale: '2', audio: ['on', 'false'] } });
+    });
+
+    it('holds a review pause that carries no preview, and serves the render from the review route', () => {
+      source().emit('job_paused', videoPause);
+      expect(jobStore.current).toMatchObject({ status: 'paused', paused: true, review: { iteration: 2 }, previewUrl: null });
+      expect(reviewVideoUrl(jobStore.current!)).toBe('/jobs/job-video/review?v=2');
+    });
+
+    it('follows the next video of the batch to its own URL, and drops the URL once resumed', () => {
+      source().emit('job_paused', videoPause);
+      source().emit('job_resumed', { type: 'job_resumed' });
+      expect(reviewVideoUrl(jobStore.current!)).toBeNull();
+      source().emit('job_paused', { ...videoPause, review: { iteration: 3 } });
+      expect(reviewVideoUrl(jobStore.current!)).toBe('/jobs/job-video/review?v=3');
+    });
+
+    it('restores a waiting review from a reconnect snapshot, including after the first decision and before job_resumed', async () => {
+      jobStore.clearJob();
+      await jobStore.reconnectActiveJob({ snapshot: {
+        id: 'job-vsnap', job_id: 'job-vsnap', workflow: 'txt2vid', job_type: 'txt2vid', status: 'paused', prompt: 'P', model: 'ltx', runs: 3,
+        created_at: '', event_count: 7, paused: true, review: { iteration: 2 }, settings: { upscale: '2', audio: 'false' },
+        supported_controls: ['approve', 'discard', 'quit'], last_event: { type: 'job_paused', event_id: 7, review: { iteration: 2 } },
+      } });
+      expect(jobStore.current).toMatchObject({ paused: true, review: { iteration: 2 }, previewUrl: null });
+      expect(reviewVideoUrl(jobStore.current!)).toBe('/jobs/job-vsnap/review?v=2');
+      source().emit('job_resumed', { type: 'job_resumed', event_id: 8 });
+      expect(jobStore.current?.review).toBeNull();
+    });
   });
 });

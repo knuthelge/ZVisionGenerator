@@ -10,12 +10,13 @@ import warnings
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import get_video_backend, supports_video_audio
+from zvisiongenerator.backends import get_video_backend, supports_video_audio, supports_video_upscale_review
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
 from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.utils.config import load_config, resolve_video_defaults, select_ratio_size_defaults
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
+from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import enhance_by_set_for_mode
@@ -52,6 +53,12 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
     parser.add_argument("--low-memory", action=argparse.BooleanOptionalAction, default=True, help="Low-memory mode for LTX (default: enabled).")
     parser.add_argument("--lora", type=str, default=None, help="Comma-separated LoRAs with optional weights: name1:0.8,name2:0.5. Bare names resolve from ~/.ziv/loras/.")
     parser.add_argument("--upscale", type=int, default=None, help="Upscale factor (only 2 accepted).")
+    parser.add_argument(
+        "--review",
+        action="store_true",
+        default=False,
+        help="Pause after each half-size render, before the upscale: press y to upscale it, n to discard it or q to quit. Needs --upscale and a terminal.",
+    )
     parser.add_argument("--audio", action=argparse.BooleanOptionalAction, default=True, help="Include audio in output (default: enabled).")
     add_enhance_arguments(parser, mode="video")
     return parser
@@ -107,6 +114,12 @@ def main(*, prog: str = "ziv-video") -> None:
         parser.error("--steps must be at least 1")
     if args.upscale is not None and args.upscale != 2:
         parser.error("--upscale only supports factor 2 (LTX spatial upscaler)")
+    if args.review and args.upscale is None:
+        parser.error("--review needs --upscale: without an upscale there is no half-size render to review.")
+    if args.review and not supports_video_upscale_review():
+        parser.error("--review is not supported by the video backend of this platform.")
+    if args.review and not stdin_is_interactive():
+        parser.error("--review needs an interactive terminal to ask for each decision.")
     parse_enhance_args(parser, args, mode="video")
 
     # Expand ~ in filesystem-only path arguments. Model/LoRA tokens are resolved by shared helpers.
@@ -264,36 +277,47 @@ def main(*, prog: str = "ziv-video") -> None:
     if plan.cancelled:
         return
 
-    # Load model
-    print(f"Loading {model_info.family.upper()} video model: {args.model}")
-    load_kwargs: dict[str, Any] = {}
-    if args.upscale:
-        load_kwargs["upscale"] = True
+    # The key listener only runs for a review: it would otherwise take over the terminal for nothing. It starts after
+    # ensure_ffmpeg and the preflight, which can both prompt with input().
+    skip = SkipSignal(quit_only=True) if args.review else None
+    if skip is not None:
+        skip.start()
+        print("Commands: [q] quit")
     try:
-        model, model_info = backend.load_model(
-            args.model,
-            mode=mode,
-            low_memory=args.low_memory,
-            loras=loras,
-            **load_kwargs,
+        # Load model
+        print(f"Loading {model_info.family.upper()} video model: {args.model}")
+        load_kwargs: dict[str, Any] = {}
+        if args.upscale:
+            load_kwargs["upscale"] = True
+        try:
+            model, model_info = backend.load_model(
+                args.model,
+                mode=mode,
+                low_memory=args.low_memory,
+                loras=loras,
+                **load_kwargs,
+            )
+        except (RuntimeError, ValueError, FileNotFoundError, ImportError) as e:
+            logger.exception("Failed to load video model %s", args.model)
+            parser.error(str(e))
+
+        # Build workflow
+        workflow = build_video_workflow(args, enhance=plan.has_rewrites)
+
+        run_video_batch(
+            backend=backend,
+            model=model,
+            model_info=model_info,
+            workflow=workflow,
+            prompts_data=prompts_data,
+            config=config,
+            args=args,
+            plan=plan,
+            skip_signal=skip,
         )
-    except (RuntimeError, ValueError, FileNotFoundError, ImportError) as e:
-        logger.exception("Failed to load video model %s", args.model)
-        parser.error(str(e))
-
-    # Build workflow
-    workflow = build_video_workflow(args, enhance=plan.has_rewrites)
-
-    run_video_batch(
-        backend=backend,
-        model=model,
-        model_info=model_info,
-        workflow=workflow,
-        prompts_data=prompts_data,
-        config=config,
-        args=args,
-        plan=plan,
-    )
+    finally:
+        if skip is not None:
+            skip.stop()
 
 
 if __name__ == "__main__":

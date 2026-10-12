@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable
+import tempfile
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -225,6 +226,92 @@ def _generate_one_stage(
         aggressive_cleanup()
 
 
+def _preview_small_render(pipe: Any, stage1: Any, review: Callable[[Path], None], *, frame_rate: float, seed: int) -> None:
+    """Decode the half-size result of stage 1 to a temporary video file and hand its path to *review*.
+
+    The file lives in a temporary directory outside the output folder and is deleted when *review* returns or raises.
+    Stage 2 must see the pipeline as stage 1 left it, so the DiT slot is put back after the decode (under ``low_memory``
+    the decode empties it, which would turn off stage-2 sparse attention and break tiling), and under ``low_memory``
+    the decoders are freed again as ``generate_and_save`` expects to find them.
+
+    Args:
+        pipe: The ``DistilledPipeline`` that has just run stage 1.
+        stage1: Its ``Stage1Result``.
+        review: Receives the path of the decoded video.
+        frame_rate: Frames per second of the clip.
+        seed: Seed of the generation, for the decoder.
+    """
+    from ltx_core_mlx.utils.memory import aggressive_cleanup
+
+    video_half = pipe.video_patchifier.unpatchify(stage1.video_tokens, stage1.latent_dims)
+    audio_half = pipe.audio_patchifier.unpatchify(stage1.audio_tokens)
+    with tempfile.TemporaryDirectory(prefix="ziv-review-") as directory:
+        path = Path(directory) / "small-render.mp4"
+        dit, loaded = pipe.dit, pipe._loaded  # noqa: SLF001
+        try:
+            pipe._load_decoders()  # noqa: SLF001
+            pipe._decode_and_save_video(video_half, audio_half, str(path), frame_rate=frame_rate, seed=seed)  # noqa: SLF001
+        finally:
+            pipe.dit, pipe._loaded = dit, loaded  # noqa: SLF001
+            if pipe.low_memory:
+                pipe.vae_decoder = None
+                pipe.audio_decoder = None
+                pipe.vocoder = None
+                aggressive_cleanup()
+        review(path)
+
+
+def _release_after_aborted_generation(pipe: Any) -> None:
+    """Free what the rest of ``generate_and_save`` would have freed, for a generation that stops after stage 1.
+
+    Under ``low_memory`` the vendored code releases the DiT, the prompt encoder, the image conditioner and the upsampler
+    after stage 2 (``DistilledPipeline._stage2`` and ``generate_and_save``). A generation that ends between the stages
+    never gets there, and the next ``_stage1`` would load the text encoder next to the resident DiT, because ``load()``
+    returns early while ``_loaded`` is true. The next ``load()`` reloads all of it (the DiT when ``dit`` is ``None``,
+    the VAE encoder through the image conditioner, the upsampler when ``upsampler`` is ``None``).
+    The DiT is not freed at this moment: the exception in flight still references it through its traceback, so the
+    cache is only cleared at the start of the next reviewed generation (``_generate_two_stage``).
+    Without ``low_memory`` nothing is freed, as in a generation that runs through.
+    """
+    if not pipe.low_memory:
+        return
+    from ltx_core_mlx.utils.memory import aggressive_cleanup
+
+    pipe.dit = None
+    pipe.prompt_encoder.free()
+    pipe.image_conditioner.free()
+    pipe.upsampler = None
+    pipe._loaded = False  # noqa: SLF001
+    aggressive_cleanup()
+
+
+@contextlib.contextmanager
+def _review_after_stage1(pipe: Any, review: Callable[[Path], None], *, frame_rate: float, seed: int) -> Iterator[None]:
+    """Let *review* see the half-size result of stage 1 while ``generate_and_save`` runs.
+
+    ``generate_two_stage`` calls ``self._stage1(...)``, so an instance attribute shadows the method for the duration
+    of the block. The wrapper returns the stage-1 result unchanged, so the generation goes on exactly as without it.
+    The attribute is removed afterwards, also when *review* or the generation raises. When the review raises (a
+    discard or a quit), the model is released as a finished generation would have released it.
+    """
+    stage1_method = pipe._stage1  # noqa: SLF001
+
+    def _stage1_then_review(*args: Any, **kwargs: Any) -> Any:
+        result = stage1_method(*args, **kwargs)
+        try:
+            _preview_small_render(pipe, result[0], review, frame_rate=frame_rate, seed=seed)
+        except BaseException:
+            _release_after_aborted_generation(pipe)
+            raise
+        return result
+
+    pipe._stage1 = _stage1_then_review  # noqa: SLF001
+    try:
+        yield
+    finally:
+        del pipe._stage1  # noqa: SLF001
+
+
 def _generate_two_stage(
     model: _LtxModel,
     prompt: str,
@@ -236,23 +323,34 @@ def _generate_two_stage(
     output_path: str,
     image_path: str | None,
     step_callback: Callable[[dict[str, Any]], None] | None,
+    review: Callable[[Path], None] | None,
 ) -> None:
-    """Generate at half resolution, spatially upscale 2x, and refine with the distilled pipeline."""
+    """Generate at half resolution, spatially upscale 2x, and refine with the distilled pipeline.
+
+    With *review*, the half-size result is decoded to a temporary video and passed to it between the two stages.
+    """
     from ltx_pipelines_mlx.scheduler import STAGE_2_SIGMAS
 
     pipe = model.pipeline
+    if review is not None and pipe.low_memory:
+        # A discarded or quit review left the DiT referenced by its traceback, so the release after it could not free it.
+        # With that traceback gone, this frees what the previous video left in the MLX cache before stage 1 loads the text encoder.
+        from ltx_core_mlx.utils.memory import aggressive_cleanup
+
+        aggressive_cleanup()
     pipe.stepwise = _TwoStageProgress(step_callback, stage2_total=len(STAGE_2_SIGMAS) - 1) if step_callback is not None else None
-    pipe.generate_and_save(
-        prompt=prompt,
-        output_path=output_path,
-        height=height,
-        width=width,
-        num_frames=num_frames,
-        frame_rate=model.frame_rate,
-        seed=seed,
-        stage1_steps=stage1_steps,
-        image=image_path,
-    )
+    with _review_after_stage1(pipe, review, frame_rate=model.frame_rate, seed=seed) if review is not None else contextlib.nullcontext():
+        pipe.generate_and_save(
+            prompt=prompt,
+            output_path=output_path,
+            height=height,
+            width=width,
+            num_frames=num_frames,
+            frame_rate=model.frame_rate,
+            seed=seed,
+            stage1_steps=stage1_steps,
+            image=image_path,
+        )
 
 
 def _generate(
@@ -267,17 +365,21 @@ def _generate(
     image_path: str | None,
     stage1_steps: int | None,
     step_callback: Callable[[dict[str, Any]], None] | None,
+    review: Callable[[Path], None] | None = None,
 ) -> Path:
     """Dispatch to the one-stage or two-stage generator that matches the loaded handle.
 
     Raises:
-        ValueError: If ``stage1_steps`` is set but the handle was not loaded for upscale, or the reverse.
+        ValueError: If ``stage1_steps`` is set but the handle was not loaded for upscale, or the reverse,
+            or if ``review`` is set without ``stage1_steps``.
     """
+    if review is not None and stage1_steps is None:
+        raise ValueError("review needs stage1_steps: only the two-stage upscale has a half-size render to review")
     if (stage1_steps is not None) != model.upscale:
         raise ValueError(f"stage1_steps must be set exactly when the model is loaded for upscale (upscale={model.upscale}, stage1_steps={stage1_steps})")
     with mlx_cache_limit(0) if model.low_ram_streaming else contextlib.nullcontext():
         if stage1_steps is not None:
-            _generate_two_stage(model, prompt, width, height, num_frames, seed, stage1_steps, output_path, image_path, step_callback)
+            _generate_two_stage(model, prompt, width, height, num_frames, seed, stage1_steps, output_path, image_path, step_callback, review)
         else:
             _generate_one_stage(model, prompt, width, height, num_frames, seed, steps, output_path, image_path, step_callback)
     return Path(output_path)
@@ -357,15 +459,16 @@ class LtxVideoBackend:
             steps: Inference steps.
             output_path: Path to save video.
             step_callback: Receives progress event dicts.
-            **kwargs: stage1_steps for distilled two-stage upscale mode.
+            **kwargs: stage1_steps for distilled two-stage upscale mode; review, a ``Callable[[Path], None]``
+                that receives a temporary video of the half-size render before the upscale (needs stage1_steps).
 
         Returns:
             Path to generated video.
 
         Raises:
-            ValueError: If stage1_steps does not match the model's upscale mode.
+            ValueError: If stage1_steps does not match the model's upscale mode, or review is set without it.
         """
-        return _generate(model, prompt, width, height, num_frames, seed, steps, output_path, None, kwargs.get("stage1_steps"), step_callback)
+        return _generate(model, prompt, width, height, num_frames, seed, steps, output_path, None, kwargs.get("stage1_steps"), step_callback, kwargs.get("review"))
 
     def image_to_video(
         self,
@@ -394,12 +497,13 @@ class LtxVideoBackend:
             steps: Inference steps.
             output_path: Path to save video.
             step_callback: Receives progress event dicts.
-            **kwargs: stage1_steps for distilled two-stage upscale mode.
+            **kwargs: stage1_steps for distilled two-stage upscale mode; review, a ``Callable[[Path], None]``
+                that receives a temporary video of the half-size render before the upscale (needs stage1_steps).
 
         Returns:
             Path to generated video.
 
         Raises:
-            ValueError: If stage1_steps does not match the model's upscale mode.
+            ValueError: If stage1_steps does not match the model's upscale mode, or review is set without it.
         """
-        return _generate(model, prompt, width, height, num_frames, seed, steps, output_path, image_path, kwargs.get("stage1_steps"), step_callback)
+        return _generate(model, prompt, width, height, num_frames, seed, steps, output_path, image_path, kwargs.get("stage1_steps"), step_callback, kwargs.get("review"))

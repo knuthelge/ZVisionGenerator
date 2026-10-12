@@ -2,6 +2,7 @@
 import { flushSync, mount, unmount } from '../../node_modules/svelte/src/index-client.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { jobStore } from '$lib/state/job.svelte';
 import { router } from '$lib/state/router.svelte';
 import type { AppConfig, GalleryPage, WorkspaceContext } from '$lib/types';
 
@@ -112,5 +113,44 @@ describe('App startup routing', () => {
     window.dispatchEvent(new PopStateEvent('popstate'));
 
     expect(router.page).toBe('workspace');
+  });
+
+  it('puts a review marker in the tab title while a render waits, and takes it out after the decision', async () => {
+    configApiMocks.getConfig.mockResolvedValue(makeConfig('gallery'));
+    document.title = 'ZVision Generator';
+    app = flushSync(() => mount(App, { target }));
+    await settle();
+    expect(document.title).toBe('ZVision Generator');
+
+    jobStore.clearJob();
+    jobStore.startJob({ job_id: 'job-title', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
+    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    source.emit('job_paused', { type: 'job_paused', review: { iteration: 1 }, preview_version: 1 });
+    await settle();
+    expect(document.title).toBe('⏸ Review · ZVision Generator');
+
+    source.emit('job_resumed', { type: 'job_resumed' });
+    await settle();
+    expect(document.title).toBe('ZVision Generator');
+    jobStore.clearJob();
+  });
+
+  it('marks the tab title for a video review too', async () => {
+    configApiMocks.getConfig.mockResolvedValue(makeConfig('gallery'));
+    document.title = 'ZVision Generator';
+    app = flushSync(() => mount(App, { target }));
+    await settle();
+
+    jobStore.clearJob();
+    jobStore.startJob({ job_id: 'job-title-video', workflow: 'txt2vid', prompt: 'P', model: 'ltx', runs: 1, created_at: '' });
+    const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    source.emit('job_paused', { type: 'job_paused', mode: 'video', review: { iteration: 1 } });
+    await settle();
+    expect(document.title).toBe('⏸ Review · ZVision Generator');
+
+    source.emit('job_resumed', { type: 'job_resumed' });
+    await settle();
+    expect(document.title).toBe('ZVision Generator');
+    jobStore.clearJob();
   });
 });

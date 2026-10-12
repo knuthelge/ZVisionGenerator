@@ -825,3 +825,310 @@ class TestPlanConsumption:
         types = [e["type"] for e in events if e["type"] in ("prompt_started", "prompt_enhanced")]
         assert types == ["prompt_started", "prompt_enhanced", "prompt_enhanced", "prompt_started"]
         assert {e["enhanced_prompt"] for e in events if e["type"] == "prompt_enhanced"} == {"A tabby cat in warm light."}
+
+
+class TestReviewBeforeUpscale:
+    """run_batch builds the review callable and reacts to its decision."""
+
+    @staticmethod
+    def _workflow(upscale):
+        from PIL import Image
+
+        from zvisiongenerator.workflows.image_stages import review_stage
+
+        def _render(request, artifacts):
+            artifacts.image = Image.new("RGB", (8, 8))
+            artifacts.filename = "image"
+            artifacts.filepath = "/out/image.png"
+            return StageOutcome.success
+
+        return GenerationWorkflow(name="test", stages=[_render, review_stage, upscale])
+
+    @staticmethod
+    def _run(skip, decide, *, prompts=1, args=None, on_event=None):
+        """Run a batch whose reviews are decided by *decide(event)* on each review's job_paused event."""
+        events: list[dict[str, object]] = []
+
+        def _callback(event):
+            events.append(event)
+            if event["type"] == "job_paused" and "review" in event:
+                decide(event)
+            if on_event is not None:
+                on_event(event)
+
+        args = args or _make_args(upscale=2, review=True)
+        run_batch(
+            MagicMock(),
+            MagicMock(spec=[]),
+            _prompts(prompts),
+            _CONFIG,
+            args,
+            model_info=_MODEL_INFO,
+            progress_callback=_callback,
+            skip_signal=skip,
+            plan=_make_plan(_prompts(prompts), args, config=_CONFIG),
+        )
+        return events
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_approve_pauses_with_review_and_preview_then_resumes_and_upscales(self, mock_build_wf):
+        upscale = MagicMock(return_value=StageOutcome.success)
+        mock_build_wf.return_value = self._workflow(upscale)
+        skip = SkipSignal()
+
+        events = self._run(skip, lambda _e: skip.set_review_decision("approve"))
+
+        types = [event["type"] for event in events]
+        assert types.index("job_paused") < types.index("job_resumed") < types.index("generation_finished")
+        paused = next(event for event in events if event["type"] == "job_paused")
+        assert paused["review"] == {"iteration": 1}
+        assert paused["preview"].size == (8, 8)
+        finished = next(event for event in events if event["type"] == "generation_finished")
+        assert finished["status"] == "success"
+        upscale.assert_called_once()
+        assert types[-1] == "batch_completed"
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_discard_skips_without_the_skip_warning(self, mock_build_wf):
+        upscale = MagicMock(return_value=StageOutcome.success)
+        mock_build_wf.return_value = self._workflow(upscale)
+        skip = SkipSignal()
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            events = self._run(skip, lambda _e: skip.set_review_decision("discard"))
+
+        finished = next(event for event in events if event["type"] == "generation_finished")
+        assert finished["status"] == "skipped"
+        upscale.assert_not_called()
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_an_all_discarded_batch_completes(self, mock_build_wf):
+        mock_build_wf.return_value = self._workflow(MagicMock(return_value=StageOutcome.success))
+        skip = SkipSignal()
+
+        events = self._run(skip, lambda _e: skip.set_review_decision("discard"), prompts=2)
+
+        statuses = [event["status"] for event in events if event["type"] == "generation_finished"]
+        assert statuses == ["skipped", "skipped"]
+        assert events[-1]["type"] == "batch_completed"
+        assert events[-1]["completed_iterations"] == 2
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_quit_during_a_review_skips_then_cancels_the_batch(self, mock_build_wf):
+        upscale = MagicMock(return_value=StageOutcome.success)
+        mock_build_wf.return_value = self._workflow(upscale)
+        skip = SkipSignal()
+
+        events = self._run(skip, lambda _e: skip.queue_action("quit"), prompts=2)
+
+        types = [event["type"] for event in events]
+        finished = [event for event in events if event["type"] == "generation_finished"]
+        assert [event["status"] for event in finished] == ["skipped"]
+        assert types[-2:] == ["generation_finished", "batch_cancelled"]
+        assert "batch_completed" not in types
+        assert types.count("job_paused") == 1
+        upscale.assert_not_called()
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_the_wait_is_not_generation_time(self, mock_build_wf):
+        import time
+
+        mock_build_wf.return_value = self._workflow(MagicMock(return_value=StageOutcome.success))
+        skip = SkipSignal()
+
+        def _decide_late(_event):
+            time.sleep(0.3)
+            skip.set_review_decision("approve")
+
+        events = self._run(skip, _decide_late, prompts=2)
+
+        finished = [event for event in events if event["type"] == "generation_finished"]
+        assert all(event["generation_time"] < 0.2 for event in finished)
+        second_start = [event for event in events if event["type"] == "prompt_started"][1]
+        assert second_start["avg_secs"] < 0.2
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_a_pause_queued_during_the_small_render_applies_after_the_upscale(self, mock_build_wf):
+        import threading
+        import time
+
+        upscale = MagicMock(return_value=StageOutcome.success)
+        mock_build_wf.return_value = self._workflow(upscale)
+        skip = SkipSignal()
+
+        def _decide(_event):
+            skip.queue_action("pause")
+            skip.set_review_decision("approve")
+
+        def _resume_a_pause(event):
+            if event["type"] == "job_paused" and "review" not in event:
+                assert upscale.call_count == 1
+
+                def _resume():
+                    while not skip.is_waiting_for_resume():
+                        time.sleep(0.001)
+                    skip.resume()
+
+                threading.Thread(target=_resume, daemon=True).start()
+
+        events = self._run(skip, _decide, on_event=_resume_a_pause)
+
+        types = [event["type"] for event in events]
+        assert types.count("job_paused") == 2
+        assert "review" in events[types.index("job_paused")]
+        assert types.index("generation_finished") < len(types) - 1 - types[::-1].index("job_paused")
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_a_pause_queued_before_the_review_applies_after_a_discard(self, mock_build_wf):
+        import threading
+        import time
+
+        upscale = MagicMock(return_value=StageOutcome.success)
+        mock_build_wf.return_value = self._workflow(upscale)
+        skip = SkipSignal()
+
+        def _decide(_event):
+            skip.queue_action("pause")
+            skip.set_review_decision("discard")
+
+        def _resume_a_pause(event):
+            if event["type"] == "job_paused" and "review" not in event:
+
+                def _resume():
+                    while not skip.is_waiting_for_resume():
+                        time.sleep(0.001)
+                    skip.resume()
+
+                threading.Thread(target=_resume, daemon=True).start()
+
+        events = self._run(skip, _decide, on_event=_resume_a_pause)
+
+        types = [event["type"] for event in events]
+        assert types.count("job_paused") == 2
+        assert "review" in events[types.index("job_paused")]
+        plain_pause = len(types) - 1 - types[::-1].index("job_paused")
+        assert types.index("generation_finished") < plain_pause
+        assert types[plain_pause + 1] == "job_resumed"
+        assert skip.pending() is None
+        upscale.assert_not_called()
+        assert types[-1] == "batch_completed"
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_a_quit_while_paused_after_a_discard_ends_the_batch(self, mock_build_wf):
+        import threading
+        import time
+
+        mock_build_wf.return_value = self._workflow(MagicMock(return_value=StageOutcome.success))
+        skip = SkipSignal()
+
+        def _decide(_event):
+            skip.queue_action("pause")
+            skip.set_review_decision("discard")
+
+        def _quit_the_pause(event):
+            if event["type"] == "job_paused" and "review" not in event:
+
+                def _quit():
+                    while not skip.is_waiting_for_resume():
+                        time.sleep(0.001)
+                    skip.queue_action("quit")
+                    skip.resume()
+
+                threading.Thread(target=_quit, daemon=True).start()
+
+        events = self._run(skip, _decide, on_event=_quit_the_pause, prompts=2)
+
+        types = [event["type"] for event in events]
+        assert types[-1] == "batch_cancelled"
+        assert types.count("prompt_started") == 1
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_a_repeat_queued_before_the_review_applies_after_a_discard(self, mock_build_wf):
+        upscale = MagicMock(return_value=StageOutcome.success)
+        mock_build_wf.return_value = self._workflow(upscale)
+        skip = SkipSignal()
+        decisions = iter(["discard", "approve"])
+
+        def _decide(_event):
+            decision = next(decisions)
+            if decision == "discard":
+                skip.queue_action("repeat")
+            skip.set_review_decision(decision)
+
+        events = self._run(skip, _decide)
+
+        types = [event["type"] for event in events]
+        assert types.count("job_paused") == 2
+        assert "generation_repeat" in types
+        assert types.index("generation_finished") < types.index("generation_repeat")
+        statuses = [event["status"] for event in events if event["type"] == "generation_finished"]
+        assert statuses == ["skipped", "success"]
+        upscale.assert_called_once()
+        assert types[-1] == "batch_completed"
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_a_next_queued_before_the_review_skips_the_image_without_an_upscale(self, mock_build_wf):
+        upscale = MagicMock(return_value=StageOutcome.success)
+        mock_build_wf.return_value = self._workflow(upscale)
+        skip = SkipSignal()
+
+        def _queue_next_while_rendering(event):
+            if event["type"] == "generation_started":
+                skip.queue_action("skip")
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            events = self._run(skip, lambda _e: None, on_event=_queue_next_while_rendering, prompts=2)
+
+        finished = [event["status"] for event in events if event["type"] == "generation_finished"]
+        assert finished == ["skipped", "skipped"]
+        assert [event["type"] for event in events].count("generation_started") == 2
+        upscale.assert_not_called()
+        assert events[-1]["type"] == "batch_completed"
+
+    @pytest.mark.parametrize("args", [dict(upscale=2, review=False), dict(upscale=None, review=True)])
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_no_review_callable_without_upscale_and_review(self, mock_build_wf, args):
+        stage = MagicMock(return_value=StageOutcome.success)
+        mock_build_wf.return_value = GenerationWorkflow(name="test", stages=[stage])
+
+        run_batch(MagicMock(), MagicMock(spec=[]), _prompts(), _CONFIG, _make_args(**args), model_info=_MODEL_INFO, plan=_make_plan(_prompts(), _make_args(**args), config=_CONFIG))
+
+        assert stage.call_args[0][0].review is None
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_review_callable_is_set_with_upscale_and_review(self, mock_build_wf):
+        stage = MagicMock(return_value=StageOutcome.success)
+        mock_build_wf.return_value = GenerationWorkflow(name="test", stages=[stage])
+        args = _make_args(upscale=2, review=True)
+
+        run_batch(
+            MagicMock(),
+            MagicMock(spec=[]),
+            _prompts(),
+            _CONFIG,
+            args,
+            model_info=_MODEL_INFO,
+            plan=_make_plan(_prompts(), args, config=_CONFIG),
+            skip_signal=SkipSignal(),
+        )
+
+        assert callable(stage.call_args[0][0].review)
+
+    @patch("zvisiongenerator.image_runner.build_workflow")
+    def test_a_review_discard_still_warns_for_other_skips(self, mock_build_wf):
+        """Only a decision made in a review silences the skip warning."""
+        mock_build_wf.return_value = _mock_workflow(StageOutcome.skipped)
+
+        with pytest.warns(UserWarning, match="Generation skipped by workflow stage"):
+            run_batch(
+                MagicMock(),
+                MagicMock(spec=[]),
+                _prompts(),
+                _CONFIG,
+                _make_args(upscale=2, review=True),
+                model_info=_MODEL_INFO,
+                plan=_make_plan(_prompts(), _make_args(upscale=2, review=True), config=_CONFIG),
+                skip_signal=SkipSignal(),
+            )

@@ -39,6 +39,7 @@ def _make_args(**overrides):
         upscale_guidance=None,
         upscale_sharpen=False,
         upscale_save_pre=False,
+        review=False,
         image_path=None,
         image_strength=0.5,
         output="outputs",

@@ -118,4 +118,20 @@ describe('cliCommand', () => {
 
     expect(command).toBe('ziv video --model ltx --prompt waves --ratio 16:9 --size m --frames 97 --steps 8 --image /refs/sea.png --no-audio --upscale 2');
   });
+
+  it('adds --review for an upscale that pauses for review', () => {
+    const base = { mode: 'image', model: 'zit', prompt: 'a lake', upscale: '2' };
+    expect(cliCommand({ ...base, review: 'true' }).command).toContain('--upscale 2 --review');
+    expect(cliCommand(base).command).not.toContain('--review');
+    // The Workspace never posts review without upscale, but a stray field must not make the CLI refuse the command.
+    expect(cliCommand({ mode: 'image', model: 'zit', prompt: 'a lake', review: 'true' }).command).not.toContain('--review');
+  });
+
+  it('adds --review to a video command with an upscale that pauses for review', () => {
+    const base = { mode: 'video', model: 'ltx', prompt: 'waves', video_upscale_factor: '2', upscale: '2' };
+    expect(cliCommand({ ...base, review: 'true' }).command).toBe('ziv video --model ltx --prompt waves --upscale 2 --review');
+    expect(cliCommand(base).command).not.toContain('--review');
+    // A stray review field without an upscale must not make the CLI refuse the command.
+    expect(cliCommand({ mode: 'video', model: 'ltx', prompt: 'waves', review: 'true' }).command).not.toContain('--review');
+  });
 });
