@@ -8,7 +8,7 @@ Images in the gallery can be upscaled 2× or 4× after the fact ([Upscale existi
 
 On macOS the model for this is already installed. mflux 0.22, which we pin, ships ByteDance's SeedVR2 (3B and 7B), a one-step diffusion restoration model that is the community default for video upscaling. mflux only exposes it for single images, but its transformer and VAE work on video. The work is a video loop around mflux's modules plus the same app plumbing the image upscale has. It doesn't need a model port or a new dependency.
 
-**Builds on** [Upscale existing images on macOS with SeedVR2](image-upscale-seedvr2-mac.md). That proposal ships the SeedVR2 loader, the capability flag, the shared `seedvr2` config block, the mflux contract test, the model download and the Restore group in the Upscale menu. Build it first. The steps below assume it is in place and add only the clip path.
+**Builds on** [Upscale existing images on macOS with SeedVR2](image-upscale-seedvr2-mac.md). That proposal ships the SeedVR2 loader, the capability flag, the shared `seedvr2` config block with its automatic per-machine model choice, the mflux contract test, the model download and the plain 2×/4× SeedVR2 items in the Upscale menu. Build it first. The steps below assume it is in place and add only the clip path.
 
 ### Not in scope
 
@@ -108,10 +108,10 @@ Write the numbers and the chosen defaults (chunk size, overlap, model, quantizat
 
 ### 2. macOS SeedVR2 video backend
 
-- Add `upscale_clip(model, frames, width, height, seed) -> frames` to the `Restorer` Protocol in `core/restorer.py` and to `backends/restore_mac.py`, both from the image proposal. Model loading (`load_model`) is already there.
+- Add `upscale_clip(model, frames, width, height, seed) -> frames` to the `SeedVR2Upscaler` Protocol in `core/seedvr2.py` and to `backends/seedvr2_mac.py`, both from the image proposal. Model loading (`load_model`) is already there.
   - `upscale_clip` resizes the chunk with bicubic, pads to 16 px, encodes it with `model.vae.encode` as `(1, 3, T, H, W)`, and builds the condition with `SeedVR2LatentCreator.create_condition`. It creates `T`-frame noise (sliced from a timeline-wide tensor if the spike says so), takes one transformer step with `SeedVR2TextEmbeddings.load_positive()`, decodes, crops, and applies `SeedVR2Util.apply_color_correction` against the resized input.
   - Add spatial tiling here only if the spike requires it. It would be our own `(B, C, T, H, W)` tiler, because mflux's tilers are image-only.
-- `backends/__init__.py`: reuse `get_restorer()`, and add `supports_video_file_upscale()`, which is true when `supports_seedvr2_upscale()` is. No other module branches on platform.
+- `backends/__init__.py`: reuse `get_seedvr2_upscaler()`, and add `supports_video_file_upscale()`, which is true when `supports_seedvr2()` is. No other module branches on platform.
 - Config: a new `video_upscale:` block with `chunk_frames`, `overlap_frames` and `max_megapixels`, using the defaults from the spike. Model and quantization come from the shared `seedvr2` block. Follow the usual precedence rules.
 - Contract tests: extend `tests/test_mflux_seedvr2_contract.py` (added by the image proposal) to pin by introspection:
   - the instance attributes `vae` and `transformer` (the constructor, `bits` and the model configs are already pinned)
@@ -143,7 +143,7 @@ Write the numbers and the chosen defaults (chunk size, overlap, model, quantizat
 
 ### 5. Web UI
 
-- The asset viewer's Upscale menu shows up for videos too, with only the Restore group from the image proposal (videos have no Refine), and the same 2×/4× items, sizes and disabled reasons. This adds no new controls or tabs.
+- The asset viewer's Upscale menu shows up for videos too, with only the plain 2× and 4× items from the image proposal (videos have no creative upscale), and the same sizes and disabled reasons. This adds no new controls or tabs.
 - The job card shows the chunk progress and the output size (`meta`), like an image upscale.
 - Run `make frontend-build` and commit the rebuilt SPA.
 - Vitest: the menu renders for a video asset that carries `upscale.factors` and is absent when `upscale` is `null`.
@@ -171,7 +171,7 @@ Covered by the image proposal's step 6: SeedVR2 is already in the inventory and 
 
 ## Open questions
 
-- **Default model.** Choose 3B bf16 or 7B int8 from the spike's quality and memory results. Should the other be a config option only, or a choice in the menu? The menu would be a new control, so prefer config unless the quality gap is large.
+- **Model on video.** Videos use the per-machine tier the image proposal picks, so a Mac keeps one SeedVR2 model. The spike checks whether that tier's per-chunk activation cost still fits at the target sizes. If it doesn't, video lowers its chunk size and size limit rather than switching to another model.
 - **4×.** At 4× even a 480p source becomes about 1920 px on the short side. Ship 2× only if 4× doesn't fit typical machines, and show the size-limit reason for 4× the way images do.
 - **Long videos.** Time grows linearly with frame count. Decide whether the job card needs an estimated time remaining based on the first chunk.
 - **Colour correction.** We'd use mflux's Lab transfer, which is what mflux ships. Wavelet is the node's default, so check in the spike whether it looks better on video.
