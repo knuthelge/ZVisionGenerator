@@ -1,11 +1,6 @@
 # Review before upscaling
 
-**Status:** In progress (2026-10-11)
-
-**Progress:** Steps 1, 3, 4 and 5 are built and documented: images on every platform, video on macOS through the `_stage1` wrapper in `video_mac`. The tests use mocked pipelines and the vendored two-stage orchestration, never a real model, so the spike's measurements (step 2) are still open. What remains:
-
-- Manual real-model checks on macOS: the peak memory (`mx.get_peak_memory`) during the preview decode on a 32 GB Mac with `--low-memory` against today's no-review peak (if it is higher, the reload fallback described under Video applies), the same peak for the video that follows a discarded one (32 GB, `--low-memory`), and identical frames and audio with and without review for the same seed (`ffmpeg -f framemd5`, after confirming that two no-review runs match each other).
-- Video review on CUDA, which builds on the two-stage upscale in [platform parity](platform-parity.md) (step 3). Until then `supports_video_upscale_review()` is false there.
+**Status:** Done (unreleased, 2026-10-12). Shipped in `a45e8e9` (feature) and `2741388` (docs): images on every platform, video on macOS through the `_stage1` wrapper in `video_mac`. The manual real-model checks on macOS (step 2) are done. Video review on CUDA moved to [platform parity](../platform-parity.md) step 3, since it builds on the two-stage upscale there; until then `supports_video_upscale_review()` is false on CUDA.
 
 ## Problem
 
@@ -128,7 +123,7 @@ The backends get one optional keyword argument, `review: Callable[[Path], None] 
 
 ### Windows and Linux
 
-Today's diffusers upscale isn't the two-stage flow ([platform parity](platform-parity.md), step 3). Review on CUDA builds on that step. Until then:
+Today's diffusers upscale isn't the two-stage flow ([platform parity](../platform-parity.md), step 3). Review on CUDA builds on that step. Until then:
 - `supports_video_upscale_review()` in `backends/__init__.py` (next to `supports_video_audio()`) returns false on CUDA;
 - the form hides the option and the server and CLI refuse it;
 - `video_diffusers` raises `ValueError` when it gets `review`, so a missed check can't be silently ignored.

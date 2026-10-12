@@ -1,6 +1,6 @@
 # Dependency refresh: shared packages and the frontend
 
-**Status:** Done (2026-10-10, unreleased). Shipped in `e5fce24` (shared Python packages), `d7bc31a` (frontend minors), `ac27be1` (Vite 8 and Vitest 5) and `7212d0a` (mflux test skip). The CUDA changes are in [deps-cuda.md](deps-cuda.md).
+**Status:** Done (2026-10-10, v0.13.0b19). Shipped in `e5fce24` (shared Python packages), `d7bc31a` (frontend minors), `ac27be1` (Vite 8 and Vitest 5) and `7212d0a` (mflux test skip). The CUDA changes are in [deps-cuda.md](deps-cuda.md).
 
 This is the first of three dependency proposals. It covers what every platform installs and runs the same way: the web server, the general Python libraries, the Hugging Face hub client, the dev tools and the frontend toolchain. The platform-specific engines are in [macOS: mflux 0.22 and a fresh LTX](deps-macos.md) and [Windows and Linux: torch 2.14, CUDA 13 and diffusers 0.41](deps-cuda.md).
 
@@ -125,4 +125,4 @@ The lock is shared, so every proposal moves packages for all platforms. CI runs 
 
 ## Open questions
 
-- Whether the first-run download proposal ([first-run.md](first-run.md)) should set `HF_XET_HIGH_PERFORMANCE` for its downloads. It saturates the network bandwidth and uses all CPU cores, so it may help most on fast links. Whether it also raises connection counts or memory use isn't documented.
+- Whether the first-run download proposal ([first-run.md](../first-run.md)) should set `HF_XET_HIGH_PERFORMANCE` for its downloads. It saturates the network bandwidth and uses all CPU cores, so it may help most on fast links. Whether it also raises connection counts or memory use isn't documented.

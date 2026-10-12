@@ -248,7 +248,7 @@ Send requests through `api` in `$lib/api/client`, which throws `ApiError` with t
 
 ### Web UI Design System
 
-The Web UI has one design system ([proposal](https://github.com/knuthelge/ZVisionGenerator/blob/main/proposals/web-design-system.md); borders and colours in [No borders and Graphite](https://github.com/knuthelge/ZVisionGenerator/blob/main/proposals/web-no-borders-graphite.md)). Its tokens live in `@theme` in `frontend/src/app/global.css`, and its component classes are the `ui-*` classes in the same file. Build pages from the shared components in `frontend/src/lib/components/` (`Button`, `Input`, `Select`, `Toggle`, `Badge`, `Panel`, `Segmented`, `ActionBar`, `PageHeader`, `KeyValueList`, `Alert`, `EmptyState`, `InspectorSection`, `InspectorRow`) or, where no component fits, the `ui-*` classes (for example `ui-chip`), rather than styling elements by hand.
+The Web UI has one design system. Its tokens live in `@theme` in `frontend/src/app/global.css`, and its component classes are the `ui-*` classes in the same file. Build pages from the shared components in `frontend/src/lib/components/` (`Button`, `Input`, `Select`, `Toggle`, `Badge`, `Panel`, `Segmented`, `ActionBar`, `PageHeader`, `KeyValueList`, `Alert`, `EmptyState`, `InspectorSection`, `InspectorRow`) or, where no component fits, the `ui-*` classes (for example `ui-chip`), rather than styling elements by hand.
 
 - **Size:** controls are 28px (`h-control`), small ones 22px, rows 30px. Buttons that sit together share one height; inside an `ActionBar` every button is 36px and the one marked `main` takes the remaining width.
 - **Type:** four sizes only: `text-meta` (11px), `text-ui` (12px), `text-content` (13px), `text-title` (16px). Nunito (`font-heading`) is for titles, area names and the main action; monospace is for numbers, paths and shortcuts.
@@ -282,10 +282,6 @@ Mock heavy image and video dependencies in tests. Diffusers backend tests patch 
     - for review before upscaling: `_stage1` (shadowed per call), `Stage1Result.video_tokens`/`audio_tokens`/`latent_dims`, `_load_decoders`, `dit`/`_loaded` (restored after the preview decode), and the model state released after an aborted generation
     - `DistilledPipeline.generate_and_save` for upscale, and `BasePipeline`'s `gemma_model_id` default, the transformer-file preference order and the `low_memory` and `low_ram_streaming` constructor arguments
 - **Cache limit.** `low_ram_streaming` makes the pipeline set the MLX buffer-cache limit to 0 for the whole process. `backends/memory_mac.mlx_cache_limit` scopes that to model construction and each generation, then restores the previous limit.
-
-## Proposals
-
-Planned and possible future work is written up in [`proposals/`](https://github.com/knuthelge/ZVisionGenerator/tree/main/proposals) at the repository root, one Markdown file per proposal with a status line, indexed in `proposals/README.md`. Check it before starting larger work, and update a proposal's status when it ships.
 
 ## Releasing
 

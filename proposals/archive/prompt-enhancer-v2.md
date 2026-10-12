@@ -1,6 +1,6 @@
 # Prompt enhancer: audio, image awareness and model-aware rewrites
 
-**Status:** Done (unreleased, 2026-10-11) for items 1, 2, 3a and 5; items 3b, 4, 6 and 7 rejected
+**Status:** Done (2026-10-11, v0.13.0b19) for items 1, 2, 3a and 5; items 3b, 4, 6 and 7 rejected
 
 ## Decision
 
@@ -56,7 +56,7 @@ No new UI. Both values are already in the request.
 Two steps, the first needs no new model:
 
 - **3a. Text-only (cheap).** When the job has a reference image, tell the model: *"The first frame is supplied as an image. Describe the motion, camera and changes over time; refer to the subject briefly and don't restyle it or add appearance details."* For img2img, Style and Mood still apply, but the subject and layout come from the image. `enhance_prompt` gets `has_reference: bool`.
-- **3b. Vision (spike first).** Qwen3.5 is natively multimodal. Feed the reference image so the rewrite can name what is actually in the frame. Needs `mlx-vlm` on macOS and the processor or VLM class in transformers on CUDA, and a vision-capable checkpoint. The current pinned `heretic` 4-bit MLX conversion may be text-only (the `*_text` fallback in `prompt_enhancer_mac._load` suggests it). Spike: find an uncensored Qwen3.5-4B checkpoint that keeps the vision tower on both platforms, and measure memory and the time per rewrite. Same machinery would serve Klein edits in [Edit images](image-editing.md).
+- **3b. Vision (spike first).** Qwen3.5 is natively multimodal. Feed the reference image so the rewrite can name what is actually in the frame. Needs `mlx-vlm` on macOS and the processor or VLM class in transformers on CUDA, and a vision-capable checkpoint. The current pinned `heretic` 4-bit MLX conversion may be text-only (the `*_text` fallback in `prompt_enhancer_mac._load` suggests it). Spike: find an uncensored Qwen3.5-4B checkpoint that keeps the vision tower on both platforms, and measure memory and the time per rewrite. Same machinery would serve Klein edits in [Edit images](../image-editing.md).
 
 ### 4. Model-aware rewrites
 
@@ -96,7 +96,7 @@ Keep the last few rewrites of the current prompt in the draft, with ‹ › to s
 - **Negative-prompt generation.** The default video and most image models run distilled at guidance 1, where negatives do little.
 - **User-defined Style and Mood options in config.** Possible later (the axes are data already), but item 5 covers most one-off needs without a config format.
 - **Prompt caching across a batch.** The shared system prompt is about 200 tokens; prefill is a small part of each rewrite.
-- **Stop and skip for video jobs while enhancing.** Already covered by [Controls for Web UI video jobs](video-job-controls.md).
+- **Stop and skip for video jobs while enhancing.** Already covered by [Controls for Web UI video jobs](../video-job-controls.md).
 
 ## Testing
 

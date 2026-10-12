@@ -1,6 +1,6 @@
 # macOS: mflux 0.22 and a fresh LTX
 
-**Status:** Done (unreleased, 2026-10-11). Shipped on branch `deps-macos` in `10ca75a` (mflux 0.22 and mlx-lm 0.32), `4ace5cb` (LTX v0.16.3 re-vendor and port), `95d9115` (low-RAM streaming), `dfa148a` (docs) and `2139801` (MP4 settings fix). The plan was corrected in several places along the way; see [What changed from the plan](#what-changed-from-the-plan). Verified on one M5 with 32 GB; see [Results (2026-10-10/11)](#results-2026-1010-11).
+**Status:** Done (2026-10-11, v0.13.0b19). Shipped on branch `deps-macos` in `10ca75a` (mflux 0.22 and mlx-lm 0.32), `4ace5cb` (LTX v0.16.3 re-vendor and port), `95d9115` (low-RAM streaming), `dfa148a` (docs) and `2139801` (MP4 settings fix). The plan was corrected in several places along the way; see [What changed from the plan](#what-changed-from-the-plan). Verified on one M5 with 32 GB; see [Results (2026-10-10/11)](#results-2026-1010-11).
 
 This is one of three dependency proposals. It covers the Apple Silicon engines: mflux for images, the vendored `ltx_core_mlx` and `ltx_pipelines_mlx` for video, and mlx-lm for the prompt enhancer. See also [Shared packages and the frontend](deps-shared.md) and [Windows and Linux: torch 2.14, CUDA 13 and diffusers 0.41](deps-cuda.md).
 
@@ -89,7 +89,7 @@ Two PRs, mflux first because it's smaller and independent of LTX.
 
 ### Not in this proposal (follow-ups)
 
-- **LTX-2.5 aliases** (`ltx25-4`, `ltx25-8`). Re-vendoring makes them possible, and they're the most visible gain, but they need their own defaults (steps, sizes, auto duration), memory checks and docs. They're also gated, so they depend on the token handling in [first-run.md](first-run.md). Decided 2026-10-10: LTX-2.5 not planned.
+- **LTX-2.5 aliases** (`ltx25-4`, `ltx25-8`). Re-vendoring makes them possible, and they're the most visible gain, but they need their own defaults (steps, sizes, auto duration), memory checks and docs. They're also gated, so they depend on the token handling in [first-run.md](../first-run.md). Decided 2026-10-10: LTX-2.5 not planned.
 - Retake, extend, audio-to-video, keyframe interpolation and HDR in the Web UI.
 - Float16 LTX compute (`LTX2_COMPUTE_DTYPE`) and block-sparse attention as user options.
 
@@ -120,7 +120,7 @@ Found while building. The plan above stays as written, with markers where it was
 
 1. **Upstream has no distilled one-stage API.** In LTX v0.16.3, `--distilled` is two-stage, and `BasePipeline` has no generate method. The no-upscale path (t2v and i2v) is composed in `video_mac.py` from public upstream parts. Upscale uses `DistilledPipeline.generate_and_save`.
 2. **Stored quants do not stay valid.** The manifest's `backend_format` is `mflux-<version>`, so every `@q4` and `@q8` copy is rebuilt once after the update. The CHANGELOG says so.
-3. **`compute_precision` was implemented and then dropped.** mflux has only `float16` (no bfloat16), and only Z-Image and FLUX.2 Klein take it (not Krea 2 or Ideogram 4). Measured on an M5 with 32 GB it gave 0–4%, which is noise. mflux documents it as aimed at the M1 family, and upstream saw no change on an M5 Max either. See [macos-speed.md](macos-speed.md). Because it is gone, [platform-parity.md](platform-parity.md) no longer carries it as a gap.
+3. **`compute_precision` was implemented and then dropped.** mflux has only `float16` (no bfloat16), and only Z-Image and FLUX.2 Klein take it (not Krea 2 or Ideogram 4). Measured on an M5 with 32 GB it gave 0–4%, which is noise. mflux documents it as aimed at the M1 family, and upstream saw no change on an M5 Max either. See [macos-speed.md](../macos-speed.md). Because it is gone, [platform-parity.md](../platform-parity.md) no longer carries it as a gap.
 4. **`docs/development.md` had no vendoring section.** One was added: "Vendored LTX".
 5. **The old vendored LTX had local hand-patches** (step and progress callbacks), which violated the rule against hand-editing `packages/ltx_*`. They are gone. Progress now uses upstream's `on_step` and the `stepwise` slot.
 6. **"25 test references" was an overcount.** Only `test_video_upscale.py` and `test_model_files.py` were coupled to the library. A new `tests/test_ltx_mlx_contract.py` pins the upstream internals we use.

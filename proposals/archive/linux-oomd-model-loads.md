@@ -1,6 +1,6 @@
 # Linux: keep systemd-oomd from killing the editor during model loads
 
-**Status:** Accepted (2026-10-10). Applied as a local drop-in with 80% and 60 s; see [Results with the drop-in](#results-with-the-drop-in). The docs note for users is still to do.
+**Status:** Done (unreleased, 2026-10-12). Applied as a local drop-in with 80% and 60 s; see [Results with the drop-in](#results-with-the-drop-in). The docs note for users is under Troubleshooting in `docs/getting-started.md`. The optional startup warning in `ziv-ui` (§3) was not built.
 
 ## Problem
 

@@ -10,7 +10,7 @@ Nothing here has been implemented. Apart from the streaming measurement in item 
 
 ### Measured context
 
-[deps-macos.md](deps-macos.md) proposed an opt-in float16 compute mode (`compute_precision`) for Z-Image and FLUX.2 Klein, based on mflux's release notes (8–35% faster, measured on an M1 Max). It was tried on an M5 with 32 GB and gave 0–4%, which is noise. mflux documents the mode as aimed at the M1 family, and the M5 Max shows no change either. It was dropped from deps-macos, so float16 image compute is not an opportunity on current Macs.
+[deps-macos.md](archive/deps-macos.md) proposed an opt-in float16 compute mode (`compute_precision`) for Z-Image and FLUX.2 Klein, based on mflux's release notes (8–35% faster, measured on an M1 Max). It was tried on an M5 with 32 GB and gave 0–4%, which is noise. mflux documents the mode as aimed at the M1 family, and the M5 Max shows no change either. It was dropped from deps-macos, so float16 image compute is not an opportunity on current Macs.
 
 The lifetime peak of an LTX run is set before denoising (the text-encoder load and the pre-denoise phase), so streaming only lowers the steady-state footprint, not the peak. Item 4 has the numbers.
 
@@ -45,7 +45,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 
 - **Change:** Cache the loaded backend, keyed by model, quant, LoRAs and weights. Free it on a model change, a video or upscale job, before prompt enhancement, or after an idle timeout.
 - **Evidence:** every job loads the model (`zvisiongenerator/web/web_runner.py:664` and `:690`, through the loader at `:880-907`) and frees it at the end (`:606-607`).
-- **Estimated gain:** 3–10 s per job, plus the compile retrace (item 6). Basis: the model-load timings in [image-model-memory.md](image-model-memory.md).
+- **Estimated gain:** 3–10 s per job, plus the compile retrace (item 6). Basis: the model-load timings in [image-model-memory.md](archive/image-model-memory.md).
 - **Output:** identical.
 - **Effort / risk:** medium / medium. On 32 GB an image model and the enhancer cannot both stay resident, so the eviction rules decide whether this helps or causes swap.
 
@@ -84,7 +84,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
   - Truncate the Qwen3 text encoder to the 27 layers Klein reads, after the stored-quant save (`zvisiongenerator/image_model_loader.py:243`).
   - Cache `_encode_prompt_pair` per prompt for Klein and Z-Image.
 - **Evidence:** Klein takes hidden layers 9, 18 and 27 (`mflux.models.flux2.variants.txt2img.flux2_klein`, around lines 151-176), but the encoder runs all 36 (`mflux.models.flux2.model.flux2_text_encoder.qwen3_text_encoder`, around lines 95-121). Klein and Z-Image have no prompt cache (the memory-saver callback in `mflux.callbacks.instances.memory_saver` is the only caching there).
-- **Estimated gain:** 25% less text-encoder compute (27 of 36 layers), 1–2 GB less memory, and no re-encode when a batch repeats a prompt. The encoder was recorded at 7–8 s per Klein image in [image-model-memory.md](image-model-memory.md), which may include step 1, so the absolute saving is uncertain.
+- **Estimated gain:** 25% less text-encoder compute (27 of 36 layers), 1–2 GB less memory, and no re-encode when a batch repeats a prompt. The encoder was recorded at 7–8 s per Klein image in [image-model-memory.md](archive/image-model-memory.md), which may include step 1, so the absolute saving is uncertain.
 - **Output:** identical.
 - **Effort / risk:** small to medium / medium. Layer truncation reaches into mflux's module structure.
 
@@ -158,7 +158,7 @@ Not researched in depth. One candidate: the video backend enables VAE slicing an
 - **PiD decode.** It is a 4x image decode, slower, and changes the picture.
 - **Live previews as a cost.** They are a linear projection at three milestones (`progress_events.py:16`), which is negligible.
 - **Removing `mx.eval` in `_ProgressChecker`** (`zvisiongenerator/backends/image_mac.py:223`). mflux evaluates the same latents right afterwards (`z_image.py:133`), so there is nothing to save.
-- **A smaller MLX cache cap or clearing the cache per image.** Already measured with no slowdown in [image-model-memory.md](image-model-memory.md); not worth more work.
+- **A smaller MLX cache cap or clearing the cache per image.** Already measured with no slowdown in [image-model-memory.md](archive/image-model-memory.md); not worth more work.
 - **VAE tiling.** Already off (`flux2_initializer.py:48`).
 - **Shorter text padding.** Changes the conditioning.
 - **Fully loaded LTX (`--low-memory` off).** About 27 GB, too tight for 32 GB.
