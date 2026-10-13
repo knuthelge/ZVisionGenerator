@@ -31,8 +31,10 @@ from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils import video_extend as video_extend_module
+from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.utils.model_memory import MemoryBudget, clip_memory_fit as real_clip_memory_fit
+from zvisiongenerator.utils.seedvr2 import SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.utils.provenance import embed_png_config
 
 
@@ -1356,6 +1358,67 @@ def test_models_route_uses_shared_alias_inventory(monkeypatch, tmp_path):
     assert image_models["local-image"]["stored_quant"] is None
     assert image_models["alias-image"]["stored_quant"] is None
     assert isinstance(payload["stored_quants_supported"], bool)
+
+
+_SEEDVR2_7B = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=10.79, activation_base_gb=1.88, activation_gb_per_mp=0.83)
+
+
+def _models_route_with_seedvr2(monkeypatch, tmp_path, *, copy_files: dict[str, bytes] | None):
+    """Serve ``GET /api/models`` with SeedVR2 on, its 7B copy holding *copy_files* (or absent when ``None``)."""
+    copy = seedvr2_copy_dir("seedvr2-7b", tmp_path / "models")
+    if copy_files is not None:
+        for name, content in copy_files.items():
+            (copy / name).parent.mkdir(parents=True, exist_ok=True)
+            (copy / name).write_bytes(content)
+    settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(_SEEDVR2_7B,))
+    web_config = _make_web_config()
+    web_config.data_dir = str(tmp_path)
+    web_config.models_dir = str(tmp_path / "models")
+    web_config.seedvr2 = SeedVR2Setup(settings=settings, tier=_SEEDVR2_7B, budget_bytes=None, downloaded=copy_files is not None)
+    monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    monkeypatch.setattr(workspace_api_module, "list_loras", lambda _data_dir: [])
+    return web_config
+
+
+def test_models_route_lists_the_downloaded_seedvr2_tier_with_its_disk_use(monkeypatch, tmp_path):
+    _models_route_with_seedvr2(monkeypatch, tmp_path, copy_files={"transformer/w.safetensors": b"x" * 2_000_000_000, "vae/v.safetensors": b"y" * 500_000_000})
+
+    with TestClient(web_server.app) as client:
+        rows = client.get("/api/models").json()["image_models"]
+
+    assert rows == [
+        {
+            "name": "seedvr2-7b@q8",
+            "family": "seedvr2",
+            "size_label": "7b",
+            "source": "seedvr2",
+            "stored_quant": None,
+            "downloaded": True,
+            "memory_fit": None,
+            "delete": {"kind": "installed", "repo_id": None, "linked_by": [], "stored_quants": []},
+            "disk_size_label": "2.5 GB",
+            "download_size_label": "17.0 GB",
+        }
+    ]
+
+
+def test_models_route_lists_the_seedvr2_tier_as_not_downloaded_without_a_copy(monkeypatch, tmp_path):
+    _models_route_with_seedvr2(monkeypatch, tmp_path, copy_files=None)
+
+    with TestClient(web_server.app) as client:
+        (row,) = client.get("/api/models").json()["image_models"]
+
+    assert (row["name"], row["downloaded"], row["delete"], row["disk_size_label"], row["download_size_label"]) == ("seedvr2-7b@q8", False, None, None, "17.0 GB")
+
+
+def test_models_route_has_no_seedvr2_row_where_seedvr2_is_off(monkeypatch, tmp_path):
+    web_config = _models_route_with_seedvr2(monkeypatch, tmp_path, copy_files={"w.safetensors": b"x"})
+    web_config.seedvr2 = None
+
+    with TestClient(web_server.app) as client:
+        rows = client.get("/api/models").json()["image_models"]
+
+    assert rows == []
 
 
 def test_submit_video_job_surfaces_platform_alias_mismatch(monkeypatch):

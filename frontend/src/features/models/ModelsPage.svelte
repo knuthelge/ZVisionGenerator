@@ -18,7 +18,7 @@
   let localLoraPath = $state('');
   let checkpointPathReset = $state(0);
   let localLoraPathReset = $state(0);
-  let pendingDelete = $state<{ type: 'model'; name: string; info: ModelDeleteInfo } | { type: 'lora'; name: string } | null>(null);
+  let pendingDelete = $state<{ type: 'model'; name: string; info: ModelDeleteInfo; downloadSizeLabel?: string | null } | { type: 'lora'; name: string } | null>(null);
   let deleteOpen = $state(false);
   let deleting = $state(false);
 
@@ -109,6 +109,12 @@
     }
   }
 
+  function notDownloadedTooltip(m: { source?: string; download_size_label?: string | null }): string {
+    return m.source === 'seedvr2' && m.download_size_label
+      ? `Not downloaded: the first plain upscale downloads it (${m.download_size_label}).`
+      : NOT_DOWNLOADED_TOOLTIP;
+  }
+
   function deleteQuestion(target: NonNullable<typeof pendingDelete>): string {
     if (target.type === 'lora') return `Delete ${target.name}.safetensors from the LoRAs folder?`;
     if (target.info.kind === 'installed') return `Delete the model folder ${target.name} from the models folder?`;
@@ -171,9 +177,9 @@
   }
 </script>
 
-{#snippet modelName(m: ModelStatusFields & { name: string })}
+{#snippet modelName(m: ModelStatusFields & { name: string; source?: string; download_size_label?: string | null })}
   {#if m.downloaded === true || m.downloaded === false}
-    <Tooltip text={`${m.name}\n${m.downloaded ? DOWNLOADED_TOOLTIP : NOT_DOWNLOADED_TOOLTIP}`} focusable={false} class="max-w-full items-center gap-1.5">
+    <Tooltip text={`${m.name}\n${m.downloaded ? DOWNLOADED_TOOLTIP : notDownloadedTooltip(m)}`} focusable={false} class="max-w-full items-center gap-1.5">
       {#if m.downloaded}
         <svg class="h-3.5 w-3.5 shrink-0 text-primary-main" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -196,10 +202,11 @@
   </button>
 {/snippet}
 
-{#snippet modelDeleteCell(m: { name: string; delete?: ModelDeleteInfo | null })}
+{#snippet modelDeleteCell(m: { name: string; delete?: ModelDeleteInfo | null; source?: string; download_size_label?: string | null })}
   {#if m.delete}
     {@const info = m.delete}
-    {@render deleteButton(info.kind === 'installed' ? `Delete ${m.name}` : `Delete the Hugging Face download of ${m.name}`, () => requestDelete({ type: 'model', name: m.name, info }))}
+    {@const downloadSizeLabel = m.source === 'seedvr2' ? m.download_size_label : null}
+    {@render deleteButton(info.kind === 'installed' ? `Delete ${m.name}` : `Delete the Hugging Face download of ${m.name}`, () => requestDelete({ type: 'model', name: m.name, info, downloadSizeLabel }))}
   {/if}
 {/snippet}
 
@@ -269,6 +276,9 @@
                           {@render modelName(m)}
                           {#if m.stored_quant}
                             <span class="ui-help block font-normal" data-testid="stored-quant" title="Used automatically when {m.stored_quant.base_model} runs at q{m.stored_quant.bits}">q{m.stored_quant.bits} copy of {m.stored_quant.base_model}</span>
+                          {/if}
+                          {#if m.disk_size_label}
+                            <span class="ui-help block font-normal" data-testid="disk-size">{m.disk_size_label} on disk</span>
                           {/if}
                         </td>
                         <td class="font-mono">{m.family}</td>
@@ -477,7 +487,9 @@
 >
   {#if pendingDelete}
     <div class="space-y-2" data-testid="delete-dialog">
-      {#if pendingDelete.type === 'model' && pendingDelete.info.kind === 'installed'}
+      {#if pendingDelete.type === 'model' && pendingDelete.info.kind === 'installed' && pendingDelete.downloadSizeLabel}
+        <p data-testid="delete-redownload">The next plain upscale downloads it again ({pendingDelete.downloadSizeLabel}).</p>
+      {:else if pendingDelete.type === 'model' && pendingDelete.info.kind === 'installed'}
         <p>Hugging Face files it links to are kept.</p>
       {:else if pendingDelete.type === 'model'}
         <p>The <span class="font-mono">{pendingDelete.name}</span> alias stays in your config and downloads the model again the next time you use it.</p>

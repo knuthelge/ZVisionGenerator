@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import re
 from pathlib import Path
 
@@ -171,6 +172,23 @@ def has_complete_weights(model_dir: Path) -> bool:
     # Root-level files are only selected when they stand in for the transformer folder.
     present = {component_of(model_dir, path) or _TRANSFORMER_COMPONENT for path in files}
     return all(name in present for name in components or ()) and _shards_complete(files)
+
+
+def directory_bytes(path: Path) -> int:
+    """Return the total size of the regular files under *path*, not following symlinks; 0 when it is missing."""
+    if not path.is_dir():
+        return 0
+    total = 0
+    for root, _dirs, files in os.walk(path, followlinks=False):
+        for name in files:
+            file = Path(root, name)
+            if file.is_symlink():
+                continue
+            try:
+                total += file.stat().st_size
+            except OSError:
+                continue
+    return total
 
 
 def huggingface_cache_repo_dir(repo_id: str) -> Path:

@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
 from zvisiongenerator.utils.model_files import find_local_model_dir, huggingface_cache_repo_dir
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 from zvisiongenerator.utils.stored_quant import stored_quant_dirs_for
@@ -50,6 +51,15 @@ def model_delete_target(
     if repo is None or find_local_dir(entry.resolved_path) is None:
         return None
     return DeleteTarget("huggingface", huggingface_cache_repo_dir(repo.repo_id), repo_id=repo.repo_id, stored_quants=stored_quants)
+
+
+def seedvr2_delete_target(model: str, models_dir: Path) -> DeleteTarget | None:
+    """Return what deleting the stored SeedVR2 copy of *model* removes, or ``None`` when no copy is on disk.
+
+    Only the copy goes: the Hugging Face cache is never touched, since the copy replaced those downloads.
+    """
+    copy = seedvr2_copy_dir(model, models_dir)
+    return DeleteTarget("installed", copy) if copy.is_dir() else None
 
 
 def installed_models_linking_to(target: Path, models_dir: Path) -> tuple[str, ...]:

@@ -975,8 +975,14 @@ export interface ModelEntry extends ModelStatusFields {
   name: string;
   family: string;
   size_label?: string;
+  /** Where the model comes from: `installed`, `alias`, or `seedvr2` for the plain-upscale model's stored copy. */
+  source?: string;
   stored_quant?: StoredQuantInfo | null;
   delete?: ModelDeleteInfo | null;
+  /** Disk use of the stored copy, set on the SeedVR2 row while the copy exists. */
+  disk_size_label?: string | null;
+  /** Size of the first-use download, set on the SeedVR2 row. */
+  download_size_label?: string | null;
 }
 
 export interface VideoModelEntry extends ModelStatusFields {

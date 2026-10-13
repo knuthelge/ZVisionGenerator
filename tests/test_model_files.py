@@ -240,3 +240,18 @@ def test_precision_variants_are_ignored_next_to_plain_weights(tmp_path):
     files = {path.relative_to(tmp_path).as_posix() for path in model_files.model_weight_files(tmp_path)}
 
     assert files == {"transformer/diffusion_pytorch_model.safetensors", "vae/diffusion_pytorch_model.fp16-00001-of-00001.safetensors"}
+
+
+def test_directory_bytes_counts_regular_files_and_skips_symlinks(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "one.bin").write_bytes(b"x" * 10)
+    (tmp_path / "two.bin").write_bytes(b"y" * 5)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.bin"
+    outside.write_bytes(b"z" * 100)
+    (tmp_path / "link.bin").symlink_to(outside)
+
+    assert model_files.directory_bytes(tmp_path) == 15
+
+
+def test_directory_bytes_is_zero_for_a_missing_directory(tmp_path):
+    assert model_files.directory_bytes(tmp_path / "missing") == 0

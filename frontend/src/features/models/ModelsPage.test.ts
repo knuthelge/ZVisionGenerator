@@ -34,6 +34,7 @@ vi.mock('$lib/state/toasts.svelte', () => ({
   addToast: vi.fn(),
 }));
 
+import { NOT_DOWNLOADED_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
 import ModelsPage from './ModelsPage.svelte';
 
 function makeInventory(): ModelInventory {
@@ -477,6 +478,88 @@ describe('ModelsPage Browse buttons', () => {
     expect(modelApiMocks.deleteModel).toHaveBeenCalledWith('klein9b');
     expect(modelApiMocks.getModelInventory).toHaveBeenCalledTimes(2);
     expect(document.querySelector('[data-testid="delete-dialog"]')).toBeNull();
+  });
+
+  describe('SeedVR2 row', () => {
+    const seedvr2Row = {
+      name: 'seedvr2-7b@q8',
+      family: 'seedvr2',
+      size_label: '7b',
+      source: 'seedvr2',
+      stored_quant: null,
+      memory_fit: null,
+      download_size_label: '17.0 GB',
+    };
+
+    function tooltipFor(name: string): string {
+      const label = Array.from(target.querySelectorAll('[data-testid="model-name"]')).find((el) => el.textContent === name);
+      return label?.parentElement?.querySelector('[role="tooltip"]')?.textContent ?? '';
+    }
+
+    it('shows the disk use only while the stored copy exists, with a delete for it', async () => {
+      modelApiMocks.getModelInventory.mockResolvedValue({
+        ...makeInventory(),
+        image_models: [
+          { ...seedvr2Row, downloaded: true, disk_size_label: '9.3 GB', delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
+          { name: 'zit', family: 'zimage', downloaded: true, delete: null },
+        ],
+      });
+      app = flushSync(() => mount(ModelsPage, { target }));
+      await settle();
+
+      const disk = target.querySelectorAll('[data-testid="disk-size"]');
+      expect(disk).toHaveLength(1);
+      expect(disk[0].textContent).toContain('9.3 GB');
+      expect(Array.from(target.querySelectorAll('[data-testid="delete-button"]')).map((el) => el.getAttribute('aria-label'))).toEqual(['Delete seedvr2-7b@q8']);
+      expect(target.querySelector('[data-testid="model-memory-fit"]')).toBeNull();
+    });
+
+    it('names the download size in the not-downloaded tooltip and leaves image rows alone', async () => {
+      modelApiMocks.getModelInventory.mockResolvedValue({
+        ...makeInventory(),
+        image_models: [
+          { ...seedvr2Row, downloaded: false, disk_size_label: null, delete: null },
+          { name: 'klein4b', family: 'flux2_klein', downloaded: false, delete: null },
+        ],
+      });
+      app = flushSync(() => mount(ModelsPage, { target }));
+      await settle();
+
+      expect(tooltipFor('seedvr2-7b@q8')).toContain('(17.0 GB)');
+      expect(tooltipFor('seedvr2-7b@q8')).not.toContain(NOT_DOWNLOADED_TOOLTIP);
+      expect(tooltipFor('klein4b')).toContain(NOT_DOWNLOADED_TOOLTIP);
+      expect(target.querySelector('[data-testid="disk-size"]')).toBeNull();
+    });
+
+    it('confirms with the re-download size instead of the installed-model line and deletes by name', async () => {
+      modelApiMocks.getModelInventory.mockResolvedValue({
+        ...makeInventory(),
+        image_models: [
+          { ...seedvr2Row, downloaded: true, disk_size_label: '9.3 GB', delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
+          { name: 'artaix', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
+        ],
+      });
+      modelApiMocks.deleteModel.mockResolvedValue({ tone: 'success', message: "Deleted model 'seedvr2-7b@q8'.", detail: '' });
+      app = flushSync(() => mount(ModelsPage, { target }));
+      await settle();
+      const buttons = target.querySelectorAll('[data-testid="delete-button"]');
+
+      (buttons[1] as HTMLButtonElement).click();
+      await settle();
+      expect(document.querySelector('[data-testid="delete-redownload"]')).toBeNull();
+      expect(document.querySelector('[data-testid="delete-dialog"]')?.textContent).toContain('Hugging Face files it links to are kept.');
+      (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Cancel') as HTMLButtonElement).click();
+      await settle();
+
+      (buttons[0] as HTMLButtonElement).click();
+      await settle();
+      expect(document.querySelector('[data-testid="delete-redownload"]')?.textContent).toContain('17.0 GB');
+      expect(document.querySelector('[data-testid="delete-dialog"]')?.textContent).not.toContain('Hugging Face files');
+      (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
+      await settle();
+
+      expect(modelApiMocks.deleteModel).toHaveBeenCalledWith('seedvr2-7b@q8');
+    });
   });
 
   it('deletes a LoRA after confirmation and surfaces a refused delete', async () => {

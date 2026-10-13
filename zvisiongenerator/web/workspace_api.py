@@ -14,13 +14,15 @@ from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
 from zvisiongenerator.utils.config import resolve_defaults, resolve_enhancer_model, resolve_video_defaults
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
-from zvisiongenerator.utils.model_files import find_local_model_dir
+from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
+from zvisiongenerator.utils.model_files import directory_bytes, find_local_model_dir
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import matrix_contract, resolve_enhance_ceiling
+from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
-from zvisiongenerator.web.model_delete import installed_models_linking_to, model_delete_target
+from zvisiongenerator.web.model_delete import installed_models_linking_to, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
 from zvisiongenerator.web.model_status import describe_model_status
 
@@ -194,7 +196,8 @@ def build_models_response(
                 "delete": delete_info(entry),
             }
             for entry in web_config.image_inventory
-        ],
+        ]
+        + _seedvr2_model_rows(web_config.seedvr2, Path(web_config.models_dir)),
         "video_models": [
             {"name": entry.name, "family": entry.family, "supports_i2v": entry.supports_i2v, "source": entry.source, **status(entry, "video"), "delete": delete_info(entry)}
             for entry in web_config.video_inventory
@@ -204,6 +207,33 @@ def build_models_response(
         "huggingface_configured": token_var is not None,
         "huggingface_token_env_var": token_var,
     }
+
+
+def _seedvr2_model_rows(setup: SeedVR2Setup | None, models_dir: Path) -> list[dict[str, Any]]:
+    """Return the Models-page row for the SeedVR2 tier this Mac uses, or no rows where SeedVR2 is off.
+
+    The row has the shape of an image model's, plus the stored copy's disk use and the size of the first-use
+    download, which the page shows in the not-downloaded tooltip and the delete confirmation.
+    """
+    if setup is None:
+        return []
+    model = setup.tier.model
+    copy = seedvr2_copy_dir(model, models_dir)
+    can_delete = seedvr2_delete_target(model, models_dir) is not None
+    return [
+        {
+            "name": copy.name,
+            "family": "seedvr2",
+            "size_label": model.removeprefix("seedvr2-"),
+            "source": "seedvr2",
+            "stored_quant": None,
+            "downloaded": setup.downloaded,
+            "memory_fit": None,
+            "delete": {"kind": "installed", "repo_id": None, "linked_by": [], "stored_quants": []} if can_delete else None,
+            "disk_size_label": seedvr2_size_label(directory_bytes(copy)) if can_delete else None,
+            "download_size_label": seedvr2_size_label(seedvr2_download_bytes(model)),
+        }
+    ]
 
 
 def _stored_quant_payload(entry: ImageInventoryEntry) -> dict[str, Any] | None:

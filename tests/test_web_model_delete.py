@@ -9,8 +9,10 @@ import huggingface_hub.constants
 import pytest
 from fastapi.testclient import TestClient
 
+from zvisiongenerator.utils.seedvr2 import SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.web import server as web_server
-from zvisiongenerator.web.model_delete import delete_lora, delete_model, installed_models_linking_to, model_delete_target
+from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
+from zvisiongenerator.web.model_delete import delete_lora, delete_model, installed_models_linking_to, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 
 
@@ -136,6 +138,8 @@ class TestDeleteRoutes:
     def client(self, layout, monkeypatch):
         web_config = SimpleNamespace(
             data_dir=str(layout.data_dir),
+            models_dir=str(layout.models_dir),
+            seedvr2=None,
             image_inventory=(_image_entry("custom", "installed", str(layout.models_dir / "custom")), _image_entry("base", "alias", "org/base")),
             video_inventory=(VideoInventoryEntry(name="ltx", family="ltx", supports_i2v=True, source="alias", resolved_path="org/missing"),),
         )
@@ -182,3 +186,76 @@ def test_models_payload_describes_what_each_delete_removes(layout):
     assert delete_info(_image_entry("custom", "installed", "")) == {"kind": "installed", "repo_id": None, "linked_by": [], "stored_quants": []}
     assert delete_info(_image_entry("base", "alias", "org/base")) == {"kind": "huggingface", "repo_id": "org/base", "linked_by": ["custom"], "stored_quants": []}
     assert delete_info(_image_entry("missing", "alias", "org/missing")) is None
+
+
+class TestSeedvr2DeleteTarget:
+    def test_a_stored_copy_is_the_target(self, layout):
+        copy = seedvr2_copy_dir("seedvr2-7b", layout.models_dir)
+        _touch(copy / "transformer" / "weights.safetensors")
+
+        target = seedvr2_delete_target("seedvr2-7b", layout.models_dir)
+
+        assert target is not None
+        assert (target.kind, target.path, target.stored_quants) == ("installed", copy, ())
+
+    def test_no_copy_means_no_target(self, layout):
+        assert seedvr2_delete_target("seedvr2-7b", layout.models_dir) is None
+
+    def test_deleting_the_copy_leaves_the_huggingface_cache_and_other_models(self, layout):
+        copy = seedvr2_copy_dir("seedvr2-7b", layout.models_dir)
+        _touch(copy / "transformer" / "weights.safetensors")
+
+        delete_model(seedvr2_delete_target("seedvr2-7b", layout.models_dir))
+
+        assert not copy.exists()
+        assert (layout.models_dir / "custom").is_dir()
+        assert layout.base_snapshot.is_dir()
+
+
+class TestSeedvr2DeleteRoute:
+    @pytest.fixture
+    def client(self, layout, monkeypatch):
+        tier = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=10.79, activation_base_gb=1.88, activation_gb_per_mp=0.83)
+        settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(tier,))
+        self.copy = seedvr2_copy_dir("seedvr2-7b", layout.models_dir)
+        _touch(self.copy / "transformer" / "weights.safetensors")
+        self.web_config = SimpleNamespace(
+            data_dir=str(layout.data_dir),
+            models_dir=str(layout.models_dir),
+            image_inventory=(_image_entry("custom", "installed", str(layout.models_dir / "custom")),),
+            video_inventory=(),
+            seedvr2=SeedVR2Setup(settings=settings, tier=tier, budget_bytes=None, downloaded=True),
+        )
+        monkeypatch.setattr(web_server, "load_web_config", lambda: self.web_config)
+        monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
+        with TestClient(web_server.app) as client:
+            yield client
+
+    def test_delete_removes_only_the_stored_copy(self, client, layout):
+        response = client.delete("/api/models/seedvr2-7b@q8")
+
+        assert response.status_code == 200
+        assert not self.copy.exists()
+        assert (layout.models_dir / "custom").is_dir()
+        assert layout.base_snapshot.is_dir()
+
+    def test_a_second_delete_finds_nothing(self, client):
+        assert client.delete("/api/models/seedvr2-7b@q8").status_code == 200
+        assert client.delete("/api/models/seedvr2-7b@q8").status_code == 404
+
+    def test_other_names_and_the_other_tier_are_404(self, client):
+        assert client.delete("/api/models/seedvr2-3b@q8").status_code == 404
+        assert client.delete("/api/models/seedvr2-7b").status_code == 404
+        assert self.copy.is_dir()
+
+    def test_delete_is_404_where_seedvr2_is_off(self, client):
+        self.web_config.seedvr2 = None
+
+        assert client.delete("/api/models/seedvr2-7b@q8").status_code == 404
+        assert self.copy.is_dir()
+
+    def test_delete_is_refused_while_a_job_runs(self, client, monkeypatch):
+        monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: {"job_id": "j1"})
+
+        assert client.delete("/api/models/seedvr2-7b@q8").status_code == 409
+        assert self.copy.is_dir()

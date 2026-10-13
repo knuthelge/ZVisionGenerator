@@ -62,7 +62,7 @@ from zvisiongenerator.utils.prompt_enhance_video import EnhancePairResult, enhan
 from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
 from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
-from zvisiongenerator.utils.seedvr2 import seedvr2_tier_label
+from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_tier_label
 from zvisiongenerator.upscale_runner import read_upscale_source
 from zvisiongenerator.utils.video_extend import apply_extend_args
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
@@ -88,7 +88,7 @@ from zvisiongenerator.web.upscale_api import plan_seedvr2_upscale, plan_upscale,
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
-from zvisiongenerator.web.model_delete import delete_lora, delete_model, model_delete_target
+from zvisiongenerator.web.model_delete import DeleteTarget, delete_lora, delete_model, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.review import review_enabled
 from zvisiongenerator.web.job_contract import UPSCALE_SUPPORTED_CONTROLS, image_supported_controls, video_supported_controls
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner, worker_runtime_context
@@ -1728,6 +1728,12 @@ async def api_models_import_lora_hf(request: Request) -> dict[str, Any]:
     return {"status": "ok", "tone": notice["tone"], "message": notice["message"]}
 
 
+def _seedvr2_copy_target(name: str, setup: SeedVR2Setup, models_dir: Path) -> DeleteTarget | None:
+    """Return the delete target when *name* is the Models-page row of the SeedVR2 tier in use and its copy exists."""
+    target = seedvr2_delete_target(setup.tier.model, models_dir)
+    return target if target is not None and target.path.name == name else None
+
+
 @app.delete("/api/models/{name}")
 def api_delete_model(name: str) -> dict[str, Any]:
     """Delete an installed model folder, or an alias model's HuggingFace download (the alias itself stays)."""
@@ -1735,6 +1741,8 @@ def api_delete_model(name: str) -> dict[str, Any]:
     web_config = load_web_config()
     entry = next((entry for entry in (*web_config.image_inventory, *web_config.video_inventory) if entry.name == name), None)
     target = model_delete_target(entry, Path(web_config.data_dir) / "models") if entry is not None else None
+    if entry is None and web_config.seedvr2 is not None:
+        target = _seedvr2_copy_target(name, web_config.seedvr2, Path(web_config.models_dir))
     if target is None:
         raise HTTPException(status_code=404, detail=f"No deletable model named '{name}'.")
     try:
