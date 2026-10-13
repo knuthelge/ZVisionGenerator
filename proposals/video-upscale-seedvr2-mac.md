@@ -114,7 +114,7 @@ Write the numbers and the chosen defaults (chunk size, overlap, model, quantizat
 - `backends/__init__.py`: reuse `get_seedvr2_upscaler()`, and add `supports_video_file_upscale()`, which is true when `supports_seedvr2()` is. No other module branches on platform.
 - Config: a new `video_upscale:` block with `chunk_frames`, `overlap_frames` and `max_megapixels`, using the defaults from the spike. Model and quantization come from the shared `seedvr2` block. Follow the usual precedence rules.
 - Contract tests: extend `tests/test_mflux_seedvr2_contract.py` (added by the image proposal) to pin by introspection:
-  - the instance attributes `vae` and `transformer` (the constructor, `bits` and the model configs are already pinned)
+  - the instance attributes `vae` and `transformer` (the constructor and the model configs are already pinned)
   - `SeedVR2LatentCreator.create_condition(encoded_latent)`
   - `SeedVR2TextEmbeddings.load_positive(batch_size)`
   - `SeedVR2Util.apply_color_correction(content, style, luminance_weight)`
@@ -150,7 +150,7 @@ Write the numbers and the chosen defaults (chunk size, overlap, model, quantizat
 
 ### 6. Model download
 
-Covered by the image proposal's step 6: SeedVR2 is already in the inventory and downloads like other models by the time this ships.
+Covered by the image proposal's step 6: SeedVR2 stays out of the inventory and the model picker. The first plain upscale downloads it through `load_seedvr2` (`seedvr2_loader.py`), which stores an 8-bit copy in the hidden `models_dir/.seedvr2/` folder and deletes the downloaded files; the Models-page row is separate from the inventory. Video upscale reuses that path and adds no download step of its own.
 
 ### 7. Docs and changelog
 
