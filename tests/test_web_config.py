@@ -578,3 +578,39 @@ def test_user_config_temp_file_never_has_wider_permissions(monkeypatch, tmp_path
 
     assert seen and seen[0][0] == 0o600 and "/x" in seen[0][1]
     assert stat.S_IMODE(config.stat().st_mode) == 0o600
+
+
+def _patch_minimal_web_config(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(web_config_module, "load_config", _make_app_config)
+    monkeypatch.setattr(web_config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+    monkeypatch.setattr(web_config_module, "list_models", lambda _: [])
+    monkeypatch.setattr(web_config_module, "list_video_models", lambda _: [])
+    monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
+
+
+def test_load_web_config_has_no_seedvr2_where_it_is_unsupported(monkeypatch, tmp_path):
+    _patch_minimal_web_config(monkeypatch, tmp_path)
+
+    assert web_config_module.load_web_config().seedvr2 is None
+
+
+@pytest.mark.parametrize(("budget", "expected_bytes"), [(SimpleNamespace(gpu_bytes=26_800_000_000), 26_800_000_000), (None, None)])
+def test_load_web_config_builds_seedvr2_setup_from_the_memory_budget(monkeypatch, tmp_path, budget, expected_bytes):
+    _patch_minimal_web_config(monkeypatch, tmp_path)
+    setup = object()
+    calls: list[dict] = []
+
+    def _build(config, **kwargs):
+        calls.append({"config": config, **kwargs})
+        return setup
+
+    monkeypatch.setattr(web_config_module, "supports_seedvr2", lambda: True)
+    monkeypatch.setattr(web_config_module, "memory_budget", lambda: budget)
+    monkeypatch.setattr(web_config_module, "build_seedvr2_setup", _build)
+
+    web_config = web_config_module.load_web_config()
+
+    assert web_config.seedvr2 is setup
+    assert calls[0]["budget_bytes"] == expected_bytes
+    assert calls[0]["models_dir"] == tmp_path / ".ziv" / "models"

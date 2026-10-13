@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, supports_seedvr2
 from zvisiongenerator.converters.list_assets import list_loras, list_models, list_video_models
+from zvisiongenerator.seedvr2_loader import build_seedvr2_setup
 from zvisiongenerator.utils.config import load_config, resolve_enhancer_model
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
+from zvisiongenerator.utils.seedvr2 import SeedVR2Setup
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config_contract import resolve_loras_dir, resolve_models_dir, resolve_output_dir
 from zvisiongenerator.web.model_inventory import (
@@ -62,6 +66,7 @@ class WebUiConfig:
     video_inventory: tuple[VideoInventoryEntry, ...] = ()
     enhancer_model: str | None = None
     enhancer_revision: str | None = None
+    seedvr2: SeedVR2Setup | None = None
 
 
 def load_web_config() -> WebUiConfig:
@@ -93,6 +98,7 @@ def load_web_config() -> WebUiConfig:
     image_model_options = inventory_names(selectable_images)
     video_model_options = inventory_names(video_inventory)
     lora_options = tuple(entry.name for entry in list_loras(data_dir))
+    seedvr2 = _resolve_seedvr2(app_config, data_dir) if supports_seedvr2() else None
 
     image_sizes = app_config.get("sizes", {})
     video_sizes = app_config.get("video_sizes", {})
@@ -119,6 +125,7 @@ def load_web_config() -> WebUiConfig:
         quantize_options=_resolve_quantize_options(ui_config),
         image_inventory=image_inventory,
         video_inventory=video_inventory,
+        seedvr2=seedvr2,
         **_resolve_enhancer(app_config),
     )
 
@@ -128,6 +135,12 @@ def preferred_option(preferred: str | None, options: tuple[str, ...]) -> str | N
     if preferred in options:
         return preferred
     return options[0] if options else None
+
+
+def _resolve_seedvr2(app_config: dict[str, Any], data_dir: Path) -> SeedVR2Setup:
+    """Return the SeedVR2 tier for this machine's memory budget and whether its stored copy exists."""
+    budget_bytes = b.gpu_bytes if (b := memory_budget()) else None
+    return build_seedvr2_setup(app_config, budget_bytes=budget_bytes, models_dir=resolve_models_dir(data_dir=data_dir))
 
 
 def _resolve_enhancer(app_config: dict[str, Any]) -> dict[str, str | None]:

@@ -61,10 +61,12 @@ from zvisiongenerator.utils.prompt_enhance import (
 from zvisiongenerator.utils.prompt_enhance_video import EnhancePairResult, enhance_video_prompt, split_scene_action
 from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
 from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
+from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
+from zvisiongenerator.utils.seedvr2 import seedvr2_tier_label
 from zvisiongenerator.upscale_runner import read_upscale_source
 from zvisiongenerator.utils.video_extend import apply_extend_args
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
-from zvisiongenerator.workflows import build_upscale_workflow
+from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_upscale_workflow
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response, huggingface_token_env_var
 from zvisiongenerator.web.config_contract import persist_writable_config_patch, resolve_output_dir as resolve_config_output_dir
@@ -82,7 +84,7 @@ from zvisiongenerator.web.gallery import (
 from zvisiongenerator.web.json_fields import json_field
 from zvisiongenerator.web.path_picker import pick_path
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
-from zvisiongenerator.web.upscale_api import plan_upscale, upscale_json_request, upscale_size_label
+from zvisiongenerator.web.upscale_api import plan_seedvr2_upscale, plan_upscale, upscale_json_request, upscale_size_label
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
@@ -659,7 +661,7 @@ async def upscale(request: Request) -> JSONResponse:
 def _upscale_from_body(body: Any) -> JSONResponse:
     """Validate an upscale request, plan the job and submit it; runs off the event loop."""
     try:
-        asset_id, factor = upscale_json_request(body)
+        asset_id, factor, method = upscale_json_request(body)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     source_path = resolve_output_asset_path(_media_output_root(), asset_id)
@@ -669,8 +671,16 @@ def _upscale_from_body(body: Any) -> JSONResponse:
         raise HTTPException(status_code=404, detail=f"Unknown image: {asset_id}")
 
     web_config = load_web_config()
+    setup = web_config.seedvr2
+    use_seedvr2 = method == UPSCALE_METHOD_SEEDVR2
+    if use_seedvr2 and setup is None:
+        raise HTTPException(status_code=422, detail="SeedVR2 upscaling is only available on macOS.")
     try:
-        plan = plan_upscale(read_upscale_source(source_path), factor, web_config, backend_name=get_backend_name())
+        source = read_upscale_source(source_path)
+        if use_seedvr2:
+            plan = plan_seedvr2_upscale(source, factor, setup=setup)
+        else:
+            plan = plan_upscale(source, factor, web_config, backend_name=get_backend_name())
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -681,7 +691,7 @@ def _upscale_from_body(body: Any) -> JSONResponse:
         "workflow": "upscale",
         "job_type": "Upscale",
         "prompt": plan.request.resolved_prompt or plan.request.prompt,
-        "model": plan.request.model_name or "",
+        "model": seedvr2_tier_label(setup.tier.model) if use_seedvr2 else plan.request.model_name or "",
         "runs": 1,
         "meta": upscale_size_label(plan),
         "notices": list(plan.notices),
@@ -692,7 +702,7 @@ def _upscale_from_body(body: Any) -> JSONResponse:
     try:
         job_id = web_runner.submit_upscale_job(
             request=plan.request,
-            workflow=build_upscale_workflow(sharpen=plan.request.sharpen),
+            workflow=build_seedvr2_upscale_workflow() if use_seedvr2 else build_upscale_workflow(sharpen=plan.request.sharpen),
             model_ref=plan.model_ref,
             admission_check=_reject_while_busy,
             context=context,

@@ -187,3 +187,9 @@ def fake_peft_no_match(monkeypatch):
     peft.NoMatchingPeftModuleError = NoMatchingPeftModuleError
     monkeypatch.setitem(sys.modules, "peft", peft)
     return NoMatchingPeftModuleError
+
+
+@pytest.fixture(autouse=True)
+def _seedvr2_off_in_web_config(monkeypatch):
+    """Keep SeedVR2 off in the Web UI config so tests behave the same on every platform; opt-in tests patch it back on."""
+    monkeypatch.setattr("zvisiongenerator.web.config.supports_seedvr2", lambda: False)

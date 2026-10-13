@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +22,7 @@ from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.gallery import gallery_asset_to_json, list_gallery_assets
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry
 from zvisiongenerator.web.web_runner import JobConflictError
+from zvisiongenerator.workflows import build_seedvr2_upscale_workflow
 
 _DEFAULTS = {
     "steps": 10,
@@ -49,6 +51,7 @@ def _web_config(output_dir, **overrides):
         image_model_options=("zit", "other"),
         video_model_options=("ltx-8",),
         quantize_options=(4, 8),
+        seedvr2=None,
         image_inventory=(
             ImageInventoryEntry(name="zit", family="zimage", size=None, source="alias", resolved_path="zit"),
             ImageInventoryEntry(name="ideo", family="ideogram4", size=None, source="alias", resolved_path="ideo"),
@@ -347,10 +350,27 @@ def test_seedvr2_plan_rejects_unknown_factor():
         upscale_api.plan_seedvr2_upscale(_source(), 3, setup=_seedvr2_setup())
 
 
-@pytest.mark.parametrize("body", [None, [], {"factor": 2}, {"asset_id": "a.png"}, {"asset_id": "a.png", "factor": 3}, {"asset_id": "a.png", "factor": True}])
+@pytest.mark.parametrize(
+    "body",
+    [
+        None,
+        [],
+        {"factor": 2},
+        {"asset_id": "a.png"},
+        {"asset_id": "a.png", "factor": 3},
+        {"asset_id": "a.png", "factor": True},
+        {"asset_id": "a.png", "factor": 2, "method": "bogus"},
+        {"asset_id": "a.png", "factor": 2, "method": None},
+    ],
+)
 def test_request_body_validation(body):
     with pytest.raises(ValueError):
         upscale_api.upscale_json_request(body)
+
+
+@pytest.mark.parametrize(("extra", "method"), [({}, "creative"), ({"method": "creative"}, "creative"), ({"method": "seedvr2"}, "seedvr2")])
+def test_request_body_method(extra, method):
+    assert upscale_api.upscale_json_request({"asset_id": "a.png", "factor": 4, **extra}) == ("a.png", 4, method)
 
 
 # ── Endpoint ────────────────────────────────────────────────────────────────
@@ -371,7 +391,7 @@ def upscale_client(monkeypatch, tmp_path):
 
     monkeypatch.setattr(web_server.web_runner, "submit_upscale_job", _submit)
     with TestClient(web_server.app) as client:
-        yield SimpleNamespace(client=client, submitted=submitted, root=tmp_path, monkeypatch=monkeypatch)
+        yield SimpleNamespace(client=client, submitted=submitted, root=tmp_path, monkeypatch=monkeypatch, web_config=web_config)
 
 
 def test_upscale_route_queues_job(upscale_client):
@@ -456,6 +476,97 @@ def test_upscale_route_conflict_while_busy(upscale_client):
     assert response.status_code == 409
 
 
+def test_upscale_route_defaults_to_the_creative_plan_even_with_seedvr2_on(upscale_client):
+    upscale_client.web_config.seedvr2 = _seedvr2_setup()
+    _write_png(upscale_client.root / "a.png", config={"prompt": "a barn", "model": "zit"})
+
+    response = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 2})
+
+    assert response.status_code == 200
+    submitted = upscale_client.submitted[0]
+    assert submitted["request"].upscale_method == "creative"
+    assert submitted["model_ref"] == "/models/zit"
+    assert submitted["context"]["model"] == "zit"
+
+
+def test_upscale_route_rejects_an_unknown_method(upscale_client):
+    _write_png(upscale_client.root / "a.png")
+
+    response = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 2, "method": "bogus"})
+
+    assert response.status_code == 422
+    assert upscale_client.submitted == []
+
+
+def test_upscale_route_rejects_seedvr2_where_it_is_unsupported(upscale_client):
+    _write_png(upscale_client.root / "a.png")
+
+    response = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 2, "method": "seedvr2"})
+
+    assert response.status_code == 422
+    assert upscale_client.submitted == []
+
+
+def test_upscale_route_queues_a_seedvr2_job(upscale_client):
+    upscale_client.web_config.seedvr2 = _seedvr2_setup()
+    _write_png(upscale_client.root / "set" / "portrait.png", config={"prompt": "a barn", "model": "zit", "seed": 3})
+
+    response = upscale_client.client.post("/api/upscale", json={"asset_id": "set/portrait.png", "factor": 2, "method": "seedvr2"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job_id"] == "job-up"
+    assert payload["workflow"] == "upscale"
+    assert payload["model"] == "SeedVR2 7B q8"
+    assert payload["meta"] == "2× → 1664×2432"
+    submitted = upscale_client.submitted[0]
+    assert submitted["request"].upscale_method == "seedvr2"
+    assert submitted["request"].upscale_model == "seedvr2-7b"
+    assert submitted["workflow"].stages == build_seedvr2_upscale_workflow().stages
+    assert submitted["context"]["model"] == "SeedVR2 7B q8"
+    assert submitted["context"]["meta"] == "2× → 1664×2432"
+    assert submitted["context"]["settings"] == {}
+
+
+def test_upscale_route_queues_a_seedvr2_job_for_a_model_that_cannot_upscale(upscale_client):
+    upscale_client.web_config.seedvr2 = _seedvr2_setup()
+    _write_png(upscale_client.root / "plain.png")
+    _patch_model_resolution(upscale_client.monkeypatch, defaults={**_DEFAULTS, "supports_upscale": False})
+
+    creative = upscale_client.client.post("/api/upscale", json={"asset_id": "plain.png", "factor": 2})
+    plain = upscale_client.client.post("/api/upscale", json={"asset_id": "plain.png", "factor": 2, "method": "seedvr2"})
+
+    assert (creative.status_code, plain.status_code) == (422, 200)
+
+
+def test_upscale_route_queues_a_warned_seedvr2_size_that_creative_refuses(upscale_client):
+    upscale_client.web_config.seedvr2 = _seedvr2_setup(budget_bytes=int(20e9))
+    _write_png(upscale_client.root / "a.png")
+
+    refused = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 4})
+    queued = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 4, "method": "seedvr2"})
+
+    assert refused.status_code == 422
+    assert queued.status_code == 200
+    assert upscale_client.submitted[0]["request"].upscale_factor == 4
+    assert queued.json()["meta"] == "4× → 3328×4864"
+
+
+def test_upscale_route_seedvr2_maps_unknown_asset_and_busy(upscale_client):
+    upscale_client.web_config.seedvr2 = _seedvr2_setup()
+    _write_png(upscale_client.root / "a.png")
+
+    missing = upscale_client.client.post("/api/upscale", json={"asset_id": "missing.png", "factor": 2, "method": "seedvr2"})
+
+    def _busy(**_kwargs):
+        raise JobConflictError("busy")
+
+    upscale_client.monkeypatch.setattr(web_server.web_runner, "submit_upscale_job", _busy)
+    busy = upscale_client.client.post("/api/upscale", json={"asset_id": "a.png", "factor": 2, "method": "seedvr2"})
+
+    assert (missing.status_code, busy.status_code) == (404, 409)
+
+
 # ── Gallery asset fields ────────────────────────────────────────────────────
 
 
@@ -475,6 +586,62 @@ def test_gallery_upscale_field_lists_factors(tmp_path):
         {"factor": 4, "width": 3328, "height": 4864, "allowed": False, "reason": upscale["factors"][1]["reason"], "warning": None},
     ]
     assert "megapixel" in upscale["factors"][1]["reason"]
+
+
+def test_gallery_upscale_field_has_no_seedvr2_where_it_is_unsupported(tmp_path):
+    _write_png(tmp_path / "a.png", config={"prompt": "p", "model": "zit"})
+
+    assert _asset_json(tmp_path, "a.png")["upscale"]["seedvr2"] is None
+
+
+def test_gallery_upscale_field_lists_seedvr2_options(tmp_path):
+    _write_png(tmp_path / "a.png", size=(1024, 1536), config={"prompt": "p", "model": "zit"})
+    web_config = _web_config(tmp_path, seedvr2=_seedvr2_setup())
+
+    seedvr2 = _asset_json(tmp_path, "a.png", web_config)["upscale"]["seedvr2"]
+
+    assert seedvr2["options"] == [
+        {"factor": 2, "width": 2048, "height": 3072, "allowed": True, "reason": None, "warning": None},
+        {"factor": 4, "width": 4096, "height": 6144, "allowed": True, "reason": None, "warning": None},
+    ]
+    assert seedvr2["model"] == "SeedVR2 7B q8"
+    assert seedvr2["downloaded"] is False
+    assert seedvr2["download_size_label"] == "17.0 GB"
+
+
+def test_gallery_upscale_field_seedvr2_warns_only_over_the_budget(tmp_path):
+    _write_png(tmp_path / "a.png", size=(1024, 1536))
+    web_config = _web_config(tmp_path, seedvr2=_seedvr2_setup(budget_bytes=int(21e9)))
+
+    options = _asset_json(tmp_path, "a.png", web_config)["upscale"]["seedvr2"]["options"]
+
+    assert [(option["factor"], option["allowed"], option["warning"]) for option in options] == [(2, True, None), (4, True, SEEDVR2_MEMORY_WARNING)]
+
+
+def test_gallery_upscale_field_seedvr2_download_label_follows_the_stored_copy(tmp_path):
+    _write_png(tmp_path / "a.png")
+    downloaded = replace(_seedvr2_setup(), downloaded=True)
+    three_b = SeedVR2Tier("seedvr2-3b", weights_gb=4.0, activation_floor_gb=5.0, activation_base_gb=1.0, activation_gb_per_mp=0.5)
+
+    ready = _asset_json(tmp_path, "a.png", _web_config(tmp_path, seedvr2=downloaded))["upscale"]["seedvr2"]
+    small = _asset_json(tmp_path, "a.png", _web_config(tmp_path, seedvr2=_seedvr2_setup(tier=three_b)))["upscale"]["seedvr2"]
+
+    assert (ready["downloaded"], ready["download_size_label"]) == (True, None)
+    assert (small["model"], small["download_size_label"]) == ("SeedVR2 3B q8", "7.3 GB")
+
+
+def test_gallery_upscale_field_seedvr2_does_not_depend_on_the_image_model(tmp_path):
+    _write_png(tmp_path / "ideo.png", size=(256, 256), config={"prompt": "p", "model": "ideo"})
+    _write_png(tmp_path / "plain.png", size=(256, 256))
+    web_config = _web_config(tmp_path, image_model_options=("zit", "ideo"), seedvr2=_seedvr2_setup())
+    no_models = _web_config(tmp_path, image_model_options=(), default_models=WebUiDefaultModels(), seedvr2=_seedvr2_setup())
+
+    ideo = _asset_json(tmp_path, "ideo.png", web_config)["upscale"]
+    plain = _asset_json(tmp_path, "plain.png", no_models)["upscale"]
+
+    for upscale in (ideo, plain):
+        assert [factor["allowed"] for factor in upscale["factors"]] == [False, False]
+        assert all(option["allowed"] for option in upscale["seedvr2"]["options"])
 
 
 def test_gallery_upscale_field_disallows_models_without_upscale(tmp_path):

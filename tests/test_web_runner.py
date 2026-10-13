@@ -454,7 +454,9 @@ class TestWebRunner:
         monkeypatch.setattr(
             web_runner_module,
             "load_web_config",
-            lambda: SimpleNamespace(default_models=SimpleNamespace(image="zit", video="ltx-8"), image_model_options=("zit",), video_model_options=("ltx-8",), image_inventory=(), app_config={}),
+            lambda: SimpleNamespace(
+                default_models=SimpleNamespace(image="zit", video="ltx-8"), image_model_options=("zit",), video_model_options=("ltx-8",), image_inventory=(), app_config={}, seedvr2=None
+            ),
         )
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
 

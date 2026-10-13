@@ -15,7 +15,8 @@ from PIL import Image, UnidentifiedImageError
 from zvisiongenerator.backends import supports_video_extend
 from zvisiongenerator.utils.provenance import image_prompt_text, optional_float, optional_int, optional_text, read_mp4_config, read_png_config, recorded_settings
 from zvisiongenerator.utils.config import model_capabilities
-from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, upscale_options, upscale_output_size
+from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label, seedvr2_tier_label
+from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, seedvr2_options, upscale_options, upscale_output_size
 from zvisiongenerator.utils.video_splice import SPLICE_DIR_PREFIX
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canonicalize_workflow, default_workflow_for_mode, workflow_mode
@@ -484,10 +485,12 @@ def _asset_details_json(asset: GalleryAsset) -> dict[str, Any]:
 
 
 def _asset_upscale_json(asset: GalleryAsset, web_config: WebUiConfig, resolved_model: str | None) -> dict[str, Any] | None:
-    """Return the upscale menu for an image: each factor's size and whether the refinement model allows it.
+    """Return the upscale menu for an image: the creative factors and the SeedVR2 upscale.
 
-    The refinement model is the one recorded in the image, or the default image model when that one is
-    missing or not configured, matching what ``POST /api/upscale`` will use.
+    ``factors`` gives each creative factor's size and whether the refinement model allows it. That model is the
+    one recorded in the image, or the default image model when that one is missing or not configured, matching
+    what ``POST /api/upscale`` will use. ``seedvr2`` is independent of the image's model: ``None`` where SeedVR2
+    is unsupported, else its options (never disabled, possibly warned), tier label and download state.
     """
     if asset.width is None or asset.height is None:
         return None
@@ -498,7 +501,20 @@ def _asset_upscale_json(asset: GalleryAsset, web_config: WebUiConfig, resolved_m
         # The inventory's family gives the same capabilities resolve_defaults uses for POST /api/upscale, without detection.
         family = next((entry.family for entry in web_config.image_inventory if entry.name == model), "unknown")
         options = upscale_options(asset.width, asset.height, model_capabilities(web_config.app_config, family), web_config.app_config)
-    return {"factors": [asdict(option) for option in options]}
+    return {"factors": [asdict(option) for option in options], "seedvr2": _seedvr2_upscale_json(asset.width, asset.height, web_config.seedvr2)}
+
+
+def _seedvr2_upscale_json(width: int, height: int, setup: SeedVR2Setup | None) -> dict[str, Any] | None:
+    """Return the SeedVR2 part of the upscale menu, or ``None`` when SeedVR2 is unsupported."""
+    if setup is None:
+        return None
+    model = setup.tier.model
+    return {
+        "options": [asdict(option) for option in seedvr2_options(width, height, setup.tier, budget_bytes=setup.budget_bytes)],
+        "model": seedvr2_tier_label(model),
+        "downloaded": setup.downloaded,
+        "download_size_label": None if setup.downloaded else seedvr2_size_label(seedvr2_download_bytes(model)),
+    }
 
 
 def _source_with_asset_id(root: Path, source: dict[str, Any] | None) -> dict[str, Any] | None:

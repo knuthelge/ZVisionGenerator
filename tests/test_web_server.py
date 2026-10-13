@@ -71,6 +71,7 @@ def _make_web_config() -> SimpleNamespace:
         quantize_options=(4, 8),
         image_inventory=(),
         video_inventory=(),
+        seedvr2=None,
     )
 
 

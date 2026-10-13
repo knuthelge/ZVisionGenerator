@@ -13,7 +13,7 @@ from zvisiongenerator.utils.config import resolve_defaults, resolve_scheduler_cl
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import parse_lora_arg
 from zvisiongenerator.utils.paths import resolve_model_path
-from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2, RecordedSettings
+from zvisiongenerator.utils.provenance import UPSCALE_METHOD_CREATIVE, UPSCALE_METHOD_SEEDVR2, RecordedSettings
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS, SEEDVR2_REPO, SeedVR2Setup
 from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, existing_image_denoise, seedvr2_options, upscale_options
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
@@ -21,6 +21,7 @@ from zvisiongenerator.web.config import WebUiConfig, preferred_option
 NOTICE_SETTINGS_UNKNOWN = "original settings unknown"
 NOTICE_MODEL_NOT_CONFIGURED = "original model not configured, using the default"
 NOTICE_LORA_MISSING = "missing LoRAs left out"
+_UPSCALE_METHODS = (UPSCALE_METHOD_CREATIVE, UPSCALE_METHOD_SEEDVR2)
 
 
 @dataclass(frozen=True)
@@ -222,11 +223,13 @@ def upscale_size_label(plan: UpscalePlan) -> str:
     return f"{plan.option.factor}× → {plan.option.width}×{plan.option.height}"
 
 
-def upscale_json_request(body: Any) -> tuple[str, int]:
-    """Validate a ``POST /api/upscale`` body and return ``(asset_id, factor)``.
+def upscale_json_request(body: Any) -> tuple[str, int, str]:
+    """Validate a ``POST /api/upscale`` body and return ``(asset_id, factor, method)``.
+
+    ``method`` is optional and defaults to ``creative``.
 
     Raises:
-        ValueError: If the asset ID or factor is missing or malformed.
+        ValueError: If the asset ID, factor or method is missing or malformed.
     """
     if not isinstance(body, dict):
         raise ValueError("Request body must be a JSON object.")
@@ -236,4 +239,7 @@ def upscale_json_request(body: Any) -> tuple[str, int]:
     factor = body.get("factor")
     if isinstance(factor, bool) or not isinstance(factor, int) or factor not in UPSCALE_FACTORS:
         raise ValueError(f"factor must be one of {list(UPSCALE_FACTORS)}.")
-    return asset_id, factor
+    method = body.get("method", UPSCALE_METHOD_CREATIVE)
+    if method not in _UPSCALE_METHODS:
+        raise ValueError(f"method must be one of {list(_UPSCALE_METHODS)}.")
+    return asset_id, factor, method
