@@ -201,6 +201,18 @@ class TestBuildImageConfigPayload:
         assert payload["scheduler"] == "beta"
         assert payload["generation"]["upscale"]["seed"] == 0
 
+    def test_seedvr2_upscale_of_a_source_without_a_family_saves_no_family(self):
+        request = _make_image_request(upscale_source="/out/p.png", upscale_factor=2, upscale_method="seedvr2", upscale_model="seedvr2-3b", model_family="unknown", source_settings_known=False)
+        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (64, 32)), was_upscaled=True)
+
+        assert build_image_config_payload(request, artifacts).get("model_family") is None
+
+    def test_seedvr2_upscale_of_a_recorded_source_keeps_its_family(self):
+        request = _make_image_request(upscale_source="/out/p.png", upscale_factor=2, upscale_method="seedvr2", upscale_model="seedvr2-3b", model_family="flux")
+        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (64, 32)), was_upscaled=True)
+
+        assert build_image_config_payload(request, artifacts)["model_family"] == "flux"
+
     def test_seedvr2_upscale_of_a_recorded_source_keeps_its_sampling_values(self):
         request = _make_image_request(upscale_source="/out/p.png", upscale_factor=2, upscale_method="seedvr2", upscale_model="seedvr2-3b", seed=5, steps=8, guidance=1.5)
         artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (64, 32)), was_upscaled=True)

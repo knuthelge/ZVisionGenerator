@@ -38,13 +38,15 @@ def build_image_config_payload(request: ImageGenerationRequest, artifacts: Image
     negative_prompt = None if artifacts.metadata.get("negative_suppressed") else request.negative_prompt
     # A SeedVR2 upscale of a source with no recorded sampling settings must not save class defaults as if they were its own.
     unknown_source = request.upscale_method == UPSCALE_METHOD_SEEDVR2 and not request.source_settings_known
+    # SeedVR2 runs no image model, so a source that recorded no family leaves it unrecorded rather than "unknown".
+    family_unknown = request.upscale_method == UPSCALE_METHOD_SEEDVR2 and request.model_family == "unknown"
     payload: dict[str, Any] = {
         "schema": IMAGE_CONFIG_SCHEMA,
         "workflow": _image_workflow(request),
         "prompt": artifacts.metadata.get("enhanced_prompt") or request.prompt,
         "negative_prompt": negative_prompt or None,
         "model": _portable_path(request.model_name),
-        "model_family": request.model_family,
+        "model_family": None if family_unknown else request.model_family,
         "seed": None if unknown_source else request.seed,
         "steps": None if unknown_source else request.steps,
         "guidance": None if unknown_source else request.guidance,
