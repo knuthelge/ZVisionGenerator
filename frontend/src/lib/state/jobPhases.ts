@@ -119,7 +119,12 @@ export function trackJobEvent(job: ActiveJobState, type: string, event: EventDat
     if (typeof action === 'string' && CONTROL_ACTIONS.has(action) && !UNQUEUED_ACTIONS.has(action)) next.controlQueued = action as JobControlAction;
   }
   if (type === 'preflight_started') next.enhanceTotal = numberField(event, 'total_rewrites') ?? 0;
-  if (type === 'model_loading' && event?.phase === 'saving_quant') next.loadQuant = numberField(event, 'quantize') ?? 8;
+  if (type === 'model_loading') {
+    const loadPhase = event?.phase;
+    if (loadPhase === 'downloading' || loadPhase === 'loading' || loadPhase === 'saving_quant') next.loadPhase = loadPhase;
+    if (event?.replaces_download === true) next.loadReplacesDownload = true;
+    if (loadPhase === 'saving_quant') next.loadQuant = numberField(event, 'quantize') ?? 8;
+  }
   if (type === 'generation_finished') next.itemFinished = true;
   if (type === 'prompt_started' || type === 'generation_repeat') next.itemFinished = false;
   if (type === 'workflow_started' && Array.isArray(event?.stage_names)) {

@@ -21,7 +21,7 @@
 <script lang="ts">
   import { Icon, ShortcutList } from '$lib/components/atoms';
   import { isTyping } from '$lib/keyboard';
-  import { canExtend, canUseAsReference, describeFallbackReason, extendReason, upscaleFactor, upscaleFactors, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
+  import { canExtend, canUseAsReference, describeFallbackReason, extendReason, plainUpscaleMethod, upscaleFactors, upscaleOption, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { GalleryAsset, UpscaleFactor } from '$lib/types';
   import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
@@ -113,16 +113,17 @@
   const separateScene = $derived(asset?.scene && asset.scene !== asset.prompt ? asset.scene : null);
   const sourceIndex = $derived(source?.id ? assets.findIndex((item) => item.id === source.id) : -1);
 
-  /** Upscale the shown image by *factor* from the keyboard; a disallowed factor explains why instead. */
+  /** Upscale the shown image by *factor* from the keyboard with the plain method; a disallowed factor explains why instead. */
   function runUpscale(factor: UpscaleFactor): boolean {
     if (!asset || !onupscale) return false;
-    const option = upscaleFactor(asset, factor);
+    const method = plainUpscaleMethod(asset);
+    const option = upscaleOption(asset, factor, method);
     if (!option) return false;
     if (!option.allowed) {
       addToast(option.reason ?? `Upscaling ${factor}× is not available for this image.`, 'warning');
       return true;
     }
-    onupscale(asset, factor);
+    onupscale(asset, factor, method);
     return true;
   }
 

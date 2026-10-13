@@ -375,6 +375,19 @@ describe('AssetViewer', () => {
       { factor: 2 as const, width: 1664, height: 2432, allowed: true, reason: null },
       { factor: 4 as const, width: 3328, height: 4864, allowed: false, reason: 'Over the 16-megapixel upscale limit.' },
     ],
+    seedvr2: null,
+  };
+  const seedvr2Upscale = {
+    ...upscale,
+    seedvr2: {
+      options: [
+        { factor: 2 as const, width: 1664, height: 2432, allowed: true as const, reason: null, warning: null },
+        { factor: 4 as const, width: 3328, height: 4864, allowed: true as const, reason: null, warning: 'May need more memory than this Mac has.' },
+      ],
+      model: 'SeedVR2 7B q8',
+      downloaded: true,
+      download_size_label: null,
+    },
   };
 
   function upscaleItems(): HTMLElement[] {
@@ -388,11 +401,11 @@ describe('AssetViewer', () => {
     flushSync(() => document.querySelector<HTMLButtonElement>('[data-action="upscale"]')!.click());
 
     const items = upscaleItems();
-    expect(items.map((item) => item.textContent?.trim())).toEqual(['2× → 1664×2432', '4× → 3328×4864']);
+    expect(items.map((item) => item.textContent?.trim())).toEqual(['2× creative → 1664×2432', '4× creative → 3328×4864']);
     expect(items[1].getAttribute('aria-disabled')).toBe('true');
     expect(items[1].getAttribute('title')).toBe('Over the 16-megapixel upscale limit.');
     flushSync(() => items[0].click());
-    expect(onupscale).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 2);
+    expect(onupscale).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 2, 'creative');
   });
 
   it('hides the upscale menu without a handler', () => {
@@ -413,11 +426,46 @@ describe('AssetViewer', () => {
     press('x');
     press('2');
     expect(onupscale).toHaveBeenCalledTimes(1);
-    expect(onupscale).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 2);
+    expect(onupscale).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 2, 'creative');
 
     press('x');
     press('4');
     expect(onupscale).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the SeedVR2 upscale with X then 2 or 4 where it is offered, even for a size flagged as high memory', () => {
+    const onupscale = vi.fn();
+    mountViewer({ assets: [makeAsset({ upscale: seedvr2Upscale })], onupscale });
+
+    press('x');
+    press('2');
+    press('x');
+    press('4');
+
+    expect(onupscale.mock.calls.map(([, factor, method]) => [factor, method])).toEqual([[2, 'seedvr2'], [4, 'seedvr2']]);
+  });
+
+  it('does not start the upscale chord from Shift+X', () => {
+    const onupscale = vi.fn();
+    mountViewer({ assets: [makeAsset({ upscale: seedvr2Upscale })], onupscale });
+
+    press('X', { shiftKey: true });
+    press('2');
+
+    expect(onupscale).not.toHaveBeenCalled();
+  });
+
+  it('lists the SeedVR2 items, a separator and the creative items in the upscale menu', () => {
+    const onupscale = vi.fn();
+    mountViewer({ assets: [makeAsset({ upscale: seedvr2Upscale })], onupscale });
+
+    flushSync(() => document.querySelector<HTMLButtonElement>('[data-action="upscale"]')!.click());
+
+    const items = upscaleItems();
+    expect(items.map((item) => item.getAttribute('data-action'))).toEqual(['upscale-seedvr2-2', 'upscale-seedvr2-4', 'upscale-creative-2', 'upscale-creative-4']);
+    expect(document.querySelectorAll('[role="menu"][aria-label="Upscale"] [role="separator"]')).toHaveLength(1);
+    flushSync(() => items[1].click());
+    expect(onupscale).toHaveBeenCalledWith(expect.objectContaining({ id: 'out/asset-a.png' }), 4, 'seedvr2');
   });
 
   it('leaves 2 and 4 alone without a preceding X', () => {

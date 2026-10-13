@@ -230,7 +230,10 @@ export function headline(job: ActiveJobState): string {
     const rewrite = enhanceProgress(job);
     return rewrite ? `Enhancing prompt ${rewrite.current} of ${rewrite.total}` : 'Loading the prompt enhancer';
   }
-  if (phase === 'load') return job.loadQuant ? 'Preparing the model' : 'Loading the model';
+  if (phase === 'load') {
+    if (job.loadPhase === 'downloading') return `Downloading ${job.model}`;
+    return job.loadQuant ? 'Preparing the model' : 'Loading the model';
+  }
   if (job.workflow === 'upscale') return 'Upscaling';
   const verb = job.stageName === 'upscale' && !job.itemFinished ? 'Upscaling' : 'Generating';
   return total > 1 ? `${verb} ${noun} ${index + 1} of ${total}` : `${verb} ${noun}`;
@@ -356,7 +359,7 @@ export function phaseRows(job: ActiveJobState): PhaseRow[] {
     else status = active ? (isPaused(job) ? 'paused' : 'current') : endedStatus;
     rows.push({
       key,
-      label: key === 'queue' ? 'Queued' : key === 'enhance' ? 'Enhance prompts' : key === 'load' ? (job.loadQuant ? 'Prepare model' : 'Load model') : generateLabel(job),
+      label: key === 'queue' ? 'Queued' : key === 'enhance' ? 'Enhance prompts' : key === 'load' ? loadLabel(job) : generateLabel(job),
       detail: rowDetail(job, key, status, total),
       status,
       secs: status === 'pending' || status === 'skipped' || status === 'current' || status === 'paused' ? undefined : phaseSeconds(job.phaseMarks, key),
@@ -364,6 +367,19 @@ export function phaseRows(job: ActiveJobState): PhaseRow[] {
     });
   }
   return rows;
+}
+
+/** The explanation under the model-load row: what the load is doing and why it only happens the first time. */
+export function loadBody(job: ActiveJobState): string {
+  if (job.loadPhase === 'downloading') return 'Downloading the model files. Only the first time; later upscales start from the saved copy.';
+  if (job.loadQuant && job.loadReplacesDownload) return 'Saving an 8-bit copy and removing the downloaded files to save disk. Only the first time.';
+  if (job.loadQuant) return 'Saving a quantized copy so later jobs load in seconds. Only the first time you use this model.';
+  return `Loading ${job.model} into memory.`;
+}
+
+function loadLabel(job: ActiveJobState): string {
+  if (job.loadPhase === 'downloading') return 'Download model';
+  return job.loadQuant ? 'Prepare model' : 'Load model';
 }
 
 function rowDetail(job: ActiveJobState, key: JobPhase, status: PhaseRowStatus, total: number): string {

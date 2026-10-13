@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { GalleryPage, JobContext, UpscaleFactor } from '$lib/types';
+import type { GalleryPage, JobContext, UpscaleFactor, UpscaleMethod } from '$lib/types';
 
 export function getGallery(page: number = 1, filter?: string, sortOrder?: string): Promise<GalleryPage> {
   const params = new URLSearchParams({ page: String(page) });
@@ -13,6 +13,6 @@ export function deleteAsset(assetId: string): Promise<void> {
 }
 
 /** Queue a job that upscales an existing image; resolves to the job, like a generate. */
-export function submitUpscale(assetId: string, factor: UpscaleFactor): Promise<JobContext> {
-  return api.post<JobContext>('/api/upscale', { asset_id: assetId, factor });
+export function submitUpscale(assetId: string, factor: UpscaleFactor, method: UpscaleMethod): Promise<JobContext> {
+  return api.post<JobContext>('/api/upscale', { asset_id: assetId, factor, method });
 }

@@ -41,7 +41,7 @@
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { startUpscale } from '$lib/state/upscale';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
-  import type { DraftState, GalleryAsset, JobControlAction, JobSnapshot, UpscaleFactor, WorkspaceContext, Workflow } from '$lib/types';
+  import type { DraftState, GalleryAsset, JobControlAction, JobSnapshot, UpscaleFactor, UpscaleMethod, WorkspaceContext, Workflow } from '$lib/types';
 
   interface Props {
     /** The workflows the server offers, once its context has loaded; the top bar shows a tab for each. */
@@ -329,9 +329,9 @@
     addToast(`Loaded settings from ${asset.filename}`, 'success');
   }
 
-  async function upscaleAsset(asset: GalleryAsset, factor: UpscaleFactor): Promise<void> {
+  async function upscaleAsset(asset: GalleryAsset, factor: UpscaleFactor, method: UpscaleMethod): Promise<void> {
     // Like Generate, an upscale joins the queue while another job runs.
-    const job = await startUpscale(asset, factor);
+    const job = await startUpscale(asset, factor, method);
     if (job?.queue_position) react('nodding');
     if (job) closeLightbox();
   }

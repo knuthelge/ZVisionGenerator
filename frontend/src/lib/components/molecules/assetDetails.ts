@@ -77,6 +77,9 @@ export function loraFacts(lora: string): DetailFact[] {
 export function describeUpscale(upscale: NonNullable<NonNullable<GalleryAsset['details']>['generation']>['upscale']): string {
   if (!upscale?.factor) return '';
   const parts = [`${upscale.factor}×`];
+  if (upscale.method) parts.push(upscale.method === 'seedvr2' ? 'SeedVR2' : 'creative');
+  if (upscale.model) parts.push(upscale.quantize ? `${upscale.model} q${upscale.quantize}` : upscale.model);
+  if (upscale.softness != null) parts.push(`softness ${upscale.softness}`);
   if (upscale.denoise != null) parts.push(`denoise ${upscale.denoise}`);
   if (upscale.steps != null) parts.push(`${upscale.steps} steps`);
   if (upscale.guidance != null) parts.push(`guidance ${upscale.guidance}`);

@@ -219,8 +219,9 @@ def _is_missing_local_file(reference: str) -> bool:
 
 
 def upscale_size_label(plan: UpscalePlan) -> str:
-    """Return the job's size line, e.g. ``2× → 1664×2432``."""
-    return f"{plan.option.factor}× → {plan.option.width}×{plan.option.height}"
+    """Return the job's size line, e.g. ``2× → 1664×2432``, or ``2× creative → 1664×2432``."""
+    creative = " creative" if plan.request.upscale_method == UPSCALE_METHOD_CREATIVE else ""
+    return f"{plan.option.factor}×{creative} → {plan.option.width}×{plan.option.height}"
 
 
 def upscale_json_request(body: Any) -> tuple[str, int, str]:

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import type { GalleryAsset } from '$lib/types';
+import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 
-import { assetAspect, canExtend, canUseAsReference, describeFallbackReason, extendParams, extendReason, referenceParams, reuseParams, workflowLabel } from './assetActions';
+import { assetAspect, canExtend, canUseAsReference, describeFallbackReason, extendParams, extendReason, plainUpscaleMethod, referenceParams, reuseParams, upscaleOption, workflowLabel } from './assetActions';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -47,6 +47,28 @@ describe('asset actions', () => {
     expect(assetAspect(makeAsset({ width: 4000, height: 500 }))).toBe(2);
     expect(assetAspect(makeAsset({ width: 512, height: 768 }))).toBeCloseTo(0.667, 3);
     expect(assetAspect(makeAsset())).toBe(1);
+  });
+
+  describe('upscale methods', () => {
+    const two: AssetUpscaleFactor = { factor: 2, width: 200, height: 200, allowed: true, reason: null };
+    const plainTwo: AssetUpscaleFactor = { ...two, warning: null };
+    const withSeedvr2 = makeAsset({
+      upscale: { factors: [two], seedvr2: { options: [plainTwo], model: 'SeedVR2 7B q8', downloaded: true, download_size_label: null } },
+    });
+    const creativeOnly = makeAsset({ upscale: { factors: [two], seedvr2: null } });
+
+    it('runs the plain upscale with SeedVR2 where it is offered, otherwise creative', () => {
+      expect(plainUpscaleMethod(withSeedvr2)).toBe('seedvr2');
+      expect(plainUpscaleMethod(creativeOnly)).toBe('creative');
+      expect(plainUpscaleMethod(makeAsset())).toBe('creative');
+    });
+
+    it('finds the option of a factor within its method', () => {
+      expect(upscaleOption(withSeedvr2, 2, 'seedvr2')).toBe(plainTwo);
+      expect(upscaleOption(withSeedvr2, 2, 'creative')).toBe(two);
+      expect(upscaleOption(creativeOnly, 2, 'seedvr2')).toBeUndefined();
+      expect(upscaleOption(creativeOnly, 4, 'creative')).toBeUndefined();
+    });
   });
 });
 

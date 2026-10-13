@@ -4,7 +4,7 @@
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import Alert from './Alert.svelte';
   import {
-    enhanceProgress, finishingLabel, finishingText, formatClock, isActive, isPaused, isVideo, itemActivity, iterations, jobPhase, outcome, phaseRows,
+    enhanceProgress, finishingLabel, finishingText, formatClock, isActive, isPaused, isVideo, itemActivity, iterations, jobPhase, loadBody, outcome, phaseRows,
     positionLabel, readySummary, stageBars, stepFraction, type PhaseRow, type PhaseRowStatus
   } from '$lib/state/jobView';
   import type { ActiveJobState } from '$lib/types';
@@ -219,7 +219,7 @@
             </div>
           {:else if row.key === 'load'}
             <div class="job-detail">
-              <p class="ui-help">{job.loadQuant ? 'Saving a quantized copy so later jobs load in seconds. Only the first time you use this model.' : `Loading ${job.model} into memory.`}</p>
+              <p class="ui-help">{loadBody(job)}</p>
             </div>
           {/if}
         {/if}

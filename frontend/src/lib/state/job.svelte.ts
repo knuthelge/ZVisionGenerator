@@ -95,8 +95,11 @@ function promptProgress(event: Record<string, unknown> | null | undefined): Part
 function statusMessageForEvent(type: string | undefined, event: Record<string, unknown> | null | undefined): string {
   if (type === 'model_loading') {
     const model = eventFieldString(event, 'model');
-    if (eventFieldString(event, 'phase') === 'saving_quant') {
+    const phase = eventFieldString(event, 'phase');
+    if (phase === 'downloading') return `Downloading ${model || 'the model'} (first use only)...`;
+    if (phase === 'saving_quant') {
       const bits = eventFieldNumber(event, 'quantize');
+      if (event?.replaces_download === true) return `Saving a q${bits} copy of ${model || 'the model'} and removing the download to save disk (first use only)...`;
       return `Saving a q${bits} copy of ${model || 'the model'} for faster loading (first use only)...`;
     }
     return `Loading ${model || 'model'}...`;

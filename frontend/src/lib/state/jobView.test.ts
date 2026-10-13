@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ActiveJobState } from '$lib/types';
 import {
   documentTitle, etaLabel, finishingLabel, formatClock, headline, isReviewing, isSteppedStage, isVideo, itemActivity, itemFraction, iterations,
-  jobBar, jobControls, jobTone, outcome, phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine,
+  jobBar, jobControls, jobTone, loadBody, outcome, phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine,
   reviewVideoUrl, stageBars, timeLeft
 } from './jobView';
 
@@ -31,6 +31,9 @@ describe('jobView', () => {
       ['a waiting job', job({ status: 'queued', phase: 'queue' }), 'Waiting to start'],
       ['a rewrite', job({ phase: 'enhance', stageName: 'enhancing_prompts', currentStep: 1, totalSteps: 4 }), 'Enhancing prompt 2 of 4'],
       ['a first-use model prep', job({ phase: 'load', loadQuant: 8 }), 'Preparing the model'],
+      ['a model download', job({ phase: 'load', model: 'SeedVR2 7B q8', loadPhase: 'downloading' }), 'Downloading SeedVR2 7B q8'],
+      ['the copy saved after a download', job({ phase: 'load', loadPhase: 'saving_quant', loadQuant: 8, loadReplacesDownload: true }), 'Preparing the model'],
+      ['a load from the saved copy', job({ phase: 'load', loadPhase: 'loading' }), 'Loading the model'],
       ['a batch item', batch(), 'Generating image 8 of 24'],
       ['the upscale pass', batch({ stageNames: ['text_to_image', 'upscale'], stageName: 'upscale' }), 'Upscaling image 8 of 24'],
       ['a pause between images', batch({ status: 'paused', paused: true, itemFinished: true }), 'Paused after image 8 of 24'],
@@ -110,6 +113,26 @@ describe('jobView', () => {
     expect(rows.map((row) => [row.key, row.status, row.secs ?? null, row.detail])).toEqual([
       ['queue', 'done', 2, ''], ['load', 'failed', 7, 'zit'], ['generate', 'pending', null, 'Not started'],
     ]);
+  });
+
+  it('labels the load row for a download, a copy being saved and a plain load', () => {
+    const loadRow = (overrides: Partial<ActiveJobState>) => phaseRows(job({ phase: 'load', model: 'SeedVR2 7B q8', ...overrides })).find((row) => row.key === 'load')!;
+
+    expect(loadRow({ loadPhase: 'downloading' })).toMatchObject({ label: 'Download model', detail: 'SeedVR2 7B q8' });
+    expect(loadRow({ loadPhase: 'saving_quant', loadQuant: 8 })).toMatchObject({ label: 'Prepare model', detail: 'q8 copy · first use only' });
+    expect(loadRow({ loadPhase: 'loading' })).toMatchObject({ label: 'Load model', detail: 'SeedVR2 7B q8' });
+  });
+
+  it('explains the load row by phase, saying a replaced download saves disk', () => {
+    const downloading = loadBody(job({ loadPhase: 'downloading' }));
+    const replacing = loadBody(job({ loadPhase: 'saving_quant', loadQuant: 8, loadReplacesDownload: true }));
+    const quantizing = loadBody(job({ loadPhase: 'saving_quant', loadQuant: 8 }));
+    const loading = loadBody(job({ model: 'zit' }));
+
+    expect(new Set([downloading, replacing, quantizing, loading]).size).toBe(4);
+    expect(replacing).toContain('disk');
+    expect(quantizing).not.toContain('disk');
+    expect(loading).toContain('zit');
   });
 
   it('lists prompt enhancement only for a job that rewrites prompts', () => {

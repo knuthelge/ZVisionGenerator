@@ -89,4 +89,22 @@ describe('jobPhases', () => {
     expect(initialPhase('running', '100', { type: 'model_loading' }).phase).toBe('load');
     expect(initialPhase('running', '100', { type: 'control_queued' }).phase).toBeUndefined();
   });
+
+  it('follows the newest model_loading phase and whether the copy replaces the download', () => {
+    let state = job({ phase: 'load' });
+    state = trackJobEvent(state, 'model_loading', { phase: 'downloading', model: 'SeedVR2 7B q8' }, 0);
+    expect(state.loadPhase).toBe('downloading');
+    expect(state.loadQuant).toBeUndefined();
+    expect(state.loadReplacesDownload).toBeUndefined();
+
+    state = trackJobEvent(state, 'model_loading', { phase: 'saving_quant', quantize: 8, replaces_download: true }, 0);
+    expect(state).toMatchObject({ loadPhase: 'saving_quant', loadQuant: 8, loadReplacesDownload: true });
+
+    expect(trackJobEvent(job({ phase: 'load' }), 'model_loading', { phase: 'loading' }, 0).loadPhase).toBe('loading');
+  });
+
+  it('keeps the load phase when a model_loading event names none', () => {
+    const state = trackJobEvent(job({ phase: 'load', loadPhase: 'loading' }), 'model_loading', { mode: 'image' }, 0);
+    expect(state.loadPhase).toBe('loading');
+  });
 });

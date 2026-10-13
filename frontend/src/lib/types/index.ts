@@ -7,6 +7,9 @@ export type JobWorkflow = Workflow | 'upscale';
 
 export type UpscaleFactor = 2 | 4;
 
+/** How an image upscale runs: the SeedVR2 model (macOS), or the image model's creative pass. */
+export type UpscaleMethod = 'seedvr2' | 'creative';
+
 export type WorkflowMode = 'image' | 'video';
 
 export type PromptSource = 'inline' | 'file';
@@ -139,7 +142,18 @@ export interface AssetGeneration {
   /** Seconds the model spent generating. */
   time?: number;
   quantize?: number;
-  upscale?: { factor?: number; denoise?: number; steps?: number; guidance?: number; pre_sharpen?: number };
+  upscale?: {
+    factor?: number;
+    method?: UpscaleMethod;
+    model?: string;
+    quantize?: number | null;
+    softness?: number | null;
+    seed?: number | null;
+    denoise?: number;
+    steps?: number;
+    guidance?: number;
+    pre_sharpen?: number;
+  };
   sharpen?: number;
   contrast?: number;
   saturation?: number;
@@ -153,10 +167,25 @@ export interface AssetUpscaleFactor {
   height: number;
   allowed: boolean;
   reason: string | null;
+  /** Set on a SeedVR2 option that is allowed but may not fit in memory. */
+  warning?: string | null;
+}
+
+/** The SeedVR2 upscale an asset offers (macOS only). */
+export interface AssetSeedvr2Upscale {
+  options: AssetUpscaleFactor[];
+  /** Label of the model tier that runs, e.g. `SeedVR2 7B q8`. */
+  model: string;
+  downloaded: boolean;
+  /** Size of the first-use download; null once the model is on this machine. */
+  download_size_label: string | null;
 }
 
 export interface AssetUpscale {
+  /** Creative upscale options (the image model's img2img pass). */
   factors: AssetUpscaleFactor[];
+  /** SeedVR2 upscale options, or null where SeedVR2 is not offered. */
+  seedvr2: AssetSeedvr2Upscale | null;
 }
 
 export type MemoryFitStatus = 'fits' | 'tight' | 'too_large';
@@ -745,6 +774,10 @@ export interface ActiveJobState extends JobContext {
   enhanceTotal?: number;
   /** Bits of the quantized copy the model load saves first (first use of a model only); unset for a plain load. */
   loadQuant?: number;
+  /** Newest `model_loading` phase: the model's files are downloading, loading into memory, or being saved as a quantized copy. */
+  loadPhase?: LoadPhase;
+  /** The quantized copy replaces the downloaded files (SeedVR2), so saving it frees disk. */
+  loadReplacesDownload?: boolean;
   /** The current item has finished (its generation_finished arrived); the next item has not started yet. */
   itemFinished?: boolean;
   /** Ordered workflow stages of the current item, e.g. ["text_to_image", "upscale"]. */
@@ -762,6 +795,9 @@ export interface ActiveJobState extends JobContext {
   /** Server clock minus client clock, in seconds, so live phase durations count from server timestamps. */
   serverOffset?: number;
 }
+
+/** Phase of a `model_loading` event. */
+export type LoadPhase = 'downloading' | 'loading' | 'saving_quant';
 
 /** Server phase order of a job: queued, prompt enhancement, model load, then the generation loop. */
 export type JobPhase = 'queue' | 'enhance' | 'load' | 'generate';

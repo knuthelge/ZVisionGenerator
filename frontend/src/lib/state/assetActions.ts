@@ -1,5 +1,5 @@
 import { requestConfirm } from '$lib/components/molecules/confirm.svelte';
-import type { AssetUpscaleFactor, GalleryAsset, JobWorkflow, UpscaleFactor, Workflow } from '$lib/types';
+import type { AssetUpscaleFactor, GalleryAsset, JobWorkflow, UpscaleFactor, UpscaleMethod, Workflow } from '$lib/types';
 
 /** Which generation a reference image feeds. */
 export type ReferenceTarget = 'image' | 'video';
@@ -10,7 +10,7 @@ export interface AssetActionHandlers {
   onreuse?: (asset: GalleryAsset) => void;
   onreference?: (asset: GalleryAsset, target: ReferenceTarget) => void;
   onextend?: (asset: GalleryAsset) => void;
-  onupscale?: (asset: GalleryAsset, factor: UpscaleFactor) => void;
+  onupscale?: (asset: GalleryAsset, factor: UpscaleFactor, method: UpscaleMethod) => void;
   ondelete?: (asset: GalleryAsset, options?: DeleteOptions) => void;
 }
 
@@ -33,9 +33,20 @@ export function upscaleFactors(asset: GalleryAsset): AssetUpscaleFactor[] {
   return asset.media_type === 'image' ? (asset.upscale?.factors ?? []) : [];
 }
 
-/** Return the upscale option for one factor, or undefined when the asset does not offer it. */
-export function upscaleFactor(asset: GalleryAsset, factor: UpscaleFactor): AssetUpscaleFactor | undefined {
-  return upscaleFactors(asset).find((option) => option.factor === factor);
+/** Return the SeedVR2 upscale options an image offers, or none where SeedVR2 is unavailable. */
+export function seedvr2Options(asset: GalleryAsset): AssetUpscaleFactor[] {
+  return asset.media_type === 'image' ? (asset.upscale?.seedvr2?.options ?? []) : [];
+}
+
+/** Return the method the plain upscale shortcut runs: SeedVR2 where it is offered, otherwise creative. */
+export function plainUpscaleMethod(asset: GalleryAsset): UpscaleMethod {
+  return asset.upscale?.seedvr2 ? 'seedvr2' : 'creative';
+}
+
+/** Return the upscale option for one factor and method, or undefined when the asset does not offer it. */
+export function upscaleOption(asset: GalleryAsset, factor: UpscaleFactor, method: UpscaleMethod): AssetUpscaleFactor | undefined {
+  const options = method === 'seedvr2' ? seedvr2Options(asset) : upscaleFactors(asset);
+  return options.find((option) => option.factor === factor);
 }
 
 export interface DeleteOptions {

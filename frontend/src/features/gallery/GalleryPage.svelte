@@ -9,7 +9,7 @@
   import { draft } from '$lib/state/draft.svelte';
   import { extendParams, referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { startUpscale } from '$lib/state/upscale';
-  import type { GalleryAsset, UpscaleFactor } from '$lib/types';
+  import type { GalleryAsset, UpscaleFactor, UpscaleMethod } from '$lib/types';
   import { Button, Select, Spinner } from '$lib/components/atoms';
   import { Alert, AssetTile, AssetViewer, EmptyState, PageHeader, requestConfirm } from '$lib/components/molecules';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
@@ -433,9 +433,9 @@
     addToast(`${asset.filename} is now the source video`, 'success');
   }
 
-  async function upscaleAsset(asset: GalleryAsset, factor: UpscaleFactor): Promise<void> {
+  async function upscaleAsset(asset: GalleryAsset, factor: UpscaleFactor, method: UpscaleMethod): Promise<void> {
     // The job panel and queue live in the Workspace; follow the upscale there.
-    if (await startUpscale(asset, factor)) router.navigate('workspace');
+    if (await startUpscale(asset, factor, method)) router.navigate('workspace');
   }
 
   // --- Keyboard -------------------------------------------------------------

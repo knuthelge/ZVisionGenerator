@@ -1,5 +1,5 @@
-import { canExtend, canUseAsReference, extendReason, upscaleFactors, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
-import type { GalleryAsset } from '$lib/types';
+import { canExtend, canUseAsReference, extendReason, seedvr2Options, upscaleFactors, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
+import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 import type { ActionMenuEntry } from './ActionMenu.svelte';
 
 /** Build the secondary actions for an asset: reference, extend, upscale, download, delete. */
@@ -39,16 +39,43 @@ export function assetMenuEntries(
   return entries;
 }
 
-/** Build the upscale items, e.g. `2× → 1664×2432`; a factor over a limit is disabled with its reason. */
+/**
+ * Build the upscale items: the SeedVR2 ones where offered (`2× → 1664×2432`), a separator, then the creative ones
+ * (`2× creative → 1664×2432`). A SeedVR2 item is never disabled: over the memory estimate it is marked and explained
+ * in its tooltip. A creative factor over a limit is disabled with its reason.
+ */
 export function upscaleEntries(asset: GalleryAsset, onupscale: NonNullable<AssetActionHandlers['onupscale']>): ActionMenuEntry[] {
-  return upscaleFactors(asset).map((option) => ({
+  const seedvr2 = asset.upscale?.seedvr2;
+  const plain = seedvr2
+    ? seedvr2Options(asset).map((option) => ({
+        kind: 'item' as const,
+        id: `upscale-seedvr2-${option.factor}`,
+        label: `${sizeLabel(option, '')}${option.warning ? HIGH_MEMORY_MARKER : ''}`,
+        title: plainTitle(option, seedvr2.download_size_label),
+        onselect: () => onupscale(asset, option.factor, 'seedvr2'),
+      }))
+    : [];
+  const creative = upscaleFactors(asset).map((option) => ({
     kind: 'item' as const,
-    id: `upscale-${option.factor}`,
-    label: `${option.factor}× → ${option.width}×${option.height}`,
+    id: `upscale-creative-${option.factor}`,
+    label: sizeLabel(option, ' creative'),
     disabled: !option.allowed,
     title: option.allowed ? undefined : (option.reason ?? undefined),
-    onselect: () => onupscale(asset, option.factor),
+    onselect: () => onupscale(asset, option.factor, 'creative'),
   }));
+  return plain.length > 0 && creative.length > 0 ? [...plain, { kind: 'separator' as const }, ...creative] : [...plain, ...creative];
+}
+
+const HIGH_MEMORY_MARKER = ' · high memory';
+
+function sizeLabel(option: AssetUpscaleFactor, suffix: string): string {
+  return `${option.factor}×${suffix} → ${option.width}×${option.height}`;
+}
+
+/** The tooltip of a SeedVR2 item: its memory warning, then the first-use download size while the model is not on disk. */
+function plainTitle(option: AssetUpscaleFactor, downloadSizeLabel: string | null): string | undefined {
+  const lines = [option.warning, downloadSizeLabel ? `First use downloads ${downloadSizeLabel}` : null].filter(Boolean);
+  return lines.length > 0 ? lines.join('\n') : undefined;
 }
 
 /** Build the "use as reference" items; a target the current model can't use is disabled with its reason. */

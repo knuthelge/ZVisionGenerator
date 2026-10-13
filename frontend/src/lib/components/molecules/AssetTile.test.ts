@@ -104,18 +104,19 @@ describe('AssetTile', () => {
           { factor: 2, width: 1664, height: 2432, allowed: true, reason: null },
           { factor: 4, width: 3328, height: 4864, allowed: false, reason: 'Too large.' },
         ],
+        seedvr2: null,
       },
     });
     const onupscale = vi.fn();
     mountTile({ asset, onreference: vi.fn(), onupscale, ondelete: vi.fn() });
 
     openMenu(asset);
-    expect(menuActions()).toEqual(['reference-image', 'reference-video', 'upscale-2', 'upscale-4', 'download', 'delete']);
-    expect(document.querySelector('[data-action="upscale-4"]')?.getAttribute('aria-disabled')).toBe('true');
+    expect(menuActions()).toEqual(['reference-image', 'reference-video', 'upscale-creative-2', 'upscale-creative-4', 'download', 'delete']);
+    expect(document.querySelector('[data-action="upscale-creative-4"]')?.getAttribute('aria-disabled')).toBe('true');
 
-    (document.querySelector('[data-action="upscale-2"]') as HTMLButtonElement).click();
+    (document.querySelector('[data-action="upscale-creative-2"]') as HTMLButtonElement).click();
     flushSync();
-    expect(onupscale).toHaveBeenCalledWith(asset, 2);
+    expect(onupscale).toHaveBeenCalledWith(asset, 2, 'creative');
   });
 
   it('hides the upscale actions without upscale options', () => {
