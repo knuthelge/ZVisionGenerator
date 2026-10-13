@@ -171,11 +171,44 @@ In a batch every image pauses. A Pause, Repeat or Next queued before the review 
 
 ### Upscaling an existing image (Web UI)
 
-To upscale an image you already have, choose **Upscale → 2×** or **4×** in the asset viewer (Gallery or Workspace) or in the **⋯** menu on its thumbnail. In the viewer you can also press **X** then **2** or **4**. Each option shows the output size, e.g. `2× → 1664×2432`. The job runs in the Workspace job panel, or joins the queue when another job is running; starting it from the Gallery takes you there.
+To upscale an image you already have, open the **Upscale** menu in the asset viewer (Gallery or Workspace) or the **⋯** menu on its thumbnail. Each option shows the output size, e.g. `2× → 1664×2432`. The job runs in the Workspace job panel, or joins the queue when another job is running; starting it from the Gallery takes you there.
+
+There are two kinds of upscale:
+
+| Menu item | Available on | What it does |
+|-----------|--------------|--------------|
+| **2×**, **4×** | macOS | A plain upscale with SeedVR2: one step, no prompt, no image model. It enlarges the image faithfully and adds fine detail without redrawing it. |
+| **2× creative**, **4× creative** | all platforms | The image model redraws the enlarged image (img2img) with the image's own settings. |
+
+On Windows and Linux the menu shows only the creative items, labelled "creative". In the viewer, press **X** then **2** or **4** to run the plain upscale on macOS, or the creative one on Windows and Linux. The creative items on macOS are in the menu only.
+
+#### Plain upscale (macOS)
+
+The plain upscale works for any image: files without recorded settings, imported files and images from models that cannot upscale or refine images (e.g. Ideogram 4). No image model needs to be configured, and the job panel notes "original settings unknown" for a file without a record. The result is saved as is, without the sharpen, contrast and saturation passes. A source that has a record carries its prompt, model and LoRAs over for **Reuse settings**.
+
+- **Model.** The app picks one SeedVR2 model for your Mac from its memory: the 7B model where an output of 16 megapixels (a 4× upscale of a 1 MP image) fits in memory, otherwise the 3B model. Both run at 8-bit. To force a model, set `seedvr2.model` (below).
+- **First use.** The job downloads the model (about 17 GB for 7B, 7.3 GB for 3B) and the job panel shows this as its own step. It then stores an 8-bit copy in the models folder (`~/.ziv/models/`) and removes the downloaded files to save disk, so the model keeps roughly half of its download size on disk. Later upscales load the copy. The Models page lists the model your Mac uses as `seedvr2-7b@q8` (or `seedvr2-3b@q8`). Once the copy exists, the row shows its disk use and a delete button that removes it; the next plain upscale downloads the model again.
+- **Memory.** A size that may need more memory than your Mac's GPU memory budget stays available, marked **· high memory**, and its tooltip says so. The job runs, but it can be slow while macOS swaps, and a size well beyond the budget may fail. Time grows about linearly with the output size: on a 32 GB M5 a 16 MP result took about 6 minutes. The plain upscale has no megapixel limit.
+
+The model choice and its defaults live in the `seedvr2` section of `~/.ziv/config.yaml`; the values below are the defaults:
+
+```yaml
+seedvr2:
+  model: auto                  # auto, seedvr2-3b or seedvr2-7b
+  softness: 0.75               # 0-1: pre-blur before upscaling; 0 = off
+  reference_megapixels: 16     # Output size the automatic choice must fit (a typical 4x)
+  tiers:                       # 8-bit, best first; the first that fits this Mac's memory at reference_megapixels is used
+    - {model: seedvr2-7b, weights_gb: 9.26, activation_floor_gb: 10.79, activation_base_gb: 1.88, activation_gb_per_mp: 0.83}
+    - {model: seedvr2-3b, weights_gb: 4.72, activation_floor_gb: 10.79, activation_base_gb: 1.10, activation_gb_per_mp: 0.89}
+```
+
+With `model: auto` the first tier whose estimate fits at `reference_megapixels` wins, and the last one runs when none does or the memory is unknown. A tier's estimate is `weights_gb` plus the larger of `activation_floor_gb` and `activation_base_gb + activation_gb_per_mp × output megapixels`; the same estimate decides which sizes are marked **high memory**. Set `model` to `seedvr2-3b` or `seedvr2-7b` to use only that model. `softness` sets how much the image is softened before SeedVR2 enlarges it; `0` turns that off. Config precedence applies as everywhere else.
+
+#### Creative upscale
 
 The image is resized, refined with img2img and sharpened, using the settings recorded in the file: prompt, model, seed, steps, guidance, scheduler, LoRAs, negative prompt and quantization. When the recorded model is not configured here, the default image model refines it with its own defaults. Images without recorded settings (imported or older files) are refined by the default image model with an empty prompt; the job panel notes this. The image is already sharpened, so by default the CAS pass before refinement is skipped (`sharpening.existing_pre_upscale: 0`); the final pass uses `sharpening.existing_upscaled`. Contrast and saturation are not applied again.
 
-The result is saved next to the original as `<name>_2x.png` or `<name>_4x.png`, with a counter (`_2`) if that name exists. An option is disabled, with the reason in its tooltip, when the model cannot upscale or refine images (e.g. Ideogram 4), or when the output would exceed the model's maximum dimension or the megapixel limit. These settings live in the `upscale` section of `~/.ziv/config.yaml`:
+Both kinds save the result next to the original as `<name>_2x.png` or `<name>_4x.png`, with a counter (`_2`) if that name exists. A creative option is disabled, with the reason in its tooltip, when the model cannot upscale or refine images (e.g. Ideogram 4), or when the output would exceed the model's maximum dimension or the megapixel limit. These settings live in the `upscale` section of `~/.ziv/config.yaml`:
 
 ```yaml
 upscale:
@@ -270,7 +303,7 @@ The asset viewer's **Details** show the amounts an image was made with, includin
 
 Images are saved as `<set name>_<YYYY-MM-DD_HH-MM-SS>.png` (for example `portrait_2026-10-04_14-03-22.png`), with `_2`, `_3`… added when that name is already taken, so no file is overwritten. Videos follow the same pattern with their format's extension.
 
-The settings each file was made with are embedded in it: prompt, negative prompt, model and family, seed, steps, guidance, scheduler, size, LoRAs, reference image and strength, quantization, generation time, upscale factor/denoise/steps, and the sharpen, contrast and saturation amounts. The Web UI asset viewer shows them under **Details** (**I**), and **Reuse settings** loads them into the Workspace. Paths inside your home folder, such as LoRAs, models and reference images, are recorded as `~/…`, so a shared file does not show your user name; the prompt is stored as written.
+The settings each file was made with are embedded in it: prompt, negative prompt, model and family, seed, steps, guidance, scheduler, size, LoRAs, reference image and strength, quantization, generation time, upscale factor, method (`seedvr2` or `creative`) and the settings it used (model and softness for SeedVR2; denoise and steps for creative), and the sharpen, contrast and saturation amounts. The Web UI asset viewer shows them under **Details** (**I**), and **Reuse settings** loads them into the Workspace. Paths inside your home folder, such as LoRAs, models and reference images, are recorded as `~/…`, so a shared file does not show your user name; the prompt is stored as written.
 
 ## Keyboard Shortcuts
 

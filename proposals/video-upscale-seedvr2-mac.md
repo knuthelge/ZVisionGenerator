@@ -8,7 +8,7 @@ Images in the gallery can be upscaled 2× or 4× after the fact ([Upscale existi
 
 On macOS the model for this is already installed. mflux 0.22, which we pin, ships ByteDance's SeedVR2 (3B and 7B), a one-step diffusion restoration model that is the community default for video upscaling. mflux only exposes it for single images, but its transformer and VAE work on video. The work is a video loop around mflux's modules plus the same app plumbing the image upscale has. It doesn't need a model port or a new dependency.
 
-**Builds on** [Upscale existing images on macOS with SeedVR2](image-upscale-seedvr2-mac.md). That proposal ships the SeedVR2 loader, the capability flag, the shared `seedvr2` config block with its automatic per-machine model choice, the mflux contract test, the model download and the plain 2×/4× SeedVR2 items in the Upscale menu. Build it first. The steps below assume it is in place and add only the clip path.
+**Builds on** [Upscale existing images on macOS with SeedVR2](archive/image-upscale-seedvr2-mac.md). That proposal ships the SeedVR2 loader, the capability flag, the shared `seedvr2` config block with its automatic per-machine model choice, the mflux contract test, the model download and the plain 2×/4× SeedVR2 items in the Upscale menu. It has shipped, and its spike results are the baseline for the numbers below. The steps below assume it is in place and add only the clip path.
 
 ### Not in scope
 

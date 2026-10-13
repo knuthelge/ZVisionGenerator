@@ -72,6 +72,7 @@ zvisiongenerator/
 ├── image_runner.py                Image generation run orchestration
 ├── upscale_runner.py              Upscale one existing image: read its recorded settings, run the upscale workflow
 ├── review.py                      Shared wait for a review decision
+├── seedvr2_loader.py              SeedVR2 loading through its stored 8-bit copy (download, quantize, save, delete the download)
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/
@@ -88,6 +89,7 @@ zvisiongenerator/
 │   ├── prompt_enhancer_mac.py     macOS prompt-enhancer LLM (mlx-lm)
 │   ├── prompt_enhancer_win.py     Windows/Linux prompt-enhancer LLM (transformers)
 │   ├── prompt_enhancer_session.py Single resident prompt-enhancer model: exclusive use and idle release
+│   ├── seedvr2_mac.py             macOS SeedVR2 upscaler (mflux)
 │   ├── video_mac.py               macOS video backend (LTX via MLX)
 │   └── video_diffusers.py         Windows/Linux video backend (LTX via diffusers/CUDA)
 ├── converters/
@@ -104,6 +106,7 @@ zvisiongenerator/
 │   ├── image_backend.py           Image backend protocol
 │   ├── video_backend.py           Video backend protocol and the optional VideoExtender protocol
 │   ├── prompt_enhancer.py         Prompt-enhancer protocol
+│   ├── seedvr2.py                 SeedVR2 upscaler protocol
 │   └── workflow.py                Unified workflow engine (image + video)
 ├── processing/
 │   ├── contrast.py                Contrast adjustment
@@ -133,8 +136,9 @@ zvisiongenerator/
 │   ├── prompt_enhance_video.py    Video prompts as a scene and an action: word plans, chat messages, output parsing and the run (no model I/O)
 │   ├── prompts.py                 Prompt file loading
 │   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
+│   ├── seedvr2.py                 SeedVR2 settings, memory estimate and per-Mac tier choice
 │   ├── stored_quant.py            Stored-quant naming, manifests and folder handling
-│   ├── upscale.py                 Upscale output sizes, size limits and denoise defaults
+│   ├── upscale.py                 Upscale output sizes, size limits, SeedVR2 options and denoise defaults
 │   ├── video_extend.py            Extend: source checks and problem codes, loading the source, frame and audio-sample arithmetic of the window
 │   ├── video_model_detect.py      Video model type detection
 │   ├── video_probe.py             ffprobe a clip: stream facts, rotation and the checks' inputs
@@ -165,6 +169,7 @@ zvisiongenerator/
 └── workflows/
     ├── enhance_stage.py           Applies the planned rewrite in image and video workflows
     ├── image_stages.py            Image pipeline stage definitions
+    ├── seedvr2_stages.py          SeedVR2 upscale stage
     └── video_stages.py            Video pipeline stage definitions, including extend_video and join_clips
 
 prompts.yaml                       Default prompt definitions
@@ -175,6 +180,8 @@ prompts.yaml                       Default prompt definitions
 ### Backend Protocol
 
 Platform backends live in `backends/image_mac.py` (mflux/MLX), `backends/image_win.py` (Windows/Linux diffusers image), `backends/video_mac.py` (MLX video), and `backends/video_diffusers.py` (Windows/Linux diffusers video). Image backends implement the `ImageBackend` Protocol from `core/image_backend.py`; video backends implement the `VideoBackend` Protocol from `core/video_backend.py`. The prompt-enhancer LLM follows the same split: `backends/prompt_enhancer_mac.py` (mlx-lm) and `backends/prompt_enhancer_win.py` (transformers) implement the `PromptEnhancer` Protocol from `core/prompt_enhancer.py`. Backend and accelerator selection stays centralized in `backends/__init__.py` — never branch on `sys.platform` elsewhere to pick a backend. OS-level checks unrelated to backends (file pickers, ffmpeg install hints, terminal handling) are fine where they are needed.
+
+SeedVR2, the plain upscale of existing images, is macOS-only and has its own small Protocol, `SeedVR2Upscaler` in `core/seedvr2.py`, implemented by `backends/seedvr2_mac.py` (mflux). `supports_seedvr2()` and `get_seedvr2_upscaler()` in `backends/__init__.py` expose it, so other code asks for the capability instead of checking the platform. `seedvr2_loader.py` loads it through a stored 8-bit copy in the same way `image_model_loader.py` does for image models, and `tests/test_mflux_seedvr2_contract.py` records the mflux surface it relies on; re-run it on every mflux bump.
 
 The `image_win.py` module is the shared diffusers/CUDA image backend for both Windows and Linux. The filename is historical; platform selection still happens only in `backends/__init__.py`.
 
@@ -188,7 +195,7 @@ The Windows/Linux diffusers image backend is also CUDA-only. Validation happens 
 
 ### Workflow Stages
 
-Image stage functions in `workflows/image_stages.py` have the uniform signature `(ImageGenerationRequest, ImageWorkingArtifacts) -> StageOutcome`. Video stage functions in `workflows/video_stages.py` have the signature `(VideoGenerationRequest, VideoWorkingArtifacts) -> StageOutcome`. Stages are composed dynamically by `build_workflow()` and `build_video_workflow()`. A video workflow starts with `resolve_prompt_stage`, which composes the scene and the prompt into the text the model receives (`compose_video_prompt`), and `enhance_prompt_stage` applies a planned scene and action rewrite. A job whose arguments carry an `extend_source` swaps the generation stage for the extend pair: `extend_video` (calls `extend_video` on the backend for the new segment only) and `join_clips` (`utils/video_splice.splice_clips` joins the segment onto the untouched source and removes the temporary segment directory). The extend variant has no `strip_audio` stage, since the joined clip already has the right audio; its provenance `workflow` is `extend`, with `source_video` and `extend_frames` recorded. `build_upscale_workflow()` upscales an existing image (`load_source_stage` → `upscale_stage` → `sharpen_stage` → `save_image_stage`); the Web UI runs it through `WebRunner.submit_upscale_job` and `upscale_runner.run_upscale`, which emits the same events as a one-image batch, without preflight or the batch loop.
+Image stage functions in `workflows/image_stages.py` have the uniform signature `(ImageGenerationRequest, ImageWorkingArtifacts) -> StageOutcome`. Video stage functions in `workflows/video_stages.py` have the signature `(VideoGenerationRequest, VideoWorkingArtifacts) -> StageOutcome`. Stages are composed dynamically by `build_workflow()` and `build_video_workflow()`. A video workflow starts with `resolve_prompt_stage`, which composes the scene and the prompt into the text the model receives (`compose_video_prompt`), and `enhance_prompt_stage` applies a planned scene and action rewrite. A job whose arguments carry an `extend_source` swaps the generation stage for the extend pair: `extend_video` (calls `extend_video` on the backend for the new segment only) and `join_clips` (`utils/video_splice.splice_clips` joins the segment onto the untouched source and removes the temporary segment directory). The extend variant has no `strip_audio` stage, since the joined clip already has the right audio; its provenance `workflow` is `extend`, with `source_video` and `extend_frames` recorded. `build_upscale_workflow()` upscales an existing image (`load_source_stage` → `upscale_stage` → `sharpen_stage` → `save_image_stage`); the Web UI runs it through `WebRunner.submit_upscale_job` and `upscale_runner.run_upscale`, which emits the same events as a one-image batch, without preflight or the batch loop. `build_seedvr2_upscale_workflow()` is the plain upscale (`resolve_prompt_stage` → `load_source_stage` → `seedvr2_stages.upscale_stage` → `save_image_stage`), chosen when the request's `upscale_method` is `seedvr2`; it does not sharpen. The tier is chosen by `utils/seedvr2.pick_seedvr2_tier` from the `seedvr2` config block and the Mac's memory budget, and `generation.upscale.method` records `seedvr2` or `creative` in the saved file.
 
 ### Review Before Upscaling
 

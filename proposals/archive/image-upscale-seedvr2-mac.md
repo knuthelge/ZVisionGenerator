@@ -1,10 +1,10 @@
 # Upscale existing images on macOS with SeedVR2
 
-**Status:** Proposed (2026-10-12)
+**Status:** Done (unreleased, 2026-10-13). The spike gate passed before any code; the shipped behaviour is described in the Web UI image guide.
 
 ## Problem
 
-Upscaling an existing image ([Upscale existing images](archive/image-upscale-from-gallery.md)) is a Lanczos resize followed by one img2img pass of the whole frame with the image's own diffusion model. That works well up to about the size the model was trained on (1–2 megapixels). Above that it has three problems:
+Upscaling an existing image ([Upscale existing images](image-upscale-from-gallery.md)) is a Lanczos resize followed by one img2img pass of the whole frame with the image's own diffusion model. That works well up to about the size the model was trained on (1–2 megapixels). Above that it has three problems:
 
 - **Quality.** At a high denoise the model invents new detail and repeats patterns, because it never saw frames that large. `existing_image_denoise` drops to 0.2 above `upscale.existing_large_megapixels` (2 MP) to stop this. At 0.2 the pass mostly sharpens the Lanczos result and adds little real detail. So the large upscales people want for wallpapers and prints, 5–20 MP, are the ones that gain least.
 - **Cost.** The DiT attends over the whole frame, so time and memory grow faster than the pixel count. A 4× of a 1.5 MP image refines 24 MP of latents in one pass.
@@ -23,7 +23,7 @@ In code, config and recorded settings, the methods are `seedvr2` and `creative`.
 
 ### Relation to the video proposal
 
-[Upscale existing videos on macOS with SeedVR2](video-upscale-seedvr2-mac.md) uses the same model. This proposal is the smaller first step and builds the shared foundation the video one then reuses:
+[Upscale existing videos on macOS with SeedVR2](../video-upscale-seedvr2-mac.md) uses the same model. This proposal is the smaller first step and builds the shared foundation the video one then reuses:
 
 - the SeedVR2 loader and the capability flag in `backends/`
 - the `seedvr2` config block and the automatic model choice
@@ -155,7 +155,7 @@ SeedVR2 isn't in the app's model inventory. Disk use comes first:
 - Once the copy is saved, the app deletes both downloaded files, the transformer and the VAE, from the Hugging Face cache. Later jobs load the copy. If the save fails, nothing is deleted and the next job tries again.
 - Whether SeedVR2 counts as downloaded is simply whether a current copy exists.
 
-This is the step the video proposal's step 6 asked for. If [model download progress](model-download-progress.md) has shipped by then, it covers this; otherwise the job card shows "Downloading SeedVR2" with no progress bar. The first-use message says the copy saves disk, not that it loads faster: a warm in-memory quantize takes only seconds.
+This is the step the video proposal's step 6 asked for. If [model download progress](../model-download-progress.md) has shipped by then, it covers this; otherwise the job card shows "Downloading SeedVR2" with no progress bar. The first-use message says the copy saves disk, not that it loads faster: a warm in-memory quantize takes only seconds.
 
 ### 3. Workflow, runner and metadata
 
