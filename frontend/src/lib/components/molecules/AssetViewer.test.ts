@@ -455,6 +455,33 @@ describe('AssetViewer', () => {
     expect(onupscale).not.toHaveBeenCalled();
   });
 
+  it('runs the SeedVR2 upscale from the chord when every creative factor is disabled', () => {
+    const onupscale = vi.fn();
+    const noCreative = {
+      ...seedvr2Upscale,
+      factors: upscale.factors.map((option) => ({ ...option, allowed: false, reason: 'This model cannot upscale.' })),
+    };
+    mountViewer({ assets: [makeAsset({ upscale: noCreative })], onupscale });
+
+    press('x');
+    press('2');
+
+    expect(onupscale.mock.calls.map(([, factor, method]) => [factor, method])).toEqual([[2, 'seedvr2']]);
+  });
+
+  it('explains instead of upscaling from the chord when only disabled creative factors exist', () => {
+    const onupscale = vi.fn();
+    const noCreative = { factors: upscale.factors.map((option) => ({ ...option, allowed: false, reason: 'This model cannot upscale.' })), seedvr2: null };
+    toasts.length = 0;
+    mountViewer({ assets: [makeAsset({ upscale: noCreative })], onupscale });
+
+    press('x');
+    press('2');
+
+    expect(onupscale).not.toHaveBeenCalled();
+    expect(toasts.map((toast) => toast.message)).toEqual(['This model cannot upscale.']);
+  });
+
   it('lists the SeedVR2 items, a separator and the creative items in the upscale menu', () => {
     const onupscale = vi.fn();
     mountViewer({ assets: [makeAsset({ upscale: seedvr2Upscale })], onupscale });
