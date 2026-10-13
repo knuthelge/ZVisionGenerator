@@ -270,7 +270,7 @@ def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
         source_video=_local_path(optional_text(config.get("source_video"))),
         extend_frames=optional_int(config.get("extend_frames")),
         lora=_lora_string(config.get("lora")),
-        generation=_generation_block(config.get("generation")),
+        generation=_generation_block(config.get("generation"), is_video=_is_video_config(config)),
         source=_source_block(config.get("source")),
     )
 
@@ -297,8 +297,13 @@ def _expand_lora_entries(text: str) -> str:
     return ",".join(expand_home(entry) for entry in text.split(",")) if text else text
 
 
-def _generation_block(value: Any) -> dict[str, Any]:
-    """Keep the known, well-typed keys of a recorded ``generation`` block."""
+def _is_video_config(config: dict[str, Any]) -> bool:
+    """Return whether an embedded config payload describes a video."""
+    return optional_int(config.get("frame_count")) is not None or optional_text(config.get("workflow")) in ("txt2vid", "img2vid", "extend")
+
+
+def _generation_block(value: Any, *, is_video: bool = False) -> dict[str, Any]:
+    """Keep the known, well-typed keys of a recorded ``generation`` block; videos record no upscale method."""
     if not isinstance(value, dict):
         return {}
     generation: dict[str, Any] = {}
@@ -328,8 +333,10 @@ def _generation_block(value: Any) -> dict[str, Any]:
             "seed": optional_int(upscale.get("seed")),
         }
         coerced = {key: item for key, item in coerced.items() if item is not None}
-        if coerced:
-            # Files that predate the method were all refined by the image model.
+        if coerced and is_video:
+            generation["upscale"] = coerced
+        elif coerced:
+            # Image files that predate the method were all refined by the image model.
             method = UPSCALE_METHOD_SEEDVR2 if upscale.get("method") == UPSCALE_METHOD_SEEDVR2 else UPSCALE_METHOD_CREATIVE
             generation["upscale"] = {"method": method, **coerced}
     return generation

@@ -602,6 +602,32 @@ class TestRecordedUpscaleMethod:
     def test_empty_block_stays_absent(self):
         assert recorded_settings({"generation": {"upscale": {"method": "seedvr2"}}}).generation == {}
 
+    def test_video_upscale_records_no_method(self):
+        upscale = {"factor": 2, "steps": 8}
+
+        by_workflow = recorded_settings({"workflow": "txt2vid", "generation": {"upscale": upscale}}).generation
+        by_frames = recorded_settings({"frame_count": 121, "generation": {"upscale": upscale}}).generation
+
+        assert by_workflow == by_frames == {"upscale": upscale}
+
+    def test_extended_video_upscale_records_no_method(self):
+        upscale = {"factor": 2, "steps": 8}
+
+        by_workflow = recorded_settings({"workflow": "extend", "generation": {"upscale": upscale}}).generation
+        by_frames = recorded_settings({"workflow": "extend", "frame_count": 193, "generation": {"upscale": upscale}}).generation
+
+        assert by_workflow == by_frames == {"upscale": upscale}
+
+    def test_old_image_upscale_reads_as_creative(self):
+        generation = recorded_settings({"workflow": "txt2img", "generation": {"upscale": {"factor": 2, "steps": 3}}}).generation
+
+        assert generation == {"upscale": {"method": "creative", "factor": 2, "steps": 3}}
+
+    def test_image_seedvr2_upscale_keeps_its_method(self):
+        generation = recorded_settings({"workflow": "upscale", "generation": {"upscale": {"method": "seedvr2", "factor": 2}}}).generation
+
+        assert generation == {"upscale": {"method": "seedvr2", "factor": 2}}
+
 
 class TestRecordedSettings:
     def test_reads_top_level_settings_only(self):
