@@ -1411,6 +1411,39 @@ def test_models_route_lists_the_seedvr2_tier_as_not_downloaded_without_a_copy(mo
     assert (row["name"], row["downloaded"], row["delete"], row["disk_size_label"], row["download_size_label"]) == ("seedvr2-7b@q8", False, None, None, "17.0 GB")
 
 
+def test_models_route_reads_not_downloaded_after_the_copy_is_deleted(monkeypatch, tmp_path):
+    """The row is rebuilt from disk on every request, so deleting the copy flips it without a restart."""
+    from zvisiongenerator.seedvr2_loader import SEEDVR2_STORED_FORMAT, seedvr2_downloaded
+    from zvisiongenerator.utils.stored_quant import write_manifest
+
+    models_dir = tmp_path / "models"
+    copy = seedvr2_copy_dir("seedvr2-7b", models_dir)
+    (copy / "w.safetensors").parent.mkdir(parents=True)
+    (copy / "w.safetensors").write_bytes(b"x" * 1000)
+    write_manifest(copy, {"bits": 8, "backend_format": SEEDVR2_STORED_FORMAT, "model": "seedvr2-7b"})
+    web_config = _make_web_config()
+    web_config.data_dir = str(tmp_path)
+    web_config.models_dir = str(models_dir)
+    settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(_SEEDVR2_7B,))
+
+    def load() -> SimpleNamespace:
+        web_config.seedvr2 = SeedVR2Setup(settings=settings, tier=_SEEDVR2_7B, budget_bytes=None, downloaded=seedvr2_downloaded("seedvr2-7b", models_dir))
+        return web_config
+
+    monkeypatch.setattr(web_server, "load_web_config", load)
+    monkeypatch.setattr(workspace_api_module, "list_loras", lambda _data_dir: [])
+    monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
+
+    with TestClient(web_server.app) as client:
+        (before,) = client.get("/api/models").json()["image_models"]
+        assert client.delete("/api/models/seedvr2-7b@q8").status_code == 200
+        (after,) = client.get("/api/models").json()["image_models"]
+
+    assert (before["downloaded"], before["delete"] is not None, before["disk_size_label"]) == (True, True, "0.0 GB")
+    assert (after["downloaded"], after["delete"], after["disk_size_label"], after["download_size_label"]) == (False, None, None, "17.0 GB")
+    assert not copy.exists()
+
+
 def test_models_route_has_no_seedvr2_row_where_seedvr2_is_off(monkeypatch, tmp_path):
     web_config = _models_route_with_seedvr2(monkeypatch, tmp_path, copy_files={"w.safetensors": b"x"})
     web_config.seedvr2 = None

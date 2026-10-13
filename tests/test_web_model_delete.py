@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -259,3 +260,22 @@ class TestSeedvr2DeleteRoute:
 
         assert client.delete("/api/models/seedvr2-7b@q8").status_code == 409
         assert self.copy.is_dir()
+
+    def test_names_that_climb_out_of_the_copy_folder_are_404(self, client, layout):
+        sibling = layout.models_dir / "custom"
+        for name in ("..", ".seedvr2", "%2e%2e%2fcustom", "..%2Fcustom", "seedvr2-7b@q8%2F..%2F..%2Fcustom", "SEEDVR2-7B@Q8"):
+            assert client.delete(f"/api/models/{name}").status_code in {404, 405}, name
+        assert self.copy.is_dir()
+        assert sibling.is_dir()
+        assert layout.base_snapshot.is_dir()
+
+    def test_a_symlinked_copy_is_unlinked_and_its_target_survives(self, client, layout, tmp_path):
+        elsewhere = tmp_path / "elsewhere"
+        _touch(elsewhere / "weights.safetensors")
+        shutil.rmtree(self.copy)
+        self.copy.symlink_to(elsewhere, target_is_directory=True)
+
+        assert client.delete("/api/models/seedvr2-7b@q8").status_code == 200
+
+        assert not self.copy.is_symlink()
+        assert (elsewhere / "weights.safetensors").is_file()
