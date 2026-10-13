@@ -78,6 +78,8 @@ def seedvr2_settings(config: dict[str, Any]) -> SeedVR2Settings:
     tiers = tuple(_parse_tier(row, index) for index, row in enumerate(rows))
 
     model = block.get("model", _AUTO)
+    if not isinstance(model, str):
+        raise ValueError(f"config 'seedvr2.model' must be a string, got {model!r}.")
     if model != _AUTO and model not in {tier.model for tier in tiers}:
         raise ValueError(f"config 'seedvr2.model' must be 'auto' or one of the 'seedvr2.tiers' models ({', '.join(tier.model for tier in tiers)}), got {model!r}.")
     softness = block.get("softness")
@@ -144,7 +146,7 @@ def _parse_tier(row: object, index: int) -> SeedVR2Tier:
     if extra:
         raise ValueError(f"config '{name}' has unknown keys: {', '.join(map(str, extra))}.")
     model = row.get("model")
-    if model not in SEEDVR2_MODEL_FILES:
+    if not isinstance(model, str) or model not in SEEDVR2_MODEL_FILES:
         raise ValueError(f"config '{name}.model' must be one of {', '.join(SEEDVR2_MODEL_FILES)}, got {model!r}.")
     costs: dict[str, float] = {}
     for key in _TIER_COSTS:
