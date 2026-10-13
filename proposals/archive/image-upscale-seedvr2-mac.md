@@ -23,7 +23,7 @@ In code, config and recorded settings, the methods are `seedvr2` and `creative`.
 
 ### Relation to the video proposal
 
-[Upscale existing videos on macOS with SeedVR2](../video-upscale-seedvr2-mac.md) uses the same model. This proposal is the smaller first step and builds the shared foundation the video one then reuses:
+[Upscale existing videos 2× on macOS](../video-upscale-existing.md) uses the same model. This proposal is the smaller first step and builds the shared foundation the video one then reuses:
 
 - the SeedVR2 loader and the capability flag in `backends/`
 - the `seedvr2` config block and the automatic model choice
@@ -33,6 +33,8 @@ In code, config and recorded settings, the methods are `seedvr2` and `creative`.
 - the plain 2×/4× items in the viewer's Upscale menu
 
 With that in place, the video proposal only adds the clip loop, frame I/O and chunking. Shipping images first also gives the video spike a measured single-frame baseline (quality, seconds per megapixel, peak memory) from the app itself, not from a script.
+
+*Later (2026-10-13):* the video proposal dropped SeedVR2 for videos and now upscales them with LTX's own upsampler and refine pass; it reuses only this proposal's menu, route and job plumbing.
 
 ### Not in scope
 
