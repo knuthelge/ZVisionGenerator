@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from zvisiongenerator.image_model_loader import LOADING_PHASE, SAVING_QUANT_PHASE, LoadPlan, create_stored_quant, load_image_model, plan_image_model_load, save_stored_quant
+from zvisiongenerator.image_model_loader import LOADING_PHASE, SAVING_QUANT_PHASE, LoadPlan, create_stored_quant, load_image_model, plan_image_model_load, save_stored_quant, store_copy
 from zvisiongenerator.utils.stored_quant import build_manifest, is_current, write_manifest
 
 FORMAT = "fake-1"
@@ -405,3 +405,49 @@ class TestCreateStoredQuant:
     def test_unsupported_backend_raises(self, models_dir):
         with pytest.raises(RuntimeError):
             create_stored_quant(_FakeBackend(backend_format=None), _make_source(models_dir), models_dir / "atlas@q8", 8)
+
+
+class TestStoreCopy:
+    def _write(self, partial: Path) -> None:
+        partial.mkdir()
+        (partial / "weights.safetensors").write_bytes(b"q")
+
+    def test_promotes_the_written_folder_with_the_manifest(self, models_dir):
+        target = models_dir / "nested" / "thing@q8"
+        target.parent.mkdir()
+
+        stored = store_copy(self._write, target=target, manifest={"bits": 8, "kind": "x"}, label="thing")
+
+        assert stored
+        assert json.loads((target / "ziv-quant.json").read_text()) == {"bits": 8, "kind": "x"}
+        assert (target / "weights.safetensors").is_file()
+        assert [path.name for path in target.parent.iterdir()] == ["thing@q8"]
+
+    def test_a_failed_write_warns_with_the_label_and_leaves_no_folder(self, models_dir):
+        target = models_dir / "thing@q8"
+
+        def write(partial: Path) -> None:
+            partial.mkdir()
+            raise OSError("disk full")
+
+        with pytest.warns(UserWarning, match=r"q8 copy of my label.*disk full"):
+            stored = store_copy(write, target=target, manifest={"bits": 8}, label="my label")
+
+        assert not stored
+        assert list(models_dir.iterdir()) == []
+
+    def test_a_stop_discards_the_copy(self, models_dir):
+        target = models_dir / "thing@q8"
+
+        assert not store_copy(self._write, target=target, manifest={"bits": 8}, label="thing", cancelled=lambda: True)
+        assert list(models_dir.iterdir()) == []
+
+    def test_a_stale_partial_of_the_target_is_swept_first(self, models_dir):
+        target = models_dir / "thing@q8"
+        stale = models_dir / ".thing@q8.deadbeef.partial"
+        stale.mkdir()
+        old = time.time() - 2 * 60 * 60
+        os.utime(stale, (old, old))
+
+        assert store_copy(self._write, target=target, manifest={"bits": 8}, label="thing")
+        assert not stale.exists()

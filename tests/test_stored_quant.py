@@ -45,6 +45,16 @@ class TestManifest:
 
         assert sq.is_current(stored, source, 8, "mflux-1.0")
 
+    def test_manifest_matches_needs_every_expected_key_equal(self, tmp_path):
+        sq.write_manifest(tmp_path, {"bits": 8, "model": "atlas", "extra": 1})
+
+        assert sq.manifest_matches(tmp_path, {"bits": 8, "model": "atlas"})
+        assert not sq.manifest_matches(tmp_path, {"bits": 8, "model": "other"})
+        assert not sq.manifest_matches(tmp_path, {"bits": 8, "missing": 1})
+
+    def test_manifest_matches_is_false_without_a_manifest(self, tmp_path):
+        assert not sq.manifest_matches(tmp_path, {})
+
     def test_stored_quant_bits_reads_the_manifest(self, tmp_path):
         source = _make_source(tmp_path)
         stored = tmp_path / "atlas@q4"

@@ -27,6 +27,7 @@ __all__ = [
     "flush_to_disk",
     "fsync_file",
     "is_current",
+    "manifest_matches",
     "parse_stored_quant_name",
     "partial_dir",
     "promote_partial",
@@ -102,8 +103,12 @@ def is_current(stored_dir: Path, source_dir: Path, bits: int, backend_format: st
 
     The source path is informational only, so renaming the models directory keeps copies valid.
     """
+    return manifest_matches(stored_dir, {"version": _MANIFEST_VERSION, "bits": bits, "backend_format": backend_format, **source_fingerprint(source_dir)})
+
+
+def manifest_matches(stored_dir: Path, expected: dict[str, Any]) -> bool:
+    """Return whether *stored_dir* has a manifest and every key of *expected* equals the recorded value."""
     manifest = _read_manifest(stored_dir)
-    expected = {"version": _MANIFEST_VERSION, "bits": bits, "backend_format": backend_format, **source_fingerprint(source_dir)}
     return manifest is not None and all(manifest.get(key) == value for key, value in expected.items())
 
 

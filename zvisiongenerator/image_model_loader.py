@@ -33,7 +33,7 @@ from zvisiongenerator.utils.stored_quant import (
     write_manifest,
 )
 
-__all__ = ["LOADING_PHASE", "SAVING_QUANT_PHASE", "LoadPlan", "create_stored_quant", "load_image_model", "plan_image_model_load", "save_stored_quant"]
+__all__ = ["LOADING_PHASE", "SAVING_QUANT_PHASE", "LoadPlan", "create_stored_quant", "load_image_model", "plan_image_model_load", "save_stored_quant", "store_copy"]
 
 SAVING_QUANT_PHASE = "saving_quant"
 # Reported when the model loads again after its stored quant was saved.
@@ -109,9 +109,9 @@ def save_stored_quant(
     """Save *model* as *source*'s stored quant at *target*; return whether the copy is now in place.
 
     The write runs on the calling thread, so a stop request takes effect once it finishes: when *cancelled*
-    is then true the copy is discarded. See :func:`_store` for how partial and failed saves are handled.
+    is then true the copy is discarded. See :func:`store_copy` for how partial and failed saves are handled.
     """
-    return _store(lambda partial: backend.save_quantized(model, str(partial)), source=source, target=target, bits=bits, backend_format=backend_format, cancelled=cancelled)
+    return _store_image_copy(lambda partial: backend.save_quantized(model, str(partial)), source=source, target=target, bits=bits, backend_format=backend_format, cancelled=cancelled)
 
 
 def _write_stored_quant(
@@ -127,7 +127,7 @@ def _write_stored_quant(
 
     The backend checks *cancelled* while it writes, so a stop takes effect after its current step.
     """
-    return _store(
+    return _store_image_copy(
         lambda partial: backend.write_quantized_files(str(source), str(partial), bits, cancelled),
         source=source,
         target=target,
@@ -152,7 +152,7 @@ def create_stored_quant(backend: ImageBackend, source: Path, target: Path, bits:
     return save_stored_quant(backend, model, source=source, target=target, bits=bits, backend_format=backend_format)
 
 
-def _store(
+def _store_image_copy(
     write: Callable[[Path], None],
     *,
     source: Path,
@@ -161,12 +161,37 @@ def _store(
     backend_format: str,
     cancelled: Callable[[], bool] | None,
 ) -> bool:
+    """Store an image model's copy at *target* through :func:`store_copy`; the detection files are copied after *write*."""
+
+    def write_with_detection_files(partial: Path) -> None:
+        write(partial)
+        copy_detection_files(source, partial)
+
+    return store_copy(write_with_detection_files, target=target, manifest=build_manifest(source, bits, backend_format), label=source.name, cancelled=cancelled)
+
+
+def store_copy(
+    write: Callable[[Path], None],
+    *,
+    target: Path,
+    manifest: dict[str, Any],
+    label: str,
+    cancelled: Callable[[], bool] | None = None,
+) -> bool:
     """Run *write* into a hidden partial folder, complete it and rename it to *target*; return whether it is in place.
 
     Leftover partial folders of *target* from an interrupted earlier save are removed first. A failure warns
     and leaves no folder behind; the job carries on without the copy. When *cancelled* is true once the write
     returns, the copy is discarded. Interrupts (Ctrl-C, exit) also discard the partial folder.
+
+    Args:
+        write: Writes the copy's files into the partial folder it is given.
+        target: Where the finished copy lives.
+        manifest: Written last into the copy to mark it complete; its ``bits`` key names the level in warnings.
+        label: Names the model in warnings.
+        cancelled: Checked once *write* returns.
     """
+    bits = manifest.get("bits")
     sweep_stale_partials(target)
     partial = partial_dir(target)
     try:
@@ -174,12 +199,11 @@ def _store(
         if cancelled is not None and cancelled():
             discard_partial(partial)
             return False
-        copy_detection_files(source, partial)
         flush_to_disk(partial)
-        write_manifest(partial, build_manifest(source, bits, backend_format))
+        write_manifest(partial, manifest)
     except Exception as exc:  # noqa: BLE001 - a failed save must never fail the job
         discard_partial(partial)
-        warnings.warn(f"Could not save the q{bits} copy of {source.name} ({exc}); it is quantized at load instead.", stacklevel=3)
+        warnings.warn(f"Could not save the q{bits} copy of {label} ({exc}); it is quantized at load instead.", stacklevel=3)
         return False
     except BaseException:
         discard_partial(partial)
@@ -188,7 +212,7 @@ def _store(
         promote_partial(partial, target)
     except OSError as exc:
         discard_partial(partial)
-        warnings.warn(f"Could not store the q{bits} copy of {source.name} ({exc}); it is quantized at load instead.", stacklevel=3)
+        warnings.warn(f"Could not store the q{bits} copy of {label} ({exc}); it is quantized at load instead.", stacklevel=3)
         return False
     return True
 
