@@ -29,7 +29,7 @@ In code, config and recorded settings, the methods are `seedvr2` and `creative`.
 - the `seedvr2` config block and the automatic model choice
 - the mflux contract test
 - the model inventory entry and download
-- the memory admission check for SeedVR2 jobs
+- the memory estimate and warning for SeedVR2 jobs
 - the plain 2×/4× items in the viewer's Upscale menu
 
 With that in place, the video proposal only adds the clip loop, frame I/O and chunking. Shipping images first also gives the video spike a measured single-frame baseline (quality, seconds per megapixel, peak memory) from the app itself, not from a script.
@@ -44,7 +44,7 @@ With that in place, the video proposal only adds the clip loop, frame I/O and ch
 
 ## Evidence
 
-Checked against `main` at 3789d09 and the installed mflux 0.22.0 (2026-10-12).
+Checked against `main` at 3789d09 and the installed mflux 0.22.0 (2026-10-12). The spike ran on 2026-10-13.
 
 ### mflux SeedVR2 for images
 
@@ -59,7 +59,7 @@ Checked against `main` at 3789d09 and the installed mflux 0.22.0 (2026-10-12).
 | VAE tiling | `SeedVR2Initializer` sets `model.tiling_config = TilingConfig()`, which by default tiles the encode (512 px tiles, 64 px overlap) and splits the decode 8 ways per side. Large images don't decode in one piece |
 | Attention | `WindowPartitioner._make_windows` fixes the window size in latent tokens (scaled from a 45×80 reference) and adds more windows as the image grows. Attention cost is therefore about linear in pixel count, not quadratic like a full-frame DiT pass |
 | Models | `ModelConfig.seedvr2_3b()` (alias `seedvr2`) and `seedvr2_7b()`, both from Hugging Face `numz/SeedVR2_comfyUI`. `SeedVR2(quantize=, model_path=, model_config=)`. `mflux-save` writes quantized copies, and the variant is read back from the saved weights |
-| Weight sizes | 3B fp16 is about 7 GB with its VAE. 7B is 16.5 GB at fp16 and about 8.8 GB at int8. Community model cards report 7B int8 output nearly identical to fp16, and int4 degrading this model badly (see the video proposal) |
+| Weight sizes | Download: 3B fp16 6.8 GB, 7B fp16 16.5 GB, plus a 0.5 GB VAE. mflux always downloads the fp16 file and quantizes in memory, so int8 saves memory but not disk. Loaded: 7B int8 9.26 GB, 3B int8 4.72 GB. Community model cards report int4 degrading this model badly (see the video proposal) |
 | Licence | Apache-2.0 (ByteDance-Seed model card) |
 
 ### Our code
@@ -74,9 +74,40 @@ Checked against `main` at 3789d09 and the installed mflux 0.22.0 (2026-10-12).
 | Memory | `memory_mac.memory_budget_bytes()` (Apple's recommended working set), `classify_memory_fit`, `read_safetensors_totals`, and stored quants (`utils/stored_quant.py`) that keep a quantized copy next to the model |
 | Platform flags | `supports_video_audio()` and `supports_video_upscale_review()` in `backends/__init__.py` |
 
+### Spike results
+
+Measured with `SeedVR2.generate_image` outside the app, on a 32 GB M5 Mac with a memory budget (Apple's recommended working set) of 26.80 GB. No 64 GB Mac was measured. Sources: eight purpose-built renders of 1–1.3 MP from the Krea 2, Z-Image Turbo and FLUX.2 Klein 9B presets (a close-up portrait, a street with small faces, a shop front with legible text, ink line art, foliage, architecture, an oil painting, a noisy night scene with neon), plus five portrait renders. The review was blind, one set at a time against a bicubic upscale of the original.
+
+| Question | Result |
+|---|---|
+| SeedVR2 against creative | Creative never won a set. At 2× it came second in two of the eight test sets. Creative 4× doesn't run on this Mac (below), so at 4× SeedVR2 has no competitor |
+| Tier ranking | Test set: 7B int8 won 7 of 8 sets at 2× and 6 of 8 at 4× (one tie; 3B bf16 won the other two). Several 4× sets were "almost a tie". Portraits: 7B int8 and 7B bf16 took the top two places in every 2× set, so int8 costs nothing visible. 3B bf16 and 3B int8 couldn't be told apart |
+| Softness | Round 1 (0, 0.25, 0.5): 0.5 won 6 of 8 and 0 never won. Round 2 at 2× on 7B int8 (0.5, 0.75, 1.0): 0.75 placed first four times and second three times, and never last; 0.5 placed first three times; 1.0 never placed first. Differences between sources were small. Softness doesn't change memory or time |
+| Stability | No Metal error up to 20 MP. 31.9 MP outputs (about 1.4× the budget) completed on 7B int8 and 3B bf16 while macOS swapped, with no error |
+
+Peak memory and time per output size (one call):
+
+| Tier | Weights | 4 MP | 8 MP | 16 MP | 20 MP | 31.9 MP |
+|---|---|---|---|---|---|---|
+| 7B int8 | 9.26 GB | 20.05 GB, 80 s | 20.12 GB, 163 s | 24.47 GB, 375 s | 27.61 GB, 485 s | 37.45 GB, 782 s |
+| 3B int8 | 4.72 GB | 15.51 GB, 80 s | 15.58 GB, 156 s | 20.02 GB, 314 s | 23.60 GB, 401 s | not run |
+| 3B bf16 (dropped) | 7.28 GB | 18.08 GB, 81 s | 18.15 GB, 142 s | 22.58 GB, 320 s | 26.16 GB, 401 s | 36.69 GB, 668 s |
+| 7B bf16 (dropped) | 16.98 GB | 27.77 GB, 98 s | | | | |
+
+- **Memory model.** Peak = weights + activations, with activations = max(10.79 GB, slope × MP + intercept): 0.83 GB/MP + 1.88 GB for 7B int8, 0.89 GB/MP + 1.10 GB for 3B int8. The flat floor holds up to about 8 MP. Fitted on 12–20 MP, it predicts the 31.9 MP runs within 0.2 GB.
+- **Largest output inside the budget** on this Mac: 19.0 MP on 7B int8, 23.6 MP on 3B int8.
+- **Time** is about linear in pixels: 20 s/MP on 3B, 20–24 s/MP on 7B int8. A 4× of a 1 MP render (16 MP) takes about 5 minutes on 3B and 6 on 7B int8.
+- **Creative, for comparison.** 2× to 4 MP peaked at 43–45 GB, past physical memory, and took 4–9 minutes under swap. 2× to 8 MP and every 4× failed with a Metal out-of-memory error.
+- **Load.** Quantizing in memory takes 1–3 s on a warm load, so a stored 8-bit copy saves disk, not time.
+
+Decisions taken from these results:
+
+- Tiers, largest first: **7B int8**, then **3B int8**. 3B bf16 is dropped: it looks the same as 3B int8 and needs more memory and disk. 7B bf16 is dropped: it looks the same as 7B int8 and doesn't fit a 32 GB Mac's budget even at 4 MP. A 32 GB Mac gets 7B int8.
+- Default softness 0.75, one value for every source.
+
 ## Proposed change
 
-On macOS the viewer's Upscale menu shows **2×** and **4×** (SeedVR2) and, below them, **2× creative** and **4× creative** (today's upscale). Every item shows its output size and, when it's disabled, the reason. Nothing moves behind a switch. A SeedVR2 job loads SeedVR2 instead of the image's model, runs one step, and saves the result next to the source, with the source's prompt and settings carried over for the record.
+On macOS the viewer's Upscale menu shows **2×** and **4×** (SeedVR2) and, below them, **2× creative** and **4× creative** (today's upscale). Every item shows its output size and, when it's disabled, the reason. A SeedVR2 item that may need more memory than the Mac has stays enabled and shows a warning. Nothing moves behind a switch. A SeedVR2 job loads SeedVR2 instead of the image's model, runs one step, and saves the result next to the source, with the source's prompt and settings carried over for the record.
 
 The app picks the SeedVR2 model and quantization for the machine. Nobody has to choose.
 
@@ -84,47 +115,36 @@ Build it in one worktree, with a commit per step. Each step leaves the app worki
 
 ### 0. Spike, with recorded results
 
-Run `SeedVR2.generate_image` directly, outside the app. Use six sources: a portrait, a landscape with foliage, text or line art, a Z-Image render, a Krea 2 render and an Ideogram 4 render. Each is 1–2 MP.
-
-| Gate | Pass when |
-|---|---|
-| SeedVR2 against creative | In a blind side-by-side at 2× and 4×, SeedVR2 is preferred or tied on most sources against today's creative output at the same size. Note where creative wins (likely painterly styles at 2×) |
-| Model tiers | Compare 7B int8, 3B bf16 and 3B int8 blind on the same sources. Confirm the ranking used by the automatic choice, and that 7B bf16 looks no better than 7B int8 |
-| Softness | Pick the default from 0, 0.25 and 0.5 |
-| Memory and time | Record `mx.get_peak_memory()` and seconds for each tier at 4, 8, 12 and 20 MP outputs, on a 32 GB and a 64 GB or larger Mac. Fit a per-megapixel activation cost per tier |
-| Stability | No Metal command-buffer timeout at 20 MP. If there is one, record the largest size that works |
-
-Write the numbers, the tier ranking, the activation costs and the softness default into this proposal's Evidence section before step 1. If SeedVR2 doesn't beat creative on most sources, stop and reject the proposal.
+Done. SeedVR2 passed the gate: creative didn't win a single set. The numbers, the tier ranking, the activation costs and the softness default are in [Spike results](#spike-results).
 
 ### 1. Shared SeedVR2 backend (foundation for video too)
 
-- `core/seedvr2.py`: a `SeedVR2Upscaler` Protocol with `load_model(variant, quantize)` and `upscale_image(model, path, width, height, seed, softness) -> PIL.Image`.
-- `backends/seedvr2_mac.py`: the mflux implementation, with mflux imported lazily. `upscale_image` calls `generate_image` with `resolution` set to the target short side and returns `.image`. A quantized tier is stored with `stored_quant` the first time, so later jobs load it without quantizing again. The video proposal later adds `upscale_clip` to this module.
+- `core/seedvr2.py`: a `SeedVR2Upscaler` Protocol with `load_model(variant, quantize)`, `save_model(model, path)` (for the stored 8-bit copy in step 7) and `upscale_image(model, path, width, height, seed, softness) -> PIL.Image`.
+- `backends/seedvr2_mac.py`: the mflux implementation, with mflux imported lazily. `upscale_image` calls `generate_image` with `resolution` set to the target short side and returns `.image`. The video proposal later adds `upscale_clip` to this module.
 - `backends/__init__.py`: `get_seedvr2_upscaler()` and `supports_seedvr2()`. They return the mflux upscaler and `True` on macOS, and `None` and `False` elsewhere. No other module branches on platform. The video proposal's `supports_video_file_upscale()` builds on this flag.
 - `tests/test_mflux_seedvr2_contract.py` pins by introspection: `SeedVR2.__init__(quantize, model_path, model_config)`, `generate_image(seed, image_path, resolution, softness)`, `save_model(base_path)`, the `bits` and `tiling_config` attributes, and `ModelConfig.seedvr2_3b` / `seedvr2_7b`. The video proposal extends the same file with the latent creator, text embeddings and transformer call it relies on.
 - Mocked tests: `upscale_image` passes the right short side for 2× and 4× and returns the PIL image.
 
 ### 2. Automatic model choice
 
+- Config: a new top-level `seedvr2:` block with `model: auto`, `quantize: auto`, `softness: 0.75`, `max_megapixels: null` (an optional hard cap; none by default), `reference_megapixels: 16` and `tiers`. `tiers` lists, largest first, 7B int8 and 3B int8, each with its weights and the spike's activation constants (floor, slope, intercept), so new measurements only change `config.yaml`. bf16 and int4 aren't tiers. Setting `model` (`seedvr2-3b`, `seedvr2-7b`) or `quantize` (`null`, `8`) overrides the automatic choice. They follow the usual precedence rules.
 - `utils/seedvr2.py`, pure:
-  - `SEEDVR2_TIERS`: the tiers in quality order from the spike. The expected order is 7B int8, 3B bf16, 3B int8. 7B bf16 isn't a tier, because it looks the same as int8 at twice the memory. int4 isn't a tier either, because it degrades this model.
-  - `pick_seedvr2_tier(budget_bytes, weight_bytes, activation_bytes_per_mp, reference_mp)` returns the first tier whose weights plus activations at the reference output size are `fits` under `classify_memory_fit`. It returns `None` when even the last tier doesn't fit, and then the SeedVR2 items are disabled with that reason.
-  - `seedvr2_max_megapixels(tier, budget_bytes, ...)` returns the largest output the chosen tier fits, capped by `seedvr2.max_megapixels`.
-- The choice is made once per machine, from `memory_budget_bytes()`, so a given Mac always uses (and downloads) the same model. It doesn't depend on the image, which would load different models for 2× and 4×. The reference size is the spike's typical 4× output (about 8 MP, to confirm).
-- Config: a new top-level `seedvr2:` block with `model: auto`, `quantize: auto`, `softness` and `max_megapixels`. Setting `model` (`seedvr2-3b`, `seedvr2-7b`) or `quantize` (`null`, `8`) overrides the automatic choice. They follow the usual precedence rules.
+  - `estimate_seedvr2_bytes(tier, megapixels)`: weights plus max(floor, slope × MP + intercept).
+  - `pick_seedvr2_tier(settings, budget_bytes)` returns the first tier whose estimate at the reference size is `fits` under `classify_memory_fit`, and the last (smallest) tier when none fits or the budget is unknown. It never disables SeedVR2.
+- The choice is made once per machine, from `memory_budget_bytes()`, so a given Mac always uses (and downloads) the same model. It doesn't depend on the image, which would load different models for 2× and 4×. The reference size is a 4× of a 1 MP render (16 MP). A 32 GB Mac gets 7B int8 (24.4 GB at 16 MP).
 - The job card and the recorded settings show the model that ran (for example `seedvr2-7b q8`).
-- Tests: the picked tier for budgets of 16, 24, 32, 64 and 128 GB with fixed weight and activation numbers; `None` when nothing fits; config overrides win; the size cap.
+- Tests: the picked tier for budgets of 16, 24, 32, 64 and 128 GB with fixed weight and activation numbers; the smallest tier when nothing fits; config overrides win.
 
 ### 3. Sizes and limits
 
 - `utils/upscale.py`:
   - `seedvr2_output_size(width, height, factor)` matches `preprocess_image`: each side scaled and rounded down to even.
-  - `seedvr2_options(width, height, max_mp)` returns `UpscaleOption`s against the tier's limit from step 2. It ignores the image model's capabilities, so Ideogram 4 images and images without settings can be upscaled.
-- Tests: sizes for odd and even sources, and the limit reason.
+  - `seedvr2_options(width, height, tier, max_megapixels, budget_bytes)` returns `UpscaleOption`s. An option is disabled only when `seedvr2.max_megapixels` is set and exceeded. Otherwise it's enabled, with a `warning` when the tier's estimate for that size isn't `fits`. It ignores the image model's capabilities, so Ideogram 4 images and images without settings can be upscaled. Creative's options and its 20 MP limit don't change.
+- Tests: sizes for odd and even sources, the warning on and off, and the cap reason.
 
 ### 4. Workflow, runner and metadata
 
-- `build_seedvr2_upscale_workflow()`: `load_source_stage` → `seedvr2_upscale_stage` → `save_image_stage`. There's no prompt stage. Sharpening is off by default, since SeedVR2 output is already sharp; the spike can turn it on with `sharpening.existing_seedvr2`.
+- `build_seedvr2_upscale_workflow()`: `load_source_stage` → `seedvr2_upscale_stage` → `save_image_stage`. There's no prompt stage. Sharpening is off by default, since SeedVR2 output is already sharp; `sharpening.existing_seedvr2` turns it on.
 - `seedvr2_upscale_stage` calls `request.backend.upscale_image` with the source path and the planned size. It replaces `artifacts.image`.
 - `upscale_runner.run_upscale` runs it unchanged: it already takes a workflow and emits one-image batch events. SeedVR2 has one step, so the job card shows load → upscale → save without a step bar.
 - Filename: `portrait_42_2x.png`, the same rule as creative. Since the method is recorded, the name doesn't need to differ.
@@ -134,22 +154,27 @@ Write the numbers, the tier ranking, the activation costs and the softness defau
 
 ### 5. Web server and contract
 
-- `_asset_upscale_json` returns `{seedvr2: [...] | null, creative: [...]}`. `seedvr2` is `null` when `supports_seedvr2()` is false. It isn't tied to the image's model, so Ideogram 4 images get working 2× and 4× items while the creative items stay disabled with their existing reason.
+- `_asset_upscale_json` keeps `factors` (creative) and adds `seedvr2`: the options, the tier's name and whether it's downloaded, or `null` when `supports_seedvr2()` is false. It isn't tied to the image's model, so Ideogram 4 images get working 2× and 4× items while the creative items stay disabled with their existing reason.
 - `POST /api/upscale` takes `method: "seedvr2" | "creative"`, defaulting to `"creative"` so existing clients keep working. `plan_seedvr2_upscale` (next to `plan_upscale` in `web/upscale_api.py`) builds the request and enforces `seedvr2_options`.
-- Admission: estimate the chosen tier's memory from the safetensors headers plus the activation cost for this output size, and refuse with a clear message when it won't fit, as image jobs do.
-- Tests: the gallery JSON on supported and unsupported backends, the route's method default, a refused size, and queuing with the SeedVR2 workflow.
+- No memory admission check: a SeedVR2 job over the estimated budget is queued like any other, since its item already carries the warning. Only a size over a configured `seedvr2.max_megapixels` is refused.
+- Tests: the gallery JSON on supported and unsupported backends, the route's method default, a warned size that queues, a size over a configured cap, and queuing with the SeedVR2 workflow.
 
 ### 6. Web UI
 
-- The Upscale menu lists 2×, 4×, 2× creative and 4× creative, each with its size and reason line. On Windows and Linux only the creative items appear, since `seedvr2` is `null`.
-- Keyboard: the existing chord runs plain 2× or 4×. That's SeedVR2 on macOS and creative where SeedVR2 isn't available. Shift with the same chord runs creative everywhere.
+- The Upscale menu lists 2×, 4×, 2× creative and 4× creative, each with its size and reason line. A warned SeedVR2 item stays enabled with a visible marker and the warning as its tooltip. On Windows and Linux only the creative items appear, since `seedvr2` is `null`.
+- Keyboard: the existing chord (X, then 2 or 4) runs plain 2× or 4×. That's SeedVR2 on macOS and creative where SeedVR2 isn't available. On macOS the creative items are in the menu only; there's no second chord.
 - The job card shows "Upscale 2×" or "Upscale 2× creative", the output size, and the SeedVR2 model that ran.
 - Run `make frontend-build` and commit the rebuilt SPA.
-- Vitest: the four items render with their sizes; the plain items are absent when `seedvr2` is `null`; a plain item sends `method: "seedvr2"` and a creative one `method: "creative"`; the chord and Shift chord send the right method.
+- Vitest: the four items render with their sizes; the plain items are absent when `seedvr2` is `null`; a warned item stays enabled; a plain item sends `method: "seedvr2"` and a creative one `method: "creative"`; the chord sends `seedvr2` on macOS and `creative` elsewhere.
 
 ### 7. Model download
 
-SeedVR2 isn't in the app's model inventory. Add it to `ziv-model list` and the inventory, so the memory badge and the "not downloaded" state work. Only the tier picked for this Mac is downloaded, through the same path as other models. This is the step the video proposal's step 6 asked for. If [model download progress](model-download-progress.md) has shipped by then, it covers this; otherwise the job card shows "Downloading SeedVR2" with no progress bar.
+SeedVR2 isn't in the app's model inventory. Add it to `ziv-model list` and the inventory, so the memory badge and the "not downloaded" state work. Disk use comes first:
+
+- Only the tier this Mac uses is downloaded: its fp16 transformer (16.5 GB for 7B, 6.8 GB for 3B) and the 0.5 GB VAE.
+- On first use the app quantizes the tier to 8 bits and stores the copy next to the other models. Once the copy is saved, it deletes the fp16 transformer from the Hugging Face cache. Later jobs load the copy.
+
+This is the step the video proposal's step 6 asked for. If [model download progress](model-download-progress.md) has shipped by then, it covers this; otherwise the job card shows "Downloading SeedVR2" with no progress bar.
 
 ### 8. Docs and changelog
 
@@ -171,4 +196,4 @@ SeedVR2 isn't in the app's model inventory. Add it to `ziv-model list` and the i
 
 ## Open questions
 
-- **Softness per source.** If the spike shows renders and photos want different softness, decide whether that's a config value per family or one default.
+- **Softness per source.** Settled by the spike: the differences between sources were small, so there's one default (0.75) and no per-family value.
