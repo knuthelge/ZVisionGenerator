@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -614,3 +615,37 @@ def test_load_web_config_builds_seedvr2_setup_from_the_memory_budget(monkeypatch
     assert web_config.seedvr2 is setup
     assert calls[0]["budget_bytes"] == expected_bytes
     assert calls[0]["models_dir"] == tmp_path / ".ziv" / "models"
+
+
+def _seedvr2_app_config() -> dict[str, object]:
+    tiers = [{"model": "seedvr2-7b", "weights_gb": 9.26, "activation_floor_gb": 10.79, "activation_base_gb": 1.88, "activation_gb_per_mp": 0.83}]
+    return {**_make_app_config(), "seedvr2": {"model": "auto", "softness": 0.75, "reference_megapixels": 16, "tiers": tiers}}
+
+
+def test_gallery_api_reports_a_seedvr2_copy_stored_after_the_server_started(monkeypatch, tmp_path):
+    """The download state is read on every request, so a first-use download shows without a restart."""
+    from fastapi.testclient import TestClient
+    from PIL import Image
+
+    from zvisiongenerator.utils.stored_quant import MANIFEST_NAME
+    from zvisiongenerator.web import server as web_server
+
+    _patch_minimal_web_config(monkeypatch, tmp_path)
+    monkeypatch.setattr(web_config_module, "load_config", _seedvr2_app_config)
+    monkeypatch.setattr(web_config_module, "supports_seedvr2", lambda: True)
+    monkeypatch.setattr(web_config_module, "memory_budget", lambda: SimpleNamespace(gpu_bytes=26_800_000_000))
+    outputs = Path(web_config_module.load_web_config().output_dir)
+    Image.new("RGB", (64, 64)).save(outputs / "a.png")
+
+    def _seedvr2() -> dict:
+        return client.get("/api/gallery").json()["assets"][0]["upscale"]["seedvr2"]
+
+    with TestClient(web_server.app) as client:
+        before = _seedvr2()
+        copy = tmp_path / ".ziv" / "models" / ".seedvr2" / "seedvr2-7b@q8"
+        copy.mkdir(parents=True)
+        (copy / MANIFEST_NAME).write_text('{"bits": 8, "backend_format": "mflux-seedvr2", "model": "seedvr2-7b"}', encoding="utf-8")
+        after = _seedvr2()
+
+    assert (before["downloaded"], before["download_size_label"]) == (False, "17.0 GB")
+    assert (after["downloaded"], after["download_size_label"]) == (True, None)
