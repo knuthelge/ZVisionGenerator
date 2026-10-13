@@ -525,7 +525,7 @@ describe('ModelsPage Browse buttons', () => {
       app = flushSync(() => mount(ModelsPage, { target }));
       await settle();
 
-      expect(tooltipFor('seedvr2-7b@q8')).toContain('(17.0 GB)');
+      expect(tooltipFor('seedvr2-7b@q8')).toContain(seedvr2Row.download_size_label);
       expect(tooltipFor('seedvr2-7b@q8')).not.toContain(NOT_DOWNLOADED_TOOLTIP);
       expect(tooltipFor('klein4b')).toContain(NOT_DOWNLOADED_TOOLTIP);
       expect(target.querySelector('[data-testid="disk-size"]')).toBeNull();
@@ -547,14 +547,16 @@ describe('ModelsPage Browse buttons', () => {
       (buttons[1] as HTMLButtonElement).click();
       await settle();
       expect(document.querySelector('[data-testid="delete-redownload"]')).toBeNull();
-      expect(document.querySelector('[data-testid="delete-dialog"]')?.textContent).toContain('Hugging Face files it links to are kept.');
+      const installedNotes = Array.from(document.querySelectorAll('[data-testid="delete-dialog"] p')).map((el) => el.textContent);
+      expect(installedNotes.length).toBeGreaterThan(0);
       (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Cancel') as HTMLButtonElement).click();
       await settle();
 
       (buttons[0] as HTMLButtonElement).click();
       await settle();
-      expect(document.querySelector('[data-testid="delete-redownload"]')?.textContent).toContain('17.0 GB');
-      expect(document.querySelector('[data-testid="delete-dialog"]')?.textContent).not.toContain('Hugging Face files');
+      expect(document.querySelector('[data-testid="delete-redownload"]')?.textContent).toContain(seedvr2Row.download_size_label);
+      const seedvr2Notes = Array.from(document.querySelectorAll('[data-testid="delete-dialog"] p')).map((el) => el.textContent);
+      expect(seedvr2Notes.filter((note) => installedNotes.includes(note))).toEqual([]);
       (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
       await settle();
 

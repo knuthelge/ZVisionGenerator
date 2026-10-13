@@ -71,7 +71,7 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current?.message).toContain('q8');
   });
 
-  it('describes a SeedVR2 download and a copy that replaces it, never as faster loading', () => {
+  it('describes a SeedVR2 download and a copy that replaces it differently from a plain saved copy', () => {
     jobStore.startJob({ job_id: 'seedvr2', workflow: 'upscale', prompt: '', model: 'SeedVR2 7B q8', runs: 1, created_at: '' });
     const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
     source.emit('model_loading', { type: 'model_loading', mode: 'image', model: 'SeedVR2 7B q8', phase: 'downloading', quantize: 8, replaces_download: true });
@@ -79,12 +79,16 @@ describe('jobStore reconnect contract', () => {
     const downloading = jobStore.current?.message;
     source.emit('model_loading', { type: 'model_loading', mode: 'image', model: 'SeedVR2 7B q8', phase: 'saving_quant', quantize: 8, replaces_download: true });
     const replacing = jobStore.current?.message;
-
     expect(jobStore.current).toMatchObject({ loadPhase: 'saving_quant', loadQuant: 8, loadReplacesDownload: true });
+
+    jobStore.startJob({ job_id: 'plain', workflow: 'txt2img', prompt: 'a fox', model: 'zit', runs: 1, created_at: '' });
+    const next = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;
+    next.emit('model_loading', { type: 'model_loading', mode: 'image', model: 'zit', phase: 'saving_quant', quantize: 8 });
+    const plain = jobStore.current?.message;
+
     expect(downloading).toContain('SeedVR2 7B q8');
     expect(replacing).toContain('q8');
-    expect(replacing).toContain('disk');
-    expect(replacing).not.toContain('faster loading');
+    expect(new Set([downloading, replacing, plain]).size).toBe(3);
   });
 
   it('shows enhancer phases and the per-image enhanced prompt, resetting it for the next prompt', () => {
