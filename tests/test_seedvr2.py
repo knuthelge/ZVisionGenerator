@@ -266,6 +266,7 @@ class TestSettings:
             ({"tiers": []}, "seedvr2.tiers"),
             ({"tiers": [{"model": "seedvr2-9b", "weights_gb": 1, "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1}]}, "seedvr2.tiers[0].model"),
             ({"tiers": [{"model": ["seedvr2-3b"], "weights_gb": 1, "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1}]}, "seedvr2.tiers[0].model"),
+            ({"tiers": [{"model": 3, "weights_gb": 1, "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1}]}, "seedvr2.tiers[0].model"),
             ({"tiers": [{"model": "seedvr2-3b", "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1}]}, "seedvr2.tiers[0].weights_gb"),
             ({"tiers": [{"model": "seedvr2-3b", "weights_gb": 0, "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1}]}, "seedvr2.tiers[0].weights_gb"),
             ({"tiers": [{"model": "seedvr2-3b", "weights_gb": 1, "activation_floor_gb": 1, "activation_base_gb": 1, "activation_gb_per_mp": 1, "quantize": 4}]}, "seedvr2.tiers[0]"),

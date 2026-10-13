@@ -22,6 +22,7 @@ from zvisiongenerator.seedvr2_loader import (
     seedvr2_copy_dir,
     seedvr2_downloaded,
 )
+from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_MODEL_FILES, SEEDVR2_REPO
 from zvisiongenerator.utils.stored_quant import MANIFEST_NAME, write_manifest
 
@@ -102,6 +103,15 @@ class TestCopyLocation:
 
         assert list_models(tmp_path) == []
 
+    def test_listings_skip_the_copy_folder_without_probing_it(self, tmp_path, models_dir):
+        _make_copy(models_dir)
+
+        with patch("zvisiongenerator.converters.list_assets.detect_image_model") as detect:
+            detect.return_value = ImageModelInfo(family="flux2_klein", is_distilled=True, size="9b")
+            assert list_models(tmp_path) == []
+
+        detect.assert_not_called()
+
 
 class TestFirstLoad:
     def test_calls_run_in_order_and_the_model_is_returned(self, models_dir):
@@ -179,6 +189,25 @@ class TestFirstLoad:
 
         parent.upscaler.save_model.assert_not_called()
         parent.delete.assert_not_called()
+        assert not (models_dir / ".seedvr2").exists()
+
+    def test_files_are_deleted_only_once_the_copy_is_current(self, models_dir):
+        parent = _Parent()
+        current_at_delete: list[bool] = []
+        parent.delete.side_effect = lambda *_: current_at_delete.append(seedvr2_downloaded("seedvr2-7b", models_dir))
+
+        _load(parent, models_dir)
+
+        assert current_at_delete == [True, True]
+
+    def test_an_interrupted_save_discards_the_partial_and_deletes_nothing(self, models_dir):
+        parent = _Parent(save_error=KeyboardInterrupt())
+
+        with pytest.raises(KeyboardInterrupt):
+            _load(parent, models_dir)
+
+        parent.delete.assert_not_called()
+        assert list((models_dir / ".seedvr2").iterdir()) == []
 
     def test_a_stale_partial_is_swept(self, models_dir):
         copy = seedvr2_copy_dir("seedvr2-7b", models_dir)
