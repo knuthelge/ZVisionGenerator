@@ -169,6 +169,22 @@ class TestFirstLoad:
         assert not seedvr2_downloaded("seedvr2-7b", models_dir)
         assert list((models_dir / ".seedvr2").iterdir()) == []
 
+    def test_a_failed_save_warning_names_the_caller_of_the_loader(self, models_dir):
+        parent = _Parent(save_error=OSError("disk full"))
+
+        with pytest.warns(UserWarning, match="disk full") as warned:
+            _load(parent, models_dir)
+
+        assert Path(warned[0].filename) == Path(__file__)
+
+    def test_a_failed_delete_warning_names_the_caller_of_the_loader(self, models_dir):
+        parent = _Parent(delete_error=OSError("busy"))
+
+        with pytest.warns(UserWarning, match="busy") as warned:
+            _load(parent, models_dir)
+
+        assert {Path(item.filename) for item in warned} == {Path(__file__)}
+
     def test_a_failed_delete_warns_and_still_returns_the_model(self, models_dir):
         parent = _Parent(delete_error=OSError("busy"))
 

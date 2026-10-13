@@ -167,7 +167,8 @@ def _store_image_copy(
         write(partial)
         copy_detection_files(source, partial)
 
-    return store_copy(write_with_detection_files, target=target, manifest=build_manifest(source, bits, backend_format), label=source.name, cancelled=cancelled)
+    # One frame deeper than a direct caller, so warnings still name the caller of the public save function.
+    return store_copy(write_with_detection_files, target=target, manifest=build_manifest(source, bits, backend_format), label=source.name, cancelled=cancelled, stacklevel=4)
 
 
 def store_copy(
@@ -177,6 +178,8 @@ def store_copy(
     manifest: dict[str, Any],
     label: str,
     cancelled: Callable[[], bool] | None = None,
+    fallback: str = "it is quantized at load instead",
+    stacklevel: int = 3,
 ) -> bool:
     """Run *write* into a hidden partial folder, complete it and rename it to *target*; return whether it is in place.
 
@@ -190,6 +193,8 @@ def store_copy(
         manifest: Written last into the copy to mark it complete; its ``bits`` key names the level in warnings.
         label: Names the model in warnings.
         cancelled: Checked once *write* returns.
+        fallback: Ends the warning: what happens instead of using the copy.
+        stacklevel: Frame the warnings are attributed to; the default is the caller of the function calling this one.
     """
     bits = manifest.get("bits")
     sweep_stale_partials(target)
@@ -203,7 +208,7 @@ def store_copy(
         write_manifest(partial, manifest)
     except Exception as exc:  # noqa: BLE001 - a failed save must never fail the job
         discard_partial(partial)
-        warnings.warn(f"Could not save the q{bits} copy of {label} ({exc}); it is quantized at load instead.", stacklevel=3)
+        warnings.warn(f"Could not save the q{bits} copy of {label} ({exc}); {fallback}.", stacklevel=stacklevel)
         return False
     except BaseException:
         discard_partial(partial)
@@ -212,7 +217,7 @@ def store_copy(
         promote_partial(partial, target)
     except OSError as exc:
         discard_partial(partial)
-        warnings.warn(f"Could not store the q{bits} copy of {label} ({exc}); it is quantized at load instead.", stacklevel=3)
+        warnings.warn(f"Could not store the q{bits} copy of {label} ({exc}); {fallback}.", stacklevel=stacklevel)
         return False
     return True
 

@@ -108,7 +108,7 @@ def load_seedvr2(
     loaded = upscaler.load_model(model, quantize=SEEDVR2_BITS, model_path=SEEDVR2_REPO)
     _report(on_phase, SAVING_QUANT_PHASE)
     copy.parent.mkdir(parents=True, exist_ok=True)
-    saved = store_copy(lambda partial: upscaler.save_model(loaded, partial), target=copy, manifest=_manifest(model), label=seedvr2_tier_label(model))
+    saved = store_copy(lambda partial: upscaler.save_model(loaded, partial), target=copy, manifest=_manifest(model), label=seedvr2_tier_label(model), fallback="the next load saves it again")
     if saved:
         _delete_downloads(model, delete_cached_file)
     return loaded

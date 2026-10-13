@@ -451,3 +451,14 @@ class TestStoreCopy:
 
         assert store_copy(self._write, target=target, manifest={"bits": 8}, label="thing")
         assert not stale.exists()
+
+
+class TestWarningAttribution:
+    def test_save_stored_quant_warning_names_its_caller(self, models_dir):
+        source = _make_source(models_dir)
+        backend = _FakeBackend(save_error=OSError("disk full"))
+
+        with pytest.warns(UserWarning, match="disk full") as warned:
+            save_stored_quant(backend, MagicMock(), source=source, target=models_dir / "atlas@q8", bits=8, backend_format=FORMAT)
+
+        assert Path(warned[0].filename) == Path(__file__)
