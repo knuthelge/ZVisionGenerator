@@ -6,6 +6,7 @@ import argparse
 
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.review import review_enabled
+from zvisiongenerator.workflows import seedvr2_stages
 from zvisiongenerator.workflows.image_stages import (
     enhance_prompt_stage,
     resolve_prompt_stage,
@@ -21,7 +22,7 @@ from zvisiongenerator.workflows.image_stages import (
     save_image_stage,
 )
 
-__all__ = ["build_workflow", "build_upscale_workflow", "build_video_workflow"]
+__all__ = ["build_workflow", "build_upscale_workflow", "build_seedvr2_upscale_workflow", "build_video_workflow"]
 
 
 def build_workflow(args: argparse.Namespace, *, enhance: bool = False) -> GenerationWorkflow:
@@ -54,6 +55,14 @@ def build_upscale_workflow(*, sharpen: bool = True) -> GenerationWorkflow:
         stages.append(sharpen_stage)
     stages.append(save_image_stage)
     return GenerationWorkflow(name="upscale", stages=stages)
+
+
+def build_seedvr2_upscale_workflow() -> GenerationWorkflow:
+    """Build the workflow that upscales an existing image with SeedVR2: resolve the prompt, load, upscale, save.
+
+    The prompt stage puts the rendered prompt into the saved file. There is no sharpen stage: SeedVR2 output is saved as is.
+    """
+    return GenerationWorkflow(name="upscale", stages=[resolve_prompt_stage, load_source_stage, seedvr2_stages.upscale_stage, save_image_stage])
 
 
 def build_video_workflow(args: argparse.Namespace, *, enhance: bool = False) -> GenerationWorkflow:

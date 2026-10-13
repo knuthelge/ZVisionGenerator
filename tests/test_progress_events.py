@@ -10,7 +10,7 @@ import pytest
 from zvisiongenerator.core.progress_events import preview_milestone_steps, run_workflow_with_progress
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.workflow import GenerationWorkflow
-from zvisiongenerator.workflows.image_stages import _emit_step_progress
+from zvisiongenerator.workflows.image_stages import emit_step_progress
 
 
 @pytest.mark.parametrize(
@@ -32,7 +32,7 @@ def test_preview_milestone_steps_cover_quarters_but_not_the_final_step(total_ste
 def test_stage_step_progress_forwards_preview_images():
     events: list[dict] = []
     preview = Image.new("RGB", (8, 8))
-    callback = _emit_step_progress(events.append, phase="image_generate", total_steps=4)
+    callback = emit_step_progress(events.append, phase="image_generate", total_steps=4)
 
     callback({"current_step": 1, "total_steps": 4})
     callback({"current_step": 2, "total_steps": 4, "preview": preview})

@@ -22,6 +22,7 @@ from tests.conftest import _make_plan
 from tests.conftest import _make_video_args, make_extend_source
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
+from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import web_runner as web_runner_module
 from zvisiongenerator.workflows import build_video_workflow
@@ -356,6 +357,89 @@ class TestWebRunner:
         assert snapshot["supported_controls"] == ["quit"]
         assert loader_calls == {"model_ref": "/models/zit", "quantize": 8, "model_name": "zit", "lora_paths": ["/l.safetensors"]}
         assert runs == [(request, workflow)]
+
+    def test_seedvr2_upscale_loads_its_own_model_and_reports_the_copy_phases(self, tmp_path, monkeypatch):
+        """A SeedVR2 request loads through load_seedvr2 (never the image loader) and its load events replace the download."""
+        upscaler = MagicMock(name="upscaler")
+        model = MagicMock(name="seedvr2_model")
+        load_calls: list = []
+        runs: list = []
+
+        def _fake_load(engine, name, *, models_dir, on_phase):
+            load_calls.append((engine, name, models_dir))
+            for phase in ("downloading", "saving_quant"):
+                on_phase(phase)
+            return model
+
+        def _fake_run_upscale(backend, loaded, request, workflow, *, progress_callback, skip_signal):
+            runs.append((backend, loaded, request, workflow))
+            progress_callback({"type": "batch_completed", "mode": "image", "completed_iterations": 1, "total_iterations": 1})
+
+        def _no_image_loader(*_args, **_kwargs):
+            raise AssertionError("a SeedVR2 job must not load an image model")
+
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        _stub_request_job(monkeypatch)
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: upscaler)
+        monkeypatch.setattr(web_runner_module, "load_seedvr2", _fake_load)
+        monkeypatch.setattr(web_runner_module, "load_image_model", _no_image_loader)
+        monkeypatch.setattr(web_runner_module, "run_upscale", _fake_run_upscale)
+        request = ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_factor=2, upscale_source="/out/a.png", upscale_method="seedvr2", upscale_model="seedvr2-7b", upscale_quantize=8)
+        workflow = MagicMock(name="workflow")
+
+        try:
+            job_id = runner.submit_upscale_job(request=request, workflow=workflow, model_ref="numz/SeedVR2_comfyUI", context={"output_dir": str(tmp_path)})
+            snapshot = _wait_for_status(runner, job_id, "completed")
+            events = [event for event in runner._get_job(job_id).history if event["type"] == "model_loading"]
+        finally:
+            runner.shutdown()
+
+        assert snapshot["status"] == "completed"
+        assert load_calls == [(upscaler, "seedvr2-7b", tmp_path / "models")]
+        assert runs == [(upscaler, model, request, workflow)]
+        assert [(event["phase"], event["quantize"], event["replaces_download"]) for event in events] == [("downloading", 8, True), ("saving_quant", 8, True)]
+        assert {event["model"] for event in events} == {"SeedVR2 7B q8"}
+
+    def test_seedvr2_upscale_without_an_engine_fails_the_job(self, tmp_path, monkeypatch):
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        _stub_request_job(monkeypatch)
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: None)
+        request = ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_factor=2, upscale_source="/out/a.png", upscale_method="seedvr2", upscale_model="seedvr2-7b")
+
+        try:
+            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="numz/SeedVR2_comfyUI", context={})
+            snapshot = _wait_for_status(runner, job_id, "failed")
+        finally:
+            runner.shutdown()
+
+        assert snapshot["status"] == "failed"
+
+    def test_seedvr2_upscale_quit_during_the_load_cancels_without_a_file(self, tmp_path, monkeypatch):
+        """The load cannot be cancelled; a quit queued meanwhile is consumed when the workflow would start."""
+        control = SkipSignal()
+        events: list = []
+        workflow = MagicMock(name="workflow")
+
+        def _quitting_load(engine, name, *, models_dir, on_phase):
+            control.queue_action("quit")
+            return MagicMock(name="seedvr2_model")
+
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: MagicMock(name="upscaler"))
+        monkeypatch.setattr(web_runner_module, "load_seedvr2", _quitting_load)
+        request = ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_factor=2, upscale_source=str(tmp_path / "a.png"), upscale_method="seedvr2", upscale_model="seedvr2-3b")
+
+        try:
+            runner._run_upscale_request(request=request, workflow=workflow, model_ref="numz/SeedVR2_comfyUI", progress_callback=events.append, control_signal=control)
+        finally:
+            runner.shutdown()
+
+        workflow.run.assert_not_called()
+        assert events[-1]["type"] == "batch_cancelled"
+        assert not list(tmp_path.glob("*.png"))
 
     def test_completed_image_job_includes_output_assets(self, tmp_path, monkeypatch):
         """Successful generated output paths should become gallery-shaped job outputs."""

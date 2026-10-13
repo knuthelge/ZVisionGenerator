@@ -25,7 +25,7 @@ from typing import Any
 
 from PIL import Image
 
-from zvisiongenerator.backends import get_backend, get_video_backend, release_accelerator_memory
+from zvisiongenerator.backends import get_backend, get_seedvr2_upscaler, get_video_backend, release_accelerator_memory
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.core.workflow import GenerationWorkflow
@@ -33,11 +33,14 @@ from zvisiongenerator.image_model_loader import load_image_model
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.review import review_enabled
+from zvisiongenerator.seedvr2_loader import load_seedvr2
 from zvisiongenerator.upscale_runner import run_upscale
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
+from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
+from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS, seedvr2_tier_label
 from zvisiongenerator.web.config import load_web_config
 from zvisiongenerator.web.gallery import gallery_asset_for_output_path, gallery_asset_to_json
 from zvisiongenerator.web.job_contract import (
@@ -735,11 +738,14 @@ class WebRunner:
         progress_callback: Callable[[EventPayload], None],
         control_signal: SkipSignal,
     ) -> None:
-        """Load the image model inside the worker thread and run the upscale workflow once."""
+        """Load the upscale model inside the worker thread (SeedVR2 or the recorded image model) and run the upscale workflow once."""
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
             return
-        backend, model, _model_info = _load_image_model_with_progress(request, model_ref, request.quantize, progress_callback, control_signal)
+        if request.upscale_method == UPSCALE_METHOD_SEEDVR2:
+            backend, model = _load_seedvr2_with_progress(request, progress_callback)
+        else:
+            backend, model, _model_info = _load_image_model_with_progress(request, model_ref, request.quantize, progress_callback, control_signal)
         run_upscale(backend, model, request, workflow, progress_callback=progress_callback, skip_signal=control_signal)
 
     def _run_video_request(
@@ -996,6 +1002,31 @@ def _load_image_model_with_progress(
         release_memory=_release_accelerator_memory,
     )
     return backend, model, model_info
+
+
+def _load_seedvr2_with_progress(request: ImageGenerationRequest, progress_callback: Callable[[EventPayload], None]) -> tuple[Any, Any]:
+    """Load the request's SeedVR2 model (its stored copy, made on first use) and report ``model_loading`` events.
+
+    The events carry ``replaces_download`` because the first load deletes the downloaded files once the copy is
+    saved. There is no cancel hook: a quit during the load is consumed when the workflow starts.
+
+    Returns:
+        ``(upscaler, model)``.
+
+    Raises:
+        RuntimeError: If this platform has no SeedVR2 engine.
+    """
+    upscaler = get_seedvr2_upscaler()
+    if upscaler is None:
+        raise RuntimeError("SeedVR2 upscaling is not available on this platform.")
+    model_label = seedvr2_tier_label(request.upscale_model)
+    model = load_seedvr2(
+        upscaler,
+        request.upscale_model,
+        models_dir=get_ziv_data_dir() / "models",
+        on_phase=lambda phase: progress_callback({"type": "model_loading", "mode": "image", "model": model_label, "phase": phase, "quantize": SEEDVR2_BITS, "replaces_download": True}),
+    )
+    return upscaler, model
 
 
 def _release_accelerator_memory() -> None:

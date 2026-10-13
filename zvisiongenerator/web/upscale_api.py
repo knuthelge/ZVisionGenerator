@@ -13,8 +13,9 @@ from zvisiongenerator.utils.config import resolve_defaults, resolve_scheduler_cl
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import parse_lora_arg
 from zvisiongenerator.utils.paths import resolve_model_path
-from zvisiongenerator.utils.provenance import RecordedSettings
-from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, existing_image_denoise, upscale_options
+from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2, RecordedSettings
+from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS, SEEDVR2_REPO, SeedVR2Setup
+from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, existing_image_denoise, seedvr2_options, upscale_options
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 
 NOTICE_SETTINGS_UNKNOWN = "original settings unknown"
@@ -117,6 +118,72 @@ def plan_upscale(source: UpscaleSource, factor: int, web_config: WebUiConfig, *,
         upscale_source=source.path,
     )
     return UpscalePlan(request=request, model_ref=model_ref, option=option, notices=tuple(notices))
+
+
+def plan_seedvr2_upscale(source: UpscaleSource, factor: int, *, setup: SeedVR2Setup) -> UpscalePlan:
+    """Build the SeedVR2 upscale request for *source* at *factor*.
+
+    No image model is involved, so nothing is detected or defaulted from one: the request carries the source's
+    recorded settings so the new file stays reusable. When the source records no seed, steps or guidance, the
+    request holds class defaults and ``source_settings_known`` is False, so they are not saved as the original's.
+
+    Raises:
+        ValueError: If *factor* is not offered.
+    """
+    if factor not in UPSCALE_FACTORS:
+        raise ValueError(f"Upscale factor must be one of {list(UPSCALE_FACTORS)}, got {factor}.")
+    option = next(option for option in seedvr2_options(source.width, source.height, setup.tier, budget_bytes=setup.budget_bytes) if option.factor == factor)
+    recorded = source.settings or RecordedSettings()
+    notices = (NOTICE_SETTINGS_UNKNOWN,) if source.settings is None else ()
+
+    prompt = recorded.prompt or ""
+    lora_paths, lora_weights = _recorded_loras(recorded.lora)
+    settings_known = recorded.seed is not None and recorded.steps is not None and recorded.guidance is not None
+    request = ImageGenerationRequest(
+        backend=None,
+        model=None,
+        prompt=prompt,
+        resolved_prompt=source.rendered_prompt or prompt or None,
+        model_name=recorded.model,
+        model_family=recorded.model_family or "unknown",
+        supports_negative_prompt=recorded.negative_prompt is not None,
+        lora_paths=lora_paths,
+        lora_weights=lora_weights,
+        negative_prompt=recorded.negative_prompt,
+        ratio=recorded.ratio,
+        size=recorded.size,
+        width=source.width,
+        height=source.height,
+        seed=recorded.seed if settings_known else ImageGenerationRequest.seed,
+        steps=recorded.steps if settings_known else ImageGenerationRequest.steps,
+        guidance=recorded.guidance if settings_known else ImageGenerationRequest.guidance,
+        scheduler=None,
+        scheduler_name=recorded.scheduler,
+        quantize=recorded.generation.get("quantize"),
+        source_settings_known=settings_known,
+        upscale_factor=factor,
+        upscale_method=UPSCALE_METHOD_SEEDVR2,
+        upscale_model=setup.tier.model,
+        upscale_quantize=SEEDVR2_BITS,
+        upscale_softness=setup.settings.softness,
+        sharpen=False,
+        image_path=recorded.image_path,
+        image_strength=recorded.image_strength if recorded.image_strength is not None else ImageGenerationRequest.image_strength,
+        output_dir=str(Path(source.path).parent),
+        upscale_source=source.path,
+    )
+    return UpscalePlan(request=request, model_ref=SEEDVR2_REPO, option=option, notices=notices)
+
+
+def _recorded_loras(lora: str | None) -> tuple[list[str] | None, list[float] | None]:
+    """Parse recorded LoRAs for the new file's record, keeping entries whose files are gone; unparseable text gives none."""
+    if lora is None:
+        return None, None
+    try:
+        entries = parse_lora_arg(lora)
+    except ValueError:
+        return None, None
+    return [path for path, _ in entries], [weight for _, weight in entries]
 
 
 def _sharpens_after_refining(recorded: RecordedSettings) -> bool:

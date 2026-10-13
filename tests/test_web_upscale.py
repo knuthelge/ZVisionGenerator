@@ -9,9 +9,12 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
+from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.upscale_runner import UpscaleSource
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.provenance import RecordedSettings, embed_png_config
+from zvisiongenerator.utils.seedvr2 import SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
+from zvisiongenerator.utils.upscale import SEEDVR2_MEMORY_WARNING
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import upscale_api
 from zvisiongenerator.web.config import WebUiDefaultModels
@@ -256,6 +259,94 @@ def test_plan_rejects_unknown_factor(monkeypatch, tmp_path):
         upscale_api.plan_upscale(_source(), 3, _web_config(tmp_path), backend_name="mflux")
 
 
+# ── SeedVR2 planning ────────────────────────────────────────────────────────
+
+_SEEDVR2_TIER = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=10.79, activation_base_gb=1.88, activation_gb_per_mp=0.83)
+
+
+def _seedvr2_setup(*, budget_bytes=None, tier=_SEEDVR2_TIER):
+    settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(tier,))
+    return SeedVR2Setup(settings=settings, tier=tier, budget_bytes=budget_bytes, downloaded=False)
+
+
+def _forbid_image_model_detection(monkeypatch):
+    def _fail(*_args, **_kwargs):
+        raise AssertionError("SeedVR2 planning must not touch the image model")
+
+    monkeypatch.setattr(upscale_api, "detect_image_model", _fail)
+    monkeypatch.setattr(upscale_api, "resolve_defaults", _fail)
+
+
+def test_seedvr2_plan_carries_recorded_settings_without_an_image_model(monkeypatch):
+    _forbid_image_model_detection(monkeypatch)
+    source = _source(model_family="zimage", ratio="4:3", size="m", image_path="/out/ref.png", image_strength=0.6, lora="/gone.safetensors:0.8,style:1")
+
+    plan = upscale_api.plan_seedvr2_upscale(source, 2, setup=_seedvr2_setup())
+
+    request = plan.request
+    assert plan.model_ref == "numz/SeedVR2_comfyUI"
+    assert (plan.option.factor, plan.option.width, plan.option.height) == (2, 1664, 2432)
+    assert plan.notices == ()
+    assert (request.upscale_method, request.upscale_model, request.upscale_quantize, request.upscale_softness, request.upscale_factor) == ("seedvr2", "seedvr2-7b", 8, 0.75, 2)
+    assert (request.prompt, request.resolved_prompt, request.negative_prompt, request.supports_negative_prompt) == ("a barn", "a red barn", "blurry", True)
+    assert (request.model_name, request.model_family, request.quantize) == ("zit", "zimage", 8)
+    assert (request.seed, request.steps, request.guidance, request.source_settings_known) == (42, 8, 1.5, True)
+    assert (request.scheduler, request.scheduler_name) == (None, "beta")
+    # Missing LoRA files stay in the record.
+    assert (request.lora_paths, request.lora_weights) == (["/gone.safetensors", "style"], [0.8, 1.0])
+    assert (request.ratio, request.size, request.image_path, request.image_strength) == ("4:3", "m", "/out/ref.png", 0.6)
+    assert (request.width, request.height, request.output_dir, request.upscale_source, request.sharpen) == (832, 1216, "/out", "/out/portrait.png", False)
+
+
+def test_seedvr2_plan_without_settings_saves_no_invented_values(monkeypatch):
+    _forbid_image_model_detection(monkeypatch)
+    source = UpscaleSource(path="/out/imported.png", width=512, height=512)
+
+    plan = upscale_api.plan_seedvr2_upscale(source, 4, setup=_seedvr2_setup())
+
+    request = plan.request
+    assert plan.notices == (upscale_api.NOTICE_SETTINGS_UNKNOWN,)
+    assert (request.prompt, request.resolved_prompt, request.model_name, request.model_family) == ("", None, None, "unknown")
+    assert (request.seed, request.source_settings_known) == (0, False)
+    assert (request.negative_prompt, request.supports_negative_prompt, request.scheduler_name) == (None, False, None)
+    assert (request.lora_paths, request.lora_weights, request.quantize) == (None, None, None)
+
+
+def test_seedvr2_plan_with_a_partial_record_marks_settings_unknown():
+    source = _source(seed=None)
+
+    request = upscale_api.plan_seedvr2_upscale(source, 2, setup=_seedvr2_setup()).request
+
+    assert request.source_settings_known is False
+    assert (request.seed, request.steps, request.guidance) == (ImageGenerationRequest.seed, ImageGenerationRequest.steps, ImageGenerationRequest.guidance)
+    assert request.prompt == "a barn"
+
+
+def test_seedvr2_plan_prompt_falls_back_to_the_recorded_template():
+    request = upscale_api.plan_seedvr2_upscale(_source(rendered_prompt=None, prompt="a {red|blue} barn"), 2, setup=_seedvr2_setup()).request
+
+    assert request.resolved_prompt == "a {red|blue} barn"
+
+
+def test_seedvr2_plan_ignores_an_unparseable_lora_record():
+    request = upscale_api.plan_seedvr2_upscale(_source(lora="a,,b"), 2, setup=_seedvr2_setup()).request
+
+    assert (request.lora_paths, request.lora_weights) == (None, None)
+
+
+def test_seedvr2_plan_warns_instead_of_refusing_a_large_output():
+    plan = upscale_api.plan_seedvr2_upscale(_source(), 4, setup=_seedvr2_setup(budget_bytes=int(20e9)))
+
+    assert plan.option.allowed is True
+    assert plan.option.warning == SEEDVR2_MEMORY_WARNING
+    assert upscale_api.plan_seedvr2_upscale(_source(), 2, setup=_seedvr2_setup()).option.warning is None
+
+
+def test_seedvr2_plan_rejects_unknown_factor():
+    with pytest.raises(ValueError, match="factor"):
+        upscale_api.plan_seedvr2_upscale(_source(), 3, setup=_seedvr2_setup())
+
+
 @pytest.mark.parametrize("body", [None, [], {"factor": 2}, {"asset_id": "a.png"}, {"asset_id": "a.png", "factor": 3}, {"asset_id": "a.png", "factor": True}])
 def test_request_body_validation(body):
     with pytest.raises(ValueError):
@@ -418,7 +509,8 @@ def test_gallery_details_expose_recorded_settings(tmp_path):
     assert details["negative_prompt"] == "blurry"
     assert details["scheduler"] == "beta"
     assert details["model_family"] == "zimage"
-    assert details["generation"] == {"time": 12.3, "quantize": 8, "upscale": {"factor": 2, "denoise": 0.4, "steps": 3, "pre_sharpen": 0.6}, "sharpen": 1.2}
+    # A file that predates the method reads as creative.
+    assert details["generation"] == {"time": 12.3, "quantize": 8, "upscale": {"method": "creative", "factor": 2, "denoise": 0.4, "steps": 3, "pre_sharpen": 0.6}, "sharpen": 1.2}
     assert details["source"] is None
 
 

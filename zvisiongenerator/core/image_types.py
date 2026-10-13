@@ -58,6 +58,15 @@ class ImageGenerationRequest:
     upscale_save_pre: bool = False
     # Existing image an upscale job refines; set only by the upscale workflow.
     upscale_source: str | None = None
+    # "creative" refines the upscaled image with the image model; "seedvr2" runs the SeedVR2 upscaler instead.
+    upscale_method: str = "creative"
+    # SeedVR2 only: the model ("seedvr2-3b" or "seedvr2-7b"), the bits it was loaded at, and its softness.
+    upscale_model: str | None = None
+    upscale_quantize: int | None = None
+    upscale_softness: float | None = None
+    # False when a SeedVR2 upscale's source records no seed, steps or guidance, so ``seed``/``steps``/``guidance``
+    # hold class defaults that must not be saved as if they were the original's settings.
+    source_settings_known: bool = True
     # Shows the small render before the upscale and returns whether to go on; set only when review is on.
     review: Callable[[Image.Image], bool] | None = None
 

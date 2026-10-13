@@ -20,6 +20,9 @@ _PNG_CONFIG_KEY = "zvisiongenerator.config"
 _MP4_CONFIG_KEY = "zvisiongenerator.config"
 # EXIF ImageDescription tag, where saved images also carry the rendered prompt.
 EXIF_IMAGE_DESCRIPTION = 0x010E
+# The recorded ``generation.upscale.method`` values: refine with the image model, or upscale with SeedVR2.
+UPSCALE_METHOD_CREATIVE = "creative"
+UPSCALE_METHOD_SEEDVR2 = "seedvr2"
 
 
 def build_image_config_payload(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> dict[str, Any]:
@@ -33,6 +36,8 @@ def build_image_config_payload(request: ImageGenerationRequest, artifacts: Image
     width = artifacts.image.width if artifacts.image is not None else request.width
     height = artifacts.image.height if artifacts.image is not None else request.height
     negative_prompt = None if artifacts.metadata.get("negative_suppressed") else request.negative_prompt
+    # A SeedVR2 upscale of a source with no recorded sampling settings must not save class defaults as if they were its own.
+    unknown_source = request.upscale_method == UPSCALE_METHOD_SEEDVR2 and not request.source_settings_known
     payload: dict[str, Any] = {
         "schema": IMAGE_CONFIG_SCHEMA,
         "workflow": _image_workflow(request),
@@ -40,9 +45,9 @@ def build_image_config_payload(request: ImageGenerationRequest, artifacts: Image
         "negative_prompt": negative_prompt or None,
         "model": _portable_path(request.model_name),
         "model_family": request.model_family,
-        "seed": request.seed,
-        "steps": request.steps,
-        "guidance": request.guidance,
+        "seed": None if unknown_source else request.seed,
+        "steps": None if unknown_source else request.steps,
+        "guidance": None if unknown_source else request.guidance,
         "scheduler": request.scheduler_name,
         "width": width,
         "height": height,
@@ -317,10 +322,16 @@ def _generation_block(value: Any) -> dict[str, Any]:
             "steps": optional_int(upscale.get("steps")),
             "guidance": optional_float(upscale.get("guidance")),
             "pre_sharpen": optional_float(upscale.get("pre_sharpen")),
+            "model": optional_text(upscale.get("model")),
+            "quantize": optional_int(upscale.get("quantize")),
+            "softness": optional_float(upscale.get("softness")),
+            "seed": optional_int(upscale.get("seed")),
         }
         coerced = {key: item for key, item in coerced.items() if item is not None}
         if coerced:
-            generation["upscale"] = coerced
+            # Files that predate the method were all refined by the image model.
+            method = UPSCALE_METHOD_SEEDVR2 if upscale.get("method") == UPSCALE_METHOD_SEEDVR2 else UPSCALE_METHOD_CREATIVE
+            generation["upscale"] = {"method": method, **coerced}
     return generation
 
 
@@ -409,17 +420,7 @@ def _image_workflow(request: ImageGenerationRequest) -> str:
 
 
 def _image_generation_details(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> dict[str, Any]:
-    upscale = None
-    if artifacts.was_upscaled and request.upscale_factor:
-        upscale = _drop_empty(
-            {
-                "factor": request.upscale_factor,
-                "denoise": request.upscale_denoise,
-                "steps": request.upscale_steps,
-                "guidance": request.upscale_guidance,
-                "pre_sharpen": request.sharpen_amount_pre_upscale if request.upscale_sharpen else None,
-            }
-        )
+    upscale = _upscale_details(request) if artifacts.was_upscaled and request.upscale_factor else None
     return _drop_empty(
         {
             "time": _round_seconds(artifacts.generation_time),
@@ -428,6 +429,31 @@ def _image_generation_details(request: ImageGenerationRequest, artifacts: ImageW
             "sharpen": _sharpen_amount(request, artifacts) if request.sharpen else None,
             "contrast": request.contrast_amount if request.contrast else None,
             "saturation": request.saturation_amount if request.saturation else None,
+        }
+    )
+
+
+def _upscale_details(request: ImageGenerationRequest) -> dict[str, Any]:
+    """Return the recorded ``generation.upscale`` block: the method plus the settings that method used."""
+    if request.upscale_method == UPSCALE_METHOD_SEEDVR2:
+        return _drop_empty(
+            {
+                "method": UPSCALE_METHOD_SEEDVR2,
+                "factor": request.upscale_factor,
+                "model": request.upscale_model,
+                "quantize": request.upscale_quantize,
+                "softness": request.upscale_softness,
+                "seed": request.seed,
+            }
+        )
+    return _drop_empty(
+        {
+            "method": UPSCALE_METHOD_CREATIVE,
+            "factor": request.upscale_factor,
+            "denoise": request.upscale_denoise,
+            "steps": request.upscale_steps,
+            "guidance": request.upscale_guidance,
+            "pre_sharpen": request.sharpen_amount_pre_upscale if request.upscale_sharpen else None,
         }
     )
 

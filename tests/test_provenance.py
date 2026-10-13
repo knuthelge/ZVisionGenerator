@@ -131,7 +131,7 @@ class TestBuildImageConfigPayload:
 
         assert payload["generation"] == {
             "time": 12.3,
-            "upscale": {"factor": 2, "denoise": 0.4, "steps": 3, "pre_sharpen": 0.4},
+            "upscale": {"method": "creative", "factor": 2, "denoise": 0.4, "steps": 3, "pre_sharpen": 0.4},
             "sharpen": 1.2,
             "contrast": 1.1,
         }
@@ -158,6 +158,61 @@ class TestBuildImageConfigPayload:
         assert payload["image_path"] == "/out/ref.png"
         assert payload["image_strength"] == 0.6
         assert payload["source"]["workflow"] == "img2img"
+
+    def test_seedvr2_upscale_records_its_own_settings_only(self):
+        request = _make_image_request(
+            upscale_source="/out/p.png",
+            upscale_factor=4,
+            upscale_method="seedvr2",
+            upscale_model="seedvr2-7b",
+            upscale_quantize=8,
+            upscale_softness=0.75,
+            upscale_denoise=0.4,
+            upscale_steps=3,
+            quantize=4,
+            seed=9,
+            sharpen=False,
+        )
+        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (2048, 1024)), was_upscaled=True, generation_time=3.04)
+
+        generation = build_image_config_payload(request, artifacts)["generation"]
+
+        assert generation["upscale"] == {"method": "seedvr2", "factor": 4, "model": "seedvr2-7b", "quantize": 8, "softness": 0.75, "seed": 9}
+        # The generation-level quantize stays the source model's.
+        assert generation["quantize"] == 4
+
+    def test_seedvr2_upscale_of_a_source_without_settings_saves_null_sampling_values(self):
+        request = _make_image_request(
+            upscale_source="/out/p.png",
+            upscale_factor=2,
+            upscale_method="seedvr2",
+            upscale_model="seedvr2-3b",
+            upscale_quantize=8,
+            upscale_softness=0.5,
+            source_settings_known=False,
+            scheduler_name="beta",
+            seed=0,
+        )
+        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (64, 32)), was_upscaled=True)
+
+        payload = build_image_config_payload(request, artifacts)
+
+        assert (payload["seed"], payload["steps"], payload["guidance"]) == (None, None, None)
+        assert payload["scheduler"] == "beta"
+        assert payload["generation"]["upscale"]["seed"] == 0
+
+    def test_seedvr2_upscale_of_a_recorded_source_keeps_its_sampling_values(self):
+        request = _make_image_request(upscale_source="/out/p.png", upscale_factor=2, upscale_method="seedvr2", upscale_model="seedvr2-3b", seed=5, steps=8, guidance=1.5)
+        artifacts = ImageWorkingArtifacts(image=Image.new("RGB", (64, 32)), was_upscaled=True)
+
+        payload = build_image_config_payload(request, artifacts)
+
+        assert (payload["seed"], payload["steps"], payload["guidance"]) == (5, 8, 1.5)
+
+    def test_unknown_source_settings_matter_only_to_seedvr2(self):
+        request = _make_image_request(source_settings_known=False, seed=5)
+
+        assert build_image_config_payload(request, ImageWorkingArtifacts(image=Image.new("RGB", (8, 8))))["seed"] == 5
 
     def test_upscale_workflow_records_source(self):
         request = _make_image_request(upscale_source="/out/portrait.png", upscale_factor=2, upscale_denoise=0.4)
@@ -528,6 +583,26 @@ class TestRecordedValueHelpers:
             assert image_prompt_text(image) is None
 
 
+class TestRecordedUpscaleMethod:
+    def test_seedvr2_block_round_trips(self):
+        upscale = {"method": "seedvr2", "factor": 2, "model": "seedvr2-7b", "quantize": 8, "softness": 0.75, "seed": 0}
+
+        assert recorded_settings({"generation": {"upscale": upscale}}).generation == {"upscale": upscale}
+
+    def test_block_without_a_method_reads_as_creative(self):
+        generation = recorded_settings({"generation": {"upscale": {"factor": 2, "denoise": 0.4}}}).generation
+
+        assert generation == {"upscale": {"method": "creative", "factor": 2, "denoise": 0.4}}
+
+    def test_unknown_method_reads_as_creative(self):
+        generation = recorded_settings({"generation": {"upscale": {"method": "other", "factor": 2}}}).generation
+
+        assert generation["upscale"]["method"] == "creative"
+
+    def test_empty_block_stays_absent(self):
+        assert recorded_settings({"generation": {"upscale": {"method": "seedvr2"}}}).generation == {}
+
+
 class TestRecordedSettings:
     def test_reads_top_level_settings_only(self):
         # A missing top-level value must not be filled from a nested block, e.g. the upscale's own steps.
@@ -536,7 +611,7 @@ class TestRecordedSettings:
         assert settings.prompt == "p"
         assert settings.seed == 7
         assert settings.steps is None
-        assert settings.generation == {"upscale": {"factor": 2, "steps": 3}}
+        assert settings.generation == {"upscale": {"method": "creative", "factor": 2, "steps": 3}}
 
     def test_reads_legacy_lora_lists(self):
         settings = recorded_settings({"lora": [{"name": "style", "weight": 0.8}, "detail"]})

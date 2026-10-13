@@ -27,7 +27,7 @@ from zvisiongenerator.utils.prompt_compose import expand_random_choices
 from zvisiongenerator.workflows.enhance_stage import apply_planned_enhancement
 
 
-def _emit_step_progress(
+def emit_step_progress(
     step_callback,
     *,
     phase: str,
@@ -163,7 +163,7 @@ def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorking
             scheduler=request.scheduler,
             negative_prompt=neg,
             skip_signal=request.skip_signal,
-            step_callback=_emit_step_progress(request.step_callback, phase="image_refine", total_steps=effective_steps),
+            step_callback=emit_step_progress(request.step_callback, phase="image_refine", total_steps=effective_steps),
         )
     else:
         image = request.backend.text_to_image(
@@ -177,7 +177,7 @@ def text_to_image_stage(request: ImageGenerationRequest, artifacts: ImageWorking
             scheduler=request.scheduler,
             negative_prompt=neg,
             skip_signal=request.skip_signal,
-            step_callback=_emit_step_progress(request.step_callback, phase="image_generate", total_steps=request.steps),
+            step_callback=emit_step_progress(request.step_callback, phase="image_generate", total_steps=request.steps),
             steps_explicit=request.steps_explicit,
             guidance_explicit=request.guidance_explicit,
             first_sigma=request.first_sigma,
@@ -277,7 +277,7 @@ def upscale_stage(request: ImageGenerationRequest, artifacts: ImageWorkingArtifa
         scheduler=request.scheduler,
         negative_prompt=neg,
         skip_signal=request.skip_signal,
-        step_callback=_emit_step_progress(request.step_callback, phase="image_upscale", total_steps=effective_steps),
+        step_callback=emit_step_progress(request.step_callback, phase="image_upscale", total_steps=effective_steps),
     )
     elapsed = time.perf_counter() - start
     artifacts.generation_time += elapsed
