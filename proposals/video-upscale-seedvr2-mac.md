@@ -20,11 +20,11 @@ The image work shipped the shared foundation. None of this is planned again here
 | Sizes and warning | `utils/upscale.py`: `seedvr2_output_size` (each side scaled, rounded down to even), `seedvr2_options` (never disabled, `warning` when over budget, no size cap) | The output size as is. The options gain a per-chunk variant |
 | Download and stored copy | `seedvr2_loader.py`: `load_seedvr2`, `build_seedvr2_setup`, the 8-bit copy in the hidden `models_dir/.seedvr2/` folder, deletion of the downloaded files; `WebUiConfig.seedvr2`; the Models page row | All of it, unchanged. Video adds no download step |
 | Contract test | `tests/test_mflux_seedvr2_contract.py` (constructor, `generate_image`, `save_model`, model configs, file layout) | Extended with the internals the clip loop calls (step 2) |
-| Menu and shortcut | `_seedvr2_upscale_json` in `web/gallery.py`; `upscaleEntries` in `assetMenu.ts`; the X then 2/4 chord in `AssetViewer.svelte`, which runs plain 2×/4× and toasts a warned size's warning; plain items labelled `2× → W×H` with a high-memory marker | The same items and chord for videos. Creative stays in the menu only, and images only |
+| Menu and shortcut | `_seedvr2_upscale_json` in `web/gallery.py`; `upscaleEntries` in `assetMenu.ts`; the X then 2/4 chord in `AssetViewer.svelte`, which runs plain 2×/4× and toasts a warned size's warning; plain items labelled `2× → W×H` with a high-memory marker | The plain 2× item and the X then 2 chord for videos. Creative stays in the menu only, and images only |
 | Job and planning | `POST /api/upscale` with `method`, `plan_seedvr2_upscale`, `WebRunner._load_seedvr2_with_progress` with its download and load phases, `workflows/seedvr2_stages.py`, output name `{stem}_{factor}x` | The route, the load-with-progress helper and the naming rule |
-| Recorded settings | `utils/provenance.py`: `generation.upscale` with `method`, `model`, `quantize`, `softness`, `seed`; a `source` block that Reuse follows | The same keys. The video-detection rule needs one change (step 4) |
+| Recorded settings | `utils/provenance.py`: `generation.upscale` with `method`, `model`, `quantize`, `softness`, `seed`; a `source` block that Reuse follows | The same keys. The video-detection rule needs one change (step 3) |
 
-Decisions carried over: every tier is 8-bit and there's no quantize setting; there's no admission check and no size cap, only a warning; the softness default is 0.75; plain items are named 2× and 4×; videos get no creative upscale.
+Decisions carried over: every tier is 8-bit and there's no quantize setting; there's no admission check and no size cap, only a warning; the softness default is 0.75; images keep plain 2× and 4×. New here: videos get plain 2× only and no creative upscale.
 
 ### Not in scope
 
@@ -33,7 +33,7 @@ Decisions carried over: every tier is 8-bit and there's no quantize setting; the
 - **Frame-rate upscaling** (temporal ×2). LTX's temporal upsampler could do it later, as a separate feature.
 - **Videos from outside the output folder**, like the image upscale.
 - **A command-line entry point.** The image upscale is Web UI only, and so is this. Add `ziv-video` support only if people ask.
-- **Factors other than 2× and 4×**, and a creative upscale for videos.
+- **Any video factor other than 2×**, and a creative upscale for videos.
 
 ## Evidence
 
@@ -61,15 +61,7 @@ The numz ComfyUI node (`ComfyUI-SeedVR2_VideoUpscaler`) is the reference impleme
 
 ### Baseline from the image spike
 
-On a 32 GB M5 Mac (budget 26.80 GB): time is about linear in pixels, 20 s/MP on 3B int8 and 20–24 s/MP on 7B int8. Peak = weights + max(10.79 GB, slope × MP + intercept). At the image rate, frame by frame:
-
-| Job | Output pixels | Time |
-|---|---|---|
-| 2× of a 5 s 704×448 clip (121 frames at 24 fps) | 1408×896 × 121 = 153 MP | about 50 min |
-| 4× of the same clip | 2816×1792 × 121 = 611 MP | about 3.4 h |
-| 2× of the xl preset (1408×896, 25 frames) | 2816×1792 × 25 = 126 MP | about 42 min |
-
-The clip path may be cheaper per frame than this, since one transformer call covers a chunk. The spike measures it.
+On a 32 GB M5 Mac (budget 26.80 GB): time is about linear in pixels, 20 s/MP on 3B int8 and 20–24 s/MP on 7B int8. Peak = weights + max(10.79 GB, slope × MP + intercept). These are rates for one image per call and don't carry over to clips: SeedVR2 runs a chunk of frames per call and its VAE compresses time about 4× (4n+1 frames → n+1 latent frames), so the cost per frame should be well below the single-image rate. The spike measures seconds per frame.
 
 ### Video code to reuse
 
@@ -86,7 +78,7 @@ The clip path may be cheaper per frame than this, since one transformer call cov
 
 ## Proposed change
 
-On macOS, the viewer's Upscale menu shows **2×** and **4×** for videos too, with their output size and, when a chunk may need more memory than the Mac has, the high-memory marker and warning. The job reads the video in overlapping chunks, upscales each chunk with SeedVR2 through mflux's modules, blends the overlaps, encodes the frames, copies the source's audio and frame rate, and records the source and the upscale settings in the new file.
+On macOS, the viewer's Upscale menu shows a plain **2×** for videos too, with its output size and, only when even the smallest chunk may need more memory than the Mac has, the high-memory marker and warning. The job reads the video in overlapping chunks, shrinking the configured chunk to fit the Mac's memory when needed, upscales each chunk with SeedVR2 through mflux's modules, blends the overlaps, encodes the frames, copies the source's audio and frame rate, and records the source and the upscale settings in the new file.
 
 Build it in one worktree, with a commit per step. Each step leaves the app working.
 
@@ -101,17 +93,17 @@ Run SeedVR2 on clips directly against mflux, without the app: a ~50-line loop th
 | Colour correction | Per-frame wavelet + Lab correction adds no visible flicker. If it does, compute the Lab statistics once per chunk |
 | Softness | 0.75 (the image default) still looks best on video, against 0.5 and 0 |
 | Chunk seams | With the chosen chunk and overlap (Hann blend in pixels), a visual check at the seams finds no jump. Record whether one noise tensor for the whole timeline, sliced per chunk, is needed |
-| Memory and time | `mx.get_peak_memory()` and seconds per frame on **7B int8** and **3B int8** only, at 2× and 4×, with chunks of 5, 13 and 21 frames and overlaps of 0, 4 and 8 |
+| Memory and time | `mx.get_peak_memory()` and seconds per frame on **7B int8** and **3B int8** only, at 2×, with chunks of 5, 13 and 21 frames and overlaps of 0, 4 and 8 |
 | Stability | No Metal command-buffer timeout at the largest chunk that fits |
 
 Then:
 
 - **Parity fails:** stop and fix the loop.
 - **Clip path no more stable than per-frame:** the feature isn't worth a video path. Reconsider [the alternatives](#alternatives-considered).
-- **2× of a 704×448 clip doesn't fit a 32 GB Mac's budget on its tier at chunk 5 without tiling:** step 2 adds a spatial tiler for `(B, C, T, H, W)` before the feature ships.
+- **2× of a 704×448 clip doesn't fit a 32 GB Mac's budget on its tier even at the smallest chunk (5) without tiling:** step 2 adds a spatial tiler for `(B, C, T, H, W)` before the feature ships.
 - **Metal timeout:** split the transformer call or the VAE decode, the way `_pre_denoise_flush` does for LTX, and measure again.
 
-Write the numbers, the per-chunk memory fit, and the chosen `chunk_frames` and `overlap_frames` into this proposal's Evidence before step 1. Pick the default chunk as the largest that fits a 32 GB Mac's budget on its tier at 2× of a 704×448 clip.
+Write the numbers, the per-chunk memory fit, and the chosen `chunk_frames` and `overlap_frames` into this proposal's Evidence before step 1. The defaults still come from the spike (the best seam and stability results), but they needn't fit every Mac: the job shrinks the chunk to fit automatically (step 1).
 
 ### 1. Frame I/O, chunk planning and per-chunk memory (platform-free)
 
@@ -123,10 +115,11 @@ Write the numbers, the per-chunk memory fit, and the chosen `chunk_frames` and `
 - `utils/video_upscale.py`, pure:
   - `plan_chunks(frame_count, chunk_frames, overlap_frames) -> list[ChunkSpan]`: every span is 4n+1 long; a short final chunk is padded by repeating its last frame and the padding is dropped on write; a clip at or under `chunk_frames` is one chunk.
   - `blend_weights(overlap_frames)`: the Hann ramp, adding up to 1 across an overlap.
+  - `MIN_CHUNK_FRAMES = 5` and `fit_chunk_frames(tier, megapixels, budget_bytes, chunk_frames, min_chunk) -> int`: the largest 4n+1 chunk from `chunk_frames` down to `min_chunk` whose `estimate_seedvr2_clip_bytes` is within the budget, or `min_chunk` when none is. It never returns more than `chunk_frames` and never changes the output size.
 - `utils/seedvr2.py`: `estimate_seedvr2_clip_bytes(tier, megapixels, frames)`: the image estimate with a per-chunk term fitted in the spike. If the spike shows the image line scales with megapixels × frames, no new tier keys are needed; otherwise each tier gains one constant in `config.yaml`.
-- `utils/upscale.py`: `seedvr2_clip_options(width, height, tier, *, chunk_frames, budget_bytes)`: `UpscaleOption`s with `seedvr2_output_size`, never disabled, and a `warning` when the per-chunk estimate is over budget.
-- Config: a `video_upscale:` block with `chunk_frames` and `overlap_frames`, defaults from the spike, validated like `seedvr2:` (positive ints, `chunk_frames` of 4n+1, overlap smaller than the chunk). Model, quantization and softness come from `seedvr2:`. Whether a `max_megapixels` key is wanted is an open question.
-- Tests: chunk spans (lengths, overlap, padding, a single short clip); blend weights; the clip estimate and the warning just over and at the budget; config validation; `VideoFrameWriter` with a mocked `subprocess.Popen` (audio mapped only when the source has it, a failed encode or a failed check leaves no file); the shared format checks still give extend the same results.
+- `utils/upscale.py`: `seedvr2_clip_options(width, height, tier, *, min_chunk, budget_bytes)`: one 2× `UpscaleOption` with `seedvr2_output_size`, never disabled, with a `warning` only when the estimate at `min_chunk` is over budget (a larger configured chunk that doesn't fit is shrunk, not warned about).
+- Config: a `video_upscale:` block with `chunk_frames` and `overlap_frames`, defaults from the spike, validated like `seedvr2:` (non-negative ints, `chunk_frames` of 4n+1 and at least `MIN_CHUNK_FRAMES`, overlap less than half the chunk so each chunk moves forward by more than it repeats). Model, quantization and softness come from `seedvr2:`.
+- Tests: chunk spans (lengths, overlap, padding, a single short clip); blend weights; `fit_chunk_frames` keeps a chunk that fits, shrinks to the largest 4n+1 that fits, returns `min_chunk` when none does, and never exceeds `chunk_frames`; the clip estimate; the option has only factor 2 and warns just over the budget at `min_chunk`, not at it, and not when only the configured chunk is over; config validation; `VideoFrameWriter` with a mocked `subprocess.Popen` (audio mapped only when the source has it, a failed encode or a failed check leaves no file); the shared format checks still give extend the same results.
 
 ### 2. SeedVR2 clip backend and contract
 
@@ -137,8 +130,8 @@ Write the numbers, the per-chunk memory fit, and the chosen `chunk_frames` and `
 
 ### 3. Runner and recorded settings
 
-- `core/video_types.py`: a frozen `VideoUpscaleRequest` with the source path and probe, the source's recorded payload, factor, output size, tier model, softness, seed, `chunk_frames`, `overlap_frames` and the output path (`{stem}_{factor}x.mp4`, with a counter when taken, the image rule).
-- `video_upscale_runner.run_video_upscale(upscaler, model, request, *, progress_callback, skip_signal)`: reads chunk by chunk from `iter_frames`, calls `upscale_clip`, blends overlaps, writes through `VideoFrameWriter`, and embeds the settings. It emits the same events as `run_upscale` does for a one-image batch, with one step per chunk, so the job card's bar moves per chunk. Quit is checked between chunks and leaves no file.
+- `core/video_types.py`: a frozen `VideoUpscaleRequest` with the source path and probe, the source's recorded payload, factor (always 2), output size, tier model, softness, seed, the fitted `chunk_frames` and `overlap_frames` chosen at plan time, and the output path (`{stem}_{factor}x.mp4`, with a counter when taken, the image rule).
+- `video_upscale_runner.run_video_upscale(upscaler, model, request, *, progress_callback, skip_signal)`: reads chunk by chunk from `iter_frames`, calls `upscale_clip`, blends overlaps, writes through `VideoFrameWriter`, and embeds the settings. It emits the same events as `run_upscale` does for a one-image batch, with one step per chunk, so the job card's bar moves per chunk. It shows no estimated time. Quit is checked between chunks and leaves no file.
 - `utils/provenance.py`:
   - `build_video_upscale_payload(...)` starts from the source's recorded payload, so its prompt, scene, model, family, seed, steps, LoRAs, reference image, `source_video` and `extend_frames` are kept. It sets `workflow: "upscale"`, the output width and height, the same `frame_count`, `generation` with `time`, `audio`, `output_format` and `upscale: {method: "seedvr2", factor, model, quantize: 8, softness, seed, chunk_frames, overlap_frames}`, and a `source` block `{path, width, height, workflow}`. `source.workflow` is the source's own workflow (or its source's, when the source is itself an upscale), so Reuse regenerates it, and an upscaled extension reuses as Extend from the original's source.
   - The video-detection rule: a video record keeps `method` when it is `seedvr2` and still gets no default. A video `generation.upscale` without a method stays the in-run LTX upscale. Add `chunk_frames` and `overlap_frames` to the kept keys.
@@ -148,21 +141,21 @@ Write the numbers, the per-chunk memory fit, and the chosen `chunk_frames` and `
 ### 4. Web server
 
 - `gallery.py`: `upscale` for a video is `{factors: [], seedvr2: …}` with `seedvr2_clip_options` from the recorded width and height, or `null` when `web_config.seedvr2` is `None` or the size isn't recorded. `_seedvr2_upscale_json` takes the options as an argument so images and videos share it.
-- `POST /api/upscale` for a video asset: `method` must be `seedvr2` (`creative` is refused). The route probes the source (cached by file identity, like `extend_api`'s inspection), refuses it with the first `video_format_problems` message, and builds the request with `plan_seedvr2_video_upscale`, next to `plan_seedvr2_upscale`. A warned size queues like any other.
+- `POST /api/upscale` for a video asset: `method` must be `seedvr2` (`creative` is refused). The route probes the source (cached by file identity, like `extend_api`'s inspection), refuses it with the first `video_format_problems` message, and builds the request with `plan_seedvr2_video_upscale`, next to `plan_seedvr2_upscale`. Only factor 2 is accepted for a video. The planner calls `fit_chunk_frames` with the tier, the output megapixels, the Mac's budget and the configured `chunk_frames`, caps `overlap_frames` below half the fitted chunk, and puts both in the request, so the payload records the chunk that ran. A warned size queues like any other.
 - `WebRunner.submit_video_upscale_job`: job type `upscale` with `media_type: "video"`. It loads through `_load_seedvr2_with_progress`, changed to take the model name instead of an image request, so the download and load phases are the same.
-- Tests: the gallery JSON for a video on supported and unsupported backends and without a recorded size; a warned option; the route refuses `creative` for videos and an unreadable source; it queues the video job.
+- Tests: the gallery JSON for a video on supported and unsupported backends and without a recorded size (one 2× option); a warned option; the route refuses `creative`, factor 4 and an unreadable source for videos; the planner shrinks the chunk and caps the overlap on a small budget with the output size unchanged; it queues the video job.
 
 ### 5. Web UI
 
-- `assetActions.ts`: `seedvr2Options` returns options for videos too; `upscaleFactors` stays images only. The menu then lists only 2× and 4× for videos, with the same sizes, marker and tooltip, including the first-use download line.
-- `AssetViewer.svelte`: the X then 2/4 chord is active when any plain or creative option exists, so it works on videos, and a warned size still starts with its toast.
-- Job card: "Upscale 2×", the output size, the SeedVR2 model that ran, and a bar per chunk. The download and load phase lines already apply.
+- `assetActions.ts`: `seedvr2Options` returns options for videos too; `upscaleFactors` stays images only. The server sends only the 2× option for a video, so the menu lists a single plain 2× item, with the same size, marker and tooltip, including the first-use download line.
+- `AssetViewer.svelte`: the X then 2/4 chord is active when any plain or creative option exists, so X then 2 works on videos, and a warned size still starts with its toast. X then 4 on a video does nothing, as for any factor without an option today (`upscaleOption` finds none and `runUpscale` returns false).
+- Job card: "Upscale 2×", the output size, the SeedVR2 model that ran, and a bar per chunk, with no estimated time. The download and load phase lines already apply.
 - Run `make frontend-build` and commit the rebuilt SPA.
-- Vitest: a video with `seedvr2` options shows only the plain items; none when `upscale` is `null`; the chord sends `seedvr2` for a video; the job card shows chunk progress for a video upscale.
+- Vitest: a video with `seedvr2` options shows only the plain 2× item; none when `upscale` is `null`; X then 2 sends `seedvr2` for a video and X then 4 sends nothing; the job card shows chunk progress for a video upscale.
 
 ### 6. Docs and changelog
 
-- `docs/guides/video.md`: an "Upscale an existing video (Web UI)" section next to "Video Upscale & Audio". It covers what SeedVR2 does to a clip, time and memory from the spike, macOS only, audio and frame rate kept, chunks and their warning, and that an upscaled video can't be extended (extend the original). It links to the image guide for the model choice and first-use download rather than repeating them.
+- `docs/guides/video.md`: an "Upscale an existing video (Web UI)" section next to "Video Upscale & Audio". It covers what SeedVR2 does to a clip, 2× only, seconds per frame and memory from the spike, macOS only, audio and frame rate kept, chunks shrinking to fit and the warning when even the smallest doesn't, and that an upscaled video can't be extended (extend the original). It links to the image guide for the model choice and first-use download rather than repeating them.
 - The `video_upscale` keys in the video guide's configuration snippet, and `chunk_frames`/`overlap_frames` in the embedded-settings list.
 - `docs/development.md`: the new modules in Project Structure and the extended contract test.
 - A `CHANGELOG.md` entry under `[Unreleased]`.
@@ -179,6 +172,4 @@ Write the numbers, the per-chunk memory fit, and the chosen `chunk_frames` and `
 
 ## Open questions
 
-- **`video_upscale.max_megapixels`.** Images settled on no cap and a warning only, and per-chunk memory is bounded by `chunk_frames`, so a cap no longer protects memory. Proposed: drop it. Keep it only if a cap on output size per frame is wanted for time reasons (below).
-- **4× and long clips.** At the image rate, 2× of a 5 s 704×448 clip takes about 50 minutes and 4× about 3.4 hours. Decide after the spike whether 4× is offered for videos, and whether the item's tooltip or the job card shows an estimated time (seconds per frame × frames) so a multi-hour job isn't a surprise.
-- **A chunk over budget.** When the default chunk doesn't fit at a size, either warn only (as images do, smallest) or plan a smaller 4n+1 chunk that fits, trading some temporal consistency for no swapping. The spike's seam and memory numbers decide.
+None.
