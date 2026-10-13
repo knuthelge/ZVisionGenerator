@@ -202,6 +202,12 @@ class TestPickTier:
 
         assert pick_seedvr2_tier(_settings(), budget) is TIER_3B
 
+    def test_packaged_config_picks_7b_on_a_32gb_mac_and_3b_below_the_7b_estimate(self):
+        settings = seedvr2_settings(load_config())
+
+        assert pick_seedvr2_tier(settings, int(26.80e9)).model == "seedvr2-7b"
+        assert pick_seedvr2_tier(settings, int(24.41e9)).model == "seedvr2-3b"
+
     def test_unknown_budget_picks_the_last_row(self):
         assert pick_seedvr2_tier(_settings(), None) is TIER_3B
 
@@ -271,6 +277,14 @@ class TestSettings:
     def test_invalid_blocks_name_the_key(self, overrides, key):
         with pytest.raises(ValueError, match=key.replace("[", r"\[").replace("]", r"\]")):
             seedvr2_settings(_config(**overrides))
+
+    @pytest.mark.parametrize("key", ["softness", "reference_megapixels"])
+    def test_required_keys_must_be_present(self, key):
+        config = _config()
+        del config["seedvr2"][key]
+
+        with pytest.raises(ValueError, match=f"seedvr2.{key}"):
+            seedvr2_settings(config)
 
     def test_missing_block_raises(self):
         with pytest.raises(ValueError, match="seedvr2"):
