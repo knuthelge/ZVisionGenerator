@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
     from zvisiongenerator.core.image_backend import ImageBackend
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
+    from zvisiongenerator.core.seedvr2 import SeedVR2Upscaler
     from zvisiongenerator.utils.model_memory import MemoryBudget
 
 __all__ = [
@@ -20,8 +21,10 @@ __all__ = [
     "get_backend",
     "get_backend_name",
     "get_prompt_enhancer_session",
+    "get_seedvr2_upscaler",
     "get_video_backend",
     "release_accelerator_memory",
+    "supports_seedvr2",
     "supports_stored_quants",
     "supports_video_upscale_review",
 ]
@@ -131,6 +134,37 @@ def get_video_backend(family: str) -> "VideoBackend":
     if family not in VIDEO_BACKENDS:
         raise RuntimeError(f"No video backend for model family '{family}'. Available: {list(VIDEO_BACKENDS)}")
     return VIDEO_BACKENDS[family]
+
+
+# --- SeedVR2 upscaler ---
+
+
+def _create_mflux_seedvr2_upscaler() -> "SeedVR2Upscaler":
+    from zvisiongenerator.backends.seedvr2_mac import MfluxSeedVR2Upscaler
+
+    return MfluxSeedVR2Upscaler()
+
+
+_SEEDVR2_UPSCALERS_MAP: dict[str, Callable[[], "SeedVR2Upscaler"]] = {
+    "darwin": _create_mflux_seedvr2_upscaler,
+}
+
+_SEEDVR2_UPSCALERS: dict[str, "SeedVR2Upscaler"] = {}
+
+
+def supports_seedvr2() -> bool:
+    """Return whether this platform has a SeedVR2 upscaler (macOS only)."""
+    return sys.platform in _SEEDVR2_UPSCALERS_MAP
+
+
+def get_seedvr2_upscaler() -> "SeedVR2Upscaler | None":
+    """Return the process-wide SeedVR2 upscaler, or ``None`` when this platform has none."""
+    factory = _SEEDVR2_UPSCALERS_MAP.get(sys.platform)
+    if factory is None:
+        return None
+    if sys.platform not in _SEEDVR2_UPSCALERS:
+        _SEEDVR2_UPSCALERS[sys.platform] = factory()
+    return _SEEDVR2_UPSCALERS[sys.platform]
 
 
 # --- Accelerator memory ---

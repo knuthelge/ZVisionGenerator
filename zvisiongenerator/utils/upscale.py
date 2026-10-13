@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from zvisiongenerator.utils.alignment import round_to_alignment
+from zvisiongenerator.utils.seedvr2 import SeedVR2Tier, estimate_seedvr2_bytes, seedvr2_over_budget
 
 UPSCALE_FACTORS: tuple[int, ...] = (2, 4)
 DEFAULT_MAX_MEGAPIXELS = 20.0
@@ -13,22 +14,48 @@ _DEFAULT_DENOISE = {2: 0.3, 4: 0.4}
 _DEFAULT_EXISTING_DENOISE_SMALL = 0.4
 _DEFAULT_EXISTING_DENOISE_LARGE = 0.2
 _DEFAULT_EXISTING_LARGE_MEGAPIXELS = 2.0
+SEEDVR2_MEMORY_WARNING = "May need more memory than this Mac has: slower, and it may fail."
 
 
 @dataclass(frozen=True)
 class UpscaleOption:
-    """One upscale factor for a given image: its output size and whether it may run."""
+    """One upscale factor for a given image: its output size, whether it may run and any caution to show."""
 
     factor: int
     width: int
     height: int
     allowed: bool
     reason: str | None = None
+    warning: str | None = None
 
 
 def upscale_output_size(width: int, height: int, factor: int) -> tuple[int, int]:
     """Return the size ``upscale_stage`` produces: each side times *factor*, rounded to 16-pixel alignment."""
     return round_to_alignment(width * factor), round_to_alignment(height * factor)
+
+
+def seedvr2_output_size(width: int, height: int, factor: int) -> tuple[int, int]:
+    """Return the size SeedVR2 produces: each side times *factor*, rounded down to an even number (as mflux does)."""
+    return int(width * factor) // 2 * 2, int(height * factor) // 2 * 2
+
+
+def seedvr2_options(width: int, height: int, tier: SeedVR2Tier, *, budget_bytes: int | None) -> list[UpscaleOption]:
+    """Return every upscale factor for a *width* × *height* image under the SeedVR2 plain upscale.
+
+    No factor is ever disabled; one that needs more memory than *budget_bytes* carries a warning instead.
+
+    Args:
+        width: Source image width in pixels.
+        height: Source image height in pixels.
+        tier: The SeedVR2 tier whose memory cost applies.
+        budget_bytes: Memory this Mac may use, or ``None`` when unknown (no warning then).
+    """
+    options: list[UpscaleOption] = []
+    for factor in UPSCALE_FACTORS:
+        out_width, out_height = seedvr2_output_size(width, height, factor)
+        over_budget = seedvr2_over_budget(estimate_seedvr2_bytes(tier, out_width * out_height / 1e6), budget_bytes)
+        options.append(UpscaleOption(factor=factor, width=out_width, height=out_height, allowed=True, warning=SEEDVR2_MEMORY_WARNING if over_budget else None))
+    return options
 
 
 def upscale_options(width: int, height: int, capabilities: dict[str, Any], config: dict[str, Any]) -> list[UpscaleOption]:

@@ -729,8 +729,8 @@ class TestKrea2MfluxBackend:
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(image_mac_module, "detect_image_model", lambda _path: model_info)
             monkeypatch.setattr(image_mac_module, "_upcast_model_weights", MagicMock())
-            monkeypatch.setattr(image_mac_module, "_materialize_weights", MagicMock())
-            monkeypatch.setattr(image_mac_module, "_apply_buffer_cache_policy", MagicMock())
+            monkeypatch.setattr(image_mac_module, "materialize_weights", MagicMock())
+            monkeypatch.setattr(image_mac_module, "apply_buffer_cache_policy", MagicMock())
             krea2_ctor = MagicMock(return_value=MagicMock())
             monkeypatch.setattr(image_mac_module, "Krea2", krea2_ctor)
 

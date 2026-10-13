@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Iterator
+from typing import Any
+
+# Freed buffers MLX may keep for reuse. Its default (the whole memory limit) let the cache grow to 16-29 GB
+# alongside the model and pushed macOS into swap; 4 GB showed no step slowdown.
+BUFFER_CACHE_LIMIT_BYTES = 4 * 1024**3
 
 
 def release_memory() -> None:
@@ -49,3 +54,22 @@ def mlx_cache_limit(limit: int) -> Iterator[None]:
         yield
     finally:
         mx.set_cache_limit(previous)
+
+
+def materialize_weights(model: Any) -> None:
+    """Evaluate every parameter once so the weights stay resident.
+
+    mflux loads weights lazily; unevaluated, every generation rebuilds them from the safetensors
+    files (and quantizes them again), costing tens of seconds and a near-bf16 memory peak per image.
+    """
+    import mlx.core as mx
+
+    mx.eval(model.parameters())
+
+
+def apply_buffer_cache_policy() -> None:
+    """Cap MLX's free-buffer cache and drop what loading left behind."""
+    import mlx.core as mx
+
+    mx.set_cache_limit(BUFFER_CACHE_LIMIT_BYTES)
+    mx.clear_cache()

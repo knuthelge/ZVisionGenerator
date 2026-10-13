@@ -13,7 +13,17 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.upscale_runner import read_upscale_source, run_upscale
 from zvisiongenerator.utils.provenance import embed_png_config, read_png_config
-from zvisiongenerator.utils.upscale import default_upscale_denoise, existing_image_denoise, max_megapixels, upscale_options, upscale_output_size
+from zvisiongenerator.utils.seedvr2 import SeedVR2Tier, estimate_seedvr2_bytes
+from zvisiongenerator.utils.upscale import (
+    SEEDVR2_MEMORY_WARNING,
+    default_upscale_denoise,
+    existing_image_denoise,
+    max_megapixels,
+    seedvr2_options,
+    seedvr2_output_size,
+    upscale_options,
+    upscale_output_size,
+)
 from zvisiongenerator.workflows import build_upscale_workflow
 from zvisiongenerator.workflows.image_stages import load_source_stage, save_image_stage
 
@@ -34,6 +44,57 @@ def _write_png(path, size=(64, 48), *, config=None, description=None):
 def test_output_size_is_aligned_to_16():
     assert upscale_output_size(832, 1216, 2) == (1664, 2432)
     assert upscale_output_size(100, 50, 2) == (208, 112)
+
+
+_TIER_7B = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=10.79, activation_base_gb=1.88, activation_gb_per_mp=0.83)
+_BUDGET_32GB_MAC = int(26.80e9)
+
+
+@pytest.mark.parametrize(
+    ("size", "factor", "expected"),
+    [
+        ((1024, 1536), 2, (2048, 3072)),
+        ((1024, 1536), 4, (4096, 6144)),
+        ((1023, 1537), 2, (2046, 3074)),
+        ((1023, 1537), 4, (4092, 6148)),
+    ],
+)
+def test_seedvr2_output_size_rounds_down_to_even_without_16_alignment(size, factor, expected):
+    assert seedvr2_output_size(*size, factor) == expected
+
+
+def test_seedvr2_options_never_disable_a_factor():
+    options = seedvr2_options(8000, 8000, _TIER_7B, budget_bytes=_BUDGET_32GB_MAC)
+
+    assert [(option.factor, option.allowed, option.reason) for option in options] == [(2, True, None), (4, True, None)]
+
+
+def test_seedvr2_options_warn_only_for_outputs_over_the_budget():
+    fits = {option.factor: option for option in seedvr2_options(1024, 1024, _TIER_7B, budget_bytes=_BUDGET_32GB_MAC)}
+    over = {option.factor: option for option in seedvr2_options(1120, 1120, _TIER_7B, budget_bytes=_BUDGET_32GB_MAC)}
+
+    assert fits[4].warning is None
+    assert over[4].warning == SEEDVR2_MEMORY_WARNING
+    assert (over[4].width, over[4].height) == (4480, 4480)
+
+
+def test_seedvr2_options_do_not_warn_when_the_budget_equals_the_estimate():
+    budget = estimate_seedvr2_bytes(_TIER_7B, 2048 * 2048 / 1e6)
+
+    options = seedvr2_options(1024, 1024, _TIER_7B, budget_bytes=budget)
+
+    assert options[0].warning is None
+    assert seedvr2_options(1024, 1024, _TIER_7B, budget_bytes=budget - 1)[0].warning == SEEDVR2_MEMORY_WARNING
+
+
+def test_seedvr2_options_do_not_warn_for_an_unknown_budget():
+    assert all(option.warning is None for option in seedvr2_options(4000, 4000, _TIER_7B, budget_bytes=None))
+
+
+def test_creative_options_carry_no_warning():
+    options = upscale_options(832, 1216, {}, {"upscale": {"max_megapixels": 20}})
+
+    assert all(option.warning is None for option in options)
 
 
 def test_options_list_each_factor_with_size():

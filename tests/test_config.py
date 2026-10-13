@@ -17,6 +17,14 @@ from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.paths import resolve_model_path
 
 
+_SEEDVR2_BLOCK = {
+    "model": "auto",
+    "softness": 0.75,
+    "reference_megapixels": 16,
+    "tiers": [{"model": "seedvr2-3b", "weights_gb": 4.72, "activation_floor_gb": 10.79, "activation_base_gb": 1.1, "activation_gb_per_mp": 0.89}],
+}
+
+
 def _write_packaged_config(tmp_path, data):
     import yaml
 
@@ -179,6 +187,7 @@ class TestNestedConfigValidation:
             "generation": {"default_steps": 10, "default_guidance": 3.5, "default_ratio": "1:1", "default_size": "m"},
             "sharpening": {},
             "upscale": {},
+            "seedvr2": _SEEDVR2_BLOCK,
             "contrast": {},
             "saturation": {},
             "schedulers": {},
@@ -573,6 +582,31 @@ class TestConfigSchemaValidation:
         with pytest.raises(ValueError, match="Config section 'generation' must be a mapping"):
             load_config()
 
+    def test_seedvr2_replaced_with_scalar_raises(self, tmp_path, monkeypatch):
+        from zvisiongenerator.utils import config as config_mod
+
+        (tmp_path / "config.yaml").write_text("seedvr2: 42\n")
+        monkeypatch.setattr(config_mod, "get_ziv_data_dir", lambda: tmp_path)
+        with pytest.raises(ValueError, match="Config section 'seedvr2' must be a mapping"):
+            load_config()
+
+    def test_seedvr2_user_override_is_validated(self, tmp_path, monkeypatch):
+        from zvisiongenerator.utils import config as config_mod
+
+        (tmp_path / "config.yaml").write_text("seedvr2:\n  softness: 2\n")
+        monkeypatch.setattr(config_mod, "get_ziv_data_dir", lambda: tmp_path)
+        with pytest.raises(ValueError, match="seedvr2.softness"):
+            load_config()
+
+    def test_seedvr2_model_override_is_merged(self, tmp_path, monkeypatch):
+        from zvisiongenerator.utils import config as config_mod
+
+        (tmp_path / "config.yaml").write_text("seedvr2:\n  model: seedvr2-3b\n")
+        monkeypatch.setattr(config_mod, "get_ziv_data_dir", lambda: tmp_path)
+        cfg = load_config()
+        assert cfg["seedvr2"]["model"] == "seedvr2-3b"
+        assert [row["model"] for row in cfg["seedvr2"]["tiers"]] == ["seedvr2-7b", "seedvr2-3b"]
+
     def test_valid_user_override_accepted(self, tmp_path, monkeypatch):
         from zvisiongenerator.utils import config as config_mod
 
@@ -648,6 +682,7 @@ class TestPlatformConfigValidation:
                 "generation": {"default_steps": 10, "default_guidance": 3.5},
                 "sharpening": {},
                 "upscale": {},
+                "seedvr2": _SEEDVR2_BLOCK,
                 "contrast": {},
                 "saturation": {},
                 "schedulers": {},

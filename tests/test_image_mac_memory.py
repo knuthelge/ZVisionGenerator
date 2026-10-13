@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -20,6 +20,8 @@ def image_mac(monkeypatch):
     # load_model sets mflux's process-wide precision from mx; restore it so the fake never leaks into other tests.
     monkeypatch.setattr(module.ModelConfig, "precision", module.ModelConfig.precision)
     monkeypatch.setattr(module, "mx", fake_mx)
+    monkeypatch.setattr(module, "materialize_weights", MagicMock(name="materialize_weights"))
+    monkeypatch.setattr(module, "apply_buffer_cache_policy", MagicMock(name="apply_buffer_cache_policy"))
     return module, fake_mx
 
 
@@ -35,21 +37,15 @@ def _load_zimage(module, monkeypatch, *, quantize=None):
     return backend, model
 
 
-def test_load_model_materializes_weights_then_caps_and_clears_the_cache(image_mac, monkeypatch):
-    module, mx = image_mac
+def test_load_model_materializes_weights_then_applies_the_buffer_cache_policy(image_mac, monkeypatch):
+    module, _mx = image_mac
+    order = MagicMock()
+    order.attach_mock(module.materialize_weights, "materialize")
+    order.attach_mock(module.apply_buffer_cache_policy, "policy")
 
     _backend, model = _load_zimage(module, monkeypatch, quantize=8)
 
-    mx.eval.assert_called_once_with(model.parameters.return_value)
-    mx.set_cache_limit.assert_called_once_with(module._BUFFER_CACHE_LIMIT_BYTES)
-    mx.clear_cache.assert_called()
-    names = [call[0] for call in mx.method_calls]
-    assert names.index("eval") < names.index("set_cache_limit") < names.index("clear_cache")
-
-
-def test_buffer_cache_limit_is_four_gib(image_mac):
-    module, _mx = image_mac
-    assert module._BUFFER_CACHE_LIMIT_BYTES == 4 * 1024**3
+    assert order.mock_calls == [call.materialize(model), call.policy()]
 
 
 @pytest.mark.parametrize("skipped", [False, True])

@@ -380,8 +380,8 @@ def test_gallery_upscale_field_lists_factors(tmp_path):
     upscale = _asset_json(tmp_path, "a.png")["upscale"]
 
     assert upscale["factors"] == [
-        {"factor": 2, "width": 1664, "height": 2432, "allowed": True, "reason": None},
-        {"factor": 4, "width": 3328, "height": 4864, "allowed": False, "reason": upscale["factors"][1]["reason"]},
+        {"factor": 2, "width": 1664, "height": 2432, "allowed": True, "reason": None, "warning": None},
+        {"factor": 4, "width": 3328, "height": 4864, "allowed": False, "reason": upscale["factors"][1]["reason"], "warning": None},
     ]
     assert "megapixel" in upscale["factors"][1]["reason"]
 

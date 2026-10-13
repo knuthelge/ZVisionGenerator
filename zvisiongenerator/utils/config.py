@@ -18,6 +18,7 @@ import yaml
 
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.paths import get_ziv_data_dir
+from zvisiongenerator.utils.seedvr2 import seedvr2_settings
 from zvisiongenerator.utils.upscale import max_megapixels
 
 
@@ -57,6 +58,7 @@ def load_config() -> dict[str, Any]:
         "generation",
         "sharpening",
         "upscale",
+        "seedvr2",
         "contrast",
         "saturation",
         "schedulers",
@@ -152,6 +154,8 @@ def load_config() -> dict[str, Any]:
             raise ValueError(
                 f"config 'video_generation.default_size' value '{default_video_size}' is not a valid size for ratio '{default_video_ratio}'. Valid: {list(video_sizes.get(default_video_ratio, {}).keys())}"
             )
+
+    seedvr2_settings(config)
 
     return config
 
