@@ -113,7 +113,7 @@
   const separateScene = $derived(asset?.scene && asset.scene !== asset.prompt ? asset.scene : null);
   const sourceIndex = $derived(source?.id ? assets.findIndex((item) => item.id === source.id) : -1);
 
-  /** Upscale the shown image by *factor* from the keyboard with the plain method; a disallowed factor explains why instead. */
+  /** Upscale the shown image by *factor* from the keyboard with the plain method; a disallowed factor explains why instead, and a warned size starts with its warning. */
   function runUpscale(factor: UpscaleFactor): boolean {
     if (!asset || !onupscale) return false;
     const method = plainUpscaleMethod(asset);
@@ -123,6 +123,7 @@
       addToast(option.reason ?? `Upscaling ${factor}× is not available for this image.`, 'warning');
       return true;
     }
+    if (option.warning) addToast(option.warning, 'warning');
     onupscale(asset, factor, method);
     return true;
   }

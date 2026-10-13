@@ -445,6 +445,22 @@ describe('AssetViewer', () => {
     expect(onupscale.mock.calls.map(([, factor, method]) => [factor, method])).toEqual([[2, 'seedvr2'], [4, 'seedvr2']]);
   });
 
+  it('warns when the chord starts a SeedVR2 upscale flagged as high memory, and stays quiet otherwise', () => {
+    const onupscale = vi.fn();
+    toasts.length = 0;
+    mountViewer({ assets: [makeAsset({ upscale: seedvr2Upscale })], onupscale });
+
+    press('x');
+    press('2');
+    expect(onupscale).toHaveBeenCalledTimes(1);
+    expect(toasts).toEqual([]);
+
+    press('x');
+    press('4');
+    expect(onupscale).toHaveBeenCalledTimes(2);
+    expect(toasts.map((toast) => [toast.message, toast.type])).toEqual([['May need more memory than this Mac has.', 'warning']]);
+  });
+
   it('does not start the upscale chord from Shift+X', () => {
     const onupscale = vi.fn();
     mountViewer({ assets: [makeAsset({ upscale: seedvr2Upscale })], onupscale });
