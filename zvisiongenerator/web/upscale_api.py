@@ -81,23 +81,15 @@ def plan_upscale(source: UpscaleSource, factor: int, web_config: WebUiConfig, *,
     supports_negative = defaults.get("supports_negative_prompt", False)
     sharpening = sharpening_amounts(app_config)
     pre_sharpen = sharpening["existing_pre_upscale"]
-    prompt = recorded.prompt or ""
 
     request = ImageGenerationRequest(
-        backend=None,
-        model=None,
-        prompt=prompt,
-        resolved_prompt=source.rendered_prompt or prompt or None,
+        **_source_request_fields(source, recorded),
         model_name=model_name,
         model_family=model_info.family,
         supports_negative_prompt=supports_negative,
         lora_paths=lora_paths,
         lora_weights=lora_weights,
         negative_prompt=recorded.negative_prompt if supports_negative else None,
-        ratio=recorded.ratio,
-        size=recorded.size,
-        width=source.width,
-        height=source.height,
         seed=recorded.seed or 0,
         steps=steps,
         guidance=guidance,
@@ -112,11 +104,6 @@ def plan_upscale(source: UpscaleSource, factor: int, web_config: WebUiConfig, *,
         sharpen=_sharpens_after_refining(recorded),
         sharpen_amount_upscaled=sharpening["existing_upscaled"],
         sharpen_amount_pre_upscale=pre_sharpen,
-        # Recorded only: the upscale workflow never loads the reference, but Reuse settings needs it.
-        image_path=recorded.image_path,
-        image_strength=recorded.image_strength if recorded.image_strength is not None else ImageGenerationRequest.image_strength,
-        output_dir=str(Path(source.path).parent),
-        upscale_source=source.path,
     )
     return UpscalePlan(request=request, model_ref=model_ref, option=option, notices=tuple(notices))
 
@@ -137,24 +124,16 @@ def plan_seedvr2_upscale(source: UpscaleSource, factor: int, *, setup: SeedVR2Se
     recorded = source.settings or RecordedSettings()
     notices = (NOTICE_SETTINGS_UNKNOWN,) if source.settings is None else ()
 
-    prompt = recorded.prompt or ""
-    lora_paths, lora_weights = _recorded_loras(recorded.lora)
+    lora_paths, lora_weights, _ = _existing_loras(recorded.lora, keep_missing=True)
     settings_known = recorded.seed is not None and recorded.steps is not None and recorded.guidance is not None
     request = ImageGenerationRequest(
-        backend=None,
-        model=None,
-        prompt=prompt,
-        resolved_prompt=source.rendered_prompt or prompt or None,
+        **_source_request_fields(source, recorded),
         model_name=recorded.model,
         model_family=recorded.model_family or "unknown",
         supports_negative_prompt=recorded.negative_prompt is not None,
         lora_paths=lora_paths,
         lora_weights=lora_weights,
         negative_prompt=recorded.negative_prompt,
-        ratio=recorded.ratio,
-        size=recorded.size,
-        width=source.width,
-        height=source.height,
         seed=recorded.seed if settings_known else ImageGenerationRequest.seed,
         steps=recorded.steps if settings_known else ImageGenerationRequest.steps,
         guidance=recorded.guidance if settings_known else ImageGenerationRequest.guidance,
@@ -168,23 +147,28 @@ def plan_seedvr2_upscale(source: UpscaleSource, factor: int, *, setup: SeedVR2Se
         upscale_quantize=SEEDVR2_BITS,
         upscale_softness=setup.settings.softness,
         sharpen=False,
-        image_path=recorded.image_path,
-        image_strength=recorded.image_strength if recorded.image_strength is not None else ImageGenerationRequest.image_strength,
-        output_dir=str(Path(source.path).parent),
-        upscale_source=source.path,
     )
     return UpscalePlan(request=request, model_ref=SEEDVR2_REPO, option=option, notices=notices)
 
 
-def _recorded_loras(lora: str | None) -> tuple[list[str] | None, list[float] | None]:
-    """Parse recorded LoRAs for the new file's record, keeping entries whose files are gone; unparseable text gives none."""
-    if lora is None:
-        return None, None
-    try:
-        entries = parse_lora_arg(lora)
-    except ValueError:
-        return None, None
-    return [path for path, _ in entries], [weight for _, weight in entries]
+def _source_request_fields(source: UpscaleSource, recorded: RecordedSettings) -> dict[str, Any]:
+    """Return the request fields both upscale methods take from *source* and its recorded settings."""
+    prompt = recorded.prompt or ""
+    return {
+        "backend": None,
+        "model": None,
+        "prompt": prompt,
+        "resolved_prompt": source.rendered_prompt or prompt or None,
+        "ratio": recorded.ratio,
+        "size": recorded.size,
+        "width": source.width,
+        "height": source.height,
+        # Recorded only: the upscale workflow never loads the reference, but Reuse settings needs it.
+        "image_path": recorded.image_path,
+        "image_strength": recorded.image_strength if recorded.image_strength is not None else ImageGenerationRequest.image_strength,
+        "output_dir": str(Path(source.path).parent),
+        "upscale_source": source.path,
+    }
 
 
 def _sharpens_after_refining(recorded: RecordedSettings) -> bool:
@@ -195,11 +179,11 @@ def _sharpens_after_refining(recorded: RecordedSettings) -> bool:
     return not recorded.generation or "sharpen" in recorded.generation
 
 
-def _existing_loras(lora: str | None) -> tuple[list[str] | None, list[float] | None, bool]:
-    """Parse recorded LoRAs and drop local files that no longer exist.
+def _existing_loras(lora: str | None, *, keep_missing: bool = False) -> tuple[list[str] | None, list[float] | None, bool]:
+    """Parse recorded LoRAs and drop local files that no longer exist, unless *keep_missing*.
 
     Returns:
-        ``(paths, weights, dropped)``; references that are not local files are kept.
+        ``(paths, weights, dropped)``; references that are not local files are kept, and unparseable text gives none.
     """
     if lora is None:
         return None, None, False
@@ -207,7 +191,7 @@ def _existing_loras(lora: str | None) -> tuple[list[str] | None, list[float] | N
         entries = parse_lora_arg(lora)
     except ValueError:
         return None, None, False
-    kept = [(path, weight) for path, weight in entries if not _is_missing_local_file(path)]
+    kept = entries if keep_missing else [(path, weight) for path, weight in entries if not _is_missing_local_file(path)]
     if not kept:
         return None, None, bool(entries)
     return [path for path, _ in kept], [weight for _, weight in kept], len(kept) != len(entries)
