@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Windows/Linux: `video_model_presets.ltx.diffusers.latent_upsampler` (`repo`, `filename`) selects the weights of the 2x spatial upsampler that `--upscale 2` uses
 
 ### Changed
+- Video (macOS): the LTX transformer now computes in float16, which makes each denoising step about 15–25% faster on an M5, with the same memory use. The same seed gives slightly different fine detail than before. Set `LTX2_COMPUTE_DTYPE=float32` to get the old behaviour
 - Video (macOS): more accurate memory estimates. The Extend note and the video model badge were too high with **Low memory** on and too low with it off; the badge now estimates a 5 s clip at 704×448
 - Web UI: for video, the prompt box is called **Action** ("What happens: action, camera moves, sound, dialogue."), and the **Prompt** and **Enhanced** tabs are **Your text** and **Enhanced** and switch the Scene and Action boxes together
 - Web UI: video length is set in seconds (**Duration (s)**) instead of frames. It snaps to a frame count the model accepts (8k+1 for LTX), shows that count, and is no longer capped at 256 frames

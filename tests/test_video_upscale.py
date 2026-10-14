@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from conftest import _make_plan, make_extend_source
 
+import os
 import sys
 from argparse import Namespace
 from functools import partial
@@ -17,7 +18,7 @@ import pytest
 
 from tests.conftest import _make_video_args
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.backends.video_mac import LtxVideoBackend, _drop_leading_frames, _LOW_RAM_THRESHOLD_BYTES, _LtxModel, _TwoStageProgress, _use_low_ram_streaming
+from zvisiongenerator.backends.video_mac import LtxVideoBackend, _drop_leading_frames, _generation_scope, _LOW_RAM_THRESHOLD_BYTES, _LtxModel, _TwoStageProgress, _use_low_ram_streaming
 from zvisiongenerator.core.video_types import ExtendSegment, VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_cli import _build_video_parser, _resolve_upscale_steps
@@ -489,6 +490,35 @@ def _run_one_stage(pipe, *, image_path: str | None = None, step_callback=None, s
     if image_path is None:
         return backend.text_to_video(**kwargs)
     return backend.image_to_video(image_path=image_path, **kwargs)
+
+
+class TestComputeDtypeScope:
+    """A generation runs the transformer in float16 unless the user chose a compute dtype."""
+
+    @pytest.fixture(autouse=True)
+    def _no_inherited_setting(self, monkeypatch):
+        monkeypatch.delenv("LTX2_COMPUTE_DTYPE", raising=False)
+
+    def test_defaults_to_float16_inside_the_scope_and_clears_it_after(self):
+        with _generation_scope(_handle(MagicMock())):
+            assert os.environ["LTX2_COMPUTE_DTYPE"] == "float16"
+
+        assert "LTX2_COMPUTE_DTYPE" not in os.environ
+
+    @pytest.mark.parametrize("value", ["float32", "bfloat16"])
+    def test_keeps_a_value_the_user_set(self, monkeypatch, value):
+        monkeypatch.setenv("LTX2_COMPUTE_DTYPE", value)
+
+        with _generation_scope(_handle(MagicMock())):
+            assert os.environ["LTX2_COMPUTE_DTYPE"] == value
+
+        assert os.environ["LTX2_COMPUTE_DTYPE"] == value
+
+    def test_clears_the_default_even_when_the_generation_fails(self):
+        with pytest.raises(RuntimeError), _generation_scope(_handle(MagicMock())):
+            raise RuntimeError("boom")
+
+        assert "LTX2_COMPUTE_DTYPE" not in os.environ
 
 
 class TestLoadModel:

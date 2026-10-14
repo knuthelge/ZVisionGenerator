@@ -49,13 +49,20 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 - **Output:** identical.
 - **Effort / risk:** medium / medium. On 32 GB an image model and the enhancer cannot both stay resident, so the eviction rules decide whether this helps or causes swap.
 
-### 3. LTX compute dtype
+### 3. LTX compute dtype (shipped)
 
-- **Change:** Set `LTX2_COMPUTE_DTYPE` to `float16` or `bfloat16` before `pipe.load()` in `zvisiongenerator/backends/video_mac.py:174`, or expose it as an option.
-- **Evidence:** the vendored hook is in `packages/ltx_pipelines_mlx/_base.py` (the dtype helper near the top, applied after load). The LTX DiT computes in float32 by default, unlike mflux's bf16 models. Upstream's `CLAUDE.md` reports, on an M1 Max, float16 cutting a run from 701 s to 563 s (-20%) and bfloat16 about 0%.
-- **Estimated gain:** up to about 20% on an M1 Max; unknown on an M5. The mflux float16 gain did not carry over from an M1 to an M5 (see Problem), so treat the M1 figure with caution.
-- **Output:** changes slightly (upstream reports cosine similarity 0.99985 for float16).
-- **Effort / risk:** small / low (opt-in). Experiment 2 decides whether it is worth exposing.
+- **Change:** `_generation_scope` in `zvisiongenerator/backends/video_mac.py` defaults `LTX2_COMPUTE_DTYPE` to `float16` while a generation runs, unless the user already set the variable.
+- **Evidence:** the vendored hook is in `packages/ltx_pipelines_mlx/_base.py`. The LTX DiT computes in float32 by default because float32 AdaLN tables promote the activations. Upstream reports, on an M1 Max, float16 cutting a run from 701 s to 563 s (-20%) and bfloat16 about 0%.
+- **Measured on the M5 (32 GB), idle machine, `ltx-4`, same seed:**
+
+  | Clip | Denoising per step, float32 → float16 | Whole render |
+  |---|---|---|
+  | 512x256, 49 frames | 4.71 → 3.59 s, 5.57 → 4.76 s (two pairs) | 53 → 44 s, 61 → 55 s |
+  | 704x448, 97 frames | 22.3 → 16.6 s | 205 → 161 s |
+
+  Peak Metal memory was the same (13.2 GB at 704x448). PSNR of float16 against float32 was 31.8 dB (small) and 35.1 dB (larger); float32 runs repeat exactly. Single-kernel timings agree: quantized matmul about 1.4x and attention about 2.3x faster than float32, with bfloat16 equal to float16 on this chip.
+- **Output:** changes slightly for the same seed; judged "basically the same" by eye.
+- **Decision (2026-10-14):** on by default with no option. `LTX2_COMPUTE_DTYPE=float32` restores the old path.
 
 ### 4. LTX block streaming on 32 GB (settled)
 
@@ -141,7 +148,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 Run in this order. Each is a measurement only, with no product change, on the M5 32 GB used for the baseline. Repeat each run, given the ±25% noise in the baseline.
 
 1. **Ideogram FP8 against a q4 copy.** Seconds per step and swap (`vm_stat`). Sizes item 1.
-2. **`ltx-4` streaming on and off, with `LTX2_COMPUTE_DTYPE` unset, `float16` and `bfloat16`.** Timings come from the LTX phase output on stderr. Sizes item 3. The streaming half is done (item 4), so reuse those numbers rather than repeating it.
+2. **`ltx-4` streaming on and off, with `LTX2_COMPUTE_DTYPE` unset, `float16` and `bfloat16`.** Done: streaming is item 4, and float16 was measured and shipped as item 3 (bfloat16 was not timed end to end).
 3. **`klein9b -n 3` with the same prompt.** Time `_encode_prompt_pair`, and compare step 1 against step 2 on images 2 and 3. Sizes items 5 and 6.
 4. **Two identical `klein4b` Web UI jobs back to back.** Time from `model_loading` to the first step event. Sizes item 2.
 5. **VAE decode in float32 against bf16** at size `m` and on a 2x upscale. Sizes item 9.
@@ -169,4 +176,4 @@ Not researched in depth. One candidate: the video backend enables VAE slicing an
 ## Alternatives considered
 
 - **Only build the top-ranked items.** Rejected as a starting point: items 1 and 5 each depend on a measurement that is cheap compared with the build, so measure first.
-- **Turn on LTX float16 by default after the M1 result.** Rejected for the same reason the mflux float16 mode was: the M1 gain did not carry over to the M5 for image models, so an LTX result needs its own M5 timing.
+- **Turn on LTX float16 by default after the M1 result.** Rejected at first, because the M1 gain did not carry over to the M5 for image models. It was then timed on the M5 (item 3), the gain held, and it shipped.

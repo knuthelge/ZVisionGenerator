@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -30,6 +31,11 @@ _LATENT_CHANNELS = 128
 # Larger Macs do not stream: streaming lowers the memory held while denoising but not the peak, which is set
 # while the text encoder loads, and it slows LoRA runs.
 _LOW_RAM_THRESHOLD_BYTES = 24 * 1024**3
+# Environment variable the vendored pipeline reads, while it loads the transformer, to pick the compute dtype.
+_COMPUTE_DTYPE_ENV = "LTX2_COMPUTE_DTYPE"
+# The pipeline computes in float32 unless told otherwise. float16 is faster per step on Apple Silicon with
+# near-identical output, so a generation uses it unless the user has set the variable themselves.
+_DEFAULT_COMPUTE_DTYPE = "float16"
 # Sample rate the audio VAE encoder reads.
 _AUDIO_ENCODER_RATE = 16000
 
@@ -592,9 +598,30 @@ def _generate_two_stage(
         )
 
 
-def _generation_scope(model: _LtxModel) -> contextlib.AbstractContextManager[Any]:
-    """Return the context a generation runs in: the MLX buffer cache is off while the transformer is streamed."""
-    return mlx_cache_limit(0) if model.low_ram_streaming else contextlib.nullcontext()
+@contextlib.contextmanager
+def _default_compute_dtype() -> Iterator[None]:
+    """Default the vendored pipeline's compute dtype to float16 for the block; a value the user already set is kept.
+
+    The pipeline reads the variable each time it loads the transformer, which happens inside a generation.
+    """
+    if _COMPUTE_DTYPE_ENV in os.environ:
+        yield
+        return
+    os.environ[_COMPUTE_DTYPE_ENV] = _DEFAULT_COMPUTE_DTYPE
+    try:
+        yield
+    finally:
+        os.environ.pop(_COMPUTE_DTYPE_ENV, None)
+
+
+@contextlib.contextmanager
+def _generation_scope(model: _LtxModel) -> Iterator[None]:
+    """Run a generation in its context: float16 compute by default, and the MLX buffer cache off while the transformer is streamed."""
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(_default_compute_dtype())
+        if model.low_ram_streaming:
+            stack.enter_context(mlx_cache_limit(0))
+        yield
 
 
 def _generate(
