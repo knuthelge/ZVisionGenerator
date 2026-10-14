@@ -11,7 +11,27 @@ from PIL import Image
 import pytest
 
 import zvisiongenerator.backends.video_diffusers as video_diffusers_module
-from zvisiongenerator.backends.video_diffusers import DiffusersVideoBackend, _build_generation_kwargs, _configure_torch_runtime, _validate_diffusers_version
+from zvisiongenerator.backends.video_diffusers import (
+    _DISTILLED_GUIDANCE,
+    DiffusersVideoBackend,
+    _build_generation_kwargs,
+    _configure_torch_runtime,
+    _resolve_pipeline_classes,
+    _stage1_sigmas,
+    _validate_diffusers_version,
+)
+
+_DISTILLED_SIGMAS = (1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875)
+_STAGE2_SIGMAS = (0.909375, 0.725, 0.421875)
+_EXTRA_GUIDANCE_KWARGS = ("audio_guidance_scale", "stg_scale", "audio_stg_scale", "modality_scale", "audio_modality_scale")
+
+
+class _FakeVae:
+    def __init__(self):
+        self.tiling_enabled = False
+
+    def enable_tiling(self) -> None:
+        self.tiling_enabled = True
 
 
 class _FakeInferenceMode:
@@ -72,8 +92,7 @@ class _BaseFakePipeline:
         self.load_kwargs: dict[str, object] = {}
         self.cpu_offload_enabled = False
         self.to_calls: list[tuple[object, object]] = []
-        self.vae_slicing_enabled = False
-        self.vae_tiling_enabled = False
+        self.vae = _FakeVae()
         self.loaded_loras: list[tuple[str, str | None]] = []
         self.adapter_calls: list[tuple[object, object]] = []
         self.calls: list[dict[str, object]] = []
@@ -88,12 +107,6 @@ class _BaseFakePipeline:
 
     def enable_model_cpu_offload(self) -> None:
         self.cpu_offload_enabled = True
-
-    def enable_vae_slicing(self) -> None:
-        self.vae_slicing_enabled = True
-
-    def enable_vae_tiling(self) -> None:
-        self.vae_tiling_enabled = True
 
     def to(self, *, device=None, dtype=None):
         self.to_calls.append((device, dtype))
@@ -110,10 +123,9 @@ class _FakeTextPipeline(_BaseFakePipeline):
     def __call__(self, **kwargs):
         self.calls.append(kwargs)
         callback = kwargs.get("callback_on_step_end")
-        total_steps = int(kwargs.get("num_inference_steps", 1))
         if callback is not None:
-            callback(self, 0, None, {})
-            callback(self, max(total_steps - 1, 0), None, {})
+            for step in range(int(kwargs["num_inference_steps"])):
+                callback(self, step, None, {})
         return SimpleNamespace(frames=[["frame-1", "frame-2"]])
 
 
@@ -121,10 +133,9 @@ class _FakeImagePipeline(_BaseFakePipeline):
     def __call__(self, **kwargs):
         self.calls.append(kwargs)
         callback = kwargs.get("callback_on_step_end")
-        total_steps = int(kwargs.get("num_inference_steps", 1))
         if callback is not None:
-            callback(self, 0, None, {})
-            callback(self, max(total_steps - 1, 0), None, {})
+            for step in range(int(kwargs["num_inference_steps"])):
+                callback(self, step, None, {})
         return SimpleNamespace(frames=[["image-frame-1"]])
 
 
@@ -145,7 +156,7 @@ def _clear_pipeline_state():
         pipeline_class.loaded_instances = []
 
 
-def _make_runtime(*, torch: _FakeTorch | None = None, text_pipeline=_FakeTextPipeline, image_pipeline=_FakeImagePipeline, upscaler_pipeline=_FakeUpscalerPipeline, version: str = "0.37.1"):
+def _make_runtime(*, torch: _FakeTorch | None = None, text_pipeline=_FakeTextPipeline, image_pipeline=_FakeImagePipeline, upscaler_pipeline=_FakeUpscalerPipeline, version: str = "0.38.0"):
     exported: dict[str, object] = {}
 
     def _export(frames, output_video_path=None, fps=10):
@@ -162,9 +173,10 @@ def _make_runtime(*, torch: _FakeTorch | None = None, text_pipeline=_FakeTextPip
             text_to_video=text_pipeline,
             image_to_video=image_pipeline,
             latent_upscaler=upscaler_pipeline,
-            family_name="LTX2",
         ),
         diffusers_version=version,
+        distilled_sigmas=_DISTILLED_SIGMAS,
+        stage2_sigmas=_STAGE2_SIGMAS,
     )
     runtime.exported = exported
     return runtime
@@ -208,8 +220,33 @@ def test_load_model_prefers_runtime_classes_and_configures_pipeline(monkeypatch)
     assert model.text_to_video is _FakeTextPipeline.loaded_instances[0]
     assert model.latent_upscaler is _FakeUpscalerPipeline.loaded_instances[0]
     assert model.text_to_video.cpu_offload_enabled is True
-    assert model.text_to_video.vae_slicing_enabled is True
-    assert model.text_to_video.vae_tiling_enabled is True
+
+
+@pytest.mark.parametrize("low_memory", [True, False])
+def test_load_model_enables_tiling_on_the_vae(monkeypatch, low_memory):
+    runtime = _make_runtime()
+    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+
+    model, _ = DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=low_memory)
+
+    pipeline = model.text_to_video
+    assert pipeline.vae.tiling_enabled is True
+    assert pipeline.cpu_offload_enabled is low_memory
+    assert bool(pipeline.to_calls) is not low_memory
+
+
+def test_load_model_without_a_vae_still_loads(monkeypatch):
+    class _NoVaePipeline(_FakeTextPipeline):
+        def __init__(self):
+            super().__init__()
+            del self.vae
+
+    runtime = _make_runtime(text_pipeline=_NoVaePipeline)
+    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+
+    model, _ = DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=False)
+
+    assert not hasattr(model.text_to_video, "vae")
 
 
 def test_text_to_video_exports_path_and_reports_progress(monkeypatch, tmp_path):
@@ -242,34 +279,101 @@ def test_text_to_video_exports_path_and_reports_progress(monkeypatch, tmp_path):
     assert call["height"] == 448
     assert call["num_frames"] == 49
     assert call["num_inference_steps"] == 6
+    assert call["sigmas"] == _stage1_sigmas(_DISTILLED_SIGMAS, 6)
     assert call["frame_rate"] == 24
     assert call["generator"].seed == 123
-    assert events[0] == {"phase": "video", "current_step": 1, "total_steps": 6}
-    assert events[-1] == {"phase": "video", "current_step": 6, "total_steps": 6}
+    assert events == [{"phase": "video", "current_step": step, "total_steps": 6} for step in range(1, 7)]
     assert runtime.torch.cuda.empty_cache_calls == 1
 
 
-def test_build_generation_kwargs_keeps_input_kwargs_and_drops_torch() -> None:
-    extra_kwargs = {"image": "image-bytes", "torch": _FakeTorch()}
+def _run_text_to_video(monkeypatch, tmp_path, *, steps, step_callback=None):
+    runtime = _make_runtime()
+    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+    backend = DiffusersVideoBackend()
+    model, _ = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=False)
+    backend.text_to_video(
+        model=model,
+        prompt="a river",
+        width=704,
+        height=448,
+        num_frames=49,
+        seed=1,
+        steps=steps,
+        output_path=str(tmp_path / "video.mp4"),
+        step_callback=step_callback,
+    )
+    return model.text_to_video.calls[0]
+
+
+def test_text_to_video_passes_distilled_sigmas_and_cfg_one(monkeypatch, tmp_path):
+    call = _run_text_to_video(monkeypatch, tmp_path, steps=8)
+
+    assert call["sigmas"] == list(_DISTILLED_SIGMAS)
+    assert call["num_inference_steps"] == len(call["sigmas"])
+    assert call["guidance_scale"] == 1.0
+    assert not set(_EXTRA_GUIDANCE_KWARGS) & set(call)
+
+
+def test_distilled_guidance_is_guidance_scale_only():
+    assert dict(_DISTILLED_GUIDANCE) == {"guidance_scale": 1.0}
+
+
+def test_short_steps_report_len_sigmas_progress(monkeypatch, tmp_path):
+    events: list[dict[str, object]] = []
+
+    call = _run_text_to_video(monkeypatch, tmp_path, steps=4, step_callback=events.append)
+
+    assert call["sigmas"] == _stage1_sigmas(_DISTILLED_SIGMAS, 4)
+    assert events == [{"phase": "video", "current_step": step, "total_steps": 4} for step in range(1, 5)]
+
+
+@pytest.mark.parametrize(
+    ("steps", "expected"),
+    [
+        (9, list(_DISTILLED_SIGMAS)),
+        (8, list(_DISTILLED_SIGMAS)),
+        (7, [1.0, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875]),
+        (5, [1.0, 0.975, 0.909375, 0.725, 0.421875]),
+        (3, [1.0, 0.725, 0.421875]),
+        (1, [1.0]),
+    ],
+)
+def test_stage1_sigmas_keeps_start_and_tail(steps, expected):
+    assert _stage1_sigmas(_DISTILLED_SIGMAS, steps) == expected
+
+
+def test_stage1_sigmas_rejects_fewer_than_one_step():
+    with pytest.raises(ValueError, match="at least 1"):
+        _stage1_sigmas(_DISTILLED_SIGMAS, 0)
+
+
+def test_build_generation_kwargs_keeps_input_kwargs() -> None:
+    extra_kwargs = {"image": "image-bytes"}
+    generator = _FakeGenerator("cpu")
+    callback = MagicMock()
 
     kwargs = _build_generation_kwargs(
-        _FakeImagePipeline(),
         prompt="animate this",
         width=704,
         height=448,
         num_frames=49,
-        steps=4,
-        seed=99,
         fps=24,
-        step_callback=None,
-        phase="video",
+        sigmas=(1.0, 0.5),
+        generator=generator,
+        output_type="pil",
+        callback=callback,
         extra_kwargs=extra_kwargs,
     )
 
     assert kwargs["image"] == "image-bytes"
-    assert kwargs["generator"].seed == 99
-    assert "torch" not in kwargs
-    assert extra_kwargs == {"image": "image-bytes", "torch": extra_kwargs["torch"]}
+    assert kwargs["generator"] is generator
+    assert kwargs["callback_on_step_end"] is callback
+    assert kwargs["sigmas"] == [1.0, 0.5]
+    assert kwargs["num_inference_steps"] == 2
+    assert kwargs["guidance_scale"] == 1.0
+    assert kwargs["frame_rate"] == 24
+    assert kwargs["output_type"] == "pil"
+    assert extra_kwargs == {"image": "image-bytes"}
 
 
 def test_image_to_video_uses_loaded_image(monkeypatch, tmp_path):
@@ -297,6 +401,10 @@ def test_image_to_video_uses_loaded_image(monkeypatch, tmp_path):
     call = model.image_to_video.calls[0]
     assert call["prompt"] == "animate this"
     assert call["image"].size == (8, 8)
+    assert call["sigmas"] == _stage1_sigmas(_DISTILLED_SIGMAS, 4)
+    assert call["num_inference_steps"] == 4
+    assert call["guidance_scale"] == 1.0
+    assert not set(_EXTRA_GUIDANCE_KWARGS) & set(call)
 
 
 def test_upscale_uses_latent_upscaler_and_requires_stage1_steps(monkeypatch, tmp_path):
@@ -335,18 +443,26 @@ def test_upscale_uses_latent_upscaler_and_requires_stage1_steps(monkeypatch, tmp
 
     assert result == output_path
     assert model.text_to_video.calls[0]["num_inference_steps"] == 4
+    assert model.text_to_video.calls[0]["sigmas"] == _stage1_sigmas(_DISTILLED_SIGMAS, 4)
     assert model.latent_upscaler.calls[0]["video"] == ["frame-1", "frame-2"]
     assert runtime.exported["frames"] == ["upscaled-frame"]
     assert events[-1] == {"phase": "video_upscale_stage_2", "current_step": 5, "total_steps": 5}
 
 
-def test_load_model_fails_when_upscaler_api_is_missing(monkeypatch):
-    backend = DiffusersVideoBackend()
-    runtime = _make_runtime(upscaler_pipeline=None)
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+def test_resolve_pipeline_classes_requires_ltx2():
+    ltx2 = SimpleNamespace(LTX2Pipeline=object, LTX2ImageToVideoPipeline=object, LTX2LatentUpsamplePipeline=object)
 
-    with pytest.raises(RuntimeError, match="latent upscaler"):
-        backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", upscale=True)
+    classes = _resolve_pipeline_classes(ltx2)
+
+    assert classes.text_to_video is object
+    assert classes.image_to_video is object
+    assert classes.latent_upscaler is object
+    for missing in ("LTX2Pipeline", "LTX2ImageToVideoPipeline", "LTX2LatentUpsamplePipeline"):
+        partial = SimpleNamespace(**{name: object for name in vars(ltx2) if name != missing})
+        with pytest.raises(RuntimeError, match="LTX-2"):
+            _resolve_pipeline_classes(partial)
+    with pytest.raises(RuntimeError, match="LTX-2"):
+        _resolve_pipeline_classes(SimpleNamespace(LTXPipeline=object, LTXImageToVideoPipeline=object))
 
 
 def test_load_model_applies_lora_weights(monkeypatch, tmp_path):
@@ -453,8 +569,8 @@ def test_load_model_rejects_lora_scales_when_adapter_api_cannot_apply_them(monke
 
 
 def test_load_model_rejects_old_diffusers_versions(monkeypatch):
-    with pytest.raises(RuntimeError, match=r"diffusers>=0\.37\.1"):
-        _validate_diffusers_version("0.36.0")
+    with pytest.raises(RuntimeError, match=r"diffusers>=0\.38\.0"):
+        _validate_diffusers_version("0.37.1")
 
 
 def test_import_does_not_set_cuda_alloc_conf(monkeypatch):

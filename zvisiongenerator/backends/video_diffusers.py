@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import inspect
 import sys
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from types import MappingProxyType
+from typing import Any, Final
 
 from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
 from zvisiongenerator.backends.lora_peft import is_unmatched_adapter_error, restore_cpu_offload, warn_unmatched_lora
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 
-_MINIMUM_DIFFUSERS_VERSION = (0, 37, 1)
+_MINIMUM_DIFFUSERS_VERSION = (0, 38, 0)
+# Distilled checkpoints run without classifier-free guidance. Only guidance_scale is passed, so the other guidance
+# terms (audio, spatio-temporal, modality) follow the pipeline defaults of the installed diffusers version.
+_DISTILLED_GUIDANCE: Final[Mapping[str, float]] = MappingProxyType({"guidance_scale": 1.0})
 
 
 @dataclass(frozen=True)
@@ -21,8 +26,7 @@ class _PipelineClasses:
 
     text_to_video: type[Any]
     image_to_video: type[Any]
-    latent_upscaler: type[Any] | None
-    family_name: str
+    latent_upscaler: type[Any]
 
 
 @dataclass(frozen=True)
@@ -34,6 +38,8 @@ class _RuntimeDependencies:
     export_to_video: Any
     pipeline_classes: _PipelineClasses
     diffusers_version: str
+    distilled_sigmas: tuple[float, ...]
+    stage2_sigmas: tuple[float, ...]
 
 
 @dataclass
@@ -61,27 +67,16 @@ def _parse_version(version: str) -> tuple[int, ...]:
 
 
 def _resolve_pipeline_classes(diffusers_module: Any) -> _PipelineClasses:
-    """Select the best available LTX pipeline family from diffusers."""
+    """Resolve the LTX-2 pipeline classes from diffusers."""
 
-    if all(hasattr(diffusers_module, name) for name in ("LTX2Pipeline", "LTX2ImageToVideoPipeline")):
-        latent_upscaler = getattr(diffusers_module, "LTX2LatentUpsamplePipeline", None)
-        return _PipelineClasses(
-            text_to_video=diffusers_module.LTX2Pipeline,
-            image_to_video=diffusers_module.LTX2ImageToVideoPipeline,
-            latent_upscaler=latent_upscaler,
-            family_name="LTX2",
-        )
-
-    if all(hasattr(diffusers_module, name) for name in ("LTXPipeline", "LTXImageToVideoPipeline")):
-        latent_upscaler = getattr(diffusers_module, "LTXLatentUpsamplePipeline", None)
-        return _PipelineClasses(
-            text_to_video=diffusers_module.LTXPipeline,
-            image_to_video=diffusers_module.LTXImageToVideoPipeline,
-            latent_upscaler=latent_upscaler,
-            family_name="LTX",
-        )
-
-    raise RuntimeError("Installed diffusers is missing the required LTX video pipelines. Expected LTX2Pipeline/LTX2ImageToVideoPipeline or LTXPipeline/LTXImageToVideoPipeline.")
+    names = ("LTX2Pipeline", "LTX2ImageToVideoPipeline", "LTX2LatentUpsamplePipeline")
+    if not all(hasattr(diffusers_module, name) for name in names):
+        raise RuntimeError("Installed diffusers is missing the LTX-2 video pipelines (LTX2Pipeline, LTX2ImageToVideoPipeline, LTX2LatentUpsamplePipeline).")
+    return _PipelineClasses(
+        text_to_video=diffusers_module.LTX2Pipeline,
+        image_to_video=diffusers_module.LTX2ImageToVideoPipeline,
+        latent_upscaler=diffusers_module.LTX2LatentUpsamplePipeline,
+    )
 
 
 def _validate_diffusers_version(diffusers_version: str) -> None:
@@ -106,12 +101,19 @@ def _load_runtime_dependencies() -> _RuntimeDependencies:
     diffusers_version = getattr(diffusers, "__version__", "0")
     _validate_diffusers_version(diffusers_version)
 
+    try:
+        from diffusers.pipelines.ltx2.utils import DISTILLED_SIGMA_VALUES, STAGE_2_DISTILLED_SIGMA_VALUES
+    except ImportError as exc:
+        raise RuntimeError("Installed diffusers is missing the LTX-2 distilled sigma tables.") from exc
+
     return _RuntimeDependencies(
         torch=torch,
         image_module=Image,
         export_to_video=export_to_video,
         pipeline_classes=_resolve_pipeline_classes(diffusers),
         diffusers_version=diffusers_version,
+        distilled_sigmas=tuple(DISTILLED_SIGMA_VALUES),
+        stage2_sigmas=tuple(STAGE_2_DISTILLED_SIGMA_VALUES),
     )
 
 
@@ -155,6 +157,14 @@ def _select_torch_dtype(torch: Any) -> Any:
     return torch.float16
 
 
+def _enable_vae_tiling(pipeline: Any) -> None:
+    """Enable tiled decoding on the pipeline VAE when it supports it."""
+
+    vae = getattr(pipeline, "vae", None)
+    if vae is not None and hasattr(vae, "enable_tiling"):
+        vae.enable_tiling()
+
+
 def _configure_pipeline(pipeline: Any, runtime: _RuntimeDependencies, *, torch_dtype: Any, low_memory: bool) -> Any:
     """Apply offload and VAE tuning on a loaded diffusers pipeline."""
 
@@ -163,10 +173,7 @@ def _configure_pipeline(pipeline: Any, runtime: _RuntimeDependencies, *, torch_d
     elif hasattr(pipeline, "to"):
         pipeline.to(device="cuda", dtype=torch_dtype)
 
-    if hasattr(pipeline, "enable_vae_slicing"):
-        pipeline.enable_vae_slicing()
-    if hasattr(pipeline, "enable_vae_tiling"):
-        pipeline.enable_vae_tiling()
+    _enable_vae_tiling(pipeline)
     return pipeline
 
 
@@ -224,20 +231,30 @@ def _make_generator(torch: Any, seed: int | None) -> Any | None:
     return torch.Generator(device="cpu").manual_seed(seed)
 
 
-def _make_step_callback(*, total_steps: int, phase: str, step_callback: Any | None = None) -> Any | None:
+def _stage1_sigmas(table: Sequence[float], steps: int) -> list[float]:
+    """Return the distilled sigmas for *steps* denoising steps, keeping the start and the tail of the table."""
+
+    if steps < 1:
+        raise ValueError(f"steps must be at least 1, got {steps}")
+    if steps >= len(table):
+        return list(table)
+    return [table[0], *table[len(table) - steps + 1 :]]
+
+
+def _make_step_callback(step_callback: Callable[[dict[str, Any]], None] | None, *, phase: str, offset: int, total: int) -> Callable[..., Any] | None:
     """Adapt diffusers callback events to the existing backend callback payload."""
 
     if step_callback is None:
         return None
 
-    safe_total_steps = max(total_steps, 1)
+    safe_total = max(total, 1)
 
     def _on_step_end(_pipeline: Any, step: int, _timestep: Any, callback_kwargs: Any) -> Any:
         step_callback(
             {
                 "phase": phase,
-                "current_step": min(step + 1, safe_total_steps),
-                "total_steps": safe_total_steps,
+                "current_step": min(offset + step + 1, safe_total),
+                "total_steps": safe_total,
             }
         )
         return callback_kwargs
@@ -343,41 +360,69 @@ def _cleanup(runtime: _RuntimeDependencies) -> None:
 
 
 def _build_generation_kwargs(
-    pipeline: Any,
     *,
     prompt: str,
     width: int,
     height: int,
     num_frames: int,
-    steps: int,
-    seed: int,
     fps: int,
-    step_callback: Any | None,
-    phase: str,
-    extra_kwargs: dict[str, Any] | None = None,
+    sigmas: Sequence[float],
+    generator: Any,
+    output_type: str,
+    callback: Callable[..., Any] | None,
+    extra_kwargs: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Map the shared backend contract to diffusers pipeline kwargs."""
 
-    copied_extra_kwargs = dict(extra_kwargs or {})
-    torch_module = getattr(pipeline, "_torch", None) or copied_extra_kwargs.pop("torch", None)
-    if torch_module is None:
-        raise RuntimeError("Diffusers generation kwargs require a torch runtime for seeded generation.")
     kwargs: dict[str, Any] = {
         "prompt": prompt,
         "width": width,
         "height": height,
         "num_frames": num_frames,
         "frame_rate": fps,
-        "num_inference_steps": steps,
-        "generator": _make_generator(torch_module, seed),
-        "output_type": "pil",
+        "sigmas": list(sigmas),
+        "num_inference_steps": len(sigmas),
+        "generator": generator,
+        "output_type": output_type,
+        **_DISTILLED_GUIDANCE,
     }
-    callback = _make_step_callback(total_steps=steps, phase=phase, step_callback=step_callback)
     if callback is not None:
         kwargs["callback_on_step_end"] = callback
-    if copied_extra_kwargs:
-        kwargs.update(copied_extra_kwargs)
-    return _filter_supported_kwargs(pipeline, kwargs)
+    if extra_kwargs:
+        kwargs.update(extra_kwargs)
+    return kwargs
+
+
+def _generate_one_stage(
+    model: _LoadedVideoModel,
+    pipeline: Any,
+    *,
+    prompt: str,
+    width: int,
+    height: int,
+    num_frames: int,
+    seed: int,
+    steps: int,
+    step_callback: Any | None,
+    extra_kwargs: Mapping[str, Any],
+    phase: str = "video",
+) -> list[Any]:
+    """Run one distilled denoising pass at full size and return its frames."""
+
+    sigmas = _stage1_sigmas(model.runtime.distilled_sigmas, steps)
+    kwargs = _build_generation_kwargs(
+        prompt=prompt,
+        width=width,
+        height=height,
+        num_frames=num_frames,
+        fps=model.model_info.default_fps,
+        sigmas=sigmas,
+        generator=_make_generator(model.runtime.torch, seed),
+        output_type="pil",
+        callback=_make_step_callback(step_callback, phase=phase, offset=0, total=len(sigmas)),
+        extra_kwargs=extra_kwargs,
+    )
+    return _extract_frames(pipeline(**kwargs))
 
 
 class DiffusersVideoBackend:
@@ -421,8 +466,6 @@ class DiffusersVideoBackend:
 
         latent_upscaler = None
         if upscale:
-            if runtime.pipeline_classes.latent_upscaler is None:
-                raise RuntimeError(f"Installed diffusers {runtime.diffusers_version} does not expose the required latent upscaler for LTX video upscaling.")
             latent_upscaler = _load_pipeline(runtime.pipeline_classes.latent_upscaler, model_path, runtime, torch_dtype=torch_dtype, low_memory=low_memory)
 
         return (
@@ -463,23 +506,21 @@ class DiffusersVideoBackend:
             raise RuntimeError("Upscale was requested, but the diffusers latent upscaler is unavailable for this model.")
 
         base_steps = stage1_steps if stage1_steps is not None else steps
-        generation_kwargs = _build_generation_kwargs(
-            model.text_to_video,
-            prompt=prompt,
-            width=width,
-            height=height,
-            num_frames=num_frames,
-            steps=base_steps,
-            seed=seed,
-            fps=model.model_info.default_fps,
-            step_callback=step_callback,
-            phase="video_upscale_stage_1" if stage1_steps is not None else "video",
-            extra_kwargs={"torch": model.runtime.torch},
-        )
 
         with model.runtime.torch.inference_mode():
-            result = model.text_to_video(**generation_kwargs)
-            frames = _extract_frames(result)
+            frames = _generate_one_stage(
+                model,
+                model.text_to_video,
+                prompt=prompt,
+                width=width,
+                height=height,
+                num_frames=num_frames,
+                seed=seed,
+                steps=base_steps,
+                step_callback=step_callback,
+                extra_kwargs={},
+                phase="video_upscale_stage_1" if stage1_steps is not None else "video",
+            )
             if model.latent_upscaler is not None:
                 frames = self._upscale_video(
                     model,
@@ -525,23 +566,20 @@ class DiffusersVideoBackend:
         with model.runtime.image_module.open(image_path) as image:
             input_image = image.convert("RGB")
 
-        generation_kwargs = _build_generation_kwargs(
-            model.image_to_video,
-            prompt=prompt,
-            width=width,
-            height=height,
-            num_frames=num_frames,
-            steps=base_steps,
-            seed=seed,
-            fps=model.model_info.default_fps,
-            step_callback=step_callback,
-            phase="video_upscale_stage_1" if stage1_steps is not None else "video",
-            extra_kwargs={"image": input_image, "torch": model.runtime.torch},
-        )
-
         with model.runtime.torch.inference_mode():
-            result = model.image_to_video(**generation_kwargs)
-            frames = _extract_frames(result)
+            frames = _generate_one_stage(
+                model,
+                model.image_to_video,
+                prompt=prompt,
+                width=width,
+                height=height,
+                num_frames=num_frames,
+                seed=seed,
+                steps=base_steps,
+                step_callback=step_callback,
+                extra_kwargs={"image": input_image},
+                phase="video_upscale_stage_1" if stage1_steps is not None else "video",
+            )
             if model.latent_upscaler is not None:
                 frames = self._upscale_video(
                     model,
