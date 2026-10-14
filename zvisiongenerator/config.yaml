@@ -226,8 +226,12 @@ video_model_presets:
   ltx:
     default_steps: 8
     diffusers:
-      # Configurable diffusers-converted LTX 2.3 repository used for Windows/Linux.
-      default_repo: "dg845/LTX-2.3-Diffusers"
+      # Distilled LTX 2.3 in diffusers format, used on Windows/Linux (8 steps, guidance 1.0). Distilled checkpoints only.
+      default_repo: "diffusers/LTX-2.3-Distilled-Diffusers"
+      # 2x spatial latent upsampler for --upscale 2: one safetensors file in a Hugging Face repo.
+      latent_upsampler:
+        repo: "Lightricks/LTX-2.3"
+        filename: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"
     upscale:
       default_upscale_steps: 8
 

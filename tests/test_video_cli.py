@@ -293,6 +293,69 @@ class TestVideoCliExecution:
         assert captured["upscale_steps"] == 8
         assert any("max 8 denoising steps" in str(item.message) for item in seen)
 
+    @staticmethod
+    def _run_main_for_load_kwargs(monkeypatch, tmp_path, *, preset_extra, extra_argv):
+        """Run ``main`` with a stubbed backend and return that backend's mock."""
+        import zvisiongenerator.video_cli as video_cli
+
+        model_info = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
+        backend = MagicMock()
+        backend.load_model.return_value = (MagicMock(), model_info)
+        ltx_preset = {"upscale": {"default_upscale_steps": 8}, **preset_extra}
+
+        monkeypatch.setattr(
+            video_cli,
+            "load_config",
+            lambda: {
+                "video_generation": {"default_ratio": "16:9", "default_size": "m"},
+                "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
+                "video_model_presets": {"ltx": ltx_preset},
+            },
+        )
+        monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
+        monkeypatch.setattr(video_cli, "detect_video_model", lambda _model: model_info)
+        monkeypatch.setattr(
+            video_cli,
+            "resolve_video_defaults",
+            lambda _family, _config, cli_overrides: {"steps": 8, "width": 704, "height": 448, "num_frames": 49, **cli_overrides},
+        )
+        monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
+        monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args, **_kwargs: object())
+        monkeypatch.setattr(video_cli, "run_video_batch", lambda *_a, **_k: None)
+
+        argv = ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog", "-o", str(tmp_path), *extra_argv]
+        with patch("sys.argv", argv):
+            video_cli.main()
+        return backend
+
+    def test_main_passes_latent_upsampler_source_when_upscaling(self, monkeypatch, tmp_path):
+        upsampler = {"repo": "your-org/upsampler", "filename": "up.safetensors"}
+
+        backend = self._run_main_for_load_kwargs(monkeypatch, tmp_path, preset_extra={"diffusers": {"latent_upsampler": upsampler}}, extra_argv=["--upscale", "2"])
+
+        kwargs = backend.load_model.call_args.kwargs
+        assert kwargs["upscale"] is True
+        assert kwargs["latent_upsampler"] == ("your-org/upsampler", "up.safetensors")
+
+    def test_main_omits_latent_upsampler_without_upscale(self, monkeypatch, tmp_path):
+        upsampler = {"repo": "your-org/upsampler", "filename": "up.safetensors"}
+
+        backend = self._run_main_for_load_kwargs(monkeypatch, tmp_path, preset_extra={"diffusers": {"latent_upsampler": upsampler}}, extra_argv=[])
+
+        assert "latent_upsampler" not in backend.load_model.call_args.kwargs
+
+    def test_main_passes_none_when_upsampler_not_configured(self, monkeypatch, tmp_path):
+        backend = self._run_main_for_load_kwargs(monkeypatch, tmp_path, preset_extra={}, extra_argv=["--upscale", "2"])
+
+        assert backend.load_model.call_args.kwargs["latent_upsampler"] is None
+
+    def test_main_reports_malformed_upsampler_config_via_parser_error(self, monkeypatch, tmp_path):
+        bad = {"diffusers": {"latent_upsampler": {"repo": " ", "filename": "up.safetensors"}}}
+
+        with pytest.raises(SystemExit, match="2"):
+            self._run_main_for_load_kwargs(monkeypatch, tmp_path, preset_extra=bad, extra_argv=["--upscale", "2"])
+
 
 class _VideoCliEnhancer:
     def __init__(self, order: list[str]):

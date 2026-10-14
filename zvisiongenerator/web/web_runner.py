@@ -35,6 +35,7 @@ from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.review import review_enabled
 from zvisiongenerator.seedvr2_loader import load_seedvr2
 from zvisiongenerator.upscale_runner import run_upscale
+from zvisiongenerator.utils.config import ltx_latent_upsampler_source
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.paths import get_ziv_data_dir
@@ -789,6 +790,7 @@ class WebRunner:
         load_kwargs: dict[str, Any] = {}
         if request.upscale:
             load_kwargs["upscale"] = True
+            load_kwargs["latent_upsampler"] = ltx_latent_upsampler_source(config)
         model, model_info = backend.load_model(
             model_ref,
             mode="i2v" if request.image_path else "t2v",

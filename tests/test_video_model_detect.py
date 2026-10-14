@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
+from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model, is_known_video_repo
 
 
 class TestDetectVideoModel:
@@ -15,7 +15,7 @@ class TestDetectVideoModel:
         [
             ("dgrauet/ltx-2.3-mlx-q4", "ltx", "ltx", True, 24, 8, 32),
             ("dgrauet/ltx-2-mlx-q8", "ltx", "ltx", True, 24, 8, 32),
-            ("dg845/LTX-2.3-Diffusers", "ltx", "ltx", True, 24, 8, 32),
+            ("diffusers/LTX-2.3-Distilled-Diffusers", "ltx", "ltx", True, 24, 8, 32),
             ("Lightricks/LTX-Video", "ltx", "ltx", True, 24, 8, 32),
         ],
         ids=["ltx-q4", "ltx-q8", "ltx-diffusers-default", "ltx-video"],
@@ -29,12 +29,17 @@ class TestDetectVideoModel:
         assert info.frame_alignment == expected_frame_align
         assert info.resolution_alignment == expected_res_align
 
-    @pytest.mark.parametrize("model_path", ["some/random-model", "stable-diffusion/v2", "Lightricks/LTX-2.3-13B", ""])
+    @pytest.mark.parametrize("model_path", ["some/random-model", "stable-diffusion/v2", "Lightricks/LTX-2.3-13B", "dg845/LTX-2.3-Diffusers", ""])
     def test_unknown_models(self, model_path):
         info = detect_video_model(model_path)
         assert info.family == "unknown"
         assert info.backend == "unknown"
         assert info.supports_i2v is False
+
+    def test_is_known_video_repo_recognizes_distilled_default(self):
+        assert is_known_video_repo("diffusers/LTX-2.3-Distilled-Diffusers") is True
+        assert is_known_video_repo("Lightricks/LTX-2.3-13B") is False
+        assert is_known_video_repo("dg845/LTX-2.3-Diffusers") is False
 
     @pytest.mark.parametrize(
         ("model_path", "expected_family", "expected_i2v"),

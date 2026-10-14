@@ -324,6 +324,27 @@ class TestWebRunner:
         assert seen["args"].extend_source is source
         assert "upscale" not in backend.load_model.call_args.kwargs
 
+    @pytest.mark.parametrize(("upscale", "expect_source"), [(2, True), (None, False)])
+    def test_video_job_passes_latent_upsampler_only_when_upscaling(self, monkeypatch, upscale, expect_source):
+        """Video jobs hand the configured upsampler source to load_model only for upscale jobs."""
+        monkeypatch.setattr(web_runner_module, "run_video_batch", lambda **_kw: None)
+        backend = _stub_request_job(monkeypatch)
+        config = {"video_model_presets": {"ltx": {"diffusers": {"latent_upsampler": {"repo": "your-org/upsampler", "filename": "up.safetensors"}}}}}
+        request = VideoGenerationRequest(backend=None, model=None, prompt="prompt", model_family="ltx", upscale=upscale)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            job_id = runner.submit_video_request_job(request=request, prompts_data={"default": [("prompt", None)]}, config=config, args=_make_video_args(), model_ref="model")
+            _wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        kwargs = backend.load_model.call_args.kwargs
+        if expect_source:
+            assert kwargs["latent_upsampler"] == ("your-org/upsampler", "up.safetensors")
+        else:
+            assert "latent_upsampler" not in kwargs
+
     def test_upscale_job_loads_model_and_runs_workflow_once(self, tmp_path, monkeypatch):
         """Upscale jobs load the recorded model (with its quant and LoRAs), run once, and accept only quit."""
         loader_calls: dict = {}

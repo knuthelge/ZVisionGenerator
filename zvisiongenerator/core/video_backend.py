@@ -40,7 +40,8 @@ class VideoBackend(Protocol):
           reusable across generate calls. Callers pass it back unchanged.
 
         Backend-specific keyword arguments:
-        - LTX: low_memory (bool), loras (list[tuple[str, float]]), upscale (bool).
+        - LTX: low_memory (bool), loras (list[tuple[str, float]]), upscale (bool),
+          latent_upsampler (tuple[str, str] | None, diffusers only).
           ``mode`` is accepted and ignored.
         """
         ...

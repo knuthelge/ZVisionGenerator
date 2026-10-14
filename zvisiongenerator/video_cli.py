@@ -15,7 +15,7 @@ from zvisiongenerator.backends import accelerator_memory_budget_or_none, get_vid
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.alignment import aligned_video_dims
 from zvisiongenerator.utils.app_log import setup_logging
-from zvisiongenerator.utils.config import load_config, resolve_video_defaults, select_ratio_size_defaults, validate_video_size_choice
+from zvisiongenerator.utils.config import load_config, ltx_latent_upsampler_source, resolve_video_defaults, select_ratio_size_defaults, validate_video_size_choice
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import parse_lora_arg, resolve_lora_references
@@ -502,10 +502,11 @@ def main(*, prog: str = "ziv-video") -> None:
     try:
         # Load model
         print(f"Loading {model_info.family.upper()} video model: {args.model}")
-        load_kwargs: dict[str, Any] = {}
-        if args.upscale:
-            load_kwargs["upscale"] = True
         try:
+            load_kwargs: dict[str, Any] = {}
+            if args.upscale:
+                load_kwargs["upscale"] = True
+                load_kwargs["latent_upsampler"] = ltx_latent_upsampler_source(config)
             model, model_info = backend.load_model(
                 args.model,
                 mode=mode,

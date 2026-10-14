@@ -8,6 +8,7 @@ from zvisiongenerator.utils.config import (
     _deep_merge,
     get_variant_key,
     load_config,
+    ltx_latent_upsampler_source,
     model_capabilities,
     resolve_defaults,
     resolve_video_defaults,
@@ -1000,3 +1001,36 @@ class TestValidateVideoSizeChoice:
 
     def test_a_config_without_a_size_table_accepts_anything(self):
         validate_video_size_choice({}, "4:3", "xl")
+
+
+class TestLtxLatentUpsamplerSource:
+    """Verify the latent upsampler source helper reads and validates its config key."""
+
+    @staticmethod
+    def _config(value):
+        return {"video_model_presets": {"ltx": {"diffusers": {"latent_upsampler": value}}}}
+
+    def test_packaged_config_ships_upsampler_and_distilled_default_repo(self, monkeypatch, tmp_path):
+        from zvisiongenerator.utils import config as config_module
+
+        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+
+        config = load_config()
+
+        assert ltx_latent_upsampler_source(config) == ("Lightricks/LTX-2.3", "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
+        assert config["video_model_presets"]["ltx"]["diffusers"]["default_repo"] == "diffusers/LTX-2.3-Distilled-Diffusers"
+
+    @pytest.mark.parametrize("config", [{}, {"video_model_presets": {}}, {"video_model_presets": {"ltx": {"diffusers": {}}}}])
+    def test_absent_key_returns_none(self, config):
+        assert ltx_latent_upsampler_source(config) is None
+
+    def test_returns_stripped_values(self):
+        assert ltx_latent_upsampler_source(self._config({"repo": " your-org/upsampler ", "filename": " up.safetensors "})) == ("your-org/upsampler", "up.safetensors")
+
+    @pytest.mark.parametrize(
+        "value",
+        [None, "not-a-mapping", {"repo": " ", "filename": "x"}, {"repo": "r", "filename": ""}, {"repo": "r"}, {"filename": "x"}, {"repo": 3, "filename": "x"}],
+    )
+    def test_malformed_value_raises_value_error(self, value):
+        with pytest.raises(ValueError, match="latent_upsampler"):
+            ltx_latent_upsampler_source(self._config(value))

@@ -178,7 +178,7 @@ def test_load_model_rejects_missing_cuda(monkeypatch):
     )
 
     with pytest.raises(RuntimeError, match="CUDA is not available"):
-        backend.load_model("dg845/LTX-2.3-Diffusers", mode="t2v")
+        backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v")
 
 
 @pytest.mark.parametrize(("cuda_version", "expects_hint"), [("13.0", True), ("12.6", False), (None, False)])
@@ -192,7 +192,7 @@ def test_missing_cuda_error_asks_for_a_driver_update_only_for_cuda_13_builds(mon
     )
 
     with pytest.raises(RuntimeError, match="CUDA is not available") as excinfo:
-        backend.load_model("dg845/LTX-2.3-Diffusers", mode="t2v")
+        backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v")
 
     assert (cuda_driver_hint(False, "13.0") in str(excinfo.value)) is expects_hint
 
@@ -202,7 +202,7 @@ def test_load_model_prefers_runtime_classes_and_configures_pipeline(monkeypatch)
     runtime = _make_runtime()
     monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
 
-    model, model_info = backend.load_model("dg845/LTX-2.3-Diffusers", mode="t2v", low_memory=True, upscale=True)
+    model, model_info = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=True, upscale=True)
 
     assert model_info.family == "ltx"
     assert model.text_to_video is _FakeTextPipeline.loaded_instances[0]
@@ -216,7 +216,7 @@ def test_text_to_video_exports_path_and_reports_progress(monkeypatch, tmp_path):
     backend = DiffusersVideoBackend()
     runtime = _make_runtime()
     monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
-    model, _ = backend.load_model("dg845/LTX-2.3-Diffusers", mode="t2v", low_memory=False)
+    model, _ = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=False)
     events: list[dict[str, object]] = []
     output_path = tmp_path / "video.mp4"
 
@@ -276,7 +276,7 @@ def test_image_to_video_uses_loaded_image(monkeypatch, tmp_path):
     backend = DiffusersVideoBackend()
     runtime = _make_runtime()
     monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
-    model, _ = backend.load_model("dg845/LTX-2.3-Diffusers", mode="i2v", low_memory=False)
+    model, _ = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="i2v", low_memory=False)
     input_path = tmp_path / "input.png"
     Image.new("RGB", (8, 8), "blue").save(input_path)
     output_path = tmp_path / "i2v.mp4"
@@ -303,7 +303,7 @@ def test_upscale_uses_latent_upscaler_and_requires_stage1_steps(monkeypatch, tmp
     backend = DiffusersVideoBackend()
     runtime = _make_runtime()
     monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
-    model, _ = backend.load_model("dg845/LTX-2.3-Diffusers", mode="t2v", low_memory=False, upscale=True)
+    model, _ = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=False, upscale=True)
     events: list[dict[str, object]] = []
     output_path = tmp_path / "upscaled.mp4"
 
@@ -346,7 +346,7 @@ def test_load_model_fails_when_upscaler_api_is_missing(monkeypatch):
     monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
 
     with pytest.raises(RuntimeError, match="latent upscaler"):
-        backend.load_model("dg845/LTX-2.3-Diffusers", mode="t2v", upscale=True)
+        backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", upscale=True)
 
 
 def test_load_model_applies_lora_weights(monkeypatch, tmp_path):
@@ -356,7 +356,7 @@ def test_load_model_applies_lora_weights(monkeypatch, tmp_path):
     lora_path = tmp_path / "style.safetensors"
     lora_path.write_text("weights", encoding="utf-8")
 
-    model, _ = backend.load_model("dg845/LTX-2.3-Diffusers", mode="t2v", loras=[(str(lora_path), 0.75)])
+    model, _ = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", loras=[(str(lora_path), 0.75)])
 
     assert model.text_to_video.loaded_loras == [(str(lora_path), "lora_0")]
     assert model.text_to_video.adapter_calls == [(["lora_0"], [0.75])]
@@ -395,7 +395,7 @@ def test_a_lora_matching_no_layer_is_skipped_with_a_warning(monkeypatch, tmp_pat
     monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: _make_runtime(text_pipeline=_LoraNoMatchPipeline))
 
     with pytest.warns(UserWarning, match="other-model.safetensors: none of its LoRA tensors match"):
-        model, _ = DiffusersVideoBackend().load_model("dg845/LTX-2.3-Diffusers", mode="t2v", loras=[(first, 1.0), (second, 0.5)])
+        model, _ = DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", loras=[(first, 1.0), (second, 0.5)])
 
     assert model.text_to_video.loaded_loras == [(second, "lora_1")]
     assert model.text_to_video.adapter_calls == [(["lora_1"], [0.5])]
@@ -411,7 +411,7 @@ def test_offload_hooks_are_restored_after_loras_load_only_in_low_memory_mode(mon
     monkeypatch.setattr(_LoraNoMatchPipeline, "enable_model_cpu_offload", lambda self: enable_calls.append(True))
 
     with pytest.warns(UserWarning):
-        DiffusersVideoBackend().load_model("dg845/LTX-2.3-Diffusers", mode="t2v", low_memory=low_memory, loras=[(path, 1.0)])
+        DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=low_memory, loras=[(path, 1.0)])
 
     # low_memory enables offload once while configuring the pipeline; the restore adds a second call.
     assert len(enable_calls) == (2 if restored else 0)
@@ -424,7 +424,7 @@ def test_other_lora_load_errors_still_fail_the_load(monkeypatch, tmp_path, fake_
     monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: _make_runtime(text_pipeline=_LoraNoMatchPipeline))
 
     with pytest.raises(RuntimeError, match="Failed to load LoRA"):
-        DiffusersVideoBackend().load_model("dg845/LTX-2.3-Diffusers", mode="t2v", loras=[(path, 1.0)])
+        DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", loras=[(path, 1.0)])
 
 
 def test_load_model_rejects_missing_or_unsupported_lora(monkeypatch, tmp_path):
@@ -433,12 +433,12 @@ def test_load_model_rejects_missing_or_unsupported_lora(monkeypatch, tmp_path):
     monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
 
     with pytest.raises(FileNotFoundError, match="missing.safetensors"):
-        backend.load_model("dg845/LTX-2.3-Diffusers", mode="t2v", loras=[(str(tmp_path / "missing.safetensors"), 1.0)])
+        backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", loras=[(str(tmp_path / "missing.safetensors"), 1.0)])
 
     bad_lora = tmp_path / "bad.txt"
     bad_lora.write_text("weights", encoding="utf-8")
     with pytest.raises(ValueError, match="Unsupported LoRA format"):
-        backend.load_model("dg845/LTX-2.3-Diffusers", mode="t2v", loras=[(str(bad_lora), 1.0)])
+        backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", loras=[(str(bad_lora), 1.0)])
 
 
 def test_load_model_rejects_lora_scales_when_adapter_api_cannot_apply_them(monkeypatch, tmp_path):
@@ -449,7 +449,7 @@ def test_load_model_rejects_lora_scales_when_adapter_api_cannot_apply_them(monke
     lora_path.write_text("weights", encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="explicit LoRA scales"):
-        backend.load_model("dg845/LTX-2.3-Diffusers", mode="t2v", loras=[(str(lora_path), 0.5)])
+        backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", loras=[(str(lora_path), 0.5)])
 
 
 def test_load_model_rejects_old_diffusers_versions(monkeypatch):
@@ -488,6 +488,6 @@ def test_load_model_does_not_validate_diffusers_version_twice(monkeypatch):
     validator = MagicMock(side_effect=AssertionError("duplicate validation"))
     monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._validate_diffusers_version", validator)
 
-    backend.load_model("dg845/LTX-2.3-Diffusers", mode="t2v")
+    backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v")
 
     validator.assert_not_called()

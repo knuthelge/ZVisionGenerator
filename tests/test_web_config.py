@@ -271,8 +271,8 @@ def test_load_web_config_exposes_windows_linux_video_aliases_and_hides_macos_onl
         },
         "ltx-2.3": {
             "darwin": {"message": "Alias 'ltx-2.3' is available on Windows and Linux only. On macOS, use 'ltx-4' or 'ltx-8'."},
-            "win32": "dg845/LTX-2.3-Diffusers",
-            "linux": "dg845/LTX-2.3-Diffusers",
+            "win32": "diffusers/LTX-2.3-Distilled-Diffusers",
+            "linux": "diffusers/LTX-2.3-Distilled-Diffusers",
         },
     }
     app_config["ui"]["default_models"] = {"video": "ltx-8"}

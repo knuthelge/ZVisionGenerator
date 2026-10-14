@@ -26,7 +26,7 @@ class VideoModelInfo:
 # Prefix → (family, backend, supports_i2v, default_fps, frame_alignment, resolution_alignment)
 _VIDEO_MODEL_MAP: dict[str, tuple[str, str, bool, int, int, int]] = {
     "dgrauet/ltx": ("ltx", "ltx", True, 24, 8, 32),
-    "dg845/ltx-2.3-diffusers": ("ltx", "ltx", True, 24, 8, 32),
+    "diffusers/ltx-2.3-distilled-diffusers": ("ltx", "ltx", True, 24, 8, 32),
     "lightricks/ltx-video": ("ltx", "ltx", True, 24, 8, 32),
 }
 

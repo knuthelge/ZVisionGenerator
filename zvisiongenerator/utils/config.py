@@ -440,6 +440,30 @@ def resolve_upscale_steps(defaults: dict[str, Any], steps: int) -> int:
     return preset_steps if preset_steps is not None else max(1, steps // 2)
 
 
+def ltx_latent_upsampler_source(config: dict[str, Any]) -> tuple[str, str] | None:
+    """Return the configured LTX latent upsampler as ``(repo_id, filename)``, or ``None`` when not configured.
+
+    Raises:
+        ValueError: If ``video_model_presets.ltx.diffusers.latent_upsampler`` is set but is not a mapping with
+            non-blank string ``repo`` and ``filename``.
+    """
+    key = "video_model_presets.ltx.diffusers.latent_upsampler"
+    node: Any = config
+    for part in key.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    if not isinstance(node, dict):
+        raise ValueError(f"{key} must be a mapping with 'repo' and 'filename'.")
+    values: list[str] = []
+    for field in ("repo", "filename"):
+        value = node.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{key}.{field} must be a non-blank string.")
+        values.append(value.strip())
+    return values[0], values[1]
+
+
 def model_reference(repo: str, revision: str | None) -> str:
     """Return ``repo`` or ``repo@revision`` (the inverse of :func:`split_model_revision`)."""
     return f"{repo}@{revision}" if revision else repo
