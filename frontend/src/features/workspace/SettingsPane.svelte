@@ -179,7 +179,7 @@
     [
       s.audio && !silentSource ? 'Audio' : null,
       s.lowMemory ? 'Low memory' : null,
-      s.videoUpscaleEnabled ? `${s.videoUpscaleFactor}× upscale` : null,
+      caps.showVideoUpscale && s.videoUpscaleEnabled ? `${s.videoUpscaleFactor}× upscale` : null,
       videoUpscaleReviewOn ? 'Review' : null,
     ]
       .filter(Boolean).join(' · ') || 'Off'

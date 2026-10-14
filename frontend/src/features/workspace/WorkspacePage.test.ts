@@ -1097,6 +1097,18 @@ describe('WorkspacePage', () => {
         expect(videoSummary()).not.toContain('Review');
       });
 
+      it('leaves a kept upscale out of the summary when the workflow offers no video upscale', async () => {
+        const context = makeContext();
+        for (const definition of Object.values(context.workflow_contract.definitions)) {
+          definition.visible_controls = definition.visible_controls.filter((id) => id !== 'video_upscale_enabled');
+        }
+        draft.update('videoUpscaleEnabled', true);
+        await mountWorkspace(context);
+        await settle();
+        expect(target.querySelector('#ws-video-upscale')).toBeNull();
+        expect(videoSummary()).not.toContain('upscale');
+      });
+
       it('keeps the image Review choice apart from the video one', async () => {
         draft.update('upscaleReview', true);
         draft.update('videoUpscaleEnabled', true);
