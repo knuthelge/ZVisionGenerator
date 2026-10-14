@@ -16,8 +16,8 @@ from zvisiongenerator.backends.lora_peft import is_unmatched_adapter_error, rest
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 
 _MINIMUM_DIFFUSERS_VERSION = (0, 38, 0)
-# Distilled checkpoints run without classifier-free guidance. Only guidance_scale is passed, so the other guidance
-# terms (audio, spatio-temporal, modality) follow the pipeline defaults of the installed diffusers version.
+# The distilled model card's setting. Only guidance_scale is passed, so the other guidance terms (audio,
+# spatio-temporal, modality) keep the pipeline defaults of the installed diffusers version.
 _DISTILLED_GUIDANCE: Final[Mapping[str, float]] = MappingProxyType({"guidance_scale": 1.0})
 # Architecture of the LTX-2.3 x2 spatial latent upsampler (matches the published weights).
 _UPSAMPLER_CONFIG: Final[Mapping[str, Any]] = MappingProxyType(

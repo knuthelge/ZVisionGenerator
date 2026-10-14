@@ -99,7 +99,7 @@ ziv-video -m MODEL --upscale 2 --no-audio --prompt "..."
 `--upscale 2` is the only supported video upscale mode. It works in two stages on every platform: the clip is rendered at half the requested width and height, its latents are upsampled 2× with the LTX-2.3 spatial upsampler, and a short refinement at full size sharpens the result. The finished clip has the width and height you asked for, and progress counts both stages as one run.
 
 - **Steps** — `--steps` (default 8, at most 8) sets the half-size stage. On Windows and Linux the refinement adds 3 steps, so the default run shows 11 steps in total. LoRAs apply to both stages.
-- **Windows and Linux upsampler** — the upsampler weights (about 1 GB) come from the Hugging Face file named by `video_model_presets.ltx.diffusers.latent_upsampler` (`repo` and `filename`, set in the packaged config) and are downloaded on the first upscale run. A missing or mismatched file is reported before the video model loads. Other runs do not load the upsampler.
+- **Windows and Linux upsampler** — the upsampler weights (about 1 GB) come from the Hugging Face file named by `video_model_presets.ltx.diffusers.latent_upsampler` (`repo` and `filename`, set in the packaged config) and are downloaded on the first upscale run. A missing file is reported before the video model loads; a file that does not match the x2 upsampler layout is reported when the upsampler loads. Other runs do not load the upsampler.
 - **Memory** — with `--low-memory` (the default) the Windows/Linux upsampler stays in system memory and moves to the GPU only while it upsamples. With `--no-low-memory` it stays on the GPU.
 - **Size** — width and height must be divisible by 64, and are aligned to 64 with a warning when needed.
 
