@@ -226,8 +226,8 @@ def _video_backend_is_ltx_mlx() -> bool:
 
 
 def supports_video_audio() -> bool:
-    """Return whether this platform's video backend writes an audio track (LTX MLX on macOS; diffusers writes frames only)."""
-    return _video_backend_is_ltx_mlx()
+    """Return whether this platform's video backend writes an audio track (every registered LTX backend does)."""
+    return sys.platform in _VIDEO_BACKENDS_MAP
 
 
 def supports_video_extend() -> bool:

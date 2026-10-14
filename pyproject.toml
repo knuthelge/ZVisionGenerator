@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "accelerate>=1.15.0",
+    "av>=19.0.1; sys_platform != 'darwin'",
     "bitsandbytes>=0.50.0; sys_platform != 'darwin'",
     "diffusers==0.41.0",
     "fastapi>=0.143.0",

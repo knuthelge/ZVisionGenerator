@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tests.conftest import _make_mock_video_backend, _make_plan, _make_video_args
-from zvisiongenerator.backends import supports_video_audio, supports_video_upscale_review
+from zvisiongenerator.backends import supports_video_upscale_review
 from zvisiongenerator.backends.video_diffusers import DiffusersVideoBackend
 from zvisiongenerator.backends.video_mac import LtxVideoBackend, _LtxModel
 from zvisiongenerator.core.types import StageOutcome
@@ -270,7 +270,6 @@ class TestSupportsVideoUpscaleReview:
         monkeypatch.setattr(sys, "platform", platform)
 
         assert supports_video_upscale_review() is expected
-        assert supports_video_upscale_review() == supports_video_audio()
 
 
 # ---------------------------------------------------------------------------

@@ -88,7 +88,7 @@ Comma-separated `key=value` pairs; join several values with `+`. Omitted keys us
 | `details` | `lighting`, `composition`, `camera`, `materials`, `color`, `environment`, `subject` | `lighting+composition` |
 | `length` | `shorter`, `same`, `longer`, `extra` | `same` |
 | `motion` (`ziv-video` only) | `action`, `camera-move`, `pacing` | `action` |
-| `sound` (`ziv-video` only, used with audio on, macOS only) | `ambient`, `effects`, `dialogue`, `music` | none |
+| `sound` (`ziv-video` only, used with audio on) | `ambient`, `effects`, `dialogue`, `music` | none |
 | `parts` (`ziv-video` only) | `both`, `action` | `action` with `--extend` when the source has a scene, otherwise `both` |
 
 `parts=action` keeps the scene exactly as written and rewrites only the action, so `style`, `mood` and `details` have no effect. It needs a scene (from `--scene`, the entry's `scene:` or the extended clip); with none, the run uses `parts=both` and warns.
@@ -128,7 +128,7 @@ Platform-aware aliases:
 | `--low-memory` / `--no-low-memory` | enabled | Low-memory mode for LTX. On macOS with 24 GB of memory or less it also streams the transformer from disk, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. `--no-low-memory` turns that off too |
 | `--upscale` | disabled | Upscale factor: `2` only. Renders at half size, upsamples the latents 2×, then refines at full size, so the output keeps the requested size. On Windows/Linux the first use downloads the 2× upsampler (about 1 GB; `video_model_presets.ltx.diffusers.latent_upsampler`) |
 | `--review` | `False` | Pause after each small render to approve (`y`) or discard (`n`) the upscale. Needs `--upscale` and a terminal. macOS only for now |
-| `--audio` / `--no-audio` | enabled | Include or strip audio in video output. macOS only; Windows/Linux videos have no audio track |
+| `--audio` / `--no-audio` | enabled | Include or strip audio in video output |
 | `--lora` | `None` | Comma-separated LoRAs with optional weights: `name:0.8,name2:0.5`. Windows/Linux require diffusers-compatible LTX LoRA adapters. |
 | `-r`, `--runs` | `1` | Number of batch runs |
 | `-o`, `--output` | `.` | Output directory |

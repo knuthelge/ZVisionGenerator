@@ -203,7 +203,7 @@ Both defaults are pinned to a revision. To use another chat model, set **Prompt 
 | Mood | one | Keep, Serene, Joyful, Romantic, Melancholic, Mysterious, Eerie, Dramatic, Epic, Whimsical, Nostalgic |
 | Details | any | Lighting, Composition, Camera & lens, Materials & textures, Color & mood, Environment, Subject |
 | Motion (video only) | any | Action / sequence, Camera movement, Pacing |
-| Sound (video with audio on, macOS only) | any | Ambience, Sound effects, Dialogue, Music |
+| Sound (video with audio on) | any | Ambience, Sound effects, Dialogue, Music |
 | Length | one | Shorter (≈50 %), Same, Longer (≈200 %), Extra long (≈300 %) |
 | Direction | free text | e.g. *at night, in the rain* or *focus on the dog* (up to 300 characters) |
 
@@ -217,7 +217,7 @@ The enhancer keeps your subject and every detail you describe. It adds only thin
 - With no Sound option picked, it adds no new sounds.
 - **Ambience** and **Sound effects** describe the setting's soundscape and sounds that match the action. **Music** describes music in the scene or a score.
 - **Dialogue** keeps your quoted lines. If you wrote none, it writes short lines that fit the scene. Only people already in the scene speak.
-- With audio off, on Windows and Linux (whose videos have no audio track), and for images, the enhancer describes no sounds and Sound is ignored.
+- With audio off, and for images, the enhancer describes no sounds and Sound is ignored.
 
 **Direction** is a short instruction the enhancer follows, such as a time of day, weather, or what to focus on. A direction alone is enough to enhance, without picking other options.
 

@@ -85,8 +85,8 @@ class TestBackendRegistryLookup:
 
         assert backends.supports_stored_quants() is True
 
-    @pytest.mark.parametrize(("platform", "expected"), [("darwin", True), ("win32", False), ("linux", False)])
-    def test_only_the_ltx_mlx_video_backend_writes_audio(self, monkeypatch, platform, expected):
+    @pytest.mark.parametrize(("platform", "expected"), [("darwin", True), ("win32", True), ("linux", True), ("freebsd", False)])
+    def test_every_supported_video_platform_writes_audio(self, monkeypatch, platform, expected):
         import zvisiongenerator.backends as backends
 
         monkeypatch.setattr(backends.sys, "platform", platform)

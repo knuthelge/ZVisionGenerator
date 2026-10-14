@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import sys
+import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -49,11 +50,20 @@ class _RuntimeDependencies:
 
     torch: Any
     image_module: Any
-    export_to_video: Any
+    encode_video: Any
     pipeline_classes: _PipelineClasses
     diffusers_version: str
     distilled_sigmas: tuple[float, ...]
     stage2_sigmas: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class _GeneratedClip:
+    """Decoded frames of one clip with its audio waveform ``(channels, samples)`` and sample rate, when the pipeline made audio."""
+
+    frames: list[Any]
+    audio: Any | None = None
+    sample_rate: int | None = None
 
 
 @dataclass
@@ -109,7 +119,7 @@ def _load_runtime_dependencies() -> _RuntimeDependencies:
         import torch
         from PIL import Image
         import diffusers
-        from diffusers.utils import export_to_video
+        from diffusers.utils import encode_video
     except ImportError as exc:
         raise RuntimeError("Video diffusers dependencies are unavailable. Install the Windows/Linux video runtime with `uv sync`.") from exc
 
@@ -125,7 +135,7 @@ def _load_runtime_dependencies() -> _RuntimeDependencies:
     return _RuntimeDependencies(
         torch=torch,
         image_module=Image,
-        export_to_video=export_to_video,
+        encode_video=encode_video,
         pipeline_classes=_resolve_pipeline_classes(diffusers, LTX2LatentUpsamplerModel),
         diffusers_version=diffusers_version,
         distilled_sigmas=tuple(DISTILLED_SIGMA_VALUES),
@@ -344,12 +354,42 @@ def _extract_frames(result: Any) -> list[Any]:
     return []
 
 
-def _export_video(model: _LoadedVideoModel, frames: list[Any], output_path: str) -> Path:
-    """Export generated frames to the requested output path."""
+def _extract_audio(result: Any) -> Any | None:
+    """Return the first clip's audio waveform from a decoded pipeline output, or ``None`` when it has none."""
 
-    if not frames:
+    audio = getattr(result, "audio", None)
+    if audio is None or len(audio) == 0:
+        return None
+    return audio[0]
+
+
+def _audio_sample_rate(pipeline: Any) -> int | None:
+    """Return the sample rate of the pipeline vocoder's output waveform, or ``None`` when the pipeline has no vocoder."""
+
+    config = getattr(getattr(pipeline, "vocoder", None), "config", None)
+    rate = getattr(config, "output_sampling_rate", None)
+    return int(rate) if rate else None
+
+
+def _clip_from_result(result: Any, pipeline: Any) -> _GeneratedClip:
+    """Collect the frames, audio and audio sample rate of a decoded pipeline output."""
+
+    return _GeneratedClip(frames=_extract_frames(result), audio=_extract_audio(result), sample_rate=_audio_sample_rate(pipeline))
+
+
+def _export_video(model: _LoadedVideoModel, clip: _GeneratedClip, output_path: str) -> Path:
+    """Export a generated clip to the requested output path, muxing its audio track when it has one."""
+
+    if not clip.frames:
         raise RuntimeError("Diffusers video generation returned no frames to export.")
-    model.runtime.export_to_video(frames, output_video_path=output_path, fps=model.model_info.default_fps)
+    fps = model.model_info.default_fps
+    audio = clip.audio
+    if audio is not None and clip.sample_rate is None:
+        warnings.warn("The video pipeline returned audio without a vocoder sample rate; the video is saved without sound.", stacklevel=2)
+        audio = None
+    if audio is not None:
+        audio = audio.float().cpu()
+    model.runtime.encode_video(clip.frames, fps=fps, output_path=output_path, audio=audio, audio_sample_rate=clip.sample_rate if audio is not None else None)
     return Path(output_path)
 
 
@@ -504,8 +544,8 @@ def _generate_one_stage(
     steps: int,
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
-) -> list[Any]:
-    """Run one distilled denoising pass at full size and return its frames."""
+) -> _GeneratedClip:
+    """Run one distilled denoising pass at full size and return its clip."""
 
     sigmas = _stage1_sigmas(model.runtime.distilled_sigmas, steps)
     kwargs = _build_generation_kwargs(
@@ -520,7 +560,7 @@ def _generate_one_stage(
         callback=_make_step_callback(step_callback, phase="video", offset=0, total=len(sigmas)),
         extra_kwargs=extra_kwargs,
     )
-    return _extract_frames(pipeline(**kwargs))
+    return _clip_from_result(pipeline(**kwargs), pipeline)
 
 
 def _generate_two_stage(
@@ -535,7 +575,7 @@ def _generate_two_stage(
     stage1_steps: int,
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
-) -> list[Any]:
+) -> _GeneratedClip:
     """Render at half size, upsample the latents 2x and refine at full size on the same pipeline.
 
     Both denoising passes run on *pipeline* so its LoRA adapters apply to each. Progress covers both passes as one
@@ -578,7 +618,7 @@ def _generate_two_stage(
                 extra_kwargs=refine_kwargs,
             )
         )
-    return _extract_frames(stage2)
+    return _clip_from_result(stage2, pipeline)
 
 
 def _check_upscale_arguments(model: _LoadedVideoModel, stage1_steps: int | None) -> None:
@@ -590,7 +630,7 @@ def _check_upscale_arguments(model: _LoadedVideoModel, stage1_steps: int | None)
         raise RuntimeError("Upscale was requested, but no latent upsampler is loaded for this model.")
 
 
-def _generate_frames(
+def _generate_clip(
     model: _LoadedVideoModel,
     pipeline: Any,
     *,
@@ -603,8 +643,8 @@ def _generate_frames(
     stage1_steps: int | None,
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
-) -> list[Any]:
-    """Generate frames in one stage, or in two stages when *stage1_steps* is set."""
+) -> _GeneratedClip:
+    """Generate a clip in one stage, or in two stages when *stage1_steps* is set."""
 
     if stage1_steps is None:
         return _generate_one_stage(
@@ -724,7 +764,7 @@ class DiffusersVideoBackend:
         _check_upscale_arguments(model, stage1_steps)
 
         with model.runtime.torch.inference_mode():
-            frames = _generate_frames(
+            clip = _generate_clip(
                 model,
                 model.text_to_video,
                 prompt=prompt,
@@ -737,7 +777,7 @@ class DiffusersVideoBackend:
                 step_callback=step_callback,
                 extra_kwargs={},
             )
-            output = _export_video(model, frames, output_path)
+            output = _export_video(model, clip, output_path)
         _cleanup(model.runtime)
         return output
 
@@ -768,7 +808,7 @@ class DiffusersVideoBackend:
             input_image = image.convert("RGB")
 
         with model.runtime.torch.inference_mode():
-            frames = _generate_frames(
+            clip = _generate_clip(
                 model,
                 model.image_to_video,
                 prompt=prompt,
@@ -781,6 +821,6 @@ class DiffusersVideoBackend:
                 step_callback=step_callback,
                 extra_kwargs={"image": input_image},
             )
-            output = _export_video(model, frames, output_path)
+            output = _export_video(model, clip, output_path)
         _cleanup(model.runtime)
         return output

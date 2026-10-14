@@ -211,6 +211,41 @@ class _FakeUpsamplerModel:
         return self
 
 
+class _FakeWaveform:
+    """Stand-in for a vocoder waveform tensor; records the conversions applied before encoding."""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.conversions: list[str] = []
+
+    def float(self):
+        self.conversions.append("float")
+        return self
+
+    def cpu(self):
+        self.conversions.append("cpu")
+        return self
+
+
+class _AudioTextPipeline(_FakeTextPipeline):
+    """Text pipeline whose decoded output carries a batch of waveforms, like LTX2Pipeline with its vocoder."""
+
+    def __init__(self, sample_rate: int | None = 24000):
+        super().__init__()
+        self.vocoder = SimpleNamespace(config=SimpleNamespace(output_sampling_rate=sample_rate))
+
+    def __call__(self, **kwargs):
+        result = _run_fake_denoise(self, kwargs, [["frame-1", "frame-2"]])
+        if kwargs["output_type"] != "latent":
+            result.audio = [_FakeWaveform("clip-0"), _FakeWaveform("clip-1")]
+        return result
+
+
+class _NoRatePipeline(_AudioTextPipeline):
+    def __init__(self):
+        super().__init__(sample_rate=None)
+
+
 class _NoScalePipeline(_FakeTextPipeline):
     def set_adapters(self, adapter_names, adapter_weights=None) -> None:  # noqa: ARG002
         raise AttributeError
@@ -218,7 +253,7 @@ class _NoScalePipeline(_FakeTextPipeline):
 
 @pytest.fixture(autouse=True)
 def _clear_pipeline_state():
-    for pipeline_class in (_FakeTextPipeline, _FakeImagePipeline, _NoScalePipeline):
+    for pipeline_class in (_FakeTextPipeline, _FakeImagePipeline, _NoScalePipeline, _AudioTextPipeline, _NoRatePipeline):
         pipeline_class.loaded_instances = []
     _FakeUpsamplerModel.instances = []
     _FakeUpsamplerModel.load_error = None
@@ -233,18 +268,15 @@ def _make_runtime(
     upsampler_model=_FakeUpsamplerModel,
     version: str = "0.38.0",
 ):
-    exported: dict[str, object] = {}
+    encoded: dict[str, object] = {}
 
-    def _export(frames, output_video_path=None, fps=10):
-        exported["frames"] = frames
-        exported["output_video_path"] = output_video_path
-        exported["fps"] = fps
-        return output_video_path
+    def _encode(video, fps, output_path, audio=None, audio_sample_rate=None):
+        encoded.update(frames=video, fps=fps, output_path=output_path, audio=audio, audio_sample_rate=audio_sample_rate)
 
     runtime = SimpleNamespace(
         torch=torch or _FakeTorch(),
         image_module=Image,
-        export_to_video=_export,
+        encode_video=_encode,
         pipeline_classes=SimpleNamespace(
             text_to_video=text_pipeline,
             image_to_video=image_pipeline,
@@ -255,7 +287,7 @@ def _make_runtime(
         distilled_sigmas=_DISTILLED_SIGMAS,
         stage2_sigmas=_STAGE2_SIGMAS,
     )
-    runtime.exported = exported
+    runtime.encoded = encoded
     return runtime
 
 
@@ -383,9 +415,9 @@ def test_text_to_video_exports_path_and_reports_progress(monkeypatch, tmp_path):
     )
 
     assert result == output_path
-    assert runtime.exported["frames"] == ["frame-1", "frame-2"]
-    assert runtime.exported["output_video_path"] == str(output_path)
-    assert runtime.exported["fps"] == 24
+    assert runtime.encoded["frames"] == ["frame-1", "frame-2"]
+    assert runtime.encoded["output_path"] == str(output_path)
+    assert runtime.encoded["fps"] == 24
     call = model.text_to_video.calls[0]
     assert call["prompt"] == "a river"
     assert call["width"] == 704
@@ -648,7 +680,7 @@ def test_upscale_i2v_refines_on_the_image_pipeline(monkeypatch, tmp_path):
     assert stage2["audio_latents"] == "audio-latent"
     assert stage2["output_type"] == "pil"
     assert model.upsample_pipeline.vae is pipeline.vae
-    assert runtime.exported["frames"] == ["image-frame-1"]
+    assert runtime.encoded["frames"] == ["image-frame-1"]
 
 
 @pytest.mark.parametrize(("width", "height"), [(520, 384), (512, 392)])
@@ -669,9 +701,63 @@ def test_upscale_exports_stage2_frames(monkeypatch, tmp_path):
     result = DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, **_text_to_video_args(tmp_path))
 
     assert result == tmp_path / "upscaled.mp4"
-    assert runtime.exported["frames"] == ["frame-1", "frame-2"]
-    assert runtime.exported["fps"] == 24
+    assert runtime.encoded["frames"] == ["frame-1", "frame-2"]
+    assert runtime.encoded["fps"] == 24
     assert runtime.torch.cuda.empty_cache_calls == 1
+
+
+def test_text_to_video_muxes_the_first_waveform_at_the_vocoder_rate(monkeypatch, tmp_path):
+    runtime = _make_runtime(text_pipeline=_AudioTextPipeline)
+    _patch_runtime(monkeypatch, runtime)
+    backend = DiffusersVideoBackend()
+    model, _ = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=False)
+
+    result = backend.text_to_video(model=model, **_text_to_video_args(tmp_path))
+
+    assert result == tmp_path / "upscaled.mp4"
+    assert runtime.encoded["frames"] == ["frame-1", "frame-2"]
+    assert runtime.encoded["fps"] == 24
+    assert runtime.encoded["output_path"] == str(tmp_path / "upscaled.mp4")
+    assert runtime.encoded["audio"].name == "clip-0"
+    assert runtime.encoded["audio"].conversions == ["float", "cpu"]
+    assert runtime.encoded["audio_sample_rate"] == 24000
+
+
+def test_upscale_muxes_the_refined_stage_audio(monkeypatch, tmp_path):
+    runtime = _make_runtime(text_pipeline=_AudioTextPipeline)
+    model = _load_upscale_model(monkeypatch, low_memory=False, runtime=runtime)
+
+    DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, **_text_to_video_args(tmp_path))
+
+    assert runtime.encoded["audio"].name == "clip-0"
+    assert runtime.encoded["audio_sample_rate"] == 24000
+
+
+def test_audio_without_a_vocoder_rate_is_dropped_with_a_warning(monkeypatch, tmp_path):
+    runtime = _make_runtime(text_pipeline=_NoRatePipeline)
+    _patch_runtime(monkeypatch, runtime)
+    backend = DiffusersVideoBackend()
+    model, _ = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=False)
+
+    with pytest.warns(UserWarning, match="without sound"):
+        backend.text_to_video(model=model, **_text_to_video_args(tmp_path))
+
+    assert runtime.encoded["frames"] == ["frame-1", "frame-2"]
+    assert runtime.encoded["audio"] is None
+    assert runtime.encoded["audio_sample_rate"] is None
+
+
+def test_output_without_audio_is_encoded_as_frames_only(monkeypatch, tmp_path):
+    runtime = _make_runtime()
+    _patch_runtime(monkeypatch, runtime)
+    backend = DiffusersVideoBackend()
+    model, _ = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=False)
+
+    backend.text_to_video(model=model, **_text_to_video_args(tmp_path))
+
+    assert runtime.encoded["frames"] == ["frame-1", "frame-2"]
+    assert runtime.encoded["audio"] is None
+    assert runtime.encoded["audio_sample_rate"] is None
 
 
 @pytest.mark.parametrize(("stage1_steps", "stage1_len"), [(8, 8), (4, 4), (1, 1), (12, 8)])

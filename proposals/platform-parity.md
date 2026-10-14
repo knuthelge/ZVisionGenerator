@@ -1,6 +1,6 @@
 # Feature parity between macOS and Windows/Linux
 
-**Status:** In progress (2026-10-14). Step 3 (two-stage video upscale on CUDA) is done; the other steps are still open.
+**Status:** In progress (2026-10-14). Steps 2 (audio in CUDA video) and 3 (two-stage video upscale on CUDA) are done; the other steps are still open.
 
 ## Problem
 
@@ -11,7 +11,7 @@ What's left are the features that work on one platform and are missing or behave
 Missing on Windows and Linux:
 
 1. **FLUX.2 Klein can't refine an existing image.** Reference images, `--upscale` and gallery Upscale fail with the default model `klein9b`. `DiffusersBackend.image_to_image` (`backends/image_win.py`) builds `AutoPipelineForImage2Image.from_pipe(model)` and passes `strength=`. diffusers maps the `flux2-klein` family to `Flux2KleinPipeline` for img2img, and its `__call__` has no `strength` parameter and no `**kwargs`, so the call raises `TypeError`. This is unchanged in 0.41.0. `flux2_klein` doesn't set `supports_img2img: false`, so the Web UI and CLI offer the feature. Z-Image (`ZImageImg2ImgPipeline`) and Krea 2 (our own latent path) work.
-2. **Videos have no audio.** `LTX2PipelineOutput` returns `frames` and `audio`, but `video_diffusers._export_video` writes only the frames with `export_to_video`. `--audio`, which is on by default, does nothing.
+2. ~~**Videos have no audio.**~~ *Done (2026-10-14), see step 2.* `LTX2PipelineOutput` returns `frames` and `audio`, but `video_diffusers._export_video` writes only the frames with `export_to_video`. `--audio`, which is on by default, does nothing.
 3. ~~**Video upscale isn't the two-stage upscale.**~~ *Done (2026-10-14), see step 3.* On macOS, `--upscale 2` generates at half resolution, upsamples the latents 2× and refines them at full resolution. On CUDA, stage 1 runs at the full requested size. `_upscale_video` then passes that size to `LTX2LatentUpsamplePipeline`, which reads `height`/`width` as the size of its *input* video. So the output is about 2× the requested size, nothing refines it, and stage 2 shows up as one jump in progress.
 4. ~~**No float16 compute option.**~~ *Dropped (2026-10-11).* `deps-macos` proposed a `compute_precision` option for mflux, but it gave 0–4% on an M5 and was removed, so macOS has nothing to match. See [macos-speed.md](macos-speed.md) and [deps-macos.md](archive/deps-macos.md#what-changed-from-the-plan).
 5. **No quantized video.** macOS has `ltx-4` and `ltx-8` (MLX q4/q8). CUDA has only `ltx-2.3` in bfloat16.
@@ -62,6 +62,10 @@ Each step is its own PR, in this order. Steps 1, 2 and 8 are small and fix what 
 - Tests: a mocked pipeline that rejects unknown kwargs (`inspect.signature` with no `**kwargs`), so a call with `strength=` fails the test the way it fails at runtime. Check the latents and sigmas handed to the pipeline for a given strength.
 
 ### 2. Audio in CUDA video
+
+**Done (2026-10-14).** `_export_video` muxes the first waveform of `result.audio` with `diffusers.utils.encode_video` at `pipeline.vocoder.config.output_sampling_rate` (48 kHz for the distilled repo); every clip, with or without audio, is written by that one encoder. The two-stage upscale exports the refine stage's audio. `av` is a dependency on Windows and Linux, and `supports_video_audio()` is true there. Still open: the manual run on an NVIDIA GPU, listening for sync against the same seed on a Mac.
+
+Original plan:
 
 - In `video_diffusers`, read `result.audio` alongside the frames. When it's present, write the file with `diffusers.utils.export_utils.encode_video(frames, fps, output_path, audio=..., audio_sample_rate=...)`. The sample rate comes from the pipeline (the vocoder or audio VAE config; confirm the attribute in the spike). Without audio, keep `export_to_video`.
 - `strip_audio_stage` already handles `--no-audio` for both platforms, so nothing changes in the workflow.

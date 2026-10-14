@@ -75,7 +75,7 @@ The **Rewrite** option chooses what is written: **Scene and action**, or **Actio
 
 ## Prompt Enhancement
 
-Video prompts can be rewritten by the local [prompt enhancer](prompts.md#enhancing-prompts), which writes a scene and an action (see [Scene and Action](#scene-and-action)), adds visible motion and camera movement in time order and fits the action to the clip length. With audio on (macOS only), the **Sound** options add ambience, sound effects, dialogue or music, and sounds you wrote are always kept. Use `--enhance style=cinematic,motion=action+camera-move,sound=ambient+effects`, or the Enhance options in the Web UI. For image-to-video, the rewrite describes motion and change rather than appearance; the enhancer does not see the starting image itself. Prompts are rewritten before the video model loads, and the enhancer is unloaded first, so it adds no memory during generation. In the Web UI, **Cancel** (or `Esc` twice) stops a video job while prompts are rewritten and at the next denoising step, in both passes of an upscaled video; while the model loads, and during the short latent upsample between the two passes of a Windows/Linux upscale, it takes effect once that finishes. Pause, Skip and Repeat are not available for video.
+Video prompts can be rewritten by the local [prompt enhancer](prompts.md#enhancing-prompts), which writes a scene and an action (see [Scene and Action](#scene-and-action)), adds visible motion and camera movement in time order and fits the action to the clip length. With audio on, the **Sound** options add ambience, sound effects, dialogue or music, and sounds you wrote are always kept. Use `--enhance style=cinematic,motion=action+camera-move,sound=ambient+effects`, or the Enhance options in the Web UI. For image-to-video, the rewrite describes motion and change rather than appearance; the enhancer does not see the starting image itself. Prompts are rewritten before the video model loads, and the enhancer is unloaded first, so it adds no memory during generation. In the Web UI, **Cancel** (or `Esc` twice) stops a video job while prompts are rewritten and at the next denoising step, in both passes of an upscaled video; while the model loads, and during the short latent upsample between the two passes of a Windows/Linux upscale, it takes effect once that finishes. Pause, Skip and Repeat are not available for video.
 
 ## Video Upscale & Audio
 
@@ -103,7 +103,7 @@ ziv-video -m MODEL --upscale 2 --no-audio --prompt "..."
 - **Memory** — with `--low-memory` (the default) the Windows/Linux upsampler stays in system memory and moves to the GPU only while it upsamples. With `--no-low-memory` it stays on the GPU.
 - **Size** — width and height must be divisible by 64, and are aligned to 64 with a warning when needed.
 
-Audio is generated on macOS only. On Windows and Linux videos have no audio track, so `--audio` has no effect and the Web UI hides the Audio toggle and the enhancer's Sound options.
+Audio is generated together with the video on every platform, and `--no-audio` (or turning off **Audio** in the Web UI) removes it. On Windows and Linux the audio track is 48 kHz stereo AAC.
 
 Windows and Linux video generation require CUDA. CPU fallback is not available for the diffusers video backend.
 
