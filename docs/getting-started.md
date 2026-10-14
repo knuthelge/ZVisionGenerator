@@ -120,7 +120,7 @@ To run the same job from a terminal, press the terminal button in the *Settings*
 
 To give the preview more room, collapse the Compose and Settings sidebar with the **«** button next to *Compose*. It folds into a narrow strip with an expand button and a Generate button, and the choice is remembered in the browser. On phone-width screens the sidebar always shows above the preview.
 
-While a job runs, its card shows the progress, the time left and a live preview of the current image. **Pause** and **Cancel** are at the top of the card; **Skip** and **Repeat** are next to the current image. Pause and Repeat wait until the current image is finished, while Skip and Cancel stop it at its next step. A video job offers Cancel only; while its model loads, Cancel takes effect once loading finishes. If a job fails, the card shows why. Finished images appear in the history strip.
+While a job runs, its card shows the progress, the time left and a live preview of the current image. **Pause** and **Cancel** are at the top of the card; **Skip** and **Repeat** are next to the current image. Pause and Repeat wait until the current image is finished, while Skip and Cancel stop it at its next step. A video job offers Cancel only, plus Approve and Discard while it waits for a review (macOS); while its model loads, Cancel takes effect once loading finishes. If a job fails, the card shows why. Finished images appear in the history strip.
 
 The workspace model picker and the Models page show whether each model is already downloaded; models that are not yet downloaded download on first use. They also show whether a downloaded model fits this machine's memory. On macOS this is compared with the GPU memory Apple recommends for the machine:
 
@@ -195,7 +195,7 @@ Full-screen asset viewer:
 | `←` / `→` | Previous / next asset |
 | `Home` / `End` | First / last asset |
 | `R` | Reuse settings |
-| `E` | Use as reference: load the asset as the reference image, together with its prompt |
+| `E` | Use as reference: load an image as the reference image, together with its prompt. On a video (macOS), Extend: open it in the Extend Video tab |
 | `D` | Download |
 | `C` | Copy the prompt |
 | `Delete` / `Backspace` | Delete (asks for confirmation: `Enter` confirms, `Esc` cancels) |
