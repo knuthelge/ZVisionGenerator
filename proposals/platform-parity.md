@@ -1,18 +1,18 @@
 # Feature parity between macOS and Windows/Linux
 
-**Status:** Proposed (2026-10-09)
+**Status:** In progress (2026-10-14). Step 3 (two-stage video upscale on CUDA) is done; the other steps are still open.
 
 ## Problem
 
 Most development has happened on macOS. The shared app is the same everywhere: the CLI controls, the Web UI (queue, gallery, prompt builder, config, file picker), text-to-image for Z-Image, FLUX.2 Klein and Krea 2, q4/q8 with stored quants, image memory badges, LoRAs and LoKr, live image previews, video text-to-video and image-to-video, video LoRAs and the prompt enhancer. [Quantization parity on CUDA](archive/cuda-quant-parity.md) closed the image quantization gap.
 
-What's left are the features that work on one platform and are missing or behave differently on the other. This proposal assumes the three dependency proposals have shipped ([shared](archive/deps-shared.md), [CUDA](archive/deps-cuda.md), [macOS](archive/deps-macos.md)): diffusers 0.41.0 on Windows and Linux, mflux 0.22 and LTX MLX v0.16.3 on macOS. Several gaps get wider with them. macOS moves to upstream's two-stage video upscale and gains low-RAM video streaming, while the CUDA video backend doesn't change.
+What's left are the features that work on one platform and are missing or behave differently on the other. This proposal assumes the three dependency proposals have shipped ([shared](archive/deps-shared.md), [CUDA](archive/deps-cuda.md), [macOS](archive/deps-macos.md)): diffusers 0.41.0 on Windows and Linux, mflux 0.22 and LTX MLX v0.16.3 on macOS. Several gaps get wider with them. macOS moves to upstream's two-stage video upscale and gains low-RAM video streaming, while the CUDA video backend did not change until step 3.
 
 Missing on Windows and Linux:
 
 1. **FLUX.2 Klein can't refine an existing image.** Reference images, `--upscale` and gallery Upscale fail with the default model `klein9b`. `DiffusersBackend.image_to_image` (`backends/image_win.py`) builds `AutoPipelineForImage2Image.from_pipe(model)` and passes `strength=`. diffusers maps the `flux2-klein` family to `Flux2KleinPipeline` for img2img, and its `__call__` has no `strength` parameter and no `**kwargs`, so the call raises `TypeError`. This is unchanged in 0.41.0. `flux2_klein` doesn't set `supports_img2img: false`, so the Web UI and CLI offer the feature. Z-Image (`ZImageImg2ImgPipeline`) and Krea 2 (our own latent path) work.
 2. **Videos have no audio.** `LTX2PipelineOutput` returns `frames` and `audio`, but `video_diffusers._export_video` writes only the frames with `export_to_video`. `--audio`, which is on by default, does nothing.
-3. **Video upscale isn't the two-stage upscale.** On macOS, `--upscale 2` generates at half resolution, upsamples the latents 2× and refines them at full resolution. On CUDA, stage 1 runs at the full requested size. `_upscale_video` then passes that size to `LTX2LatentUpsamplePipeline`, which reads `height`/`width` as the size of its *input* video. So the output is about 2× the requested size, nothing refines it, and stage 2 shows up as one jump in progress.
+3. ~~**Video upscale isn't the two-stage upscale.**~~ *Done (2026-10-14), see step 3.* On macOS, `--upscale 2` generates at half resolution, upsamples the latents 2× and refines them at full resolution. On CUDA, stage 1 runs at the full requested size. `_upscale_video` then passes that size to `LTX2LatentUpsamplePipeline`, which reads `height`/`width` as the size of its *input* video. So the output is about 2× the requested size, nothing refines it, and stage 2 shows up as one jump in progress.
 4. ~~**No float16 compute option.**~~ *Dropped (2026-10-11).* `deps-macos` proposed a `compute_precision` option for mflux, but it gave 0–4% on an M5 and was removed, so macOS has nothing to match. See [macos-speed.md](macos-speed.md) and [deps-macos.md](archive/deps-macos.md#what-changed-from-the-plan).
 5. **No quantized video.** macOS has `ltx-4` and `ltx-8` (MLX q4/q8). CUDA has only `ltx-2.3` in bfloat16.
 6. **No low-RAM video streaming.** `--low-memory` on CUDA means `enable_model_cpu_offload()`, which moves each whole component onto the GPU in turn. macOS gets DiT block streaming (`low_ram_streaming`). CUDA image models already stream block by block (`image_win._stream_to_gpu`), but video doesn't.
@@ -46,6 +46,9 @@ Checked against `main` at v0.13.0b17 and the diffusers 0.41.0 wheel from PyPI (2
 | `diffusers.utils.export_utils.encode_video` (0.41.0) | `encode_video(video, fps, output_path, audio=None, audio_sample_rate=None, ...)`, through PyAV |
 | `LTX2LatentUpsamplePipeline.__call__` | `height`/`width` are "the height in pixels of the input video (not the generated video, which will have a larger resolution)" |
 | `video_mac._generate_upscaled` (replaced by `DistilledPipeline.generate_and_save`) | Half-res distilled stage 1, 2× `LatentUpsampler`, distilled refine with `STAGE_2_SIGMAS` |
+| `LTX2Pipeline.__call__` guidance defaults (checked 2026-10-14) | 0.38.0: `guidance_scale=4.0`, `stg_scale=0.0`, `modality_scale=1.0`. 0.40.0 and 0.41.0: `guidance_scale=3.0`, `stg_scale=1.0`, `modality_scale=3.0`, `audio_guidance_scale=7.0`, spatio-temporal guidance on block 28. Passing only `guidance_scale=1.0`, as the distilled model card does, therefore still runs extra guidance passes on 0.41 |
+| `LTX2Pipeline.__call__` (0.41.0) | Accepts `latents=`, `audio_latents=`, `sigmas=` and `noise_scale=`, so the refine stage needs no DFR pipeline |
+| `dg845/LTX-2.3-Diffusers` | Not distilled and ships no `latent_upsampler` component. The distilled diffusers repo has none either; the x2 upsampler is a single file in `Lightricks/LTX-2.3` |
 
 ## Proposed change
 
@@ -67,13 +70,17 @@ Each step is its own PR, in this order. Steps 1, 2 and 8 are small and fix what 
 
 ### 3. Two-stage video upscale on CUDA
 
+**Done (2026-10-14).** The default repo is now the distilled `diffusers/LTX-2.3-Distilled-Diffusers`, the upsampler is loaded from `Lightricks/LTX-2.3` (`video_model_presets.ltx.diffusers.latent_upsampler`), stage 1 runs at half size, and the refine runs through `LTX2Pipeline(latents=, sigmas=)` on the same pipeline, so DFR was not needed. Every diffusers call now passes the distilled sigmas and `guidance_scale=1.0`. Still open: the manual run on an NVIDIA GPU (t2v and i2v, `--low-memory` on and off, LoRA, Cancel during stage 2), including whether the guidance terms left at the 0.41 defaults cost speed or change the look.
+
+Original plan:
+
 Match the macOS flow (half-res stage 1, 2× latent upsample, refine at full res):
 
 - Stage 1: run the text-to-video or image-to-video pipeline at `width // 2` × `height // 2` with `output_type="latent"`. `video_cli` already aligns upscale sizes to 64, so the halves stay 32-aligned.
 - Upsample: pass the latents to `LTX2LatentUpsamplePipeline` (`latents=`, with the half size as `height`/`width`), returning latents.
-- Stage 2: denoise the upsampled latents at full size with the same distilled transformer over the stage-2 sigmas, then decode. In diffusers 0.41 that's the `LTX2Pipeline` call with `latents=` and `sigmas=` (the same trick the image backend uses for Krea 2), or `LTX2DFRPipeline` / `LTX2DFRTemporalRefinePipeline` if a spike shows they do this directly. The spike decides between them.
+- Stage 2: denoise the upsampled latents at full size with the same distilled transformer over the stage-2 sigmas, then decode. In diffusers 0.41 that's the `LTX2Pipeline` call with `latents=` and `sigmas=` (the same trick the image backend uses for Krea 2), or `LTX2DFRPipeline` / `LTX2DFRTemporalRefinePipeline` if a spike shows they do this directly. The spike decides between them. (Resolved in step 3: `LTX2Pipeline` was enough.)
 - Progress: stage 1 and stage 2 report real steps under the existing `video_upscale_stage_1` / `video_upscale_stage_2` phases, with one total, as on macOS.
-- Confirm that the configured `ltx-2.3` repo (`dg845/LTX-2.3-Diffusers`) ships a `latent_upsampler` component. If not, load it from a separate repo, configured under `video_model_presets.ltx.diffusers`.
+- Confirm that the configured `ltx-2.3` repo ships a `latent_upsampler` component. If not, load it from a separate repo, configured under `video_model_presets.ltx.diffusers`. (It does not; see the evidence table.)
 - Tests: mocked pipelines; assert the stage-1 size is half the target, the upsampler gets the half size, stage 2 runs at the target size, and the step totals.
 - **Review before upscaling for video** (moved here from [Review before upscaling](archive/upscale-review.md), which shipped for images everywhere and video on macOS). Once stage 1 returns latents, decode them to a temporary mp4 and call the backend's `review(path)` before stage 2, as `video_mac` does. Then make `supports_video_upscale_review()` in `backends/__init__.py` true on CUDA and drop the `ValueError` that `video_diffusers` raises for `review`. Measure the peak VRAM during the preview decode against the no-review peak; if it is higher, free the transformer for the preview and reload it on Approve. Tests: the mocked stage-1 latents are decoded and passed to `review` before stage 2 runs, and a discard skips stage 2.
 
@@ -142,11 +149,11 @@ macOS extends a clip by pinning its last 25 frames at the start of a one-stage w
 
 - **One big parity PR.** Rejected: the video steps need hardware to verify and would hold back the small fixes (1, 2, 8).
 - **Turn off Klein img2img on CUDA permanently.** Rejected: Klein is the default model, and refining images is a core feature.
-- **Use only `LTX2DFRPipeline` for the CUDA upscale.** Possible, but it's new in 0.41 and its output isn't compared with the macOS two-stage flow yet. The spike in step 3 decides.
+- **Use only `LTX2DFRPipeline` for the CUDA upscale.** Possible, but it's new in 0.41 and its output isn't compared with the macOS two-stage flow yet. The spike in step 3 decided: `LTX2Pipeline` was enough.
 
 ## Open questions
 
 - Which attribute holds the LTX-2 audio sample rate in diffusers 0.41 (step 2).
-- Whether `dg845/LTX-2.3-Diffusers` includes the latent upsampler, and whether `LTX2Pipeline` accepts `latents=` plus `sigmas=` for the refine stage (step 3).
+- ~~Whether the configured repo includes the latent upsampler, and whether `LTX2Pipeline` accepts `latents=` plus `sigmas=` for the refine stage (step 3).~~ Answered (2026-10-14): the repo has no upsampler, which is loaded from `Lightricks/LTX-2.3`, and `LTX2Pipeline` accepts both.
 - Whether the per-backend capability override in step 1 is worth adding, or the fix should ship directly.
 - How much quality q4 costs for LTX on CUDA, and whether only q8 should be offered (step 5).

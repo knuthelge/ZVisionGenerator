@@ -17,7 +17,7 @@ These files are not part of the published docs site, and the docs don't link to 
 | Proposal | Status | Summary |
 |---|---|---|
 | [Controls for Web UI video jobs](video-job-controls.md) | In progress | Quit has shipped; Next and Pause for video jobs remain |
-| [Feature parity between macOS and Windows/Linux](platform-parity.md) | Proposed | Klein img2img, video audio, two-stage video upscale with review, quantized and streamed video with memory badges on CUDA, extending a video; matching Z-Image scheduler, ffmpeg install and enhancer download |
+| [Feature parity between macOS and Windows/Linux](platform-parity.md) | In progress | Klein img2img, video audio, two-stage video upscale (done) with review, quantized and streamed video with memory badges on CUDA, extending a video; matching Z-Image scheduler, ffmpeg install and enhancer download |
 | [First and last frame for image-to-video](video-first-last-frame.md) | Proposed | An optional end image for `img2vid`: macOS first (MLX keyframe on the true last frame), then CUDA via `LTX2ConditionPipeline.from_pipe` with generate-and-trim once a spike confirms it; Last frame picker, `--end-image`, recorded settings and a two-frame enhancer rule |
 | [Upscale existing videos 2× on macOS](video-upscale-existing.md) | Proposed | Generate at `m`, extend, then upscale the finished video 2× from the viewer with LTX's own upsampler and a 1–3 step distilled refine, tiled over time for long clips; original audio kept. Replaces a SeedVR2 plan that won't fit a 32 GB Mac; a half-day spike sets steps and tiling |
 | [Edit images: inpaint, extend and Klein edits](image-editing.md) | Proposed | Paint a mask and redraw it, extend the canvas, and (Klein) edit from a prompt, through one editor opened from any image |

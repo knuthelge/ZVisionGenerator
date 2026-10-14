@@ -22,7 +22,7 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 - **Model store** — central `~/.ziv/` directory with bare-name resolution and HuggingFace fallback
 - **LoRA support** — single or stacked, configurable weights, bare-name resolution
 - **Image upscale** — generate small → Lanczos → img2img refine → CAS sharpen
-- **Video upscale** — 2× spatial upscaling through the platform LTX backend when supported by the selected runtime
+- **Video upscale** — `--upscale 2` renders at half size, upsamples the latents 2× and refines at full size, so the clip keeps the requested size, on macOS and on Windows/Linux
 - **Reference images** — img2img steering from any starting image
 - **Model variants** — image quantization across supported image backends, plus macOS MLX video Q4/Q8 aliases
 - **Post-processing** — contrast, saturation, and CAS sharpening (image only)
@@ -56,7 +56,7 @@ uv sync
 
 > Video generation requires [ffmpeg](https://ffmpeg.org/). On Windows and Linux, image and video generation require an RTX 20-series (Turing) or newer NVIDIA GPU, including RTX 50-series, with NVIDIA driver 580 or newer, so that CUDA is available to PyTorch.
 
-> The packaged Windows/Linux `ltx-2.3` alias defaults to the configurable diffusers-converted repository `dg845/LTX-2.3-Diffusers`. This is the diffusers-compatible layout required by the Windows/Linux video backend, not an official Lightricks alias. Override it in `~/.ziv/config.yaml` if you want to point `ltx-2.3` at a different compatible diffusers repository.
+> The packaged Windows/Linux `ltx-2.3` alias defaults to the distilled diffusers checkpoint `diffusers/LTX-2.3-Distilled-Diffusers`, which runs 8 steps at `guidance_scale` 1.0. Only distilled checkpoints are supported. Override the repository with `video_model_presets.ltx.diffusers.default_repo` in `~/.ziv/config.yaml` if you want to point `ltx-2.3` at a different distilled diffusers repository. `--upscale 2` downloads the 2× upsampler (about 1 GB) on its first use.
 
 > The macOS video aliases `ltx-4` and `ltx-8` are the shipped MLX Q4/Q8 presets. Windows and Linux use the diffusers-backed `ltx-2.3` alias instead, so the Q4/Q8 naming does not carry across platforms.
 

@@ -105,7 +105,7 @@ Platform-aware aliases:
 
 - macOS: `ltx-4`, `ltx-8`
 - Windows and Linux: `ltx-2.3`
-- The Windows/Linux alias resolves through `video_model_presets.ltx.diffusers.default_repo`, which defaults to `dg845/LTX-2.3-Diffusers` and can be overridden in `~/.ziv/config.yaml`.
+- The Windows/Linux alias resolves through `video_model_presets.ltx.diffusers.default_repo`, which defaults to the distilled checkpoint `diffusers/LTX-2.3-Distilled-Diffusers` and can be overridden in `~/.ziv/config.yaml`. Only distilled checkpoints are supported; the backend runs the distilled schedule (up to 8 steps) at `guidance_scale` 1.0.
 - `ltx-4` and `ltx-8` are the shipped macOS MLX Q4/Q8 aliases. `ltx-2.3` is the Windows/Linux diffusers alias and does not imply a packaged Q4/Q8 tier.
 
 | Argument | Default | Description |
@@ -123,10 +123,10 @@ Platform-aware aliases:
 | `--frames` | model-aware | Number of frames (LTX: auto-aligned to 8k+1) |
 | `--ratio` | `16:9` | Aspect ratio preset (16:9, 9:16, 1:1) |
 | `-s`, `--size` | `m` | Size preset (`s`, `m`, `l`, `xl`) |
-| `--steps` | model-aware | Inference steps |
+| `--steps` | model-aware | Inference steps (LTX: up to 8; on Windows/Linux, fewer than 8 keeps the end of the distilled schedule) |
 | `--seed` | `None` (random) | Seed for reproducible video generation |
 | `--low-memory` / `--no-low-memory` | enabled | Low-memory mode for LTX. On macOS with 24 GB of memory or less it also streams the transformer from disk, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. `--no-low-memory` turns that off too |
-| `--upscale` | disabled | Upscale factor: `2` only. Fails explicitly when the active backend cannot provide the LTX latent upscaler. |
+| `--upscale` | disabled | Upscale factor: `2` only. Renders at half size, upsamples the latents 2×, then refines at full size, so the output keeps the requested size. On Windows/Linux the first use downloads the 2× upsampler (about 1 GB; `video_model_presets.ltx.diffusers.latent_upsampler`) |
 | `--review` | `False` | Pause after each small render to approve (`y`) or discard (`n`) the upscale. Needs `--upscale` and a terminal. macOS only for now |
 | `--audio` / `--no-audio` | enabled | Include or strip audio in video output. macOS only; Windows/Linux videos have no audio track |
 | `--lora` | `None` | Comma-separated LoRAs with optional weights: `name:0.8,name2:0.5`. Windows/Linux require diffusers-compatible LTX LoRA adapters. |

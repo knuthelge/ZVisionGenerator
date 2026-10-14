@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - macOS: plain image upscale with SeedVR2 in the Web UI. The viewer's Upscale menu offers **2×** and **4×** that enlarge an image faithfully, without the image model re-imagining it, and need no image model. The first use downloads the model (17.0 GB for the larger one, 7.3 GB for the smaller one the Mac falls back to when it has less memory), then stores a compact 8-bit copy and removes the download. A size that may not fit in memory stays available, marked **high memory**, and can run slowly or fail. The job card shows the download as its own step
 - macOS: the Models page lists the SeedVR2 upscale model with its download state and how much disk its stored copy uses, and can delete that copy; the next plain upscale downloads it again
 - Docs: a Linux troubleshooting note for when `systemd-oomd` closes the terminal or editor while a large model loads, with an optional drop-in that relaxes its limit
+- Windows/Linux: `video_model_presets.ltx.diffusers.latent_upsampler` (`repo`, `filename`) selects the weights of the 2x spatial upsampler that `--upscale 2` uses
 
 ### Changed
 - Video (macOS): more accurate memory estimates. The Extend note and the video model badge were too high with **Low memory** on and too low with it off; the badge now estimates a 5 s clip at 704×448
@@ -21,6 +22,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Web UI: video length is set in seconds (**Duration (s)**) instead of frames. It snaps to a frame count the model accepts (8k+1 for LTX), shows that count, and is no longer capped at 256 frames
 - Web UI: stopping the server (Ctrl-C on `ziv ui`) cancels the running job instead of waiting for it
 - Web UI: the creative image upscale (the image model refines the enlarged image) is labelled **2× creative** and **4× creative** in the Upscale menu, the toast and the job size line. Press `X` then `2` or `4` for the plain upscale on macOS, and for the creative one on Windows/Linux. Details of an upscaled image show the method used
+- **Breaking** — Windows/Linux: `ltx-2.3` uses the distilled `diffusers/LTX-2.3-Distilled-Diffusers` checkpoint (a new download) with its 8-step schedule and `guidance_scale` 1.0, as its model card says. `--steps` below 8 keeps the end of the schedule. Only distilled checkpoints are supported: `dg845/LTX-2.3-Diffusers` and other non-distilled repositories are no longer the default or recognised by name, so remove a `default_repo` override that points at one
+- Windows/Linux: video needs diffusers 0.38.0 or newer
+
+### Fixed
+- Windows/Linux: `--upscale 2` works. It renders at half size, upsamples 2x with the LTX-2.3 spatial upsampler (about 1 GB, downloaded on the first upscale run) and refines for 3 steps at full size, so the clip has the requested size instead of about twice it. The refinement reports its own steps and Cancel stops it at the next step
+- Windows/Linux: video decoding uses tiled VAE decoding, which keeps its memory down
 
 ## [0.13.0b19] - 2026-10-11
 

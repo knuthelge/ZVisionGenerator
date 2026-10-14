@@ -8,8 +8,8 @@ Generate videos from text prompts or images using `ziv-video`. macOS uses the ML
 |---|---|---|---|---|
 | macOS | `ltx-4` | MLX (`ltx-pipelines-mlx`) | `dgrauet/ltx-2.3-mlx-q4` | ✅ |
 | macOS | `ltx-8` | MLX (`ltx-pipelines-mlx`) | `dgrauet/ltx-2.3-mlx-q8` | ✅ |
-| Windows | `ltx-2.3` | diffusers/CUDA | `dg845/LTX-2.3-Diffusers` by default | ✅ |
-| Linux | `ltx-2.3` | diffusers/CUDA | `dg845/LTX-2.3-Diffusers` by default | ✅ |
+| Windows | `ltx-2.3` | diffusers/CUDA | `diffusers/LTX-2.3-Distilled-Diffusers` by default | ✅ |
+| Linux | `ltx-2.3` | diffusers/CUDA | `diffusers/LTX-2.3-Distilled-Diffusers` by default | ✅ |
 
 ## Model Aliases
 
@@ -75,7 +75,7 @@ The **Rewrite** option chooses what is written: **Scene and action**, or **Actio
 
 ## Prompt Enhancement
 
-Video prompts can be rewritten by the local [prompt enhancer](prompts.md#enhancing-prompts), which writes a scene and an action (see [Scene and Action](#scene-and-action)), adds visible motion and camera movement in time order and fits the action to the clip length. With audio on (macOS only), the **Sound** options add ambience, sound effects, dialogue or music, and sounds you wrote are always kept. Use `--enhance style=cinematic,motion=action+camera-move,sound=ambient+effects`, or the Enhance options in the Web UI. For image-to-video, the rewrite describes motion and change rather than appearance; the enhancer does not see the starting image itself. Prompts are rewritten before the video model loads, and the enhancer is unloaded first, so it adds no memory during generation. In the Web UI, **Cancel** (or `Esc` twice) stops a video job while prompts are rewritten and at the next denoising step; while the model loads, and during the Windows/Linux upscale pass, it takes effect once that finishes. Pause, Skip and Repeat are not available for video.
+Video prompts can be rewritten by the local [prompt enhancer](prompts.md#enhancing-prompts), which writes a scene and an action (see [Scene and Action](#scene-and-action)), adds visible motion and camera movement in time order and fits the action to the clip length. With audio on (macOS only), the **Sound** options add ambience, sound effects, dialogue or music, and sounds you wrote are always kept. Use `--enhance style=cinematic,motion=action+camera-move,sound=ambient+effects`, or the Enhance options in the Web UI. For image-to-video, the rewrite describes motion and change rather than appearance; the enhancer does not see the starting image itself. Prompts are rewritten before the video model loads, and the enhancer is unloaded first, so it adds no memory during generation. In the Web UI, **Cancel** (or `Esc` twice) stops a video job while prompts are rewritten and at the next denoising step, in both passes of an upscaled video; while the model loads, and during the short latent upsample between the two passes of a Windows/Linux upscale, it takes effect once that finishes. Pause, Skip and Repeat are not available for video.
 
 ## Video Upscale & Audio
 
@@ -96,7 +96,12 @@ ziv-video -m MODEL --no-audio --prompt "..."
 ziv-video -m MODEL --upscale 2 --no-audio --prompt "..."
 ```
 
-`--upscale 2` is the only supported video upscale mode. On macOS it uses the existing MLX distilled two-stage path. On Windows and Linux it uses the diffusers latent upscaler when that API is present in the installed diffusers build. If the selected runtime or model layout does not expose the latent upscaler, `ziv-video` fails explicitly instead of silently ignoring the request.
+`--upscale 2` is the only supported video upscale mode. It works in two stages on every platform: the clip is rendered at half the requested width and height, its latents are upsampled 2× with the LTX-2.3 spatial upsampler, and a short refinement at full size sharpens the result. The finished clip has the width and height you asked for, and progress counts both stages as one run.
+
+- **Steps** — `--steps` (default 8, at most 8) sets the half-size stage. On Windows and Linux the refinement adds 3 steps, so the default run shows 11 steps in total. LoRAs apply to both stages.
+- **Windows and Linux upsampler** — the upsampler weights (about 1 GB) come from the Hugging Face file named by `video_model_presets.ltx.diffusers.latent_upsampler` (`repo` and `filename`, set in the packaged config) and are downloaded on the first upscale run. A missing or mismatched file is reported before the video model loads. Other runs do not load the upsampler.
+- **Memory** — with `--low-memory` (the default) the Windows/Linux upsampler stays in system memory and moves to the GPU only while it upsamples. With `--no-low-memory` it stays on the GPU.
+- **Size** — width and height must be divisible by 64, and are aligned to 64 with a warning when needed.
 
 Audio is generated on macOS only. On Windows and Linux videos have no audio track, so `--audio` has no effect and the Web UI hides the Audio toggle and the enhancer's Sound options.
 
@@ -221,7 +226,7 @@ LTX-2.3 has specific alignment requirements that are auto-corrected with a warni
 - **macOS MLX Q4 baseline**: `ltx-4`, 704×448, ≤49 frames with `--low-memory`
 - **macOS low memory**: `--low-memory` (the default) frees each model component once it has run. On Macs with 24 GB of memory or less it also streams the transformer from disk during generation, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. `--no-low-memory` (or **Low memory** off in the Web UI) turns off both, keeping every component loaded
 
-Windows and Linux use the configurable diffusers repository behind `ltx-2.3` instead of shipped Q4/Q8 aliases.
+Windows and Linux use the configurable diffusers repository behind `ltx-2.3` instead of shipped Q4/Q8 aliases. That backend supports distilled checkpoints only: every run uses the distilled schedule with at most 8 steps and `guidance_scale` 1.0. With fewer than 8 steps it keeps the end of the schedule. Video decoding is tiled to keep memory down.
 
 ## Memory Check
 
@@ -237,10 +242,10 @@ The estimate grows with the number of frames and the pixels per frame. It was me
 `ziv-video` auto-detects the model family from supported model values:
 
 - **Aliases** — `ltx-4` and `ltx-8` on macOS, `ltx-2.3` on Windows and Linux
-- **Supported/configured repo IDs** — known LTX prefixes such as `dgrauet/ltx*` and `Lightricks/LTX-Video*`, plus the configured `video_model_presets.ltx.diffusers.default_repo`
+- **Supported/configured repo IDs** — known LTX prefixes such as `dgrauet/ltx*` and `Lightricks/LTX-Video*`, including `diffusers/LTX-2.3-Distilled-Diffusers`, plus the configured `video_model_presets.ltx.diffusers.default_repo`
 - **Local paths** — local paths containing `ltx` are treated as LTX candidates, including Windows-style path strings on any host
 
-For Windows/Linux direct repo swaps, point `ltx-2.3` at a compatible diffusers repository in `~/.ziv/config.yaml`. Arbitrary unconfigured HuggingFace repositories are not accepted solely because their names contain `ltx`.
+For Windows/Linux direct repo swaps, point `ltx-2.3` at another distilled LTX-2.3 diffusers repository with `video_model_presets.ltx.diffusers.default_repo` in `~/.ziv/config.yaml`. Non-distilled repositories are not supported. Arbitrary unconfigured HuggingFace repositories are not accepted solely because their names contain `ltx`.
 
 Runtime `--lora` values must be local LoRA files or bare LoRA names that resolve from `~/.ziv/loras/`. HuggingFace-shaped LoRA references such as `org/lora:0.8` are import inputs for `ziv-model lora --hf`, not direct generation inputs.
 

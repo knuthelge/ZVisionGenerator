@@ -185,7 +185,15 @@ SeedVR2, the plain upscale of existing images, is macOS-only and has its own sma
 
 The `image_win.py` module is the shared diffusers/CUDA image backend for both Windows and Linux. The filename is historical; platform selection still happens only in `backends/__init__.py`.
 
-Windows and Linux video resolution is config-driven through `video_model_presets.ltx.diffusers.default_repo` and the `ltx-2.3` alias. The backend assumes a diffusers-compatible repository layout and keeps the configured default overrideable from user config. macOS keeps the MLX-only `ltx-4` and `ltx-8` aliases.
+Windows and Linux video resolution is config-driven through `video_model_presets.ltx.diffusers.default_repo` and the `ltx-2.3` alias. The backend targets distilled LTX-2.3 diffusers checkpoints only, so the packaged default is `diffusers/LTX-2.3-Distilled-Diffusers`, and the configured default stays overrideable from user config. macOS keeps the MLX-only `ltx-4` and `ltx-8` aliases.
+
+`backends/video_diffusers.py` passes the distilled sigma tables from `diffusers.pipelines.ltx2.utils` on every generation call, with `num_inference_steps` equal to their length and `guidance_scale=1.0` as the only guidance argument (`_DISTILLED_GUIDANCE`), so the other guidance terms follow the installed diffusers defaults. Fewer steps than the table keep its first sigma and its tail. The `--upscale 2` flow is two-stage:
+
+1. Stage 1 runs the generation pipeline at half the requested size with `output_type="latent"`.
+2. An `LTX2LatentUpsamplePipeline` upsamples the latents 2×. It is built around the generation pipeline's own VAE and is never moved with `.to()` or given CPU offload, since either would re-hook that shared VAE. In low-memory mode the upsampler model waits on the CPU and visits the GPU only for this pass.
+3. Stage 2 calls the same LoRA-bearing generation pipeline at full size with the upsampled latents, the stage-1 audio latents and the stage-2 sigmas. The scheduler is swapped for a static-shift copy for that call only and restored afterwards, even when the call fails.
+
+The upsampler weights are one safetensors file resolved with `hf_hub_download` from `video_model_presets.ltx.diffusers.latent_upsampler` (`repo`, `filename`; read with `utils.config.ltx_latent_upsampler_source`) before the generation pipeline loads, and only when upscaling. Both stages report steps as one run under the `video_upscale_stage_1` and `video_upscale_stage_2` phases, as the macOS backend does.
 
 Extending a clip is an optional capability, not part of `VideoBackend`: the `VideoExtender` Protocol in `core/video_backend.py` declares `extend_video(model, source, prompt, *, extend_frames, seed, steps, segment_dir, audio_output, step_callback=None)`, which only the macOS backend implements. Callers gate on `supports_video_extend()` in `backends/__init__.py` (beside `supports_video_audio()`) and look the method up on the backend; the Web UI contract drops the `extend` workflow, and the CLI refuses `--extend`, when it is false.
 
@@ -280,7 +288,7 @@ The Web UI has one design system. Its tokens live in `@theme` in `frontend/src/a
 
 ### Test Strategy
 
-Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.
+Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, upsampler weight download and loading, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.
 
 ## Vendored LTX
 

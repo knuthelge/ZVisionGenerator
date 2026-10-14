@@ -18,7 +18,7 @@ Z-Vision Generator gives you a unified CLI for both image and video generation, 
 - **Model store** — central `~/.ziv/` directory with bare-name resolution, aliases, local paths, and supported HuggingFace model references
 - **LoRA support** — single or stacked, configurable weights, bare-name resolution (image and video)
 - **Image upscale** — generate small → Lanczos → img2img refine → CAS sharpen
-- **Video upscale** — macOS MLX uses distilled two-stage 2× spatial upscaling; Windows/Linux diffusers uses latent upscaling when the model supports it and fails explicitly when it does not
+- **Video upscale** — `--upscale 2` renders at half size, upsamples the latents 2× and refines at full size, so the clip keeps the requested size, on macOS and on Windows/Linux
 - **Reference images** — img2img steering from any starting image
 - **Model variants** — image quantization across supported image backends, plus macOS MLX video Q4/Q8 aliases
 - **Post-processing** — contrast, saturation, and CAS sharpening (image only)

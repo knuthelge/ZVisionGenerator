@@ -64,7 +64,8 @@ ziv-video -m MODEL -p prompts.yaml -r 3
 
 - macOS exposes `ltx-4` and `ltx-8`, which resolve to the MLX LTX repositories and are the shipped Q4/Q8 presets.
 - Windows and Linux expose `ltx-2.3`, which resolves to the configurable diffusers repository in `video_model_presets.ltx.diffusers.default_repo`.
-- The packaged default is `dg845/LTX-2.3-Diffusers`, a diffusers-converted repository with the layout required by the Windows/Linux diffusers video backend. It is a configurable diffusers default, not a shipped Q4/Q8 alias.
+- The packaged default is `diffusers/LTX-2.3-Distilled-Diffusers`, the distilled LTX-2.3 checkpoint in diffusers format. It runs 8 steps at `guidance_scale` 1.0, and `--steps` below 8 keeps the end of that schedule. Only distilled checkpoints are supported. It is a configurable diffusers default, not a shipped Q4/Q8 alias.
+- `--upscale 2` loads a 2× latent upsampler (about 1 GB) from the Hugging Face file named by `video_model_presets.ltx.diffusers.latent_upsampler`, downloaded on the first upscale run.
 
 To override the Windows/Linux default video repository, add a user config file at `~/.ziv/config.yaml`:
 
@@ -72,10 +73,13 @@ To override the Windows/Linux default video repository, add a user config file a
 video_model_presets:
   ltx:
     diffusers:
-      default_repo: your-org/your-ltx-diffusers-repo
+      default_repo: your-org/your-distilled-ltx-repo
+      latent_upsampler:
+        repo: your-org/your-ltx-upsampler
+        filename: your-upsampler-x2.safetensors
 ```
 
-After the override, `ziv-video -m ltx-2.3 ...` and the Web UI both resolve to the new repository.
+After the override, `ziv-video -m ltx-2.3 ...` and the Web UI both resolve to the new repository. `latent_upsampler` is optional and only used by `--upscale 2`.
 
 ### Model & LoRA Management
 
