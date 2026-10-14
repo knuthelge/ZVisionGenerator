@@ -622,6 +622,34 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#linux-the-terminal-or-editor-closes-while-a-model-loads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux: the terminal or editor closes while a model loads
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1113,6 +1141,34 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Troubleshooting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#linux-the-terminal-or-editor-closes-while-a-model-loads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linux: the terminal or editor closes while a model loads
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1187,15 +1243,19 @@ ziv-video -m MODEL -p prompts.yaml -r 3
 <ul>
 <li>macOS exposes <code>ltx-4</code> and <code>ltx-8</code>, which resolve to the MLX LTX repositories and are the shipped Q4/Q8 presets.</li>
 <li>Windows and Linux expose <code>ltx-2.3</code>, which resolves to the configurable diffusers repository in <code>video_model_presets.ltx.diffusers.default_repo</code>.</li>
-<li>The packaged default is <code>dg845/LTX-2.3-Diffusers</code>, a diffusers-converted repository with the layout required by the Windows/Linux diffusers video backend. It is a configurable diffusers default, not a shipped Q4/Q8 alias.</li>
+<li>The packaged default is <code>diffusers/LTX-2.3-Distilled-Diffusers</code>, the distilled LTX-2.3 checkpoint in diffusers format. It runs 8 steps at <code>guidance_scale</code> 1.0, and <code>--steps</code> below 8 keeps the end of that schedule. Only distilled checkpoints are supported. It is a configurable diffusers default, not a shipped Q4/Q8 alias.</li>
+<li><code>--upscale 2</code> loads a 2× latent upsampler (about 1 GB) from the Hugging Face file named by <code>video_model_presets.ltx.diffusers.latent_upsampler</code>, downloaded on the first upscale run.</li>
 </ul>
 <p>To override the Windows/Linux default video repository, add a user config file at <code>~/.ziv/config.yaml</code>:</p>
 <pre><code class="language-yaml">video_model_presets:
   ltx:
     diffusers:
-      default_repo: your-org/your-ltx-diffusers-repo
+      default_repo: your-org/your-distilled-ltx-repo
+      latent_upsampler:
+        repo: your-org/your-ltx-upsampler
+        filename: your-upsampler-x2.safetensors
 </code></pre>
-<p>After the override, <code>ziv-video -m ltx-2.3 ...</code> and the Web UI both resolve to the new repository.</p>
+<p>After the override, <code>ziv-video -m ltx-2.3 ...</code> and the Web UI both resolve to the new repository. <code>latent_upsampler</code> is optional and only used by <code>--upscale 2</code>.</p>
 <h3 id="model-lora-management">Model &amp; LoRA Management</h3>
 <pre><code class="language-bash"># Convert a Z-Image checkpoint
 ziv-model model -i checkpoint.safetensors --name my-model
@@ -1221,7 +1281,7 @@ uv run ziv ui --no-browser
 <p>If the server can't start a job with the current settings, for example image-to-image without a reference image, the reason shows above the Generate button and in a notice. It goes away when you change a setting.</p>
 <p>To run the same job from a terminal, press the terminal button in the <em>Settings</em> header. It copies a <code>ziv image</code> or <code>ziv video</code> command with the current model, prompt, LoRAs and settings, writing to the Web UI's output folder. The CLI has no inline negative prompt and runs every prompt in a prompts file rather than only the selected ones, so a notice says when the copied command differs from what Generate would run; an uploaded reference image is named by its file name, so replace it with the file's path.</p>
 <p>To give the preview more room, collapse the Compose and Settings sidebar with the <strong>«</strong> button next to <em>Compose</em>. It folds into a narrow strip with an expand button and a Generate button, and the choice is remembered in the browser. On phone-width screens the sidebar always shows above the preview.</p>
-<p>While a job runs, its card shows the progress, the time left and a live preview of the current image. <strong>Pause</strong> and <strong>Cancel</strong> are at the top of the card; <strong>Skip</strong> and <strong>Repeat</strong> are next to the current image. Pause and Repeat wait until the current image is finished, while Skip and Cancel stop it at its next step. A video job offers Cancel only; while its model loads, Cancel takes effect once loading finishes. If a job fails, the card shows why. Finished images appear in the history strip.</p>
+<p>While a job runs, its card shows the progress, the time left and a live preview of the current image. <strong>Pause</strong> and <strong>Cancel</strong> are at the top of the card; <strong>Skip</strong> and <strong>Repeat</strong> are next to the current image. Pause and Repeat wait until the current image is finished, while Skip and Cancel stop it at its next step. A video job offers Cancel only, plus Approve and Discard while it waits for a review (macOS); while its model loads, Cancel takes effect once loading finishes. If a job fails, the card shows why. Finished images appear in the history strip.</p>
 <p>The workspace model picker and the Models page show whether each model is already downloaded; models that are not yet downloaded download on first use. They also show whether a downloaded model fits this machine's memory. On macOS this is compared with the GPU memory Apple recommends for the machine:</p>
 <ul>
 <li><strong>Fits</strong>: the estimate is at most 1.1 times the recommendation.</li>
@@ -1304,11 +1364,15 @@ uv run ziv ui --no-browser
 </tr>
 <tr>
 <td><code>N</code></td>
-<td>Skip to the next image</td>
+<td>Skip to the next image; during a review, discard the small render</td>
 </tr>
 <tr>
 <td><code>R</code></td>
 <td>Repeat the current image</td>
+</tr>
+<tr>
+<td><code>Y</code></td>
+<td>Approve the small render for upscaling (during a review)</td>
 </tr>
 </tbody>
 </table>
@@ -1405,7 +1469,7 @@ uv run ziv ui --no-browser
 </tr>
 <tr>
 <td><code>E</code></td>
-<td>Use as reference: load the asset as the reference image, together with its prompt</td>
+<td>Use as reference: load an image as the reference image, together with its prompt. On a video (macOS), Extend: open it in the Extend Video tab</td>
 </tr>
 <tr>
 <td><code>D</code></td>
@@ -1473,6 +1537,23 @@ ziv-image -m my-model --prompt &quot;a landscape&quot;
 </code></pre>
 <h3 id="error-log">Error Log</h3>
 <p>Each command records warnings and errors, with full tracebacks, in <code>~/.ziv/logs/&lt;command&gt;.log</code> (<code>ui.log</code>, <code>image.log</code>, <code>video.log</code> or <code>model.log</code>). The file is cleared every time the command starts, so it only covers the latest run, and stays empty when nothing goes wrong. If the logs folder cannot be written, the log goes to the system temp folder instead; <code>ziv ui</code> prints the file's location at startup. Set <code>ZIV_LOG=off</code> to turn the log off.</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<h3 id="linux-the-terminal-or-editor-closes-while-a-model-loads">Linux: the terminal or editor closes while a model loads</h3>
+<p>On Linux distributions that run <code>systemd-oomd</code>, such as Ubuntu, loading a large model can close the terminal or editor that started the job, and the job with it, even when there is enough memory for the load to finish. <code>systemd-oomd</code> reacts to memory pressure (the time spent waiting for memory to be reclaimed), not to running out of memory. Loading 15–35 GB of weights on a machine with about 32 GB of RAM fills the page cache and can keep pressure above Ubuntu's limit of 50% for 20 seconds. oomd then stops the whole terminal or editor the job runs in. <code>journalctl -u systemd-oomd</code> lists each time it did.</p>
+<p>To relax the limit for your user session, create <code>/etc/systemd/system/user@.service.d/99-oomd-relax.conf</code> with sudo:</p>
+<pre><code class="language-ini">[Service]
+ManagedOOMMemoryPressureLimit=80%
+ManagedOOMMemoryPressureDurationSec=60s
+</code></pre>
+<ul>
+<li><strong>Apply:</strong> run <code>sudo systemctl daemon-reload</code>, then log out and back in, or reboot.</li>
+<li><strong>Verify:</strong> <code>systemctl show user@$(id -u).service -p ManagedOOMMemoryPressureLimit</code> prints <code>80%</code>, and <code>oomctl</code> lists the new limit.</li>
+<li><strong>Revert:</strong> delete the file and repeat the reload and re-login.</li>
+</ul>
+<p>80% for 60 seconds still stops runaway memory use, but lets typical model loads finish. The largest loads, such as Krea 2 without quantization, can still go over it; use <code>-q 8</code> or <code>-q 4</code> on these machines. ZVisionGenerator never changes this setting itself.</p>
+<p>To protect your editor when oomd does act, start heavy jobs in their own unit, so oomd stops the job rather than the editor:</p>
+<pre><code class="language-bash">systemd-run --user --collect --same-dir -p OOMScoreAdjust=500 ziv-image -m my-model --prompt &quot;a landscape&quot;
+</code></pre>
 
 
 

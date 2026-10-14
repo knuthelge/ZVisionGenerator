@@ -658,6 +658,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#review-before-upscaling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review before upscaling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#upscaling-an-existing-image-web-ui" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -665,6 +676,34 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Upscaling an existing image (Web UI)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#plain-upscale-macos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plain upscale (macOS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#creative-upscale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Creative upscale
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -1148,6 +1187,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#review-before-upscaling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review before upscaling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#upscaling-an-existing-image-web-ui" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1155,6 +1205,34 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Upscaling an existing image (Web UI)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#plain-upscale-macos" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Plain upscale (macOS)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#creative-upscale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Creative upscale
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
         
@@ -1504,10 +1582,56 @@ ziv-image -m my-model --prompt &quot;a landscape&quot; --upscale 2 --no-upscale-
 </tr>
 </tbody>
 </table>
+<h3 id="review-before-upscaling">Review before upscaling</h3>
+<p>With a review, each generation pauses after the small render, before the upscale. <strong>Approve</strong> upscales it; <strong>Discard</strong> skips the image and saves nothing. In the Web UI, turn on the <strong>Review</strong> row under <strong>Upscale</strong> and press <strong>Y</strong> to approve or <strong>N</strong> to discard. On the command line, add <code>--review</code> to <code>--upscale</code>. It needs a terminal and prints the path of the small render; press <code>y</code> to approve, <code>n</code> to discard or <code>q</code> to quit.</p>
+<pre><code class="language-bash">ziv-image -m my-model --prompt &quot;a landscape&quot; --upscale 2 --review
+</code></pre>
+<p>In a batch every image pauses. A Pause, Repeat or Next queued before the review still applies: pause and repeat take effect after the current image, and Next skips it.</p>
 <h3 id="upscaling-an-existing-image-web-ui">Upscaling an existing image (Web UI)</h3>
-<p>To upscale an image you already have, choose <strong>Upscale → 2×</strong> or <strong>4×</strong> in the asset viewer (Gallery or Workspace) or in the <strong>⋯</strong> menu on its thumbnail. In the viewer you can also press <strong>X</strong> then <strong>2</strong> or <strong>4</strong>. Each option shows the output size, e.g. <code>2× → 1664×2432</code>. The job runs in the Workspace job panel, or joins the queue when another job is running; starting it from the Gallery takes you there.</p>
+<p>To upscale an image you already have, open the <strong>Upscale</strong> menu in the asset viewer (Gallery or Workspace) or the <strong>⋯</strong> menu on its thumbnail. Each option shows the output size, e.g. <code>2× → 1664×2432</code>. The job runs in the Workspace job panel, or joins the queue when another job is running; starting it from the Gallery takes you there.</p>
+<p>There are two kinds of upscale:</p>
+<table>
+<thead>
+<tr>
+<th>Menu item</th>
+<th>Available on</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>2×</strong>, <strong>4×</strong></td>
+<td>macOS</td>
+<td>A plain upscale with SeedVR2: one step, no prompt, no image model. It enlarges the image faithfully and adds fine detail without redrawing it.</td>
+</tr>
+<tr>
+<td><strong>2× creative</strong>, <strong>4× creative</strong></td>
+<td>all platforms</td>
+<td>The image model redraws the enlarged image (img2img) with the image's own settings.</td>
+</tr>
+</tbody>
+</table>
+<p>On Windows and Linux the menu shows only the creative items, labelled "creative". In the viewer, press <strong>X</strong> then <strong>2</strong> or <strong>4</strong> to run the plain upscale on macOS, or the creative one on Windows and Linux. The creative items on macOS are in the menu only.</p>
+<h4 id="plain-upscale-macos">Plain upscale (macOS)</h4>
+<p>The plain upscale works for any image: files without recorded settings, imported files and images from models that cannot upscale or refine images (e.g. Ideogram 4). No image model needs to be configured, and the job panel notes "original settings unknown" for a file without a record. The result is saved as is, without the sharpen, contrast and saturation passes. A source that has a record carries its prompt, model and LoRAs over for <strong>Reuse settings</strong>.</p>
+<ul>
+<li><strong>Model.</strong> The app picks one SeedVR2 model for your Mac from its memory: the 7B model where an output of 16 megapixels (a 4× upscale of a 1 MP image) fits in memory, otherwise the 3B model. Both run at 8-bit. To force a model, set <code>seedvr2.model</code> (below).</li>
+<li><strong>First use.</strong> The job downloads the model (about 17 GB for 7B, 7.3 GB for 3B) and the job panel shows this as its own step. It then stores an 8-bit copy in the models folder (<code>~/.ziv/models/</code>) and removes the downloaded files to save disk, so the model keeps roughly half of its download size on disk. Later upscales load the copy. The Models page lists the model your Mac uses as <code>seedvr2-7b@q8</code> (or <code>seedvr2-3b@q8</code>). Once the copy exists, the row shows its disk use and a delete button that removes it; the next plain upscale downloads the model again. That clean-up deletes the two downloaded files (the model's transformer and the shared VAE) from the shared Hugging Face cache, so they are removed even if another tool had cached them. If the chosen model changes (a <code>seedvr2.model</code> edit or a Mac with different memory), the previous model's copy stays in the hidden <code>.seedvr2</code> folder inside the models folder and is not shown on the Models page; delete that folder by hand to reclaim the space.</li>
+<li><strong>Memory.</strong> A size that may need more memory than your Mac's GPU memory budget stays available, marked <strong>· high memory</strong>, and its tooltip says so. The job runs, but it can be slow while macOS swaps, and a size well beyond the budget may fail. Time grows about linearly with the output size: on a 32 GB M5 a 16 MP result took about 6 minutes. The plain upscale has no megapixel limit.</li>
+</ul>
+<p>The model choice and its defaults live in the <code>seedvr2</code> section of <code>~/.ziv/config.yaml</code>; the values below are the defaults:</p>
+<pre><code class="language-yaml">seedvr2:
+  model: auto                  # auto, seedvr2-3b or seedvr2-7b
+  softness: 0.75               # 0-1: pre-blur before upscaling; 0 = off
+  reference_megapixels: 16     # Output size the automatic choice must fit (a typical 4x)
+  tiers:                       # 8-bit, best first; the first that fits this Mac's memory at reference_megapixels is used
+    - {model: seedvr2-7b, weights_gb: 9.26, activation_floor_gb: 10.79, activation_base_gb: 1.88, activation_gb_per_mp: 0.83}
+    - {model: seedvr2-3b, weights_gb: 4.72, activation_floor_gb: 10.79, activation_base_gb: 1.10, activation_gb_per_mp: 0.89}
+</code></pre>
+<p>With <code>model: auto</code> the first tier whose estimate fits at <code>reference_megapixels</code> wins, and the last one runs when none does or the memory is unknown. A tier's estimate is <code>weights_gb</code> plus the larger of <code>activation_floor_gb</code> and <code>activation_base_gb + activation_gb_per_mp × output megapixels</code>; the same estimate decides which sizes are marked <strong>high memory</strong>. Set <code>model</code> to <code>seedvr2-3b</code> or <code>seedvr2-7b</code> to use only that model. <code>softness</code> sets how much the image is softened before SeedVR2 enlarges it; <code>0</code> turns that off. Config precedence applies as everywhere else.</p>
+<h4 id="creative-upscale">Creative upscale</h4>
 <p>The image is resized, refined with img2img and sharpened, using the settings recorded in the file: prompt, model, seed, steps, guidance, scheduler, LoRAs, negative prompt and quantization. When the recorded model is not configured here, the default image model refines it with its own defaults. Images without recorded settings (imported or older files) are refined by the default image model with an empty prompt; the job panel notes this. The image is already sharpened, so by default the CAS pass before refinement is skipped (<code>sharpening.existing_pre_upscale: 0</code>); the final pass uses <code>sharpening.existing_upscaled</code>. Contrast and saturation are not applied again.</p>
-<p>The result is saved next to the original as <code>&lt;name&gt;_2x.png</code> or <code>&lt;name&gt;_4x.png</code>, with a counter (<code>_2</code>) if that name exists. An option is disabled, with the reason in its tooltip, when the model cannot upscale or refine images (e.g. Ideogram 4), or when the output would exceed the model's maximum dimension or the megapixel limit. These settings live in the <code>upscale</code> section of <code>~/.ziv/config.yaml</code>:</p>
+<p>Both kinds save the result next to the original as <code>&lt;name&gt;_2x.png</code> or <code>&lt;name&gt;_4x.png</code>, with a counter (<code>_2</code>) if that name exists. A creative option is disabled, with the reason in its tooltip, when the model cannot upscale or refine images (e.g. Ideogram 4), or when the output would exceed the model's maximum dimension or the megapixel limit. These settings live in the <code>upscale</code> section of <code>~/.ziv/config.yaml</code>:</p>
 <pre><code class="language-yaml">upscale:
   existing_denoise_small: 0.4      # Refinement denoise for outputs up to existing_large_megapixels
   existing_denoise_large: 0.2      # Larger outputs: high denoise at large sizes invents detail and seams
@@ -1592,7 +1716,7 @@ ziv-image -m my-model --prompt &quot;a sunset&quot; --no-sharpen           # dis
 <p>The asset viewer's <strong>Details</strong> show the amounts an image was made with, including the pre-sharpen of an upscale.</p>
 <h2 id="output-files">Output Files</h2>
 <p>Images are saved as <code>&lt;set name&gt;_&lt;YYYY-MM-DD_HH-MM-SS&gt;.png</code> (for example <code>portrait_2026-10-04_14-03-22.png</code>), with <code>_2</code>, <code>_3</code>… added when that name is already taken, so no file is overwritten. Videos follow the same pattern with their format's extension.</p>
-<p>The settings each file was made with are embedded in it: prompt, negative prompt, model and family, seed, steps, guidance, scheduler, size, LoRAs, reference image and strength, quantization, generation time, upscale factor/denoise/steps, and the sharpen, contrast and saturation amounts. The Web UI asset viewer shows them under <strong>Details</strong> (<strong>I</strong>), and <strong>Reuse settings</strong> loads them into the Workspace. Paths inside your home folder, such as LoRAs, models and reference images, are recorded as <code>~/…</code>, so a shared file does not show your user name; the prompt is stored as written.</p>
+<p>The settings each file was made with are embedded in it: prompt, negative prompt, model and family, seed, steps, guidance, scheduler, size, LoRAs, reference image and strength, quantization, generation time, upscale factor, method (<code>seedvr2</code> or <code>creative</code>) and the settings it used (model and softness for SeedVR2; denoise and steps for creative), and the sharpen, contrast and saturation amounts. The Web UI asset viewer shows them under <strong>Details</strong> (<strong>I</strong>), and <strong>Reuse settings</strong> loads them into the Workspace. Paths inside your home folder, such as LoRAs, models and reference images, are recorded as <code>~/…</code>, so a shared file does not show your user name; the prompt is stored as written.</p>
 <h2 id="keyboard-shortcuts">Keyboard Shortcuts</h2>
 <p>During batch generation:</p>
 <table>

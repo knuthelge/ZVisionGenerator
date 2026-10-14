@@ -823,6 +823,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#review-before-upscaling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review Before Upscaling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#job-phases-preflight-and-generation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -942,17 +953,6 @@
     <span class="md-ellipsis">
       
         Vendored LTX
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#proposals" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Proposals
       
     </span>
   </a>
@@ -1094,6 +1094,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#review-before-upscaling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review Before Upscaling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#job-phases-preflight-and-generation" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1213,17 +1224,6 @@
     <span class="md-ellipsis">
       
         Vendored LTX
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#proposals" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Proposals
       
     </span>
   </a>
@@ -1367,6 +1367,7 @@ make install
 <li>Use <code>conftest.py::_make_args(**overrides)</code> to build minimal <code>argparse.Namespace</code> objects.</li>
 <li>Use <code>tmp_path</code> fixture for filesystem operations.</li>
 <li>Use <code>@pytest.mark.parametrize</code> for data-driven tests with many input/output pairs.</li>
+<li>Tests that run the real <code>ffmpeg</code> and <code>ffprobe</code> (in <code>tests/test_video_probe.py</code>, <code>tests/test_video_splice.py</code> and <code>tests/test_video_tail.py</code>) are marked to skip when the tools are missing and are meant to be run locally with ffmpeg installed; run them before changing the extend join. Everything else mocks ffmpeg.</li>
 <li>Skip heavy dependencies: <code>pytest.importorskip("torch")</code>, <code>@pytest.mark.skipif(sys.platform == ...)</code> for platform-specific tests.</li>
 <li>Assert behavior and machine-readable contracts, not documentation prose, help text wording, CSS utility classes, source-code text, or incidental selector details.</li>
 <li>String assertions are appropriate only when the string is the contract under test, such as routes, config keys, storage keys, parser options, event names, filenames, enum values, structured statuses, and accessibility or control names required for operability.</li>
@@ -1389,8 +1390,11 @@ make install
 ├── enhance_cli.py                 Shared --enhance / --no-enhance / --enhance-model CLI handling
 ├── preflight.py                   Preflight phase: plan seeds and prompts, rewrite them before the model loads
 ├── image_model_loader.py          Image model loading through stored quants (reuse, or save on first use)
+├── image_review.py                Review of an image's small render before the upscale
 ├── image_runner.py                Image generation run orchestration
 ├── upscale_runner.py              Upscale one existing image: read its recorded settings, run the upscale workflow
+├── review.py                      Shared wait for a review decision
+├── seedvr2_loader.py              SeedVR2 loading through its stored 8-bit copy (download, quantize, save, delete the download)
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/
@@ -1407,6 +1411,7 @@ make install
 │   ├── prompt_enhancer_mac.py     macOS prompt-enhancer LLM (mlx-lm)
 │   ├── prompt_enhancer_win.py     Windows/Linux prompt-enhancer LLM (transformers)
 │   ├── prompt_enhancer_session.py Single resident prompt-enhancer model: exclusive use and idle release
+│   ├── seedvr2_mac.py             macOS SeedVR2 upscaler (mflux)
 │   ├── video_mac.py               macOS video backend (LTX via MLX)
 │   └── video_diffusers.py         Windows/Linux video backend (LTX via diffusers/CUDA)
 ├── converters/
@@ -1419,10 +1424,11 @@ make install
 │   ├── progress_events.py         Shared image/video workflow progress event helpers
 │   ├── latent_preview.py          Latent → RGB projection factors shared by live previews
 │   ├── image_types.py             Image request and artifacts
-│   ├── video_types.py             Video request and artifacts
+│   ├── video_types.py             Video request and artifacts, and the extend source, spec and segment
 │   ├── image_backend.py           Image backend protocol
-│   ├── video_backend.py           Video backend protocol
+│   ├── video_backend.py           Video backend protocol and the optional VideoExtender protocol
 │   ├── prompt_enhancer.py         Prompt-enhancer protocol
+│   ├── seedvr2.py                 SeedVR2 upscaler protocol
 │   └── workflow.py                Unified workflow engine (image + video)
 ├── processing/
 │   ├── contrast.py                Contrast adjustment
@@ -1431,36 +1437,44 @@ make install
 ├── schedulers/
 │   └── beta_scheduler.py          Beta-distribution sigma scheduler
 ├── utils/
-│   ├── alignment.py               Pixel-alignment helpers for resolution
+│   ├── alignment.py               Pixel-alignment helpers for resolution, and the size and frame alignment of a video job
 │   ├── app_log.py                 Error log file, cleared on every start
 │   ├── atomic_write.py            Atomic file replacement for config and prompt-file writers
 │   ├── config.py                  Config loading (image + video)
 │   ├── console.py                 Console formatting
-│   ├── ffmpeg.py                  ffmpeg availability check and install
+│   ├── ffmpeg.py                  ffmpeg availability check and install, and the error for a failed ffmpeg or ffprobe run
 │   ├── filename.py                Output filenames ({set}_{timestamp}) and collision counters
 │   ├── image_model_detect.py      Image model type detection
-│   ├── interactive.py             Keyboard interrupt handling
+│   ├── interactive.py             Keyboard interrupt handling and review state
 │   ├── lora.py                    LoRA CLI argument parsing
 │   ├── model_files.py             Offline check for fully downloaded model weights
-│   ├── model_memory.py            Header-only memory estimates (MLX unified memory; CUDA GPU and system memory)
+│   ├── model_memory.py            Header-only memory estimates (MLX unified memory, with a per-stage LTX clip estimate by size and length; CUDA GPU and system memory)
 │   ├── paths.py                   ~/.ziv/ model store resolution
 │   ├── platform.py                Platform metadata and platform-aware alias values
-│   ├── prompt_compose.py          Structured prompt flattening &amp; snippets
+│   ├── prompt_compose.py          Structured prompt flattening &amp; snippets; video scene helpers (compose scene + prompt, quoted-line stripping, original-prompt check)
 │   ├── prompt_document.py         Prompt file ↔ editable document for the Web UI builder (comment-preserving, ruamel.yaml)
 │   ├── prompt_document_check.py   Builder document previews and problems, with the prompt loader's rules
-│   ├── prompt_enhance.py          Prompt-enhancement build, run, and post-processing (no model I/O)
+│   ├── prompt_enhance.py          Prompt-enhancement settings, length plans, chat messages, run, and post-processing (no model I/O)
+│   ├── prompt_enhance_video.py    Video prompts as a scene and an action: word plans, chat messages, output parsing and the run (no model I/O)
 │   ├── prompts.py                 Prompt file loading
 │   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
+│   ├── seedvr2.py                 SeedVR2 settings, memory estimate and per-Mac tier choice
 │   ├── stored_quant.py            Stored-quant naming, manifests and folder handling
-│   ├── upscale.py                 Upscale output sizes, size limits and denoise defaults
-│   └── video_model_detect.py      Video model type detection
+│   ├── upscale.py                 Upscale output sizes, size limits, SeedVR2 options and denoise defaults
+│   ├── video_extend.py            Extend: source checks and problem codes, loading the source, frame and audio-sample arithmetic of the window
+│   ├── video_model_detect.py      Video model type detection
+│   ├── video_probe.py             ffprobe a clip: stream facts, rotation and the checks' inputs
+│   ├── video_splice.py            Join a generated segment onto the source clip (stream copy or one re-encode) with the audio
+│   └── video_tail.py              Read a clip's last frames at their displayed size
 ├── web/
 │   ├── config.py                  Web UI config loading and model inventory discovery
 │   ├── config_api.py              JSON config response assembly
 │   ├── config_contract.py         Writable config semantics and path readback helpers
 │   ├── defaults.py                Ratio and size defaults for Web UI contracts
+│   ├── extend_api.py              Extend routes: check and describe a source video, fit its window to memory, build the rewrite context of an extension
 │   ├── gallery.py                 Gallery inventory and response serialization
 │   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
+│   ├── json_fields.py             Typed reads of optional fields in a JSON request body
 │   ├── model_delete.py            Delete installed models, LoRAs, and HF downloads
 │   ├── model_inventory.py         Backend model inventory for Web UI contracts
 │   ├── model_status.py            Per-model downloaded / memory-fit status for the SPA
@@ -1469,6 +1483,7 @@ make install
 │   ├── prompt_files.py            Read and atomically update host-local prompt files
 │   ├── request_guard.py           DNS-rebinding and cross-site request protection
 │   ├── upscale_api.py             Plan a viewer upscale job: refinement model, carried settings, limits
+│   ├── video_clip.py              Resolve the model, steps, size and length a video job runs at, shared by the job and its memory estimate
 │   ├── web_runner.py              Background workers for generation batches
 │   ├── workspace_api.py           Shared SPA payloads for workspace and models routes
 │   ├── workspace_contract.py      Workflow aliases and static workspace capabilities
@@ -1476,26 +1491,38 @@ make install
 └── workflows/
     ├── enhance_stage.py           Applies the planned rewrite in image and video workflows
     ├── image_stages.py            Image pipeline stage definitions
-    └── video_stages.py            Video pipeline stage definitions
+    ├── seedvr2_stages.py          SeedVR2 upscale stage
+    └── video_stages.py            Video pipeline stage definitions, including extend_video and join_clips
 
 prompts.yaml                       Default prompt definitions
 </code></pre>
 <h2 id="architecture-overview">Architecture Overview</h2>
 <h3 id="backend-protocol">Backend Protocol</h3>
 <p>Platform backends live in <code>backends/image_mac.py</code> (mflux/MLX), <code>backends/image_win.py</code> (Windows/Linux diffusers image), <code>backends/video_mac.py</code> (MLX video), and <code>backends/video_diffusers.py</code> (Windows/Linux diffusers video). Image backends implement the <code>ImageBackend</code> Protocol from <code>core/image_backend.py</code>; video backends implement the <code>VideoBackend</code> Protocol from <code>core/video_backend.py</code>. The prompt-enhancer LLM follows the same split: <code>backends/prompt_enhancer_mac.py</code> (mlx-lm) and <code>backends/prompt_enhancer_win.py</code> (transformers) implement the <code>PromptEnhancer</code> Protocol from <code>core/prompt_enhancer.py</code>. Backend and accelerator selection stays centralized in <code>backends/__init__.py</code> — never branch on <code>sys.platform</code> elsewhere to pick a backend. OS-level checks unrelated to backends (file pickers, ffmpeg install hints, terminal handling) are fine where they are needed.</p>
+<p>SeedVR2, the plain upscale of existing images, is macOS-only and has its own small Protocol, <code>SeedVR2Upscaler</code> in <code>core/seedvr2.py</code>, implemented by <code>backends/seedvr2_mac.py</code> (mflux). <code>supports_seedvr2()</code> and <code>get_seedvr2_upscaler()</code> in <code>backends/__init__.py</code> expose it, so other code asks for the capability instead of checking the platform. <code>seedvr2_loader.py</code> loads it through a stored 8-bit copy in the same way <code>image_model_loader.py</code> does for image models, and <code>tests/test_mflux_seedvr2_contract.py</code> records the mflux surface it relies on; re-run it on every mflux bump.</p>
 <p>The <code>image_win.py</code> module is the shared diffusers/CUDA image backend for both Windows and Linux. The filename is historical; platform selection still happens only in <code>backends/__init__.py</code>.</p>
-<p>Windows and Linux video resolution is config-driven through <code>video_model_presets.ltx.diffusers.default_repo</code> and the <code>ltx-2.3</code> alias. The backend assumes a diffusers-compatible repository layout and keeps the configured default overrideable from user config. macOS keeps the MLX-only <code>ltx-4</code> and <code>ltx-8</code> aliases.</p>
+<p>Windows and Linux video resolution is config-driven through <code>video_model_presets.ltx.diffusers.default_repo</code> and the <code>ltx-2.3</code> alias. The backend targets distilled LTX-2.3 diffusers checkpoints only, so the packaged default is <code>diffusers/LTX-2.3-Distilled-Diffusers</code>, and the configured default stays overrideable from user config. macOS keeps the MLX-only <code>ltx-4</code> and <code>ltx-8</code> aliases.</p>
+<p><code>backends/video_diffusers.py</code> passes the distilled sigma tables from <code>diffusers.pipelines.ltx2.utils</code> on every generation call, with <code>num_inference_steps</code> equal to their length and <code>guidance_scale=1.0</code> as the only guidance argument (<code>_DISTILLED_GUIDANCE</code>), so the other guidance terms follow the installed diffusers defaults. Fewer steps than the table keep its first sigma and its tail. The <code>--upscale 2</code> flow is two-stage:</p>
+<ol>
+<li>Stage 1 runs the generation pipeline at half the requested size with <code>output_type="latent"</code>.</li>
+<li>An <code>LTX2LatentUpsamplePipeline</code> upsamples the latents 2×. It is built around the generation pipeline's own VAE and is never moved with <code>.to()</code> or given CPU offload, since either would re-hook that shared VAE. In low-memory mode the upsampler model waits on the CPU and visits the GPU only for this pass.</li>
+<li>Stage 2 calls the same LoRA-bearing generation pipeline at full size with the upsampled latents, the stage-1 audio latents and the stage-2 sigmas. The scheduler is swapped for a static-shift copy for that call only and restored afterwards, even when the call fails.</li>
+</ol>
+<p>The upsampler weights are one safetensors file resolved with <code>hf_hub_download</code> from <code>video_model_presets.ltx.diffusers.latent_upsampler</code> (<code>repo</code>, <code>filename</code>; read with <code>utils.config.ltx_latent_upsampler_source</code>) before the generation pipeline loads, and only when upscaling. Both stages report steps as one run under the <code>video_upscale_stage_1</code> and <code>video_upscale_stage_2</code> phases, as the macOS backend does.</p>
+<p>Extending a clip is an optional capability, not part of <code>VideoBackend</code>: the <code>VideoExtender</code> Protocol in <code>core/video_backend.py</code> declares <code>extend_video(model, source, prompt, *, extend_frames, seed, steps, segment_dir, audio_output, step_callback=None)</code>, which only the macOS backend implements. Callers gate on <code>supports_video_extend()</code> in <code>backends/__init__.py</code> (beside <code>supports_video_audio()</code>) and look the method up on the backend; the Web UI contract drops the <code>extend</code> workflow, and the CLI refuses <code>--extend</code>, when it is false.</p>
 <p>The Windows/Linux video backend is CUDA-only. Validation happens lazily during backend load so importing the package or running non-video code paths does not require torch, diffusers, or a GPU.</p>
 <p>The Windows/Linux diffusers image backend is also CUDA-only. Validation happens lazily during image backend load so importing the package or running non-image code paths does not require torch, diffusers, or a GPU.</p>
 <h3 id="workflow-stages">Workflow Stages</h3>
-<p>Image stage functions in <code>workflows/image_stages.py</code> have the uniform signature <code>(ImageGenerationRequest, ImageWorkingArtifacts) -&gt; StageOutcome</code>. Video stage functions in <code>workflows/video_stages.py</code> have the signature <code>(VideoGenerationRequest, VideoWorkingArtifacts) -&gt; StageOutcome</code>. Stages are composed dynamically by <code>build_workflow()</code> and <code>build_video_workflow()</code>. <code>build_upscale_workflow()</code> upscales an existing image (<code>load_source_stage</code> → <code>upscale_stage</code> → <code>sharpen_stage</code> → <code>save_image_stage</code>); the Web UI runs it through <code>WebRunner.submit_upscale_job</code> and <code>upscale_runner.run_upscale</code>, which emits the same events as a one-image batch, without preflight or the batch loop.</p>
+<p>Image stage functions in <code>workflows/image_stages.py</code> have the uniform signature <code>(ImageGenerationRequest, ImageWorkingArtifacts) -&gt; StageOutcome</code>. Video stage functions in <code>workflows/video_stages.py</code> have the signature <code>(VideoGenerationRequest, VideoWorkingArtifacts) -&gt; StageOutcome</code>. Stages are composed dynamically by <code>build_workflow()</code> and <code>build_video_workflow()</code>. A video workflow starts with <code>resolve_prompt_stage</code>, which composes the scene and the prompt into the text the model receives (<code>compose_video_prompt</code>), and <code>enhance_prompt_stage</code> applies a planned scene and action rewrite. A job whose arguments carry an <code>extend_source</code> swaps the generation stage for the extend pair: <code>extend_video</code> (calls <code>extend_video</code> on the backend for the new segment only) and <code>join_clips</code> (<code>utils/video_splice.splice_clips</code> joins the segment onto the untouched source and removes the temporary segment directory). The extend variant has no <code>strip_audio</code> stage, since the joined clip already has the right audio; its provenance <code>workflow</code> is <code>extend</code>, with <code>source_video</code> and <code>extend_frames</code> recorded. <code>build_upscale_workflow()</code> upscales an existing image (<code>load_source_stage</code> → <code>upscale_stage</code> → <code>sharpen_stage</code> → <code>save_image_stage</code>); the Web UI runs it through <code>WebRunner.submit_upscale_job</code> and <code>upscale_runner.run_upscale</code>, which emits the same events as a one-image batch, without preflight or the batch loop. <code>build_seedvr2_upscale_workflow()</code> is the plain upscale (<code>resolve_prompt_stage</code> → <code>load_source_stage</code> → <code>seedvr2_stages.upscale_stage</code> → <code>save_image_stage</code>), chosen when the request's <code>upscale_method</code> is <code>seedvr2</code>; it does not sharpen. The tier is chosen by <code>utils/seedvr2.pick_seedvr2_tier</code> from the <code>seedvr2</code> config block and the Mac's memory budget, and <code>generation.upscale.method</code> records <code>seedvr2</code> or <code>creative</code> in the saved file.</p>
+<h3 id="review-before-upscaling">Review Before Upscaling</h3>
+<p><code>--review</code> pauses a generation after the small render of an upscale until the user approves or discards it. The review state lives in <code>SkipSignal</code> (<code>utils/interactive.py</code>), the shared wait in <code>review.py</code>, and images pass through <code>review_stage</code> before <code>upscale_stage</code>. Video passes a <code>review</code> keyword to the backend: only <code>video_mac</code> honours it, <code>video_diffusers</code> refuses, and <code>supports_video_upscale_review()</code> in <code>backends/__init__.py</code> tells the form, server and CLI whether to offer it. The Web UI sends approve and discard through the job controls and shows a video review from <code>GET /jobs/{id}/review</code>. Everything stays in memory while the review waits, so an approved output equals one made without review.</p>
 <h3 id="job-phases-preflight-and-generation">Job Phases: Preflight and Generation</h3>
 <p>Every image and video job (CLI and Web UI) runs in two phases, and only one model is resident at a time:</p>
 <ol>
 <li><strong>Preflight</strong> (<code>preflight.run_preflight</code>) runs before the generation model loads. It plans every iteration with <code>plan_iterations</code> (seed, <code>{a|b}</code> expansion, enhancement settings) and, when any iteration asks for auto enhancement, loads the prompt enhancer, rewrites those prompts, closes the enhancer and frees accelerator memory. It returns a frozen <code>JobPlan</code> (<code>core/job_plan.py</code>).</li>
 <li><strong>Generation</strong>: the entry point loads the model and passes the plan to <code>run_batch</code> / <code>run_video_batch</code> as the required <code>plan=</code> argument. Runners raise <code>ValueError</code> for a cancelled plan or one whose length differs from the batch, and <code>RuntimeError</code> when an iteration is out of order. Retry and repeat keep the planned text and draw a new random seed.</li>
 </ol>
-<p><code>JobPlan.iterations</code> holds one <code>IterationPlan</code> per iteration in run → set → prompt order, the order the runners loop in. Each carries <code>seed</code>, <code>resolved_prompt</code>, <code>enhanced_prompt</code> and <code>enhance_status</code> (<code>off</code>, <code>enhanced</code>, <code>failed</code>, <code>skipped</code>). The workflow's <code>enhance_prompt_stage</code> only applies the planned rewrite; no workflow stage calls the LLM.</p>
+<p><code>JobPlan.iterations</code> holds one <code>IterationPlan</code> per iteration in run → set → prompt order, the order the runners loop in. Each carries <code>seed</code>, <code>resolved_prompt</code>, <code>enhanced_prompt</code> and <code>enhance_status</code> (<code>off</code>, <code>enhanced</code>, <code>failed</code>, <code>skipped</code>); video iterations also carry <code>scene</code>, <code>resolved_scene</code> and <code>enhanced_scene</code>, and a video rewrite returns the scene and the action together. <code>EnhanceSettings.parts</code> (<code>both</code>, <code>action</code> or <code>None</code> for auto) picks what a video rewrite writes; <code>resolve_parts()</code> turns it into <code>action</code> or <code>both</code> per job (auto means <code>action</code> when extending a clip that has a scene, and a blank scene always means <code>both</code>). A rewrite that keeps the scene returns <code>EnhancePairResult.scene == ""</code>, so <code>enhanced_scene</code> is <code>None</code>, no <code>enhanced_scene</code> is stored in the metadata, and the provenance <code>scene</code> is the user's own, with <code>scene_input</code> repeating it. The workflow's <code>enhance_prompt_stage</code> only applies the planned rewrite; no workflow stage calls the LLM.</p>
 <p>Entry points own the control signal. <code>image_cli.main</code> creates the <code>SkipSignal</code> and its key listener before preflight and stops it after <code>run_batch</code>; Web UI image and video jobs pass their control signal to both phases. Video jobs offer only Quit: <code>run_video_batch</code> checks it before each video and raises from the step callback so a running video stops at its next denoising step, then emits <code>batch_cancelled</code>. During preflight there is a control boundary before each rewrite and a final one after the enhancer is released: <code>skip</code> skips the next rewrite, <code>pause</code> waits, <code>quit</code> cancels, and <code>repeat</code> is dropped. A rewrite stopped by the user (the <code>cancelled</code> callback saw Next or Quit) is <code>skipped</code>, never <code>failed</code>. On Quit, preflight releases the enhancer and memory before emitting <code>batch_cancelled</code>.</p>
 <p>Preflight events (none carry <code>eta_secs</code>, <code>avg_secs</code> or <code>elapsed_secs</code>):</p>
 <table>
@@ -1565,7 +1592,7 @@ prompts.yaml                       Default prompt definitions
 <p>Report the outcome of an action with <code>addToast(message, type, options)</code> from <code>$lib/state/toasts.svelte</code>. One toast shows at a time at the bottom centre of the page content (pages with a fixed left sidebar set <code>--toast-inset-left</code>); the rest wait their turn, shown as "+N". A repeat of a waiting or showing message merges into it ("×2"), and an error goes ahead of every non-error. Each tone has a default time on screen (success 2.5 s, info 4 s, warning 7 s); errors stay until dismissed, or give way after 8 s once other toasts are waiting, and hovering or focusing a toast pauses it. Pass <code>{ action: { label, run } }</code> for one follow-up such as Retry, and <code>{ timeout }</code> only when the default doesn't fit. An action that acts on a page must not outlive it: keep the id <code>addToast</code> returns and call <code>dismissToast(id)</code> in the page's <code>onDestroy</code>. Raise one toast per action, and skip it when the screen already shows the result.</p>
 <p>Send requests through <code>api</code> in <code>$lib/api/client</code>, which throws <code>ApiError</code> with the HTTP <code>status</code> and the server's <code>detail</code>. Show a failed request with <code>errorText(err, fallback)</code>, never <code>err.message</code>, which holds the method, path and raw body. Offer Retry only when <code>isRetryable(err)</code>: a 4xx means the server refused the input, and the same request fails the same way again.</p>
 <h3 id="web-ui-design-system">Web UI Design System</h3>
-<p>The Web UI has one design system (<a href="https://github.com/knuthelge/ZVisionGenerator/blob/main/proposals/web-design-system.md">proposal</a>; borders and colours in <a href="https://github.com/knuthelge/ZVisionGenerator/blob/main/proposals/web-no-borders-graphite.md">No borders and Graphite</a>). Its tokens live in <code>@theme</code> in <code>frontend/src/app/global.css</code>, and its component classes are the <code>ui-*</code> classes in the same file. Build pages from the shared components in <code>frontend/src/lib/components/</code> (<code>Button</code>, <code>Input</code>, <code>Select</code>, <code>Toggle</code>, <code>Badge</code>, <code>Panel</code>, <code>Segmented</code>, <code>ActionBar</code>, <code>PageHeader</code>, <code>KeyValueList</code>, <code>Alert</code>, <code>EmptyState</code>, <code>InspectorSection</code>, <code>InspectorRow</code>) or, where no component fits, the <code>ui-*</code> classes (for example <code>ui-chip</code>), rather than styling elements by hand.</p>
+<p>The Web UI has one design system. Its tokens live in <code>@theme</code> in <code>frontend/src/app/global.css</code>, and its component classes are the <code>ui-*</code> classes in the same file. Build pages from the shared components in <code>frontend/src/lib/components/</code> (<code>Button</code>, <code>Input</code>, <code>Select</code>, <code>Toggle</code>, <code>Badge</code>, <code>Panel</code>, <code>Segmented</code>, <code>ActionBar</code>, <code>PageHeader</code>, <code>KeyValueList</code>, <code>Alert</code>, <code>EmptyState</code>, <code>InspectorSection</code>, <code>InspectorRow</code>) or, where no component fits, the <code>ui-*</code> classes (for example <code>ui-chip</code>), rather than styling elements by hand.</p>
 <ul>
 <li><strong>Size:</strong> controls are 28px (<code>h-control</code>), small ones 22px, rows 30px. Buttons that sit together share one height; inside an <code>ActionBar</code> every button is 36px and the one marked <code>main</code> takes the remaining width.</li>
 <li><strong>Type:</strong> four sizes only: <code>text-meta</code> (11px), <code>text-ui</code> (12px), <code>text-content</code> (13px), <code>text-title</code> (16px). Nunito (<code>font-heading</code>) is for titles, area names and the main action; monospace is for numbers, paths and shortcuts.</li>
@@ -1578,7 +1605,7 @@ prompts.yaml                       Default prompt definitions
 <li><strong>Focus:</strong> every control shows the same 2px teal outline with a 2px offset.</li>
 </ul>
 <h3 id="test-strategy">Test Strategy</h3>
-<p>Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.</p>
+<p>Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, upsampler weight download and loading, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.</p>
 <h2 id="vendored-ltx">Vendored LTX</h2>
 <p><code>packages/ltx_core_mlx</code> and <code>packages/ltx_pipelines_mlx</code> are vendored from <a href="https://github.com/dgrauet/ltx-2-mlx"><code>dgrauet/ltx-2-mlx</code></a>. They are not published to PyPI, and PyPI rejects direct-URL dependencies, so they live in the repository. Never edit them by hand.</p>
 <ul>
@@ -1593,13 +1620,16 @@ prompts.yaml                       Default prompt definitions
 <li><code>utils._orchestration.combined_image_conditionings</code>, <code>utils.args.ImageConditioningInput</code>, and <code>utils.helpers.create_noised_state(legacy_scalar_blend=True)</code></li>
 <li><code>ltx_core_mlx</code>'s <code>X0Model</code>, <code>snap_output_dimensions(two_stage=)</code>, <code>compute_video_latent_shape</code>, <code>compute_audio_token_count</code>, <code>compute_audio_positions</code>, <code>compute_video_positions</code> and <code>aggressive_cleanup</code></li>
 <li><code>scheduler.shorten_schedule</code>, <code>DISTILLED_SIGMAS</code> and <code>STAGE_2_SIGMAS</code>, and <code>utils.samplers.denoise_loop</code> with its <code>on_step(step_idx, total, video_x0, sigma)</code> signature</li>
+<li>for review before upscaling: <code>_stage1</code> (shadowed per call), <code>Stage1Result.video_tokens</code>/<code>audio_tokens</code>/<code>latent_dims</code>, <code>_load_decoders</code>, <code>dit</code>/<code>_loaded</code> (restored after the preview decode), and the model state released after an aborted generation</li>
 <li><code>DistilledPipeline.generate_and_save</code> for upscale, and <code>BasePipeline</code>'s <code>gemma_model_id</code> default, the transformer-file preference order and the <code>low_memory</code> and <code>low_ram_streaming</code> constructor arguments</li>
+<li>Extending a clip (<code>LtxVideoBackend.extend_video</code>), video side: <code>conditioning.types.VideoConditionByLatentIndex(frame_indices, clean_latent, strength)</code> pins the carried tail at the start of the window; <code>retake.encode_video_tensor(encoder, video_tensor)</code> and <code>utils.media_io.video_preprocess(frames, height, width)</code> encode the tail frames inside <code>image_conditioner(fn, free_after=)</code></li>
+<li>Extending a clip, audio side: <code>ltx_core_mlx.utils.audio.load_audio(path, target_sample_rate, start_time, max_duration, mono)</code> reads the tail's sound at its position in the file; <code>audio_vae.encode_audio(waveform, sample_rate, encoder, processor)</code> encodes it inside <code>audio_conditioner(fn, free_after=)</code>; <code>extend_distilled.fit_audio_latent(audio_latent, audio_tokens)</code> fits the <code>(1, 8, T, 16)</code> latent before <code>audio_patchifier.patchify</code>, and <code>extend_distilled.carry_audio_tokens(frame_rate, carry_pixel_frames)</code> gives the token count</li>
+<li>Extending a clip, decode: the pipeline's <code>_loaded</code> flag (cleared with <code>dit = None</code> so the next <code>load()</code> reloads the transformer), <code>video_decoder_block.load()</code> and <code>video_decoder_block.video_decoder</code> (the diffusion decoder is rejected), <code>video_vae.VideoDecoder.tiled_decode(latent, tiling_config)</code>, <code>video_vae._compute_decode_tiling(latent_shape, frame_rate, budget_bytes)</code> (which may return <code>None</code> or temporal tiles), <code>video_vae.decode_cache_limit()</code>, <code>video_vae.stream_chunks_to_ffmpeg(chunks, proc)</code> and <code>video_vae._ffmpeg_sink(cmd)</code>, and <code>audio_decoder_block.__call__(audio_latent)</code></li>
+<li>Extending a clip: <code>ltx_core_mlx.utils.audio.load_audio</code> returns an <code>AudioData</code> whose <code>.waveform</code> and <code>.sample_rate</code> are passed to <code>encode_audio</code>, and <code>video_patchifier.patchify</code> and <code>audio_patchifier.patchify</code> return <code>(tokens, dims)</code> tuples, so the tokens are <code>patchify(...)[0]</code></li>
 </ul>
 </li>
 <li><strong>Cache limit.</strong> <code>low_ram_streaming</code> makes the pipeline set the MLX buffer-cache limit to 0 for the whole process. <code>backends/memory_mac.mlx_cache_limit</code> scopes that to model construction and each generation, then restores the previous limit.</li>
 </ul>
-<h2 id="proposals">Proposals</h2>
-<p>Planned and possible future work is written up in <a href="https://github.com/knuthelge/ZVisionGenerator/tree/main/proposals"><code>proposals/</code></a> at the repository root, one Markdown file per proposal with a status line, indexed in <code>proposals/README.md</code>. Check it before starting larger work, and update a proposal's status when it ships.</p>
 <h2 id="releasing">Releasing</h2>
 <p>Pushing a <code>v*</code> tag runs the Release workflow, which builds the package, publishes it to PyPI and creates a GitHub Release. The package version comes from the tag (<code>hatch-vcs</code>), so the tag must be a valid PEP 440 version:</p>
 <ul>

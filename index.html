@@ -869,7 +869,7 @@
 <li><strong>Model store</strong> — central <code>~/.ziv/</code> directory with bare-name resolution, aliases, local paths, and supported HuggingFace model references</li>
 <li><strong>LoRA support</strong> — single or stacked, configurable weights, bare-name resolution (image and video)</li>
 <li><strong>Image upscale</strong> — generate small → Lanczos → img2img refine → CAS sharpen</li>
-<li><strong>Video upscale</strong> — macOS MLX uses distilled two-stage 2× spatial upscaling; Windows/Linux diffusers uses latent upscaling when the model supports it and fails explicitly when it does not</li>
+<li><strong>Video upscale</strong> — <code>--upscale 2</code> renders at half size, upsamples the latents 2× and refines at full size, so the clip keeps the requested size, on macOS and on Windows/Linux</li>
 <li><strong>Reference images</strong> — img2img steering from any starting image</li>
 <li><strong>Model variants</strong> — image quantization across supported image backends, plus macOS MLX video Q4/Q8 aliases</li>
 <li><strong>Post-processing</strong> — contrast, saturation, and CAS sharpening (image only)</li>
