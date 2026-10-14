@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import os
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 from PIL import Image
@@ -15,8 +16,13 @@ from zvisiongenerator.backends.video_diffusers import (
     _DISTILLED_GUIDANCE,
     DiffusersVideoBackend,
     _build_generation_kwargs,
+    _UPSAMPLER_CONFIG,
+    _build_upsample_pipeline,
     _configure_torch_runtime,
+    _load_latent_upsampler,
+    _read_state_dict,
     _resolve_pipeline_classes,
+    _resolve_upsampler_weights,
     _stage1_sigmas,
     _validate_diffusers_version,
 )
@@ -139,10 +145,44 @@ class _FakeImagePipeline(_BaseFakePipeline):
         return SimpleNamespace(frames=[["image-frame-1"]])
 
 
-class _FakeUpscalerPipeline(_BaseFakePipeline):
+class _FakeUpsamplePipeline(_BaseFakePipeline):
+    """Stand-in for LTX2LatentUpsamplePipeline: built from a shared VAE and an upsampler, never from_pretrained."""
+
+    def __init__(self, vae=None, latent_upsampler=None):
+        super().__init__()
+        self.vae = vae
+        self.latent_upsampler = latent_upsampler
+
     def __call__(self, **kwargs):
         self.calls.append(kwargs)
         return SimpleNamespace(frames=[["upscaled-frame"]])
+
+
+class _FakeUpsamplerModel:
+    """Stand-in for LTX2LatentUpsamplerModel recording its constructor kwargs, weights and placement."""
+
+    instances: list["_FakeUpsamplerModel"] = []
+    load_error: Exception | None = None
+
+    def __init__(self, **config):
+        self.config = config
+        self.state_dict_calls: list[tuple[dict[str, Any], bool]] = []
+        self.to_calls: list[dict[str, Any]] = []
+        self.eval_calls = 0
+        _FakeUpsamplerModel.instances.append(self)
+
+    def load_state_dict(self, state_dict, strict=True):
+        if _FakeUpsamplerModel.load_error is not None:
+            raise _FakeUpsamplerModel.load_error
+        self.state_dict_calls.append((state_dict, strict))
+
+    def to(self, **kwargs):
+        self.to_calls.append(kwargs)
+        return self
+
+    def eval(self):
+        self.eval_calls += 1
+        return self
 
 
 class _NoScalePipeline(_FakeTextPipeline):
@@ -152,11 +192,21 @@ class _NoScalePipeline(_FakeTextPipeline):
 
 @pytest.fixture(autouse=True)
 def _clear_pipeline_state():
-    for pipeline_class in (_FakeTextPipeline, _FakeImagePipeline, _FakeUpscalerPipeline, _NoScalePipeline):
+    for pipeline_class in (_FakeTextPipeline, _FakeImagePipeline, _NoScalePipeline):
         pipeline_class.loaded_instances = []
+    _FakeUpsamplerModel.instances = []
+    _FakeUpsamplerModel.load_error = None
 
 
-def _make_runtime(*, torch: _FakeTorch | None = None, text_pipeline=_FakeTextPipeline, image_pipeline=_FakeImagePipeline, upscaler_pipeline=_FakeUpscalerPipeline, version: str = "0.38.0"):
+def _make_runtime(
+    *,
+    torch: _FakeTorch | None = None,
+    text_pipeline=_FakeTextPipeline,
+    image_pipeline=_FakeImagePipeline,
+    upsample_pipeline=_FakeUpsamplePipeline,
+    upsampler_model=_FakeUpsamplerModel,
+    version: str = "0.38.0",
+):
     exported: dict[str, object] = {}
 
     def _export(frames, output_video_path=None, fps=10):
@@ -172,7 +222,8 @@ def _make_runtime(*, torch: _FakeTorch | None = None, text_pipeline=_FakeTextPip
         pipeline_classes=SimpleNamespace(
             text_to_video=text_pipeline,
             image_to_video=image_pipeline,
-            latent_upscaler=upscaler_pipeline,
+            latent_upsample_pipeline=upsample_pipeline,
+            latent_upsampler_model=upsampler_model,
         ),
         diffusers_version=version,
         distilled_sigmas=_DISTILLED_SIGMAS,
@@ -180,6 +231,41 @@ def _make_runtime(*, torch: _FakeTorch | None = None, text_pipeline=_FakeTextPip
     )
     runtime.exported = exported
     return runtime
+
+
+_UPSAMPLER_SOURCE = ("example-org/example-upsampler", "example-x2.safetensors")
+_UPSAMPLER_STATE = {"initial_conv.weight": "tensor"}
+
+
+def _patch_runtime(monkeypatch, runtime):
+    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+
+
+def _patch_upsampler_io(monkeypatch, events: list[str] | None = None):
+    """Replace the weight download and read with fakes; return the recorded download requests."""
+
+    downloads: list[tuple[str, str]] = []
+
+    def _download(repo_id, filename):
+        downloads.append((repo_id, filename))
+        if events is not None:
+            events.append("download")
+        return "/fake/upsampler.safetensors"
+
+    def _read(path):
+        assert path == "/fake/upsampler.safetensors"
+        return dict(_UPSAMPLER_STATE)
+
+    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._resolve_upsampler_weights", _download)
+    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._read_state_dict", _read)
+    return downloads
+
+
+def _load_upscale_model(monkeypatch, *, low_memory, mode="t2v", runtime=None):
+    _patch_runtime(monkeypatch, runtime or _make_runtime())
+    _patch_upsampler_io(monkeypatch)
+    model, _ = DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode=mode, low_memory=low_memory, upscale=True, latent_upsampler=_UPSAMPLER_SOURCE)
+    return model
 
 
 def test_load_model_rejects_missing_cuda(monkeypatch):
@@ -213,12 +299,13 @@ def test_load_model_prefers_runtime_classes_and_configures_pipeline(monkeypatch)
     backend = DiffusersVideoBackend()
     runtime = _make_runtime()
     monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+    _patch_upsampler_io(monkeypatch)
 
-    model, model_info = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=True, upscale=True)
+    model, model_info = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=True, upscale=True, latent_upsampler=_UPSAMPLER_SOURCE)
 
     assert model_info.family == "ltx"
     assert model.text_to_video is _FakeTextPipeline.loaded_instances[0]
-    assert model.latent_upscaler is _FakeUpscalerPipeline.loaded_instances[0]
+    assert isinstance(model.upsample_pipeline, _FakeUpsamplePipeline)
     assert model.text_to_video.cpu_offload_enabled is True
 
 
@@ -407,11 +494,10 @@ def test_image_to_video_uses_loaded_image(monkeypatch, tmp_path):
     assert not set(_EXTRA_GUIDANCE_KWARGS) & set(call)
 
 
-def test_upscale_uses_latent_upscaler_and_requires_stage1_steps(monkeypatch, tmp_path):
+def test_upscale_uses_upsample_pipeline_and_requires_stage1_steps(monkeypatch, tmp_path):
     backend = DiffusersVideoBackend()
     runtime = _make_runtime()
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
-    model, _ = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=False, upscale=True)
+    model = _load_upscale_model(monkeypatch, low_memory=False, runtime=runtime)
     events: list[dict[str, object]] = []
     output_path = tmp_path / "upscaled.mp4"
 
@@ -444,7 +530,7 @@ def test_upscale_uses_latent_upscaler_and_requires_stage1_steps(monkeypatch, tmp
     assert result == output_path
     assert model.text_to_video.calls[0]["num_inference_steps"] == 4
     assert model.text_to_video.calls[0]["sigmas"] == _stage1_sigmas(_DISTILLED_SIGMAS, 4)
-    assert model.latent_upscaler.calls[0]["video"] == ["frame-1", "frame-2"]
+    assert model.upsample_pipeline.calls[0]["video"] == ["frame-1", "frame-2"]
     assert runtime.exported["frames"] == ["upscaled-frame"]
     assert events[-1] == {"phase": "video_upscale_stage_2", "current_step": 5, "total_steps": 5}
 
@@ -452,17 +538,166 @@ def test_upscale_uses_latent_upscaler_and_requires_stage1_steps(monkeypatch, tmp
 def test_resolve_pipeline_classes_requires_ltx2():
     ltx2 = SimpleNamespace(LTX2Pipeline=object, LTX2ImageToVideoPipeline=object, LTX2LatentUpsamplePipeline=object)
 
-    classes = _resolve_pipeline_classes(ltx2)
+    classes = _resolve_pipeline_classes(ltx2, _FakeUpsamplerModel)
 
     assert classes.text_to_video is object
     assert classes.image_to_video is object
-    assert classes.latent_upscaler is object
+    assert classes.latent_upsample_pipeline is object
+    assert classes.latent_upsampler_model is _FakeUpsamplerModel
     for missing in ("LTX2Pipeline", "LTX2ImageToVideoPipeline", "LTX2LatentUpsamplePipeline"):
         partial = SimpleNamespace(**{name: object for name in vars(ltx2) if name != missing})
         with pytest.raises(RuntimeError, match="LTX-2"):
-            _resolve_pipeline_classes(partial)
+            _resolve_pipeline_classes(partial, _FakeUpsamplerModel)
     with pytest.raises(RuntimeError, match="LTX-2"):
-        _resolve_pipeline_classes(SimpleNamespace(LTXPipeline=object, LTXImageToVideoPipeline=object))
+        _resolve_pipeline_classes(SimpleNamespace(LTXPipeline=object, LTXImageToVideoPipeline=object), _FakeUpsamplerModel)
+
+
+def test_upscale_load_downloads_upsampler_before_the_pipeline(monkeypatch):
+    events: list[str] = []
+
+    class _OrderedPipeline(_FakeTextPipeline):
+        @classmethod
+        def from_pretrained(cls, model_path, **kwargs):
+            events.append("from_pretrained")
+            return super().from_pretrained(model_path, **kwargs)
+
+    runtime = _make_runtime(text_pipeline=_OrderedPipeline)
+    _patch_runtime(monkeypatch, runtime)
+    downloads = _patch_upsampler_io(monkeypatch, events)
+
+    DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", upscale=True, latent_upsampler=_UPSAMPLER_SOURCE)
+
+    assert events == ["download", "from_pretrained"]
+    assert downloads == [_UPSAMPLER_SOURCE]
+
+
+def test_failed_upsampler_download_stops_before_the_pipeline_loads(monkeypatch):
+    _patch_runtime(monkeypatch, _make_runtime())
+
+    def _fail(repo_id, filename):
+        raise RuntimeError(f"Failed to download the LTX latent upsampler '{filename}' from '{repo_id}': offline")
+
+    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._resolve_upsampler_weights", _fail)
+
+    with pytest.raises(RuntimeError, match="latent upsampler"):
+        DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", upscale=True, latent_upsampler=_UPSAMPLER_SOURCE)
+
+    assert _FakeTextPipeline.loaded_instances == []
+
+
+def test_upscale_load_builds_upsampler_with_x2_config_and_strict_weights(monkeypatch):
+    _load_upscale_model(monkeypatch, low_memory=False)
+
+    (upsampler,) = _FakeUpsamplerModel.instances
+    assert upsampler.config == dict(_UPSAMPLER_CONFIG)
+    assert upsampler.config["use_rational_resampler"] is False
+    assert upsampler.state_dict_calls == [(_UPSAMPLER_STATE, True)]
+    assert upsampler.eval_calls == 1
+
+
+@pytest.mark.parametrize(("low_memory", "expected_to"), [(False, {"device": "cuda", "dtype": "bfloat16"}), (True, {"dtype": "bfloat16"})])
+def test_upsampler_device_follows_low_memory(monkeypatch, low_memory, expected_to):
+    model = _load_upscale_model(monkeypatch, low_memory=low_memory)
+
+    assert model.upsample_pipeline.latent_upsampler.to_calls == [expected_to]
+
+
+@pytest.mark.parametrize("mode", ["t2v", "i2v"])
+@pytest.mark.parametrize("low_memory", [False, True])
+def test_upsample_pipeline_shares_the_generation_vae(monkeypatch, mode, low_memory):
+    model = _load_upscale_model(monkeypatch, low_memory=low_memory, mode=mode)
+
+    generation = model.text_to_video or model.image_to_video
+    upsample = model.upsample_pipeline
+    assert upsample.vae is generation.vae
+    assert upsample.to_calls == []
+    assert upsample.cpu_offload_enabled is False
+
+
+def test_upscale_load_requires_upsampler_source(monkeypatch):
+    _patch_runtime(monkeypatch, _make_runtime())
+    downloads = _patch_upsampler_io(monkeypatch)
+
+    with pytest.raises(ValueError, match="latent_upsampler"):
+        DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", upscale=True)
+
+    assert downloads == []
+    assert _FakeTextPipeline.loaded_instances == []
+
+
+def test_upsampler_weight_mismatch_is_reported(monkeypatch):
+    _FakeUpsamplerModel.load_error = RuntimeError("Missing key(s) in state_dict")
+
+    with pytest.raises(RuntimeError, match="latent_upsampler") as excinfo:
+        _load_upscale_model(monkeypatch, low_memory=False)
+
+    assert "Missing key(s)" in str(excinfo.value)
+
+
+def test_non_upscale_load_never_touches_the_upsampler(monkeypatch):
+    _patch_runtime(monkeypatch, _make_runtime())
+    downloads = _patch_upsampler_io(monkeypatch)
+
+    model, _ = DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", latent_upsampler=_UPSAMPLER_SOURCE)
+
+    assert model.upsample_pipeline is None
+    assert downloads == []
+    assert _FakeUpsamplerModel.instances == []
+
+
+def test_load_latent_upsampler_helper_returns_the_eval_model():
+    model = _load_latent_upsampler(_FakeUpsamplerModel, _UPSAMPLER_STATE, torch_dtype="float16", low_memory=True)
+
+    assert isinstance(model, _FakeUpsamplerModel)
+    assert model.to_calls == [{"dtype": "float16"}]
+
+
+def test_build_upsample_pipeline_passes_the_vae_and_upsampler_only():
+    generation = SimpleNamespace(vae=_FakeVae())
+    upsampler = _FakeUpsamplerModel()
+
+    pipeline = _build_upsample_pipeline(_FakeUpsamplePipeline, generation, upsampler)
+
+    assert pipeline.vae is generation.vae
+    assert pipeline.latent_upsampler is upsampler
+
+
+def test_resolve_upsampler_weights_downloads_the_named_file(monkeypatch):
+    import huggingface_hub
+
+    calls: list[dict[str, str]] = []
+
+    def _fake_download(**kwargs):
+        calls.append(kwargs)
+        return "/cache/example-x2.safetensors"
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", _fake_download)
+
+    assert _resolve_upsampler_weights(*_UPSAMPLER_SOURCE) == "/cache/example-x2.safetensors"
+    assert calls == [{"repo_id": _UPSAMPLER_SOURCE[0], "filename": _UPSAMPLER_SOURCE[1]}]
+
+
+def test_resolve_upsampler_weights_reports_download_failures(monkeypatch):
+    import huggingface_hub
+
+    def _fail(**_kwargs):
+        raise OSError("offline")
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", _fail)
+
+    with pytest.raises(RuntimeError, match="offline") as excinfo:
+        _resolve_upsampler_weights(*_UPSAMPLER_SOURCE)
+
+    assert _UPSAMPLER_SOURCE[0] in str(excinfo.value)
+    assert _UPSAMPLER_SOURCE[1] in str(excinfo.value)
+
+
+def test_read_state_dict_loads_the_safetensors_file(monkeypatch):
+    import safetensors.torch
+
+    monkeypatch.setattr(safetensors.torch, "load_file", lambda path: {"path": path})
+
+    assert _read_state_dict("/cache/example-x2.safetensors") == {"path": "/cache/example-x2.safetensors"}
 
 
 def test_load_model_applies_lora_weights(monkeypatch, tmp_path):

@@ -18,6 +18,18 @@ _MINIMUM_DIFFUSERS_VERSION = (0, 38, 0)
 # Distilled checkpoints run without classifier-free guidance. Only guidance_scale is passed, so the other guidance
 # terms (audio, spatio-temporal, modality) follow the pipeline defaults of the installed diffusers version.
 _DISTILLED_GUIDANCE: Final[Mapping[str, float]] = MappingProxyType({"guidance_scale": 1.0})
+# Architecture of the LTX-2.3 x2 spatial latent upsampler (matches the published weights).
+_UPSAMPLER_CONFIG: Final[Mapping[str, Any]] = MappingProxyType(
+    {
+        "in_channels": 128,
+        "mid_channels": 1024,
+        "num_blocks_per_stage": 4,
+        "dims": 3,
+        "spatial_upsample": True,
+        "temporal_upsample": False,
+        "use_rational_resampler": False,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -26,7 +38,8 @@ class _PipelineClasses:
 
     text_to_video: type[Any]
     image_to_video: type[Any]
-    latent_upscaler: type[Any]
+    latent_upsample_pipeline: type[Any]
+    latent_upsampler_model: type[Any]
 
 
 @dataclass(frozen=True)
@@ -48,7 +61,7 @@ class _LoadedVideoModel:
 
     text_to_video: Any | None
     image_to_video: Any | None
-    latent_upscaler: Any | None
+    upsample_pipeline: Any | None
     runtime: _RuntimeDependencies
     model_info: VideoModelInfo
     low_memory: bool
@@ -66,8 +79,8 @@ def _parse_version(version: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def _resolve_pipeline_classes(diffusers_module: Any) -> _PipelineClasses:
-    """Resolve the LTX-2 pipeline classes from diffusers."""
+def _resolve_pipeline_classes(diffusers_module: Any, upsampler_model: type[Any]) -> _PipelineClasses:
+    """Resolve the LTX-2 pipeline classes from diffusers and pair them with the latent upsampler model class."""
 
     names = ("LTX2Pipeline", "LTX2ImageToVideoPipeline", "LTX2LatentUpsamplePipeline")
     if not all(hasattr(diffusers_module, name) for name in names):
@@ -75,7 +88,8 @@ def _resolve_pipeline_classes(diffusers_module: Any) -> _PipelineClasses:
     return _PipelineClasses(
         text_to_video=diffusers_module.LTX2Pipeline,
         image_to_video=diffusers_module.LTX2ImageToVideoPipeline,
-        latent_upscaler=diffusers_module.LTX2LatentUpsamplePipeline,
+        latent_upsample_pipeline=diffusers_module.LTX2LatentUpsamplePipeline,
+        latent_upsampler_model=upsampler_model,
     )
 
 
@@ -102,15 +116,16 @@ def _load_runtime_dependencies() -> _RuntimeDependencies:
     _validate_diffusers_version(diffusers_version)
 
     try:
+        from diffusers.pipelines.ltx2.latent_upsampler import LTX2LatentUpsamplerModel
         from diffusers.pipelines.ltx2.utils import DISTILLED_SIGMA_VALUES, STAGE_2_DISTILLED_SIGMA_VALUES
     except ImportError as exc:
-        raise RuntimeError("Installed diffusers is missing the LTX-2 distilled sigma tables.") from exc
+        raise RuntimeError("Installed diffusers is missing the LTX-2 distilled sigma tables or the latent upsampler model.") from exc
 
     return _RuntimeDependencies(
         torch=torch,
         image_module=Image,
         export_to_video=export_to_video,
-        pipeline_classes=_resolve_pipeline_classes(diffusers),
+        pipeline_classes=_resolve_pipeline_classes(diffusers, LTX2LatentUpsamplerModel),
         diffusers_version=diffusers_version,
         distilled_sigmas=tuple(DISTILLED_SIGMA_VALUES),
         stage2_sigmas=tuple(STAGE_2_DISTILLED_SIGMA_VALUES),
@@ -192,6 +207,53 @@ def _load_pipeline(
     except Exception as exc:
         raise RuntimeError(f"Failed to load {pipeline_class.__name__} from '{model_path}': {exc}") from exc
     return _configure_pipeline(pipeline, runtime, torch_dtype=torch_dtype, low_memory=low_memory)
+
+
+def _resolve_upsampler_weights(repo_id: str, filename: str) -> str:
+    """Download one latent upsampler weights file from the Hugging Face Hub and return its local path."""
+
+    try:
+        from huggingface_hub import hf_hub_download
+
+        return str(hf_hub_download(repo_id=repo_id, filename=filename))
+    except Exception as exc:
+        raise RuntimeError(f"Failed to download the LTX latent upsampler '{filename}' from '{repo_id}': {exc}") from exc
+
+
+def _read_state_dict(path: str) -> dict[str, Any]:
+    """Read a safetensors file into a CPU state dict."""
+
+    from safetensors.torch import load_file
+
+    return load_file(path)
+
+
+def _load_latent_upsampler(model_class: type[Any], state_dict: Mapping[str, Any], *, torch_dtype: Any, low_memory: bool) -> Any:
+    """Build the x2 latent upsampler, load its weights strictly and place it for the memory mode.
+
+    In low-memory mode the model stays on the CPU so it can be moved to the GPU only for the upsample pass.
+    """
+
+    model = model_class(**_UPSAMPLER_CONFIG)
+    try:
+        model.load_state_dict(dict(state_dict), strict=True)
+    except RuntimeError as exc:
+        raise RuntimeError(f"The latent upsampler weights do not match the LTX-2.3 x2 spatial upsampler layout (check video_model_presets.ltx.diffusers.latent_upsampler): {exc}") from exc
+    if low_memory:
+        model.to(dtype=torch_dtype)
+    else:
+        model.to(device="cuda", dtype=torch_dtype)
+    model.eval()
+    return model
+
+
+def _build_upsample_pipeline(pipeline_class: type[Any], generation_pipeline: Any, upsampler: Any) -> Any:
+    """Wrap the upsampler in an upsample pipeline that shares the generation pipeline's VAE.
+
+    The result must never be moved with ``.to()`` or given CPU offload: either would re-hook the shared VAE.
+    """
+
+    return pipeline_class(vae=generation_pipeline.vae, latent_upsampler=upsampler)
 
 
 def _call_signature_parameters(callable_obj: Any) -> dict[str, inspect.Parameter] | None:
@@ -445,6 +507,10 @@ class DiffusersVideoBackend:
         if mode not in {"t2v", "i2v"}:
             raise ValueError(f"Unsupported video generation mode: {mode}")
 
+        latent_upsampler = kwargs.get("latent_upsampler")
+        if upscale and latent_upsampler is None:
+            raise ValueError("--upscale 2 needs video_model_presets.ltx.diffusers.latent_upsampler (repo and filename) in the config.")
+
         runtime = _load_runtime_dependencies()
         _validate_cuda(runtime)
         _configure_torch_runtime(runtime.torch)
@@ -453,6 +519,9 @@ class DiffusersVideoBackend:
         model_info = detect_video_model(model_path)
         if model_info.family != "ltx":
             raise RuntimeError(f"Unsupported diffusers video model: '{model_path}'.")
+
+        # Fail fast on a missing upsampler file before the large generation pipeline loads.
+        upsampler_weights = _resolve_upsampler_weights(*latent_upsampler) if upscale else None
 
         text_pipeline = _load_pipeline(runtime.pipeline_classes.text_to_video, model_path, runtime, torch_dtype=torch_dtype, low_memory=low_memory) if mode == "t2v" else None
         image_pipeline = _load_pipeline(runtime.pipeline_classes.image_to_video, model_path, runtime, torch_dtype=torch_dtype, low_memory=low_memory) if mode == "i2v" else None
@@ -464,15 +533,21 @@ class DiffusersVideoBackend:
         if loras:
             _apply_loras(active_pipeline, loras, cpu_offload=low_memory)
 
-        latent_upscaler = None
-        if upscale:
-            latent_upscaler = _load_pipeline(runtime.pipeline_classes.latent_upscaler, model_path, runtime, torch_dtype=torch_dtype, low_memory=low_memory)
+        upsample_pipeline = None
+        if upsampler_weights is not None:
+            upsampler = _load_latent_upsampler(
+                runtime.pipeline_classes.latent_upsampler_model,
+                _read_state_dict(upsampler_weights),
+                torch_dtype=torch_dtype,
+                low_memory=low_memory,
+            )
+            upsample_pipeline = _build_upsample_pipeline(runtime.pipeline_classes.latent_upsample_pipeline, active_pipeline, upsampler)
 
         return (
             _LoadedVideoModel(
                 text_to_video=text_pipeline,
                 image_to_video=image_pipeline,
-                latent_upscaler=latent_upscaler,
+                upsample_pipeline=upsample_pipeline,
                 runtime=runtime,
                 model_info=model_info,
                 low_memory=low_memory,
@@ -500,9 +575,9 @@ class DiffusersVideoBackend:
 
         _refuse_review(kwargs)
         stage1_steps = kwargs.get("stage1_steps")
-        if model.latent_upscaler is not None and stage1_steps is None:
+        if model.upsample_pipeline is not None and stage1_steps is None:
             raise ValueError("stage1_steps must be provided when upscale is enabled")
-        if model.latent_upscaler is None and stage1_steps is not None:
+        if model.upsample_pipeline is None and stage1_steps is not None:
             raise RuntimeError("Upscale was requested, but the diffusers latent upscaler is unavailable for this model.")
 
         base_steps = stage1_steps if stage1_steps is not None else steps
@@ -521,7 +596,7 @@ class DiffusersVideoBackend:
                 extra_kwargs={},
                 phase="video_upscale_stage_1" if stage1_steps is not None else "video",
             )
-            if model.latent_upscaler is not None:
+            if model.upsample_pipeline is not None:
                 frames = self._upscale_video(
                     model,
                     frames=frames,
@@ -557,9 +632,9 @@ class DiffusersVideoBackend:
 
         _refuse_review(kwargs)
         stage1_steps = kwargs.get("stage1_steps")
-        if model.latent_upscaler is not None and stage1_steps is None:
+        if model.upsample_pipeline is not None and stage1_steps is None:
             raise ValueError("stage1_steps must be provided when upscale is enabled")
-        if model.latent_upscaler is None and stage1_steps is not None:
+        if model.upsample_pipeline is None and stage1_steps is not None:
             raise RuntimeError("Upscale was requested, but the diffusers latent upscaler is unavailable for this model.")
 
         base_steps = stage1_steps if stage1_steps is not None else steps
@@ -580,7 +655,7 @@ class DiffusersVideoBackend:
                 extra_kwargs={"image": input_image},
                 phase="video_upscale_stage_1" if stage1_steps is not None else "video",
             )
-            if model.latent_upscaler is not None:
+            if model.upsample_pipeline is not None:
                 frames = self._upscale_video(
                     model,
                     frames=frames,
@@ -609,7 +684,7 @@ class DiffusersVideoBackend:
     ) -> list[Any]:
         """Run the optional latent upscaler and emit a terminal progress event."""
 
-        if model.latent_upscaler is None:
+        if model.upsample_pipeline is None:
             raise RuntimeError("Upscale was requested, but no latent upscaler pipeline is loaded.")
 
         upscale_kwargs = {
@@ -620,7 +695,7 @@ class DiffusersVideoBackend:
             "generator": _make_generator(model.runtime.torch, seed),
             "output_type": "pil",
         }
-        result = model.latent_upscaler(**_filter_supported_kwargs(model.latent_upscaler, upscale_kwargs))
+        result = model.upsample_pipeline(**_filter_supported_kwargs(model.upsample_pipeline, upscale_kwargs))
         if step_callback is not None:
             step_callback(
                 {
