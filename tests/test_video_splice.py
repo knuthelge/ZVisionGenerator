@@ -423,7 +423,7 @@ def _declared_audio_samples(path: Path) -> int:
     )
     lines = [line.split(",") for line in probe.stdout.split()]
     numerator, denominator = (int(part) for part in next(line[0] for line in lines if "/" in line[0]).split("/"))
-    packets = [(int(line[0]), int(line[1])) for line in lines if len(line) == 2 and "/" not in line[0]]
+    packets = [(int(line[0]), int(line[1])) for line in lines if len(line) >= 2 and "/" not in line[0]]  # newer ffprobe adds a trailing field to trimmed packets
     start = max(0, packets[0][0])
     end = packets[-1][0] + packets[-1][1]
     return round((end - start) * numerator * RATE / denominator)
