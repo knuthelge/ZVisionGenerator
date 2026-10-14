@@ -416,9 +416,23 @@ def _packet_hashes(path: Path, *, decoded: bool = False) -> list[str]:
     return [line.rsplit(",", 1)[1].strip() for line in lines if line and not line.startswith("#")]
 
 
+def _declared_audio_samples(path: Path) -> int:
+    """Return the audio stream's length in samples at RATE, from its first packet's start (or 0) to its last packet's end."""
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=time_base:packet=pts,duration", "-of", "csv=p=0", str(path)], capture_output=True, check=True, text=True
+    )
+    lines = [line.split(",") for line in probe.stdout.split()]
+    numerator, denominator = (int(part) for part in next(line[0] for line in lines if "/" in line[0]).split("/"))
+    packets = [(int(line[0]), int(line[1])) for line in lines if len(line) == 2 and "/" not in line[0]]
+    start = max(0, packets[0][0])
+    end = packets[-1][0] + packets[-1][1]
+    return round((end - start) * numerator * RATE / denominator)
+
+
 def _audio_pcm(path: Path) -> np.ndarray:
+    """Decode the first audio stream, cut to its declared length (some ffmpeg builds keep the last AAC frame's padding)."""
     data = ffmpeg("-i", str(path), "-map", "0:a:0", "-f", "s16le", "-ac", "2", "-ar", str(RATE), "-")
-    return np.frombuffer(data, dtype=np.int16).reshape(-1, 2)
+    return np.frombuffer(data, dtype=np.int16).reshape(-1, 2)[: _declared_audio_samples(path)]
 
 
 def _red_overlap(frame: np.ndarray, reference: np.ndarray) -> float:
@@ -615,8 +629,9 @@ class TestRealReencode:
         _make_clip(plain, numbered_frames(72, 128, 64))
         late = tmp_path / "late.mkv"
         ffmpeg("-i", str(wav), "-itsoffset", "0.5", "-i", str(plain), "-map", "1:v", "-map", "0:a", "-c:v", "copy", "-c:a", "aac", str(late))
-        source = build_extend_source(late, probe_video(late), None)
-        assert source.video_start == pytest.approx(0.5)
+        probe = probe_video(late)
+        source = build_extend_source(late, probe, None)
+        assert source.video_start == pytest.approx(0.5 - (probe.format_start or 0.0))  # the AAC priming may start the container early
         segment = _make_segment(tmp_path, source, numbered_frames(16, 128, 64), with_audio=False)
         silent_wav = tmp_path / "quiet.wav"
         write_pcm16_wav(np.zeros((2, 32000), dtype=np.float32), silent_wav)

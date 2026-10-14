@@ -189,7 +189,7 @@ class TestRealTail:
         probe = probe_video(clip)
         assert probe.video_start == pytest.approx(0.5)
         tail, source = _tail_of(clip)
-        assert source.video_start == pytest.approx(0.5)
+        assert source.video_start == pytest.approx(0.5 - (probe.format_start or 0.0))  # the AAC priming may start the container early
         assert np.array_equal(tail, decode_frames(clip, 64, 32)[175:200])
 
     @pytest.mark.parametrize("angle", ["-90", "90", "180"])

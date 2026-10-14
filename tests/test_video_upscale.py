@@ -592,6 +592,7 @@ class TestLoadModel:
 
     def test_missing_package_raises_runtime_error(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", None)  # makes the import raise ImportError
+        monkeypatch.setattr("zvisiongenerator.backends.video_mac.memory_size_bytes", lambda: 64 * 1024**3)  # MLX is absent off macOS
 
         with pytest.raises(RuntimeError, match="ltx-pipelines-mlx"):
             LtxVideoBackend().load_model("model/path")
