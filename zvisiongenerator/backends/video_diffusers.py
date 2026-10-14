@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import inspect
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -455,6 +456,42 @@ def _build_generation_kwargs(
     return kwargs
 
 
+def _upsample_latents(upsample_pipeline: Any, latents: Any, *, width: int, height: int, num_frames: int, low_memory: bool) -> Any:
+    """Upsample stage-1 video latents 2x and return the upsampled latents.
+
+    *width* and *height* are the final (stage 2) size. In low-memory mode the CPU-resident upsampler runs on the GPU only
+    for this pass and returns to the CPU afterwards, even when the pass fails.
+    """
+
+    upsampler = upsample_pipeline.latent_upsampler
+    if low_memory:
+        upsampler.to("cuda")
+    try:
+        result = upsample_pipeline(
+            latents=latents,
+            height=height // 2,
+            width=width // 2,
+            num_frames=num_frames,
+            output_type="latent",
+        )
+    finally:
+        if low_memory:
+            upsampler.to("cpu")
+    return result.frames
+
+
+@contextmanager
+def _refine_scheduler(pipeline: Any) -> Iterator[None]:
+    """Swap in a static-shift scheduler for the refinement pass and restore the original on exit."""
+
+    original = pipeline.scheduler
+    pipeline.scheduler = type(original).from_config(original.config, use_dynamic_shifting=False, shift_terminal=None)
+    try:
+        yield
+    finally:
+        pipeline.scheduler = original
+
+
 def _generate_one_stage(
     model: _LoadedVideoModel,
     pipeline: Any,
@@ -467,7 +504,6 @@ def _generate_one_stage(
     steps: int,
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
-    phase: str = "video",
 ) -> list[Any]:
     """Run one distilled denoising pass at full size and return its frames."""
 
@@ -481,10 +517,120 @@ def _generate_one_stage(
         sigmas=sigmas,
         generator=_make_generator(model.runtime.torch, seed),
         output_type="pil",
-        callback=_make_step_callback(step_callback, phase=phase, offset=0, total=len(sigmas)),
+        callback=_make_step_callback(step_callback, phase="video", offset=0, total=len(sigmas)),
         extra_kwargs=extra_kwargs,
     )
     return _extract_frames(pipeline(**kwargs))
+
+
+def _generate_two_stage(
+    model: _LoadedVideoModel,
+    pipeline: Any,
+    *,
+    prompt: str,
+    width: int,
+    height: int,
+    num_frames: int,
+    seed: int,
+    stage1_steps: int,
+    step_callback: Any | None,
+    extra_kwargs: Mapping[str, Any],
+) -> list[Any]:
+    """Render at half size, upsample the latents 2x and refine at full size on the same pipeline.
+
+    Both denoising passes run on *pipeline* so its LoRA adapters apply to each. Progress covers both passes as one
+    run of ``len(stage-1 sigmas) + len(stage-2 sigmas)`` steps.
+    """
+
+    if width % 64 or height % 64:
+        raise ValueError(f"Two-stage upscale needs width and height divisible by 64, got {width}x{height}.")
+
+    runtime = model.runtime
+    stage1_sigmas = _stage1_sigmas(runtime.distilled_sigmas, stage1_steps)
+    stage2_sigmas = list(runtime.stage2_sigmas)
+    total = len(stage1_sigmas) + len(stage2_sigmas)
+    generator = _make_generator(runtime.torch, seed)
+    common = {"prompt": prompt, "num_frames": num_frames, "fps": model.model_info.default_fps, "generator": generator}
+
+    stage1 = pipeline(
+        **_build_generation_kwargs(
+            **common,
+            width=width // 2,
+            height=height // 2,
+            sigmas=stage1_sigmas,
+            output_type="latent",
+            callback=_make_step_callback(step_callback, phase="video_upscale_stage_1", offset=0, total=total),
+            extra_kwargs=extra_kwargs,
+        )
+    )
+    upsampled = _upsample_latents(model.upsample_pipeline, stage1.frames, width=width, height=height, num_frames=num_frames, low_memory=model.low_memory)
+
+    refine_kwargs = {**extra_kwargs, "latents": upsampled, "audio_latents": stage1.audio, "noise_scale": stage2_sigmas[0]}
+    with _refine_scheduler(pipeline):
+        stage2 = pipeline(
+            **_build_generation_kwargs(
+                **common,
+                width=width,
+                height=height,
+                sigmas=stage2_sigmas,
+                output_type="pil",
+                callback=_make_step_callback(step_callback, phase="video_upscale_stage_2", offset=len(stage1_sigmas), total=total),
+                extra_kwargs=refine_kwargs,
+            )
+        )
+    return _extract_frames(stage2)
+
+
+def _check_upscale_arguments(model: _LoadedVideoModel, stage1_steps: int | None) -> None:
+    """Ensure the loaded model and the request agree on whether the run is upscaled."""
+
+    if model.upsample_pipeline is not None and stage1_steps is None:
+        raise ValueError("stage1_steps must be provided when upscale is enabled")
+    if model.upsample_pipeline is None and stage1_steps is not None:
+        raise RuntimeError("Upscale was requested, but no latent upsampler is loaded for this model.")
+
+
+def _generate_frames(
+    model: _LoadedVideoModel,
+    pipeline: Any,
+    *,
+    prompt: str,
+    width: int,
+    height: int,
+    num_frames: int,
+    seed: int,
+    steps: int,
+    stage1_steps: int | None,
+    step_callback: Any | None,
+    extra_kwargs: Mapping[str, Any],
+) -> list[Any]:
+    """Generate frames in one stage, or in two stages when *stage1_steps* is set."""
+
+    if stage1_steps is None:
+        return _generate_one_stage(
+            model,
+            pipeline,
+            prompt=prompt,
+            width=width,
+            height=height,
+            num_frames=num_frames,
+            seed=seed,
+            steps=steps,
+            step_callback=step_callback,
+            extra_kwargs=extra_kwargs,
+        )
+    return _generate_two_stage(
+        model,
+        pipeline,
+        prompt=prompt,
+        width=width,
+        height=height,
+        num_frames=num_frames,
+        seed=seed,
+        stage1_steps=stage1_steps,
+        step_callback=step_callback,
+        extra_kwargs=extra_kwargs,
+    )
 
 
 class DiffusersVideoBackend:
@@ -575,15 +721,10 @@ class DiffusersVideoBackend:
 
         _refuse_review(kwargs)
         stage1_steps = kwargs.get("stage1_steps")
-        if model.upsample_pipeline is not None and stage1_steps is None:
-            raise ValueError("stage1_steps must be provided when upscale is enabled")
-        if model.upsample_pipeline is None and stage1_steps is not None:
-            raise RuntimeError("Upscale was requested, but the diffusers latent upscaler is unavailable for this model.")
-
-        base_steps = stage1_steps if stage1_steps is not None else steps
+        _check_upscale_arguments(model, stage1_steps)
 
         with model.runtime.torch.inference_mode():
-            frames = _generate_one_stage(
+            frames = _generate_frames(
                 model,
                 model.text_to_video,
                 prompt=prompt,
@@ -591,22 +732,11 @@ class DiffusersVideoBackend:
                 height=height,
                 num_frames=num_frames,
                 seed=seed,
-                steps=base_steps,
+                steps=steps,
+                stage1_steps=stage1_steps,
                 step_callback=step_callback,
                 extra_kwargs={},
-                phase="video_upscale_stage_1" if stage1_steps is not None else "video",
             )
-            if model.upsample_pipeline is not None:
-                frames = self._upscale_video(
-                    model,
-                    frames=frames,
-                    width=width,
-                    height=height,
-                    num_frames=num_frames,
-                    seed=seed,
-                    base_steps=base_steps,
-                    step_callback=step_callback,
-                )
             output = _export_video(model, frames, output_path)
         _cleanup(model.runtime)
         return output
@@ -632,17 +762,13 @@ class DiffusersVideoBackend:
 
         _refuse_review(kwargs)
         stage1_steps = kwargs.get("stage1_steps")
-        if model.upsample_pipeline is not None and stage1_steps is None:
-            raise ValueError("stage1_steps must be provided when upscale is enabled")
-        if model.upsample_pipeline is None and stage1_steps is not None:
-            raise RuntimeError("Upscale was requested, but the diffusers latent upscaler is unavailable for this model.")
+        _check_upscale_arguments(model, stage1_steps)
 
-        base_steps = stage1_steps if stage1_steps is not None else steps
         with model.runtime.image_module.open(image_path) as image:
             input_image = image.convert("RGB")
 
         with model.runtime.torch.inference_mode():
-            frames = _generate_one_stage(
+            frames = _generate_frames(
                 model,
                 model.image_to_video,
                 prompt=prompt,
@@ -650,58 +776,11 @@ class DiffusersVideoBackend:
                 height=height,
                 num_frames=num_frames,
                 seed=seed,
-                steps=base_steps,
+                steps=steps,
+                stage1_steps=stage1_steps,
                 step_callback=step_callback,
                 extra_kwargs={"image": input_image},
-                phase="video_upscale_stage_1" if stage1_steps is not None else "video",
             )
-            if model.upsample_pipeline is not None:
-                frames = self._upscale_video(
-                    model,
-                    frames=frames,
-                    width=width,
-                    height=height,
-                    num_frames=num_frames,
-                    seed=seed,
-                    base_steps=base_steps,
-                    step_callback=step_callback,
-                )
             output = _export_video(model, frames, output_path)
         _cleanup(model.runtime)
         return output
-
-    def _upscale_video(
-        self,
-        model: _LoadedVideoModel,
-        *,
-        frames: list[Any],
-        width: int,
-        height: int,
-        num_frames: int,
-        seed: int,
-        base_steps: int,
-        step_callback: Any | None,
-    ) -> list[Any]:
-        """Run the optional latent upscaler and emit a terminal progress event."""
-
-        if model.upsample_pipeline is None:
-            raise RuntimeError("Upscale was requested, but no latent upscaler pipeline is loaded.")
-
-        upscale_kwargs = {
-            "video": frames,
-            "width": width,
-            "height": height,
-            "num_frames": num_frames,
-            "generator": _make_generator(model.runtime.torch, seed),
-            "output_type": "pil",
-        }
-        result = model.upsample_pipeline(**_filter_supported_kwargs(model.upsample_pipeline, upscale_kwargs))
-        if step_callback is not None:
-            step_callback(
-                {
-                    "phase": "video_upscale_stage_2",
-                    "current_step": max(base_steps, 1) + 1,
-                    "total_steps": max(base_steps, 1) + 1,
-                }
-            )
-        return _extract_frames(result)

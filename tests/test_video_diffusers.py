@@ -40,6 +40,18 @@ class _FakeVae:
         self.tiling_enabled = True
 
 
+class _FakeScheduler:
+    """Stand-in for FlowMatchEulerDiscreteScheduler: from_config records the overrides it was built with."""
+
+    def __init__(self, config: dict[str, Any] | None = None, overrides: dict[str, Any] | None = None):
+        self.config = config or {"shift": 1.0, "use_dynamic_shifting": True, "shift_terminal": 0.1}
+        self.overrides = overrides
+
+    @classmethod
+    def from_config(cls, config, **overrides):
+        return cls(config, overrides)
+
+
 class _FakeInferenceMode:
     def __enter__(self):
         return self
@@ -99,6 +111,8 @@ class _BaseFakePipeline:
         self.cpu_offload_enabled = False
         self.to_calls: list[tuple[object, object]] = []
         self.vae = _FakeVae()
+        self.scheduler = _FakeScheduler()
+        self.schedulers_at_call: list[object] = []
         self.loaded_loras: list[tuple[str, str | None]] = []
         self.adapter_calls: list[tuple[object, object]] = []
         self.calls: list[dict[str, object]] = []
@@ -125,24 +139,28 @@ class _BaseFakePipeline:
         self.adapter_calls.append((adapter_names, adapter_weights))
 
 
+def _run_fake_denoise(pipeline: _BaseFakePipeline, kwargs: dict[str, Any], frames: list[list[str]]) -> SimpleNamespace:
+    """Record one pipeline call, fire the step callback per step and return latents or frames by output type."""
+
+    pipeline.calls.append(kwargs)
+    pipeline.schedulers_at_call.append(pipeline.scheduler)
+    callback = kwargs.get("callback_on_step_end")
+    if callback is not None:
+        for step in range(int(kwargs["num_inference_steps"])):
+            callback(pipeline, step, None, {})
+    if kwargs["output_type"] == "latent":
+        return SimpleNamespace(frames="video-latent", audio="audio-latent")
+    return SimpleNamespace(frames=frames)
+
+
 class _FakeTextPipeline(_BaseFakePipeline):
     def __call__(self, **kwargs):
-        self.calls.append(kwargs)
-        callback = kwargs.get("callback_on_step_end")
-        if callback is not None:
-            for step in range(int(kwargs["num_inference_steps"])):
-                callback(self, step, None, {})
-        return SimpleNamespace(frames=[["frame-1", "frame-2"]])
+        return _run_fake_denoise(self, kwargs, [["frame-1", "frame-2"]])
 
 
 class _FakeImagePipeline(_BaseFakePipeline):
     def __call__(self, **kwargs):
-        self.calls.append(kwargs)
-        callback = kwargs.get("callback_on_step_end")
-        if callback is not None:
-            for step in range(int(kwargs["num_inference_steps"])):
-                callback(self, step, None, {})
-        return SimpleNamespace(frames=[["image-frame-1"]])
+        return _run_fake_denoise(self, kwargs, [["image-frame-1"]])
 
 
 class _FakeUpsamplePipeline(_BaseFakePipeline):
@@ -152,10 +170,14 @@ class _FakeUpsamplePipeline(_BaseFakePipeline):
         super().__init__()
         self.vae = vae
         self.latent_upsampler = latent_upsampler
+        self.error: Exception | None = None
 
     def __call__(self, **kwargs):
         self.calls.append(kwargs)
-        return SimpleNamespace(frames=[["upscaled-frame"]])
+        self.latent_upsampler.moves_at_call.append(list(self.latent_upsampler.moves))
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(frames="upsampled-latent")
 
 
 class _FakeUpsamplerModel:
@@ -168,6 +190,8 @@ class _FakeUpsamplerModel:
         self.config = config
         self.state_dict_calls: list[tuple[dict[str, Any], bool]] = []
         self.to_calls: list[dict[str, Any]] = []
+        self.moves: list[str] = []
+        self.moves_at_call: list[list[str]] = []
         self.eval_calls = 0
         _FakeUpsamplerModel.instances.append(self)
 
@@ -176,8 +200,10 @@ class _FakeUpsamplerModel:
             raise _FakeUpsamplerModel.load_error
         self.state_dict_calls.append((state_dict, strict))
 
-    def to(self, **kwargs):
-        self.to_calls.append(kwargs)
+    def to(self, *devices, **kwargs):
+        self.moves.extend(devices)
+        if kwargs:
+            self.to_calls.append(kwargs)
         return self
 
     def eval(self):
@@ -494,45 +520,236 @@ def test_image_to_video_uses_loaded_image(monkeypatch, tmp_path):
     assert not set(_EXTRA_GUIDANCE_KWARGS) & set(call)
 
 
-def test_upscale_uses_upsample_pipeline_and_requires_stage1_steps(monkeypatch, tmp_path):
-    backend = DiffusersVideoBackend()
+def _text_to_video_args(tmp_path, **overrides):
+    return {"prompt": "a city", "width": 512, "height": 384, "num_frames": 49, "seed": 77, "steps": 8, "output_path": str(tmp_path / "upscaled.mp4"), **overrides}
+
+
+def _run_upscaled_text_to_video(monkeypatch, tmp_path, *, low_memory=False, **overrides):
     runtime = _make_runtime()
-    model = _load_upscale_model(monkeypatch, low_memory=False, runtime=runtime)
-    events: list[dict[str, object]] = []
-    output_path = tmp_path / "upscaled.mp4"
+    model = _load_upscale_model(monkeypatch, low_memory=low_memory, runtime=runtime)
+    DiffusersVideoBackend().text_to_video(model=model, **_text_to_video_args(tmp_path, **overrides))
+    return model, runtime
+
+
+def test_upscale_requires_stage1_steps_and_stage1_steps_require_upscale(monkeypatch, tmp_path):
+    backend = DiffusersVideoBackend()
+    model = _load_upscale_model(monkeypatch, low_memory=False)
 
     with pytest.raises(ValueError, match="stage1_steps"):
-        backend.text_to_video(
-            model=model,
-            prompt="a city",
-            width=704,
-            height=448,
-            num_frames=49,
-            seed=77,
-            steps=8,
-            output_path=str(output_path),
-            step_callback=events.append,
-        )
+        backend.text_to_video(model=model, **_text_to_video_args(tmp_path))
+    assert model.text_to_video.calls == []
 
-    result = backend.text_to_video(
-        model=model,
-        prompt="a city",
-        width=704,
-        height=448,
-        num_frames=49,
-        seed=77,
-        steps=8,
-        output_path=str(output_path),
-        step_callback=events.append,
-        stage1_steps=4,
+    _patch_runtime(monkeypatch, _make_runtime())
+    plain, _ = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", mode="t2v", low_memory=False)
+    with pytest.raises(RuntimeError, match="upsampler"):
+        backend.text_to_video(model=plain, stage1_steps=4, **_text_to_video_args(tmp_path))
+    assert plain.text_to_video.calls == []
+
+
+def test_upscale_t2v_runs_half_size_stage1_then_full_size_refine(monkeypatch, tmp_path):
+    model, _ = _run_upscaled_text_to_video(monkeypatch, tmp_path, stage1_steps=4)
+
+    stage1, stage2 = model.text_to_video.calls
+    assert (stage1["width"], stage1["height"]) == (256, 192)
+    assert stage1["output_type"] == "latent"
+    assert stage1["sigmas"] == _stage1_sigmas(_DISTILLED_SIGMAS, 4)
+    assert stage1["num_inference_steps"] == 4
+    assert stage1["guidance_scale"] == 1.0
+    assert "latents" not in stage1
+    assert (stage2["width"], stage2["height"]) == (512, 384)
+    assert stage2["output_type"] == "pil"
+    assert stage2["sigmas"] == list(_STAGE2_SIGMAS)
+    assert stage2["num_inference_steps"] == 3
+    assert stage2["guidance_scale"] == 1.0
+    assert not set(_EXTRA_GUIDANCE_KWARGS) & (set(stage1) | set(stage2))
+    assert stage2["num_frames"] == stage1["num_frames"] == 49
+    assert stage2["generator"] is stage1["generator"]
+    assert stage1["generator"].seed == 77
+
+
+def test_upscale_passes_stage1_audio_latents_and_noise_scale_to_stage2(monkeypatch, tmp_path):
+    model, _ = _run_upscaled_text_to_video(monkeypatch, tmp_path, stage1_steps=4)
+
+    stage2 = model.text_to_video.calls[1]
+    assert stage2["latents"] == "upsampled-latent"
+    assert stage2["audio_latents"] == "audio-latent"
+    assert stage2["noise_scale"] == _STAGE2_SIGMAS[0]
+
+
+def test_upscale_upsampler_gets_half_size_and_stage1_latents(monkeypatch, tmp_path):
+    model, _ = _run_upscaled_text_to_video(monkeypatch, tmp_path, stage1_steps=4)
+
+    (call,) = model.upsample_pipeline.calls
+    assert call == {"latents": "video-latent", "height": 192, "width": 256, "num_frames": 49, "output_type": "latent"}
+
+
+def test_upscale_refine_uses_swapped_scheduler_and_restores_it(monkeypatch, tmp_path):
+    model = _load_upscale_model(monkeypatch, low_memory=False)
+    pipeline = model.text_to_video
+    original = pipeline.scheduler
+
+    DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, **_text_to_video_args(tmp_path))
+
+    stage1_scheduler, stage2_scheduler = pipeline.schedulers_at_call
+    assert stage1_scheduler is original
+    assert stage2_scheduler is not original
+    assert stage2_scheduler.config is original.config
+    assert stage2_scheduler.overrides == {"use_dynamic_shifting": False, "shift_terminal": None}
+    assert pipeline.scheduler is original
+
+
+def test_upscale_restores_scheduler_when_the_step_callback_raises(monkeypatch, tmp_path):
+    model = _load_upscale_model(monkeypatch, low_memory=False)
+    pipeline = model.text_to_video
+    original = pipeline.scheduler
+
+    def _cancel_in_stage2(event):
+        if event["phase"] == "video_upscale_stage_2":
+            raise KeyboardInterrupt("quit")
+
+    with pytest.raises(KeyboardInterrupt):
+        DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, step_callback=_cancel_in_stage2, **_text_to_video_args(tmp_path))
+
+    assert pipeline.schedulers_at_call[1] is not original
+    assert pipeline.scheduler is original
+
+
+def test_upscale_leaves_the_scheduler_alone_when_stage1_is_cancelled(monkeypatch, tmp_path):
+    model = _load_upscale_model(monkeypatch, low_memory=False)
+    pipeline = model.text_to_video
+    original = pipeline.scheduler
+
+    def _cancel(_event):
+        raise KeyboardInterrupt("quit")
+
+    with pytest.raises(KeyboardInterrupt):
+        DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, step_callback=_cancel, **_text_to_video_args(tmp_path))
+
+    assert len(pipeline.calls) == 1
+    assert model.upsample_pipeline.calls == []
+    assert pipeline.scheduler is original
+
+
+def test_upscale_i2v_refines_on_the_image_pipeline(monkeypatch, tmp_path):
+    runtime = _make_runtime()
+    model = _load_upscale_model(monkeypatch, low_memory=False, mode="i2v", runtime=runtime)
+    pipeline = model.image_to_video
+    input_path = tmp_path / "input.png"
+    Image.new("RGB", (8, 8), "blue").save(input_path)
+
+    DiffusersVideoBackend().image_to_video(model=model, image_path=str(input_path), stage1_steps=4, **_text_to_video_args(tmp_path))
+
+    stage1, stage2 = pipeline.calls
+    assert (stage1["width"], stage1["height"]) == (256, 192)
+    assert stage1["output_type"] == "latent"
+    assert stage1["image"].size == (8, 8)
+    assert (stage2["width"], stage2["height"]) == (512, 384)
+    assert stage2["latents"] == "upsampled-latent"
+    assert stage2["audio_latents"] == "audio-latent"
+    assert stage2["output_type"] == "pil"
+    assert model.upsample_pipeline.vae is pipeline.vae
+    assert runtime.exported["frames"] == ["image-frame-1"]
+
+
+@pytest.mark.parametrize(("width", "height"), [(520, 384), (512, 392)])
+def test_upscale_rejects_sizes_not_divisible_by_64(monkeypatch, tmp_path, width, height):
+    model = _load_upscale_model(monkeypatch, low_memory=False)
+
+    with pytest.raises(ValueError, match="divisible by 64"):
+        DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, **_text_to_video_args(tmp_path, width=width, height=height))
+
+    assert model.text_to_video.calls == []
+    assert model.upsample_pipeline.calls == []
+
+
+def test_upscale_exports_stage2_frames(monkeypatch, tmp_path):
+    runtime = _make_runtime()
+    model = _load_upscale_model(monkeypatch, low_memory=False, runtime=runtime)
+
+    result = DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, **_text_to_video_args(tmp_path))
+
+    assert result == tmp_path / "upscaled.mp4"
+    assert runtime.exported["frames"] == ["frame-1", "frame-2"]
+    assert runtime.exported["fps"] == 24
+    assert runtime.torch.cuda.empty_cache_calls == 1
+
+
+@pytest.mark.parametrize(("stage1_steps", "stage1_len"), [(8, 8), (4, 4), (1, 1), (12, 8)])
+def test_upscale_progress_matches_two_stage_contract(monkeypatch, tmp_path, stage1_steps, stage1_len):
+    events: list[dict[str, object]] = []
+    total = stage1_len + 3
+
+    _run_upscaled_text_to_video(monkeypatch, tmp_path, stage1_steps=stage1_steps, step_callback=events.append)
+
+    expected = [{"phase": "video_upscale_stage_1", "current_step": step, "total_steps": total} for step in range(1, stage1_len + 1)]
+    expected += [{"phase": "video_upscale_stage_2", "current_step": stage1_len + step, "total_steps": total} for step in range(1, 4)]
+    assert events == expected
+    assert events[-1]["current_step"] == events[-1]["total_steps"]
+
+
+def test_upscale_i2v_progress_matches_two_stage_contract(monkeypatch, tmp_path):
+    model = _load_upscale_model(monkeypatch, low_memory=False, mode="i2v")
+    input_path = tmp_path / "input.png"
+    Image.new("RGB", (8, 8), "blue").save(input_path)
+    events: list[dict[str, object]] = []
+
+    DiffusersVideoBackend().image_to_video(model=model, image_path=str(input_path), stage1_steps=4, step_callback=events.append, **_text_to_video_args(tmp_path))
+
+    assert [(e["phase"], e["current_step"], e["total_steps"]) for e in events] == [
+        ("video_upscale_stage_1", 1, 7),
+        ("video_upscale_stage_1", 2, 7),
+        ("video_upscale_stage_1", 3, 7),
+        ("video_upscale_stage_1", 4, 7),
+        ("video_upscale_stage_2", 5, 7),
+        ("video_upscale_stage_2", 6, 7),
+        ("video_upscale_stage_2", 7, 7),
+    ]
+
+
+@pytest.mark.parametrize(("low_memory", "expected_moves"), [(True, ["cuda", "cpu"]), (False, [])])
+def test_upscale_moves_the_upsampler_to_the_gpu_only_in_low_memory_mode(monkeypatch, tmp_path, low_memory, expected_moves):
+    model, _ = _run_upscaled_text_to_video(monkeypatch, tmp_path, low_memory=low_memory, stage1_steps=4)
+
+    upsampler = model.upsample_pipeline.latent_upsampler
+    assert upsampler.moves == expected_moves
+    assert upsampler.moves_at_call == [expected_moves[:1]]
+
+
+def test_upscale_returns_the_upsampler_to_the_cpu_when_the_upsample_fails(monkeypatch, tmp_path):
+    model = _load_upscale_model(monkeypatch, low_memory=True)
+    model.upsample_pipeline.error = RuntimeError("out of memory")
+    pipeline = model.text_to_video
+    original = pipeline.scheduler
+
+    with pytest.raises(RuntimeError, match="out of memory"):
+        DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, **_text_to_video_args(tmp_path))
+
+    assert model.upsample_pipeline.latent_upsampler.moves == ["cuda", "cpu"]
+    assert len(pipeline.calls) == 1
+    assert pipeline.scheduler is original
+
+
+def test_upscale_runs_both_stages_on_the_same_lora_bearing_pipeline(monkeypatch, tmp_path):
+    lora_path = tmp_path / "style.safetensors"
+    lora_path.write_text("weights", encoding="utf-8")
+    _patch_runtime(monkeypatch, _make_runtime())
+    _patch_upsampler_io(monkeypatch)
+    backend = DiffusersVideoBackend()
+    model, _ = backend.load_model(
+        "diffusers/LTX-2.3-Distilled-Diffusers",
+        mode="t2v",
+        low_memory=False,
+        loras=[(str(lora_path), 0.5)],
+        upscale=True,
+        latent_upsampler=_UPSAMPLER_SOURCE,
     )
 
-    assert result == output_path
-    assert model.text_to_video.calls[0]["num_inference_steps"] == 4
-    assert model.text_to_video.calls[0]["sigmas"] == _stage1_sigmas(_DISTILLED_SIGMAS, 4)
-    assert model.upsample_pipeline.calls[0]["video"] == ["frame-1", "frame-2"]
-    assert runtime.exported["frames"] == ["upscaled-frame"]
-    assert events[-1] == {"phase": "video_upscale_stage_2", "current_step": 5, "total_steps": 5}
+    backend.text_to_video(model=model, stage1_steps=4, **_text_to_video_args(tmp_path))
+
+    (pipeline,) = _FakeTextPipeline.loaded_instances
+    assert pipeline is model.text_to_video
+    assert pipeline.loaded_loras == [(str(lora_path), "lora_0")]
+    assert len(pipeline.calls) == 2
 
 
 def test_resolve_pipeline_classes_requires_ltx2():

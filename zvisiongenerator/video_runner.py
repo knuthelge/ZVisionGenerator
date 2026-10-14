@@ -89,8 +89,9 @@ def _quit_requested(skip_signal: SkipSignal | None) -> bool:
 def _cancellable_step_callback(step_callback: ProgressCallback | None, skip_signal: SkipSignal | None) -> ProgressCallback | None:
     """Wrap *step_callback* so a queued Quit stops the denoising loop at its next step.
 
-    Both video backends call the step callback from their denoising loop, so raising there ends the generation. The
-    diffusers latent upscaler reports only once, after it finishes, so a Quit during that pass applies when it ends.
+    Both video backends call the step callback from every denoising step, including the upscale refinement, so raising
+    there ends the generation. Only the latent upsample between the two passes is a single short step that runs to
+    completion, so a Quit during it applies at the first refinement step.
     """
     if skip_signal is None:
         return step_callback
