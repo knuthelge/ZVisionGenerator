@@ -507,10 +507,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#video-model-defaults-and-overrides" class="md-nav__link">
+  <a href="#choosing-a-video-model" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Video Model Defaults And Overrides
+        Choosing a Video Model
       
     </span>
   </a>
@@ -1026,10 +1026,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#video-model-defaults-and-overrides" class="md-nav__link">
+  <a href="#choosing-a-video-model" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Video Model Defaults And Overrides
+        Choosing a Video Model
       
     </span>
   </a>
@@ -1226,12 +1226,9 @@ ziv-image -m Tongyi-MAI/Z-Image-Turbo --prompt &quot;a cat&quot;
 ziv-image -m my-model -p prompts.yaml -r 3
 </code></pre>
 <h3 id="video-generation">Video Generation</h3>
-<p>Use <code>MODEL</code> below as follows: <code>ltx-4</code> or <code>ltx-8</code> on macOS, <code>ltx-2.3</code> on Windows and Linux.</p>
-<pre><code class="language-bash"># Text-to-video with LTX on macOS
+<p>Use <code>MODEL</code> below as <code>ltx-4</code> or <code>ltx-8</code> (4-bit or 8-bit) on every platform.</p>
+<pre><code class="language-bash"># Text-to-video with LTX (4-bit)
 ziv-video -m ltx-4 --prompt &quot;A cat walking through a garden&quot;
-
-# Text-to-video with LTX on Windows or Linux
-ziv-video -m ltx-2.3 --prompt &quot;A cat walking through a garden&quot;
 
 # Image-to-video with your platform alias
 ziv-video -m MODEL --image photo.jpg --prompt &quot;Camera slowly zooms in&quot;
@@ -1239,23 +1236,8 @@ ziv-video -m MODEL --image photo.jpg --prompt &quot;Camera slowly zooms in&quot;
 # Batch from prompts file with your platform alias
 ziv-video -m MODEL -p prompts.yaml -r 3
 </code></pre>
-<h3 id="video-model-defaults-and-overrides">Video Model Defaults And Overrides</h3>
-<ul>
-<li>macOS exposes <code>ltx-4</code> and <code>ltx-8</code>, which resolve to the MLX LTX repositories and are the shipped Q4/Q8 presets.</li>
-<li>Windows and Linux expose <code>ltx-2.3</code>, which resolves to the configurable diffusers repository in <code>video_model_presets.ltx.diffusers.default_repo</code>.</li>
-<li>The packaged default is <code>diffusers/LTX-2.3-Distilled-Diffusers</code>, the distilled LTX-2.3 checkpoint in diffusers format. It runs 8 steps at <code>guidance_scale</code> 1.0, and <code>--steps</code> below 8 keeps the end of that schedule. Only distilled checkpoints are supported. It is a configurable diffusers default, not a shipped Q4/Q8 alias.</li>
-<li><code>--upscale 2</code> loads a 2× latent upsampler (about 1 GB) from the Hugging Face file named by <code>video_model_presets.ltx.diffusers.latent_upsampler</code>, downloaded on the first upscale run.</li>
-</ul>
-<p>To override the Windows/Linux default video repository, add a user config file at <code>~/.ziv/config.yaml</code>:</p>
-<pre><code class="language-yaml">video_model_presets:
-  ltx:
-    diffusers:
-      default_repo: your-org/your-distilled-ltx-repo
-      latent_upsampler:
-        repo: your-org/your-ltx-upsampler
-        filename: your-upsampler-x2.safetensors
-</code></pre>
-<p>After the override, <code>ziv-video -m ltx-2.3 ...</code> and the Web UI both resolve to the new repository. <code>latent_upsampler</code> is optional and only used by <code>--upscale 2</code>.</p>
+<h3 id="choosing-a-video-model">Choosing a Video Model</h3>
+<p><code>ltx-4</code> needs the least memory; <code>ltx-8</code> is closer to the full model. On Windows and Linux, <code>ltx-4</code> needs about 20 GB of system memory and <code>ltx-8</code> about 27 GB, and the first run of each takes a while to download and prepare the model. See the <a href="../guides/video/#ltx-constraints">Video Guide</a>.</p>
 <h3 id="model-lora-management">Model &amp; LoRA Management</h3>
 <pre><code class="language-bash"># Convert a Z-Image checkpoint
 ziv-model model -i checkpoint.safetensors --name my-model
@@ -1469,7 +1451,7 @@ uv run ziv ui --no-browser
 </tr>
 <tr>
 <td><code>E</code></td>
-<td>Use as reference: load an image as the reference image, together with its prompt. On a video (macOS), Extend: open it in the Extend Video tab</td>
+<td>Use as reference: load an image as the reference image, together with its prompt. On a video, Extend: open it in the Extend Video tab</td>
 </tr>
 <tr>
 <td><code>D</code></td>

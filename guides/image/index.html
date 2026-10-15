@@ -1407,7 +1407,7 @@
 </tr>
 </tbody>
 </table>
-<p>For video aliases, see <a href="../video/#model-aliases">Video Guide → Model Aliases</a>.</p>
+<p>For video aliases, see <a href="../video/#supported-models">Video Guide → Supported Models</a>.</p>
 <pre><code class="language-bash">ziv-image -m zit --prompt &quot;a beautiful sunset&quot;
 ziv-image -m klein4b --prompt &quot;a portrait&quot;
 ziv-image -m ideo --prompt &quot;a portrait&quot;
@@ -1464,14 +1464,14 @@ ziv-image -m krea2 -q 4 --prompt &quot;a portrait&quot;
 <td>512×512</td>
 <td>672×384</td>
 <td>384×672</td>
-<td>608×400</td>
-<td>400×608</td>
+<td>576×384</td>
+<td>384×576</td>
 </tr>
 <tr>
 <td><code>s</code></td>
 <td>704×704</td>
-<td>944×528</td>
-<td>528×944</td>
+<td>960×544</td>
+<td>544×960</td>
 <td>864×576</td>
 <td>576×864</td>
 </tr>
@@ -1485,22 +1485,23 @@ ziv-image -m krea2 -q 4 --prompt &quot;a portrait&quot;
 </tr>
 <tr>
 <td><code>l</code></td>
-<td>1440×1440</td>
-<td>1888×1056</td>
-<td>1056×1888</td>
+<td>1408×1408</td>
+<td>1920×1088</td>
+<td>1088×1920</td>
 <td>1728×1152</td>
 <td>1152×1728</td>
 </tr>
 <tr>
 <td><code>xl</code></td>
 <td>1600×1600</td>
-<td>2112×1184</td>
-<td>1184×2112</td>
-<td>1936×1296</td>
-<td>1296×1936</td>
+<td>2176×1216</td>
+<td>1216×2176</td>
+<td>1920×1280</td>
+<td>1280×1920</td>
 </tr>
 </tbody>
 </table>
+<p>Every preset keeps its exact size under <code>--upscale 2</code>; <code>m</code>, <code>l</code> and <code>xl</code> also do under <code>--upscale 4</code>.</p>
 <p>Use <code>-W</code> / <code>-H</code> to override with exact pixel dimensions:</p>
 <pre><code class="language-bash">ziv-image -m my-model --prompt &quot;a portrait&quot; -W 1024 -H 1024
 </code></pre>

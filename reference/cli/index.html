@@ -1381,14 +1381,11 @@ ziv ui [options]       # Same as ziv-ui
 <p><code>parts=action</code> keeps the scene exactly as written and rewrites only the action, so <code>style</code>, <code>mood</code> and <code>details</code> have no effect. It needs a scene (from <code>--scene</code>, the entry's <code>scene:</code> or the extended clip); with none, the run uses <code>parts=both</code> and warns.</p>
 <p>The free-text direction is not part of the spec; pass it with <code>--enhance-note</code>.</p>
 <p>See <a href="../../guides/prompts/#enhancing-prompts">Enhancing Prompts</a>.</p>
-<p>The <code>ideo</code> alias selects Ideogram 4 (<code>ideogram-ai/ideogram-4-fp8</code>), a macOS/MLX-only image model. Its width and height must be in the 256–2048 range and multiples of 16. Size presets that exceed this range — <code>--size xl</code> with <code>--ratio 16:9</code> or <code>--ratio 9:16</code> (2112 px) — are rejected before the model loads, as are <code>--image</code> and <code>--upscale</code> (both require img2img, which Ideogram 4 does not support).</p>
+<p>The <code>ideo</code> alias selects Ideogram 4 (<code>ideogram-ai/ideogram-4-fp8</code>), a macOS/MLX-only image model. Its width and height must be in the 256–2048 range and multiples of 16. Size presets that exceed this range — <code>--size xl</code> with <code>--ratio 16:9</code> or <code>--ratio 9:16</code> (2176 px) — are rejected before the model loads, as are <code>--image</code> and <code>--upscale</code> (both require img2img, which Ideogram 4 does not support).</p>
 <h2 id="ziv-video-video-generation"><code>ziv-video</code> — Video Generation</h2>
 <p>Platform-aware aliases:</p>
 <ul>
-<li>macOS: <code>ltx-4</code>, <code>ltx-8</code></li>
-<li>Windows and Linux: <code>ltx-2.3</code></li>
-<li>The Windows/Linux alias resolves through <code>video_model_presets.ltx.diffusers.default_repo</code>, which defaults to the distilled checkpoint <code>diffusers/LTX-2.3-Distilled-Diffusers</code> and can be overridden in <code>~/.ziv/config.yaml</code>. Only distilled checkpoints are supported; the backend runs the distilled schedule (up to 8 steps) at <code>guidance_scale</code> 1.0.</li>
-<li><code>ltx-4</code> and <code>ltx-8</code> are the shipped macOS MLX Q4/Q8 aliases. <code>ltx-2.3</code> is the Windows/Linux diffusers alias and does not imply a packaged Q4/Q8 tier.</li>
+<li><code>ltx-4</code> and <code>ltx-8</code> (4-bit and 8-bit LTX-2.3) on every platform. On Windows and Linux they need about 20 GB and 27 GB of system memory.</li>
 </ul>
 <table>
 <thead>
@@ -1422,7 +1419,7 @@ ziv ui [options]       # Same as ziv-ui
 <tr>
 <td><code>--extend SRC</code></td>
 <td><code>None</code></td>
-<td>Continue the video <code>SRC</code>: generate what happens next and append it, writing a new file (the source is not changed). macOS only. See <a href="#extending-a-video">Extending a video</a></td>
+<td>Continue the video <code>SRC</code>: generate what happens next and append it, writing a new file (the source is not changed). See <a href="#extending-a-video">Extending a video</a></td>
 </tr>
 <tr>
 <td><code>--extend-seconds S</code></td>
@@ -1461,8 +1458,8 @@ ziv ui [options]       # Same as ziv-ui
 </tr>
 <tr>
 <td><code>-s</code>, <code>--size</code></td>
-<td><code>m</code></td>
-<td>Size preset (<code>s</code>, <code>m</code>, <code>l</code>, <code>xl</code>)</td>
+<td><code>s</code></td>
+<td>Size preset (<code>xs</code>, <code>s</code>, <code>m</code>, <code>l</code>, <code>xl</code>)</td>
 </tr>
 <tr>
 <td><code>--steps</code></td>
@@ -1482,7 +1479,7 @@ ziv ui [options]       # Same as ziv-ui
 <tr>
 <td><code>--upscale</code></td>
 <td>disabled</td>
-<td>Upscale factor: <code>2</code> only. Renders at half size, upsamples the latents 2×, then refines at full size, so the output keeps the requested size. On Windows/Linux the first use downloads the 2× upsampler (about 1 GB; <code>video_model_presets.ltx.diffusers.latent_upsampler</code>)</td>
+<td>Upscale factor: <code>2</code> only. Renders at half size, upsamples the latents 2×, then refines at full size, so the output keeps the requested size. On Windows/Linux the first use downloads the 2× upsampler (about 1 GB)</td>
 </tr>
 <tr>
 <td><code>--review</code></td>
@@ -1540,7 +1537,7 @@ ziv ui [options]       # Same as ziv-ui
 <ul>
 <li>Video generation requires <code>ffmpeg</code> on every platform.</li>
 <li>Windows and Linux video generation are CUDA-only.</li>
-<li>Alias mismatches are reported directly, for example <code>ltx-4</code> on Windows or <code>ltx-2.3</code> on macOS.</li>
+<li>On Windows and Linux a model that cannot fit in system memory stops before loading, and the first run of each model takes a while to download and prepare it.</li>
 </ul>
 <h3 id="extending-a-video">Extending a video</h3>
 <pre><code class="language-bash">ziv-video --extend clip.mp4 --prompt &quot;The camera pans to the tower.&quot;
@@ -1555,7 +1552,7 @@ ziv-video --extend clip.mp4 --extend-frames 96 -p prompts.yaml
 <li><strong>LoRAs:</strong> the LoRAs it was made with that still exist; missing ones are skipped with a warning. <code>--lora</code> replaces them.</li>
 <li><strong>Prompt:</strong> none, so the extension continues naturally. A video recorded with a single prompt and no scene (made before scenes existed) keeps that prompt when you pass none, with quoted lines dropped while it is unchanged; if <code>--prompt</code> still equals it, a warning says to change it to what happens next.</li>
 </ul>
-<p>Options refused with <code>--extend</code>, since the extension keeps the source's size and takes its own length: <code>--image</code>, <code>--upscale</code>, <code>--ratio</code>, <code>--size</code>, <code>--width</code>, <code>--height</code> and <code>--frames</code>. <code>--extend-seconds</code> and <code>--extend-frames</code> need <code>--extend</code>. In a prompt file, every entry needs a <code>prompt</code>, which is the action that follows the source. On Windows and Linux, <code>--extend</code> is refused. <code>--no-audio</code> leaves the result without sound, and a silent source gives a silent result. When the extension may not fit in memory, a warning is printed and the run continues.</p>
+<p>Options refused with <code>--extend</code>, since the extension keeps the source's size and takes its own length: <code>--image</code>, <code>--upscale</code>, <code>--ratio</code>, <code>--size</code>, <code>--width</code>, <code>--height</code> and <code>--frames</code>. <code>--extend-seconds</code> and <code>--extend-frames</code> need <code>--extend</code>. In a prompt file, every entry needs a <code>prompt</code>, which is the action that follows the source. <code>--no-audio</code> leaves the result without sound, and a silent source gives a silent result. When the extension may not fit in memory, a warning is printed and the run continues.</p>
 <h2 id="ziv-model-model-checkpoint-conversion"><code>ziv-model model</code> — Checkpoint Conversion</h2>
 <table>
 <thead>
@@ -1671,14 +1668,14 @@ ziv-video --extend clip.mp4 --extend-frames 96 -p prompts.yaml
 <td>512×512</td>
 <td>672×384</td>
 <td>384×672</td>
-<td>608×400</td>
-<td>400×608</td>
+<td>576×384</td>
+<td>384×576</td>
 </tr>
 <tr>
 <td><code>s</code></td>
 <td>704×704</td>
-<td>944×528</td>
-<td>528×944</td>
+<td>960×544</td>
+<td>544×960</td>
 <td>864×576</td>
 <td>576×864</td>
 </tr>
@@ -1692,24 +1689,24 @@ ziv-video --extend clip.mp4 --extend-frames 96 -p prompts.yaml
 </tr>
 <tr>
 <td><code>l</code></td>
-<td>1440×1440</td>
-<td>1888×1056</td>
-<td>1056×1888</td>
+<td>1408×1408</td>
+<td>1920×1088</td>
+<td>1088×1920</td>
 <td>1728×1152</td>
 <td>1152×1728</td>
 </tr>
 <tr>
 <td><code>xl</code></td>
 <td>1600×1600</td>
-<td>2112×1184</td>
-<td>1184×2112</td>
-<td>1936×1296</td>
-<td>1296×1936</td>
+<td>2176×1216</td>
+<td>1216×2176</td>
+<td>1920×1280</td>
+<td>1280×1920</td>
 </tr>
 </tbody>
 </table>
 <h2 id="video-size-presets">Video Size Presets</h2>
-<p>Default ratio is <code>16:9</code>. Dimensions vary by <code>--ratio</code>.</p>
+<p>Default ratio is <code>16:9</code> and default size is <code>s</code>. Dimensions vary by <code>--ratio</code>.</p>
 <table>
 <thead>
 <tr>
@@ -1721,28 +1718,34 @@ ziv-video --extend clip.mp4 --extend-frames 96 -p prompts.yaml
 </thead>
 <tbody>
 <tr>
-<td><code>s</code></td>
-<td>512×256 (49f)</td>
-<td>256×512 (49f)</td>
+<td><code>xs</code></td>
+<td>576×320 (49f)</td>
+<td>320×576 (49f)</td>
 <td>384×384 (49f)</td>
 </tr>
 <tr>
+<td><code>s</code></td>
+<td>768×448 (49f)</td>
+<td>448×768 (49f)</td>
+<td>576×576 (49f)</td>
+</tr>
+<tr>
 <td><code>m</code></td>
-<td>704×448 (49f)</td>
-<td>448×704 (49f)</td>
-<td>512×512 (33f)</td>
+<td>1024×576 (49f)</td>
+<td>576×1024 (49f)</td>
+<td>768×768 (49f)</td>
 </tr>
 <tr>
 <td><code>l</code></td>
-<td>960×512 (33f)</td>
-<td>512×960 (33f)</td>
-<td>768×768 (33f)</td>
+<td>1280×704 (33f)</td>
+<td>704×1280 (33f)</td>
+<td>960×960 (33f)</td>
 </tr>
 <tr>
 <td><code>xl</code></td>
-<td>1408×896 (25f)</td>
-<td>896×1408 (25f)</td>
-<td>1024×1024 (25f)</td>
+<td>1600×896 (25f)</td>
+<td>896×1600 (25f)</td>
+<td>1216×1216 (25f)</td>
 </tr>
 </tbody>
 </table>
