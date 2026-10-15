@@ -30,6 +30,7 @@ These files are not part of the published docs site, and the docs don't link to 
 
 | Proposal | Status | Summary |
 |---|---|---|
+| [An in-app path browser](archive/web-path-browser.md) | Done (unreleased) | A file browser drawn in the Web UI from a server listing, plus path completion in the field, replaces the host-native dialog (Tk on Linux, `osascript` on macOS), so Browse works on every OS and from any device |
 | [Group the backends into platform folders](archive/backend-folders.md) | Done (unreleased) | `backends/` split into `cuda/` (with `image/` and `video/`) and a flat `mac/`; the `_win`/`_mac` names dropped. A pure move |
 | [Extend a video](archive/video-extend.md) | Done (unreleased) | Continue a clip from its last 25 frames in the one-stage loop and splice the new part onto the untouched original, with audio, on macOS; Windows/Linux moved to platform parity |
 | [A scene for video prompts](archive/video-scene.md) | Done (unreleased) | An optional Scene beside the video prompt (CLI, prompt files, Web UI), sent first, and an enhancer that writes both a scene and an action in one call |

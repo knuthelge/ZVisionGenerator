@@ -96,7 +96,8 @@ export function formatSeconds(seconds: number): string {
 
 /** Return the last path segment of a POSIX or Windows path. */
 export function fileName(path: string): string {
-  return path.split(/[\\/]/).pop() || path;
+  // A folder path may end in a separator; its name is the last non-empty part.
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
 }
 
 function compact(facts: (DetailFact | null)[]): DetailFact[] {

@@ -369,8 +369,7 @@
              
               value={checkpointPath}
               placeholder="/path/to/model.safetensors"
-              pickerKind="existing_file"
-              pickerPurpose="checkpoint_file"
+              purpose="checkpoint_file"
               required
               onresolve={async (candidate) => candidate}
               onvaluechange={(value) => (checkpointPath = value)}
@@ -435,8 +434,7 @@
              
               value={localLoraPath}
               placeholder="/path/to/lora.safetensors"
-              pickerKind="existing_file"
-              pickerPurpose="lora_file"
+              purpose="lora_file"
               required
               onresolve={async (candidate) => candidate}
               onvaluechange={(value) => (localLoraPath = value)}

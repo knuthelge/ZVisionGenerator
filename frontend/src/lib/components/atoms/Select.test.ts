@@ -8,12 +8,11 @@ import Select from './Select.svelte';
 
 const promptFileContract: PromptFileContract = {
   accepted_extensions: ['.yaml'],
-  browse_kind: 'existing_file',
   selection_required: false,
   trust_boundary: {
     scope: 'server_host_only',
     manual_entry: 'submitted_value_kept_until_backend_validation',
-    picker: 'server_host_native_picker',
+    picker: 'in_app_browser',
     read_write: 'yaml_files_only',
   },
   help: {

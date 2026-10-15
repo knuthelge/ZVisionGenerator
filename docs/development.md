@@ -168,7 +168,7 @@ zvisiongenerator/
 │   ├── model_delete.py            Delete installed models, LoRAs, and HF downloads
 │   ├── model_inventory.py         Backend model inventory for Web UI contracts
 │   ├── model_status.py            Per-model downloaded / memory-fit status for the SPA
-│   ├── path_picker.py             Host-local directory and file picker
+│   ├── path_browser.py            Host folder listings for the in-app path browser
 │   ├── prompt_builder.py          Prompts page API: load, preview, save (revision-checked) and create prompt files
 │   ├── prompt_files.py            Read and atomically update host-local prompt files
 │   ├── request_guard.py           DNS-rebinding and cross-site request protection
@@ -191,7 +191,7 @@ prompts.yaml                       Default prompt definitions
 
 ### Backend Protocol
 
-Platform backends live in `backends/mac/image.py` (mflux/MLX), `backends/cuda/image/backend.py` (Windows/Linux diffusers image), `backends/mac/video.py` (MLX video), and `backends/cuda/video/backend.py` (Windows/Linux diffusers video). Image backends implement the `ImageBackend` Protocol from `core/image_backend.py`; video backends implement the `VideoBackend` Protocol from `core/video_backend.py`. The prompt-enhancer LLM follows the same split: `backends/mac/prompt_enhancer.py` (mlx-lm) and `backends/cuda/prompt_enhancer.py` (transformers) implement the `PromptEnhancer` Protocol from `core/prompt_enhancer.py`. Backend and accelerator selection stays centralized in `backends/__init__.py` — never branch on `sys.platform` elsewhere to pick a backend. OS-level checks unrelated to backends (file pickers, ffmpeg install hints, terminal handling) are fine where they are needed.
+Platform backends live in `backends/mac/image.py` (mflux/MLX), `backends/cuda/image/backend.py` (Windows/Linux diffusers image), `backends/mac/video.py` (MLX video), and `backends/cuda/video/backend.py` (Windows/Linux diffusers video). Image backends implement the `ImageBackend` Protocol from `core/image_backend.py`; video backends implement the `VideoBackend` Protocol from `core/video_backend.py`. The prompt-enhancer LLM follows the same split: `backends/mac/prompt_enhancer.py` (mlx-lm) and `backends/cuda/prompt_enhancer.py` (transformers) implement the `PromptEnhancer` Protocol from `core/prompt_enhancer.py`. Backend and accelerator selection stays centralized in `backends/__init__.py` — never branch on `sys.platform` elsewhere to pick a backend. OS-level checks unrelated to backends (drive listings, ffmpeg install hints, terminal handling) are fine where they are needed.
 
 SeedVR2, the plain upscale of existing images, is macOS-only and has its own small Protocol, `SeedVR2Upscaler` in `core/seedvr2.py`, implemented by `backends/mac/seedvr2.py` (mflux). `supports_seedvr2()` and `get_seedvr2_upscaler()` in `backends/__init__.py` expose it, so other code asks for the capability instead of checking the platform. `seedvr2_loader.py` loads it through a stored 8-bit copy in the same way `image_model_loader.py` does for image models, and `tests/test_mflux_seedvr2_contract.py` records the mflux surface it relies on; re-run it on every mflux bump.
 
@@ -287,6 +287,8 @@ Raise `ValueError`, `FileNotFoundError`, `RuntimeError` directly with descriptiv
 ### Web UI Confirmations
 
 Ask the user to approve an action with `ConfirmDialog` (`frontend/src/lib/components/molecules/`), never `window.confirm`. It has no title: it shows the question, an optional line of information, and a cancel button plus a confirm button named after the action (danger-styled for destructive actions). Enter confirms (except on the focused cancel button), Esc cancels, and a held key never confirms; while it is open, no other key reaches the page or a viewer underneath. Call `requestConfirm({ question, info, confirmLabel })`, which resolves `true` on confirm, or render `<ConfirmDialog>` directly when the dialog needs a body or stays open while the action runs (`pending`).
+
+Let the user choose a path on the server's machine with `PathField`, or `PathInput` (a path box with completion) and `PathBrowser` (the browse dialog) where a field needs its own layout. Each takes a browse purpose; the purposes, with their folder or file kind and accepted extensions, live in `web/path_browser.py`, so add one there for a new kind of path.
 
 ### Web UI Toasts
 

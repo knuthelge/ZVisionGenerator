@@ -28,8 +28,13 @@ const workspaceApiMocks = vi.hoisted(() => ({
   cancelJob: vi.fn(async () => undefined),
 }));
 
+const browseApiMocks = vi.hoisted(() => ({
+  listDirectory: vi.fn(),
+  browsePlaces: vi.fn(),
+  createFolder: vi.fn(),
+}));
+
 const promptFileApiMocks = vi.hoisted(() => ({
-  openPathPicker: vi.fn(),
   inspectPromptFile: vi.fn(),
   writePromptFile: vi.fn(),
 }));
@@ -81,14 +86,16 @@ vi.mock('$lib/api/promptEnhance', async (importOriginal) => {
   return { ...actual, enhancePrompt: enhanceApiMocks.enhancePrompt };
 });
 
+vi.mock('$lib/api/browse', () => browseApiMocks);
+
 vi.mock('$lib/api/promptFiles', () => ({
-  openPathPicker: promptFileApiMocks.openPathPicker,
   inspectPromptFile: promptFileApiMocks.inspectPromptFile,
   writePromptFile: promptFileApiMocks.writePromptFile,
 }));
 
 import WorkspacePage from './WorkspacePage.svelte';
 import ControlsSidebar from './ControlsSidebar.svelte';
+import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 
 let target: HTMLDivElement;
 let app: Record<string, unknown> | null = null;
@@ -105,7 +112,7 @@ beforeEach(() => {
   toasts.splice(0, toasts.length);
   for (const mock of [
     workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.getJobSnapshot,
-    workspaceApiMocks.getHistory, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.listJobs, promptFileApiMocks.openPathPicker,
+    workspaceApiMocks.getHistory, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.listJobs, browseApiMocks.listDirectory, browseApiMocks.browsePlaces,
     promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, extendApiMocks.inspectExtendSource, enhanceApiMocks.enhancePrompt,
     videoMemoryApiMocks.checkVideoMemoryFit, galleryApiMocks.deleteAsset,
   ]) mock.mockReset();
@@ -336,12 +343,11 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
     default_prompt_source: 'inline',
     prompt_file: {
       accepted_extensions: ['.yaml', '.yml'],
-      browse_kind: 'existing_file',
       selection_required: true,
       trust_boundary: {
         scope: 'server_host_only',
         manual_entry: 'submitted_value_kept_until_backend_validation',
-        picker: 'server_host_native_picker',
+        picker: 'in_app_browser',
         read_write: 'yaml_files_only',
       },
       help: {
@@ -468,7 +474,7 @@ describe('WorkspacePage', () => {
       runs: 1,
       created_at: '2026-04-23T10:00:00Z',
     });
-    promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'cancelled', path: null, message: null });
+    browseApiMocks.browsePlaces.mockResolvedValue(placesFor('source_video'));
     Object.defineProperty(URL, 'createObjectURL', {
       configurable: true,
       value: vi.fn(() => 'blob:test-image'),
@@ -2403,6 +2409,22 @@ describe('WorkspacePage', () => {
     expect(quantizeSelect!.disabled, 'Quantize select must be enabled after context loads').toBe(false);
   });
 
+  it('browses the host for a reference image and submits its path instead of an uploaded file', async () => {
+    draft.update('workflow', 'img2img');
+    browseApiMocks.browsePlaces.mockResolvedValue(placesFor('reference_image'));
+    browseApiMocks.listDirectory.mockResolvedValue(listingWith('/pictures/cat.png'));
+    await mountWorkspace(makeContext());
+
+    (target.querySelector('#ws-image-browse') as HTMLButtonElement).click();
+    await settle();
+    expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('reference_image', '', expect.anything());
+    chooseInBrowser('cat.png');
+    await settle();
+
+    expect(draft.state.referenceImagePath).toBe('/pictures/cat.png');
+    expect((target.querySelector('#ws-image-path') as HTMLInputElement).value).toBe('/pictures/cat.png');
+  });
+
   it('does not submit stale reference image fields after switching to a non-reference workflow', async () => {
     draft.update('workflow', 'img2img');
     draft.update('referenceImagePath', '/tmp/stale-reference.png');
@@ -3708,7 +3730,7 @@ describe('WorkspacePage extend', () => {
     workspaceApiMocks.submitGenerate.mockResolvedValue({
       job_id: 'job-ext', workflow: 'extend', prompt: '', model: 'ltx-8', runs: 1, created_at: '2026-10-11T10:00:00Z',
     });
-    promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'cancelled', path: null, message: null });
+    browseApiMocks.browsePlaces.mockResolvedValue(placesFor('source_video'));
   });
 
   async function mountExtend(options: { context?: WorkspaceContext; params?: Record<string, string>; props?: Record<string, unknown> } = {}): Promise<void> {
@@ -3731,12 +3753,19 @@ describe('WorkspacePage extend', () => {
     if (key === 'change') el.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
+  /** Pick *path* in the path browser that Browse opens. */
+  async function browseTo(path: string): Promise<void> {
+    browseApiMocks.listDirectory.mockResolvedValue(listingWith(path));
+    button('ws-source-browse').click();
+    await settle();
+    chooseInBrowser(path.slice(path.lastIndexOf('/') + 1));
+    await settle();
+  }
+
   /** Choose a source the way Browse does, and let the server describe it. */
   async function chooseSource(info = sceneSource(), path = SOURCE): Promise<void> {
     extendApiMocks.inspectExtendSource.mockResolvedValue(info);
-    promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'selected', path, message: null });
-    button('ws-source-browse').click();
-    await settle();
+    await browseTo(path);
   }
 
   async function submit(): Promise<FormData | undefined> {
@@ -3813,7 +3842,7 @@ describe('WorkspacePage extend', () => {
       await mountExtend();
       await chooseSource(sceneSource());
 
-      expect(promptFileApiMocks.openPathPicker).toHaveBeenCalledWith({ kind: 'existing_file', purpose: 'source_video', initial_path: null });
+      expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('source_video', '', expect.anything());
       expect(lastInspect()).toMatchObject({ path: SOURCE, extend_frames: null, model: 'ltx-8' });
       expect(draft.state.extendSourcePath).toBe(SOURCE);
       expect(text('[data-section="source-video"] .inspector-summary')).toBe('walk.mp4');
@@ -3849,24 +3878,13 @@ describe('WorkspacePage extend', () => {
     it('reports a path with no video and keeps the reason Choose a video', async () => {
       await mountExtend();
       extendApiMocks.inspectExtendSource.mockRejectedValue(new ApiError('not found', 404, 'Source video not found: /nope.mp4'));
-      promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'selected', path: '/nope.mp4', message: null });
-      button('ws-source-browse').click();
-      await settle();
+      await browseTo('/nope.mp4');
 
       expect(text('#ws-source-help')).toBe('No video at this path.');
       expect(input('ws-source-path').getAttribute('aria-invalid')).toBe('true');
       expect(input('ws-source-path').getAttribute('aria-describedby')).toBe('ws-source-help');
       expect(button('ws-submit').disabled).toBe(true);
       expect(text('#ws-generate-reason')).toBe('Choose a video to extend.');
-    });
-
-    it('shows the picker\'s message when the host cannot pick files', async () => {
-      await mountExtend();
-      promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'unsupported', path: null, message: 'No file picker on this host.' });
-      button('ws-source-browse').click();
-      await settle();
-      expect(text('#ws-source-help')).toBe('No file picker on this host.');
-      expect(extendApiMocks.inspectExtendSource).not.toHaveBeenCalled();
     });
 
     it('clears the source and its facts but keeps the typed text', async () => {
@@ -4136,9 +4154,7 @@ describe('WorkspacePage extend', () => {
     it('waits for a source still being checked, then submits, without a reason, a toast or a jump of focus', async () => {
       await mountExtend();
       const release = holdInspection();
-      promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'selected', path: SOURCE, message: null });
-      button('ws-source-browse').click();
-      await settle();
+      await browseTo(SOURCE);
       expect(button('ws-submit').disabled).toBe(true);
       expect(target.querySelector('#ws-generate-reason')).toBeNull();
       expect(target.querySelector('[data-section="source-video"] .spinner')).not.toBeNull();

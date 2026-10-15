@@ -10,12 +10,11 @@ PROMPT_SOURCE_VALUES = ("inline", "file")
 DEFAULT_PROMPT_SOURCE = "inline"
 PROMPT_FILE_CONTRACT = {
     "accepted_extensions": [".yaml", ".yml"],
-    "browse_kind": "existing_file",
     "selection_required": True,
     "trust_boundary": {
         "scope": "server_host_only",
         "manual_entry": "submitted_value_kept_until_backend_validation",
-        "picker": "server_host_native_picker",
+        "picker": "in_app_browser",
         "read_write": "yaml_files_only",
     },
     "help": {

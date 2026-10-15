@@ -82,7 +82,7 @@ from zvisiongenerator.web.gallery import (
     resolve_output_asset_path,
 )
 from zvisiongenerator.web.json_fields import json_field
-from zvisiongenerator.web.path_picker import pick_path
+from zvisiongenerator.web.path_browser import BrowsePlace, BrowsePurpose, DirectoryListing, browse_places, create_folder, default_place_dir, host_drives, list_directory, resolve_purpose
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
 from zvisiongenerator.web.upscale_api import plan_seedvr2_upscale, plan_upscale, upscale_json_request, upscale_size_label
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
@@ -126,8 +126,8 @@ async def _lifespan(_: FastAPI):
         web_runner.shutdown()
 
 
-# Blocking handler work (native picker, conversion, imports) is offloaded with run_in_threadpool (AnyIO's worker
-# pool), not asyncio.to_thread: the SSE streams wait on asyncio's default executor, so long dialogs or conversions
+# Blocking handler work (folder listings, conversion, imports) is offloaded with run_in_threadpool (AnyIO's worker
+# pool), not asyncio.to_thread: the SSE streams wait on asyncio's default executor, so long listings or conversions
 # must not occupy its threads and stall progress updates.
 app = FastAPI(title="Z-Vision Generator Web UI", lifespan=_lifespan)
 app.add_middleware(LocalRequestGuardMiddleware)
@@ -193,18 +193,65 @@ async def spa_root() -> FileResponse:
     return FileResponse(spa_index)
 
 
-@app.post("/api/picker")
-async def open_picker(request: Request) -> dict[str, str | None]:
-    """Open a shared native picker on the local machine running the Web UI host."""
-    payload = await request.json()
-    kind = _required_json_string(payload, "kind")
-    purpose = _required_json_string(payload, "purpose")
-    initial_path = _coerce_optional_string(payload.get("initial_path"))
+@app.get("/api/browse")
+async def api_browse(purpose: str, path: str = "", hidden: bool = False, show_all: bool = Query(False, alias="all")) -> dict[str, Any]:
+    """List one host-local folder for the in-app path browser, keeping what *purpose* can choose."""
+    browse_purpose = _browse_purpose(purpose)
     try:
-        result = await run_in_threadpool(pick_path, kind, purpose=purpose, initial_path=initial_path)
+        listing = await run_in_threadpool(_list_browse_directory, browse_purpose, path, show_hidden=hidden, show_all=show_all)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {exc.filename or path}.") from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return listing.to_payload()
+
+
+@app.get("/api/browse/places")
+async def api_browse_places(purpose: str) -> dict[str, Any]:
+    """Return what *purpose* chooses and the path browser's sidebar shortcuts for it."""
+    browse_purpose = _browse_purpose(purpose)
+    places = await run_in_threadpool(_browse_places, browse_purpose)
+    return {"purpose": browse_purpose.to_payload(), "places": [place.to_payload() for place in places]}
+
+
+@app.post("/api/browse/folder")
+async def api_browse_folder(request: Request) -> dict[str, str]:
+    """Create a folder from the path browser for a folder purpose (New folder)."""
+    payload = await request.json()
+    browse_purpose = _browse_purpose(_required_json_string(payload, "purpose"))
+    parent = _required_json_string(payload, "path")
+    name = _required_json_string(payload, "name")
+    try:
+        created = await run_in_threadpool(create_folder, browse_purpose, parent, name)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=f"'{name}' already exists.") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=f"Permission denied: {parent}.") from exc
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"path": str(created)}
+
+
+def _browse_purpose(name: str) -> BrowsePurpose:
+    try:
+        return resolve_purpose(name)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return result.to_payload()
+
+
+def _browse_places(purpose: BrowsePurpose) -> tuple[BrowsePlace, ...]:
+    return browse_places(purpose, home=Path.home(), output_root=_media_output_root(), data_dir=get_ziv_data_dir(), drives=host_drives())
+
+
+def _list_browse_directory(purpose: BrowsePurpose, path: str, *, show_hidden: bool, show_all: bool) -> DirectoryListing:
+    """List *path*, or the purpose's own place when it is empty; blocking, so it runs in the thread pool."""
+    # Only an empty path opens at the purpose's place, which reads the config.
+    default_dir = None if path.strip() else default_place_dir(purpose, home=Path.home(), output_root=_media_output_root(), data_dir=get_ziv_data_dir())
+    return list_directory(purpose, path, default_dir=default_dir, show_hidden=show_hidden, show_all=show_all)
 
 
 @app.post("/api/extend/source")

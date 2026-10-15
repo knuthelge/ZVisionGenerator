@@ -235,8 +235,7 @@
                 changed={isChanged(field)}
                 resettable={field.clearable}
                 layout="row"
-                pickerKind="directory"
-                pickerPurpose="output_directory"
+                purpose="output_directory"
                 onresolve={async (candidate) => candidate}
                 onvaluechange={(value) => {
                   formValues[field.key] = value;

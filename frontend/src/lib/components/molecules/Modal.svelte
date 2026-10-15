@@ -1,3 +1,9 @@
+<script lang="ts" module>
+  // Open modals, innermost last: only the innermost one answers Escape, Tab and focus leaks,
+  // so a dialog opened from another dialog (a path browser over New file) closes alone.
+  const openStack: symbol[] = [];
+</script>
+
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import Icon from '../atoms/Icon.svelte';
@@ -15,6 +21,8 @@
     describedby?: string;
     /** Stack above full-screen overlays such as the asset viewer. */
     elevated?: boolean;
+    /** Fill the screen below 640 px and lay the body out edge to edge, for browsers and editors that scroll inside. */
+    fill?: boolean;
     onclose?: () => void;
     children?: Snippet;
     footer?: Snippet;
@@ -28,6 +36,7 @@
     labelledby,
     describedby,
     elevated = false,
+    fill = false,
     onclose,
     children,
     footer
@@ -70,8 +79,12 @@
 
     // Capture the current element reference for this effect run.
     const el = dialogEl;
+    const token = Symbol('modal');
+    openStack.push(token);
+    const innermost = () => openStack[openStack.length - 1] === token;
 
     function handleKeydown(e: KeyboardEvent): void {
+      if (!innermost()) return;
       if (e.key === 'Escape') {
         e.preventDefault();
         close();
@@ -105,7 +118,7 @@
     // capture-phase focusin listener detects the leak and immediately returns
     // focus to the first focusable element inside the dialog.
     function handleFocusIn(e: FocusEvent): void {
-      if (!el || el.contains(e.target as Node)) return;
+      if (!innermost() || !el || el.contains(e.target as Node)) return;
       const focusable = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE));
       (focusable[0] ?? el).focus();
     }
@@ -113,6 +126,7 @@
     document.addEventListener('keydown', handleKeydown);
     document.addEventListener('focusin', handleFocusIn, true);
     return () => {
+      openStack.splice(openStack.indexOf(token), 1);
       document.removeEventListener('keydown', handleKeydown);
       document.removeEventListener('focusin', handleFocusIn, true);
     };
@@ -131,7 +145,7 @@
       tabindex="-1"
     ></button>
     <!-- Flex centering layer -->
-    <div class="flex items-center justify-center h-full p-4 pointer-events-none">
+    <div class="flex items-center justify-center h-full p-4 pointer-events-none {fill ? 'max-sm:p-0' : ''}">
       <!-- Dialog -->
       <div
         bind:this={dialogEl}
@@ -141,7 +155,7 @@
         aria-labelledby={labelledby}
         aria-describedby={describedby}
         tabindex="-1"
-        class="ui-overlay relative flex max-h-full w-full {SIZE_CLASSES[size]} flex-col focus:outline-none pointer-events-auto"
+        class="ui-overlay relative flex max-h-full w-full {SIZE_CLASSES[size]} flex-col focus:outline-none pointer-events-auto {fill ? 'max-sm:h-full max-sm:max-w-none max-sm:rounded-none' : ''}"
       >
       {#if title}
         <div class="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-2.5">
@@ -156,7 +170,7 @@
           </button>
         </div>
       {/if}
-      <div class="min-h-0 overflow-y-auto px-4 py-3 text-content text-text-secondary">
+      <div class="min-h-0 text-content text-text-secondary {fill ? 'flex flex-1 flex-col overflow-hidden' : 'overflow-y-auto px-4 py-3'}">
         {@render children?.()}
       </div>
       {#if footer}

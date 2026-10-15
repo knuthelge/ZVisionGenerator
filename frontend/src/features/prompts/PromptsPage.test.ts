@@ -12,7 +12,6 @@ const api = vi.hoisted(() => ({
   loadPromptDocument: vi.fn(),
   savePromptDocument: vi.fn(),
   previewPromptDocument: vi.fn(),
-  openPathPicker: vi.fn(),
   writePromptFile: vi.fn(),
   createPromptFile: vi.fn(),
 }));

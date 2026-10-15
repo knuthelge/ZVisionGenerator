@@ -1,20 +1,11 @@
 import { api } from './client';
 import type {
-  PathPickerResult,
   PromptDocument,
   PromptDocumentLoad,
   PromptDocumentPreview,
   PromptDocumentSaved,
   PromptFileInspection,
 } from '$lib/types';
-
-export function openPathPicker(data: {
-  kind: 'existing_file' | 'directory';
-  purpose: string;
-  initial_path?: string | null;
-}): Promise<PathPickerResult> {
-  return api.post<PathPickerResult>('/api/picker', data);
-}
 
 export function inspectPromptFile(path: string): Promise<PromptFileInspection> {
   return api.post<PromptFileInspection>('/api/prompt-files/inspect', { path });

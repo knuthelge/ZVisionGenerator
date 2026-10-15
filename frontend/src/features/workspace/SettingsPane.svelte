@@ -1,7 +1,7 @@
 <script lang="ts">
   import { draft, MAX_SHARPEN_AMOUNT, offeredSizes, settingDefaultsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
-  import { ActionBar, InspectorRow, InspectorSection } from '$lib/components/molecules';
+  import { ActionBar, InspectorRow, InspectorSection, PathBrowser, PathInput } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { extendGuard } from '$lib/state/extend';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
@@ -214,6 +214,14 @@
   const referencePreview = $derived(filePreviewUrl ?? referencePreviewUrl);
   const referenceName = $derived(imageFile?.name ?? (s.referenceImagePath ? fileName(s.referenceImagePath) : ''));
 
+  let browsingImage = $state(false);
+
+  /** Take a host path as the reference, replacing an uploaded file. */
+  function chooseImagePath(path: string): void {
+    onImageFileChange(null);
+    draft.update('referenceImagePath', path);
+  }
+
   function clearImage(): void {
     onImageFileChange(null);
     draft.update('referenceImagePath', null);
@@ -414,25 +422,29 @@
                 <Icon name="reference" size={16} />
               {/if}
             </div>
-            <span class="reference-name" title={referenceName}>{referenceName || 'Drop or browse'}</span>
+            <span class="reference-name" title={referenceName}>{referenceName || 'Browse or drop'}</span>
+            <button id="ws-image-browse" type="button" class="ui-btn ui-btn-row" title="Browse for an image" aria-label="Browse for a reference image" onclick={() => { browsingImage = true; }}><Icon name="folder" size={14} /></button>
             <!-- No name: the chosen file is attached on submit only while it is the reference (see WorkspacePage). -->
             <input id="ws-image-file" bind:this={fileInput} type="file" accept="image/png,image/jpeg,image/webp" class="hidden" onchange={(e) => onImageFileChange(e.currentTarget.files?.[0] ?? null)}>
-            <label for="ws-image-file" class="ui-btn ui-btn-row" title="Browse for an image" aria-label="Browse for a reference image"><Icon name="plus" size={14} /></label>
+            <label for="ws-image-file" class="ui-btn ui-btn-row" title="Upload an image from this device" aria-label="Upload a reference image from this device"><Icon name="upload" size={14} /></label>
             <button type="button" class="ui-btn ui-btn-row" aria-label="Clear reference image" title="Clear" onclick={clearImage}><Icon name="close" size={14} /></button>
           </InspectorRow>
           <InspectorRow label="Path" forId="ws-image-path">
-            <input
+            <PathInput
               id="ws-image-path"
               name="image_path"
-              type="text"
+              purpose="reference_image"
               class="inspector-text"
+              plain
               placeholder="/path/to/reference.png"
               value={s.referenceImagePath ?? ''}
-              oninput={(e) => draft.update('referenceImagePath', e.currentTarget.value || null)}
-            >
+              oninput={(text) => draft.update('referenceImagePath', text || null)}
+              onpick={chooseImagePath}
+            />
           </InspectorRow>
         </div>
       </InspectorSection>
+      <PathBrowser bind:open={browsingImage} purpose="reference_image" initialPath={s.referenceImagePath} onchoose={chooseImagePath} />
     {/if}
 
     {#if showPostprocess}
@@ -662,11 +674,10 @@
   .frame-count { flex: none; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); white-space: nowrap; }
   .dim-times { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
 
-  .inspector-select, .inspector-text { width: 100%; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: var(--text-ui); color: var(--color-text-primary); }
-  .inspector-text { font-family: var(--font-mono); }
+  .inspector-select { width: 100%; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: var(--text-ui); color: var(--color-text-primary); }
   .inspector-select.factor { flex: none; width: 70px; }
-  .inspector-select:hover, .inspector-text:hover { background: var(--color-bg-surface-hover); }
-  .inspector-select:focus, .inspector-text:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-surface); }
+  .inspector-select:hover { background: var(--color-bg-surface-hover); }
+  .inspector-select:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-surface); }
   .inspector-select option { background: var(--color-bg-surface); }
   .row-hint { padding: 0 12px 6px 116px; font-size: var(--text-meta); color: var(--color-text-muted); }
 

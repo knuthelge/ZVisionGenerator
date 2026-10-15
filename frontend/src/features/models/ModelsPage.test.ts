@@ -13,8 +13,10 @@ const modelApiMocks = vi.hoisted(() => ({
   deleteLora: vi.fn(),
 }));
 
-const promptFileApiMocks = vi.hoisted(() => ({
-  openPathPicker: vi.fn(),
+const browseApiMocks = vi.hoisted(() => ({
+  listDirectory: vi.fn(),
+  browsePlaces: vi.fn(),
+  createFolder: vi.fn(),
 }));
 
 vi.mock('$lib/api/models', () => ({
@@ -26,9 +28,7 @@ vi.mock('$lib/api/models', () => ({
   deleteLora: modelApiMocks.deleteLora,
 }));
 
-vi.mock('$lib/api/promptFiles', () => ({
-  openPathPicker: promptFileApiMocks.openPathPicker,
-}));
+vi.mock('$lib/api/browse', () => browseApiMocks);
 
 vi.mock('$lib/state/toasts.svelte', () => ({
   addToast: vi.fn(),
@@ -36,6 +36,7 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 
 import { NOT_DOWNLOADED_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
 import ModelsPage from './ModelsPage.svelte';
+import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 
 function makeInventory(): ModelInventory {
   return {
@@ -59,7 +60,7 @@ async function settle(): Promise<void> {
 function browseButtonFor(target: HTMLElement, inputId: string): HTMLButtonElement {
   const input = target.querySelector(`#${inputId}`);
   const field = input?.closest('.flex.flex-col');
-  const button = Array.from(field?.querySelectorAll('button') ?? []).find((candidate) => candidate.textContent?.trim() === 'Browse') as HTMLButtonElement | undefined;
+  const button = field?.querySelector<HTMLButtonElement>('button[aria-label="Browse"]') ?? undefined;
   if (!button) throw new Error(`Browse button not found for ${inputId}`);
   return button;
 }
@@ -86,8 +87,9 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.deleteModel.mockReset();
     modelApiMocks.deleteLora.mockReset();
     modelApiMocks.getModelInventory.mockResolvedValue(makeInventory());
-    promptFileApiMocks.openPathPicker.mockReset();
-    promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'cancelled', path: null, message: null });
+    for (const mock of Object.values(browseApiMocks)) mock.mockReset();
+    browseApiMocks.browsePlaces.mockImplementation(async (purpose: 'checkpoint_file' | 'lora_file') => placesFor(purpose));
+    browseApiMocks.listDirectory.mockResolvedValue(listingWith('/models/first.safetensors'));
     target = document.createElement('div');
     document.body.appendChild(target);
   });
@@ -98,37 +100,31 @@ describe('ModelsPage Browse buttons', () => {
     document.body.innerHTML = '';
   });
 
-  it('uses backend-supported picker purposes for local model files', async () => {
+  it('browses with the checkpoint and LoRA purposes for local model files', async () => {
     app = flushSync(() => mount(ModelsPage, { target }));
     await settle();
 
-    browseButtonFor(target, 'convert-input-path').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    browseButtonFor(target, 'convert-input-path').click();
     await settle();
-    browseButtonFor(target, 'import-local-source-path').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(browseApiMocks.listDirectory).toHaveBeenLastCalledWith('checkpoint_file', '', expect.anything());
+    document.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="Close dialog"]')!.click();
     await settle();
 
-    expect(promptFileApiMocks.openPathPicker).toHaveBeenNthCalledWith(1, {
-      kind: 'existing_file',
-      purpose: 'checkpoint_file',
-      initial_path: null,
-    });
-    expect(promptFileApiMocks.openPathPicker).toHaveBeenNthCalledWith(2, {
-      kind: 'existing_file',
-      purpose: 'lora_file',
-      initial_path: null,
-    });
+    browseButtonFor(target, 'import-local-source-path').click();
+    await settle();
+    expect(browseApiMocks.listDirectory).toHaveBeenLastCalledWith('lora_file', '', expect.anything());
   });
 
   it('submits the first browse-selected checkpoint path in the conversion API payload', async () => {
-    promptFileApiMocks.openPathPicker.mockResolvedValueOnce({
-      status: 'selected', path: '/models/first-checkpoint.safetensors', message: null,
-    });
+    browseApiMocks.listDirectory.mockResolvedValue(listingWith('/models/first-checkpoint.safetensors'));
     modelApiMocks.convertCheckpoint.mockResolvedValue({ tone: 'error', message: 'Keep values for assertion.' });
 
     app = flushSync(() => mount(ModelsPage, { target }));
     await settle();
 
     browseButtonFor(target, 'convert-input-path').click();
+    await settle();
+    chooseInBrowser('first-checkpoint.safetensors');
     await settle();
     const modelType = target.querySelector('#convert-model-type') as HTMLSelectElement;
     modelType.value = 'zimage';
@@ -143,15 +139,15 @@ describe('ModelsPage Browse buttons', () => {
   });
 
   it('submits the first browse-selected local LoRA path in the import API payload', async () => {
-    promptFileApiMocks.openPathPicker.mockResolvedValueOnce({
-      status: 'selected', path: '/models/first-lora.safetensors', message: null,
-    });
+    browseApiMocks.listDirectory.mockResolvedValue(listingWith('/models/first-lora.safetensors'));
     modelApiMocks.importLoraLocal.mockResolvedValue({ tone: 'error', message: 'Keep values for assertion.' });
 
     app = flushSync(() => mount(ModelsPage, { target }));
     await settle();
 
     browseButtonFor(target, 'import-local-source-path').click();
+    await settle();
+    chooseInBrowser('first-lora.safetensors');
     await settle();
     (target.querySelector('#import-local-source-path') as HTMLInputElement).closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
@@ -162,7 +158,6 @@ describe('ModelsPage Browse buttons', () => {
   });
 
   it('is expected to clear a successful checkpoint path and begin the next browse with no initial path', async () => {
-    promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'cancelled', path: null, message: null });
     modelApiMocks.convertCheckpoint.mockResolvedValue({ tone: 'success', message: 'Converted.' });
 
     app = flushSync(() => mount(ModelsPage, { target }));
@@ -189,10 +184,7 @@ describe('ModelsPage Browse buttons', () => {
 
     browseButtonFor(target, 'convert-input-path').click();
     await settle();
-    expect.soft(promptFileApiMocks.openPathPicker).toHaveBeenLastCalledWith(expect.objectContaining({
-      purpose: 'checkpoint_file',
-      initial_path: null,
-    }));
+    expect.soft(browseApiMocks.listDirectory).toHaveBeenLastCalledWith('checkpoint_file', '', expect.anything());
   });
 
   it('preserves checkpoint retry state and surfaces an operation error result', async () => {
@@ -236,7 +228,6 @@ describe('ModelsPage Browse buttons', () => {
   });
 
   it('clears a successful local LoRA path and resets its next picker origin', async () => {
-    promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'cancelled', path: null, message: null });
     modelApiMocks.importLoraLocal.mockResolvedValue({ tone: 'success', message: 'Imported.' });
     app = flushSync(() => mount(ModelsPage, { target }));
     await settle();
@@ -255,10 +246,7 @@ describe('ModelsPage Browse buttons', () => {
 
     browseButtonFor(target, 'import-local-source-path').click();
     await settle();
-    expect(promptFileApiMocks.openPathPicker).toHaveBeenLastCalledWith(expect.objectContaining({
-      purpose: 'lora_file',
-      initial_path: null,
-    }));
+    expect(browseApiMocks.listDirectory).toHaveBeenLastCalledWith('lora_file', '', expect.anything());
   });
 
   it('blocks an empty Model Type through native requestSubmit validation and submits after a type is selected', async () => {

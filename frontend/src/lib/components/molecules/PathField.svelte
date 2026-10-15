@@ -1,8 +1,10 @@
 <script lang="ts">
   import { errorText } from '$lib/api/client';
-  import { openPathPicker } from '$lib/api/promptFiles';
-  import { Button, Input } from '$lib/components/atoms';
+  import { Button, Icon } from '$lib/components/atoms';
+  import type { BrowsePurposeName } from '$lib/types';
   import FormField from './FormField.svelte';
+  import PathBrowser from './PathBrowser.svelte';
+  import PathInput from './PathInput.svelte';
 
   interface Props {
     id: string;
@@ -21,8 +23,8 @@
     resettable?: boolean;
     /** Field layout; see FormField. */
     layout?: 'stack' | 'row';
-    pickerKind?: 'existing_file' | 'directory';
-    pickerPurpose?: string;
+    /** What Browse and completion choose; the server knows the folder or file rules. */
+    purpose: BrowsePurposeName;
     onresolve: (candidate: string) => Promise<string>;
     onvaluechange?: (value: string) => void;
     onclear?: () => void;
@@ -42,8 +44,7 @@
     changed = false,
     resettable = false,
     layout = 'stack',
-    pickerKind = 'existing_file',
-    pickerPurpose = 'path',
+    purpose,
     onresolve,
     onvaluechange,
     onclear,
@@ -53,7 +54,7 @@
   let syncedValue = $state(value ?? '');
   let editing = $state(false);
   let pending = $state(false);
-  let pendingLabel = $state('Browsing for path');
+  let browsing = $state(false);
   let error = $state<string | null>(null);
   let requiredInvalidMessage = $state<string | null>(null);
   let status = $state<string | null>(null);
@@ -67,7 +68,6 @@
     requestVersion += 1;
     editing = false;
     pending = false;
-    pendingLabel = 'Browsing for path';
     pendingExternalValue = null;
     error = null;
     requiredInvalidMessage = null;
@@ -143,7 +143,6 @@
 
     const currentRequestVersion = existingRequestVersion ?? ++requestVersion;
     pending = true;
-    pendingLabel = 'Resolving path';
     error = null;
     requiredInvalidMessage = null;
     status = null;
@@ -166,45 +165,10 @@
     }
   }
 
-  async function browse(): Promise<void> {
-    const currentRequestVersion = ++requestVersion;
-    pending = true;
-    pendingLabel = 'Browsing for path';
+  function browse(): void {
     error = null;
     requiredInvalidMessage = null;
-    try {
-      const result = await openPathPicker({
-        kind: pickerKind,
-        purpose: pickerPurpose,
-        initial_path: syncedValue || null,
-      });
-
-      if (currentRequestVersion !== requestVersion) return;
-
-      if (result.status === 'selected' && result.path) {
-        await resolveCandidate(result.path, currentRequestVersion);
-        return;
-      }
-
-      if (result.status === 'cancelled') {
-        return;
-      }
-
-      if (result.status === 'unsupported') {
-        status = result.message ?? 'Path picking is not supported on this host.';
-        statusTone = 'warning';
-      } else {
-        error = result.message ?? 'Path picker failed.';
-        status = null;
-        statusTone = 'muted';
-      }
-    } catch (err) {
-      if (currentRequestVersion === requestVersion) {
-        error = errorText(err, 'Failed to open the path picker.');
-      }
-    } finally {
-      if (currentRequestVersion === requestVersion) pending = false;
-    }
+    browsing = true;
   }
 
   function clear(): void {
@@ -236,9 +200,10 @@
     {#if name}
       <input bind:this={hiddenInput} type="hidden" {name} value={value ?? ''}>
     {/if}
-    <div class="flex flex-col gap-2 sm:flex-row" aria-busy={pending ? 'true' : undefined}>
-      <Input
+    <div class="flex gap-1.5" aria-busy={pending ? 'true' : undefined}>
+      <PathInput
         {id}
+        {purpose}
         value={inputValue}
         {placeholder}
         {disabled}
@@ -246,16 +211,17 @@
         ariaDescribedby={hasFeedback ? feedbackId : undefined}
         ariaInvalid={Boolean(fieldError)}
         ariaBusy={pending}
-        class="min-w-0"
-        oninput={(event) => {
+        class="min-w-0 flex-1"
+        oninput={(text) => {
           editing = true;
-          inputValue = (event.currentTarget as HTMLInputElement).value;
+          inputValue = text;
           error = null;
           requiredInvalidMessage = null;
           status = null;
           statusTone = 'muted';
           publishValue(inputValue);
         }}
+        onpick={(path) => void resolveCandidate(path)}
         onblur={() => {
           editing = false;
         }}
@@ -272,16 +238,18 @@
           }
         }}
       />
-      <div class="flex flex-wrap gap-2 sm:contents">
-        <Button type="button" disabled={disabled || pending} loading={pending} onclick={() => void browse()}>
-          {pending ? pendingLabel : browseLabel}
+      <div class="contents">
+        <Button type="button" icon aria-label={browseLabel} title={browseLabel} disabled={disabled || pending} loading={pending} onclick={browse}>
+          <Icon name="folder" size={14} />
         </Button>
         {#if !resettable}
-          <Button type="button" variant="quiet" disabled={disabled || pending || (!syncedValue && !inputValue)} onclick={clear}>
-            {clearLabel}
+          <Button type="button" variant="quiet" icon aria-label={clearLabel} title={clearLabel} disabled={disabled || pending || (!syncedValue && !inputValue)} onclick={clear}>
+            <Icon name="close" size={14} />
           </Button>
         {/if}
       </div>
     </div>
   </div>
 </FormField>
+
+<PathBrowser bind:open={browsing} {purpose} initialPath={inputValue || syncedValue || null} onchoose={(path) => void resolveCandidate(path)} />

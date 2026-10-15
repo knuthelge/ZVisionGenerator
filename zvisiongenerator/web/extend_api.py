@@ -17,7 +17,7 @@ from zvisiongenerator.utils.video_extend import ExtendInspection, extend_enhance
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.gallery import output_media_url
 from zvisiongenerator.web.json_fields import json_field
-from zvisiongenerator.web.path_picker import SOURCE_VIDEO_EXTENSIONS
+from zvisiongenerator.web.path_browser import SOURCE_VIDEO_EXTENSIONS
 
 
 EXTEND_UNAVAILABLE_MESSAGE = "Extending a video is not available on this platform."

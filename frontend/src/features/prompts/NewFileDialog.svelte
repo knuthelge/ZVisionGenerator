@@ -50,8 +50,7 @@
         label="Folder"
         bind:value={directory}
         placeholder="/absolute/path/to/folder"
-        pickerKind="directory"
-        pickerPurpose="prompt_file_folder"
+        purpose="prompt_file_folder"
         onresolve={async (candidate) => candidate}
         onvaluechange={(value) => { directory = value.trim() || null; }}
       />

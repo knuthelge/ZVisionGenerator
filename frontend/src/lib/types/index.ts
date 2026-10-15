@@ -348,12 +348,11 @@ export type EnhanceFrame =
 
 export interface PromptFileContract {
   accepted_extensions: string[];
-  browse_kind: 'existing_file';
   selection_required: boolean;
   trust_boundary: {
     scope: 'server_host_only';
     manual_entry: 'submitted_value_kept_until_backend_validation';
-    picker: 'server_host_native_picker';
+    picker: 'in_app_browser';
     read_write: 'yaml_files_only';
   };
   help: {
@@ -467,12 +466,48 @@ export interface PromptFileInspection {
   options: PromptFileOption[];
 }
 
-export type PathPickerStatus = 'selected' | 'cancelled' | 'unsupported' | 'error';
+/** What a Browse button chooses; the server owns the list (`web/path_browser.py`). */
+export type BrowsePurposeName = 'output_directory' | 'prompt_file' | 'prompt_file_folder' | 'checkpoint_file' | 'lora_file' | 'source_video' | 'reference_image';
 
-export interface PathPickerResult {
-  status: PathPickerStatus;
-  path: string | null;
-  message: string | null;
+export interface BrowsePurpose {
+  name: BrowsePurposeName;
+  kind: 'directory' | 'existing_file';
+  label: string;
+  accepted_extensions: string[];
+}
+
+export interface BrowseEntry {
+  name: string;
+  path: string;
+  kind: 'directory' | 'file';
+  size: number | null;
+  /** Seconds since the epoch. */
+  modified: number | null;
+  selectable: boolean;
+}
+
+export interface BrowseListing {
+  path: string;
+  parent: string | null;
+  separator: string;
+  /** The file the request named, when it named a file rather than a folder. */
+  focus: string | null;
+  entries: BrowseEntry[];
+  /** Files left out because the purpose can't choose them. */
+  hidden_count: number;
+}
+
+export interface BrowsePlace {
+  id: string;
+  label: string;
+  path: string;
+  /** The place this purpose opens at when the field is empty. */
+  default: boolean;
+}
+
+export interface BrowsePlaces {
+  purpose: BrowsePurpose;
+  places: BrowsePlace[];
 }
 
 export interface UpscaleDefaults {

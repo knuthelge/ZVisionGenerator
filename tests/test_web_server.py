@@ -22,7 +22,6 @@ from conftest import make_probe
 from zvisiongenerator.web import config_contract as config_contract_module
 from zvisiongenerator.web import extend_api as extend_api_module
 from zvisiongenerator.web import model_inventory as model_inventory_module
-from zvisiongenerator.web import path_picker as path_picker_module
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import video_clip as video_clip_module
 from zvisiongenerator.web import workspace_api as workspace_api_module
@@ -289,7 +288,6 @@ def test_phase_a_routes_share_config_and_path_authority(monkeypatch):
     assert workspace_payload["active_job"] == active_job_snapshot
     assert workspace_payload["queued_jobs"] == []
     assert prompt_file["accepted_extensions"] == [".yaml", ".yml"]
-    assert prompt_file["browse_kind"] == "existing_file"
     assert prompt_file["selection_required"] is True
     assert prompt_file["trust_boundary"]["scope"] == "server_host_only"
     assert prompt_file["trust_boundary"]["manual_entry"] == "submitted_value_kept_until_backend_validation"
@@ -878,73 +876,6 @@ def test_submit_image_job_standard_prompt_path_remains_unchanged_for_non_ideogra
     assert submitted[0]["args"].first_sigma is None
     assert submitted[0]["prompts_data"] == {"web": [("hello world", "avoid blur")]}
     assert submitted[0]["request"].prompt == "hello world"
-
-
-def test_picker_route_rejects_unknown_or_mismatched_host_local_purpose():
-    """Picker requests should stay inside explicit backend-owned host-local trust buckets."""
-    with TestClient(web_server.app) as client:
-        unknown_response = client.post("/api/picker", json={"kind": "directory", "purpose": "unknown", "initial_path": None})
-        mismatch_response = client.post("/api/picker", json={"kind": "directory", "purpose": "prompt_file", "initial_path": None})
-
-    assert unknown_response.status_code == 422
-    unknown_payload = unknown_response.json()
-    assert set(unknown_payload) == {"detail"}
-    assert "unknown" in unknown_payload["detail"]
-    assert mismatch_response.status_code == 422
-    mismatch_payload = mismatch_response.json()
-    assert set(mismatch_payload) == {"detail"}
-    assert "prompt_file" in mismatch_payload["detail"]
-    assert "existing_file" in mismatch_payload["detail"]
-
-
-def test_picker_route_accepts_model_file_purposes(monkeypatch):
-    """Model-management Browse buttons should use backend-owned picker purposes."""
-    captured_requests: list[tuple[str, str, str | None]] = []
-
-    def _fake_pick_path(kind: str, *, purpose: str, initial_path: str | None = None):
-        captured_requests.append((kind, purpose, initial_path))
-        return SimpleNamespace(to_payload=lambda: {"status": "cancelled", "path": None, "message": None})
-
-    monkeypatch.setattr(web_server, "pick_path", _fake_pick_path)
-
-    with TestClient(web_server.app) as client:
-        checkpoint_response = client.post("/api/picker", json={"kind": "existing_file", "purpose": "checkpoint_file", "initial_path": "/models/model.safetensors"})
-        lora_response = client.post("/api/picker", json={"kind": "existing_file", "purpose": "lora_file", "initial_path": "/loras/style.safetensors"})
-
-    assert checkpoint_response.status_code == 200
-    assert lora_response.status_code == 200
-    assert captured_requests == [
-        ("existing_file", "checkpoint_file", "/models/model.safetensors"),
-        ("existing_file", "lora_file", "/loras/style.safetensors"),
-    ]
-
-
-def test_model_picker_purposes_require_existing_safetensors_files(tmp_path, monkeypatch):
-    """Checkpoint and LoRA picker purposes should accept only host-local safetensors files."""
-    checkpoint = tmp_path / "checkpoint.safetensors"
-    lora = tmp_path / "style.safetensors"
-    wrong_extension = tmp_path / "notes.txt"
-    checkpoint.write_text("checkpoint", encoding="utf-8")
-    lora.write_text("lora", encoding="utf-8")
-    wrong_extension.write_text("text", encoding="utf-8")
-    selected_paths = iter([str(checkpoint), str(lora), str(wrong_extension), str(tmp_path / "missing.safetensors")])
-
-    monkeypatch.setattr(path_picker_module.sys, "platform", "linux")
-    monkeypatch.setattr(path_picker_module, "_pick_tk", lambda kind, initial_path, picker_purpose: next(selected_paths))
-
-    checkpoint_result = path_picker_module.pick_path("existing_file", purpose="checkpoint_file")
-    lora_result = path_picker_module.pick_path("existing_file", purpose="lora_file")
-    wrong_extension_result = path_picker_module.pick_path("existing_file", purpose="checkpoint_file")
-    missing_result = path_picker_module.pick_path("existing_file", purpose="lora_file")
-
-    assert checkpoint_result.status == "selected"
-    assert checkpoint_result.path == str(checkpoint)
-    assert lora_result.status == "selected"
-    assert lora_result.path == str(lora)
-    assert wrong_extension_result.status == "error"
-    assert ".safetensors" in (wrong_extension_result.message or "")
-    assert missing_result.status == "error"
-    assert "existing file" in (missing_result.message or "")
 
 
 def test_prompt_file_routes_reject_non_local_or_wrong_extension_paths(tmp_path):
@@ -1965,28 +1896,6 @@ def test_media_only_serves_gallery_media_types(monkeypatch, tmp_path):
         assert client.get("/media/ok.png").status_code == 200
 
 
-def test_picker_macos_passes_initial_path_as_argv_not_script_source(monkeypatch, tmp_path):
-    """A hostile directory name must reach osascript as data, never as AppleScript source."""
-    hostile = tmp_path / 'a\\" & (do shell script "echo INJECTED") --'
-    hostile.mkdir()
-    calls: list[list[str]] = []
-
-    def _fake_run(cmd, **_kwargs):
-        calls.append(cmd)
-        return SimpleNamespace(returncode=0, stdout=str(hostile) + "/\n", stderr="")
-
-    monkeypatch.setattr(path_picker_module.subprocess, "run", _fake_run)
-
-    selected = path_picker_module._pick_macos("directory", str(hostile), path_picker_module._PICKER_PURPOSES["output_directory"])
-
-    assert selected == str(hostile) + "/"
-    cmd = calls[0]
-    script = cmd[2]
-    assert "INJECTED" not in script
-    assert "item 1 of argv" in script
-    assert cmd[3:] == [str(hostile.resolve())]
-
-
 def test_media_output_root_is_cached_until_user_config_changes(monkeypatch, tmp_path):
     import yaml
 
@@ -2006,68 +1915,6 @@ def test_media_output_root_is_cached_until_user_config_changes(monkeypatch, tmp_
     config_contract_module.write_user_config_override({"ui": {"output_dir": str(tmp_path / "second")}})
     assert web_server._media_output_root() == (tmp_path / "second").resolve()
     assert len(loads) == 2
-
-
-def test_picker_allows_only_one_dialog_at_a_time(monkeypatch):
-    """Concurrent picker requests (worker threads) must not open a second native dialog; Tk is not thread-safe."""
-    import threading
-
-    opened = threading.Event()
-    release = threading.Event()
-
-    def _slow_tk(kind, initial_path, picker_purpose):
-        opened.set()
-        release.wait(timeout=2.0)
-        return None
-
-    monkeypatch.setattr(path_picker_module.sys, "platform", "linux")
-    monkeypatch.setattr(path_picker_module, "_pick_tk", _slow_tk)
-    results: list[object] = []
-    first = threading.Thread(target=lambda: results.append(path_picker_module.pick_path("directory", purpose="output_directory")))
-    first.start()
-    assert opened.wait(timeout=2.0)
-
-    second = path_picker_module.pick_path("directory", purpose="output_directory")
-    release.set()
-    first.join(timeout=2.0)
-
-    assert second.status == "error"
-    assert "already open" in (second.message or "")
-    assert results[0].status == "cancelled"
-    assert path_picker_module.pick_path("directory", purpose="output_directory").status == "cancelled"
-
-
-@pytest.mark.parametrize(
-    ("completed", "expected_status", "expected_path"),
-    [
-        (SimpleNamespace(returncode=0, stdout="/picked/dir\n", stderr=""), "selected", "/picked/dir"),
-        (SimpleNamespace(returncode=0, stdout="", stderr=""), "cancelled", None),
-        (SimpleNamespace(returncode=1, stdout="", stderr="Traceback...\nModuleNotFoundError: No module named 'tkinter'"), "unsupported", None),
-        (SimpleNamespace(returncode=1, stdout="", stderr="Traceback...\n_tkinter.TclError: no display name and no $DISPLAY environment variable"), "error", None),
-    ],
-)
-def test_tk_picker_runs_in_child_process(monkeypatch, tmp_path, completed, expected_status, expected_path):
-    """On Linux/Windows the Tk dialog runs in a child Python so Tk owns that process's main thread."""
-    calls: list[list[str]] = []
-
-    def _fake_run(cmd, **_kwargs):
-        calls.append(cmd)
-        return completed
-
-    monkeypatch.setattr(path_picker_module.sys, "platform", "linux")
-    monkeypatch.setattr(path_picker_module.subprocess, "run", _fake_run)
-    monkeypatch.setattr(path_picker_module, "_validate_selected_path", lambda _path, _purpose: None)
-
-    result = path_picker_module.pick_path("directory", purpose="output_directory", initial_path=str(tmp_path))
-
-    cmd = calls[0]
-    assert cmd[0] == path_picker_module.sys.executable and cmd[1] == "-c"
-    assert cmd[3:5] == ["directory", str(tmp_path.resolve())]
-    assert result.status == expected_status
-    if expected_path is not None:
-        assert result.path == str(Path(expected_path).resolve())
-    if expected_status == "error":
-        assert "no display" in (result.message or "")
 
 
 def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
@@ -2451,25 +2298,6 @@ def clip(monkeypatch, tmp_path):
 def _inspect(body):
     with TestClient(web_server.app) as client:
         return client.post("/api/extend/source", json=body)
-
-
-def test_source_video_picker_purpose_accepts_only_video_files(tmp_path, monkeypatch):
-    video = tmp_path / "clip.m4v"
-    video.write_bytes(b"\x00")
-    (tmp_path / "notes.txt").write_text("text", encoding="utf-8")
-    selected = iter([str(video), str(tmp_path / "notes.txt")])
-    monkeypatch.setattr(path_picker_module.sys, "platform", "linux")
-    monkeypatch.setattr(path_picker_module, "_pick_tk", lambda kind, initial_path, picker_purpose: next(selected))
-
-    accepted = path_picker_module.pick_path("existing_file", purpose="source_video")
-    rejected = path_picker_module.pick_path("existing_file", purpose="source_video")
-    with TestClient(web_server.app) as client:
-        wrong_kind = client.post("/api/picker", json={"kind": "directory", "purpose": "source_video", "initial_path": None})
-
-    assert (accepted.status, accepted.path) == ("selected", str(video))
-    assert rejected.status == "error"
-    assert wrong_kind.status_code == 422
-    assert set(path_picker_module.SOURCE_VIDEO_EXTENSIONS) == {".mp4", ".mov", ".m4v", ".mkv", ".webm"}
 
 
 def test_a_clip_that_has_not_changed_is_probed_once(clip):

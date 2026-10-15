@@ -98,6 +98,27 @@ describe('Modal', () => {
     opener.remove();
   });
 
+  it('closes only the innermost of two open modals on Escape', async () => {
+    const outerClose = vi.fn();
+    const innerClose = vi.fn();
+    const innerTarget = document.createElement('div');
+    document.body.appendChild(innerTarget);
+    app = flushSync(() => mount(Modal, { target, props: { open: true, title: 'New file', onclose: outerClose } }));
+    const inner = flushSync(() => mount(Modal, { target: innerTarget, props: { open: true, title: 'Choose folder', onclose: innerClose } }));
+    await settle();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+
+    expect(innerClose).toHaveBeenCalledTimes(1);
+    expect(outerClose).not.toHaveBeenCalled();
+
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    await settle();
+    expect(outerClose).toHaveBeenCalledTimes(1);
+    await unmount(inner);
+  });
+
   it('traps Tab focus within the modal, cycling from last to first focusable element', async () => {
     app = flushSync(() => mount(Modal, {
       target,

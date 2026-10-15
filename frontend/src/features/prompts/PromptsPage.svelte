@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { ApiError, errorText } from '$lib/api/client';
-  import { loadPromptDocument, openPathPicker, previewPromptDocument, savePromptDocument } from '$lib/api/promptFiles';
+  import { loadPromptDocument, previewPromptDocument, savePromptDocument } from '$lib/api/promptFiles';
   import { Icon, Spinner } from '$lib/components/atoms';
-  import { ActionMenu, EmptyState, requestConfirm } from '$lib/components/molecules';
+  import { ActionMenu, EmptyState, PathBrowser, requestConfirm } from '$lib/components/molecules';
   import type { ActionMenuEntry } from '$lib/components/molecules/ActionMenu.svelte';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { draft } from '$lib/state/draft.svelte';
@@ -37,6 +37,7 @@
   let fileMenuOpen = $state(false);
   let fileMenuAnchor = $state<HTMLButtonElement | null>(null);
   let newFileOpen = $state(false);
+  let browsing = $state(false);
 
   const fileName = $derived(builder.path ? (builder.path.split(/[\\/]/).pop() ?? builder.path) : '');
   const folder = $derived(builder.path ? builder.path.slice(0, builder.path.length - fileName.length) : '');
@@ -138,14 +139,8 @@
     await openFile(builder.path);
   }
 
-  async function browse(): Promise<void> {
-    try {
-      const result = await openPathPicker({ kind: 'existing_file', purpose: 'prompt_file', initial_path: builder.path });
-      if (result.status === 'selected' && result.path) await openFile(result.path);
-      else if (result.status === 'error' && result.message) addToast(result.message, 'error');
-    } catch (err) {
-      addToast(errorText(err, 'Could not open the file picker.'), 'error');
-    }
+  function browse(): void {
+    browsing = true;
   }
 
   /** Save the document; returns the saved payload, or null when nothing was saved. */
@@ -330,6 +325,7 @@
   {/if}
 </div>
 
+<PathBrowser bind:open={browsing} purpose="prompt_file" initialPath={builder.path} onchoose={(path) => void openFile(path)} />
 <NewFileDialog bind:open={newFileOpen} initialDirectory={folder || null} oncreated={(path) => void openFile(path)} />
 
 <style>

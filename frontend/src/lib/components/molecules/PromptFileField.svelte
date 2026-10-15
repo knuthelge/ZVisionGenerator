@@ -159,8 +159,7 @@
         value={path}
         placeholder="/absolute/path/to/prompts.yaml"
         helper={path ? undefined : contract.help.path}
-        pickerKind={contract.browse_kind}
-        pickerPurpose="prompt_file"
+        purpose="prompt_file"
         {disabled}
         onresolve={(candidate) => refreshPath(candidate, contract.help.loaded)}
         onvaluechange={handleManualPathChange}

@@ -153,12 +153,11 @@ function makeContext(overrides: Partial<WorkspaceContext> = {}): WorkspaceContex
     default_prompt_source: 'inline',
     prompt_file: {
       accepted_extensions: ['.yaml', '.yml'],
-      browse_kind: 'existing_file',
       selection_required: true,
       trust_boundary: {
         scope: 'server_host_only',
         manual_entry: 'submitted_value_kept_until_backend_validation',
-        picker: 'server_host_native_picker',
+        picker: 'in_app_browser',
         read_write: 'yaml_files_only',
       },
       help: {

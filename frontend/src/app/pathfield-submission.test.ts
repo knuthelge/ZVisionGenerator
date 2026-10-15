@@ -2,15 +2,16 @@
 import { flushSync, mount, unmount } from '../../node_modules/svelte/src/index-client.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const promptFileApiMocks = vi.hoisted(() => ({
-  openPathPicker: vi.fn(),
+const browseApiMocks = vi.hoisted(() => ({
+  listDirectory: vi.fn(),
+  browsePlaces: vi.fn(),
+  createFolder: vi.fn(),
 }));
 
-vi.mock('$lib/api/promptFiles', () => ({
-  openPathPicker: promptFileApiMocks.openPathPicker,
-}));
+vi.mock('$lib/api/browse', () => browseApiMocks);
 
 import PathField from '$lib/components/molecules/PathField.svelte';
+import { chooseInBrowser, listingWith, openBrowser, placesFor } from '../test-utils/pathBrowser';
 
 async function settle(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -24,6 +25,18 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
     resolve = done;
   });
   return { promise, resolve };
+}
+
+function button(root: ParentNode, label: string): HTMLButtonElement {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('button')).find((item) => item.getAttribute('aria-label') === label || item.textContent?.trim() === label)!;
+}
+
+/** Open Browse and choose *name* in the browser. */
+async function browseAndChoose(root: ParentNode, name: string): Promise<void> {
+  button(root, 'Browse').click();
+  await settle();
+  chooseInBrowser(name);
+  await settle();
 }
 
 function inputAndHidden(form: HTMLFormElement, id: string, name: string): {
@@ -43,8 +56,9 @@ describe('PathField behavior', () => {
   beforeEach(() => {
     target = document.createElement('div');
     document.body.appendChild(target);
-    promptFileApiMocks.openPathPicker.mockReset();
-    promptFileApiMocks.openPathPicker.mockResolvedValue({ status: 'cancelled', path: null, message: null });
+    for (const mock of Object.values(browseApiMocks)) mock.mockReset();
+    browseApiMocks.browsePlaces.mockResolvedValue(placesFor('checkpoint_file'));
+    browseApiMocks.listDirectory.mockResolvedValue(listingWith('/models/first-selected.safetensors'));
   });
 
   afterEach(async () => {
@@ -71,6 +85,7 @@ describe('PathField behavior', () => {
         id: 'manual-path',
         name: 'path',
         label: 'Path',
+        purpose: 'checkpoint_file',
         value: '',
         onresolve: vi.fn(async (candidate: string) => candidate),
       },
@@ -91,20 +106,14 @@ describe('PathField behavior', () => {
   it('keeps a first browse-selected path aligned between the visible input and named FormData', async () => {
     const form = document.createElement('form');
     target.appendChild(form);
-    promptFileApiMocks.openPathPicker.mockResolvedValue({
-      status: 'selected',
-      path: '/models/first-selected.safetensors',
-      message: null,
-    });
-
     app = flushSync(() => mount(PathField, {
       target: form,
       props: {
         id: 'browse-path',
         name: 'path',
         label: 'Path',
+        purpose: 'checkpoint_file',
         value: '',
-        pickerPurpose: 'checkpoint_file',
         onresolve: vi.fn(async (candidate: string) => candidate),
       },
     }));
@@ -112,17 +121,13 @@ describe('PathField behavior', () => {
 
     const input = form.querySelector('#browse-path') as HTMLInputElement;
     const hidden = form.querySelector('input[type="hidden"][name="path"]') as HTMLInputElement;
-    const browse = Array.from(form.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Browse') as HTMLButtonElement;
-    browse.click();
-    await settle();
+    await browseAndChoose(form, 'first-selected.safetensors');
 
     expect(input.value).toBe('/models/first-selected.safetensors');
     expect(hidden.value).toBe('/models/first-selected.safetensors');
     expect(new FormData(form).get('path')).toBe('/models/first-selected.safetensors');
-    expect(promptFileApiMocks.openPathPicker).toHaveBeenCalledWith(expect.objectContaining({
-      purpose: 'checkpoint_file',
-      initial_path: null,
-    }));
+    expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('checkpoint_file', '', expect.anything());
+    expect(openBrowser()).toBeNull();
   });
 
   it('keeps explicit resolve as the normalization path', async () => {
@@ -134,6 +139,7 @@ describe('PathField behavior', () => {
         id: 'normalized-path',
         name: 'path',
         label: 'Path',
+        purpose: 'checkpoint_file',
         value: '',
         onresolve: onResolve,
         onvaluechange: onValueChange,
@@ -154,97 +160,73 @@ describe('PathField behavior', () => {
     expect(onValueChange).toHaveBeenLastCalledWith('/server/normalized.yaml');
   });
 
-  it.each([
-    ['cancelled', null, null, undefined],
-    ['unsupported', null, 'The host does not support browsing.', 'The host does not support browsing.'],
-    ['error', null, 'Only .safetensors files are accepted.', 'Only .safetensors files are accepted.'],
-  ] as const)('preserves a manual value for the %s picker result', async (status, path, message, visibleMessage) => {
+  it('opens the browser at the typed value and keeps it when the browser closes without a choice', async () => {
     const form = document.createElement('form');
     target.appendChild(form);
-    promptFileApiMocks.openPathPicker.mockResolvedValue({ status, path, message });
     app = flushSync(() => mount(PathField, {
       target: form,
       props: {
-        id: 'picker-outcome-path', name: 'path', label: 'Path', value: '',
+        id: 'cancel-path', name: 'path', label: 'Path', purpose: 'checkpoint_file', value: '',
         onresolve: vi.fn(async (candidate: string) => candidate),
       },
     }));
     await settle();
 
-    const { input, hidden } = inputAndHidden(form, 'picker-outcome-path', 'path');
+    const { input, hidden } = inputAndHidden(form, 'cancel-path', 'path');
     input.value = '/models/preserve.safetensors';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    Array.from(form.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Browse')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    button(form, 'Browse').click();
     await settle();
 
+    expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('checkpoint_file', '/models/preserve.safetensors', expect.anything());
+    button(openBrowser()!, 'Cancel').click();
+    await settle();
+
+    expect(openBrowser()).toBeNull();
     expect(input.value).toBe('/models/preserve.safetensors');
     expect(hidden.value).toBe('/models/preserve.safetensors');
-    expect(new FormData(form).get('path')).toBe('/models/preserve.safetensors');
-    if (visibleMessage) expect(form.textContent).toContain(visibleMessage);
-    else expect(form.textContent).not.toContain('Path picker failed.');
   });
 
-  it('shows a field error and preserves the value when the picker request throws', async () => {
-    const form = document.createElement('form');
-    target.appendChild(form);
-    promptFileApiMocks.openPathPicker.mockRejectedValue(new Error('Picker network failed.'));
+  it('opens the browser at a newly typed path rather than the last resolved one', async () => {
     app = flushSync(() => mount(PathField, {
-      target: form,
+      target,
       props: {
-        id: 'picker-network-path', name: 'path', label: 'Path', value: '',
+        id: 'retyped-path', name: 'path', label: 'Path', purpose: 'checkpoint_file', value: '/data/models/a.safetensors',
         onresolve: vi.fn(async (candidate: string) => candidate),
       },
     }));
     await settle();
 
-    const { input, hidden } = inputAndHidden(form, 'picker-network-path', 'path');
-    input.value = '/models/retry.safetensors';
+    const input = target.querySelector('#retyped-path') as HTMLInputElement;
+    input.value = '/mnt/other/';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    Array.from(form.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Browse')!.click();
+    button(target, 'Browse').click();
     await settle();
 
-    expect(form.textContent).toContain('Picker network failed.');
-    expect(input.value).toBe('/models/retry.safetensors');
-    expect(hidden.value).toBe('/models/retry.safetensors');
-    expect(input.getAttribute('aria-invalid')).toBe('true');
-    expect(input.getAttribute('aria-describedby')).toBe('picker-network-path-feedback');
-    const feedback = form.querySelector('#picker-network-path-feedback') as HTMLElement;
-    expect(feedback.textContent).toBe('Picker network failed.');
-    expect(feedback.getAttribute('role')).toBe('alert');
-    expect(feedback.getAttribute('aria-live')).toBe('assertive');
-    expect(feedback.getAttribute('aria-atomic')).toBe('true');
+    expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('checkpoint_file', '/mnt/other/', expect.anything());
   });
 
-  it('treats a backend picker error as an invalid field with assertive feedback', async () => {
+  it('shows a folder that cannot be listed inside the browser and keeps the value', async () => {
     const form = document.createElement('form');
     target.appendChild(form);
-    promptFileApiMocks.openPathPicker.mockResolvedValue({
-      status: 'error', path: null, message: 'Only .safetensors files are accepted.',
-    });
+    browseApiMocks.listDirectory.mockRejectedValue(new Error('Permission denied: /root.'));
     app = flushSync(() => mount(PathField, {
       target: form,
       props: {
-        id: 'picker-backend-error-path', name: 'path', label: 'Path', value: '',
+        id: 'denied-path', name: 'path', label: 'Path', purpose: 'checkpoint_file', value: '',
         onresolve: vi.fn(async (candidate: string) => candidate),
       },
     }));
     await settle();
 
-    const { input, hidden } = inputAndHidden(form, 'picker-backend-error-path', 'path');
-    input.value = '/models/not-supported.bin';
+    const { input } = inputAndHidden(form, 'denied-path', 'path');
+    input.value = '/root/x.safetensors';
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    Array.from(form.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Browse')!.click();
+    button(form, 'Browse').click();
     await settle();
 
-    expect(input.value).toBe('/models/not-supported.bin');
-    expect(hidden.value).toBe('/models/not-supported.bin');
-    expect(input.getAttribute('aria-invalid')).toBe('true');
-    expect(input.getAttribute('aria-describedby')).toBe('picker-backend-error-path-feedback');
-    const feedback = form.querySelector('#picker-backend-error-path-feedback') as HTMLElement;
-    expect(feedback.textContent).toBe('Only .safetensors files are accepted.');
-    expect(feedback.getAttribute('role')).toBe('alert');
-    expect(feedback.getAttribute('aria-live')).toBe('assertive');
-    expect(feedback.getAttribute('aria-atomic')).toBe('true');
+    expect(openBrowser()?.querySelector('[role="alert"]')?.textContent).toBe('Permission denied: /root.');
+    expect(input.value).toBe('/root/x.safetensors');
   });
 
   it('keeps one stable, polite feedback target while helper text becomes success or warning feedback', async () => {
@@ -254,7 +236,7 @@ describe('PathField behavior', () => {
     app = flushSync(() => mount(PathField, {
       target: form,
       props: {
-        id: 'accessible-path', name: 'path', label: 'Path', value: '',
+        id: 'accessible-path', name: 'path', label: 'Path', purpose: 'checkpoint_file', value: '',
         helper: 'Choose a model file from this computer.',
         onresolve: onResolve,
       },
@@ -281,47 +263,6 @@ describe('PathField behavior', () => {
     expect(form.textContent?.match(/Path loaded from the host machine\./g)).toHaveLength(1);
     expect(feedback.getAttribute('role')).toBe('status');
     expect(feedback.getAttribute('aria-live')).toBe('polite');
-
-    promptFileApiMocks.openPathPicker.mockResolvedValue({
-      status: 'unsupported', path: null, message: 'Browse is unavailable on this host.',
-    });
-    Array.from(form.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Browse')!.click();
-    await settle();
-
-    expect(form.querySelectorAll(`#${feedbackId}`)).toHaveLength(1);
-    expect(feedback.textContent).toBe('Browse is unavailable on this host.');
-    expect(form.textContent?.match(/Browse is unavailable on this host\./g)).toHaveLength(1);
-    expect(feedback.getAttribute('role')).toBe('status');
-    expect(feedback.getAttribute('aria-live')).toBe('polite');
-    expect(feedback.getAttribute('aria-atomic')).toBe('true');
-  });
-
-  it('exposes pending picker work through aria-busy before returning to the idle state', async () => {
-    const form = document.createElement('form');
-    target.appendChild(form);
-    const picker = deferred<{ status: 'cancelled'; path: null; message: null }>();
-    promptFileApiMocks.openPathPicker.mockReturnValue(picker.promise);
-    app = flushSync(() => mount(PathField, {
-      target: form,
-      props: {
-        id: 'busy-path', name: 'path', label: 'Path', value: '',
-        onresolve: vi.fn(async (candidate: string) => candidate),
-      },
-    }));
-    await settle();
-
-    const { input } = inputAndHidden(form, 'busy-path', 'path');
-    Array.from(form.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Browse')!.click();
-    await Promise.resolve();
-    flushSync();
-
-    expect(input.getAttribute('aria-busy')).toBe('true');
-    expect(form.querySelector('[aria-busy="true"]')).not.toBeNull();
-
-    picker.resolve({ status: 'cancelled', path: null, message: null });
-    await settle();
-    expect(input.getAttribute('aria-busy')).toBeNull();
-    expect(form.querySelector('[aria-busy="true"]')).toBeNull();
   });
 
   it('does not allow an obsolete async normalization result to repopulate a cleared path', async () => {
@@ -331,7 +272,7 @@ describe('PathField behavior', () => {
     app = flushSync(() => mount(PathField, {
       target: form,
       props: {
-        id: 'stale-resolution-path', name: 'path', label: 'Path', value: '',
+        id: 'stale-resolution-path', name: 'path', label: 'Path', purpose: 'checkpoint_file', value: '',
         onresolve: vi.fn(() => resolution.promise),
       },
     }));
@@ -343,7 +284,7 @@ describe('PathField behavior', () => {
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
     await settle();
 
-    const clear = Array.from(form.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Clear')!;
+    const clear = button(form, 'Clear');
     // A parent-controlled reset may occur while a resolution is pending. Dispatching
     // directly exercises the stale-result guard even though the disabled button blocks
     // this action for a user during the pending state.
@@ -363,7 +304,7 @@ describe('PathField behavior', () => {
     app = flushSync(() => mount(PathField, {
       target: form,
       props: {
-        id: 'required-path', name: 'path', label: 'Path', value: '', required: true,
+        id: 'required-path', name: 'path', label: 'Path', purpose: 'checkpoint_file', value: '', required: true,
         onresolve: vi.fn(async (candidate: string) => candidate),
       },
     }));
@@ -383,13 +324,11 @@ describe('PathField behavior', () => {
     const submit = vi.fn((event: SubmitEvent) => event.preventDefault());
     const invalid = vi.fn();
     form.addEventListener('submit', submit);
-    promptFileApiMocks.openPathPicker.mockResolvedValue({
-      status: 'selected', path: '/models/from-picker.safetensors', message: null,
-    });
+    browseApiMocks.listDirectory.mockResolvedValue(listingWith('/models/from-picker.safetensors'));
     app = flushSync(() => mount(PathField, {
       target: form,
       props: {
-        id: 'required-feedback-path', name: 'path', label: 'Path', value: '', required: true,
+        id: 'required-feedback-path', name: 'path', label: 'Path', purpose: 'checkpoint_file', value: '', required: true,
         onresolve: vi.fn(async (candidate: string) => candidate),
       },
     }));
@@ -418,12 +357,11 @@ describe('PathField behavior', () => {
     expect(input.getAttribute('aria-invalid')).toBeNull();
     expect(form.querySelector('#required-feedback-path-feedback')).toBeNull();
 
-    Array.from(form.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Browse')!.click();
-    await settle();
+    await browseAndChoose(form, 'from-picker.safetensors');
     expect(input.value).toBe('/models/from-picker.safetensors');
     expect(input.getAttribute('aria-invalid')).toBeNull();
 
-    Array.from(form.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Clear')!.click();
+    button(form, 'Clear').click();
     await settle();
     expect(input.value).toBe('');
     expect(input.getAttribute('aria-invalid')).toBeNull();

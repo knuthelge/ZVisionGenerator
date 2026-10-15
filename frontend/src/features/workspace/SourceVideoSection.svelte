@@ -1,9 +1,7 @@
 <script lang="ts">
   import { draft } from '$lib/state/draft.svelte';
-  import { errorText } from '$lib/api/client';
-  import { openPathPicker } from '$lib/api/promptFiles';
   import { Icon, Spinner } from '$lib/components/atoms';
-  import { Alert, InspectorRow, InspectorSection } from '$lib/components/molecules';
+  import { Alert, InspectorRow, InspectorSection, PathBrowser, PathInput } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
   import { extendSourceFacts, type ExtendGuard } from '$lib/state/extend';
@@ -39,8 +37,7 @@
   let pathTimer: ReturnType<typeof setTimeout> | undefined;
   // Typed text the draft has not taken yet; plain, since state reads are not reliable once the section unmounts.
   let pendingPath: string | undefined;
-  let pickerMessage = $state<string | null>(null);
-  let picking = $state(false);
+  let browsing = $state(false);
 
   $effect(() => {
     pathText = sourcePath ?? '';
@@ -53,7 +50,6 @@
 
   /** Take a newly chosen source (or none): its text replaces both boxes once the server has described it. */
   function chooseSource(path: string | null): void {
-    pickerMessage = null;
     draft.setExtendSourcePath(path);
     void extendInspection.inspect(context, { replaceText: true });
   }
@@ -80,20 +76,6 @@
     commitPath(true);
   }
 
-  async function browseSource(): Promise<void> {
-    picking = true;
-    pickerMessage = null;
-    try {
-      const result = await openPathPicker({ kind: 'existing_file', purpose: 'source_video', initial_path: sourcePath });
-      if (result.status === 'selected' && result.path) chooseSource(result.path);
-      else if (result.status === 'unsupported') pickerMessage = result.message ?? 'Path picking is not supported on this host.';
-      else if (result.status === 'error') pickerMessage = result.message ?? 'Path picker failed.';
-    } catch (error) {
-      pickerMessage = errorText(error, 'Failed to open the path picker.');
-    } finally {
-      picking = false;
-    }
-  }
 </script>
 
 <InspectorSection id="source-video" title="Source video" summary={name || 'None'} active={found}>
@@ -113,8 +95,8 @@
       class="ui-btn ui-btn-row"
       aria-label="Browse for a source video"
       title={busy ? 'Available once the job is submitted.' : 'Browse for a video'}
-      disabled={busy || picking}
-      onclick={browseSource}
+      disabled={busy}
+      onclick={() => { browsing = true; }}
     ><Icon name="folder" size={14} /></button>
     <button
       id="ws-source-clear"
@@ -132,26 +114,24 @@
     </p>
   {/if}
   <InspectorRow label="Path" forId="ws-source-path">
-    <input
+    <PathInput
       id="ws-source-path"
       name="source_video"
-      type="text"
+      purpose="source_video"
       class="inspector-text"
+      plain
       placeholder="/path/to/clip.mp4"
-      spellcheck="false"
-      autocomplete="off"
-      aria-invalid={missing ? 'true' : undefined}
-      aria-describedby={missing ? 'ws-source-help' : undefined}
+      ariaInvalid={missing}
+      ariaDescribedby={missing ? 'ws-source-help' : undefined}
       value={pathText}
-      oninput={(e) => onPathInput(e.currentTarget.value)}
+      oninput={onPathInput}
+      onpick={(path) => { pathText = path; commitPath(true); }}
       onchange={() => commitPath()}
       onkeydown={onPathKeydown}
-    >
+    />
   </InspectorRow>
   <div id="ws-source-help" class="source-feedback" aria-live="polite">
-    {#if pickerMessage}
-      <p class="ui-help ui-help-warning">{pickerMessage}</p>
-    {:else if draft.state.missingSourceVideo}
+    {#if draft.state.missingSourceVideo}
       <Alert tone="warning" testId="extend-source-moved">The source video has moved or been deleted; choose it again to extend.</Alert>
     {:else if sourceStatus === 'not_found'}
       <p class="ui-help ui-help-error">No video at this path.</p>
@@ -168,11 +148,9 @@
   </div>
 </InspectorSection>
 
+<PathBrowser bind:open={browsing} purpose="source_video" initialPath={pathText.trim() || sourcePath} onchoose={(path) => chooseSource(path)} />
+
 <style>
-  .inspector-text { width: 100%; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-primary); }
-  .inspector-text:hover { background: var(--color-bg-surface-hover); }
-  .inspector-text:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-surface); }
-  .inspector-text[aria-invalid='true'] { box-shadow: inset 0 0 0 1px var(--color-error); }
   .row-hint { padding: 0 12px 6px 116px; font-size: var(--text-meta); color: var(--color-text-muted); }
 
   /* Facts wrap between facts only, so a fact such as "145 frames" never splits. */
