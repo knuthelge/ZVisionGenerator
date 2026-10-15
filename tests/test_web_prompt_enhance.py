@@ -675,6 +675,7 @@ def clip(monkeypatch, tmp_path):
         source=make_extend_source(path=path, frame_count=97, scene=_SOURCE_SCENE, prompt=_SOURCE_ACTION),
     )
     extend_api_module._inspect_by_identity.cache_clear()
+    monkeypatch.setattr(extend_api_module, "require_ffmpeg", lambda: None)  # the inspection is stubbed; ffmpeg need not be installed
     monkeypatch.setattr(extend_api_module, "inspect_extend_source", lambda _path: ExtendInspection(None, None, (), state.source))
     for module in (web_server, extend_api_module):
         monkeypatch.setattr(module, "supports_video_extend", lambda: True)
