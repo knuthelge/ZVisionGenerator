@@ -21,9 +21,9 @@ from zvisiongenerator.utils.model_memory import (
 NO_QUANTIZE_KEY = "none"
 UNIFIED_MEMORY = "unified"
 DISCRETE_MEMORY = "discrete"
-VIDEO_ESTIMATE_NOTE = "Estimated for a 5 s clip at 704x448. The Workspace checks the size and length you choose."
+VIDEO_ESTIMATE_NOTE = "Estimated for a 5 s clip at 768x448. The Workspace checks the size and length you choose."
 # The clip the badge is estimated for: 5 s at 24 fps, no upscale.
-_REFERENCE_CLIP = {"width": 704, "height": 448, "frames": 121}
+_REFERENCE_CLIP = {"width": 768, "height": 448, "frames": 121}
 
 
 def describe_model_status(

@@ -69,8 +69,8 @@ class TestDescribeModelStatus:
         assert with_encoder["memory_fit"]["by_quantize"] == {"none": {"status": "too_large", "required_gb": 16.0}}
         assert with_encoder["memory_fit"]["without_low_memory"] == {"status": "too_large", "required_gb": 24.0}
         assert with_encoder["memory_fit"]["note"] == VIDEO_ESTIMATE_NOTE
-        # Both estimates are for the reference clip: 704x448, 121 frames (5 s), no upscale; staged is Low memory on.
-        reference = {"width": 704, "height": 448, "frames": 121, "unified_bytes": 32 * _GIB}
+        # Both estimates are for the reference clip: 768x448, 121 frames (5 s), no upscale; staged is Low memory on.
+        reference = {"width": 768, "height": 448, "frames": 121, "unified_bytes": 32 * _GIB}
         assert calls == [{"low_memory": True, **reference}, {"low_memory": False, **reference}]
 
 

@@ -97,7 +97,7 @@ The free-text direction is not part of the spec; pass it with `--enhance-note`.
 
 See [Enhancing Prompts](../guides/prompts.md#enhancing-prompts).
 
-The `ideo` alias selects Ideogram 4 (`ideogram-ai/ideogram-4-fp8`), a macOS/MLX-only image model. Its width and height must be in the 256–2048 range and multiples of 16. Size presets that exceed this range — `--size xl` with `--ratio 16:9` or `--ratio 9:16` (2112 px) — are rejected before the model loads, as are `--image` and `--upscale` (both require img2img, which Ideogram 4 does not support).
+The `ideo` alias selects Ideogram 4 (`ideogram-ai/ideogram-4-fp8`), a macOS/MLX-only image model. Its width and height must be in the 256–2048 range and multiples of 16. Size presets that exceed this range — `--size xl` with `--ratio 16:9` or `--ratio 9:16` (2176 px) — are rejected before the model loads, as are `--image` and `--upscale` (both require img2img, which Ideogram 4 does not support).
 
 ## `ziv-video` — Video Generation
 
@@ -119,7 +119,7 @@ Platform-aware aliases:
 | `-H`, `--height` | model-aware | Video height (LTX: auto-aligned to 32px, 64px with `--upscale`) |
 | `--frames` | model-aware | Number of frames (LTX: auto-aligned to 8k+1) |
 | `--ratio` | `16:9` | Aspect ratio preset (16:9, 9:16, 1:1) |
-| `-s`, `--size` | `m` | Size preset (`s`, `m`, `l`, `xl`) |
+| `-s`, `--size` | `s` | Size preset (`xs`, `s`, `m`, `l`, `xl`) |
 | `--steps` | model-aware | Inference steps (LTX: up to 8; on Windows/Linux, fewer than 8 keeps the end of the distilled schedule) |
 | `--seed` | `None` (random) | Seed for reproducible video generation |
 | `--low-memory` / `--no-low-memory` | enabled | Low-memory mode for LTX. On macOS with 24 GB of memory or less it also streams the transformer from disk, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. `--no-low-memory` turns that off too |
@@ -193,19 +193,20 @@ Default ratio is `2:3`. Dimensions vary by `--ratio`.
 
 | Preset | 1:1 | 16:9 | 9:16 | 3:2 | 2:3 |
 |--------|-----|------|------|-----|-----|
-| `xs` | 512×512 | 672×384 | 384×672 | 608×400 | 400×608 |
-| `s` | 704×704 | 944×528 | 528×944 | 864×576 | 576×864 |
+| `xs` | 512×512 | 672×384 | 384×672 | 576×384 | 384×576 |
+| `s` | 704×704 | 960×544 | 544×960 | 864×576 | 576×864 |
 | `m` | 1024×1024 | 1344×768 | 768×1344 | 1216×832 | 832×1216 |
-| `l` | 1440×1440 | 1888×1056 | 1056×1888 | 1728×1152 | 1152×1728 |
-| `xl` | 1600×1600 | 2112×1184 | 1184×2112 | 1936×1296 | 1296×1936 |
+| `l` | 1408×1408 | 1920×1088 | 1088×1920 | 1728×1152 | 1152×1728 |
+| `xl` | 1600×1600 | 2176×1216 | 1216×2176 | 1920×1280 | 1280×1920 |
 
 ## Video Size Presets
 
-Default ratio is `16:9`. Dimensions vary by `--ratio`.
+Default ratio is `16:9` and default size is `s`. Dimensions vary by `--ratio`.
 
 | Preset | 16:9 | 9:16 | 1:1 |
 |--------|------|------|-----|
-| `s` | 512×256 (49f) | 256×512 (49f) | 384×384 (49f) |
-| `m` | 704×448 (49f) | 448×704 (49f) | 512×512 (33f) |
-| `l` | 960×512 (33f) | 512×960 (33f) | 768×768 (33f) |
-| `xl` | 1408×896 (25f) | 896×1408 (25f) | 1024×1024 (25f) |
+| `xs` | 576×320 (49f) | 320×576 (49f) | 384×384 (49f) |
+| `s` | 768×448 (49f) | 448×768 (49f) | 576×576 (49f) |
+| `m` | 1024×576 (49f) | 576×1024 (49f) | 768×768 (49f) |
+| `l` | 1280×704 (33f) | 704×1280 (33f) | 960×960 (33f) |
+| `xl` | 1600×896 (25f) | 896×1600 (25f) | 1216×1216 (25f) |

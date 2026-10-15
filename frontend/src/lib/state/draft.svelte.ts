@@ -390,6 +390,12 @@ export const draft = {
       delete prefill.size;
       delete prefill.ratio;
     }
+    // A preset that has since changed size keeps the asset's own width/height, so the reused job matches it.
+    if (ctx && prefill.size !== undefined && prefill.size !== 'custom' && prefill.width !== undefined && prefill.height !== undefined) {
+      const table = workflowMode(workflow) === 'video' ? ctx.video_size_dimensions ?? {} : ctx.image_size_dimensions;
+      const preset = table[prefill.ratio ?? _draft.ratio]?.[prefill.size];
+      if (preset && (preset[0] !== prefill.width || preset[1] !== prefill.height)) prefill.size = 'custom';
+    }
     // Reused assets carry both their preset and their pixel size; a "custom" size means width/height rule.
     if (prefill.ratio !== undefined || prefill.size !== undefined) prefill.dimensionMode = prefill.size === 'custom' ? 'custom' : 'ratio';
     else if (prefill.width !== undefined || prefill.height !== undefined) prefill.dimensionMode = 'custom';

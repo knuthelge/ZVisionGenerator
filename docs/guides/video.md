@@ -192,14 +192,17 @@ The extension generates the last second of the source again (the part carried ov
 
 ## Video Sizes
 
-Default ratio is `16:9`. Dimensions vary by `--ratio`.
+Default ratio is `16:9` and default size is `s`. Dimensions vary by `--ratio`.
 
 | Preset | 16:9 | 9:16 | 1:1 |
 |--------|------|------|-----|
-| `s` | 512×256 (49f) | 256×512 (49f) | 384×384 (49f) |
-| `m` | 704×448 (49f) | 448×704 (49f) | 512×512 (33f) |
-| `l` | 960×512 (33f) | 512×960 (33f) | 768×768 (33f) |
-| `xl` | 1408×896 (25f) | 896×1408 (25f) | 1024×1024 (25f) |
+| `xs` | 576×320 (49f) | 320×576 (49f) | 384×384 (49f) |
+| `s` | 768×448 (49f) | 448×768 (49f) | 576×576 (49f) |
+| `m` | 1024×576 (49f) | 576×1024 (49f) | 768×768 (49f) |
+| `l` | 1280×704 (33f) | 704×1280 (33f) | 960×960 (33f) |
+| `xl` | 1600×896 (25f) | 896×1600 (25f) | 1216×1216 (25f) |
+
+Every size is a multiple of 64, so `--upscale 2` keeps it exact. `xs` is for quick prompt tests; `m` and `l` are 576p and 720p.
 
 Use `-W` / `-H` to override with exact pixel dimensions.
 
@@ -223,10 +226,10 @@ On Windows and Linux:
 
 On macOS, Text to Video and Image to Video check the clip's size and length against the Mac's memory before generating, and Extend Video checks the extension the same way (see [Memory](#memory)). The check never blocks a job; it warns when the clip may run slowly or fail.
 
-- **Web UI**: under **Duration (s)**, a note appears when the clip is **tight** (the Mac may slow down while generating) or **too large** (expect heavy swapping or an out-of-memory error). It follows the model, size, duration, **Low memory** and **Upscale**, and stays hidden while the clip fits. The memory badge on a video model is the estimate for a 5 s clip at 704×448 without upscale.
+- **Web UI**: under **Duration (s)**, a note appears when the clip is **tight** (the Mac may slow down while generating) or **too large** (expect heavy swapping or an out-of-memory error). It follows the model, size, duration, **Low memory** and **Upscale**, and stays hidden while the clip fits. The memory badge on a video model is the estimate for a 5 s clip at 768×448 without upscale.
 - **Command line**: `ziv-video` prints one warning at the start of a run and carries on. Shorten the clip with `--frames`, use a smaller `--size`, and keep `--low-memory` on.
 
-The estimate grows with the number of frames and the pixels per frame. It was measured with `ltx-4` on a Mac with 32 GB of memory, for clips up to about 10 s at `m`; far beyond that it is extrapolated. Macs with 24 GB or less stream the transformer from disk, so the estimate is on the high side there. It does not count memory already used by other apps or by an image model that is still loaded.
+The estimate grows with the number of frames and the pixels per frame. It was measured with `ltx-4` on a Mac with 32 GB of memory, for clips up to about 10 s at 704×448; far beyond that it is extrapolated. Macs with 24 GB or less stream the transformer from disk, so the estimate is on the high side there. It does not count memory already used by other apps or by an image model that is still loaded.
 
 ## Model Detection
 

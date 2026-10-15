@@ -910,7 +910,7 @@ class TestResolveVideoDefaults:
         empty_config: dict = {}
         result = resolve_video_defaults(family, empty_config, {})
         assert result["steps"] == 8
-        assert result["width"] == 704
+        assert result["width"] == 768
         assert result["height"] == 448
         assert result["num_frames"] == 49
 
@@ -1004,6 +1004,28 @@ class TestValidateVideoSizeChoice:
 
     def test_a_config_without_a_size_table_accepts_anything(self):
         validate_video_size_choice({}, "4:3", "xl")
+
+
+class TestShippedVideoSizes:
+    """Verify the shipped video size table suits LTX with and without --upscale 2."""
+
+    @pytest.fixture(scope="class")
+    def config(self):
+        return load_config()
+
+    def test_every_ratio_has_the_five_tiers(self, config):
+        for ratio, tiers in config["video_sizes"].items():
+            assert list(tiers) == ["xs", "s", "m", "l", "xl"], ratio
+
+    def test_sizes_are_64_aligned_and_frames_are_8k_plus_1(self, config):
+        for ratio, tiers in config["video_sizes"].items():
+            for size, dims in tiers.items():
+                assert dims["width"] % 64 == 0 and dims["height"] % 64 == 0, f"{ratio}/{size}"
+                assert (dims["frames"] - 1) % 8 == 0, f"{ratio}/{size}"
+
+    def test_the_default_size_is_listed(self, config):
+        video = config["video_generation"]
+        assert video["default_size"] in config["video_sizes"][video["default_ratio"]]
 
 
 class TestLtxLatentUpsamplerSource:

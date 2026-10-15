@@ -411,7 +411,7 @@ def resolve_video_defaults(
 
     # Determine ratio and size (CLI override > config default)
     ratio = cli_overrides.get("ratio") or vgen.get("default_ratio", "16:9")
-    size = cli_overrides.get("size") or vgen.get("default_size", "m")
+    size = cli_overrides.get("size") or vgen.get("default_size", "s")
 
     # Look up dimensions from flat video_sizes[ratio][size]. Model family still selects video_model_presets.
     ratio_sizes = vsizes.get(ratio, {})
@@ -419,7 +419,7 @@ def resolve_video_defaults(
 
     effective: dict[str, Any] = {
         "steps": preset.get("default_steps", 8),
-        "width": size_entry.get("width", 704),
+        "width": size_entry.get("width", 768),
         "height": size_entry.get("height", 448),
         "num_frames": size_entry.get("frames", 49),
         "ratio": ratio,

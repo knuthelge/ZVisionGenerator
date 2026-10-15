@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from zvisiongenerator.image_cli import _build_parser, main
+from zvisiongenerator.utils.alignment import round_to_alignment
 from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.prompts import PromptFileInspection
 
@@ -34,36 +35,36 @@ EXPECTED_DIMENSIONS = {
         "xs": (512, 512),
         "s": (704, 704),
         "m": (1024, 1024),
-        "l": (1440, 1440),
+        "l": (1408, 1408),
         "xl": (1600, 1600),
     },
     "16:9": {
         "xs": (672, 384),
-        "s": (944, 528),
+        "s": (960, 544),
         "m": (1344, 768),
-        "l": (1888, 1056),
-        "xl": (2112, 1184),
+        "l": (1920, 1088),
+        "xl": (2176, 1216),
     },
     "9:16": {
         "xs": (384, 672),
-        "s": (528, 944),
+        "s": (544, 960),
         "m": (768, 1344),
-        "l": (1056, 1888),
-        "xl": (1184, 2112),
+        "l": (1088, 1920),
+        "xl": (1216, 2176),
     },
     "3:2": {
-        "xs": (608, 400),
+        "xs": (576, 384),
         "s": (864, 576),
         "m": (1216, 832),
         "l": (1728, 1152),
-        "xl": (1936, 1296),
+        "xl": (1920, 1280),
     },
     "2:3": {
-        "xs": (400, 608),
+        "xs": (384, 576),
         "s": (576, 864),
         "m": (832, 1216),
         "l": (1152, 1728),
-        "xl": (1296, 1936),
+        "xl": (1280, 1920),
     },
 }
 
@@ -241,7 +242,7 @@ class TestDefaultResolution:
         assert result["size"] == "m"
 
     def test_only_size_flag_uses_default_ratio(self):
-        """SC-3: --size xl with default ratio 2:3 → 1296×1936."""
+        """SC-3: --size xl with default ratio 2:3 → 1280×1920."""
         result = self._run_capturing(["-m", "fake", "--size", "xl"])
         assert result["ratio"] == "2:3"
         assert result["size"] == "xl"
@@ -253,7 +254,7 @@ class TestDefaultResolution:
         assert result["size"] == "m"
 
     def test_both_flags_explicit(self):
-        """SC-1: --ratio 16:9 --size l → 1888×1056."""
+        """SC-1: --ratio 16:9 --size l → 1920×1088."""
         result = self._run_capturing(["-m", "fake", "--ratio", "16:9", "--size", "l"])
         assert result["ratio"] == "16:9"
         assert result["size"] == "l"
@@ -301,11 +302,11 @@ class TestRunnerSizeLookup:
 
         return captured["request"]
 
-    def test_16_9_l_resolves_1888x1056(self):
-        """SC-1: --ratio 16:9 --size l → 1888×1056."""
+    def test_16_9_l_resolves_1920x1088(self):
+        """SC-1: --ratio 16:9 --size l → 1920×1088."""
         req = self._capture_request("16:9", "l")
-        assert req.width == 1888
-        assert req.height == 1056
+        assert req.width == 1920
+        assert req.height == 1088
 
     def test_2_3_m_resolves_832x1216(self):
         """SC-2: Default 2:3/m → 832×1216."""
@@ -319,22 +320,22 @@ class TestRunnerSizeLookup:
         assert req.width == 1024
         assert req.height == 1024
 
-    def test_2_3_xl_resolves_1296x1936(self):
-        """SC-3: --size xl → 1296×1936."""
+    def test_2_3_xl_resolves_1280x1920(self):
+        """SC-3: --size xl → 1280×1920."""
         req = self._capture_request("2:3", "xl")
-        assert req.width == 1296
-        assert req.height == 1936
+        assert req.width == 1280
+        assert req.height == 1920
 
     def test_width_override_takes_priority(self):
         """SC-5: --width overrides preset width."""
         req = self._capture_request("16:9", "l", width_override=800)
         assert req.width == 800
-        assert req.height == 1056  # height from preset
+        assert req.height == 1088  # height from preset
 
     def test_height_override_takes_priority(self):
         """SC-5: --height overrides preset height."""
         req = self._capture_request("16:9", "l", height_override=600)
-        assert req.width == 1888  # width from preset
+        assert req.width == 1920  # width from preset
         assert req.height == 600
 
     def test_both_overrides_ignore_preset(self):
@@ -464,23 +465,21 @@ class TestRunnerFilenameIntegration:
 
 
 class TestUpscalePresetRoundTrip:
-    """SC-8: Upscale validation works with the new size resolution."""
+    """SC-8: Every shipped preset keeps its exact size under the upscale factors its tier supports."""
 
-    def test_16_9_l_upscale_2_round_trip(self):
-        """SC-8: 1888/2=944, 1056/2=528 — both multiples of 16."""
-        assert 1888 // 2 == 944
-        assert 944 % 16 == 0
-        assert 1056 // 2 == 528
-        assert 528 % 16 == 0
+    @pytest.fixture(scope="class")
+    def config(self):
+        return load_config()
 
-    def test_2_3_m_upscale_2_round_trip(self):
-        """Default preset 2:3/m: 832/2=416, 1216/2=608 — both multiples of 16."""
-        assert 832 // 2 == 416
-        assert 416 % 16 == 0
-        assert 1216 // 2 == 608
-        assert 608 % 16 == 0
-
-    # Note: 6 presets (16:9/s, 9:16/s, 3:2/xs, 3:2/xl, 2:3/xs, 2:3/xl)
-    # have dimensions that are multiples of 16 but NOT 32, so they drift
-    # under 2x upscale. The runner handles this with a warning — see
-    # TestPresetSizeDriftWarning in test_runner_outcome.py.
+    @pytest.mark.parametrize(
+        "ratio,size",
+        [(r, s) for r in RATIOS for s in SIZES],
+        ids=[f"{r}_{s}" for r in RATIOS for s in SIZES],
+    )
+    def test_preset_survives_upscale(self, config, ratio, size):
+        """xs and s survive 2x; m, l and xl survive 2x and 4x (the base render is a multiple of 16)."""
+        dims = config["sizes"][ratio][size]
+        factors = (2,) if size in ("xs", "s") else (2, 4)
+        for factor in factors:
+            for value in (dims["width"], dims["height"]):
+                assert round_to_alignment(value // factor) * factor == value, f"{ratio}/{size} {value} drifts under {factor}x upscale"

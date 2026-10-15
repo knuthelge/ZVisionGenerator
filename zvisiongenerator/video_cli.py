@@ -266,7 +266,7 @@ def _apply_ratio_size_defaults(parser: argparse.ArgumentParser, args: argparse.N
         {ratio: tuple(size_map.keys()) for ratio, size_map in vsizes.items()},
         vgen_cfg.get("default_size"),
         fallback_ratio="16:9",
-        fallback_size="m",
+        fallback_size="s",
     )
     if args.ratio is None:
         args.ratio = default_ratio

@@ -827,6 +827,17 @@ describe('draft settings persistence', () => {
     expect(draft.state.dimensionMode).toBe('custom');
   });
 
+  it('reuses an asset at its own size when its preset has since changed size', () => {
+    const ctx = makeContext({ image_size_dimensions: { '1:1': { m: [1024, 1024] } } });
+    draft.hydrateFromContext(ctx);
+
+    draft.loadFromUrl({ ratio: '1:1', size: 'm', width: '1024', height: '1024' }, ctx);
+    expect(draft.state).toMatchObject({ dimensionMode: 'ratio', size: 'm' });
+
+    draft.loadFromUrl({ ratio: '1:1', size: 'm', width: '1088', height: '1088' }, ctx);
+    expect(draft.state).toMatchObject({ dimensionMode: 'custom', size: 'custom', width: 1088, height: 1088 });
+  });
+
   it('keeps a custom size across reloads', () => {
     const ctx = makeContext();
     draft.hydrateFromContext(ctx);

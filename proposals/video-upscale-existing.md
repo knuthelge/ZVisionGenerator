@@ -4,7 +4,7 @@
 
 ## Problem
 
-The intended video workflow is: generate at `m`, extend the clip until it's right, then enlarge the finished video 2×. Today the last step is impossible:
+The intended video workflow is: generate at `s` (the default), extend the clip until it's right, then enlarge the finished video 2×. Today the last step is impossible:
 
 - The in-run upscale (two-stage LTX) only enlarges LTX's own half-size render inside the same run, and it can't be combined with extend (`video_mac.py`: "Extending a video is not supported together with upscale").
 - Extend refuses an upscaled video, so upscaling first and extending afterwards doesn't work either.
@@ -48,9 +48,9 @@ Checked against `main` at 17686fa and the vendored LTX packages, on 2026-10-13.
 |---|---|
 | What stage 2 needs | `_stage2(stage1, video_upscaled, …)` reads `latent_dims`, `video_embeds`, `audio_embeds`, `audio_tokens`, `relay_mask`, `x0_model`, `resolved_images` and `nag` from the `Stage1Result`. All of them can be built without running stage 1: the latent from the VAE encoder, the embeddings from the prompt encoder |
 | Refine strength | `STAGE_2_SIGMAS` is `[0.909375, 0.725, 0.421875, 0.0]`. `stage2_steps` keeps the tail, so 3 steps start at 0.91 (most new detail), 2 at 0.725 and 1 at 0.42 (closest to the source). LTX 2.5 packs use their own table |
-| Size rules | The source is the half-size input: its sides must be multiples of 32, which every LTX render is. Output is exactly 2× on each side (`m` 704×448 → 1408×896) |
+| Size rules | The source is the half-size input: its sides must be multiples of 32, which every LTX render is. Output is exactly 2× on each side (`s` 768×448 → 1536×896) |
 | Frame count | Unchanged. LTX renders and extends are 8k+1 frames, which the VAE takes as is |
-| Long clips | Stage 2 holds the whole clip's tokens. A 10 s extended `m` clip (241 frames) is 31 latent frames × 44×28 tokens ≈ 38k tokens at full size. `VideoModalityTiler` splits that into temporal and spatial tiles. Prompt Relay refuses tiling, which doesn't matter here: the upscale uses one prompt |
+| Long clips | Stage 2 holds the whole clip's tokens. A 10 s extended `s` clip (241 frames) is 31 latent frames × 48×28 tokens ≈ 42k tokens at full size. `VideoModalityTiler` splits that into temporal and spatial tiles. Prompt Relay refuses tiling, which doesn't matter here: the upscale uses one prompt |
 | Audio | Stage 2 also refines audio tokens. The upscale encodes the source's audio for the pipeline and then muxes the **original** audio track into the output, so the sound is unchanged |
 | Memory | The DiT and VAE are the ones a two-stage generation of the same output size loads; stage 1 is skipped and a full-length encode is added. `clip_memory_fit(upscale=True)` measures a two-stage generation; the spike checks it is a safe upper bound |
 
@@ -62,7 +62,7 @@ The earlier version of this proposal planned a chunked clip loop around mflux 0.
 |---|---|
 | mflux's SeedVR2 VAE is single-frame only. `Upsample3D` trims extra frames only when `T == 1`, so n+1 latent frames decode to 4n+4 frames instead of 4n+1, misaligned with the input. `SeedVR2LatentCreator.create_condition` builds its mask with `T = 1` and fails on clips. `apply_color_correction` is a per-frame Lab transfer only | Installed mflux 0.22.0 |
 | mlx-gen (MIT, an mflux fork) has a working SeedVR2 video path, measured on an M5 Max with 128 GB: 2× of a 320×240, 149-frame clip peaked at 34.4 GB (3B) and 44.3 GB (7B) and took 454–539 s (about 3–3.6 s per frame). Its safe default is 1× only and it refuses 2× video without `--force-unsafe-video-memory`. At 480×360 it produces "one … corrupted frame in every latent group of four" | [mlx-gen upscaling doc](https://github.com/lpalbou/mlx-gen/blob/main/docs/upscaling.md) |
-| Our smallest real case, `m` 704×448 → 1408×896, has about 4× the output pixels of mlx-gen's test, so it can't fit a 32 GB Mac's 26.8 GB budget without spatial tiling | Derived from the row above |
+| Our smallest real case, `s` 768×448 → 1536×896, has over 4× the output pixels of mlx-gen's test, so it can't fit a 32 GB Mac's 26.8 GB budget without spatial tiling | Derived from the row above |
 | The working low-memory design is mlx-seedvr2-swift's: Lanczos enlarge first, SeedVR2 at 1:1 in spatial tiles, the causal VAE's state carried across chunk joins, chunks cut at scene changes, chunk length lowered to fit memory. That's a full port, weeks of work | [mlx-seedvr2-swift](https://github.com/xocialize/mlx-seedvr2-swift) |
 | The reference ComfyUI node runs on PyTorch MPS; one report has a 16 GB Mac mini taking 35 minutes for a quarter-second clip | [numz node](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler), [issue #465](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler/issues/465) |
 
@@ -76,7 +76,7 @@ Build it in one worktree, with a commit per step. Each step leaves the app worki
 
 ### 0. Spike, with recorded results
 
-A script outside the app that builds a `Stage1Result` from an encoded video and runs `_upsample_latent` → `_stage2` → decode on `DistilledPipeline`. Four app renders with `ltx-4`: a 5 s `m` clip, a 10 s `m` clip made with two extends, a face close-up at `m`, and a 5 s `l` clip. On a 32 GB Mac with `--low-memory`; `ltx-8` and a 64 GB Mac if available. About half a day to a day, most of it machine time.
+A script outside the app that builds a `Stage1Result` from an encoded video and runs `_upsample_latent` → `_stage2` → decode on `DistilledPipeline`. Four app renders with `ltx-4`: a 5 s `s` clip, a 10 s `s` clip made with two extends, a face close-up at `s`, and a 5 s `m` clip. On a 32 GB Mac with `--low-memory`; `ltx-8` and a 64 GB Mac if available. About half a day to a day, most of it machine time.
 
 | Gate | Pass when |
 |---|---|

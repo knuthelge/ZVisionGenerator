@@ -10,7 +10,7 @@ from zvisiongenerator.utils.config import select_ratio_size_defaults
 _IMAGE_FALLBACK_RATIO = "2:3"
 _IMAGE_FALLBACK_SIZE = "m"
 _VIDEO_FALLBACK_RATIO = "16:9"
-_VIDEO_FALLBACK_SIZE = "m"
+_VIDEO_FALLBACK_SIZE = "s"
 
 
 def resolve_image_ratio_size_defaults(web_config: Any) -> tuple[str, str]:
