@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b21] - 2026-10-15
+
 ### Changed
 - **Web UI: a new file browser.** The folder button next to a path field now opens a file browser inside the Web UI instead of a system dialog on the server's screen. It looks the same on macOS, Windows and Linux, works from a phone or another computer, and on a phone fills the screen. It has shortcuts to your home, output, model and LoRA folders, recent choices, a filter, an editable path bar, keyboard control, and **New folder** for folder fields. The reference image gets the same browser, next to its upload button. Typing a path in the field now suggests matching folders and files (`Tab` completes)
 
