@@ -20,6 +20,9 @@ _LTX_MLX_DISTILLED_UNVERSIONED = "transformer-distilled.safetensors"
 _LTX_MLX_UPSAMPLER_STEMS = ("spatial_upscaler_x2_v1_0", "ltx-2.3-spatial-upscaler-x2", "spatial_upscaler_x2_v1_1")
 _WEIGHTLESS_CLASS_HINTS = ("Tokenizer", "Scheduler", "Processor", "FeatureExtractor")
 _TRANSFORMER_COMPONENT = "transformer"
+# LTX-2 diffusers repos are downloaded without their transformer weights on Windows/Linux, which load the transformer
+# from a single-file checkpoint (video_model_presets.ltx.diffusers.transformer).
+_SEPARATE_TRANSFORMER_PIPELINES = ("LTX2Pipeline", "LTX2ImageToVideoPipeline")
 _SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d+)-of-(?P<total>\d+)\.safetensors$")
 # Diffusers precision variants (e.g. ``diffusion_pytorch_model.fp16.safetensors``, optionally sharded).
 _VARIANT_RE = re.compile(r"\.(?:fp16|bf16|fp32|fp8)(?:-\d+-of-\d+)?\.safetensors$")
@@ -171,7 +174,14 @@ def has_complete_weights(model_dir: Path) -> bool:
         return ltx_mlx_transformer_file(model_dir) is not None and (model_dir / "vae_decoder.safetensors").is_file()
     # Root-level files are only selected when they stand in for the transformer folder.
     present = {component_of(model_dir, path) or _TRANSFORMER_COMPONENT for path in files}
-    return all(name in present for name in components or ()) and _shards_complete(files)
+    required = [name for name in components or () if not (name == _TRANSFORMER_COMPONENT and _has_separate_transformer(model_dir))]
+    return all(name in present for name in required) and _shards_complete(files)
+
+
+def _has_separate_transformer(model_dir: Path) -> bool:
+    """Return whether *model_dir* is a pipeline whose transformer may load from a separate checkpoint instead of its folder."""
+    index = _read_model_index(model_dir)
+    return index is not None and index.get("_class_name") in _SEPARATE_TRANSFORMER_PIPELINES
 
 
 def directory_bytes(path: Path) -> int:

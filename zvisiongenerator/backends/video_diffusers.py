@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import inspect
+import json
+import logging
 import sys
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -13,13 +15,25 @@ from types import MappingProxyType
 from typing import Any, Final
 
 from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
-from zvisiongenerator.backends.lora_peft import is_unmatched_adapter_error, restore_cpu_offload, warn_unmatched_lora
+from zvisiongenerator.backends.lora_peft import is_unmatched_adapter_error, warn_unmatched_lora
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 
-_MINIMUM_DIFFUSERS_VERSION = (0, 38, 0)
-# The distilled model card's setting. Only guidance_scale is passed, so the other guidance terms (audio,
-# spatio-temporal, modality) keep the pipeline defaults of the installed diffusers version.
-_DISTILLED_GUIDANCE: Final[Mapping[str, float]] = MappingProxyType({"guidance_scale": 1.0})
+logger = logging.getLogger(__name__)
+
+_MINIMUM_DIFFUSERS_VERSION = (0, 41, 0)
+# The pipelines' own default prompt length, in tokens.
+_MAX_SEQUENCE_LENGTH = 1024
+# Tokens a token-wise layer (feed-forward, RMSNorm) computes at once: a feed-forward's 4x-wide activation is then
+# 128 MB and an RMSNorm's float32 copy 64 MB, however long the clip.
+_TOKEN_CHUNK = 4096
+# A load whose estimated peak passes this share of system memory leaves little to the rest of the machine.
+_SYSTEM_MEMORY_TIGHT_RATIO = 0.8
+# A distilled checkpoint runs without guidance, as on macOS. Every guidance term is set to its neutral value:
+# diffusers 0.40+ default to audio guidance 7, spatio-temporal guidance 1 and modality guidance 3 even at
+# guidance_scale 1.0, which over-sharpens the video, distorts the audio and adds three extra passes per step.
+_DISTILLED_GUIDANCE: Final[Mapping[str, float]] = MappingProxyType(
+    {"guidance_scale": 1.0, "audio_guidance_scale": 1.0, "stg_scale": 0.0, "audio_stg_scale": 0.0, "modality_scale": 1.0, "audio_modality_scale": 1.0}
+)
 # Architecture of the LTX-2.3 x2 spatial latent upsampler (matches the published weights).
 _UPSAMPLER_CONFIG: Final[Mapping[str, Any]] = MappingProxyType(
     {
@@ -66,9 +80,40 @@ class _GeneratedClip:
     sample_rate: int | None = None
 
 
+@dataclass(frozen=True)
+class _TextEncoderSource:
+    """Where the text encoder loads from for each new prompt: the repo folder (its config) and its prepared FP8 copy."""
+
+    repo_dir: Path
+    prepared: Path
+    torch_dtype: Any
+
+
+@dataclass(frozen=True)
+class _TransformerSource:
+    """Where the transformer loads from, how it is placed, and whether it gives way to the text encoder.
+
+    With *swap* the transformer and the text encoder do not fit in system memory together: the transformer loads
+    after a prompt is encoded and is released before the next new prompt's text encoder loads.
+    """
+
+    config: dict[str, Any]
+    prepared: Path
+    quantize: int
+    torch_dtype: Any
+    low_memory: bool
+    loras: tuple[tuple[str, float], ...]
+    swap: bool
+
+
 @dataclass
 class _LoadedVideoModel:
-    """Reusable loaded diffusers video pipelines for one request mode."""
+    """Reusable loaded diffusers video pipelines for one request mode.
+
+    The pipelines have no text encoder: it loads for a new prompt and is set only while encoding
+    (see :func:`_encode_prompt`). Without *text_encoder* the pipeline encodes prompts itself. With *transformer* the
+    pipeline's transformer may be absent until a prompt is encoded (see :func:`_ensure_transformer`).
+    """
 
     text_to_video: Any | None
     image_to_video: Any | None
@@ -76,6 +121,10 @@ class _LoadedVideoModel:
     runtime: _RuntimeDependencies
     model_info: VideoModelInfo
     low_memory: bool
+    text_encoder: _TextEncoderSource | None = None
+    transformer: _TransformerSource | None = None
+    prompt_cache: tuple[str, dict[str, Any]] | None = None
+    resident_text_encoder: Any | None = None  # kept between prompts when it fits beside the transformer
 
 
 def _parse_version(version: str) -> tuple[int, ...]:
@@ -118,8 +167,10 @@ def _load_runtime_dependencies() -> _RuntimeDependencies:
     try:
         import torch
         from PIL import Image
+        import av  # noqa: F401 - the encoder needs it
         import diffusers
-        from diffusers.utils import encode_video
+
+        from zvisiongenerator.backends.video_encode import encode_video
     except ImportError as exc:
         raise RuntimeError("Video diffusers dependencies are unavailable. Install the Windows/Linux video runtime with `uv sync`.") from exc
 
@@ -184,51 +235,285 @@ def _select_torch_dtype(torch: Any) -> Any:
 
 
 def _enable_vae_tiling(pipeline: Any) -> None:
-    """Enable tiled decoding on the pipeline VAE when it supports it."""
+    """Make the pipeline VAE decode in tiles, in space and in time, when it supports it.
+
+    The LTX-2 VAE tiles only in space by default, so every tile decodes all frames at once and a long clip runs out of
+    GPU memory at the end. Frame-wise decoding takes a few latent frames at a time, so decoding memory no longer grows
+    with the clip's length.
+    """
 
     vae = getattr(pipeline, "vae", None)
     if vae is not None and hasattr(vae, "enable_tiling"):
         vae.enable_tiling()
+        if hasattr(vae, "use_framewise_decoding"):
+            vae.use_framewise_decoding = True
 
 
-def _configure_pipeline(pipeline: Any, runtime: _RuntimeDependencies, *, torch_dtype: Any, low_memory: bool) -> Any:
-    """Apply offload and VAE tuning on a loaded diffusers pipeline."""
-
-    if low_memory and hasattr(pipeline, "enable_model_cpu_offload"):
-        pipeline.enable_model_cpu_offload()
-    elif hasattr(pipeline, "to"):
-        pipeline.to(device="cuda", dtype=torch_dtype)
-
-    _enable_vae_tiling(pipeline)
-    return pipeline
-
-
-def _load_pipeline(
+def _load_generation_pipeline(
     pipeline_class: type[Any],
     model_path: str,
     runtime: _RuntimeDependencies,
     *,
     torch_dtype: Any,
     low_memory: bool,
-) -> Any:
-    """Instantiate and configure one diffusers pipeline."""
+    quantize: int,
+    transformer_source: tuple[str, str] | None,
+    loras: list[tuple[str, float]],
+    model_name: str | None,
+) -> tuple[Any, _TextEncoderSource, _TransformerSource]:
+    """Load the generation pipeline without its text encoder, placed for the memory mode.
 
+    The transformer (at *quantize*, with *loras*) is attached now when it fits in system memory beside the text
+    encoder, and otherwise only once the first prompt is encoded.
+
+    Returns:
+        The pipeline, and where its text encoder and transformer load from.
+    """
+
+    from zvisiongenerator.backends.memory_cuda import release_memory
+
+    checkpoint = _download_hub_file(*transformer_source, "LTX transformer") if transformer_source else None
+    repo_dir = _repo_dir(model_path, with_transformer=checkpoint is None)
+    transformer_input = checkpoint or repo_dir / "transformer"
+    fits_together = _check_system_memory(repo_dir, transformer_input, quantize)
+    prepared_transformer, prepared_text_encoder = _prepared_weights(model_name, model_path, repo_dir, transformer_input, quantize, runtime.torch.device("cuda"))
+    connectors = _load_connectors(repo_dir, torch_dtype)
     try:
-        pipeline = pipeline_class.from_pretrained(model_path, torch_dtype=torch_dtype)
+        pipeline = pipeline_class.from_pretrained(str(repo_dir), transformer=None, connectors=connectors, text_encoder=None, torch_dtype=torch_dtype)
     except Exception as exc:
         raise RuntimeError(f"Failed to load {pipeline_class.__name__} from '{model_path}': {exc}") from exc
-    return _configure_pipeline(pipeline, runtime, torch_dtype=torch_dtype, low_memory=low_memory)
+    _place_components(pipeline, runtime.torch, low_memory=low_memory)
+    transformer = _TransformerSource(
+        config=_transformer_config(repo_dir),
+        prepared=prepared_transformer,
+        quantize=quantize,
+        torch_dtype=torch_dtype,
+        low_memory=low_memory,
+        loras=tuple(loras),
+        swap=low_memory and not fits_together,  # without low memory the transformer lives on the GPU
+    )
+    if not transformer.swap:
+        _attach_transformer(pipeline, transformer, runtime.torch)
+    else:
+        release_memory()  # the connectors' full-precision copy and the components' CPU copies
+    return pipeline, _TextEncoderSource(repo_dir=repo_dir, prepared=prepared_text_encoder, torch_dtype=torch_dtype), transformer
+
+
+def _attach_transformer(pipeline: Any, source: _TransformerSource, torch: Any) -> None:
+    """Load the transformer from *source*, place it for the memory mode, give it to *pipeline* and apply the LoRAs."""
+
+    from zvisiongenerator.backends.block_streaming import unload_before
+    from zvisiongenerator.backends.ltx_cuda_weights import load_transformer
+    from zvisiongenerator.backends.memory_cuda import release_memory
+    from zvisiongenerator.backends.timestep_runs import modulate_by_runs
+
+    transformer = load_transformer(source.config, prepared=source.prepared, bits=source.quantize, compute_dtype=source.torch_dtype)
+    _place_transformer(transformer, torch, quantize=source.quantize, low_memory=source.low_memory)
+    _chunk_token_wise_layers(transformer)
+    modulate_by_runs(transformer)  # image-to-video's per-token timesteps without a per-token modulation copy
+    if source.low_memory:
+        unload_before(transformer, _codec_components(pipeline))  # the VAEs leave the GPU while it denoises
+    pipeline.transformer = transformer
+    # The pipeline reads its patch sizes from the transformer it was built with, which was none.
+    config = getattr(transformer, "config", None)
+    if config is not None:
+        pipeline.transformer_spatial_patch_size = config.patch_size
+        pipeline.transformer_temporal_patch_size = config.patch_size_t
+    if source.loras:
+        _apply_loras(pipeline, list(source.loras))
+    release_memory()  # the unpinned originals the streaming copied from
+
+
+def _release_transformer(pipeline: Any, source: _TransformerSource) -> None:
+    """Remove the transformer (and its LoRAs, from the connectors too) from *pipeline* and free its memory."""
+
+    from zvisiongenerator.backends.memory_cuda import release_memory
+
+    if source.loras and hasattr(pipeline, "unload_lora_weights"):
+        pipeline.unload_lora_weights()
+    pipeline.transformer = None
+    release_memory()
+
+
+def _ensure_transformer(model: _LoadedVideoModel, pipeline: Any) -> None:
+    """Attach the transformer to *pipeline* if it was left out or released for the text encoder."""
+
+    if model.transformer is not None and getattr(pipeline, "transformer", None) is None:
+        _attach_transformer(pipeline, model.transformer, model.runtime.torch)
+
+
+def _repo_dir(model_path: str, *, with_transformer: bool) -> Path:
+    """Return the local folder of the diffusers repo *model_path*, downloading what is missing for a repo id.
+
+    Without *with_transformer* the repo's own transformer weights are not downloaded (only its config).
+    """
+
+    local = Path(model_path).expanduser()
+    if local.is_dir():
+        return local
+    from huggingface_hub import snapshot_download
+
+    ignore = None if with_transformer else ["transformer/*.safetensors", "transformer/*.safetensors.index.json"]
+    try:
+        return Path(snapshot_download(model_path, ignore_patterns=ignore))
+    except Exception as exc:
+        raise RuntimeError(f"Failed to download the LTX model '{model_path}': {exc}") from exc
+
+
+def _download_hub_file(repo_id: str, filename: str, label: str) -> Path:
+    """Download one file from the Hugging Face Hub (or find it in the cache) and return its local path."""
+
+    try:
+        from huggingface_hub import hf_hub_download
+
+        return Path(hf_hub_download(repo_id=repo_id, filename=filename))
+    except Exception as exc:
+        raise RuntimeError(f"Failed to download the {label} '{filename}' from '{repo_id}': {exc}") from exc
 
 
 def _resolve_upsampler_weights(repo_id: str, filename: str) -> str:
     """Download one latent upsampler weights file from the Hugging Face Hub and return its local path."""
 
-    try:
-        from huggingface_hub import hf_hub_download
+    return str(_download_hub_file(repo_id, filename, "LTX latent upsampler"))
 
-        return str(hf_hub_download(repo_id=repo_id, filename=filename))
-    except Exception as exc:
-        raise RuntimeError(f"Failed to download the LTX latent upsampler '{filename}' from '{repo_id}': {exc}") from exc
+
+def _check_system_memory(repo_dir: Path, transformer_input: Path, quantize: int) -> bool:
+    """Refuse a load that cannot fit in system memory, and warn when it leaves little to the rest of the machine.
+
+    Returns:
+        Whether the transformer and the text encoder fit in system memory together; otherwise they take turns.
+
+    Raises:
+        RuntimeError: If even taking turns needs more than the machine's system memory.
+    """
+
+    import psutil
+
+    from zvisiongenerator.backends.ltx_cuda_weights import component_elements, text_encoder_bytes, transformer_elements
+    from zvisiongenerator.utils.model_memory import estimate_ltx_cuda_system_memory
+
+    block_matrices, transformer_rest = transformer_elements(transformer_input)
+    estimate = estimate_ltx_cuda_system_memory(
+        block_matrices=block_matrices,
+        transformer_rest=transformer_rest,
+        connectors=component_elements(repo_dir / "connectors"),
+        text_encoder=text_encoder_bytes(repo_dir / "text_encoder"),
+        quantize=quantize,
+    )
+    total = int(psutil.virtual_memory().total)
+    need = estimate.taking_turns
+    level = f"q{quantize}"
+    smaller = "ltx-4" if quantize == 8 else None
+    if need > total:
+        advice = f" Use {smaller} instead." if smaller else ""
+        raise RuntimeError(f"LTX at {level} needs about {need / 1024**3:.0f} GB of system memory; this machine has {total / 1024**3:.0f} GB.{advice}")
+    limit = total * _SYSTEM_MEMORY_TIGHT_RATIO
+    if need > limit:
+        advice = f" If it is stopped for lack of memory, use {smaller}." if smaller else ""
+        warnings.warn(f"LTX at {level} needs about {need / 1024**3:.0f} GB of this machine's {total / 1024**3:.0f} GB of system memory, leaving little for other apps.{advice}", stacklevel=3)
+    return estimate.together <= limit
+
+
+def _prepared_weights(model_name: str | None, model_path: str, repo_dir: Path, transformer_input: Path, quantize: int, device: Any) -> tuple[Path, Path]:
+    """Return the prepared copies of the transformer and text encoder at *quantize*, writing them the first time.
+
+    They live in the models folder as the stored copy of the picked alias, ``<models>/<name>@q<bits>`` (e.g.
+    ``ltx-4@q4``), so the Models page counts them with the alias and deletes them with it. The text encoder is the
+    same at every level: one already prepared beside another alias is hard-linked instead of written again.
+    Writing reads the source weights once (tens of gigabytes) and can take several minutes.
+    """
+
+    from zvisiongenerator.backends.ltx_cuda_weights import ensure_prepared, text_encoder_sources, transformer_sources, write_text_encoder, write_transformer
+    from zvisiongenerator.utils.paths import get_ziv_data_dir
+    from zvisiongenerator.utils.stored_quant import stored_quant_name
+
+    models_dir = get_ziv_data_dir() / "models"
+    copy = models_dir / stored_quant_name(model_name or model_path.strip().replace("/", "--"), quantize)
+    transformer, text_encoder = copy / "transformer", copy / "text_encoder"
+    config = _transformer_config(repo_dir)
+    if not (transformer.is_dir() and text_encoder.is_dir()):
+        logger.info("Preparing the q%d LTX weights in %s once; this reads the full weights and can take several minutes.", quantize, copy)
+    ensure_prepared(transformer, transformer_sources(transformer_input), quantize, lambda folder: write_transformer(transformer_input, config, folder, quantize, device))
+    other_text_encoders = sorted(models_dir.glob("*@q*/text_encoder"))
+    ensure_prepared(text_encoder, text_encoder_sources(repo_dir), 8, lambda folder: write_text_encoder(repo_dir, folder), reuse=other_text_encoders)
+    return transformer, text_encoder
+
+
+def _transformer_config(repo_dir: Path) -> dict[str, Any]:
+    """Return the diffusers transformer config of the repo at *repo_dir*."""
+
+    return json.loads((repo_dir / "transformer" / "config.json").read_text(encoding="utf-8"))
+
+
+def _load_connectors(repo_dir: Path, torch_dtype: Any) -> Any:
+    """Load the text connectors with FP8 weight storage."""
+
+    from zvisiongenerator.backends.ltx_cuda_weights import load_connectors
+
+    return load_connectors(repo_dir / "connectors", compute_dtype=torch_dtype)
+
+
+def _place_components(pipeline: Any, torch: Any, *, low_memory: bool) -> None:
+    """Put the pipeline's parts other than the transformer where they run.
+
+    In low-memory mode the connectors stream to the GPU, and the VAEs and vocoder move there only when they encode
+    or decode (the transformer sends them back, see :func:`_attach_transformer`), so they take no GPU memory while
+    it denoises. Otherwise everything moves to the GPU.
+    """
+
+    from zvisiongenerator.backends.block_streaming import group_offload, load_when_used
+
+    device = torch.device("cuda")
+    for component in _codec_components(pipeline):
+        if low_memory:
+            entry_points = [getattr(component, name) for name in ("encoder", "decoder") if getattr(component, name, None) is not None]
+            load_when_used(component, entry_points or [component], device)
+        else:
+            component.to(device)
+    if low_memory:
+        group_offload(pipeline.connectors, device, "leaf_level")
+    else:
+        pipeline.connectors.to(device)
+    _enable_vae_tiling(pipeline)
+
+
+def _codec_components(pipeline: Any) -> list[Any]:
+    """Return the pipeline's VAEs and vocoder: the parts that encode and decode around the transformer."""
+
+    return [component for name in ("vae", "audio_vae", "vocoder") if (component := getattr(pipeline, name, None)) is not None]
+
+
+def _place_transformer(transformer: Any, torch: Any, *, quantize: int, low_memory: bool) -> None:
+    """Stream the transformer to the GPU block by block in low-memory mode, else move it there."""
+
+    from zvisiongenerator.backends.block_streaming import group_offload, move_outside, stream_blocks
+
+    device = torch.device("cuda")
+    if not low_memory:
+        transformer.to(device)
+    elif quantize == 4:
+        # NF4 weights carry quantization state that diffusers' group offloading leaves on the CPU.
+        stream_blocks(transformer.transformer_blocks, device)
+        move_outside(transformer, transformer.transformer_blocks, device)
+    else:
+        group_offload(transformer, device, "block_level")
+
+
+def _chunk_token_wise_layers(transformer: Any) -> None:
+    """Run the token-wise layers of every transformer block over at most ``_TOKEN_CHUNK`` tokens at a time.
+
+    These are the video and audio feed-forward layers and every RMSNorm (including the attention q/k norms): each
+    computes tokens independently, so chunking leaves the output unchanged.
+    """
+
+    from zvisiongenerator.backends.token_chunking import chunk_tokens
+
+    modules: list[Any] = []
+    for block in getattr(transformer, "transformer_blocks", ()):
+        modules.extend(getattr(block, name) for name in ("ff", "audio_ff") if getattr(block, name, None) is not None)
+        if hasattr(block, "modules"):
+            modules.extend(module for module in block.modules() if type(module).__name__ == "RMSNorm")
+    chunk_tokens(modules, _TOKEN_CHUNK)
 
 
 def _read_state_dict(path: str) -> dict[str, Any]:
@@ -296,6 +581,17 @@ def _refuse_review(kwargs: dict[str, Any]) -> None:
         raise ValueError("Review before upscaling is not supported by the diffusers video backend.")
 
 
+def _fit_image(image: Any, width: int, height: int) -> Any:
+    """Scale *image* to cover *width* × *height* with its aspect ratio kept, and crop the overflow from the center.
+
+    The diffusers pipeline would otherwise stretch the image to the video's size; the macOS pipeline crops the same way.
+    """
+
+    from PIL import Image, ImageOps
+
+    return ImageOps.fit(image, (width, height), method=Image.Resampling.BILINEAR, centering=(0.5, 0.5))
+
+
 def _make_generator(torch: Any, seed: int | None) -> Any | None:
     """Create a deterministic generator when a seed is provided."""
 
@@ -335,32 +631,29 @@ def _make_step_callback(step_callback: Callable[[dict[str, Any]], None] | None, 
     return _on_step_end
 
 
-def _extract_frames(result: Any) -> list[Any]:
-    """Normalize diffusers video outputs to a single list of frames."""
+def _decode_clip(pipeline: Any, result: Any) -> _GeneratedClip:
+    """Decode a final pass's output (``output_type="latent"``) to 8-bit frames, its audio waveform and the audio's sample rate.
 
-    if result is None:
-        return []
-    if hasattr(result, "frames"):
-        frames = result.frames
-    elif hasattr(result, "images"):
-        frames = result.images
-    else:
-        frames = result
+    The video decodes a few frames at a time straight to system memory (``streaming_decode``), so neither GPU nor
+    system memory holds a full-precision copy of the clip.
+    """
 
-    if isinstance(frames, list) and frames and isinstance(frames[0], list):
-        return frames[0]
-    if isinstance(frames, list):
-        return frames
-    return []
+    from zvisiongenerator.backends.streaming_decode import decode_frames
+
+    frames = decode_frames(pipeline.vae, result.frames)
+    return _GeneratedClip(frames=frames, audio=_decode_audio(pipeline, getattr(result, "audio", None)), sample_rate=_audio_sample_rate(pipeline))
 
 
-def _extract_audio(result: Any) -> Any | None:
-    """Return the first clip's audio waveform from a decoded pipeline output, or ``None`` when it has none."""
+def _decode_audio(pipeline: Any, audio_latents: Any | None) -> Any | None:
+    """Return the first clip's waveform decoded from *audio_latents*, or ``None`` without audio latents or an audio decoder."""
 
-    audio = getattr(result, "audio", None)
-    if audio is None or len(audio) == 0:
+    audio_vae = getattr(pipeline, "audio_vae", None)
+    vocoder = getattr(pipeline, "vocoder", None)
+    if audio_latents is None or audio_vae is None or vocoder is None:
         return None
-    return audio[0]
+    mel = audio_vae.decode(audio_latents.to(audio_vae.dtype), return_dict=False)[0]
+    waveform = vocoder(mel)
+    return waveform[0] if len(waveform) else None
 
 
 def _audio_sample_rate(pipeline: Any) -> int | None:
@@ -369,12 +662,6 @@ def _audio_sample_rate(pipeline: Any) -> int | None:
     config = getattr(getattr(pipeline, "vocoder", None), "config", None)
     rate = getattr(config, "output_sampling_rate", None)
     return int(rate) if rate else None
-
-
-def _clip_from_result(result: Any, pipeline: Any) -> _GeneratedClip:
-    """Collect the frames, audio and audio sample rate of a decoded pipeline output."""
-
-    return _GeneratedClip(frames=_extract_frames(result), audio=_extract_audio(result), sample_rate=_audio_sample_rate(pipeline))
 
 
 def _export_video(model: _LoadedVideoModel, clip: _GeneratedClip, output_path: str) -> Path:
@@ -393,11 +680,26 @@ def _export_video(model: _LoadedVideoModel, clip: _GeneratedClip, output_path: s
     return Path(output_path)
 
 
-def _apply_loras(pipeline: Any, loras: list[tuple[str, float]], *, cpu_offload: bool = False) -> None:
+def _check_lora_files(loras: list[tuple[str, float]]) -> None:
+    """Raise when a LoRA file is missing or in a format the diffusers backend does not load.
+
+    Raises:
+        FileNotFoundError: If a LoRA path does not exist.
+        ValueError: If a LoRA file is not ``.safetensors`` or ``.bin``.
+    """
+
+    for path, _weight in loras:
+        lora_path = Path(path)
+        if not lora_path.exists():
+            raise FileNotFoundError(f"LoRA weights not found: {path}")
+        if lora_path.is_file() and lora_path.suffix.lower() not in {".safetensors", ".bin"}:
+            raise ValueError(f"Unsupported LoRA format for diffusers LTX backend: {path}")
+
+
+def _apply_loras(pipeline: Any, loras: list[tuple[str, float]]) -> None:
     """Load diffusers-compatible LoRA adapters onto the active generation pipeline.
 
-    A LoRA none of whose tensors match the pipeline is skipped with a warning. When *cpu_offload* is set, model CPU
-    offload is turned back on if loading a LoRA left it off.
+    A LoRA none of whose tensors match the pipeline is skipped with a warning.
     """
 
     if not hasattr(pipeline, "load_lora_weights"):
@@ -408,13 +710,9 @@ def _apply_loras(pipeline: Any, loras: list[tuple[str, float]], *, cpu_offload: 
     load_signature = _call_signature_parameters(pipeline.load_lora_weights) or {}
     supports_adapter_name = "adapter_name" in load_signature or any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in load_signature.values())
 
+    _check_lora_files(loras)
     for index, (path, weight) in enumerate(loras):
         lora_path = Path(path)
-        if not lora_path.exists():
-            raise FileNotFoundError(f"LoRA weights not found: {path}")
-        if lora_path.is_file() and lora_path.suffix.lower() not in {".safetensors", ".bin"}:
-            raise ValueError(f"Unsupported LoRA format for diffusers LTX backend: {path}")
-
         adapter_name = f"lora_{index}"
         load_kwargs = {"adapter_name": adapter_name} if supports_adapter_name else {}
         try:
@@ -430,7 +728,6 @@ def _apply_loras(pipeline: Any, loras: list[tuple[str, float]], *, cpu_offload: 
         adapter_names.append(adapter_name)
         adapter_weights.append(weight)
 
-    restore_cpu_offload(pipeline, enabled=cpu_offload)
     if not adapter_names:
         return
 
@@ -464,7 +761,7 @@ def _cleanup(runtime: _RuntimeDependencies) -> None:
 
 def _build_generation_kwargs(
     *,
-    prompt: str,
+    prompt_inputs: Mapping[str, Any],
     width: int,
     height: int,
     num_frames: int,
@@ -478,7 +775,7 @@ def _build_generation_kwargs(
     """Map the shared backend contract to diffusers pipeline kwargs."""
 
     kwargs: dict[str, Any] = {
-        "prompt": prompt,
+        **prompt_inputs,
         "width": width,
         "height": height,
         "num_frames": num_frames,
@@ -536,7 +833,7 @@ def _generate_one_stage(
     model: _LoadedVideoModel,
     pipeline: Any,
     *,
-    prompt: str,
+    prompt_inputs: Mapping[str, Any],
     width: int,
     height: int,
     num_frames: int,
@@ -549,25 +846,25 @@ def _generate_one_stage(
 
     sigmas = _stage1_sigmas(model.runtime.distilled_sigmas, steps)
     kwargs = _build_generation_kwargs(
-        prompt=prompt,
+        prompt_inputs=prompt_inputs,
         width=width,
         height=height,
         num_frames=num_frames,
         fps=model.model_info.default_fps,
         sigmas=sigmas,
         generator=_make_generator(model.runtime.torch, seed),
-        output_type="pil",
+        output_type="latent",
         callback=_make_step_callback(step_callback, phase="video", offset=0, total=len(sigmas)),
         extra_kwargs=extra_kwargs,
     )
-    return _clip_from_result(pipeline(**kwargs), pipeline)
+    return _decode_clip(pipeline, pipeline(**kwargs))
 
 
 def _generate_two_stage(
     model: _LoadedVideoModel,
     pipeline: Any,
     *,
-    prompt: str,
+    prompt_inputs: Mapping[str, Any],
     width: int,
     height: int,
     num_frames: int,
@@ -590,7 +887,7 @@ def _generate_two_stage(
     stage2_sigmas = list(runtime.stage2_sigmas)
     total = len(stage1_sigmas) + len(stage2_sigmas)
     generator = _make_generator(runtime.torch, seed)
-    common = {"prompt": prompt, "num_frames": num_frames, "fps": model.model_info.default_fps, "generator": generator}
+    common = {"prompt_inputs": prompt_inputs, "num_frames": num_frames, "fps": model.model_info.default_fps, "generator": generator}
 
     stage1 = pipeline(
         **_build_generation_kwargs(
@@ -613,12 +910,12 @@ def _generate_two_stage(
                 width=width,
                 height=height,
                 sigmas=stage2_sigmas,
-                output_type="pil",
+                output_type="latent",
                 callback=_make_step_callback(step_callback, phase="video_upscale_stage_2", offset=len(stage1_sigmas), total=total),
                 extra_kwargs=refine_kwargs,
             )
         )
-    return _clip_from_result(stage2, pipeline)
+    return _decode_clip(pipeline, stage2)
 
 
 def _check_upscale_arguments(model: _LoadedVideoModel, stage1_steps: int | None) -> None:
@@ -644,13 +941,15 @@ def _generate_clip(
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
 ) -> _GeneratedClip:
-    """Generate a clip in one stage, or in two stages when *stage1_steps* is set."""
+    """Generate a clip in one stage, or in two stages when *stage1_steps* is set; the prompt is encoded once for both."""
 
+    prompt_inputs = _encode_prompt(model, pipeline, prompt)
+    _ensure_transformer(model, pipeline)
     if stage1_steps is None:
         return _generate_one_stage(
             model,
             pipeline,
-            prompt=prompt,
+            prompt_inputs=prompt_inputs,
             width=width,
             height=height,
             num_frames=num_frames,
@@ -662,7 +961,7 @@ def _generate_clip(
     return _generate_two_stage(
         model,
         pipeline,
-        prompt=prompt,
+        prompt_inputs=prompt_inputs,
         width=width,
         height=height,
         num_frames=num_frames,
@@ -671,6 +970,50 @@ def _generate_clip(
         step_callback=step_callback,
         extra_kwargs=extra_kwargs,
     )
+
+
+def _encode_prompt(model: _LoadedVideoModel, pipeline: Any, prompt: str) -> dict[str, Any]:
+    """Return the pipeline keyword arguments that carry *prompt*: its embeddings, or the prompt itself without a text-encoder source.
+
+    The text encoder streams to the GPU and loads for the first new prompt. When it and the transformer fit in system
+    memory together it stays loaded for later prompts; otherwise the transformer is released first and attached again afterwards
+    (:func:`_ensure_transformer`), and the text encoder is released after encoding. The last prompt's embeddings are
+    kept, so repeating a prompt loads neither again.
+    """
+
+    source = model.text_encoder
+    if source is None:
+        return {"prompt": prompt}
+    if model.prompt_cache is not None and model.prompt_cache[0] == prompt:
+        return model.prompt_cache[1]
+
+    from zvisiongenerator.backends.block_streaming import group_offload
+    from zvisiongenerator.backends.ltx_cuda_weights import load_text_encoder
+    from zvisiongenerator.backends.memory_cuda import release_memory
+
+    torch = model.runtime.torch
+    device = torch.device("cuda")
+    model.prompt_cache = None  # the old embeddings are not needed while the new ones are made
+    swap = model.transformer is not None and model.transformer.swap
+    if swap and getattr(pipeline, "transformer", None) is not None:
+        _release_transformer(pipeline, model.transformer)
+    text_encoder = model.resident_text_encoder
+    if text_encoder is None:
+        text_encoder = load_text_encoder(source.repo_dir, prepared=source.prepared, compute_dtype=source.torch_dtype)
+        group_offload(text_encoder, device)  # streamed in both modes: without low memory the transformer fills the GPU
+    pipeline.text_encoder = text_encoder
+    try:
+        # No negative prompt: the distilled guidance (_DISTILLED_GUIDANCE) runs no classifier-free guidance.
+        embeds, mask, _, _ = pipeline.encode_prompt(prompt=prompt, do_classifier_free_guidance=False, device=device, dtype=source.torch_dtype, max_sequence_length=_MAX_SEQUENCE_LENGTH)
+        model.resident_text_encoder = None if swap else text_encoder  # in system memory, streamed to the GPU
+    finally:
+        pipeline.text_encoder = None
+        del text_encoder
+        if model.resident_text_encoder is None:
+            release_memory()
+    inputs = {"prompt_embeds": embeds, "prompt_attention_mask": mask}
+    model.prompt_cache = (prompt, inputs)
+    return inputs
 
 
 class DiffusersVideoBackend:
@@ -683,7 +1026,18 @@ class DiffusersVideoBackend:
         model_path: str,
         **kwargs: Any,
     ) -> tuple[_LoadedVideoModel, VideoModelInfo]:
-        """Load the active diffusers pipeline(s) for one video request mode."""
+        """Load the diffusers pipeline for one video request mode.
+
+        Keyword Args:
+            mode: ``t2v`` or ``i2v``.
+            low_memory: Stream the transformer and connectors to the GPU instead of keeping them there.
+            loras: ``(path, weight)`` pairs.
+            upscale: Load the latent upsampler for the two-stage upscale.
+            latent_upsampler: ``(repo_id, filename)`` of the upsampler weights.
+            quantize: 4 (NF4 transformer) or 8 (FP8 transformer); both levels use an FP8 text encoder and connectors.
+            transformer_source: ``(repo_id, filename)`` of a single-file transformer checkpoint that replaces the repo's own.
+            model_name: The name the model was picked by (``ltx-4``); its prepared copy is ``<models>/<name>@q<bits>``.
+        """
 
         mode = kwargs.get("mode", "t2v")
         low_memory = bool(kwargs.get("low_memory", True))
@@ -692,6 +1046,10 @@ class DiffusersVideoBackend:
 
         if mode not in {"t2v", "i2v"}:
             raise ValueError(f"Unsupported video generation mode: {mode}")
+
+        quantize = kwargs.get("quantize")
+        if quantize not in (4, 8):
+            raise ValueError(f"LTX on Windows/Linux runs 4-bit or 8-bit: use the model 'ltx-4' or 'ltx-8' (got quantize level {quantize!r}).")
 
         latent_upsampler = kwargs.get("latent_upsampler")
         if upscale and latent_upsampler is None:
@@ -709,15 +1067,19 @@ class DiffusersVideoBackend:
         # Fail fast on a missing upsampler file before the large generation pipeline loads.
         upsampler_weights = _resolve_upsampler_weights(*latent_upsampler) if upscale else None
 
-        text_pipeline = _load_pipeline(runtime.pipeline_classes.text_to_video, model_path, runtime, torch_dtype=torch_dtype, low_memory=low_memory) if mode == "t2v" else None
-        image_pipeline = _load_pipeline(runtime.pipeline_classes.image_to_video, model_path, runtime, torch_dtype=torch_dtype, low_memory=low_memory) if mode == "i2v" else None
-
-        if text_pipeline is None and image_pipeline is None:
-            raise RuntimeError(f"No diffusers generation pipeline was loaded for mode '{mode}'.")
-
-        active_pipeline = text_pipeline or image_pipeline
-        if loras:
-            _apply_loras(active_pipeline, loras, cpu_offload=low_memory)
+        pipeline_class = runtime.pipeline_classes.text_to_video if mode == "t2v" else runtime.pipeline_classes.image_to_video
+        _check_lora_files(loras)
+        active_pipeline, text_encoder, transformer = _load_generation_pipeline(
+            pipeline_class,
+            model_path,
+            runtime,
+            torch_dtype=torch_dtype,
+            low_memory=low_memory,
+            quantize=quantize,
+            transformer_source=kwargs.get("transformer_source"),
+            loras=loras,
+            model_name=kwargs.get("model_name"),
+        )
 
         upsample_pipeline = None
         if upsampler_weights is not None:
@@ -731,12 +1093,14 @@ class DiffusersVideoBackend:
 
         return (
             _LoadedVideoModel(
-                text_to_video=text_pipeline,
-                image_to_video=image_pipeline,
+                text_to_video=active_pipeline if mode == "t2v" else None,
+                image_to_video=active_pipeline if mode == "i2v" else None,
                 upsample_pipeline=upsample_pipeline,
                 runtime=runtime,
                 model_info=model_info,
                 low_memory=low_memory,
+                text_encoder=text_encoder,
+                transformer=transformer,
             ),
             model_info,
         )
@@ -805,7 +1169,7 @@ class DiffusersVideoBackend:
         _check_upscale_arguments(model, stage1_steps)
 
         with model.runtime.image_module.open(image_path) as image:
-            input_image = image.convert("RGB")
+            input_image = _fit_image(image.convert("RGB"), width, height)
 
         with model.runtime.torch.inference_mode():
             clip = _generate_clip(

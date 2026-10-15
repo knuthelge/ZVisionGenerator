@@ -447,7 +447,44 @@ def ltx_latent_upsampler_source(config: dict[str, Any]) -> tuple[str, str] | Non
         ValueError: If ``video_model_presets.ltx.diffusers.latent_upsampler`` is set but is not a mapping with
             non-blank string ``repo`` and ``filename``.
     """
-    key = "video_model_presets.ltx.diffusers.latent_upsampler"
+    return _ltx_hub_file(config, "latent_upsampler")
+
+
+def ltx_transformer_source(config: dict[str, Any]) -> tuple[str, str] | None:
+    """Return the configured single-file LTX transformer checkpoint as ``(repo_id, filename)``, or ``None`` to use the repo's own.
+
+    A ``null`` entry (a user config turning the packaged one off) means the repo's own transformer.
+
+    Raises:
+        ValueError: If ``video_model_presets.ltx.diffusers.transformer`` is set but is not a mapping with
+            non-blank string ``repo`` and ``filename``.
+    """
+    diffusers = ((config.get("video_model_presets") or {}).get("ltx") or {}).get("diffusers") or {}
+    if diffusers.get("transformer") is None:
+        return None
+    return _ltx_hub_file(config, "transformer")
+
+
+def ltx_companion_repos(config: dict[str, Any], repo_id: str) -> tuple[str, ...]:
+    """Return the other Hugging Face repos the diffusers LTX backend downloads beside *repo_id*.
+
+    These are the single-file transformer and the latent upsampler, when *repo_id* is the configured
+    ``video_model_presets.ltx.diffusers.default_repo``; otherwise none.
+    """
+    diffusers = ((config.get("video_model_presets") or {}).get("ltx") or {}).get("diffusers") or {}
+    if diffusers.get("default_repo") != repo_id:
+        return ()
+    sources = (ltx_transformer_source(config), ltx_latent_upsampler_source(config))
+    return tuple(dict.fromkeys(source[0] for source in sources if source is not None and source[0] != repo_id))
+
+
+def _ltx_hub_file(config: dict[str, Any], name: str) -> tuple[str, str] | None:
+    """Return ``video_model_presets.ltx.diffusers.<name>`` as ``(repo_id, filename)``, or ``None`` when not set.
+
+    Raises:
+        ValueError: If the entry is not a mapping with non-blank string ``repo`` and ``filename``.
+    """
+    key = f"video_model_presets.ltx.diffusers.{name}"
     node: Any = config
     for part in key.split("."):
         if not isinstance(node, dict) or part not in node:
@@ -462,6 +499,38 @@ def ltx_latent_upsampler_source(config: dict[str, Any]) -> tuple[str, str] | Non
             raise ValueError(f"{key}.{field} must be a non-blank string.")
         values.append(value.strip())
     return values[0], values[1]
+
+
+def ltx_diffusers_quantize(config: dict[str, Any], model_name: str | None) -> int | None:
+    """Return the quantize level the diffusers LTX backend loads the model picked as *model_name* at, or ``None`` (bfloat16).
+
+    The levels are set per alias in ``video_model_presets.ltx.diffusers.quantize`` (e.g. ``ltx-4: 4``).
+
+    Raises:
+        ValueError: If that entry is set but is not a mapping of names to 4 or 8.
+    """
+    key = "video_model_presets.ltx.diffusers.quantize"
+    levels = (((config.get("video_model_presets") or {}).get("ltx") or {}).get("diffusers") or {}).get("quantize")
+    if levels is None:
+        return None
+    if not isinstance(levels, dict) or any(bits not in (4, 8) for bits in levels.values()):
+        raise ValueError(f"{key} must map model names to 4 or 8.")
+    return levels.get(model_name) if model_name is not None else None
+
+
+def ltx_load_options(config: dict[str, Any], model_name: str | None, *, upscale: bool) -> dict[str, Any]:
+    """Return the configured keyword arguments a video backend's ``load_model`` takes for the model picked as *model_name*.
+
+    The diffusers options (``quantize``, ``transformer_source``, ``model_name``, ``latent_upsampler``) are ignored by the MLX backend.
+
+    Raises:
+        ValueError: If one of the ``video_model_presets.ltx.diffusers`` entries is malformed.
+    """
+    options: dict[str, Any] = {"quantize": ltx_diffusers_quantize(config, model_name), "transformer_source": ltx_transformer_source(config), "model_name": model_name}
+    if upscale:
+        options["upscale"] = True
+        options["latent_upsampler"] = ltx_latent_upsampler_source(config)
+    return options
 
 
 def model_reference(repo: str, revision: str | None) -> str:

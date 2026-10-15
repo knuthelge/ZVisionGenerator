@@ -15,7 +15,7 @@ from zvisiongenerator.backends import accelerator_memory_budget_or_none, get_vid
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.alignment import aligned_video_dims
 from zvisiongenerator.utils.app_log import setup_logging
-from zvisiongenerator.utils.config import load_config, ltx_latent_upsampler_source, resolve_video_defaults, select_ratio_size_defaults, validate_video_size_choice
+from zvisiongenerator.utils.config import load_config, ltx_load_options, resolve_video_defaults, select_ratio_size_defaults, validate_video_size_choice
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import parse_lora_arg, resolve_lora_references
@@ -280,17 +280,10 @@ def _apply_ratio_size_defaults(parser: argparse.ArgumentParser, args: argparse.N
         parser.error(str(e))
 
 
-def _unknown_video_model_guidance(platform_key: str) -> str:
-    """Return platform-aware guidance for unknown video model selections."""
+def _unknown_video_model_guidance() -> str:
+    """Return guidance for unknown video model selections."""
 
-    suffix = "supported/configured HuggingFace LTX repo IDs, or a local path containing 'ltx'."
-    if platform_key == "darwin":
-        return f"Use a supported LTX model: 'ltx-4' or 'ltx-8' on macOS, known LTX repo prefixes, {suffix}"
-    if platform_key == "win32":
-        return f"Use a supported LTX model: 'ltx-2.3' on Windows, known LTX repo prefixes, {suffix}"
-    if platform_key.startswith("linux"):
-        return f"Use a supported LTX model: 'ltx-2.3' on Linux, known LTX repo prefixes, {suffix}"
-    return f"Use a supported LTX model: 'ltx-4' or 'ltx-8' on macOS, 'ltx-2.3' on Windows/Linux, known LTX repo prefixes, {suffix}"
+    return "Use a supported LTX model: 'ltx-4' or 'ltx-8', known LTX repo prefixes, supported/configured HuggingFace LTX repo IDs, or a local path containing 'ltx'."
 
 
 def main(*, prog: str = "ziv-video") -> None:
@@ -352,7 +345,8 @@ def main(*, prog: str = "ziv-video") -> None:
             parser.error(str(e))
         args.lora = _extend_lora(args.lora, source)
 
-    # Resolve friendly model names (e.g. "ltx-2-mlx" → ~/.ziv/models/...)
+    # Resolve friendly model names (e.g. "ltx-2-mlx" → ~/.ziv/models/...); the picked name chooses the quantize level.
+    model_name = args.model
     try:
         args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
     except ValueError as e:
@@ -372,7 +366,7 @@ def main(*, prog: str = "ziv-video") -> None:
     # Detect video model family
     model_info = detect_video_model(args.model)
     if model_info.family == "unknown":
-        parser.error(f"Could not detect video model family for '{args.model}'. {_unknown_video_model_guidance(sys.platform)}")
+        parser.error(f"Could not detect video model family for '{args.model}'. {_unknown_video_model_guidance()}")
 
     # Validate --image file exists
     if args.image_path and not os.path.isfile(args.image_path):
@@ -503,16 +497,12 @@ def main(*, prog: str = "ziv-video") -> None:
         # Load model
         print(f"Loading {model_info.family.upper()} video model: {args.model}")
         try:
-            load_kwargs: dict[str, Any] = {}
-            if args.upscale:
-                load_kwargs["upscale"] = True
-                load_kwargs["latent_upsampler"] = ltx_latent_upsampler_source(config)
             model, model_info = backend.load_model(
                 args.model,
                 mode=mode,
                 low_memory=args.low_memory,
                 loras=loras,
-                **load_kwargs,
+                **ltx_load_options(config, model_name, upscale=bool(args.upscale)),
             )
         except (RuntimeError, ValueError, FileNotFoundError, ImportError) as e:
             logger.exception("Failed to load video model %s", args.model)

@@ -85,21 +85,14 @@ platforms:
   linux: Linux
 
 model_aliases:
+  # On Windows/Linux both LTX aliases load the diffusers repo, at the quantize level
+  # video_model_presets.ltx.diffusers.quantize sets for each.
   ltx-8:
     darwin: "dgrauet/ltx-2.3-mlx-q8"
-    win32:
-      message: "Alias 'ltx-8' is macOS-only. On Windows, use 'ltx-2.3' for the CUDA diffusers backend."
-    linux:
-      message: "Alias 'ltx-8' is macOS-only. On Linux, use 'ltx-2.3' for the CUDA diffusers backend."
+    win32: "${video_model_presets.ltx.diffusers.default_repo}"
+    linux: "${video_model_presets.ltx.diffusers.default_repo}"
   ltx-4:
     darwin: "dgrauet/ltx-2.3-mlx-q4"
-    win32:
-      message: "Alias 'ltx-4' is macOS-only. On Windows, use 'ltx-2.3' for the CUDA diffusers backend."
-    linux:
-      message: "Alias 'ltx-4' is macOS-only. On Linux, use 'ltx-2.3' for the CUDA diffusers backend."
-  ltx-2.3:
-    darwin:
-      message: "Alias 'ltx-2.3' is available on Windows and Linux only. On macOS, use 'ltx-4' or 'ltx-8'."
     win32: "${video_model_presets.ltx.diffusers.default_repo}"
     linux: "${video_model_presets.ltx.diffusers.default_repo}"
   zit: "Tongyi-MAI/Z-Image-Turbo"
@@ -227,7 +220,18 @@ video_model_presets:
     default_steps: 8
     diffusers:
       # Distilled LTX 2.3 in diffusers format, used on Windows/Linux (8 steps, guidance 1.0). Distilled checkpoints only.
+      # Its text encoder, connectors, VAEs and vocoder are used; the transformer comes from the file below.
       default_repo: "diffusers/LTX-2.3-Distilled-Diffusers"
+      # The distilled transformer: one single-file LTX-2 checkpoint in a Hugging Face repo (1.1 matches macOS).
+      # Leave it out to use the default repo's own transformer.
+      transformer:
+        repo: "Lightricks/LTX-2.3"
+        filename: "ltx-2.3-22b-distilled-1.1.safetensors"
+      # Quantize level per model alias: 4 = NF4 transformer, 8 = FP8 transformer; both with an FP8 text encoder
+      # and connectors. Only these names load on Windows/Linux. Prepared copies are the alias's stored copy, ~/.ziv/models/<alias>@q<bits>.
+      quantize:
+        ltx-4: 4
+        ltx-8: 8
       # 2x spatial latent upsampler for --upscale 2: one safetensors file in a Hugging Face repo.
       latent_upsampler:
         repo: "Lightricks/LTX-2.3"

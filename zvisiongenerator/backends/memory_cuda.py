@@ -24,7 +24,8 @@ def release_memory() -> None:
     """Free a finished model's memory: collect it, then return the freed system and GPU memory.
 
     Pipelines with offload hooks hold reference cycles, so an unused model stays in system and GPU memory until
-    the garbage collector runs.
+    the garbage collector runs. Streamed weights live in pinned memory, which PyTorch caches for reuse instead of
+    returning it; that cache is emptied too.
     """
     import torch
 
@@ -32,6 +33,9 @@ def release_memory() -> None:
     _trim_heap()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+        empty_host_cache = getattr(getattr(torch, "accelerator", None), "empty_host_cache", None)
+        if empty_host_cache is not None:
+            empty_host_cache()
 
 
 def drop_cached_files(directory: Path) -> None:

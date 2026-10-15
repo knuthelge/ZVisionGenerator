@@ -955,14 +955,19 @@ export interface RouterState {
 
 // ── Model inventory types ──────────────────────────────────────────────────────
 
-/** What deleting a model removes: its installed folder, or its HuggingFace download (the alias stays). */
+/**
+ * What deleting a model removes: its installed folder, its HuggingFace download (the alias stays), or only its
+ * prepared copies (`copy`) while other models still use the download it shares with them.
+ */
 export interface ModelDeleteInfo {
-  kind: 'installed' | 'huggingface';
+  kind: 'installed' | 'huggingface' | 'copy';
   repo_id: string | null;
   /** Installed models linking into this HuggingFace download, which deleting it would break. */
   linked_by: string[];
   /** The model's stored quants (e.g. `atlas@q8`), deleted along with it. */
   stored_quants?: string[];
+  /** For `copy`: the models still using the shared download, which stays. */
+  shared_with?: string[];
 }
 
 /** A quantized copy of an installed model, used automatically when that quantize level is selected. */

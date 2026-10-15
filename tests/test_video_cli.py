@@ -107,7 +107,7 @@ class TestBuildVideoParser:
 class TestVideoCliExecution:
     """Verify executable CLI behavior beyond argument parsing."""
 
-    def test_main_reports_unknown_model_guidance_with_platform_alias(self, monkeypatch, capsys):
+    def test_main_reports_unknown_model_guidance_with_the_ltx_aliases(self, monkeypatch, capsys):
         import zvisiongenerator.video_cli as video_cli
 
         monkeypatch.setattr(video_cli, "load_config", lambda: {"model_aliases": {}})
@@ -132,7 +132,8 @@ class TestVideoCliExecution:
                 video_cli.main()
 
         err = capsys.readouterr().err
-        assert "ltx-2.3" in err
+        assert "'ltx-4' or 'ltx-8'" in err
+        assert "ltx-2.3'" not in err
         assert "dgrauet/ltx" not in err
         assert "supported/configured HuggingFace LTX repo IDs" in err
         assert "local path containing 'ltx'" in err
@@ -171,7 +172,7 @@ class TestVideoCliExecution:
         )
         monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
 
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog", "--lora", "org/lora:0.8"]):
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog", "--lora", "org/lora:0.8"]):
             with pytest.raises(SystemExit, match="2"):
                 video_cli.main()
 
@@ -234,7 +235,7 @@ class TestVideoCliExecution:
         )
         monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
 
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog", "-o", str(tmp_path)]):
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog", "-o", str(tmp_path)]):
             with pytest.raises(SystemExit, match="2"):
                 video_cli.main()
 
@@ -324,7 +325,7 @@ class TestVideoCliExecution:
         monkeypatch.setattr(video_cli, "build_video_workflow", lambda _args, **_kwargs: object())
         monkeypatch.setattr(video_cli, "run_video_batch", lambda *_a, **_k: None)
 
-        argv = ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog", "-o", str(tmp_path), *extra_argv]
+        argv = ["ziv-video", "-m", "ltx-4", "--prompt", "a dog", "-o", str(tmp_path), *extra_argv]
         with patch("sys.argv", argv):
             video_cli.main()
         return backend
@@ -416,7 +417,7 @@ class TestVideoCliPreflight:
     def test_preflight_before_model_load(self, monkeypatch, tmp_path):
         order: list[str] = []
         video_cli, captured, workflows = self._patch(monkeypatch, order)
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog runs", "--enhance", "-o", str(tmp_path)]):
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog runs", "--enhance", "-o", str(tmp_path)]):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 video_cli.main()
@@ -427,7 +428,7 @@ class TestVideoCliPreflight:
         """The reply has no markers, so the scene is not rewritten: the plan carries no enhanced scene (it once echoed the scene)."""
         order: list[str] = []
         video_cli, captured, _workflows = self._patch(monkeypatch, order)
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--scene", "A sunlit beach.", "--prompt", "a dog runs", "--enhance", "-o", str(tmp_path)]):
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--scene", "A sunlit beach.", "--prompt", "a dog runs", "--enhance", "-o", str(tmp_path)]):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 video_cli.main()
@@ -438,7 +439,7 @@ class TestVideoCliPreflight:
     def test_enhancer_load_error_exits_before_model_load(self, monkeypatch, tmp_path):
         order: list[str] = []
         video_cli, _captured, _workflows = self._patch(monkeypatch, order, load_error=RuntimeError("Could not load prompt enhancer model a/b"))
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog runs", "--enhance", "-o", str(tmp_path)]):
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog runs", "--enhance", "-o", str(tmp_path)]):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 with pytest.raises(SystemExit, match="2"):
@@ -521,7 +522,7 @@ class TestVideoCliScene:
     """``--scene`` reaches the plan; scene-only runs are valid; a run with no scene and no prompt is refused."""
 
     def _main(self, monkeypatch, tmp_path, argv):
-        return _run_cli(monkeypatch, tmp_path, ["-m", "ltx-2.3", *argv], backend=MagicMock())
+        return _run_cli(monkeypatch, tmp_path, ["-m", "ltx-4", *argv], backend=MagicMock())
 
     def test_scene_alone_is_a_scene_only_run(self, monkeypatch, tmp_path):
         captured = self._main(monkeypatch, tmp_path, ["--scene", "A castle at dusk."])

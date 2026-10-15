@@ -1,38 +1,23 @@
 # Video Generation Guide
 
-Generate videos from text prompts or images using `ziv-video`. macOS uses the MLX LTX backend, while Windows and Linux use the shared diffusers/CUDA LTX backend.
+Generate videos from text prompts or images using `ziv-video` or the Web UI.
 
 ## Supported Models
 
-| Platform | Alias | Backend | Default Target | I2V |
-|---|---|---|---|---|
-| macOS | `ltx-4` | MLX (`ltx-pipelines-mlx`) | `dgrauet/ltx-2.3-mlx-q4` | ✅ |
-| macOS | `ltx-8` | MLX (`ltx-pipelines-mlx`) | `dgrauet/ltx-2.3-mlx-q8` | ✅ |
-| Windows | `ltx-2.3` | diffusers/CUDA | `diffusers/LTX-2.3-Distilled-Diffusers` by default | ✅ |
-| Linux | `ltx-2.3` | diffusers/CUDA | `diffusers/LTX-2.3-Distilled-Diffusers` by default | ✅ |
-
-## Model Aliases
-
-| Alias | Expands To |
-|-------|------------|
-| `ltx-4` | `dgrauet/ltx-2.3-mlx-q4` |
-| `ltx-8` | `dgrauet/ltx-2.3-mlx-q8` |
-| `ltx-2.3` | `video_model_presets.ltx.diffusers.default_repo` on Windows and Linux |
-
-`ltx-4` and `ltx-8` are macOS-only aliases. They are the shipped MLX Q4/Q8 presets. `ltx-2.3` is a Windows/Linux-only alias for the configurable diffusers default and does not select a packaged Q4 or Q8 tier. The mismatch errors are intentional and point to the platform-appropriate alias.
+| Alias | Model | Platforms | I2V |
+|---|---|---|---|
+| `ltx-4` | LTX-2.3, 4-bit: needs the least memory | macOS, Windows, Linux | ✅ |
+| `ltx-8` | LTX-2.3, 8-bit: closer to the full model, needs more memory | macOS, Windows, Linux | ✅ |
 
 See [Image Guide → Model Aliases](image.md#model-aliases) for the full alias list.
 
 ## Quick Start
 
-Use `MODEL` below as follows: `ltx-4` or `ltx-8` on macOS, `ltx-2.3` on Windows and Linux.
+Use `MODEL` below as `ltx-4` or `ltx-8` (4-bit or 8-bit) on every platform.
 
 ```bash
-# Text-to-video with LTX on macOS
+# Text-to-video with LTX (4-bit)
 ziv-video -m ltx-4 --prompt "A cat walking through a garden"
-
-# Text-to-video with LTX on Windows or Linux
-ziv-video -m ltx-2.3 --prompt "A cat walking through a garden"
 
 # Image-to-video with your platform alias
 ziv-video -m MODEL --image photo.jpg --prompt "Camera slowly zooms in"
@@ -49,6 +34,8 @@ ziv-video -m MODEL --scene "A knight in a grey castle courtyard, overcast, handh
 # Continue a clip with two more seconds (macOS)
 ziv-video --extend clip.mp4 --prompt "She walks through the gate."
 ```
+
+For image-to-video, the starting image is scaled to cover the video size with its shape kept, and whatever overflows is cropped from the center. Pick a `--ratio` close to the image's shape to keep all of it.
 
 ## Scene and Action
 
@@ -99,8 +86,7 @@ ziv-video -m MODEL --upscale 2 --no-audio --prompt "..."
 `--upscale 2` is the only supported video upscale mode. It works in two stages on every platform: the clip is rendered at half the requested width and height, its latents are upsampled 2× with the LTX-2.3 spatial upsampler, and a short refinement at full size sharpens the result. The finished clip has the width and height you asked for, and progress counts both stages as one run.
 
 - **Steps** — `--steps` (default 8, at most 8) sets the half-size stage. On Windows and Linux the refinement adds 3 steps, so the default run shows 11 steps in total. LoRAs apply to both stages.
-- **Windows and Linux upsampler** — the upsampler weights (about 1 GB) come from the Hugging Face file named by `video_model_presets.ltx.diffusers.latent_upsampler` (`repo` and `filename`, set in the packaged config) and are downloaded on the first upscale run. A missing file is reported before the video model loads; a file that does not match the x2 upsampler layout is reported when the upsampler loads. Other runs do not load the upsampler.
-- **Memory** — with `--low-memory` (the default) the Windows/Linux upsampler stays in system memory and moves to the GPU only while it upsamples. With `--no-low-memory` it stays on the GPU.
+- **Windows and Linux** — the first upscale run downloads the upsampler (about 1 GB).
 - **Size** — width and height must be divisible by 64, and are aligned to 64 with a warning when needed.
 
 Audio is generated together with the video on every platform, and `--no-audio` (or turning off **Audio** in the Web UI) removes it. On Windows and Linux the audio track is 48 kHz stereo AAC.
@@ -226,7 +212,12 @@ LTX-2.3 has specific alignment requirements that are auto-corrected with a warni
 - **macOS MLX Q4 baseline**: `ltx-4`, 704×448, ≤49 frames with `--low-memory`
 - **macOS low memory**: `--low-memory` (the default) frees each model component once it has run. On Macs with 24 GB of memory or less it also streams the transformer from disk during generation, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. `--no-low-memory` (or **Low memory** off in the Web UI) turns off both, keeping every component loaded
 
-Windows and Linux use the configurable diffusers repository behind `ltx-2.3` instead of shipped Q4/Q8 aliases. That backend supports distilled checkpoints only: every run uses the distilled schedule with at most 8 steps and `guidance_scale` 1.0. With fewer than 8 steps it keeps the end of the schedule. Video decoding is tiled to keep memory down.
+On Windows and Linux:
+
+- **Memory** — `ltx-4` needs about 20 GB of system memory and `ltx-8` about 27 GB; on a 32 GB machine use `ltx-4`. A model that cannot fit stops with an error before it loads. On a 32 GB machine each new prompt takes a little longer than repeating one (`-r`, or several seeds).
+- **Length** — on a 10 GB GPU with `ltx-4`, clips up to 20 s at M, 15 s at L and 10 s at XL fit, with or without `--upscale 2`.
+- **First run** — the first run of each model downloads it and prepares it for your GPU, which takes a while. Later runs start much faster.
+- **Steps** — at most 8 (`--steps`).
 
 ## Memory Check
 
@@ -241,20 +232,20 @@ The estimate grows with the number of frames and the pixels per frame. It was me
 
 `ziv-video` auto-detects the model family from supported model values:
 
-- **Aliases** — `ltx-4` and `ltx-8` on macOS, `ltx-2.3` on Windows and Linux
-- **Supported/configured repo IDs** — known LTX prefixes such as `dgrauet/ltx*` and `Lightricks/LTX-Video*`, including `diffusers/LTX-2.3-Distilled-Diffusers`, plus the configured `video_model_presets.ltx.diffusers.default_repo`
+- **Aliases** — `ltx-4` and `ltx-8`
+- **Supported repo IDs** — known LTX prefixes such as `dgrauet/ltx*` and `Lightricks/LTX-Video*`
 - **Local paths** — local paths containing `ltx` are treated as LTX candidates, including Windows-style path strings on any host
 
-For Windows/Linux direct repo swaps, point `ltx-2.3` at another distilled LTX-2.3 diffusers repository with `video_model_presets.ltx.diffusers.default_repo` in `~/.ziv/config.yaml`. Non-distilled repositories are not supported. Arbitrary unconfigured HuggingFace repositories are not accepted solely because their names contain `ltx`.
+Arbitrary HuggingFace repositories are not accepted solely because their names contain `ltx`.
 
 Runtime `--lora` values must be local LoRA files or bare LoRA names that resolve from `~/.ziv/loras/`. HuggingFace-shaped LoRA references such as `org/lora:0.8` are import inputs for `ziv-model lora --hf`, not direct generation inputs.
 
 ## Common Platform Errors
 
-- `Alias 'ltx-4' is macOS-only...` or `Alias 'ltx-8' is macOS-only...`: use `ltx-2.3` on Windows or Linux.
-- `Alias 'ltx-2.3' is available on Windows and Linux only...`: use `ltx-4` or `ltx-8` on macOS.
+- `LTX at q8 needs about 27 GB of system memory; this machine has 16 GB. Use ltx-4 instead.` (Windows/Linux): pick the level the message names; `ltx-4` needs the least memory.
+- `LTX on Windows/Linux runs 4-bit or 8-bit...`: the diffusers backend only loads LTX at a quantize level; use `ltx-4` or `ltx-8` instead of the repository ID.
 - `CUDA is not available...`: the diffusers video backend requires an NVIDIA CUDA device on Windows and Linux. When the message says to update the driver, install NVIDIA driver 580 or newer.
-- `Could not detect video model family...`: use the platform alias (`ltx-4`/`ltx-8` on macOS or `ltx-2.3` on Windows/Linux), a known/configured LTX repo ID, or a local path containing `ltx`.
+- `Could not detect video model family...`: use an alias (`ltx-4` or `ltx-8`), a known/configured LTX repo ID, or a local path containing `ltx`.
 
 ## Related Guides
 

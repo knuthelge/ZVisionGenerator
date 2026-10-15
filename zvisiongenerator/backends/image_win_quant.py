@@ -18,25 +18,39 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends.memory_cuda import drop_cached_file, drop_cached_files, release_memory
+from zvisiongenerator.backends.memory_cuda import drop_cached_files, release_memory
+from zvisiongenerator.backends.safetensors_stream import iter_tensors
 
 if TYPE_CHECKING:
     import torch
 
 __all__ = [
     "cast_to_fp8",
+    "empty_diffusers_model",
+    "fill_weights",
+    "kept_in_compute_dtype",
+    "link_or_copy",
     "load_fp8_components",
     "load_nf4_components",
     "write_fp8_copy",
 ]
 
+# Tensors assigned to an empty model at a time (bounds what is held beyond the model itself).
+_FILL_BATCH_BYTES = 512 * 1024**2
 # Text-encoder layers kept in the compute dtype: norms and embeddings (diffusers' defaults cover the rest).
 _TEXT_ENCODER_SKIP_PATTERNS = ("pos_embed", "patch_embed", "norm", "embed", "^proj_in$", "^proj_out$", "lm_head")
+
+
+def kept_in_compute_dtype(tensor_name: str) -> bool:
+    """Return whether :func:`cast_to_fp8` keeps the text-encoder tensor *tensor_name* in the compute dtype."""
+    module = tensor_name.rpartition(".")[0]
+    return any(re.search(pattern, module) for pattern in _TEXT_ENCODER_SKIP_PATTERNS)
 
 
 def cast_to_fp8(component: Any, compute_dtype: torch.dtype) -> Any:
@@ -171,15 +185,12 @@ def _stream_fp8_transformer(component_dir: Path, compute_dtype: torch.dtype) -> 
 
     The model is created empty in *compute_dtype* and prepared with :func:`cast_to_fp8`, which fixes each
     parameter's storage dtype; every saved tensor is then cast to that dtype as it is read and put in place.
-    Each weight file leaves the page cache once it is read. Saved bfloat16 (a source model) and saved FP8 (a stored copy) load the same way.
+    Each tensor leaves the page cache once it is read. Saved bfloat16 (a source model) and saved FP8 (a stored copy) load the same way.
 
     Raises:
         RuntimeError: When the saved tensors do not cover the model (a damaged or partial copy).
     """
-    import torch
-    from accelerate import init_empty_weights
     from diffusers import AutoModel as DiffusersAutoModel
-    from safetensors import safe_open
 
     files = _weight_files(component_dir)
     if not files:
@@ -187,35 +198,68 @@ def _stream_fp8_transformer(component_dir: Path, compute_dtype: torch.dtype) -> 
         return cast_to_fp8(DiffusersAutoModel.from_pretrained(str(component_dir), torch_dtype=compute_dtype), compute_dtype)
     # AutoModel.from_config reads a path as a pipeline folder; a component's own config is passed as a dict.
     config = json.loads((component_dir / "config.json").read_text(encoding="utf-8"))
+    model = cast_to_fp8(empty_diffusers_model(config, compute_dtype), compute_dtype)
+    fill_weights(model, (item for path in files for item in iter_tensors(path)), str(component_dir))
+    return model.eval()
+
+
+def empty_diffusers_model(config: dict[str, Any], compute_dtype: torch.dtype, model_class: type[Any] | None = None) -> Any:
+    """Return the diffusers model *config* describes, without weights (on the meta device), in *compute_dtype*.
+
+    Modules the model keeps in float32 stay in float32. *model_class* builds models diffusers' ``AutoModel`` cannot
+    resolve by name (pipeline-specific ones).
+    """
+    import torch
+    from accelerate import init_empty_weights
+    from diffusers import AutoModel as DiffusersAutoModel
+
     with init_empty_weights():
-        model = DiffusersAutoModel.from_config(config)
+        model = (model_class or DiffusersAutoModel).from_config(config)
     model.to(compute_dtype)
     for name, module in model.named_modules():
         if any(part in (model._keep_in_fp32_modules or ()) for part in name.split(".")):
             module.to(torch.float32)
-    cast_to_fp8(model, compute_dtype)
+    return model
+
+
+def fill_weights(model: Any, tensors: Iterable[tuple[str, torch.Tensor]], source: str, skipped: Collection[str] = ()) -> None:
+    """Put each ``(name, tensor)`` of *tensors* in place in the empty *model*, cast to the dtype the model stores it in.
+
+    Tensors the model has no parameter or buffer for are ignored. They are assigned in small batches, so only a
+    few are held at once beyond the model itself.
+
+    Args:
+        model: A model built without weights, its storage dtypes already set.
+        tensors: The saved tensors, under the model's own names.
+        source: Where the tensors come from, for the error message.
+        skipped: Names the model has but the source need not provide (e.g. tied weights).
+
+    Raises:
+        RuntimeError: When the tensors do not cover the model (a damaged or partial copy).
+    """
     storage = {key: tensor.dtype for key, tensor in model.state_dict().items()}
     loaded: set[str] = set()
-    for path in files:
-        with safe_open(str(path), framework="pt") as handle:
-            tensors = {key: _owned(handle.get_tensor(key), storage[key]) for key in handle.keys() if key in storage}
-        model.load_state_dict(tensors, strict=False, assign=True)
-        loaded |= tensors.keys()
-        del tensors
-        drop_cached_file(path)  # files can add up to more than system memory
-    missing = storage.keys() - loaded
+    batch: dict[str, torch.Tensor] = {}
+    batch_bytes = 0
+    for name, tensor in tensors:
+        if name not in storage:
+            continue
+        batch[name] = _owned(tensor, storage[name])
+        batch_bytes += tensor.numel() * tensor.element_size()
+        if batch_bytes >= _FILL_BATCH_BYTES:
+            model.load_state_dict(batch, strict=False, assign=True)
+            loaded |= batch.keys()
+            batch, batch_bytes = {}, 0
+    model.load_state_dict(batch, strict=False, assign=True)
+    loaded |= batch.keys()
+    missing = storage.keys() - loaded - set(skipped)
     if missing:
-        raise RuntimeError(f"The weights in {component_dir} do not cover the model ({len(missing)} tensors missing, e.g. {sorted(missing)[0]}).")
-    return model.eval()
+        raise RuntimeError(f"The weights in {source} do not cover the model ({len(missing)} tensors missing, e.g. {sorted(missing)[0]}).")
 
 
 def _owned(tensor: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
-    """Return *tensor* in *dtype* in memory of its own.
-
-    ``safe_open`` tensors map the file. One already in *dtype* (FP8 from a stored copy) would stay mapped, and
-    under memory pressure its pages are dropped and read from disk again at every step.
-    """
-    return tensor.to(dtype) if tensor.dtype != dtype else tensor.clone()
+    """Return *tensor* in *dtype*, converting only when its dtype differs (it is already in memory of its own)."""
+    return tensor.to(dtype) if tensor.dtype != dtype else tensor
 
 
 def _weight_files(component_dir: Path) -> list[Path]:
@@ -231,12 +275,12 @@ def _weight_files(component_dir: Path) -> list[Path]:
 def _link_tree(source: Path, target: Path) -> None:
     """Hard-link *source* (a file or directory, following symlinks) to *target*, copying where linking fails."""
     if source.is_dir():
-        shutil.copytree(source, target, copy_function=_link_or_copy, dirs_exist_ok=True)
+        shutil.copytree(source, target, copy_function=link_or_copy, dirs_exist_ok=True)
     else:
-        _link_or_copy(source, target)
+        link_or_copy(source, target)
 
 
-def _link_or_copy(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
+def link_or_copy(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
     """Hard-link the file *source* resolves to as *target*, or copy it when a link is impossible."""
     try:
         os.link(os.path.realpath(source), target)

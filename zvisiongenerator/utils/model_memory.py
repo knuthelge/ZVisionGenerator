@@ -51,6 +51,9 @@ _CUDA_QUANTIZED_COMPONENTS = ("text_encoder", "transformer")
 # leaving the rest to the desktop and other apps. Weights beyond that stream from disk, which is much slower.
 _CUDA_GPU_FITS_RATIO = 0.9
 _CUDA_SYSTEM_FITS_RATIO = 0.8
+# LTX on CUDA: beyond the weights, the process holds the CUDA runtime, the VAEs' and tokenizer's CPU side and the
+# copies a load stages. Measured at q4 on a 10 GB GPU: peaks of 20-21 GB against 14.3 GiB of weights.
+_LTX_CUDA_RUNTIME_BYTES = 6 * GIB
 
 _DTYPE_BYTES = {
     "F64": 8,
@@ -391,6 +394,43 @@ def classify_memory_fit(required_bytes: int, budget_bytes: int) -> str:
     if required_bytes <= budget_bytes * _TIGHT_LIMIT_RATIO:
         return "tight"
     return "too_large"
+
+
+@dataclass(frozen=True)
+class LtxCudaMemoryEstimate:
+    """Estimated system memory of LTX on the diffusers/CUDA backend, in bytes, for its two ways of holding the model."""
+
+    text_encoder_bytes: int  # the text encoder while it encodes a prompt
+    transformer_bytes: int  # the transformer, held while generating
+    resident_bytes: int = 0  # the connectors, held throughout
+
+    @property
+    def taking_turns(self) -> int:
+        """The peak when the transformer is released while the text encoder runs."""
+        return max(self.text_encoder_bytes, self.transformer_bytes) + self.resident_bytes + _LTX_CUDA_RUNTIME_BYTES
+
+    @property
+    def together(self) -> int:
+        """The peak when the transformer stays loaded while the text encoder runs."""
+        return self.text_encoder_bytes + self.transformer_bytes + self.resident_bytes + _LTX_CUDA_RUNTIME_BYTES
+
+
+def estimate_ltx_cuda_system_memory(*, block_matrices: int, transformer_rest: int, connectors: int, text_encoder: int, quantize: int) -> LtxCudaMemoryEstimate:
+    """Estimate the system memory of LTX on the diffusers/CUDA backend.
+
+    At q4 the transformer blocks' 2-D weights are NF4 and the rest stays bfloat16; at q8 they are FP8. Both levels
+    keep the connectors in FP8 (one byte per element) and the text encoder mostly in FP8.
+
+    Args:
+        block_matrices: Elements of the 2-D weights inside the transformer blocks (what q4 packs).
+        transformer_rest: The transformer's other elements.
+        connectors: Elements of the text connectors, which are held throughout.
+        text_encoder: Bytes of the FP8 text encoder (its embeddings and norms stay bfloat16).
+        quantize: 4 or 8.
+    """
+    bytes_per_block_weight = {8: 1, 4: _NF4_BYTES_PER_WEIGHT}[quantize]
+    transformer_bytes = block_matrices * bytes_per_block_weight + transformer_rest * 2
+    return LtxCudaMemoryEstimate(text_encoder_bytes=text_encoder, transformer_bytes=int(transformer_bytes), resident_bytes=connectors)
 
 
 def classify_cuda_memory_fit(estimate: CudaMemoryEstimate, budget: MemoryBudget) -> str:

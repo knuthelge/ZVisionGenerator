@@ -76,6 +76,7 @@ zvisiongenerator/
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/
+│   ├── block_streaming.py         Stream a model's blocks to the GPU as they run (group offloading, or a parameter swap that carries NF4)
 │   ├── cuda_driver.py             NVIDIA driver hint when a CUDA build of PyTorch cannot start
 │   ├── image_mac.py               macOS image backend (mflux/MLX)
 │   ├── image_mac_preview.py       Cheap latent → RGB live previews for the mflux backend
@@ -84,12 +85,18 @@ zvisiongenerator/
 │   ├── image_win_preview.py       Cheap latent → RGB live previews for the diffusers backend
 │   ├── image_win_quant.py         NF4 (q4) and FP8 (q8) weights for the diffusers backend, at load and as stored quants
 │   ├── lora_peft.py               Detect and report LoRA files that match no module (peft)
+│   ├── ltx_cuda_weights.py        LTX-2.3 weights on CUDA: the single-file transformer and the Gemma text encoder, prepared once per quantize level
 │   ├── memory_cuda.py             CUDA memory release after a job, and GPU and system memory sizes
 │   ├── memory_mac.py              MLX memory release, recommended GPU memory budget, machine memory size and scoped cache limit
 │   ├── prompt_enhancer_mac.py     macOS prompt-enhancer LLM (mlx-lm)
 │   ├── prompt_enhancer_win.py     Windows/Linux prompt-enhancer LLM (transformers)
 │   ├── prompt_enhancer_session.py Single resident prompt-enhancer model: exclusive use and idle release
+│   ├── safetensors_stream.py      Read and write safetensors one tensor at a time, keeping them out of the page cache
 │   ├── seedvr2_mac.py             macOS SeedVR2 upscaler (mflux)
+│   ├── streaming_decode.py        Decode LTX-2 video latents a few frames at a time, straight to 8-bit frames
+│   ├── timestep_runs.py           Run the LTX-2 transformer on per-token (image-to-video) timesteps by runs
+│   ├── token_chunking.py          Run token-wise layers (feed-forward, RMSNorm) over a long sequence in chunks
+│   ├── video_encode.py            Write frames and audio to MP4 with PyAV (H.264 CRF 18, AAC)
 │   ├── video_mac.py               macOS video backend (LTX via MLX)
 │   └── video_diffusers.py         Windows/Linux video backend (LTX via diffusers/CUDA)
 ├── converters/
@@ -185,9 +192,17 @@ SeedVR2, the plain upscale of existing images, is macOS-only and has its own sma
 
 The `image_win.py` module is the shared diffusers/CUDA image backend for both Windows and Linux. The filename is historical; platform selection still happens only in `backends/__init__.py`.
 
-Windows and Linux video resolution is config-driven through `video_model_presets.ltx.diffusers.default_repo` and the `ltx-2.3` alias. The backend targets distilled LTX-2.3 diffusers checkpoints only, so the packaged default is `diffusers/LTX-2.3-Distilled-Diffusers`, and the configured default stays overrideable from user config. macOS keeps the MLX-only `ltx-4` and `ltx-8` aliases.
+Windows and Linux video resolution is config-driven through `video_model_presets.ltx.diffusers`: `ltx-4` and `ltx-8` both resolve to `default_repo`, `quantize` maps each name to its level (there is no unquantized path), and `utils.config.ltx_load_options` turns the config into the backend's load arguments for both the CLI and the Web UI. Only distilled LTX-2.3 checkpoints are supported.
 
-`backends/video_diffusers.py` passes the distilled sigma tables from `diffusers.pipelines.ltx2.utils` on every generation call, with `num_inference_steps` equal to their length and `guidance_scale=1.0` as the only guidance argument (`_DISTILLED_GUIDANCE`), so the other guidance terms follow the installed diffusers defaults. Fewer steps than the table keep its first sigma and its tail. The `--upscale 2` flow is two-stage:
+`video_diffusers.load_model` keeps LTX within the system memory of a 32 GB machine and the GPU memory of a 10 GB one. The rules a change must keep:
+
+- The text encoder and the transformer never share system memory unless both fit (`_check_system_memory`). When they do not, they take turns: the transformer is released while the text encoder encodes each new prompt (`_encode_prompt`, `_attach_transformer`, `_release_transformer`); when they do, the text encoder stays loaded between prompts. LoRAs are applied when the transformer is attached.
+- The transformer is the single-file checkpoint in `video_model_presets.ltx.diffusers.transformer`. `ltx_cuda_weights` prepares it and the text encoder once per level under `<models>/<alias>@q<bits>/`, streaming tensor by tensor through `safetensors_stream` so a 46 GB file never sits in memory.
+- In low-memory mode the transformer streams to the GPU block by block (`block_streaming`): FP8 with diffusers' group offloading, NF4 with `stream_blocks`, because group offloading leaves bitsandbytes' quantization state on the CPU. The VAEs and vocoder move to the GPU only to encode or decode. Video never uses `enable_model_cpu_offload()`.
+- Nothing may hold a full-length activation per token beyond the hidden states: the token-wise layers run in chunks (`token_chunking`), image-to-video's per-token timesteps are applied per run of equal timesteps (`timestep_runs`), and the final pass returns latents that `streaming_decode` decodes a few frames at a time. Each keeps diffusers' output unchanged, and its tests compare against diffusers.
+- Clips are written by `video_encode` (H.264 CRF 18 and AAC, as on macOS).
+
+`backends/video_diffusers.py` passes the distilled sigma tables from `diffusers.pipelines.ltx2.utils` on every generation call, with `num_inference_steps` equal to their length and every guidance term at its neutral value (`_DISTILLED_GUIDANCE`); diffusers' own defaults for the audio, spatio-temporal and modality terms over-cook a distilled model. Fewer steps than the table keep its first sigma and its tail. The `--upscale 2` flow is two-stage:
 
 1. Stage 1 runs the generation pipeline at half the requested size with `output_type="latent"`.
 2. An `LTX2LatentUpsamplePipeline` upsamples the latents 2×. It is built around the generation pipeline's own VAE and is never moved with `.to()` or given CPU offload, since either would re-hook that shared VAE. In low-memory mode the upsampler model waits on the CPU and visits the GPU only for this pass.

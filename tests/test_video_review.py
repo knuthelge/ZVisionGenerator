@@ -610,7 +610,7 @@ class TestVideoCliReview:
         monkeypatch.setattr(video_cli, "supports_video_upscale_review", lambda: supported)
         monkeypatch.setattr(video_cli, "ensure_ffmpeg", MagicMock(side_effect=AssertionError("ffmpeg checked")))
 
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog", *argv]):
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog", *argv]):
             with pytest.raises(SystemExit, match="2"):
                 video_cli.main()
 
@@ -640,7 +640,7 @@ class TestVideoCliReview:
         _tty(monkeypatch)
         video_cli, captured = self._patched_main(monkeypatch, tmp_path, order)
 
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog", "--upscale", "2", "--review", "-o", str(tmp_path)]):
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog", "--upscale", "2", "--review", "-o", str(tmp_path)]):
             video_cli.main()
 
         (listener,) = _FakeSkipSignal.instances
@@ -656,7 +656,7 @@ class TestVideoCliReview:
         _tty(monkeypatch)
         video_cli, _captured = self._patched_main(monkeypatch, tmp_path, order, batch_error=KeyboardInterrupt())
 
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog", "--upscale", "2", "--review", "-o", str(tmp_path)]):
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog", "--upscale", "2", "--review", "-o", str(tmp_path)]):
             with pytest.raises(KeyboardInterrupt):
                 video_cli.main()
 
@@ -666,7 +666,7 @@ class TestVideoCliReview:
         order: list[str] = []
         video_cli, captured = self._patched_main(monkeypatch, tmp_path, order)
 
-        with patch("sys.argv", ["ziv-video", "-m", "ltx-2.3", "--prompt", "a dog", "--upscale", "2", "-o", str(tmp_path)]):
+        with patch("sys.argv", ["ziv-video", "-m", "ltx-4", "--prompt", "a dog", "--upscale", "2", "-o", str(tmp_path)]):
             video_cli.main()
 
         assert _FakeSkipSignal.instances == []

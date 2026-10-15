@@ -18,6 +18,7 @@ from zvisiongenerator.utils.model_memory import (
     clip_memory_fit,
     estimate_cuda_image_memory,
     estimate_image_memory,
+    estimate_ltx_cuda_system_memory,
     estimate_ltx_mlx_clip_memory,
     ltx_decode_budget_bytes,
     ltx_video_tokens,
@@ -451,3 +452,25 @@ class TestEstimateCudaImageMemory:
 )
 def test_classify_cuda_memory_fit(gpu, system, expected):
     assert classify_cuda_memory_fit(CudaMemoryEstimate(int(gpu), int(system)), MemoryBudget(10 * _GIB, 30 * _GIB)) == expected
+
+
+class TestEstimateLtxCudaSystemMemory:
+    _COUNTS = {"block_matrices": 18 * _GIB, "transformer_rest": _GIB // 2, "connectors": 3 * _GIB, "text_encoder": 12 * _GIB}
+
+    def test_q8_stores_the_transformer_layers_text_encoder_and_connectors_in_one_byte(self):
+        q8 = estimate_ltx_cuda_system_memory(**self._COUNTS, quantize=8)
+
+        assert (q8.transformer_bytes, q8.text_encoder_bytes, q8.resident_bytes) == (18 * _GIB + 2 * (_GIB // 2), 12 * _GIB, 3 * _GIB)
+
+    def test_q4_packs_only_the_block_matrices(self):
+        q4 = estimate_ltx_cuda_system_memory(**self._COUNTS, quantize=4)
+
+        assert q4.transformer_bytes == int(18 * _GIB * model_memory._NF4_BYTES_PER_WEIGHT + 2 * (_GIB // 2))
+        assert q4.text_encoder_bytes == 12 * _GIB
+
+    def test_taking_turns_holds_the_larger_one_and_together_holds_both_with_the_connectors(self):
+        runtime = model_memory._LTX_CUDA_RUNTIME_BYTES
+        estimate = model_memory.LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB)
+
+        assert estimate.taking_turns == 15 * _GIB + runtime
+        assert estimate.together == 25 * _GIB + runtime

@@ -447,6 +447,26 @@ describe('ModelsPage Browse buttons', () => {
     expect(document.querySelector('[data-testid="delete-stored-quants"]')).toBeNull();
   });
 
+  it('deletes only the prepared copy of a model whose download another model still uses', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({
+      ...makeInventory(),
+      video_models: [
+        { name: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, delete: { kind: 'copy', repo_id: 'org/ltx', linked_by: [], stored_quants: ['ltx-4@q4'], shared_with: ['ltx-8'] } },
+      ],
+    });
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+    const button = target.querySelector('[data-testid="delete-button"]') as HTMLButtonElement;
+    expect(button.getAttribute('aria-label')).toBe('Delete the prepared copy of ltx-4');
+
+    button.click();
+    await settle();
+    const copy = document.querySelector('[data-testid="delete-copy"]')?.textContent ?? '';
+    expect(copy).toContain('ltx-4@q4');
+    expect(copy).toContain('ltx-8');
+    expect(document.querySelector('[data-testid="delete-stored-quants"]')).toBeNull();
+  });
+
   it('offers delete only for deletable models and warns about converted models linked to a download', async () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),

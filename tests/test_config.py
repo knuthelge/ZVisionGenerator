@@ -8,7 +8,10 @@ from zvisiongenerator.utils.config import (
     _deep_merge,
     get_variant_key,
     load_config,
+    ltx_diffusers_quantize,
     ltx_latent_upsampler_source,
+    ltx_load_options,
+    ltx_transformer_source,
     model_capabilities,
     resolve_defaults,
     resolve_video_defaults,
@@ -1034,3 +1037,96 @@ class TestLtxLatentUpsamplerSource:
     def test_malformed_value_raises_value_error(self, value):
         with pytest.raises(ValueError, match="latent_upsampler"):
             ltx_latent_upsampler_source(self._config(value))
+
+
+class TestLtxTransformerSource:
+    """Verify the single-file transformer source helper reads and validates its config key."""
+
+    @staticmethod
+    def _config(value):
+        return {"video_model_presets": {"ltx": {"diffusers": {"transformer": value}}}}
+
+    def test_packaged_config_ships_the_distilled_1_1_transformer(self, monkeypatch, tmp_path):
+        from zvisiongenerator.utils import config as config_module
+
+        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+
+        assert ltx_transformer_source(load_config()) == ("Lightricks/LTX-2.3", "ltx-2.3-22b-distilled-1.1.safetensors")
+
+    @pytest.mark.parametrize("config", [{}, {"video_model_presets": {"ltx": {"diffusers": {}}}}, _config.__func__(None)])
+    def test_absent_or_null_key_uses_the_repos_own_transformer(self, config):
+        assert ltx_transformer_source(config) is None
+
+    def test_a_user_null_turns_the_packaged_transformer_off(self, monkeypatch, tmp_path):
+        from zvisiongenerator.utils import config as config_module
+
+        (tmp_path / ".ziv").mkdir()
+        (tmp_path / ".ziv" / "config.yaml").write_text("video_model_presets:\n  ltx:\n    diffusers:\n      transformer: null\n")
+        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+
+        assert ltx_transformer_source(load_config()) is None
+
+    @pytest.mark.parametrize("value", ["not-a-mapping", {"repo": "r"}, {"repo": " ", "filename": "x"}])
+    def test_malformed_value_raises_value_error(self, value):
+        with pytest.raises(ValueError, match="transformer"):
+            ltx_transformer_source(self._config(value))
+
+
+class TestLtxDiffusersQuantize:
+    """Verify the per-alias quantize levels of the diffusers LTX backend."""
+
+    @staticmethod
+    def _config(value):
+        return {"video_model_presets": {"ltx": {"diffusers": {"quantize": value}}}}
+
+    def test_packaged_config_quantizes_ltx_4_and_ltx_8_only(self, monkeypatch, tmp_path):
+        from zvisiongenerator.utils import config as config_module
+
+        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+        config = load_config()
+
+        assert [ltx_diffusers_quantize(config, name) for name in ("ltx-4", "ltx-8", "other", None)] == [4, 8, None, None]
+
+    @pytest.mark.parametrize("platform_key", ["win32", "linux"])
+    def test_packaged_ltx_aliases_resolve_to_the_diffusers_repo_off_macos(self, monkeypatch, tmp_path, platform_key):
+        from zvisiongenerator.utils import config as config_module
+
+        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+        monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path / ".ziv")
+        config = load_config()
+        repo = config["video_model_presets"]["ltx"]["diffusers"]["default_repo"]
+
+        assert "ltx-2.3" not in config["model_aliases"]
+        for alias in ("ltx-4", "ltx-8"):
+            assert resolve_model_path(alias, aliases=config["model_aliases"], platform_key=platform_key) == repo
+
+    @pytest.mark.parametrize("value", ["4", {"ltx-4": 6}, {"ltx-4": "4"}])
+    def test_malformed_value_raises_value_error(self, value):
+        with pytest.raises(ValueError, match="quantize"):
+            ltx_diffusers_quantize(self._config(value), "ltx-4")
+
+
+class TestLtxLoadOptions:
+    """Verify the load options both the CLI and the Web UI pass to a video backend."""
+
+    _CONFIG = {
+        "video_model_presets": {
+            "ltx": {
+                "diffusers": {
+                    "transformer": {"repo": "org/ltx", "filename": "ltx.safetensors"},
+                    "latent_upsampler": {"repo": "org/up", "filename": "up.safetensors"},
+                    "quantize": {"ltx-4": 4},
+                }
+            }
+        }
+    }
+
+    def test_options_carry_the_level_and_the_transformer_source(self):
+        assert ltx_load_options(self._CONFIG, "ltx-4", upscale=False) == {"quantize": 4, "transformer_source": ("org/ltx", "ltx.safetensors"), "model_name": "ltx-4"}
+
+    def test_upscale_adds_the_upsampler(self):
+        options = ltx_load_options(self._CONFIG, "other", upscale=True)
+
+        assert options["quantize"] is None
+        assert options["upscale"] is True
+        assert options["latent_upsampler"] == ("org/up", "up.safetensors")

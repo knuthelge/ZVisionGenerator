@@ -22,7 +22,7 @@ from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes,
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
-from zvisiongenerator.web.model_delete import installed_models_linking_to, model_delete_target, seedvr2_delete_target
+from zvisiongenerator.web.model_delete import delete_scope, installed_models_linking_to, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
 from zvisiongenerator.web.model_status import describe_model_status
 
@@ -180,7 +180,7 @@ def build_models_response(
     image_defaults = {entry.name: image_defaults_for(entry.name, web_config) for entry in web_config.image_inventory} if memory_budget() else {}
     find_local_dir = functools.cache(find_local_model_dir)
     status = _status_resolver(web_config, image_defaults, find_local_dir)
-    delete_info = _delete_info_resolver(data_dir / "models", find_local_dir)
+    delete_info = _delete_info_resolver(data_dir / "models", find_local_dir, inventory=(*web_config.image_inventory, *web_config.video_inventory), app_config=web_config.app_config)
     loras = [{"name": lora.name, "file_size_mb": lora.file_size_mb, "size_label": f"{lora.file_size_mb} MB"} for lora in list_loras(data_dir)]
     return {
         "models_dir": web_config.models_dir,
@@ -268,7 +268,13 @@ def _status_resolver(
     return _status
 
 
-def _delete_info_resolver(models_dir: Path, find_local_dir: Callable[[str], Path | None] = find_local_model_dir) -> Callable[[ImageInventoryEntry | VideoInventoryEntry], dict[str, Any] | None]:
+def _delete_info_resolver(
+    models_dir: Path,
+    find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
+    *,
+    inventory: tuple[ImageInventoryEntry | VideoInventoryEntry, ...] = (),
+    app_config: dict[str, Any] | None = None,
+) -> Callable[[ImageInventoryEntry | VideoInventoryEntry], dict[str, Any] | None]:
     """Return a resolver for each model's ``delete`` field: what deleting it removes, or ``None`` when it cannot be deleted.
 
     HuggingFace downloads list the installed models linking into them (``linked_by``), since deleting the download
@@ -276,12 +282,13 @@ def _delete_info_resolver(models_dir: Path, find_local_dir: Callable[[str], Path
     """
 
     def _delete_info(entry: ImageInventoryEntry | VideoInventoryEntry) -> dict[str, Any] | None:
-        target = model_delete_target(entry, models_dir, find_local_dir=find_local_dir)
+        target = model_delete_target(entry, models_dir, find_local_dir=find_local_dir, **delete_scope(entry, inventory, app_config or {}))
         if target is None or not (target.path.exists() or target.path.is_symlink()):
             return None
         linked_by = list(installed_models_linking_to(target.path, models_dir)) if target.kind == "huggingface" else []
-        stored_quants = [path.name for path in target.stored_quants]
-        return {"kind": target.kind, "repo_id": target.repo_id, "linked_by": linked_by, "stored_quants": stored_quants}
+        stored_quants = [path.name for path in ((target.path, *target.stored_quants) if target.kind == "copy" else target.stored_quants)]
+        info = {"kind": target.kind, "repo_id": target.repo_id, "linked_by": linked_by, "stored_quants": stored_quants}
+        return {**info, "shared_with": list(target.shared_with)} if target.kind == "copy" else info
 
     return _delete_info
 

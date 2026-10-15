@@ -12,6 +12,7 @@ import torch
 from PIL import Image
 from diffusers import AutoPipelineForText2Image
 
+from zvisiongenerator.backends.block_streaming import group_offload
 from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
 from zvisiongenerator.backends.image_win_preview import LivePreview, create_live_preview
 from zvisiongenerator.backends.lora_peft import is_unmatched_adapter_error, restore_cpu_offload, warn_unmatched_lora
@@ -104,23 +105,10 @@ def _load_nf4(model_path: str, torch_dtype: torch.dtype, family: str, *, prequan
 
 def _stream_to_gpu(pipeline: Any, torch_dtype: torch.dtype) -> None:
     """Keep the transformer and text encoder in system memory and stream their layers to the GPU as they run."""
-    from diffusers.hooks import apply_group_offloading
-
-    options = {"onload_device": torch.device("cuda"), "num_blocks_per_group": 1, "use_stream": True, "record_stream": True, "non_blocking": True, "low_cpu_mem_usage": True}
-    apply_group_offloading(pipeline.transformer, offload_type="block_level", **options)
-    apply_group_offloading(pipeline.text_encoder, offload_type=_text_encoder_offload_type(pipeline.text_encoder), **options)
-    pipeline.vae.to(device="cuda", dtype=torch_dtype)
-
-
-def _text_encoder_offload_type(text_encoder: Any) -> str:
-    """Return how to stream *text_encoder*: block by block when its layers form a top-level list, else leaf by leaf.
-
-    Block-level offloading only splits a top-level layer list. Qwen3-VL (Krea 2) nests its layers under
-    ``language_model`` and calls its embedding directly, so at block level its whole language model would move to
-    the GPU at once.
-    """
-    has_block_list = any(type(child).__name__ in ("ModuleList", "Sequential") for child in text_encoder.children())
-    return "block_level" if has_block_list else "leaf_level"
+    device = torch.device("cuda")
+    group_offload(pipeline.transformer, device, "block_level")
+    group_offload(pipeline.text_encoder, device)
+    pipeline.vae.to(device=device, dtype=torch_dtype)
 
 
 def _load_loras(pipeline: Any, lora_paths: list[str], lora_weights: list[float] | None, *, cpu_offload: bool = False) -> None:

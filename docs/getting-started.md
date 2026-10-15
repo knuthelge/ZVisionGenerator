@@ -44,14 +44,11 @@ ziv-image -m my-model -p prompts.yaml -r 3
 
 ### Video Generation
 
-Use `MODEL` below as follows: `ltx-4` or `ltx-8` on macOS, `ltx-2.3` on Windows and Linux.
+Use `MODEL` below as `ltx-4` or `ltx-8` (4-bit or 8-bit) on every platform.
 
 ```bash
-# Text-to-video with LTX on macOS
+# Text-to-video with LTX (4-bit)
 ziv-video -m ltx-4 --prompt "A cat walking through a garden"
-
-# Text-to-video with LTX on Windows or Linux
-ziv-video -m ltx-2.3 --prompt "A cat walking through a garden"
 
 # Image-to-video with your platform alias
 ziv-video -m MODEL --image photo.jpg --prompt "Camera slowly zooms in"
@@ -60,26 +57,9 @@ ziv-video -m MODEL --image photo.jpg --prompt "Camera slowly zooms in"
 ziv-video -m MODEL -p prompts.yaml -r 3
 ```
 
-### Video Model Defaults And Overrides
+### Choosing a Video Model
 
-- macOS exposes `ltx-4` and `ltx-8`, which resolve to the MLX LTX repositories and are the shipped Q4/Q8 presets.
-- Windows and Linux expose `ltx-2.3`, which resolves to the configurable diffusers repository in `video_model_presets.ltx.diffusers.default_repo`.
-- The packaged default is `diffusers/LTX-2.3-Distilled-Diffusers`, the distilled LTX-2.3 checkpoint in diffusers format. It runs 8 steps at `guidance_scale` 1.0, and `--steps` below 8 keeps the end of that schedule. Only distilled checkpoints are supported. It is a configurable diffusers default, not a shipped Q4/Q8 alias.
-- `--upscale 2` loads a 2× latent upsampler (about 1 GB) from the Hugging Face file named by `video_model_presets.ltx.diffusers.latent_upsampler`, downloaded on the first upscale run.
-
-To override the Windows/Linux default video repository, add a user config file at `~/.ziv/config.yaml`:
-
-```yaml
-video_model_presets:
-  ltx:
-    diffusers:
-      default_repo: your-org/your-distilled-ltx-repo
-      latent_upsampler:
-        repo: your-org/your-ltx-upsampler
-        filename: your-upsampler-x2.safetensors
-```
-
-After the override, `ziv-video -m ltx-2.3 ...` and the Web UI both resolve to the new repository. `latent_upsampler` is optional and only used by `--upscale 2`.
+`ltx-4` needs the least memory; `ltx-8` is closer to the full model. On Windows and Linux, `ltx-4` needs about 20 GB of system memory and `ltx-8` about 27 GB, and the first run of each takes a while to download and prepare the model. See the [Video Guide](guides/video.md#ltx-constraints).
 
 ### Model & LoRA Management
 

@@ -118,6 +118,7 @@
   function deleteQuestion(target: NonNullable<typeof pendingDelete>): string {
     if (target.type === 'lora') return `Delete ${target.name}.safetensors from the LoRAs folder?`;
     if (target.info.kind === 'installed') return `Delete the model folder ${target.name} from the models folder?`;
+    if (target.info.kind === 'copy') return `Delete the prepared copy of ${target.name}?`;
     return `Delete the Hugging Face download of ${target.info.repo_id}?`;
   }
 
@@ -206,7 +207,7 @@
   {#if m.delete}
     {@const info = m.delete}
     {@const downloadSizeLabel = m.source === 'seedvr2' ? m.download_size_label : null}
-    {@render deleteButton(info.kind === 'installed' ? `Delete ${m.name}` : `Delete the Hugging Face download of ${m.name}`, () => requestDelete({ type: 'model', name: m.name, info, downloadSizeLabel }))}
+    {@render deleteButton(info.kind === 'huggingface' ? `Delete the Hugging Face download of ${m.name}` : info.kind === 'copy' ? `Delete the prepared copy of ${m.name}` : `Delete ${m.name}`, () => requestDelete({ type: 'model', name: m.name, info, downloadSizeLabel }))}
   {/if}
 {/snippet}
 
@@ -491,6 +492,11 @@
         <p data-testid="delete-redownload">The next plain upscale downloads it again ({pendingDelete.downloadSizeLabel}).</p>
       {:else if pendingDelete.type === 'model' && pendingDelete.info.kind === 'installed'}
         <p>Hugging Face files it links to are kept.</p>
+      {:else if pendingDelete.type === 'model' && pendingDelete.info.kind === 'copy'}
+        <p data-testid="delete-copy">
+          Deletes <span class="font-mono">{pendingDelete.info.stored_quants?.join(', ')}</span>. The download stays, since
+          <span class="font-mono">{pendingDelete.info.shared_with?.join(', ')}</span> also uses it.
+        </p>
       {:else if pendingDelete.type === 'model'}
         <p>The <span class="font-mono">{pendingDelete.name}</span> alias stays in your config and downloads the model again the next time you use it.</p>
         {#if pendingDelete.info.linked_by.length > 0}
@@ -500,7 +506,7 @@
           </Alert>
         {/if}
       {/if}
-      {#if pendingDelete.type === 'model' && (pendingDelete.info.stored_quants?.length ?? 0) > 0}
+      {#if pendingDelete.type === 'model' && pendingDelete.info.kind !== 'copy' && (pendingDelete.info.stored_quants?.length ?? 0) > 0}
         <p data-testid="delete-stored-quants">
           Its quantized copies are deleted too: <span class="font-mono">{pendingDelete.info.stored_quants?.join(', ')}</span>
         </p>

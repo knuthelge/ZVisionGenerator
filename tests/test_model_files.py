@@ -45,6 +45,14 @@ class TestHasCompleteWeights:
 
         assert has_complete_weights(tmp_path) is False
 
+    def test_an_ltx_2_repo_without_its_transformer_weights_is_complete(self, tmp_path):
+        _write_model_index(tmp_path, "LTX2Pipeline")
+        _touch(tmp_path / "transformer" / "config.json")
+        _touch(tmp_path / "text_encoder" / "model.safetensors")
+        _touch(tmp_path / "vae" / "model.safetensors")
+
+        assert has_complete_weights(tmp_path) is True
+
     def test_missing_shard_is_incomplete_even_with_a_stale_index(self, tmp_path):
         _touch(tmp_path / "model-00001-of-00002.safetensors")
         _touch(tmp_path / "model.safetensors.index.json", json.dumps({"weight_map": {"a": "model-00001-of-00005.safetensors"}}))

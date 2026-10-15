@@ -33,8 +33,8 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 | Platform | Image Generation | Video Generation |
 |----------|------------------|------------------|
 | macOS (Apple Silicon) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`) |
-| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
-| Linux (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 via diffusers/CUDA | ✅ LTX via diffusers/CUDA alias (`ltx-2.3`) |
+| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`) |
+| Linux (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`) |
 
 ## Installation
 
@@ -56,9 +56,7 @@ uv sync
 
 > Video generation requires [ffmpeg](https://ffmpeg.org/). On Windows and Linux, image and video generation require an RTX 20-series (Turing) or newer NVIDIA GPU, including RTX 50-series, with NVIDIA driver 580 or newer, so that CUDA is available to PyTorch.
 
-> The packaged Windows/Linux `ltx-2.3` alias defaults to the distilled diffusers checkpoint `diffusers/LTX-2.3-Distilled-Diffusers`, which runs 8 steps at `guidance_scale` 1.0. Only distilled checkpoints are supported. Override the repository with `video_model_presets.ltx.diffusers.default_repo` in `~/.ziv/config.yaml` if you want to point `ltx-2.3` at a different distilled diffusers repository. `--upscale 2` downloads the 2× upsampler (about 1 GB) on its first use.
-
-> The macOS video aliases `ltx-4` and `ltx-8` are the shipped MLX Q4/Q8 presets. Windows and Linux use the diffusers-backed `ltx-2.3` alias instead, so the Q4/Q8 naming does not carry across platforms.
+> Video uses `ltx-4` (4-bit) or `ltx-8` (8-bit) on every platform. On Windows and Linux they need about 20 GB and 27 GB of system memory. See the [Video Guide](docs/guides/video.md).
 
 ## Quick Start
 
@@ -72,17 +70,11 @@ ziv-image -m Tongyi-MAI/Z-Image-Turbo --prompt "a cat in a garden"
 # Batch run from a prompts file
 ziv-image -m my-model -p prompts.yaml -r 3
 
-# Generate a video on macOS
+# Generate a video (4-bit LTX)
 ziv-video -m ltx-4 --prompt "A cat walking through a garden"
 
-# Generate a video on Windows or Linux
-ziv-video -m ltx-2.3 --prompt "A cat walking through a garden"
-
-# Image-to-video on macOS
+# Image-to-video
 ziv-video -m ltx-4 --image photo.jpg --prompt "Camera zooms in slowly"
-
-# Image-to-video on Windows or Linux
-ziv-video -m ltx-2.3 --image photo.jpg --prompt "Camera zooms in slowly"
 
 # Launch the Web UI
 ziv ui

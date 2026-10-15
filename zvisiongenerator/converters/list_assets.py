@@ -7,6 +7,7 @@ from pathlib import Path
 
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.platform import AliasMap, AliasValue
+from zvisiongenerator.utils.stored_quant import parse_stored_quant_name
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 
 
@@ -68,8 +69,9 @@ def list_video_models(data_dir: Path) -> list[VideoModelEntry]:
 
     entries: list[VideoModelEntry] = []
     for child in models_dir.iterdir():
-        # Hidden folders are never models (e.g. an in-progress stored quant).
-        if not child.is_dir() or child.name.startswith("."):
+        # Hidden folders are never models (e.g. an in-progress stored quant); neither are the prepared copies of a
+        # video alias (``ltx-4@q4``), which belong to the alias.
+        if not child.is_dir() or child.name.startswith(".") or parse_stored_quant_name(child.name) is not None:
             continue
         info = detect_video_model(str(child))
         if info.family == "unknown":

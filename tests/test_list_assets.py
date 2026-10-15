@@ -303,6 +303,13 @@ class TestListVideoModels:
         assert result[0].family == "ltx"
         assert result[0].supports_i2v is True
 
+    def test_skips_the_prepared_copies_of_a_video_alias(self, tmp_path: Path):
+        models_dir = tmp_path / "models"
+        (models_dir / "ltx-4@q4" / "transformer").mkdir(parents=True)
+        (models_dir / "my-ltx-model").mkdir()
+
+        assert [entry.name for entry in list_video_models(tmp_path)] == ["my-ltx-model"]
+
     @patch("zvisiongenerator.converters.list_assets.detect_video_model")
     def test_skips_unknown_family(self, mock_detect, tmp_path: Path):
         """Dirs classified as unknown by detect_video_model are skipped."""

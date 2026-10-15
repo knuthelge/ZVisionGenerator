@@ -15,6 +15,7 @@ from diffusers.models.modeling_utils import ModelMixin  # noqa: E402
 from safetensors.torch import save_file  # noqa: E402
 
 from zvisiongenerator.backends import image_win_quant as quant  # noqa: E402
+from zvisiongenerator.backends import safetensors_stream  # noqa: E402
 
 
 class _TinyTransformer(ModelMixin, ConfigMixin):
@@ -83,10 +84,11 @@ class TestStreamFp8Transformer:
         with pytest.raises(RuntimeError):
             _stream(tmp_path / "transformer")
 
-    def test_each_weight_file_leaves_the_page_cache_once_read(self, tmp_path):
-        _save(tmp_path / "transformer", _source_tensors())
+    def test_each_tensor_leaves_the_page_cache_once_read(self, tmp_path):
+        tensors = _source_tensors()
+        _save(tmp_path / "transformer", tensors)
 
-        with patch.object(quant, "drop_cached_file") as mock_drop:
+        with patch.object(safetensors_stream, "_drop_range") as mock_drop:
             _stream(tmp_path / "transformer")
 
-        mock_drop.assert_called_once_with(tmp_path / "transformer" / "diffusion_pytorch_model.safetensors")
+        assert mock_drop.call_count == len(tensors)

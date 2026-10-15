@@ -16,7 +16,7 @@ Built-in shorthands for common image models.
 | `ideo` | `ideogram-ai/ideogram-4-fp8` |
 | `krea2` | `unsloth/Krea-2-Turbo` |
 
-For video aliases, see [Video Guide → Model Aliases](video.md#model-aliases).
+For video aliases, see [Video Guide → Supported Models](video.md#supported-models).
 
 ```bash
 ziv-image -m zit --prompt "a beautiful sunset"

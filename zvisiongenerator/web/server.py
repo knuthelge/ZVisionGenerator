@@ -88,7 +88,7 @@ from zvisiongenerator.web.upscale_api import plan_seedvr2_upscale, plan_upscale,
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
-from zvisiongenerator.web.model_delete import DeleteTarget, delete_lora, delete_model, model_delete_target, seedvr2_delete_target
+from zvisiongenerator.web.model_delete import DeleteTarget, delete_lora, delete_model, delete_scope, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.review import review_enabled
 from zvisiongenerator.web.job_contract import UPSCALE_SUPPORTED_CONTROLS, image_supported_controls, video_supported_controls
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner, worker_runtime_context
@@ -1740,7 +1740,8 @@ def api_delete_model(name: str) -> dict[str, Any]:
     _ensure_no_active_job()
     web_config = load_web_config()
     entry = next((entry for entry in (*web_config.image_inventory, *web_config.video_inventory) if entry.name == name), None)
-    target = model_delete_target(entry, Path(web_config.data_dir) / "models") if entry is not None else None
+    inventory = (*web_config.image_inventory, *web_config.video_inventory)
+    target = model_delete_target(entry, Path(web_config.data_dir) / "models", **delete_scope(entry, inventory, web_config.app_config)) if entry is not None else None
     if entry is None and web_config.seedvr2 is not None:
         target = _seedvr2_copy_target(name, web_config.seedvr2, Path(web_config.models_dir))
     if target is None:
@@ -1751,7 +1752,8 @@ def api_delete_model(name: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=f"Model '{name}' has nothing on disk to delete.") from exc
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Could not delete model '{name}': {exc}") from exc
-    message = f"Deleted model '{name}'." if target.kind == "installed" else f"Deleted the HuggingFace download of '{target.repo_id}'."
+    messages = {"installed": f"Deleted model '{name}'.", "copy": f"Deleted the prepared copy of '{name}'."}
+    message = messages.get(target.kind, f"Deleted the HuggingFace download of '{target.repo_id}'.")
     return {"status": "ok", "tone": "success", "message": message}
 
 

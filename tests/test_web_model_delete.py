@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from zvisiongenerator.utils.seedvr2 import SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
-from zvisiongenerator.web.model_delete import delete_lora, delete_model, installed_models_linking_to, model_delete_target, seedvr2_delete_target
+from zvisiongenerator.web.model_delete import delete_lora, delete_model, delete_scope, installed_models_linking_to, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 
 
@@ -106,6 +106,45 @@ def test_deleting_a_huggingface_download_removes_the_alias_stored_quants(layout)
     assert not (layout.models_dir / "base@q8").exists()
 
 
+class TestSharedDownload:
+    """ltx-4 and ltx-8 on Windows/Linux load from one download plus a separate transformer checkpoint repo."""
+
+    _CONFIG = {"video_model_presets": {"ltx": {"diffusers": {"default_repo": "org/base", "transformer": {"repo": "org/ckpt", "filename": "t.safetensors"}}}}}
+    _INVENTORY = (_image_entry("ltx-4", "alias", "org/base"), _image_entry("ltx-8", "alias", "org/base"))
+
+    def _target(self, layout, name):
+        entry = next(entry for entry in self._INVENTORY if entry.name == name)
+        return model_delete_target(entry, layout.models_dir, **delete_scope(entry, self._INVENTORY, self._CONFIG))
+
+    def test_while_the_other_alias_has_its_copy_only_this_aliases_copy_goes(self, layout):
+        _touch(layout.models_dir / "ltx-4@q4" / "transformer" / "0.safetensors")
+        _touch(layout.models_dir / "ltx-8@q8" / "transformer" / "0.safetensors")
+
+        target = self._target(layout, "ltx-4")
+        assert (target.kind, target.shared_with) == ("copy", ("ltx-8",))
+        delete_model(target)
+
+        assert not (layout.models_dir / "ltx-4@q4").exists()
+        assert (layout.models_dir / "ltx-8@q8").is_dir()
+        assert (layout.hub / "models--org--base").is_dir()
+
+    def test_the_last_alias_removes_the_download_and_the_checkpoint_repo(self, layout):
+        _touch(layout.models_dir / "ltx-8@q8" / "transformer" / "0.safetensors")
+        _touch(layout.hub / "models--org--ckpt" / "snapshots" / "abc" / "t.safetensors")
+
+        delete_model(self._target(layout, "ltx-8"))
+
+        assert not (layout.models_dir / "ltx-8@q8").exists()
+        assert not (layout.hub / "models--org--base").exists()
+        assert not (layout.hub / "models--org--ckpt").exists()
+        assert (layout.hub / "models--org--other").is_dir()
+
+    def test_an_alias_without_a_copy_while_the_other_has_one_is_not_deletable(self, layout):
+        _touch(layout.models_dir / "ltx-8@q8" / "transformer" / "0.safetensors")
+
+        assert self._target(layout, "ltx-4") is None
+
+
 def test_a_stored_quant_deletes_only_itself(layout):
     _touch(layout.models_dir / "custom@q8" / "transformer" / "0.safetensors")
 
@@ -141,6 +180,7 @@ class TestDeleteRoutes:
             data_dir=str(layout.data_dir),
             models_dir=str(layout.models_dir),
             seedvr2=None,
+            app_config={},
             image_inventory=(_image_entry("custom", "installed", str(layout.models_dir / "custom")), _image_entry("base", "alias", "org/base")),
             video_inventory=(VideoInventoryEntry(name="ltx", family="ltx", supports_i2v=True, source="alias", resolved_path="org/missing"),),
         )
