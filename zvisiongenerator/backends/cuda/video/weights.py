@@ -258,7 +258,7 @@ def load_transformer(config: dict[str, Any], *, prepared: Path, bits: int, compu
     model = _empty_transformer(config, bits, compute_dtype)
     linears = _swap_in_linear4bit(model, compute_dtype) if bits == 4 else {}
     tensors = (item for path in shard_files(prepared, _INDEX_NAME) for item in iter_tensors(path))
-    fill_weights(model, _place_nf4(tensors, linears), str(prepared), skipped=linears.keys())
+    fill_weights(model, _place_nf4(tensors, linears) if linears else tensors, str(prepared), skipped=linears.keys())
     return model.eval()
 
 

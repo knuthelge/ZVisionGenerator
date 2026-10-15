@@ -163,17 +163,17 @@ class TestEnsurePrepared:
 
     def test_a_failed_write_leaves_no_copy_behind(self, tmp_path):
         source = self._source(tmp_path)
-        target = tmp_path / "model@q4"
+        target = tmp_path / "model@q8"
 
         def _fail(folder):
             (folder / "w").write_text("half")
             raise RuntimeError("disk full")
 
         with pytest.raises(RuntimeError, match="disk full"):
-            weights.ensure_prepared(target, [source], 4, _fail)
+            weights.ensure_prepared(target, [source], 8, _fail)
 
         assert not target.exists()
-        assert list(tmp_path.glob(".model@q4.*.partial")) == []
+        assert list(tmp_path.glob(".model@q8.*.partial")) == []
 
 
 class TestTransformerWeights:
