@@ -90,6 +90,7 @@ zvisiongenerator/
 │   │   │   ├── lokr.py            LyCORIS LoKr adapters (applied like mflux)
 │   │   │   └── preview.py         Cheap latent → RGB live previews
 │   │   └── video/
+│   │       ├── audio_carry.py     Pin a clip's last sound at the start of an extension window
 │   │       ├── backend.py         LTX video backend
 │   │       ├── encode.py          Write frames and audio to MP4 with PyAV (H.264 CRF 18, AAC)
 │   │       ├── streaming_decode.py Decode LTX-2 video latents a few frames at a time, straight to 8-bit frames
@@ -214,7 +215,9 @@ Windows and Linux video resolution is config-driven through `video_model_presets
 
 The upsampler weights are one safetensors file resolved with `hf_hub_download` from `video_model_presets.ltx.diffusers.latent_upsampler` (`repo`, `filename`; read with `utils.config.ltx_latent_upsampler_source`) before the generation pipeline loads, and only when upscaling. Both stages report steps as one run under the `video_upscale_stage_1` and `video_upscale_stage_2` phases, as the macOS backend does.
 
-Extending a clip is an optional capability, not part of `VideoBackend`: the `VideoExtender` Protocol in `core/video_backend.py` declares `extend_video(model, source, prompt, *, extend_frames, seed, steps, segment_dir, audio_output, step_callback=None)`, which only the macOS backend implements. Callers gate on `supports_video_extend()` in `backends/__init__.py` (beside `supports_video_audio()`) and look the method up on the backend; the Web UI contract drops the `extend` workflow, and the CLI refuses `--extend`, when it is false.
+Extending a clip is an optional capability, not part of `VideoBackend`: the `VideoExtender` Protocol in `core/video_backend.py` declares `extend_video(model, source, prompt, *, extend_frames, seed, steps, segment_dir, audio_output, step_callback=None)`, which both LTX backends implement. Callers gate on `supports_video_extend()` in `backends/__init__.py` (beside `supports_video_audio()`) and look the method up on the backend; the Web UI contract drops the `extend` workflow, and the CLI refuses `--extend`, when it is false.
+
+On Windows and Linux, `load_model(mode="extend")` loads `LTX2ConditionPipeline`, and `extend_video` pins the tail frames with `LTX2VideoCondition(frames=tail, index=0, strength=1.0)` in a one-stage window at the source's size and frame rate. diffusers gives every audio token one timestep, so `cuda/video/audio_carry` pins the carried sound itself, as the macOS denoise mask does: the tail's sound (read by `utils/video_tail.read_source_tail_audio` at the audio VAE's rate) becomes a log-mel spectrogram with the LTX audio processor's settings and is encoded with `audio_vae.encode(...)[0].mode()`; `pin_audio_prefix` is a transformer pre-hook that, on every forward pass, puts those tokens (packed and normalized with the pipeline's `_pack_audio_latents` and `_normalize_audio_latents`) clean at the start of `audio_hidden_states` and gives them `audio_timestep` 0, leaving `audio_sigma` per sample; `restore_audio_prefix` puts the clean latent back into the result's audio latents (`output_type="latent"` returns them denormalized as `(batch, 8, tokens, 16)`) before they are decoded. The window's frames go to the segment through `utils/video_splice.write_segment_frames`. `tests/test_diffusers_ltx2_contract.py` pins the diffusers names and layouts this uses.
 
 The Windows/Linux video backend is CUDA-only. Validation happens lazily during backend load so importing the package or running non-video code paths does not require torch, diffusers, or a GPU.
 

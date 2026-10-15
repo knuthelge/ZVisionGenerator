@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - macOS: the Models page lists the SeedVR2 upscale model with its download state and how much disk its stored copy uses, and can delete that copy; the next plain upscale downloads it again
 - Docs: a Linux troubleshooting note for when `systemd-oomd` closes the terminal or editor while a large model loads, with an optional drop-in that relaxes its limit
 - Windows/Linux: videos have sound. The audio LTX 2.3 generates with the video is saved as the clip's audio track, including after `--upscale 2`. `--audio`/`--no-audio`, the Web UI **Audio** toggle and the prompt enhancer's **Sound** options now work there too. Videos there are now written with PyAV (H.264 and AAC), which is added as a dependency on Windows and Linux
-- Windows/Linux: extend a video, as on macOS: the **Extend Video** tab, the **Extend** action in the viewer and menus (`E`), and `ziv-video --extend`. The new part has sound, but it does not continue the source's sound yet
+- Windows/Linux: extend a video, as on macOS: the **Extend Video** tab, the **Extend** action in the viewer and menus (`E`), and `ziv-video --extend`. The source's last second of sound carries into the new part, as on macOS
 - Windows/Linux: `video_model_presets.ltx.diffusers.latent_upsampler` (`repo`, `filename`) selects the weights of the 2x spatial upsampler that `--upscale 2` uses
 
 ### Changed

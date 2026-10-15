@@ -21,6 +21,7 @@ from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE, CARRY_FRAMES,
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 
 if TYPE_CHECKING:
+    from zvisiongenerator.backends.cuda.video.audio_carry import AudioCarry
     from zvisiongenerator.core.video_types import ExtendSource
 
 logger = logging.getLogger(__name__)
@@ -693,6 +694,13 @@ def _export_video(model: _LoadedVideoModel, clip: _GeneratedClip, output_path: s
     return Path(output_path)
 
 
+def _audio_tokens(pipeline: Any, frames: int, fps: float) -> int:
+    """Return the audio tokens that cover *frames* video frames at *fps*, at least one, as the pipeline counts them."""
+
+    per_second = pipeline.audio_sampling_rate / pipeline.audio_hop_length / pipeline.audio_vae_temporal_compression_ratio
+    return max(1, round(frames / fps * per_second))
+
+
 def _write_extend_segment(clip: _GeneratedClip, source: ExtendSource, extend_frames: int, directory: Path, *, audio: bool) -> ExtendSegment:
     """Write the new part of a decoded extension window: its frames to ``segment.mp4`` and, with *audio*, its sound to ``segment.wav``.
 
@@ -892,8 +900,9 @@ def _generate_one_stage(
     steps: int,
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
+    audio_carry: AudioCarry | None = None,
 ) -> _GeneratedClip:
-    """Run one distilled denoising pass at full size and return its clip."""
+    """Run one distilled denoising pass at full size and return its clip, with *audio_carry* pinned at the start of its sound."""
 
     sigmas = _stage1_sigmas(model.runtime.distilled_sigmas, steps)
     kwargs = _build_generation_kwargs(
@@ -908,7 +917,15 @@ def _generate_one_stage(
         callback=_make_step_callback(step_callback, phase="video", offset=0, total=len(sigmas)),
         extra_kwargs=extra_kwargs,
     )
-    return _decode_clip(pipeline, pipeline(**kwargs))
+    if audio_carry is None:
+        return _decode_clip(pipeline, pipeline(**kwargs))
+
+    from zvisiongenerator.backends.cuda.video.audio_carry import pin_audio_prefix, restore_audio_prefix
+
+    with pin_audio_prefix(pipeline.transformer, audio_carry):
+        result = pipeline(**kwargs)
+    restore_audio_prefix(result.audio, audio_carry)
+    return _decode_clip(pipeline, result)
 
 
 def _generate_two_stage(
@@ -993,8 +1010,12 @@ def _generate_clip(
     stage1_steps: int | None,
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
+    audio_carry: AudioCarry | None = None,
 ) -> _GeneratedClip:
-    """Generate a clip at *fps* in one stage, or in two stages when *stage1_steps* is set; the prompt is encoded once for both."""
+    """Generate a clip at *fps* in one stage, or in two stages when *stage1_steps* is set; the prompt is encoded once for both.
+
+    *audio_carry* (one stage only) pins sound at the start of the clip.
+    """
 
     prompt_inputs = _encode_prompt(model, pipeline, prompt)
     _ensure_transformer(model, pipeline)
@@ -1011,7 +1032,10 @@ def _generate_clip(
             steps=steps,
             step_callback=step_callback,
             extra_kwargs=extra_kwargs,
+            audio_carry=audio_carry,
         )
+    if audio_carry is not None:
+        raise ValueError("Pinned sound is not supported with the two-stage upscale.")
     return _generate_two_stage(
         model,
         pipeline,
@@ -1263,8 +1287,9 @@ class DiffusersVideoBackend:
         """Generate the continuation of a clip: new frames, and their sound, that follow its last frame.
 
         The clip's last 25 frames are pinned at the start of a window of ``25 + extend_frames`` frames at the clip's
-        own size and frame rate (``LTX2VideoCondition`` at latent index 0, full strength). The window is generated
-        and decoded, and only its new part is written.
+        own size and frame rate (``LTX2VideoCondition`` at latent index 0, full strength), and so is the sound under
+        them when the clip has any (see ``audio_carry``). The window is generated and decoded, and only its new part
+        is written.
 
         Args:
             model: Handle returned by ``load_model`` with ``mode="extend"``.
@@ -1274,7 +1299,8 @@ class DiffusersVideoBackend:
             seed: Random seed.
             steps: Distilled denoising steps.
             segment_dir: Existing directory that receives ``segment.mp4`` and, with audio, ``segment.wav``.
-            audio_output: Whether to write the new part's sound. The sound is only written when the clip has any.
+            audio_output: Whether to write the new part's sound. The sound is only written when the clip has any; a
+                silent clip is continued without it. The clip's sound is pinned whenever it has some.
             step_callback: Receives progress event dicts.
 
         Returns:
@@ -1282,10 +1308,11 @@ class DiffusersVideoBackend:
 
         Raises:
             ValueError: If the model was loaded for upscale, or ``extend_frames`` is not a positive multiple of 8.
-            RuntimeError: If the model was not loaded for extend, or the clip's tail frames cannot be read.
+            RuntimeError: If the model was not loaded for extend, or the clip's tail frames or audio cannot be read.
         """
 
-        from zvisiongenerator.utils.video_tail import read_source_tail
+        from zvisiongenerator.backends.cuda.video.audio_carry import encode_audio_carry
+        from zvisiongenerator.utils.video_tail import read_source_tail, read_source_tail_audio
 
         if model.extend is None:
             raise RuntimeError("This loaded video model does not include an extend pipeline (load it with mode='extend').")
@@ -1294,12 +1321,15 @@ class DiffusersVideoBackend:
         if extend_frames < EXTEND_FRAME_STEP or extend_frames % EXTEND_FRAME_STEP:
             raise ValueError(f"extend_frames must be a positive multiple of {EXTEND_FRAME_STEP}, got {extend_frames}.")
 
+        pipeline = model.extend
         tail = read_source_tail(source)
+        tail_audio = read_source_tail_audio(source, pipeline.audio_vae.config.sample_rate) if source.has_audio else None
         carry = model.runtime.pipeline_classes.video_condition(frames=tail, index=0, strength=1.0)
         with model.runtime.torch.inference_mode():
+            audio_carry = encode_audio_carry(pipeline, tail_audio, _audio_tokens(pipeline, CARRY_FRAMES, source.fps)) if tail_audio is not None else None
             clip = _generate_clip(
                 model,
-                model.extend,
+                pipeline,
                 prompt=prompt,
                 width=source.width,
                 height=source.height,
@@ -1310,6 +1340,7 @@ class DiffusersVideoBackend:
                 stage1_steps=None,
                 step_callback=step_callback,
                 extra_kwargs={"conditions": [carry]},
+                audio_carry=audio_carry,
             )
             segment = _write_extend_segment(clip, source, extend_frames, Path(segment_dir), audio=audio_output and source.has_audio)
         _cleanup(model.runtime)

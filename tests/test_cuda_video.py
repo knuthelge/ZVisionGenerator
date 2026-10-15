@@ -342,13 +342,19 @@ class _FakeConditionPipeline(_BaseFakePipeline):
     """Condition pipeline that decodes to ``window`` numbered frames, with audio at 48 kHz, like LTX2ConditionPipeline."""
 
     window = 25 + 16
+    audio_sampling_rate = 16000
+    audio_hop_length = 160
+    audio_vae_temporal_compression_ratio = 4
 
     def __init__(self):
         super().__init__()
         self.audio_vae = _FakeAudioVae()
+        self.audio_vae.config = SimpleNamespace(sample_rate=16000)
         self.vocoder = _WindowVocoder(round(self.window / 24 * 48000))
+        self.transformer_at_call: list[object] = []
 
     def __call__(self, **kwargs):
+        self.transformer_at_call.append(self.transformer)
         return _run_fake_denoise(self, kwargs, [[np.full((4, 4, 3), index, dtype=np.uint8) for index in range(self.window)]])
 
 
@@ -1713,20 +1719,47 @@ class TestExtendVideo:
 
     @pytest.fixture
     def segments(self, monkeypatch):
-        """Replace the tail reader and the segment encoder; return what each received."""
-        calls = SimpleNamespace(tails=[], encoded=[])
+        """Replace the tail readers, the audio carry and the segment encoder; return what each received."""
+        from contextlib import contextmanager
+
+        calls = SimpleNamespace(tails=[], tail_audio=[], carries=[], pinned=[], restored=[], encoded=[], events=[])
         tail = np.zeros((25, 256, 512, 3), dtype=np.uint8)
+        tail_audio = np.zeros((2, 16000), dtype=np.float32)
+        carry = SimpleNamespace(token_count=26)
 
         def _read_tail(source):
             calls.tails.append(source)
             return tail
 
+        def _read_tail_audio(source, sample_rate):
+            calls.tail_audio.append((source, sample_rate))
+            return tail_audio
+
+        def _encode_carry(pipeline, waveform, token_count):
+            calls.carries.append((pipeline, waveform, token_count))
+            return carry
+
+        @contextmanager
+        def _pin(transformer, pinned):
+            calls.pinned.append((transformer, pinned))
+            calls.events.append("pin")
+            yield
+            calls.events.append("unpin")
+
+        def _restore(audio_latents, restored):
+            calls.restored.append((audio_latents, restored))
+            calls.events.append("restore")
+
         def _write_frames(frames, command):
             calls.encoded.append((list(frames), command))
 
         monkeypatch.setattr("zvisiongenerator.utils.video_tail.read_source_tail", _read_tail)
+        monkeypatch.setattr("zvisiongenerator.utils.video_tail.read_source_tail_audio", _read_tail_audio)
+        monkeypatch.setattr("zvisiongenerator.backends.cuda.video.audio_carry.encode_audio_carry", _encode_carry)
+        monkeypatch.setattr("zvisiongenerator.backends.cuda.video.audio_carry.pin_audio_prefix", _pin)
+        monkeypatch.setattr("zvisiongenerator.backends.cuda.video.audio_carry.restore_audio_prefix", _restore)
         monkeypatch.setattr("zvisiongenerator.utils.video_splice.write_segment_frames", _write_frames)
-        calls.tail = tail
+        calls.tail, calls.tail_audio_samples, calls.carry = tail, tail_audio, carry
         return calls
 
     @staticmethod
@@ -1785,6 +1818,31 @@ class TestExtendVideo:
         with wave.open(str(segment.audio_path), "rb") as reader:
             assert reader.getframerate() == 48000
             assert reader.getnframes() == lead + round(16 / 24 * 48000)
+
+    def test_the_sound_under_the_tail_is_pinned_during_the_window_and_restored_before_decoding(self, monkeypatch, tmp_path, segments):
+        model = self._load(monkeypatch)
+        source = make_extend_source()
+        self._extend(model, tmp_path, source)
+        assert segments.tail_audio == [(source, 16000)]
+        ((pipeline, waveform, token_count),) = segments.carries
+        assert pipeline is model.extend and waveform is segments.tail_audio_samples
+        assert token_count == round(25 / 24 * 25)
+        ((transformer, pinned),) = segments.pinned
+        assert transformer is model.extend.transformer_at_call[0] and pinned is segments.carry
+        ((audio_latents, restored),) = segments.restored
+        assert audio_latents == "audio-latent" and restored is segments.carry
+        assert segments.events == ["pin", "unpin", "restore"]
+        assert model.extend.audio_vae.decoded == ["audio-latent"]
+
+    def test_the_sound_is_pinned_even_when_none_is_written(self, monkeypatch, tmp_path, segments):
+        model = self._load(monkeypatch)
+        self._extend(model, tmp_path, audio_output=False)
+        assert len(segments.pinned) == 1
+
+    def test_a_silent_source_is_continued_without_a_pin(self, monkeypatch, tmp_path, segments):
+        model = self._load(monkeypatch)
+        self._extend(model, tmp_path, make_extend_source(has_audio=False))
+        assert segments.tail_audio == [] and segments.carries == [] and segments.pinned == []
 
     @pytest.mark.parametrize(("has_audio", "audio_output"), [(False, True), (True, False)])
     def test_no_sound_is_written_for_a_silent_source_or_without_audio_output(self, monkeypatch, tmp_path, segments, has_audio, audio_output):

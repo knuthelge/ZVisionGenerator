@@ -1,6 +1,6 @@
 # Feature parity between macOS and Windows/Linux
 
-**Status:** In progress (2026-10-14). Steps 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA) and 5 (quantized, streamed video on CUDA, which absorbed step 6) are done; the other steps are still open.
+**Status:** In progress (2026-10-15). Steps 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA), 5 (quantized, streamed video on CUDA, which absorbed step 6) and 11 (extend a video on CUDA) are done; the other steps are still open.
 
 ## Problem
 
@@ -18,7 +18,7 @@ Missing on Windows and Linux:
 6. ~~**No low-RAM video streaming.**~~ *Merged into step 5.* `--low-memory` on CUDA meant `enable_model_cpu_offload()`, which moves each whole component onto the GPU in turn.
 7. **No video memory-fit badges.** `model_status.describe_model_status` returns `memory_fit: None` for CUDA video ("CUDA video is not estimated").
 
-Extending a video is also macOS only: `supports_video_extend()` is false on CUDA, which hides the Extend Video workflow and refuses `--extend` (step 11).
+~~Extending a video is also macOS only.~~ *Done (2026-10-15), see step 11.* `supports_video_extend()` was false on CUDA, which hid the Extend Video workflow and refused `--extend`.
 
 Different defaults or behaviour for the same feature:
 
@@ -170,14 +170,21 @@ Original plans:
 
 ### 11. Extend a video on CUDA
 
-macOS extends a clip by pinning its last 25 frames at the start of a one-stage window and splicing the new part onto the original ([Extend a video](archive/video-extend.md)). The splice, source checks and prompts are shared; CUDA needs the generation step, video only:
+*Done (2026-10-15).* macOS extends a clip by pinning its last 25 frames at the start of a one-stage window and splicing the new part onto the original ([Extend a video](archive/video-extend.md)). The splice, source checks and prompts were already shared; CUDA got the generation step, with sound:
 
-- diffusers 0.41.0 ships `LTX2ConditionPipeline`; `LTX2VideoCondition(frames=…, index=0, strength=1.0)` overwrites the first latent frames, which matches the MLX pin. Build it from the components already loaded (no reload) and re-apply LoRAs.
-- Pin the 25 tail frames as a pixel condition at index 0, and export at the source's fps; `_export_video` uses the model's `default_fps` today.
-- No upscale for extend; `_upscale_video` re-runs from frames without conditions.
-- A source with audio gets silence for the new part until step 2 lands.
-- Implement `VideoExtender` and turn on `supports_video_extend()` for the diffusers backend. The legacy LTX 0.9 branch has no condition pipeline and does not offer extend.
-- Spike first: confirm that 25 frames encode to exactly 4 latent frames, and measure the seam.
+- `load_model(mode="extend")` loads `LTX2ConditionPipeline` through the same quantized, streamed load as the other modes (LoRAs apply as usual). The CLI and the Web UI load it for extend jobs.
+- The tail is pinned with `LTX2VideoCondition(frames=tail, index=0, strength=1.0)`: 25 frames encode to exactly 4 latent frames, which overwrite the first latent frames at full strength, as the MLX pin does. The window runs at the source's size and frame rate.
+- The condition pipeline has no audio pin (one audio timestep per sample), so `backends/cuda/video/audio_carry.py` adds one: the tail's sound is encoded with the LTX audio processor's log-mel settings and the audio VAE, a transformer pre-hook gives the carried tokens to the model clean and at timestep 0 on every step, and the clean tokens are put back into the result before decoding.
+- The window's frames are written with the shared segment command, so a clip made by the app is stream-copied at the join.
+- No upscale for extend, as on macOS.
+- Found on the way: the CLI recorded the repository an alias resolves to, and on CUDA `ltx-4` and `ltx-8` share one, so Reuse and Extend could not tell the quantize level. It now records the name picked, as the Web UI does.
+
+Spike results (a 10 GB GPU with 32 GB of system memory, torch 2.14, diffusers 0.41.0, `ltx-4`, 768×512 at 24 fps, +48 frames):
+
+- 97 frames out; the original 49 decode bit-identically (stream-copy branch).
+- The join is a 3.2 ΔE step against a 0.9 median between neighbouring frames, about 2.3 above normal motion. That matches the 2–2.5 ΔE macOS measured and accepted (the VAE round trip of the carry).
+- Memory, `ltx-4` with low memory on and each window as long as the text-to-video limits from step 5: M (704×448) +19 s peaked at 6.0 GB of GPU and 21.4 GB of system memory, L (960×512) +14 s at 6.1 GB and 22.9 GB, XL (1408×896) +9 s at 6.8 GB and 22.2 GB. Each came out with the expected frame count, so extend fits wherever the same-length text-to-video does. `ltx-8` at M +8 s peaked at 5.2 GB of GPU and 25.3 GB of system memory, in a run that also prepared its q8 copy.
+- The audio carry encodes and decodes back to the source's sound (a 1 kHz test tone comes back as 100% 1 kHz, within 3 dB). Pinning changes the new part's sound at the same seed. A steady synthetic tone is not continued with the pin or without it, so the speech and ambience continuity is judged by ear, not by that metric.
 
 ## Verification
 

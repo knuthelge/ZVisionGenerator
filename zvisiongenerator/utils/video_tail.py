@@ -110,3 +110,30 @@ def _stream_frames(command: list[str], width: int, height: int) -> Iterator[byte
         if returncode != 0:
             stderr.seek(0)
             raise tool_error("ffmpeg could not read the video's frames", stderr.read())
+
+
+def build_tail_audio_command(source: ExtendSource, sample_rate: int) -> list[str]:
+    """Build the ffmpeg command that writes the sound under a clip's last ``CARRY_FRAMES`` frames as stereo float32 PCM.
+
+    The read starts at the tail's own position in the file and lasts as long as the tail, resampled to *sample_rate*.
+    """
+    start = source.video_start + (source.frame_count - CARRY_FRAMES) / source.fps
+    duration = CARRY_FRAMES / source.fps
+    return ["ffmpeg", "-v", "error", "-ss", f"{start:.6f}", "-i", str(source.path), "-t", f"{duration:.6f}", "-map", "0:a:0", "-f", "f32le", "-ac", "2", "-ar", str(sample_rate), "-"]
+
+
+def read_source_tail_audio(source: ExtendSource, sample_rate: int) -> np.ndarray:
+    """Return the sound under a clip's last ``CARRY_FRAMES`` frames as float32 of shape ``(2, samples)`` at *sample_rate*.
+
+    Raises:
+        RuntimeError: If ffmpeg fails or the clip has no sound at its end.
+    """
+    import numpy as np
+
+    result = subprocess.run(build_tail_audio_command(source, sample_rate), capture_output=True, check=False)
+    if result.returncode != 0:
+        raise tool_error("ffmpeg could not read the video's audio", result.stderr)
+    samples = np.frombuffer(result.stdout[: len(result.stdout) // 8 * 8], dtype=np.float32).reshape(-1, 2).T.copy()
+    if not samples.shape[1]:
+        raise RuntimeError(f"Could not read the audio of {source.path} to continue it.")
+    return samples

@@ -19,7 +19,7 @@ from zvisiongenerator.utils import video_tail
 from zvisiongenerator.utils.video_extend import build_extend_source
 from zvisiongenerator.utils.video_probe import probe_video
 from zvisiongenerator.utils.video_extend import CARRY_FRAMES
-from zvisiongenerator.utils.video_tail import _build_tail_command, _read_tail_frames, _tail_start_seconds, read_source_tail
+from zvisiongenerator.utils.video_tail import _build_tail_command, _read_tail_frames, _tail_start_seconds, build_tail_audio_command, read_source_tail, read_source_tail_audio
 
 WIDTH, HEIGHT = 8, 4
 FRAME_BYTES = WIDTH * HEIGHT * 3
@@ -237,3 +237,36 @@ class TestRealTailWithWrongFrameCount:
         source = build_extend_source(clip, probe_video(clip), None)
         with pytest.raises(RuntimeError, match="found only 20"):
             read_source_tail(dataclasses.replace(source, frame_count=500))
+
+
+class TestTailAudioCommand:
+    def test_reads_the_sound_under_the_last_frames_as_stereo_float_at_the_rate(self):
+        command = build_tail_audio_command(make_extend_source(frame_count=49, fps=24.0, video_start=0.5), 16000)
+        assert command[command.index("-ss") + 1] == f"{0.5 + 24 / 24:.6f}"
+        assert command.index("-ss") < command.index("-i")
+        assert command[command.index("-t") + 1] == f"{25 / 24:.6f}"
+        assert (command[command.index("-map") + 1], command[command.index("-f") + 1]) == ("0:a:0", "f32le")
+        assert (command[command.index("-ac") + 1], command[command.index("-ar") + 1]) == ("2", "16000")
+
+
+@REAL
+class TestReadSourceTailAudio:
+    def test_returns_the_tails_sound_from_its_position_in_the_file(self, tmp_path):
+        path = tmp_path / "clip.mp4"
+        tone = "aevalsrc=if(gt(t\\,1)\\,0.5*sin(2*PI*440*t)\\,0):s=44100:d=2"
+        raw = ["-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "64x32", "-r", "24", "-i", "-"]
+        ffmpeg("-f", "lavfi", "-i", tone, *raw, "-map", "1:v", "-map", "0:a", "-c:v", "libx264", "-c:a", "pcm_s16le", "-shortest", str(path.with_suffix(".mov")), data=numbered_frames(48).tobytes())
+        source = build_extend_source(path.with_suffix(".mov"), probe_video(path.with_suffix(".mov")), None)
+        samples = read_source_tail_audio(source, 16000)
+        assert samples.shape[0] == 2 and samples.dtype == np.float32
+        assert abs(samples.shape[1] - round(25 / 24 * 16000)) <= 16
+        lead = round((1 - 23 / 24) * 16000)  # the tail starts at frame 23, before the tone starts at 1 s
+        assert np.abs(samples[:, : lead - 80]).max() < 0.01
+        assert np.abs(samples[:, lead + 160 :]).max() > 0.3  # the mono tone is upmixed to stereo at -3 dB
+
+    def test_a_clip_without_sound_is_an_error(self, tmp_path):
+        path = tmp_path / "clip.mp4"
+        encode_frames(numbered_frames(48), path)
+        source = dataclasses.replace(build_extend_source(path, probe_video(path), None), has_audio=True)
+        with pytest.raises(RuntimeError):
+            read_source_tail_audio(source, 16000)

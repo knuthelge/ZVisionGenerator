@@ -116,7 +116,7 @@ macOS keeps the existing MLX LoRA behavior. Windows and Linux accept LoRAs only 
 
 ## Extend a Video
 
-Extend continues a clip from where it ends: it generates what happens next, with audio, and writes a new file. Your original clip is never changed. On Windows and Linux the new part has sound, but it does not continue the source's sound yet, so a voice or ambience can change at the join.
+Extend continues a clip from where it ends: it generates what happens next, with audio, and writes a new file. Your original clip is never changed.
 
 ### Starting an extension
 
