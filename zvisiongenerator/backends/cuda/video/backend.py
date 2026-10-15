@@ -12,11 +12,16 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
 from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, warn_unmatched_lora
+from zvisiongenerator.core.video_types import ExtendSegment
+from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE, CARRY_FRAMES, EXTEND_FRAME_STEP, audio_lead_samples, cut_window_audio, window_audio_cut, window_frames
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
+
+if TYPE_CHECKING:
+    from zvisiongenerator.core.video_types import ExtendSource
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +39,8 @@ _SYSTEM_MEMORY_TIGHT_RATIO = 0.8
 _DISTILLED_GUIDANCE: Final[Mapping[str, float]] = MappingProxyType(
     {"guidance_scale": 1.0, "audio_guidance_scale": 1.0, "stg_scale": 0.0, "audio_stg_scale": 0.0, "modality_scale": 1.0, "audio_modality_scale": 1.0}
 )
+# The pipeline class (a ``_PipelineClasses`` field) each load mode builds.
+_PIPELINES_BY_MODE: Final[Mapping[str, str]] = MappingProxyType({"t2v": "text_to_video", "i2v": "image_to_video", "extend": "condition"})
 # Architecture of the LTX-2.3 x2 spatial latent upsampler (matches the published weights).
 _UPSAMPLER_CONFIG: Final[Mapping[str, Any]] = MappingProxyType(
     {
@@ -54,6 +61,8 @@ class _PipelineClasses:
 
     text_to_video: type[Any]
     image_to_video: type[Any]
+    condition: type[Any]
+    video_condition: type[Any]
     latent_upsample_pipeline: type[Any]
     latent_upsampler_model: type[Any]
 
@@ -121,6 +130,7 @@ class _LoadedVideoModel:
     runtime: _RuntimeDependencies
     model_info: VideoModelInfo
     low_memory: bool
+    extend: Any | None = None
     text_encoder: _TextEncoderSource | None = None
     transformer: _TransformerSource | None = None
     prompt_cache: tuple[str, dict[str, Any]] | None = None
@@ -139,15 +149,17 @@ def _parse_version(version: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def _resolve_pipeline_classes(diffusers_module: Any, upsampler_model: type[Any]) -> _PipelineClasses:
-    """Resolve the LTX-2 pipeline classes from diffusers and pair them with the latent upsampler model class."""
+def _resolve_pipeline_classes(diffusers_module: Any, upsampler_model: type[Any], video_condition: type[Any]) -> _PipelineClasses:
+    """Resolve the LTX-2 pipeline classes from diffusers and pair them with the latent upsampler model and video condition classes."""
 
-    names = ("LTX2Pipeline", "LTX2ImageToVideoPipeline", "LTX2LatentUpsamplePipeline")
+    names = ("LTX2Pipeline", "LTX2ImageToVideoPipeline", "LTX2ConditionPipeline", "LTX2LatentUpsamplePipeline")
     if not all(hasattr(diffusers_module, name) for name in names):
-        raise RuntimeError("Installed diffusers is missing the LTX-2 video pipelines (LTX2Pipeline, LTX2ImageToVideoPipeline, LTX2LatentUpsamplePipeline).")
+        raise RuntimeError(f"Installed diffusers is missing the LTX-2 video pipelines ({', '.join(names)}).")
     return _PipelineClasses(
         text_to_video=diffusers_module.LTX2Pipeline,
         image_to_video=diffusers_module.LTX2ImageToVideoPipeline,
+        condition=diffusers_module.LTX2ConditionPipeline,
+        video_condition=video_condition,
         latent_upsample_pipeline=diffusers_module.LTX2LatentUpsamplePipeline,
         latent_upsampler_model=upsampler_model,
     )
@@ -179,15 +191,16 @@ def _load_runtime_dependencies() -> _RuntimeDependencies:
 
     try:
         from diffusers.pipelines.ltx2.latent_upsampler import LTX2LatentUpsamplerModel
+        from diffusers.pipelines.ltx2.pipeline_ltx2_condition import LTX2VideoCondition
         from diffusers.pipelines.ltx2.utils import DISTILLED_SIGMA_VALUES, STAGE_2_DISTILLED_SIGMA_VALUES
     except ImportError as exc:
-        raise RuntimeError("Installed diffusers is missing the LTX-2 distilled sigma tables or the latent upsampler model.") from exc
+        raise RuntimeError("Installed diffusers is missing the LTX-2 distilled sigma tables, the latent upsampler model or the video condition.") from exc
 
     return _RuntimeDependencies(
         torch=torch,
         image_module=Image,
         encode_video=encode_video,
-        pipeline_classes=_resolve_pipeline_classes(diffusers, LTX2LatentUpsamplerModel),
+        pipeline_classes=_resolve_pipeline_classes(diffusers, LTX2LatentUpsamplerModel, LTX2VideoCondition),
         diffusers_version=diffusers_version,
         distilled_sigmas=tuple(DISTILLED_SIGMA_VALUES),
         stage2_sigmas=tuple(STAGE_2_DISTILLED_SIGMA_VALUES),
@@ -680,6 +693,43 @@ def _export_video(model: _LoadedVideoModel, clip: _GeneratedClip, output_path: s
     return Path(output_path)
 
 
+def _write_extend_segment(clip: _GeneratedClip, source: ExtendSource, extend_frames: int, directory: Path, *, audio: bool) -> ExtendSegment:
+    """Write the new part of a decoded extension window: its frames to ``segment.mp4`` and, with *audio*, its sound to ``segment.wav``.
+
+    The video is encoded with the source's size, frame rate and colour tags so that it can be stream-copied onto it.
+    The WAV starts ``audio_lead_samples`` before the new part, as the join expects.
+
+    Raises:
+        RuntimeError: If the window does not have ``25 + extend_frames`` frames, or sound is wanted and the window has
+            none at the join's sample rate.
+    """
+    from zvisiongenerator.utils.video_splice import build_segment_command, write_pcm16_wav, write_segment_frames
+
+    expected = window_frames(extend_frames)
+    if len(clip.frames) != expected:
+        raise RuntimeError(f"The extension window decoded to {len(clip.frames)} frames, expected {expected}.")
+    video_path = directory / "segment.mp4"
+    command = build_segment_command(
+        source.width,
+        source.height,
+        source.fps_text,
+        video_path,
+        color_space=source.color_space,
+        color_primaries=source.color_primaries,
+        color_trc=source.color_trc,
+    )
+    write_segment_frames(clip.frames[CARRY_FRAMES:], command)
+    if not audio:
+        return ExtendSegment(video_path=video_path)
+    if clip.audio is None or clip.sample_rate != AUDIO_SAMPLE_RATE:
+        raise RuntimeError(f"The extension window has no sound at {AUDIO_SAMPLE_RATE} Hz to continue the clip's (got {clip.sample_rate}).")
+    skip, keep = window_audio_cut(extend_frames, source.fps)
+    lead = audio_lead_samples(source.fps)
+    audio_path = directory / "segment.wav"
+    write_pcm16_wav(cut_window_audio(clip.audio.float().cpu().numpy(), skip, keep, lead), audio_path)
+    return ExtendSegment(video_path=video_path, audio_path=audio_path, lead_samples=lead)
+
+
 def _check_lora_files(loras: list[tuple[str, float]]) -> None:
     """Raise when a LoRA file is missing or in a format the diffusers backend does not load.
 
@@ -765,7 +815,7 @@ def _build_generation_kwargs(
     width: int,
     height: int,
     num_frames: int,
-    fps: int,
+    fps: float,
     sigmas: Sequence[float],
     generator: Any,
     output_type: str,
@@ -837,6 +887,7 @@ def _generate_one_stage(
     width: int,
     height: int,
     num_frames: int,
+    fps: float,
     seed: int,
     steps: int,
     step_callback: Any | None,
@@ -850,7 +901,7 @@ def _generate_one_stage(
         width=width,
         height=height,
         num_frames=num_frames,
-        fps=model.model_info.default_fps,
+        fps=fps,
         sigmas=sigmas,
         generator=_make_generator(model.runtime.torch, seed),
         output_type="latent",
@@ -868,6 +919,7 @@ def _generate_two_stage(
     width: int,
     height: int,
     num_frames: int,
+    fps: float,
     seed: int,
     stage1_steps: int,
     step_callback: Any | None,
@@ -887,7 +939,7 @@ def _generate_two_stage(
     stage2_sigmas = list(runtime.stage2_sigmas)
     total = len(stage1_sigmas) + len(stage2_sigmas)
     generator = _make_generator(runtime.torch, seed)
-    common = {"prompt_inputs": prompt_inputs, "num_frames": num_frames, "fps": model.model_info.default_fps, "generator": generator}
+    common = {"prompt_inputs": prompt_inputs, "num_frames": num_frames, "fps": fps, "generator": generator}
 
     stage1 = pipeline(
         **_build_generation_kwargs(
@@ -935,13 +987,14 @@ def _generate_clip(
     width: int,
     height: int,
     num_frames: int,
+    fps: float,
     seed: int,
     steps: int,
     stage1_steps: int | None,
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
 ) -> _GeneratedClip:
-    """Generate a clip in one stage, or in two stages when *stage1_steps* is set; the prompt is encoded once for both."""
+    """Generate a clip at *fps* in one stage, or in two stages when *stage1_steps* is set; the prompt is encoded once for both."""
 
     prompt_inputs = _encode_prompt(model, pipeline, prompt)
     _ensure_transformer(model, pipeline)
@@ -953,6 +1006,7 @@ def _generate_clip(
             width=width,
             height=height,
             num_frames=num_frames,
+            fps=fps,
             seed=seed,
             steps=steps,
             step_callback=step_callback,
@@ -965,6 +1019,7 @@ def _generate_clip(
         width=width,
         height=height,
         num_frames=num_frames,
+        fps=fps,
         seed=seed,
         stage1_steps=stage1_steps,
         step_callback=step_callback,
@@ -1029,7 +1084,7 @@ class DiffusersVideoBackend:
         """Load the diffusers pipeline for one video request mode.
 
         Keyword Args:
-            mode: ``t2v`` or ``i2v``.
+            mode: ``t2v``, ``i2v`` or ``extend`` (continue a clip, see :meth:`extend_video`).
             low_memory: Stream the transformer and connectors to the GPU instead of keeping them there.
             loras: ``(path, weight)`` pairs.
             upscale: Load the latent upsampler for the two-stage upscale.
@@ -1044,7 +1099,7 @@ class DiffusersVideoBackend:
         loras = kwargs.get("loras") or []
         upscale = bool(kwargs.get("upscale"))
 
-        if mode not in {"t2v", "i2v"}:
+        if mode not in _PIPELINES_BY_MODE:
             raise ValueError(f"Unsupported video generation mode: {mode}")
 
         quantize = kwargs.get("quantize")
@@ -1067,7 +1122,7 @@ class DiffusersVideoBackend:
         # Fail fast on a missing upsampler file before the large generation pipeline loads.
         upsampler_weights = _resolve_upsampler_weights(*latent_upsampler) if upscale else None
 
-        pipeline_class = runtime.pipeline_classes.text_to_video if mode == "t2v" else runtime.pipeline_classes.image_to_video
+        pipeline_class = getattr(runtime.pipeline_classes, _PIPELINES_BY_MODE[mode])
         _check_lora_files(loras)
         active_pipeline, text_encoder, transformer = _load_generation_pipeline(
             pipeline_class,
@@ -1095,6 +1150,7 @@ class DiffusersVideoBackend:
             _LoadedVideoModel(
                 text_to_video=active_pipeline if mode == "t2v" else None,
                 image_to_video=active_pipeline if mode == "i2v" else None,
+                extend=active_pipeline if mode == "extend" else None,
                 upsample_pipeline=upsample_pipeline,
                 runtime=runtime,
                 model_info=model_info,
@@ -1135,6 +1191,7 @@ class DiffusersVideoBackend:
                 width=width,
                 height=height,
                 num_frames=num_frames,
+                fps=model.model_info.default_fps,
                 seed=seed,
                 steps=steps,
                 stage1_steps=stage1_steps,
@@ -1179,6 +1236,7 @@ class DiffusersVideoBackend:
                 width=width,
                 height=height,
                 num_frames=num_frames,
+                fps=model.model_info.default_fps,
                 seed=seed,
                 steps=steps,
                 stage1_steps=stage1_steps,
@@ -1188,3 +1246,71 @@ class DiffusersVideoBackend:
             output = _export_video(model, clip, output_path)
         _cleanup(model.runtime)
         return output
+
+    def extend_video(
+        self,
+        model: _LoadedVideoModel,
+        source: ExtendSource,
+        prompt: str,
+        *,
+        extend_frames: int,
+        seed: int,
+        steps: int,
+        segment_dir: str | Path,
+        audio_output: bool,
+        step_callback: Any | None = None,
+    ) -> ExtendSegment | None:
+        """Generate the continuation of a clip: new frames, and their sound, that follow its last frame.
+
+        The clip's last 25 frames are pinned at the start of a window of ``25 + extend_frames`` frames at the clip's
+        own size and frame rate (``LTX2VideoCondition`` at latent index 0, full strength). The window is generated
+        and decoded, and only its new part is written.
+
+        Args:
+            model: Handle returned by ``load_model`` with ``mode="extend"``.
+            source: The checked clip to continue.
+            prompt: Text prompt describing the scene and what happens next.
+            extend_frames: New frames to generate; a multiple of 8, at least 8.
+            seed: Random seed.
+            steps: Distilled denoising steps.
+            segment_dir: Existing directory that receives ``segment.mp4`` and, with audio, ``segment.wav``.
+            audio_output: Whether to write the new part's sound. The sound is only written when the clip has any.
+            step_callback: Receives progress event dicts.
+
+        Returns:
+            The generated segment: its video and, when ``audio_output`` is set and the clip has sound, its audio.
+
+        Raises:
+            ValueError: If the model was loaded for upscale, or ``extend_frames`` is not a positive multiple of 8.
+            RuntimeError: If the model was not loaded for extend, or the clip's tail frames cannot be read.
+        """
+
+        from zvisiongenerator.utils.video_tail import read_source_tail
+
+        if model.extend is None:
+            raise RuntimeError("This loaded video model does not include an extend pipeline (load it with mode='extend').")
+        if model.upsample_pipeline is not None:
+            raise ValueError("Extending a video is not supported together with upscale.")
+        if extend_frames < EXTEND_FRAME_STEP or extend_frames % EXTEND_FRAME_STEP:
+            raise ValueError(f"extend_frames must be a positive multiple of {EXTEND_FRAME_STEP}, got {extend_frames}.")
+
+        tail = read_source_tail(source)
+        carry = model.runtime.pipeline_classes.video_condition(frames=tail, index=0, strength=1.0)
+        with model.runtime.torch.inference_mode():
+            clip = _generate_clip(
+                model,
+                model.extend,
+                prompt=prompt,
+                width=source.width,
+                height=source.height,
+                num_frames=window_frames(extend_frames),
+                fps=source.fps,
+                seed=seed,
+                steps=steps,
+                stage1_steps=None,
+                step_callback=step_callback,
+                extra_kwargs={"conditions": [carry]},
+            )
+            segment = _write_extend_segment(clip, source, extend_frames, Path(segment_dir), audio=audio_output and source.has_audio)
+        _cleanup(model.runtime)
+        return segment

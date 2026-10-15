@@ -16,6 +16,8 @@ from zvisiongenerator.utils.video_extend import AUDIO_FADE_SAMPLES, AUDIO_LEAD_S
 from zvisiongenerator.utils.video_probe import VideoProbe, parse_fraction, probe_video
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     import numpy as np
 
     from zvisiongenerator.core.video_types import ExtendSegment, ExtendSource
@@ -92,6 +94,28 @@ def build_segment_command(width: int, height: int, fps_text: str, output: str | 
         *("-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", str(SEGMENT_CRF), "-an"),
         str(output),
     ]
+
+
+def write_segment_frames(frames: Iterable[np.ndarray], command: list[str]) -> None:
+    """Pipe ``height x width x 3`` uint8 RGB frames into a segment command from ``build_segment_command``.
+
+    Raises:
+        RuntimeError: If ffmpeg exits with an error.
+    """
+    import numpy as np
+
+    with tempfile.TemporaryFile() as errors:
+        with subprocess.Popen(command, stdin=subprocess.PIPE, stderr=errors) as process:
+            assert process.stdin is not None
+            try:
+                for frame in frames:
+                    process.stdin.write(np.ascontiguousarray(frame, dtype=np.uint8).tobytes())
+                process.stdin.close()
+            except BrokenPipeError:
+                pass  # ffmpeg stopped early; its exit code and message say why
+        if process.returncode != 0:
+            errors.seek(0)
+            raise tool_error("ffmpeg could not encode the extension segment", errors.read())
 
 
 def source_audio_chain(*, samples: int, offset: float) -> str:

@@ -816,7 +816,7 @@ class TestExtendEnhance:
     def test_extending_is_refused_without_the_capability(self, clip, monkeypatch):
         monkeypatch.setattr(extend_api_module, "supports_video_extend", lambda: False)
 
-        with pytest.raises(ValueError, match="macOS only"):
+        with pytest.raises(ValueError, match="not available"):
             web_server._validate_enhance_body(_extend_body(clip))
 
     def test_the_source_is_ignored_for_images(self, clip):

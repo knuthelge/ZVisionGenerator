@@ -111,7 +111,7 @@ Platform-aware aliases:
 | `--prompt` | `None` | Inline prompt, the action: what happens; overrides `--prompts-file`. May be empty when `--scene` or `--extend` is given |
 | `--scene` | `None` | Scene: who and where, look, style, camera. Sent before the prompt. Alone it makes a scene-only run; with a prompt file it fills entries that have no `scene:` of their own. With `--extend` it defaults to the source video's recorded scene |
 | `-p`, `--prompts-file` | `prompts.yaml` | YAML prompt file path |
-| `--extend SRC` | `None` | Continue the video `SRC`: generate what happens next and append it, writing a new file (the source is not changed). macOS only. See [Extending a video](#extending-a-video) |
+| `--extend SRC` | `None` | Continue the video `SRC`: generate what happens next and append it, writing a new file (the source is not changed). See [Extending a video](#extending-a-video) |
 | `--extend-seconds S` | `2` | Length to add with `--extend`, in seconds at the source's frame rate, rounded to a multiple of 8 frames. Exclusive with `--extend-frames` |
 | `--extend-frames N` | from `--extend-seconds` | Frames to add with `--extend`, rounded to a multiple of 8 (minimum 8). Exclusive with `--extend-seconds` |
 | `--image` | `None` | Input image for image-to-video |
@@ -158,7 +158,7 @@ Defaults taken from the source when you do not pass them:
 - **LoRAs:** the LoRAs it was made with that still exist; missing ones are skipped with a warning. `--lora` replaces them.
 - **Prompt:** none, so the extension continues naturally. A video recorded with a single prompt and no scene (made before scenes existed) keeps that prompt when you pass none, with quoted lines dropped while it is unchanged; if `--prompt` still equals it, a warning says to change it to what happens next.
 
-Options refused with `--extend`, since the extension keeps the source's size and takes its own length: `--image`, `--upscale`, `--ratio`, `--size`, `--width`, `--height` and `--frames`. `--extend-seconds` and `--extend-frames` need `--extend`. In a prompt file, every entry needs a `prompt`, which is the action that follows the source. On Windows and Linux, `--extend` is refused. `--no-audio` leaves the result without sound, and a silent source gives a silent result. When the extension may not fit in memory, a warning is printed and the run continues.
+Options refused with `--extend`, since the extension keeps the source's size and takes its own length: `--image`, `--upscale`, `--ratio`, `--size`, `--width`, `--height` and `--frames`. `--extend-seconds` and `--extend-frames` need `--extend`. In a prompt file, every entry needs a `prompt`, which is the action that follows the source. `--no-audio` leaves the result without sound, and a silent source gives a silent result. When the extension may not fit in memory, a warning is printed and the run continues.
 
 ## `ziv-model model` — Checkpoint Conversion
 

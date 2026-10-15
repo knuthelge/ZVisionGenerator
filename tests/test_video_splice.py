@@ -30,6 +30,7 @@ from zvisiongenerator.utils.video_splice import (
     silent_end_length,
     splice_clips,
     write_pcm16_wav,
+    write_segment_frames,
 )
 
 
@@ -399,7 +400,7 @@ def _make_segment(directory: Path, source: ExtendSource, frames: np.ndarray, *, 
     """Encode generated frames with the segment helper, and a tone as their audio."""
     video = directory / "segment.mp4"
     command = build_segment_command(source.width, source.height, source.fps_text, video, color_space=source.color_space, color_primaries=source.color_primaries, color_trc=source.color_trc)
-    subprocess.run(command, input=frames.tobytes(), capture_output=True, check=True)
+    write_segment_frames(frames, command)
     wav = None
     if with_audio:
         wav = directory / "segment.wav"
@@ -407,6 +408,13 @@ def _make_segment(directory: Path, source: ExtendSource, frames: np.ndarray, *, 
         tone = 0.3 * np.sin(2 * np.pi * 300 * np.arange(count) / RATE)
         write_pcm16_wav(np.stack([tone, tone]), wav)
     return ExtendSegment(video, wav)
+
+
+@REAL
+def test_write_segment_frames_reports_an_ffmpeg_failure(tmp_path):
+    command = build_segment_command(128, 64, "24/1", tmp_path / "missing-dir" / "segment.mp4")
+    with pytest.raises(RuntimeError, match="extension segment"):
+        write_segment_frames(numbered_frames(8, 128, 64), command)
 
 
 def _packet_hashes(path: Path, *, decoded: bool = False) -> list[str]:

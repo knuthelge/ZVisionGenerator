@@ -145,7 +145,7 @@ def _check_extend_options(parser: argparse.ArgumentParser, args: argparse.Namesp
     if not args.extend_path.strip():
         parser.error("--extend needs a video path")
     if not supports_video_extend():
-        parser.error("--extend is available on macOS only for now.")
+        parser.error("--extend is not available on this platform.")
     for attribute, flag, reason in _EXTEND_REFUSED_OPTIONS:
         if getattr(args, attribute) is not None:
             parser.error(f"{flag} cannot be used with --extend: {reason}")

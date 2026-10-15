@@ -93,8 +93,8 @@ class TestBackendRegistryLookup:
 
         assert backends.supports_video_audio() is expected
 
-    @pytest.mark.parametrize(("platform", "expected"), [("darwin", True), ("win32", False), ("linux", False)])
-    def test_only_the_ltx_mlx_video_backend_extends_a_clip(self, monkeypatch, platform, expected):
+    @pytest.mark.parametrize(("platform", "expected"), [("darwin", True), ("win32", True), ("linux", True)])
+    def test_every_ltx_video_backend_extends_a_clip(self, monkeypatch, platform, expected):
         import zvisiongenerator.backends as backends
 
         monkeypatch.setattr(backends.sys, "platform", platform)

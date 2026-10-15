@@ -1,7 +1,7 @@
 """VideoBackend Protocol — contract for platform-specific video inference engines.
 
 Protocol requires name, load_model, text_to_video, image_to_video. ``VideoExtender`` is a separate, optional
-capability that only the macOS backend provides.
+capability that both LTX backends provide.
 """
 
 from __future__ import annotations
@@ -94,8 +94,8 @@ class VideoBackend(Protocol):
 class VideoExtender(Protocol):
     """Optional capability: continue an existing clip from its last frames.
 
-    Deliberately not ``runtime_checkable`` and not part of ``VideoBackend``: only the macOS backend provides it.
-    Callers gate on ``supports_video_extend()`` and look the method up on the backend.
+    Deliberately not ``runtime_checkable`` and not part of ``VideoBackend``: a backend offers it only where
+    ``supports_video_extend()`` says so. Callers gate on that and look the method up on the backend.
     """
 
     def extend_video(

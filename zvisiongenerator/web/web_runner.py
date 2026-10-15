@@ -789,7 +789,7 @@ class WebRunner:
         loras = list(zip(lora_paths, lora_weights, strict=False)) or None
         model, model_info = backend.load_model(
             model_ref,
-            mode="i2v" if request.image_path else "t2v",
+            mode="extend" if getattr(args, "extend_source", None) is not None else "i2v" if request.image_path else "t2v",
             low_memory=getattr(args, "low_memory", True),
             loras=loras,
             **ltx_load_options(config, request.model_name or model_ref, upscale=bool(request.upscale)),

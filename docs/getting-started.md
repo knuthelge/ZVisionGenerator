@@ -175,7 +175,7 @@ Full-screen asset viewer:
 | `←` / `→` | Previous / next asset |
 | `Home` / `End` | First / last asset |
 | `R` | Reuse settings |
-| `E` | Use as reference: load an image as the reference image, together with its prompt. On a video (macOS), Extend: open it in the Extend Video tab |
+| `E` | Use as reference: load an image as the reference image, together with its prompt. On a video, Extend: open it in the Extend Video tab |
 | `D` | Download |
 | `C` | Copy the prompt |
 | `Delete` / `Backspace` | Delete (asks for confirmation: `Enter` confirms, `Esc` cancels) |

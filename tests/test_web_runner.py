@@ -323,6 +323,7 @@ class TestWebRunner:
         assert not {"text_to_video_stage", "image_to_video_stage", "strip_audio_stage"} & set(seen["stages"])
         assert seen["args"].extend_source is source
         assert "upscale" not in backend.load_model.call_args.kwargs
+        assert backend.load_model.call_args.kwargs["mode"] == "extend"
 
     @pytest.mark.parametrize(("upscale", "expect_source"), [(2, True), (None, False)])
     def test_video_job_passes_latent_upsampler_only_when_upscaling(self, monkeypatch, upscale, expect_source):

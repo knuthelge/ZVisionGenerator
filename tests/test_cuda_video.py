@@ -9,8 +9,10 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
+import numpy as np
 from PIL import Image
 import pytest
+from conftest import make_extend_source
 
 import zvisiongenerator.backends.cuda.video.backend as video_diffusers_module
 from zvisiongenerator.backends.cuda.video.backend import (
@@ -298,6 +300,58 @@ class _NoRatePipeline(_AudioTextPipeline):
         super().__init__(sample_rate=None)
 
 
+class _FakeVideoCondition:
+    """Stand-in for LTX2VideoCondition: records the frames, latent index and strength it was built with."""
+
+    def __init__(self, *, frames, index, strength):
+        self.frames = frames
+        self.index = index
+        self.strength = strength
+
+
+class _NumpyWaveform:
+    """A vocoder waveform ``(channels, samples)`` that converts to numpy like a torch tensor."""
+
+    def __init__(self, samples: np.ndarray):
+        self.samples = samples
+
+    def float(self):
+        return self
+
+    def cpu(self):
+        return self
+
+    def numpy(self):
+        return self.samples
+
+
+class _WindowVocoder(_FakeVocoder):
+    """Vocoder returning a ramp of ``samples`` per channel, so a cut's position in the window can be read back."""
+
+    def __init__(self, samples: int):
+        super().__init__(48000)
+        self.samples = samples
+
+    def __call__(self, mel):
+        self.mels.append(mel)
+        ramp = np.linspace(-0.5, 0.5, self.samples, dtype=np.float32)
+        return [_NumpyWaveform(np.stack([ramp, ramp]))]
+
+
+class _FakeConditionPipeline(_BaseFakePipeline):
+    """Condition pipeline that decodes to ``window`` numbered frames, with audio at 48 kHz, like LTX2ConditionPipeline."""
+
+    window = 25 + 16
+
+    def __init__(self):
+        super().__init__()
+        self.audio_vae = _FakeAudioVae()
+        self.vocoder = _WindowVocoder(round(self.window / 24 * 48000))
+
+    def __call__(self, **kwargs):
+        return _run_fake_denoise(self, kwargs, [[np.full((4, 4, 3), index, dtype=np.uint8) for index in range(self.window)]])
+
+
 class _NoScalePipeline(_FakeTextPipeline):
     def set_adapters(self, adapter_names, adapter_weights=None) -> None:  # noqa: ARG002
         raise AttributeError
@@ -305,7 +359,7 @@ class _NoScalePipeline(_FakeTextPipeline):
 
 @pytest.fixture(autouse=True)
 def _clear_pipeline_state():
-    for pipeline_class in (_FakeTextPipeline, _FakeImagePipeline, _NoScalePipeline, _AudioTextPipeline, _NoRatePipeline):
+    for pipeline_class in (_FakeTextPipeline, _FakeImagePipeline, _FakeConditionPipeline, _NoScalePipeline, _AudioTextPipeline, _NoRatePipeline):
         pipeline_class.loaded_instances = []
     _FakeUpsamplerModel.instances = []
     _FakeUpsamplerModel.load_error = None
@@ -384,6 +438,7 @@ def _make_runtime(
     torch: _FakeTorch | None = None,
     text_pipeline=_FakeTextPipeline,
     image_pipeline=_FakeImagePipeline,
+    condition_pipeline=_FakeConditionPipeline,
     upsample_pipeline=_FakeUpsamplePipeline,
     upsampler_model=_FakeUpsamplerModel,
     version: str = "0.38.0",
@@ -400,6 +455,8 @@ def _make_runtime(
         pipeline_classes=SimpleNamespace(
             text_to_video=text_pipeline,
             image_to_video=image_pipeline,
+            condition=condition_pipeline,
+            video_condition=_FakeVideoCondition,
             latent_upsample_pipeline=upsample_pipeline,
             latent_upsampler_model=upsampler_model,
         ),
@@ -1345,20 +1402,22 @@ def test_upscale_runs_both_stages_on_the_same_lora_bearing_pipeline(monkeypatch,
 
 
 def test_resolve_pipeline_classes_requires_ltx2():
-    ltx2 = SimpleNamespace(LTX2Pipeline=object, LTX2ImageToVideoPipeline=object, LTX2LatentUpsamplePipeline=object)
+    ltx2 = SimpleNamespace(LTX2Pipeline=object, LTX2ImageToVideoPipeline=object, LTX2ConditionPipeline=object, LTX2LatentUpsamplePipeline=object)
 
-    classes = _resolve_pipeline_classes(ltx2, _FakeUpsamplerModel)
+    classes = _resolve_pipeline_classes(ltx2, _FakeUpsamplerModel, _FakeVideoCondition)
 
     assert classes.text_to_video is object
     assert classes.image_to_video is object
+    assert classes.condition is object
+    assert classes.video_condition is _FakeVideoCondition
     assert classes.latent_upsample_pipeline is object
     assert classes.latent_upsampler_model is _FakeUpsamplerModel
-    for missing in ("LTX2Pipeline", "LTX2ImageToVideoPipeline", "LTX2LatentUpsamplePipeline"):
+    for missing in ("LTX2Pipeline", "LTX2ImageToVideoPipeline", "LTX2ConditionPipeline", "LTX2LatentUpsamplePipeline"):
         partial = SimpleNamespace(**{name: object for name in vars(ltx2) if name != missing})
         with pytest.raises(RuntimeError, match="LTX-2"):
-            _resolve_pipeline_classes(partial, _FakeUpsamplerModel)
+            _resolve_pipeline_classes(partial, _FakeUpsamplerModel, _FakeVideoCondition)
     with pytest.raises(RuntimeError, match="LTX-2"):
-        _resolve_pipeline_classes(SimpleNamespace(LTXPipeline=object, LTXImageToVideoPipeline=object), _FakeUpsamplerModel)
+        _resolve_pipeline_classes(SimpleNamespace(LTXPipeline=object, LTXImageToVideoPipeline=object), _FakeUpsamplerModel, _FakeVideoCondition)
 
 
 def test_upscale_load_downloads_upsampler_before_the_pipeline(monkeypatch):
@@ -1647,3 +1706,117 @@ def test_load_model_does_not_validate_diffusers_version_twice(monkeypatch):
     backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v")
 
     validator.assert_not_called()
+
+
+class TestExtendVideo:
+    """Continue a clip: pin its tail at the start of a window at its size and rate, write only the new part."""
+
+    @pytest.fixture
+    def segments(self, monkeypatch):
+        """Replace the tail reader and the segment encoder; return what each received."""
+        calls = SimpleNamespace(tails=[], encoded=[])
+        tail = np.zeros((25, 256, 512, 3), dtype=np.uint8)
+
+        def _read_tail(source):
+            calls.tails.append(source)
+            return tail
+
+        def _write_frames(frames, command):
+            calls.encoded.append((list(frames), command))
+
+        monkeypatch.setattr("zvisiongenerator.utils.video_tail.read_source_tail", _read_tail)
+        monkeypatch.setattr("zvisiongenerator.utils.video_splice.write_segment_frames", _write_frames)
+        calls.tail = tail
+        return calls
+
+    @staticmethod
+    def _load(monkeypatch, *, mode="extend", upscale=False):
+        _patch_runtime(monkeypatch, _make_runtime())
+        if upscale:
+            _patch_upsampler_io(monkeypatch)
+            return DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode=mode, upscale=True, latent_upsampler=_UPSAMPLER_SOURCE)[0]
+        return DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode=mode)[0]
+
+    @staticmethod
+    def _extend(model, tmp_path, source=None, **overrides):
+        kwargs = {"extend_frames": 16, "seed": 7, "steps": 8, "segment_dir": tmp_path, "audio_output": True, **overrides}
+        return DiffusersVideoBackend().extend_video(model, source or make_extend_source(), "She closes the umbrella.", **kwargs)
+
+    def test_extend_mode_loads_the_condition_pipeline(self, monkeypatch):
+        model = self._load(monkeypatch)
+        (pipeline,) = _FakeConditionPipeline.loaded_instances
+        assert model.extend is pipeline
+        assert model.text_to_video is None and model.image_to_video is None
+
+    def test_pins_the_tail_at_latent_zero_and_generates_the_window_at_the_source_size_and_rate(self, monkeypatch, tmp_path, segments):
+        model = self._load(monkeypatch)
+        source = make_extend_source(fps=23.976, fps_text="24000/1001")
+        self._extend(model, tmp_path, source)
+        (call,) = model.extend.calls
+        (condition,) = call["conditions"]
+        assert condition.frames is segments.tail
+        assert (condition.index, condition.strength) == (0, 1.0)
+        assert (call["width"], call["height"], call["num_frames"]) == (512, 256, 41)
+        assert call["frame_rate"] == 23.976
+        assert segments.tails == [source]
+
+    def test_writes_only_the_new_frames_with_the_source_rate_and_colour_tags(self, monkeypatch, tmp_path, segments):
+        model = self._load(monkeypatch)
+        source = make_extend_source(fps_text="24/1", color_space="bt709", color_primaries="bt709", color_trc="bt709")
+        segment = self._extend(model, tmp_path, source)
+        ((frames, command),) = segments.encoded
+        assert [int(frame[0, 0, 0]) for frame in frames] == list(range(25, 41))
+        assert command[command.index("-r") + 1] == "24/1"
+        assert command[command.index("-s") + 1] == "512x256"
+        assert "colorspace=bt709" in command[command.index("-vf") + 1]
+        assert command[-1] == str(tmp_path / "segment.mp4")
+        assert segment.video_path == tmp_path / "segment.mp4"
+
+    def test_the_sound_starts_a_lead_before_the_new_part_and_covers_it_exactly(self, monkeypatch, tmp_path, segments):
+        import wave
+
+        from zvisiongenerator.utils.video_extend import audio_lead_samples
+
+        model = self._load(monkeypatch)
+        segment = self._extend(model, tmp_path)
+        lead = audio_lead_samples(24.0)
+        assert segment.audio_path == tmp_path / "segment.wav"
+        assert segment.lead_samples == lead
+        with wave.open(str(segment.audio_path), "rb") as reader:
+            assert reader.getframerate() == 48000
+            assert reader.getnframes() == lead + round(16 / 24 * 48000)
+
+    @pytest.mark.parametrize(("has_audio", "audio_output"), [(False, True), (True, False)])
+    def test_no_sound_is_written_for_a_silent_source_or_without_audio_output(self, monkeypatch, tmp_path, segments, has_audio, audio_output):
+        model = self._load(monkeypatch)
+        segment = self._extend(model, tmp_path, make_extend_source(has_audio=has_audio), audio_output=audio_output)
+        assert segment.audio_path is None
+        assert not (tmp_path / "segment.wav").exists()
+
+    @pytest.mark.parametrize("frames", [0, 12, 4])
+    def test_refuses_a_length_that_is_not_a_positive_multiple_of_8(self, monkeypatch, tmp_path, segments, frames):
+        model = self._load(monkeypatch)
+        with pytest.raises(ValueError, match="multiple of 8"):
+            self._extend(model, tmp_path, extend_frames=frames)
+
+    def test_refuses_a_model_loaded_for_another_mode(self, monkeypatch, tmp_path, segments):
+        model = self._load(monkeypatch, mode="t2v")
+        with pytest.raises(RuntimeError, match="extend"):
+            self._extend(model, tmp_path)
+
+    def test_refuses_an_upscale_model(self, monkeypatch, tmp_path, segments):
+        model = self._load(monkeypatch, upscale=True)
+        with pytest.raises(ValueError, match="upscale"):
+            self._extend(model, tmp_path)
+
+    def test_a_window_of_the_wrong_length_fails_before_anything_is_written(self, monkeypatch, tmp_path, segments):
+        model = self._load(monkeypatch)
+        monkeypatch.setattr(_FakeConditionPipeline, "window", 40)
+        with pytest.raises(RuntimeError, match="41"):
+            self._extend(model, tmp_path)
+        assert segments.encoded == []
+
+    def test_text_to_video_still_runs_at_the_model_rate(self, monkeypatch, tmp_path):
+        model = self._load(monkeypatch, mode="t2v")
+        DiffusersVideoBackend().text_to_video(model, "prompt", 512, 256, 25, 7, 8, str(tmp_path / "out.mp4"))
+        assert model.text_to_video.calls[0]["frame_rate"] == model.model_info.default_fps

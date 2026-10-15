@@ -20,7 +20,7 @@ from zvisiongenerator.web.json_fields import json_field
 from zvisiongenerator.web.path_picker import SOURCE_VIDEO_EXTENSIONS
 
 
-EXTEND_UNAVAILABLE_MESSAGE = "Extending a video is available on macOS only for now."
+EXTEND_UNAVAILABLE_MESSAGE = "Extending a video is not available on this platform."
 
 
 def _source_video_path(value: Any, *, key: str) -> Path:

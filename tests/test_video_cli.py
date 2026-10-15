@@ -650,7 +650,7 @@ class TestVideoCliExtend:
     def test_capability_gate_refuses_extend_before_the_source_is_read(self, monkeypatch, tmp_path, capsys):
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], extend_supported=False)
-        assert "macOS only" in capsys.readouterr().err
+        assert "not available" in capsys.readouterr().err
         self.backend.load_model.assert_not_called()
 
     def test_capability_gate_does_not_touch_other_runs(self, monkeypatch, tmp_path):

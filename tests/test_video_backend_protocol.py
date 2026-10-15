@@ -81,13 +81,13 @@ class TestVideoExtenderProtocol:
 
         assert isinstance(LtxVideoBackend(), VideoBackend)
 
-    def test_diffusers_backend_is_a_video_backend_without_extend_video(self):
+    def test_diffusers_backend_is_a_video_backend_with_extend_video(self):
         from zvisiongenerator.backends.cuda.video.backend import DiffusersVideoBackend
 
         backend = DiffusersVideoBackend()
 
         assert isinstance(backend, VideoBackend)
-        assert not hasattr(backend, "extend_video")
+        assert callable(getattr(backend, "extend_video", None))
 
 
 class TestGetVideoBackend:

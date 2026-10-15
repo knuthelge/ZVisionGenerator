@@ -231,8 +231,8 @@ def supports_video_audio() -> bool:
 
 
 def supports_video_extend() -> bool:
-    """Return whether this platform's video backend can extend a clip (LTX MLX on macOS; diffusers cannot yet)."""
-    return _video_backend_is_ltx_mlx()
+    """Return whether this platform's video backend can extend a clip (every registered LTX backend can)."""
+    return sys.platform in _VIDEO_BACKENDS_MAP
 
 
 def supports_video_upscale_review() -> bool:
