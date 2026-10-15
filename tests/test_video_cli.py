@@ -463,6 +463,7 @@ def _run_cli(
     local_models=("org/recorded-model", "ltx-8"),
     extend_supported=True,
     fit=None,
+    resolve=None,
 ):
     """Run ``main()`` with heavy steps patched out; return what the batch received plus the backend and memory-check mocks."""
     import zvisiongenerator.video_cli as video_cli
@@ -473,7 +474,7 @@ def _run_cli(
     monkeypatch.chdir(tmp_path)
     app_config = {"ui": {"default_models": {"video": "ltx-8"}}} if config is None else config
     monkeypatch.setattr(video_cli, "load_config", lambda: app_config)
-    monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(video_cli, "resolve_model_path", resolve or (lambda model, **_: model))
     monkeypatch.setattr(video_cli, "find_local_model_dir", lambda ref: tmp_path if ref in local_models else None)
     monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
     monkeypatch.setattr(video_cli, "supports_video_extend", lambda: extend_supported)
@@ -523,6 +524,13 @@ class TestVideoCliScene:
 
     def _main(self, monkeypatch, tmp_path, argv):
         return _run_cli(monkeypatch, tmp_path, ["-m", "ltx-4", *argv], backend=MagicMock())
+
+    def test_the_picked_model_name_is_kept_beside_the_resolved_model(self, monkeypatch, tmp_path):
+        def _resolve(model, **_):
+            return f"org/repo-for-{model}"
+
+        captured = _run_cli(monkeypatch, tmp_path, ["-m", "ltx-4", "--prompt", "a dog"], backend=MagicMock(), resolve=_resolve)
+        assert (captured["args"].model_name, captured["args"].model) == ("ltx-4", "org/repo-for-ltx-4")
 
     def test_scene_alone_is_a_scene_only_run(self, monkeypatch, tmp_path):
         captured = self._main(monkeypatch, tmp_path, ["--scene", "A castle at dusk."])

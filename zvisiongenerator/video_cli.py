@@ -345,8 +345,10 @@ def main(*, prog: str = "ziv-video") -> None:
             parser.error(str(e))
         args.lora = _extend_lora(args.lora, source)
 
-    # Resolve friendly model names (e.g. "ltx-2-mlx" → ~/.ziv/models/...); the picked name chooses the quantize level.
+    # Resolve friendly model names (e.g. "ltx-2-mlx" → ~/.ziv/models/...); the picked name chooses the quantize level
+    # and is what the video records, as the Web UI does: on Windows/Linux ltx-4 and ltx-8 resolve to the same repo.
     model_name = args.model
+    args.model_name = model_name
     try:
         args.model = resolve_model_path(args.model, aliases=config.get("model_aliases", {}), platform_key=sys.platform)
     except ValueError as e:

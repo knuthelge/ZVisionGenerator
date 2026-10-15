@@ -421,6 +421,10 @@ class TestExtendBatch:
         requests, _ = self._run(runs=2, seed=9)
         assert [r.seed for r in requests] == [9, 9]
 
+    def test_the_request_records_the_picked_model_name_over_the_resolved_model(self):
+        (request,), _ = self._run(model="org/resolved-repo", model_name="ltx-4")
+        assert request.model_name == "ltx-4"
+
     def test_other_jobs_have_no_extend(self):
         workflow = MagicMock()
         workflow.run.return_value = StageOutcome.success

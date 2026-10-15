@@ -232,7 +232,7 @@ def run_video_batch(
                     backend=backend,
                     model=model,
                     prompt=prompt,
-                    model_name=getattr(args, "model", None),
+                    model_name=getattr(args, "model_name", None) or getattr(args, "model", None),
                     filename_base=set_name,
                     model_family=model_info.family,
                     lora_paths=getattr(args, "lora_paths", None) or [],
