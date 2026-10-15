@@ -1,12 +1,40 @@
 # Feature parity between macOS and Windows/Linux
 
-**Status:** In progress (2026-10-15). Steps 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA), 5 (quantized, streamed video on CUDA, which absorbed step 6) and 11 (extend a video on CUDA) are done; the other steps are still open.
+**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, except review), 5 (quantized, streamed video on CUDA, which absorbed step 6) and 11 (extend a video on CUDA) are done. Steps 1, 3's review, 7, 8, 9, 10, 12 and 13 are still open. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
+
+## Where things stand
+
+Re-audited against `main` at v0.13.0b20 (diffusers 0.41.0, mflux 0.22.0, torch 2.14.1, transformers 5.19.0, bitsandbytes 0.50.2). The check covered the capability functions in `backends/__init__.py`, every `sys.platform` branch outside it, the `config.yaml` per-platform keys, both backends' entry points, and the installed diffusers wheel.
+
+| Feature | macOS | Windows / Linux | Step |
+|---|---|---|---|
+| Text to image: Z-Image, FLUX.2 Klein, Krea 2 | yes | yes | |
+| Ideogram 4 | yes | no; refused in `load_model` | 13 |
+| q4 / q8 with stored quants, image memory badges | yes | yes | |
+| LoRAs and LoKr (image) | yes | yes | |
+| Live image previews | yes | yes | |
+| Image to image, `--upscale`, gallery creative upscale: Z-Image, Krea 2 | yes | yes | |
+| Same, FLUX.2 Klein (the default model) | yes | **fails with `TypeError`** | 1 |
+| Plain upscale of an existing image (SeedVR2) | yes | no; creative items only | 12 |
+| Review before upscaling (image) | yes | yes | |
+| Z-Image default scheduler | `beta` | FlowMatch Euler | 8 |
+| Video t2v and i2v, `ltx-4` / `ltx-8`, LoRAs | yes | yes (LoRAs on NF4 not run on hardware) | 5 |
+| Video audio | yes | yes | 2 |
+| Two-stage video upscale | yes | yes | 3 |
+| Review before upscaling (video) | yes | no; `--review` refused, option hidden | 3 |
+| Extend a video, with its sound | yes | yes | 11 |
+| Video model memory badge | yes | no (`memory_fit: None`) | 7 |
+| Per-clip memory check (Duration note, Extend note, CLI warning) | yes | no (`clip_memory_fit` returns `None` for a discrete GPU) | 7 |
+| Load-time memory check for video | n/a | yes (`estimate_ltx_cuda_system_memory`) | 5 |
+| Prompt enhancer | yes, 2.4 GB download | yes, 9 GB download | 10 |
+| Offer to install a missing ffmpeg | Homebrew, MacPorts | prints a URL and exits | 9 |
+| Upscale an existing video | proposed, macOS only ([video-upscale-existing](video-upscale-existing.md)) | not planned yet | when it ships |
+
+Same on both, nothing to do: the CLI, the Web UI (queue, gallery, prompt builder, config, file picker, Models page), `ziv-model` and the LoRA import, size presets, accelerator memory release, and the LTX-2 LoRA format (diffusers 0.41's `_convert_non_diffusers_ltx2_lora_to_diffusers` converts the official `diffusion_model.*` layout that macOS loads).
 
 ## Problem
 
-Most development has happened on macOS. The shared app is the same everywhere: the CLI controls, the Web UI (queue, gallery, prompt builder, config, file picker), text-to-image for Z-Image, FLUX.2 Klein and Krea 2, q4/q8 with stored quants, image memory badges, LoRAs and LoKr, live image previews, video text-to-video and image-to-video, video LoRAs and the prompt enhancer. [Quantization parity on CUDA](archive/cuda-quant-parity.md) closed the image quantization gap.
-
-What's left are the features that work on one platform and are missing or behave differently on the other. This proposal assumes the three dependency proposals have shipped ([shared](archive/deps-shared.md), [CUDA](archive/deps-cuda.md), [macOS](archive/deps-macos.md)): diffusers 0.41.0 on Windows and Linux, mflux 0.22 and LTX MLX v0.16.3 on macOS. Several gaps get wider with them. macOS moves to upstream's two-stage video upscale and gains low-RAM video streaming, while the CUDA video backend did not change until step 3.
+Most development has happened on macOS. [Quantization parity on CUDA](archive/cuda-quant-parity.md) closed the image quantization gap, and steps 2, 3, 5 and 11 brought CUDA video level with macOS for generation, audio, upscale and extend. The table above lists what's left: features that work on one platform and are missing or behave differently on the other. This proposal assumes the three dependency proposals have shipped ([shared](archive/deps-shared.md), [CUDA](archive/deps-cuda.md), [macOS](archive/deps-macos.md)): diffusers 0.41.0 on Windows and Linux, mflux 0.22 and LTX MLX v0.16.3 on macOS.
 
 Missing on Windows and Linux:
 
@@ -16,7 +44,13 @@ Missing on Windows and Linux:
 4. ~~**No float16 compute option.**~~ *Dropped (2026-10-11).* `deps-macos` proposed a `compute_precision` option for mflux, but it gave 0–4% on an M5 and was removed, so macOS has nothing to match. See [macos-speed.md](macos-speed.md) and [deps-macos.md](archive/deps-macos.md#what-changed-from-the-plan).
 5. ~~**No quantized video, and video doesn't fit a 32 GB machine.**~~ *Done (2026-10-14), see step 5.* macOS has `ltx-4` and `ltx-8` (MLX q4/q8). CUDA had only `ltx-2.3` in bfloat16, which holds about 66 GB in system memory, and runs an older transformer (distilled 1.0) than macOS (1.1).
 6. ~~**No low-RAM video streaming.**~~ *Merged into step 5.* `--low-memory` on CUDA meant `enable_model_cpu_offload()`, which moves each whole component onto the GPU in turn.
-7. **No video memory-fit badges.** `model_status.describe_model_status` returns `memory_fit: None` for CUDA video ("CUDA video is not estimated").
+7. **No video memory estimates.** `model_status.describe_model_status` returns `memory_fit: None` for CUDA video ("CUDA video is not estimated"). The per-clip check that shipped on macOS later (the note under **Duration (s)**, the Extend Video note, `POST /api/video/memory-fit` and the `ziv-video` warning) is unified-memory only too: `clip_memory_fit` returns `None` when the budget has a separate system memory. On CUDA the clip length is what runs out first (XL 15 s fails on a 10 GB GPU, step 5), so this check matters more there than the badge.
+
+Also missing on Windows and Linux, found in the 2026-10-15 re-audit:
+
+- **Review before upscaling for video.** Planned as part of step 3 but not built: `supports_video_upscale_review()` is true only for LTX MLX, `video_cli` and the Web UI refuse `review`, and `_refuse_review` in `backends/cuda/video/backend.py` raises.
+- **SeedVR2, the plain upscale of existing images** ([shipped on macOS](archive/image-upscale-seedvr2-mac.md)). `supports_seedvr2()` is macOS only, so the viewer offers only the creative items, and the X chord runs a creative upscale instead of a plain one. See step 12.
+- **Ideogram 4.** This was out of scope because "diffusers has no Ideogram 4 pipeline", but diffusers 0.41.0 does ship one. See step 13.
 
 ~~Extending a video is also macOS only.~~ *Done (2026-10-15), see step 11.* `supports_video_extend()` was false on CUDA, which hid the Extend Video workflow and refused `--extend`.
 
@@ -28,7 +62,7 @@ Different defaults or behaviour for the same feature:
 
 ### Not in scope
 
-- **Ideogram 4** is mflux-only, and diffusers has no Ideogram 4 pipeline. It stays macOS-only, as `model_aliases.ideo` already says.
+- ~~**Ideogram 4** is mflux-only, and diffusers has no Ideogram 4 pipeline.~~ *In scope since 2026-10-15, as step 13:* diffusers 0.41.0 has `Ideogram4Pipeline`.
 - **FLUX.1 and FLUX.2-dev** aren't supported models. The diffusers backend happens to load them through `AutoPipeline`, but that isn't a feature to match on macOS.
 - **The GPU floor from `deps-cuda`** (RTX 20-series and newer, driver R580 or newer) is a deliberate trade-off, not a gap.
 - **LTX-2.5** was a follow-up in both platform proposals. Decided 2026-10-10: LTX-2.5 not planned.
@@ -55,9 +89,33 @@ Checked against `main` at v0.13.0b17 and the diffusers 0.41.0 wheel from PyPI (2
 | bitsandbytes NF4 under diffusers group offloading (0.41.0, bitsandbytes 0.50.2) | Fails with an illegal memory access: the hooks move `param.data` and leave the quantization state on the CPU, even when it is moved to the GPU first. Swapping whole `Params4bit` objects around a block's forward pass works and matches the resident output exactly |
 | `dg845/LTX-2.3-Diffusers` | Not distilled and ships no `latent_upsampler` component. The distilled diffusers repo has none either; the x2 upsampler is a single file in `Lightricks/LTX-2.3` |
 
+Re-checked 2026-10-15 at v0.13.0b20, against the installed diffusers 0.41.0 and the Hugging Face API:
+
+| Check | Result |
+|---|---|
+| `Flux2KleinPipeline.__call__` | Still no `strength`. `AUTO_IMAGE2IMAGE_PIPELINES_MAPPING` still maps `flux2-klein` to it, and `DiffusersBackend.image_to_image` still passes `strength=` through `AutoPipelineForImage2Image.from_pipe`. `flux2_klein` still has no `supports_img2img: false` |
+| `diffusers.Ideogram4Pipeline` (0.41.0) | Exists, with `Ideogram4Transformer2DModel`, `Ideogram4ModularPipeline` and `Ideogram4PromptEnhancerHead`. Components: `scheduler`, `vae`, `text_encoder` (`Qwen3VLModel`), `tokenizer`, `transformer`, `unconditional_transformer`, `prompt_enhancer_head`. `__call__` takes `guidance_scale`, a per-step `guidance_schedule` (default 45 × 7.0 then 3 × 3.0), `mu`/`std` for the timestep shift, `latents=` and `callback_on_step_end`. It takes no `image` and no `sigmas` |
+| `ideogram-ai/ideogram-4-fp8` (the macOS `ideo` repo) | Already in diffusers layout (`model_index.json`: `Ideogram4Pipeline`), gated, 27.5 GB |
+| `ideogram-ai/ideogram-4-nf4-diffusers` | Official, gated, 16.1 GB, created 2026-06-04. Transformer and text encoder are bitsandbytes NF4 (`quantization_config` in their `config.json`) |
+| SeedVR2 in diffusers 0.41.0 | No pipeline. No usable diffusers-format repo on the Hub either (`TrgTuan10/SeedVR2_diffusers` is empty); the PyTorch weights are `ByteDance-Seed/SeedVR2-3B` / `-7B` and `numz/SeedVR2_comfyUI` |
+| `clip_memory_fit` (`utils/model_memory.py`) | Returns `None` whenever `budget.system_bytes` is set, so on CUDA there is no Duration note, no Extend note and no CLI warning |
+| `describe_model_status` (`web/model_status.py`) | `memory_fit` is `None` for CUDA video |
+| `ensure_ffmpeg` (`utils/ffmpeg.py`) | Still offers Homebrew or MacPorts on macOS only |
+| `model_presets.zimage.default_scheduler` | Still `mflux: beta`, `diffusers: null` |
+| Pre-quantized `Qwen3.5-4B-heretic` for transformers | None among the 60 Hub results that aren't MLX or GGUF. The CUDA enhancer still downloads the 9 GB bfloat16 repo and quantizes it to NF4 when it loads |
+
 ## Proposed change
 
-Each step is its own PR, in this order. Steps 1, 2 and 8 are small and fix what users hit first (step 4 was dropped). Steps 3, 5 (with 6) and 7 are video work and fit best after `deps-macos` PR 2, so both platforms move to the same upscale flow at once.
+Each step is its own PR. Order for what's left:
+
+1. Step 1 (Klein img2img). It's a hard failure on the default model, so it goes first.
+2. Steps 8 and 9 (scheduler default, ffmpeg install). Small.
+3. Step 7 (video memory estimates). It needs the clip-length measurements from step 5 and a few more at q8.
+4. Step 3's review before upscaling.
+5. Steps 13 and 12 (Ideogram 4, SeedVR2). Both are accepted. Each starts with a spike that picks the approach: which implementation for SeedVR2, which repo for Ideogram 4.
+6. Step 10 (enhancer download). Lowest priority.
+
+Step 4 was dropped. The step numbers stay as they are so references keep working.
 
 ### 1. FLUX.2 Klein img2img on CUDA
 
@@ -79,7 +137,7 @@ Original plan:
 
 ### 3. Two-stage video upscale on CUDA
 
-**Done (2026-10-14).** The default repo is now the distilled `diffusers/LTX-2.3-Distilled-Diffusers`, the upsampler is loaded from `Lightricks/LTX-2.3` (`video_model_presets.ltx.diffusers.latent_upsampler`), stage 1 runs at half size, and the refine runs through `LTX2Pipeline(latents=, sigmas=)` on the same pipeline, so DFR was not needed. Every diffusers call now passes the distilled sigmas and `guidance_scale=1.0`. Still open: the manual run on an NVIDIA GPU (t2v and i2v, `--low-memory` on and off, LoRA, Cancel during stage 2). The guidance question is answered in step 5: the 0.41 defaults cost speed and change the look, and are now turned off.
+**Done (2026-10-14), except review before upscaling** (the last bullet of the original plan below), which is still open. The default repo is now the distilled `diffusers/LTX-2.3-Distilled-Diffusers`, the upsampler is loaded from `Lightricks/LTX-2.3` (`video_model_presets.ltx.diffusers.latent_upsampler`), stage 1 runs at half size, and the refine runs through `LTX2Pipeline(latents=, sigmas=)` on the same pipeline, so DFR was not needed. Every diffusers call now passes the distilled sigmas and `guidance_scale=1.0`. Still open: the manual run on an NVIDIA GPU (t2v and i2v, `--low-memory` on and off, LoRA, Cancel during stage 2). The guidance question is answered in step 5: the 0.41 defaults cost speed and change the look, and are now turned off.
 
 Original plan:
 
@@ -148,10 +206,12 @@ Original plans:
 - (5) Add `--quantize 8` (FP8) and `--quantize 4` (NF4) for the LTX transformer, reusing `backends/cuda/quant.py`, store the copy with the stored-quant flow (`<name>@q4` / `<name>@q8`), and expose the levels in the Web UI's video settings. (Became aliases and a cache folder: the transformer is not an installed model with a folder of its own.)
 - (6) With `--low-memory`, apply block-level group offloading to the LTX transformer instead of `enable_model_cpu_offload()`. Measure peak VRAM and seconds per step on a 12 GB and a 24 GB card.
 
-### 7. Video memory-fit badges on CUDA
+### 7. Video memory estimates on CUDA: badges and the per-clip check
 
-- Add `estimate_cuda_video_memory` to `utils/model_memory.py`, mirroring how step 5 loads the model (streamed transformer, resident VAE and upsampler), for unquantized and each level. The system-memory half exists as `estimate_ltx_cuda_system_memory`; it needs the transformer checkpoint's header, which can be read before download with `huggingface_hub.get_safetensors_metadata`.
+- Add `estimate_cuda_video_memory` to `utils/model_memory.py`, mirroring how step 5 loads the model, for `ltx-4` and `ltx-8` (there's no unquantized path any more). The transformer streams; the VAEs and vocoder stay off the GPU while it runs, and the decode streams its chunks. The system-memory half exists as `estimate_ltx_cuda_system_memory`. It needs the transformer checkpoint's header, which `huggingface_hub.get_safetensors_metadata` can read before the download.
 - Use it in `model_status.describe_model_status` for CUDA video, in the same `discrete` shape as image models, with the existing `VIDEO_ESTIMATE_NOTE`.
+- **Per clip.** Let `clip_memory_fit` handle a discrete budget too: GPU memory as a function of tokens (width × height × frames) and mode (t2v, i2v, upscale, extend), checked against VRAM, and system memory from `estimate_ltx_cuda_system_memory`, with the `classify_cuda_memory_fit` thresholds. The Duration note, the Extend note and the `ziv-video` warning then work unchanged. Fit the GPU curve to step 5's tables (the 6.75 GB plateau from M up to XL 10 s, then XL 15 s out of memory at 7.6 GB, on a 10 GB card), plus a few q8 runs. A 12 GB and a 24 GB card are needed to check that it scales.
+- Tests: the estimate for a known header and size; `clip_memory_fit` with a discrete budget returns `tight` / `too_large` around the fitted limit; the model status gives a `discrete` `memory_fit` for CUDA video.
 
 ### 8. Same Z-Image default scheduler
 
@@ -167,6 +227,7 @@ Original plans:
 
 - Look for a public, pinned NF4 or other pre-quantized copy of the same model that transformers loads directly. If one exists, point `prompt_enhancer.model.win32` / `.linux` at it and update `download_size_label`.
 - Otherwise keep the 9 GB repo. It's a one-time download, and the label already tells users. Lowest priority.
+- Re-checked 2026-10-15: no such copy exists yet (see the evidence table). A second option is to save our own NF4 copy with the stored-quant flow and drop the bfloat16 download afterwards. That cuts disk use from 9 GB to about 3 GB and load time, but not the download. It's only worth it if the load-time quantization shows up in timings.
 
 ### 11. Extend a video on CUDA
 
@@ -186,18 +247,42 @@ Spike results (a 10 GB GPU with 32 GB of system memory, torch 2.14, diffusers 0.
 - Memory, `ltx-4` with low memory on and each window as long as the text-to-video limits from step 5 (at the presets of that time): 704×448 +19 s peaked at 6.0 GB of GPU and 21.4 GB of system memory, 960×512 +14 s at 6.1 GB and 22.9 GB, 1408×896 +9 s at 6.8 GB and 22.2 GB. Each came out with the expected frame count. Text to video at the same size and frame count (481, 361 and 241 frames) peaked at 6.2, 6.2 and 8.5 GB of GPU and 21.3, 20.8 and 20.2 GB of system memory (plus 0.7 GB of swap at 1408×896), and took within 5% of the extension's time. Extend never needed more GPU memory, and at most about 2 GB more system memory, which is within run-to-run noise (the peak also counts cached model files). So extend fits wherever the same-length text to video does. `ltx-8` at 704×448 +8 s peaked at 5.2 GB of GPU and 25.3 GB of system memory, in a run that also prepared its q8 copy.
 - The audio carry encodes and decodes back to the source's sound (a 1 kHz test tone comes back as 100% 1 kHz, within 3 dB). Pinning changes the new part's sound at the same seed. A steady synthetic tone is not continued with the pin or without it, so the speech and ambience continuity is judged by ear, not by that metric.
 
+### 12. SeedVR2 plain upscale on CUDA
+
+macOS runs SeedVR2 through mflux ([shipped](archive/image-upscale-seedvr2-mac.md)). diffusers 0.41 has no SeedVR2 pipeline, so CUDA would need a PyTorch implementation of its own:
+
+- **Spike first.** Candidates: ByteDance's reference code (`ByteDance-Seed/SeedVR`, Apache-2.0) with the `ByteDance-Seed/SeedVR2-3B` / `-7B` weights, or numz's ComfyUI node, which already does tiling and block swap on consumer GPUs but is built around ComfyUI. Vendor only the inference path (DiT, VAE, window attention). Measure 2× and 4× of a 1 MP image on a 10 GB GPU at 3B and 7B, with the transformer streamed by `block_streaming` and the VAE tiled.
+- **If it fits:** a `backends/cuda/seedvr2.py` that implements the `SeedVR2Upscaler` Protocol (`core/seedvr2.py`), registered in `_SEEDVR2_UPSCALERS_MAP` for `win32` and `linux`. The tier choice in `config.yaml` (`seedvr2.tiers`) needs CUDA estimates in the `discrete` shape. The stored 8-bit copy goes through `seedvr2_loader.py` like the image models' copies, using `backends/cuda/quant.py`. The Web UI, the X chord and the Models page row need no changes, because they already follow `supports_seedvr2()`.
+- **If 7B doesn't fit a 10 GB GPU,** the tier choice picks 3B there, as it does on smaller Macs.
+- Tests: the Protocol contract with a mocked model, the tier pick against a `discrete` budget, and the registry returning the upscaler on Linux.
+
+### 13. Ideogram 4 on CUDA
+
+diffusers 0.41.0 ships `Ideogram4Pipeline`, and both official repos are already in its layout (see the evidence table). So the "macOS only" limit now comes from our code, not from diffusers.
+
+- **Spike first.** Load `ideogram-ai/ideogram-4-nf4-diffusers` (16 GB, NF4 transformer and Qwen3-VL text encoder) on a 10 GB GPU with model or group offloading and measure 1 MP and 2 MP. Then try the FP8 repo the `ideo` alias already uses, through `load_fp8_components` and block streaming. If it loads as is, both platforms share one repo and the stored quant flow can apply. Check the `unconditional_transformer`: it doubles the transformer weights and may be the first thing that doesn't fit.
+- **Load.** Drop the `RuntimeError` for `ideogram4` in `DiffusersBackend.load_model` and give `model_aliases.ideo` a `win32` / `linux` repo. Ideogram 4's `supports_img2img: false`, `supports_upscale: false` and the dimension limits already apply on every platform. `supports_quantize: false` holds only if CUDA also uses one fixed-precision repo.
+- **First sigma and JSON prompts.** macOS overrides the first denoising step's timestep by wrapping mflux's `Ideogram4Scheduler.make_timesteps` (`backends/mac/image.py`). The diffusers pipeline takes no `sigmas`, so the CUDA side needs the same hook on its scheduler's `set_timesteps`, or `supports_first_sigma` has to become backend-scoped. That's the same per-backend capability question as step 1. JSON prompts are only text, so they should carry over. Check that against the pipeline's prompt handling.
+- **Guidance.** Map our single guidance value to the pipeline's `guidance_schedule` the way mflux does. Compare against the same seed on a Mac.
+- Tests: a mocked `Ideogram4Pipeline` receives the mapped guidance schedule and the first-sigma override, and an `ideo` alias resolves on Linux.
+
 ## Verification
 
 - Unit tests with mocked pipelines for each step, as above. CI runs on macOS only, so the CUDA steps also need a manual run on a Linux or Windows machine with an NVIDIA GPU. Record the GPU, driver, torch and diffusers versions in each PR.
 - Step 1: `klein4b` and `klein9b` with a reference image, `--upscale 2`, and gallery Upscale, unquantized and at q4/q8.
 - Steps 2, 3, 5: `ltx-8` and `ltx-4` t2v and i2v, with and without `--audio`, with `--upscale 2`, at each quantize level, with `--low-memory` on and off. Compare against the same seeds on a Mac for overall look and audio sync, not pixels.
-- Step 7: compare the badge's estimate with the peak VRAM in the job log.
+- Step 7: compare the badge's estimate with the peak VRAM in the job log. For the per-clip check, run one clip just under the limit it predicts and one just over.
+- Step 12: 2× and 4× of the same images as the macOS spike, comparing time, peak VRAM and system memory, and the look against macOS.
+- Step 13: the same prompts and seeds as on a Mac, with and without first sigma and with a JSON prompt, at 1 MP and 2 MP.
+- Still owed from the done steps, on an NVIDIA GPU: audio sync against a Mac (step 2); `--low-memory` off, LoRA and Cancel during the refine stage (step 3); q8 against q4 for quality, and LoRAs on the NF4 transformer (step 5).
 
 ## Docs and changelog
 
 - `CHANGELOG.md` `[Unreleased]`, one line per step as it ships, e.g. "FLUX.2 Klein reference images and upscale now work on Windows and Linux" and "Videos made on Windows and Linux now have sound".
 - `README.md` platform table and `docs/getting-started.md`: drop the Windows/Linux video caveats as they close, and add `ltx-4` and `ltx-8` there.
 - Model guide: the Z-Image scheduler default.
+- Step 7: the "Memory Check" section of `docs/guides/video.md` stops saying macOS only.
+- Steps 12 and 13: `docs/guides/image.md` drops "macOS only" from the plain upscale and Ideogram 4 sections, and the README and `docs/index.md` feature lists lose the Ideogram 4 caveat.
 
 ## Alternatives considered
 
@@ -207,7 +292,10 @@ Spike results (a 10 GB GPU with 32 GB of system memory, torch 2.14, diffusers 0.
 
 ## Open questions
 
-- Which attribute holds the LTX-2 audio sample rate in diffusers 0.41 (step 2).
+- ~~Which attribute holds the LTX-2 audio sample rate in diffusers 0.41 (step 2).~~ Answered (2026-10-14): `pipeline.vocoder.config.output_sampling_rate`.
+- Whether Ideogram 4 on CUDA should use the NF4 diffusers repo or the same FP8 repo as macOS (step 13). This depends on the spike and on whether `supports_quantize: false` stays platform-wide.
+- Which PyTorch SeedVR2 to vendor for step 12: ByteDance's reference code or numz's node.
+- Whether "Upscale an existing video" gets a CUDA step here when [it ships](video-upscale-existing.md) on macOS. The building blocks exist: `LTX2LatentUpsamplePipeline` and step 3's `LTX2Pipeline(latents=, sigmas=)` refine.
 - ~~Whether the configured repo includes the latent upsampler, and whether `LTX2Pipeline` accepts `latents=` plus `sigmas=` for the refine stage (step 3).~~ Answered (2026-10-14): the repo has no upsampler, which is loaded from `Lightricks/LTX-2.3`, and `LTX2Pipeline` accepts both.
 - Whether the per-backend capability override in step 1 is worth adding, or the fix should ship directly.
 - How much quality q4 costs for LTX on CUDA (step 5). Both levels are offered; q4 is the one that fits a 32 GB machine.
