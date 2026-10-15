@@ -64,9 +64,15 @@ def slaney_mel_basis(sample_rate: int, n_fft: int, n_mels: int) -> np.ndarray:
 
 
 def log_mel(waveform: torch.Tensor, *, sample_rate: int, hop_length: int, n_mels: int) -> torch.Tensor:
-    """Return the log-mel spectrogram of a ``(channels, samples)`` waveform, shape ``(1, channels, frames, n_mels)``."""
+    """Return the log-mel spectrogram of a ``(channels, samples)`` waveform, shape ``(1, channels, frames, n_mels)``.
+
+    A waveform too short for the centred reflect padding (half an FFT window or less) is padded with silence first.
+    """
     import torch
 
+    short = _N_FFT // 2 + 1 - waveform.shape[-1]
+    if short > 0:
+        waveform = torch.nn.functional.pad(waveform, (0, short))
     window = torch.hann_window(_N_FFT, periodic=True, device=waveform.device, dtype=torch.float32)
     spectrum = torch.stft(waveform.float(), _N_FFT, hop_length=hop_length, window=window, center=True, pad_mode="reflect", return_complex=True).abs()
     basis = torch.from_numpy(slaney_mel_basis(sample_rate, _N_FFT, n_mels)).to(waveform.device)

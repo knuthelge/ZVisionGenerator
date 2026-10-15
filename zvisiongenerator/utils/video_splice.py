@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import subprocess
@@ -107,12 +108,13 @@ def write_segment_frames(frames: Iterable[np.ndarray], command: list[str]) -> No
     with tempfile.TemporaryFile() as errors:
         with subprocess.Popen(command, stdin=subprocess.PIPE, stderr=errors) as process:
             assert process.stdin is not None
-            try:
+            # A BrokenPipeError means ffmpeg stopped early; its exit code and message say why. Closing stdin can raise it
+            # again while flushing what is buffered, so the close is guarded too.
+            with contextlib.suppress(BrokenPipeError):
                 for frame in frames:
                     process.stdin.write(np.ascontiguousarray(frame, dtype=np.uint8).tobytes())
+            with contextlib.suppress(BrokenPipeError):
                 process.stdin.close()
-            except BrokenPipeError:
-                pass  # ffmpeg stopped early; its exit code and message say why
         if process.returncode != 0:
             errors.seek(0)
             raise tool_error("ffmpeg could not encode the extension segment", errors.read())

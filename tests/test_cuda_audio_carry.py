@@ -31,6 +31,13 @@ class TestLogMel:
         assert got.shape == (1, 2, 51, 64)
         np.testing.assert_allclose(got, _reference_log_mel(waveform), atol=1e-4)
 
+    @pytest.mark.parametrize("samples", [1, 300, 512])
+    def test_a_tail_shorter_than_half_a_window_is_padded_with_silence(self, samples):
+        waveform = torch.full((2, samples), 0.1)
+        got = log_mel(waveform, sample_rate=16000, hop_length=160, n_mels=64)
+        padded = torch.nn.functional.pad(waveform, (0, 513 - samples))
+        assert torch.equal(got, log_mel(padded, sample_rate=16000, hop_length=160, n_mels=64))
+
     def test_slaney_filters_have_unit_area_per_mel_and_cover_the_spectrum(self):
         basis = slaney_mel_basis(16000, 1024, 64)
         assert basis.shape == (64, 513)

@@ -417,6 +417,43 @@ def test_write_segment_frames_reports_an_ffmpeg_failure(tmp_path):
         write_segment_frames(numbered_frames(8, 128, 64), command)
 
 
+class _DeadPipe:
+    """An ffmpeg stdin whose reader is gone: writing fails, and so does the flush of the first close (which still closes it)."""
+
+    def __init__(self):
+        self.closed = False
+
+    def write(self, _data):
+        raise BrokenPipeError
+
+    def close(self):
+        if not self.closed:
+            self.closed = True
+            raise BrokenPipeError
+
+
+class _StoppedFfmpeg:
+    """A Popen stand-in for an ffmpeg that wrote an error and exited with 1 before reading its input."""
+
+    def __init__(self, command, *, stdin, stderr):
+        stderr.write(b"Invalid argument: colour tag\n")
+        self.stdin = _DeadPipe()
+        self.returncode = 1
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self.stdin.close()  # as Popen.__exit__ does, without catching what the flush raises
+        return False
+
+
+def test_write_segment_frames_reports_ffmpegs_error_when_its_pipe_breaks(monkeypatch):
+    monkeypatch.setattr(video_splice.subprocess, "Popen", _StoppedFfmpeg)
+    with pytest.raises(RuntimeError, match="extension segment.*colour tag"):
+        write_segment_frames(numbered_frames(8, 128, 64), ["ffmpeg"])
+
+
 def _packet_hashes(path: Path, *, decoded: bool = False) -> list[str]:
     """Return a hash per video packet, or per decoded frame."""
     codec = [] if decoded else ["-c", "copy"]
