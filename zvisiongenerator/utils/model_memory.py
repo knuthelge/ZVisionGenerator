@@ -236,7 +236,7 @@ def estimate_cuda_image_memory(model_dir: Path, quantize_levels: tuple[int | Non
     components = _image_components(model_dir)
     if components is None:
         return None
-    # Mirrors _Q4_CPU_OFFLOAD_FAMILIES in backends/image_win.py.
+    # Mirrors _Q4_CPU_OFFLOAD_FAMILIES in backends/cuda/image/backend.py.
     text_encoder_offloaded = is_krea2_model(model_dir)
     stored_bits = stored_quant_bits(model_dir)
     return {level: _cuda_level_estimate(components, stored_bits or level, text_encoder_offloaded) for level in quantize_levels}

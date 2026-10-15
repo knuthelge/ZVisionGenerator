@@ -72,8 +72,8 @@ The CLI and the Web server snap frame counts to `8k + 1` before they reach the b
 | Request | `core/video_types.VideoGenerationRequest` | `image_path: str \| None` |
 | Backend protocol | `core/video_backend.py` | `image_to_video(model, image_path: str, ...)` |
 | Stage | `workflows/video_stages.image_to_video_stage` | Passes `request.image_path`, and raises if it's `None` |
-| macOS backend | `backends/video_mac.py` | `_generate` → `_generate_one_stage` (one `ImageConditioningInput` at 0) or `_generate_two_stage` (`image=image_path`) |
-| CUDA backend | `backends/video_diffusers.py` | `load_model(mode="i2v")` loads `LTX2ImageToVideoPipeline`. `image_to_video` opens the image and passes `image=` |
+| macOS backend | `backends/mac/video.py` | `_generate` → `_generate_one_stage` (one `ImageConditioningInput` at 0) or `_generate_two_stage` (`image=image_path`) |
+| CUDA backend | `backends/cuda/video/backend.py` | `load_model(mode="i2v")` loads `LTX2ImageToVideoPipeline`. `image_to_video` opens the image and passes `image=` |
 | Web server | `web/server.py` | `_submit_video_job` builds an `argparse.Namespace` for `run_video_batch`. `_resolve_reference_image` reads `image_file` (upload) or `image_path`. `_submitted_settings` and `_public_job_context` only know `image_path`. `_optional_path` rejects a path that no longer exists |
 | Web runner | `web/web_runner.py` | `mode="i2v" if request.image_path` |
 | Workflow contract | `web/workspace_contract.py` | `visible_controls` holds control ids (`reference_image`, `reference_image_path`, `reference_image_clear` for `img2vid`). `clear_fields` holds form fields, which the frontend maps to draft state |

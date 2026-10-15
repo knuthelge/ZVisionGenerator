@@ -6,7 +6,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from zvisiongenerator.backends.token_chunking import chunk_tokens  # noqa: E402
+from zvisiongenerator.backends.cuda.video.token_chunking import chunk_tokens  # noqa: E402
 
 
 class _CountingFeedForward(torch.nn.Module):

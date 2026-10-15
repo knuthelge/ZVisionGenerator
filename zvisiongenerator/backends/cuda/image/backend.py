@@ -12,12 +12,12 @@ import torch
 from PIL import Image
 from diffusers import AutoPipelineForText2Image
 
-from zvisiongenerator.backends.block_streaming import group_offload
-from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
-from zvisiongenerator.backends.image_win_preview import LivePreview, create_live_preview
-from zvisiongenerator.backends.lora_peft import is_unmatched_adapter_error, restore_cpu_offload, warn_unmatched_lora
-from zvisiongenerator.backends.memory_cuda import configure_allocator
-from zvisiongenerator.backends.image_win_quant import load_fp8_components, load_nf4_components, write_fp8_copy
+from zvisiongenerator.backends.cuda.block_streaming import group_offload
+from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
+from zvisiongenerator.backends.cuda.image.preview import LivePreview, create_live_preview
+from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, restore_cpu_offload, warn_unmatched_lora
+from zvisiongenerator.backends.cuda.memory import configure_allocator
+from zvisiongenerator.backends.cuda.quant import load_fp8_components, load_nf4_components, write_fp8_copy
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.stored_quant import STORED_QUANT_BITS, stored_quant_bits
 
@@ -122,7 +122,7 @@ def _load_loras(pipeline: Any, lora_paths: list[str], lora_weights: list[float] 
     """
     from safetensors.torch import load_file
 
-    from zvisiongenerator.backends.image_win_lokr import apply_lokr, split_lora_tensors
+    from zvisiongenerator.backends.cuda.image.lokr import apply_lokr, split_lora_tensors
 
     weights = lora_weights if lora_weights is not None else [1.0] * len(lora_paths)
     lokr_files: list[tuple[str, Any, float]] = []
@@ -150,7 +150,7 @@ def _has_lokr(path: str) -> bool:
         return False
     from safetensors import safe_open
 
-    from zvisiongenerator.backends.image_win_lokr import has_lokr_tensors
+    from zvisiongenerator.backends.cuda.image.lokr import has_lokr_tensors
 
     with safe_open(path, framework="pt") as handle:
         return has_lokr_tensors(handle.keys())
@@ -171,7 +171,7 @@ def _load_lora_file(pipeline: Any, path: str, parts: Any, adapter_name: str) -> 
     """
     from safetensors.torch import load_file
 
-    from zvisiongenerator.backends.image_win_lokr import split_lora_tensors
+    from zvisiongenerator.backends.cuda.image.lokr import split_lora_tensors
 
     try:
         pipeline.load_lora_weights(path if parts is None else parts.rest, adapter_name=adapter_name)

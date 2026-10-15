@@ -18,7 +18,7 @@ import pytest
 
 from tests.conftest import _make_video_args
 from zvisiongenerator.core.types import StageOutcome
-from zvisiongenerator.backends.video_mac import LtxVideoBackend, _drop_leading_frames, _generation_scope, _LOW_RAM_THRESHOLD_BYTES, _LtxModel, _TwoStageProgress, _use_low_ram_streaming
+from zvisiongenerator.backends.mac.video import LtxVideoBackend, _drop_leading_frames, _generation_scope, _LOW_RAM_THRESHOLD_BYTES, _LtxModel, _TwoStageProgress, _use_low_ram_streaming
 from zvisiongenerator.core.video_types import ExtendSegment, VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_cli import _build_video_parser, _resolve_upscale_steps
@@ -531,12 +531,12 @@ class TestLoadModel:
         distilled.return_value = SimpleNamespace(kind="distilled")
         monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", MagicMock(BasePipeline=base, DistilledPipeline=distilled))
         # A large Mac: no streaming, and the real MLX cache limit is never touched.
-        monkeypatch.setattr("zvisiongenerator.backends.video_mac.memory_size_bytes", lambda: 64 * 1024**3)
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.memory_size_bytes", lambda: 64 * 1024**3)
         return SimpleNamespace(base=base, distilled=distilled)
 
     @pytest.mark.parametrize("mode", ["t2v", "i2v"])
     def test_without_upscale_builds_base_pipeline_for_either_mode(self, classes, mode):
-        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
             handle, info = LtxVideoBackend().load_model("model/path", mode=mode)
 
         classes.base.assert_called_once_with(model_dir="model/path", low_memory=True, low_ram_streaming=False)
@@ -545,7 +545,7 @@ class TestLoadModel:
         assert handle.upscale is False
 
     def test_upscale_builds_distilled_pipeline(self, classes):
-        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
             handle, _ = LtxVideoBackend().load_model("model/path", mode="i2v", upscale=True, low_memory=False)
 
         classes.distilled.assert_called_once_with(model_dir="model/path", low_memory=False, low_ram_streaming=False)
@@ -556,13 +556,13 @@ class TestLoadModel:
     @pytest.mark.parametrize("upscale", [False, True])
     def test_loras_are_set_before_load(self, classes, upscale):
         loras = [("lora.safetensors", 0.7)]
-        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
             handle, _ = LtxVideoBackend().load_model("model/path", upscale=upscale, loras=loras)
 
         assert handle.pipeline._pending_loras == loras
 
     def test_no_loras_leaves_pending_loras_unset(self, classes):
-        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
             handle, _ = LtxVideoBackend().load_model("model/path")
 
         assert not hasattr(handle.pipeline, "_pending_loras")
@@ -570,7 +570,7 @@ class TestLoadModel:
     @pytest.mark.parametrize("default_fps", [24, 30])
     def test_frame_rate_is_the_detected_default_fps(self, classes, default_fps):
         info = _model_info(default_fps)
-        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=info):
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=info):
             handle, returned_info = LtxVideoBackend().load_model("model/path")
 
         assert handle.frame_rate == float(default_fps)
@@ -589,9 +589,9 @@ class TestLoadModel:
         ],
     )
     def test_low_ram_streaming_reaches_the_constructor_and_the_handle(self, classes, monkeypatch, upscale, memory_bytes, low_memory, expected):
-        monkeypatch.setattr("zvisiongenerator.backends.video_mac.memory_size_bytes", lambda: memory_bytes)
-        monkeypatch.setattr("zvisiongenerator.backends.video_mac.mlx_cache_limit", MagicMock())
-        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.memory_size_bytes", lambda: memory_bytes)
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.mlx_cache_limit", MagicMock())
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
             handle, _ = LtxVideoBackend().load_model("model/path", upscale=upscale, low_memory=low_memory)
 
         ctor = classes.distilled if upscale else classes.base
@@ -604,9 +604,9 @@ class TestLoadModel:
         scope.return_value.__enter__.side_effect = lambda: events.append("enter")
         scope.return_value.__exit__.side_effect = lambda *a: events.append("exit")
         classes.base.side_effect = lambda **_: events.append("construct") or SimpleNamespace()
-        monkeypatch.setattr("zvisiongenerator.backends.video_mac.memory_size_bytes", lambda: _LOW_RAM_THRESHOLD_BYTES)
-        monkeypatch.setattr("zvisiongenerator.backends.video_mac.mlx_cache_limit", scope)
-        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.memory_size_bytes", lambda: _LOW_RAM_THRESHOLD_BYTES)
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.mlx_cache_limit", scope)
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
             LtxVideoBackend().load_model("model/path")
 
         scope.assert_called_once_with(0)
@@ -614,15 +614,15 @@ class TestLoadModel:
 
     def test_non_streaming_construction_leaves_the_cache_limit_alone(self, classes, monkeypatch):
         scope = MagicMock()
-        monkeypatch.setattr("zvisiongenerator.backends.video_mac.mlx_cache_limit", scope)
-        with patch("zvisiongenerator.backends.video_mac.detect_video_model", return_value=_model_info()):
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.mlx_cache_limit", scope)
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
             LtxVideoBackend().load_model("model/path")
 
         scope.assert_not_called()
 
     def test_missing_package_raises_runtime_error(self, monkeypatch):
         monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", None)  # makes the import raise ImportError
-        monkeypatch.setattr("zvisiongenerator.backends.video_mac.memory_size_bytes", lambda: 64 * 1024**3)  # MLX is absent off macOS
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.memory_size_bytes", lambda: 64 * 1024**3)  # MLX is absent off macOS
 
         with pytest.raises(RuntimeError, match="ltx-pipelines-mlx"):
             LtxVideoBackend().load_model("model/path")
@@ -1076,8 +1076,8 @@ def ext(ltx, monkeypatch, tmp_path):
     ltx.patchifiers.compute_video_latent_shape.return_value = _WINDOW_LATENT_SHAPE
     ltx.tail = MagicMock(side_effect=lambda source: np.zeros((_CARRY, source.height, source.width, 3), np.uint8))
     ltx.wav = MagicMock()
-    monkeypatch.setattr("zvisiongenerator.backends.video_mac.read_source_tail", ltx.tail)
-    monkeypatch.setattr("zvisiongenerator.backends.video_mac.write_pcm16_wav", ltx.wav)
+    monkeypatch.setattr("zvisiongenerator.backends.mac.video.read_source_tail", ltx.tail)
+    monkeypatch.setattr("zvisiongenerator.backends.mac.video.write_pcm16_wav", ltx.wav)
     ltx.segment_dir = tmp_path
     ltx.chunks = _chunks([16, 16, 16, 16, 9])
     ltx.waveform = _FakeWaveform(np.zeros((2, 146000), np.float32))

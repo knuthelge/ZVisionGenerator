@@ -23,7 +23,7 @@ def mx():
 
 @pytest.fixture()
 def preview_module(mx):
-    import zvisiongenerator.backends.image_mac_preview as module
+    import zvisiongenerator.backends.mac.image_preview as module
 
     return module
 
@@ -95,7 +95,7 @@ class TestRenderLatentPreview:
 class TestProgressCheckerPreviews:
     @pytest.fixture()
     def image_mac(self, mx):
-        import zvisiongenerator.backends.image_mac as module
+        import zvisiongenerator.backends.mac.image as module
 
         return module
 

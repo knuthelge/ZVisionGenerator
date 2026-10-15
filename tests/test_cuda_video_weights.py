@@ -14,7 +14,7 @@ from diffusers.configuration_utils import ConfigMixin, register_to_config  # noq
 from diffusers.models.modeling_utils import ModelMixin  # noqa: E402
 from safetensors.torch import save_file  # noqa: E402
 
-from zvisiongenerator.backends import ltx_cuda_weights as weights  # noqa: E402
+from zvisiongenerator.backends.cuda.video import weights  # noqa: E402
 from zvisiongenerator.utils.stored_quant import MANIFEST_NAME  # noqa: E402
 
 _PREFIX = "model.diffusion_model."

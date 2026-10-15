@@ -9,9 +9,9 @@ When a Web UI job uses a model that isn't downloaded yet, the job card says "Loa
 Nothing reports progress today because the download is a side effect of loading the model, inside a library:
 
 - **Image on macOS:** mflux's `PathResolution` calls `snapshot_download(repo_id, allow_patterns=…)` when no complete cached snapshot matches the weight definition's patterns.
-- **Image on CUDA:** diffusers `from_pretrained` (`backends/image_win.py:97`, `image_win_quant.py:136`) and our own `snapshot_download` of single components (`image_win_quant.py:166`).
+- **Image on CUDA:** diffusers `from_pretrained` (`backends/cuda/image/backend.py:97`, `image_win_quant.py:136`) and our own `snapshot_download` of single components (`image_win_quant.py:166`).
 - **Video on macOS:** the vendored LTX pipeline calls `snapshot_download(model_dir)` with no patterns (`packages/ltx_pipelines_mlx/ti2vid_one_stage.py:78`). The Gemma text encoder is a second repo (`utils/model_files.ltx_mlx_text_encoder_repo`).
-- **Video on CUDA:** diffusers `from_pretrained` (`backends/video_diffusers.py:184`).
+- **Video on CUDA:** diffusers `from_pretrained` (`backends/cuda/video/backend.py:184`).
 
 None of these calls back into our code. Web workers also set `HF_HUB_DISABLE_PROGRESS_BARS` and `TQDM_DISABLE` (`web/web_runner.worker_runtime_context`), so even the server terminal shows nothing.
 

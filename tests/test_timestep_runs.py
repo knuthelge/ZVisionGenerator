@@ -11,7 +11,7 @@ pytest.importorskip("diffusers")
 
 from diffusers import LTX2VideoTransformer3DModel  # noqa: E402
 
-from zvisiongenerator.backends.timestep_runs import modulate_by_runs, token_runs  # noqa: E402
+from zvisiongenerator.backends.cuda.video.timestep_runs import modulate_by_runs, token_runs  # noqa: E402
 
 _FRAMES, _HEIGHT, _WIDTH = 3, 2, 2
 _TOKENS = _FRAMES * _HEIGHT * _WIDTH

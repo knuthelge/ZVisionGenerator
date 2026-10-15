@@ -10,7 +10,7 @@ np = pytest.importorskip("numpy")
 
 from PIL import Image  # noqa: E402
 
-from zvisiongenerator.backends.video_encode import VIDEO_CRF, encode_video  # noqa: E402
+from zvisiongenerator.backends.cuda.video.encode import VIDEO_CRF, encode_video  # noqa: E402
 
 
 def _frames(count=5, size=(64, 48)):

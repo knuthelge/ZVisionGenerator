@@ -12,8 +12,8 @@ from unittest.mock import MagicMock
 from PIL import Image
 import pytest
 
-import zvisiongenerator.backends.video_diffusers as video_diffusers_module
-from zvisiongenerator.backends.video_diffusers import (
+import zvisiongenerator.backends.cuda.video.backend as video_diffusers_module
+from zvisiongenerator.backends.cuda.video.backend import (
     _DISTILLED_GUIDANCE,
     DiffusersVideoBackend,
     _build_generation_kwargs,
@@ -30,12 +30,12 @@ from zvisiongenerator.backends.video_diffusers import (
 )
 
 # The originals, which the fake_weights fixture replaces on the module.
-from zvisiongenerator.backends.video_diffusers import _check_system_memory as real_check_system_memory
-from zvisiongenerator.backends.video_diffusers import _download_hub_file as real_download_hub_file
-from zvisiongenerator.backends.video_diffusers import _encode_prompt as real_encode_prompt
-from zvisiongenerator.backends.video_diffusers import _place_components as real_place_components
-from zvisiongenerator.backends.video_diffusers import _prepared_weights as real_prepared_weights
-from zvisiongenerator.backends.video_diffusers import _place_transformer as real_place_transformer
+from zvisiongenerator.backends.cuda.video.backend import _check_system_memory as real_check_system_memory
+from zvisiongenerator.backends.cuda.video.backend import _download_hub_file as real_download_hub_file
+from zvisiongenerator.backends.cuda.video.backend import _encode_prompt as real_encode_prompt
+from zvisiongenerator.backends.cuda.video.backend import _place_components as real_place_components
+from zvisiongenerator.backends.cuda.video.backend import _prepared_weights as real_prepared_weights
+from zvisiongenerator.backends.cuda.video.backend import _place_transformer as real_place_transformer
 
 _DISTILLED_SIGMAS = (1.0, 0.99375, 0.9875, 0.98125, 0.975, 0.909375, 0.725, 0.421875)
 _STAGE2_SIGMAS = (0.909375, 0.725, 0.421875)
@@ -368,14 +368,14 @@ def fake_weights(monkeypatch):
     monkeypatch.setattr(video_diffusers_module, "_load_connectors", lambda repo_dir, dtype: "connectors")
     monkeypatch.setattr(video_diffusers_module, "_place_components", lambda pipeline, torch, *, low_memory: calls.placements.append(("components", low_memory)))
     monkeypatch.setattr(video_diffusers_module, "_place_transformer", lambda transformer, torch, *, quantize, low_memory: calls.placements.append((quantize, low_memory)))
-    monkeypatch.setattr("zvisiongenerator.backends.ltx_cuda_weights.load_transformer", _load_transformer)
-    monkeypatch.setattr("zvisiongenerator.backends.ltx_cuda_weights.load_text_encoder", _load_text_encoder)
-    monkeypatch.setattr("zvisiongenerator.backends.block_streaming.group_offload", lambda module, device, kind=None: calls.offloaded.append(module))
-    monkeypatch.setattr("zvisiongenerator.backends.memory_cuda.release_memory", _release)
-    monkeypatch.setattr("zvisiongenerator.backends.streaming_decode.decode_frames", lambda vae, latents: vae.decoded_latents.append(latents) or list(vae.decoded_frames))
-    monkeypatch.setattr("zvisiongenerator.backends.block_streaming.load_when_used", lambda component, entry_points, device: calls.lazy.append((component, list(entry_points))))
-    monkeypatch.setattr("zvisiongenerator.backends.block_streaming.unload_before", lambda module, components: calls.unload_before.append((module, list(components))))
-    monkeypatch.setattr("zvisiongenerator.backends.timestep_runs.modulate_by_runs", lambda transformer: calls.run_wise.append(transformer))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.weights.load_transformer", _load_transformer)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.weights.load_text_encoder", _load_text_encoder)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.block_streaming.group_offload", lambda module, device, kind=None: calls.offloaded.append(module))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.memory.release_memory", _release)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.streaming_decode.decode_frames", lambda vae, latents: vae.decoded_latents.append(latents) or list(vae.decoded_frames))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.block_streaming.load_when_used", lambda component, entry_points, device: calls.lazy.append((component, list(entry_points))))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.block_streaming.unload_before", lambda module, components: calls.unload_before.append((module, list(components))))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.timestep_runs.modulate_by_runs", lambda transformer: calls.run_wise.append(transformer))
     return calls
 
 
@@ -416,7 +416,7 @@ _UPSAMPLER_STATE = {"initial_conv.weight": "tensor"}
 
 
 def _patch_runtime(monkeypatch, runtime):
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies", lambda: runtime)
 
 
 def _patch_upsampler_io(monkeypatch, events: list[str] | None = None):
@@ -434,8 +434,8 @@ def _patch_upsampler_io(monkeypatch, events: list[str] | None = None):
         assert path == "/fake/upsampler.safetensors"
         return dict(_UPSAMPLER_STATE)
 
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._resolve_upsampler_weights", _download)
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._read_state_dict", _read)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._resolve_upsampler_weights", _download)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._read_state_dict", _read)
     return downloads
 
 
@@ -449,7 +449,7 @@ def _load_upscale_model(monkeypatch, *, low_memory, mode="t2v", runtime=None):
 def test_load_model_rejects_missing_cuda(monkeypatch):
     backend = DiffusersVideoBackend()
     monkeypatch.setattr(
-        "zvisiongenerator.backends.video_diffusers._load_runtime_dependencies",
+        "zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies",
         lambda: _make_runtime(torch=_FakeTorch(cuda_available=False)),
     )
 
@@ -459,11 +459,11 @@ def test_load_model_rejects_missing_cuda(monkeypatch):
 
 @pytest.mark.parametrize(("cuda_version", "expects_hint"), [("13.0", True), ("12.6", False), (None, False)])
 def test_missing_cuda_error_asks_for_a_driver_update_only_for_cuda_13_builds(monkeypatch, cuda_version, expects_hint):
-    from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
+    from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
 
     backend = DiffusersVideoBackend()
     monkeypatch.setattr(
-        "zvisiongenerator.backends.video_diffusers._load_runtime_dependencies",
+        "zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies",
         lambda: _make_runtime(torch=_FakeTorch(cuda_available=False, cuda_version=cuda_version)),
     )
 
@@ -476,7 +476,7 @@ def test_missing_cuda_error_asks_for_a_driver_update_only_for_cuda_13_builds(mon
 def test_load_model_prefers_runtime_classes_and_configures_pipeline(monkeypatch):
     backend = DiffusersVideoBackend()
     runtime = _make_runtime()
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies", lambda: runtime)
     _patch_upsampler_io(monkeypatch)
 
     model, model_info = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v", low_memory=True, upscale=True, latent_upsampler=_UPSAMPLER_SOURCE)
@@ -532,10 +532,10 @@ class TestPreparedCopiesLiveWithTheAlias:
             return _writer
 
         monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path)
-        monkeypatch.setattr("zvisiongenerator.backends.ltx_cuda_weights.write_transformer", _write("transformer"))
-        monkeypatch.setattr("zvisiongenerator.backends.ltx_cuda_weights.write_text_encoder", _write("text_encoder"))
-        monkeypatch.setattr("zvisiongenerator.backends.ltx_cuda_weights.transformer_sources", lambda source: [source])
-        monkeypatch.setattr("zvisiongenerator.backends.ltx_cuda_weights.text_encoder_sources", lambda repo: [repo / "te.safetensors"])
+        monkeypatch.setattr("zvisiongenerator.backends.cuda.video.weights.write_transformer", _write("transformer"))
+        monkeypatch.setattr("zvisiongenerator.backends.cuda.video.weights.write_text_encoder", _write("text_encoder"))
+        monkeypatch.setattr("zvisiongenerator.backends.cuda.video.weights.transformer_sources", lambda source: [source])
+        monkeypatch.setattr("zvisiongenerator.backends.cuda.video.weights.text_encoder_sources", lambda repo: [repo / "te.safetensors"])
         monkeypatch.setattr(video_diffusers_module, "_transformer_config", lambda repo_dir: {})
         return real_prepared_weights(name, "org/repo", tmp_path, tmp_path / "ckpt.safetensors", bits, "cuda")
 
@@ -654,9 +654,9 @@ def _placement_pipeline():
 
 def _record_streaming(monkeypatch):
     streamed: list[tuple[str, object, object]] = []
-    monkeypatch.setattr("zvisiongenerator.backends.block_streaming.group_offload", lambda module, device, kind=None: streamed.append(("group", module, kind)))
-    monkeypatch.setattr("zvisiongenerator.backends.block_streaming.stream_blocks", lambda blocks, device: streamed.append(("blocks", blocks, None)))
-    monkeypatch.setattr("zvisiongenerator.backends.block_streaming.move_outside", lambda model, blocks, device: streamed.append(("outside", model, None)))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.block_streaming.group_offload", lambda module, device, kind=None: streamed.append(("group", module, kind)))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.block_streaming.stream_blocks", lambda blocks, device: streamed.append(("blocks", blocks, None)))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.block_streaming.move_outside", lambda model, blocks, device: streamed.append(("outside", model, None)))
     return streamed
 
 
@@ -732,7 +732,7 @@ def test_every_block_feed_forward_and_rms_norm_is_chunked(monkeypatch, fake_weig
     torch = pytest.importorskip("torch")
     normalization = pytest.importorskip("diffusers.models.normalization")
     chunked: list[tuple[list[object], int]] = []
-    monkeypatch.setattr("zvisiongenerator.backends.token_chunking.chunk_tokens", lambda modules, size: chunked.append((list(modules), size)))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.token_chunking.chunk_tokens", lambda modules, size: chunked.append((list(modules), size)))
 
     class _Block(torch.nn.Module):
         def __init__(self):
@@ -746,7 +746,7 @@ def test_every_block_feed_forward_and_rms_norm_is_chunked(monkeypatch, fake_weig
 
     transformer = torch.nn.Module()
     transformer.transformer_blocks = torch.nn.ModuleList([_Block()])
-    monkeypatch.setattr("zvisiongenerator.backends.ltx_cuda_weights.load_transformer", lambda config, **_: transformer)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.weights.load_transformer", lambda config, **_: transformer)
     _patch_runtime(monkeypatch, _make_runtime())
 
     DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v")
@@ -850,9 +850,9 @@ def test_two_stage_upscale_encodes_the_prompt_once_for_both_stages(monkeypatch, 
 
 def _patch_memory(monkeypatch, *, total_gib, block_matrices=10 * 1024**3, rest=0, connectors=0, text_encoder=0):
     monkeypatch.setattr("psutil.virtual_memory", lambda: SimpleNamespace(total=total_gib * 1024**3))
-    monkeypatch.setattr("zvisiongenerator.backends.ltx_cuda_weights.transformer_elements", lambda source: (block_matrices, rest))
-    monkeypatch.setattr("zvisiongenerator.backends.ltx_cuda_weights.component_elements", lambda path: connectors)
-    monkeypatch.setattr("zvisiongenerator.backends.ltx_cuda_weights.text_encoder_bytes", lambda path: text_encoder)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.weights.transformer_elements", lambda source: (block_matrices, rest))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.weights.component_elements", lambda path: connectors)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.weights.text_encoder_bytes", lambda path: text_encoder)
 
 
 def test_a_load_larger_than_system_memory_is_refused_and_names_the_smaller_level(monkeypatch):
@@ -880,7 +880,7 @@ def test_the_check_says_whether_text_encoder_and_transformer_fit_together(monkey
 def test_text_to_video_exports_path_and_reports_progress(monkeypatch, tmp_path):
     backend = DiffusersVideoBackend()
     runtime = _make_runtime()
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies", lambda: runtime)
     model, _ = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v", low_memory=False)
     events: list[dict[str, object]] = []
     output_path = tmp_path / "video.mp4"
@@ -918,7 +918,7 @@ def test_text_to_video_exports_path_and_reports_progress(monkeypatch, tmp_path):
 
 def _run_text_to_video(monkeypatch, tmp_path, *, steps, step_callback=None):
     runtime = _make_runtime()
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies", lambda: runtime)
     backend = DiffusersVideoBackend()
     model, _ = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v", low_memory=False)
     backend.text_to_video(
@@ -1011,7 +1011,7 @@ def test_build_generation_kwargs_keeps_input_kwargs() -> None:
 def test_image_to_video_uses_loaded_image(monkeypatch, tmp_path):
     backend = DiffusersVideoBackend()
     runtime = _make_runtime()
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies", lambda: runtime)
     model, _ = backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="i2v", low_memory=False)
     input_path = tmp_path / "input.png"
     Image.new("RGB", (8, 8), "blue").save(input_path)
@@ -1386,7 +1386,7 @@ def test_failed_upsampler_download_stops_before_the_pipeline_loads(monkeypatch):
     def _fail(repo_id, filename):
         raise RuntimeError(f"Failed to download the LTX latent upsampler '{filename}' from '{repo_id}': offline")
 
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._resolve_upsampler_weights", _fail)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._resolve_upsampler_weights", _fail)
 
     with pytest.raises(RuntimeError, match="latent upsampler"):
         DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v", upscale=True, latent_upsampler=_UPSAMPLER_SOURCE)
@@ -1515,7 +1515,7 @@ def test_read_state_dict_loads_the_safetensors_file(monkeypatch):
 def test_load_model_applies_lora_weights(monkeypatch, tmp_path):
     backend = DiffusersVideoBackend()
     runtime = _make_runtime()
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies", lambda: runtime)
     lora_path = tmp_path / "style.safetensors"
     lora_path.write_text("weights", encoding="utf-8")
 
@@ -1550,7 +1550,7 @@ def test_a_lora_matching_no_layer_is_skipped_with_a_warning(monkeypatch, tmp_pat
     first, second = _write_loras(tmp_path, "other-model.safetensors", "style.safetensors")
     _LoraNoMatchPipeline.unmatched = (first,)
     _LoraNoMatchPipeline.error = fake_peft_no_match
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: _make_runtime(text_pipeline=_LoraNoMatchPipeline))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies", lambda: _make_runtime(text_pipeline=_LoraNoMatchPipeline))
 
     with pytest.warns(UserWarning, match="other-model.safetensors: none of its LoRA tensors match"):
         model, _ = DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v", loras=[(first, 1.0), (second, 0.5)])
@@ -1564,7 +1564,7 @@ def test_loading_loras_never_turns_on_model_cpu_offload(monkeypatch, tmp_path, f
     (path,) = _write_loras(tmp_path, "other-model.safetensors")
     _LoraNoMatchPipeline.unmatched = (path,)
     _LoraNoMatchPipeline.error = fake_peft_no_match
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: _make_runtime(text_pipeline=_LoraNoMatchPipeline))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies", lambda: _make_runtime(text_pipeline=_LoraNoMatchPipeline))
 
     with pytest.warns(UserWarning):
         model, _ = DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v", low_memory=low_memory, loras=[(path, 1.0)])
@@ -1577,7 +1577,7 @@ def test_other_lora_load_errors_still_fail_the_load(monkeypatch, tmp_path, fake_
     (path,) = _write_loras(tmp_path, "bad.safetensors")
     _LoraNoMatchPipeline.unmatched = (path,)
     _LoraNoMatchPipeline.error = ValueError
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: _make_runtime(text_pipeline=_LoraNoMatchPipeline))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies", lambda: _make_runtime(text_pipeline=_LoraNoMatchPipeline))
 
     with pytest.raises(RuntimeError, match="Failed to load LoRA"):
         DiffusersVideoBackend().load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v", loras=[(path, 1.0)])
@@ -1586,7 +1586,7 @@ def test_other_lora_load_errors_still_fail_the_load(monkeypatch, tmp_path, fake_
 def test_load_model_rejects_missing_or_unsupported_lora(monkeypatch, tmp_path):
     backend = DiffusersVideoBackend()
     runtime = _make_runtime()
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies", lambda: runtime)
 
     with pytest.raises(FileNotFoundError, match="missing.safetensors"):
         backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v", loras=[(str(tmp_path / "missing.safetensors"), 1.0)])
@@ -1600,7 +1600,7 @@ def test_load_model_rejects_missing_or_unsupported_lora(monkeypatch, tmp_path):
 def test_load_model_rejects_lora_scales_when_adapter_api_cannot_apply_them(monkeypatch, tmp_path):
     backend = DiffusersVideoBackend()
     runtime = _make_runtime(text_pipeline=_NoScalePipeline)
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies", lambda: runtime)
     lora_path = tmp_path / "style.safetensors"
     lora_path.write_text("weights", encoding="utf-8")
 
@@ -1640,9 +1640,9 @@ def test_configure_torch_runtime_preserves_existing_cuda_alloc_conf(monkeypatch)
 def test_load_model_does_not_validate_diffusers_version_twice(monkeypatch):
     backend = DiffusersVideoBackend()
     runtime = _make_runtime(version="0.36.0")
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._load_runtime_dependencies", lambda: runtime)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._load_runtime_dependencies", lambda: runtime)
     validator = MagicMock(side_effect=AssertionError("duplicate validation"))
-    monkeypatch.setattr("zvisiongenerator.backends.video_diffusers._validate_diffusers_version", validator)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.backend._validate_diffusers_version", validator)
 
     backend.load_model("diffusers/LTX-2.3-Distilled-Diffusers", quantize=4, mode="t2v")
 

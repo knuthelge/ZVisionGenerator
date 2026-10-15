@@ -135,7 +135,7 @@ class TestBackendRegistryLookup:
     @pytest.mark.parametrize("platform", ["win32", "linux"])
     def test_cuda_memory_budget_is_vram_plus_system_memory(self, monkeypatch, platform):
         import zvisiongenerator.backends as backends
-        from zvisiongenerator.backends import memory_cuda
+        from zvisiongenerator.backends.cuda import memory as memory_cuda
         from zvisiongenerator.utils.model_memory import MemoryBudget
 
         monkeypatch.setattr(backends.sys, "platform", platform)
@@ -145,7 +145,7 @@ class TestBackendRegistryLookup:
 
     def test_mac_memory_budget_is_the_recommended_working_set_with_the_unified_memory(self, monkeypatch):
         import zvisiongenerator.backends as backends
-        from zvisiongenerator.backends import memory_mac
+        from zvisiongenerator.backends.mac import memory as memory_mac
         from zvisiongenerator.utils.model_memory import MemoryBudget
 
         monkeypatch.setattr(backends.sys, "platform", "darwin")
@@ -156,7 +156,7 @@ class TestBackendRegistryLookup:
 
     def test_mac_without_a_working_set_size_has_no_budget(self, monkeypatch):
         import zvisiongenerator.backends as backends
-        from zvisiongenerator.backends import memory_mac
+        from zvisiongenerator.backends.mac import memory as memory_mac
 
         monkeypatch.setattr(backends.sys, "platform", "darwin")
         monkeypatch.setattr(memory_mac, "memory_budget_bytes", lambda: None)
@@ -167,7 +167,7 @@ class TestBackendRegistryLookup:
     @pytest.mark.parametrize("platform", ["win32", "linux"])
     def test_cuda_platforms_release_finished_models(self, monkeypatch, platform):
         import zvisiongenerator.backends as backends
-        from zvisiongenerator.backends import memory_cuda
+        from zvisiongenerator.backends.cuda import memory as memory_cuda
 
         released: list[bool] = []
         monkeypatch.setattr(backends.sys, "platform", platform)
@@ -181,7 +181,7 @@ class TestBackendRegistryLookup:
         import shutil
         import subprocess
 
-        from zvisiongenerator.backends import memory_cuda
+        from zvisiongenerator.backends.cuda import memory as memory_cuda
 
         psutil_mod = MagicMock()
         psutil_mod.virtual_memory.return_value.total = 30
@@ -195,7 +195,7 @@ class TestBackendRegistryLookup:
     def test_drop_cached_files_syncs_and_drops_every_file(self, monkeypatch, tmp_path):
         import os
 
-        from zvisiongenerator.backends import memory_cuda
+        from zvisiongenerator.backends.cuda import memory as memory_cuda
 
         (tmp_path / "transformer").mkdir()
         (tmp_path / "transformer" / "weights.safetensors").write_bytes(b"w")
@@ -209,7 +209,7 @@ class TestBackendRegistryLookup:
         assert dropped == [4, 4]
 
     def test_release_memory_trims_the_heap(self, monkeypatch):
-        from zvisiongenerator.backends import memory_cuda
+        from zvisiongenerator.backends.cuda import memory as memory_cuda
 
         trimmed: list[bool] = []
         monkeypatch.setitem(sys.modules, "torch", MagicMock())
@@ -222,7 +222,7 @@ class TestBackendRegistryLookup:
     def test_no_nvidia_smi_means_no_sizes(self, monkeypatch):
         import shutil
 
-        from zvisiongenerator.backends import memory_cuda
+        from zvisiongenerator.backends.cuda import memory as memory_cuda
 
         monkeypatch.setattr(shutil, "which", lambda _name: None)
 
@@ -230,7 +230,7 @@ class TestBackendRegistryLookup:
 
     def test_no_cuda_device_means_no_budget(self, monkeypatch):
         import zvisiongenerator.backends as backends
-        from zvisiongenerator.backends import memory_cuda
+        from zvisiongenerator.backends.cuda import memory as memory_cuda
 
         monkeypatch.setattr(backends.sys, "platform", "linux")
         monkeypatch.setattr(memory_cuda, "memory_sizes", lambda: None)
@@ -257,7 +257,7 @@ class TestLoadModelGuard:
 
     def test_mflux_text_to_image_without_load_model(self):
         pytest.importorskip("mflux")
-        from zvisiongenerator.backends.image_mac import MfluxBackend
+        from zvisiongenerator.backends.mac.image import MfluxBackend
 
         backend = MfluxBackend()
         with pytest.raises(RuntimeError, match="load_model"):
@@ -273,7 +273,7 @@ class TestLoadModelGuard:
 
     def test_mflux_image_to_image_without_load_model(self):
         pytest.importorskip("mflux")
-        from zvisiongenerator.backends.image_mac import MfluxBackend
+        from zvisiongenerator.backends.mac.image import MfluxBackend
 
         backend = MfluxBackend()
         with pytest.raises(RuntimeError, match="load_model"):
@@ -289,7 +289,7 @@ class TestLoadModelGuard:
 
     @pytest.mark.skipif(sys.platform == "darwin", reason="torch/CUDA not available on macOS CI")
     def test_diffusers_text_to_image_without_load_model(self):
-        from zvisiongenerator.backends.image_win import DiffusersBackend
+        from zvisiongenerator.backends.cuda.image.backend import DiffusersBackend
 
         backend = DiffusersBackend()
         with pytest.raises(RuntimeError, match="load_model"):
@@ -305,7 +305,7 @@ class TestLoadModelGuard:
 
     @pytest.mark.skipif(sys.platform == "darwin", reason="torch/CUDA not available on macOS CI")
     def test_diffusers_image_to_image_without_load_model(self):
-        from zvisiongenerator.backends.image_win import DiffusersBackend
+        from zvisiongenerator.backends.cuda.image.backend import DiffusersBackend
 
         backend = DiffusersBackend()
         with pytest.raises(RuntimeError, match="load_model"):
@@ -352,7 +352,7 @@ class TestIdeogram4MfluxBackend:
         pytest.importorskip("mflux")
         pytest.importorskip("mlx.core")
 
-        import zvisiongenerator.backends.image_mac as image_mac_module
+        import zvisiongenerator.backends.mac.image as image_mac_module
 
         return image_mac_module
 
@@ -717,7 +717,7 @@ class TestKrea2MfluxBackend:
         pytest.importorskip("mflux")
         pytest.importorskip("mlx.core")
 
-        import zvisiongenerator.backends.image_mac as image_mac_module
+        import zvisiongenerator.backends.mac.image as image_mac_module
 
         return image_mac_module
 
@@ -786,7 +786,7 @@ class TestSelectiveMacWeightUpcast:
     def test_upcast_model_weights_preserves_uint32_quantized_weights(self):
         mx = pytest.importorskip("mlx.core")
 
-        from zvisiongenerator.backends.image_mac import _upcast_model_weights
+        from zvisiongenerator.backends.mac.image import _upcast_model_weights
 
         uint_weights = mx.array([1, 2, 3], dtype=mx.uint32)
         fp16_weights = mx.array([1.5, 2.5], dtype=mx.float16)

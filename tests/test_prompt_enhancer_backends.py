@@ -39,13 +39,13 @@ def _install_fake_mlx(monkeypatch, *, load_side_effect, chunks=("A ", "fox.")):
     monkeypatch.setitem(sys.modules, "mlx_lm", mlx_lm)
     monkeypatch.setitem(sys.modules, "mlx_lm.sample_utils", sample_utils)
     release_memory = MagicMock()
-    monkeypatch.setattr("zvisiongenerator.backends.memory_mac.release_memory", release_memory)
+    monkeypatch.setattr("zvisiongenerator.backends.mac.memory.release_memory", release_memory)
     return types.SimpleNamespace(tokenizer=tokenizer, load=load, stream_generate=stream_generate, make_sampler=make_sampler, mx=mx, release_memory=release_memory)
 
 
 class TestMlxAdapter:
     def test_generate_contract(self, monkeypatch):
-        from zvisiongenerator.backends.prompt_enhancer_mac import MlxPromptEnhancer
+        from zvisiongenerator.backends.mac.prompt_enhancer import MlxPromptEnhancer
 
         fake = _install_fake_mlx(monkeypatch, load_side_effect=None)
         fake.load.side_effect = None
@@ -62,7 +62,7 @@ class TestMlxAdapter:
         assert fake.stream_generate.call_args.kwargs["max_tokens"] == 50
 
     def test_generate_frees_cached_memory_first(self, monkeypatch):
-        from zvisiongenerator.backends.prompt_enhancer_mac import MlxPromptEnhancer
+        from zvisiongenerator.backends.mac.prompt_enhancer import MlxPromptEnhancer
 
         fake = _install_fake_mlx(monkeypatch, load_side_effect=None)
         fake.load.side_effect = None
@@ -76,7 +76,7 @@ class TestMlxAdapter:
         assert [call[0] for call in order.mock_calls] == ["release_memory", "stream_generate"]
 
     def test_cancel_stops_stream(self, monkeypatch):
-        from zvisiongenerator.backends.prompt_enhancer_mac import MlxPromptEnhancer
+        from zvisiongenerator.backends.mac.prompt_enhancer import MlxPromptEnhancer
 
         fake = _install_fake_mlx(monkeypatch, load_side_effect=None)
         fake.load.side_effect = None
@@ -85,7 +85,7 @@ class TestMlxAdapter:
         assert list(enhancer.generate([], seed=1, max_tokens=5, temperature=0.7, cancelled=lambda: True)) == []
 
     def test_text_model_type_retry(self, monkeypatch):
-        from zvisiongenerator.backends.prompt_enhancer_mac import MlxPromptEnhancer
+        from zvisiongenerator.backends.mac.prompt_enhancer import MlxPromptEnhancer
 
         fake = _install_fake_mlx(monkeypatch, load_side_effect=None)
         fake.load.side_effect = [ValueError("Model type qwen3_5_text not supported."), ("model", fake.tokenizer)]
@@ -93,7 +93,7 @@ class TestMlxAdapter:
         assert fake.load.call_args_list[1].kwargs == {"revision": None, "model_config": {"model_type": "qwen3_5"}}
 
     def test_other_value_error_names_repo(self, monkeypatch):
-        from zvisiongenerator.backends.prompt_enhancer_mac import MlxPromptEnhancer
+        from zvisiongenerator.backends.mac.prompt_enhancer import MlxPromptEnhancer
 
         fake = _install_fake_mlx(monkeypatch, load_side_effect=None)
         fake.load.side_effect = ValueError("Model type llama9 not supported.")
@@ -102,7 +102,7 @@ class TestMlxAdapter:
         assert fake.load.call_count == 1
 
     def test_missing_repo_names_repo(self, monkeypatch):
-        from zvisiongenerator.backends.prompt_enhancer_mac import MlxPromptEnhancer
+        from zvisiongenerator.backends.mac.prompt_enhancer import MlxPromptEnhancer
 
         fake = _install_fake_mlx(monkeypatch, load_side_effect=None)
         fake.load.side_effect = OSError("404")
@@ -110,7 +110,7 @@ class TestMlxAdapter:
             MlxPromptEnhancer("owner/gone", None)
 
     def test_released_model_refuses(self, monkeypatch):
-        from zvisiongenerator.backends import prompt_enhancer_mac
+        from zvisiongenerator.backends.mac import prompt_enhancer as prompt_enhancer_mac
 
         fake = _install_fake_mlx(monkeypatch, load_side_effect=None)
         fake.load.side_effect = None
@@ -125,7 +125,7 @@ class TestTransformersAdapter:
     def test_load_failure_names_repo(self, monkeypatch):
         torch = pytest.importorskip("torch")
         transformers = pytest.importorskip("transformers")
-        from zvisiongenerator.backends.prompt_enhancer_win import TransformersPromptEnhancer
+        from zvisiongenerator.backends.cuda.prompt_enhancer import TransformersPromptEnhancer
 
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
         monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", MagicMock(side_effect=OSError("offline")))
@@ -136,7 +136,7 @@ class TestTransformersAdapter:
         """Preflight enhancement can be the first thing to start CUDA, which reads PYTORCH_CUDA_ALLOC_CONF once."""
         torch = pytest.importorskip("torch")
         transformers = pytest.importorskip("transformers")
-        from zvisiongenerator.backends.prompt_enhancer_win import TransformersPromptEnhancer
+        from zvisiongenerator.backends.cuda.prompt_enhancer import TransformersPromptEnhancer
 
         monkeypatch.delenv("PYTORCH_CUDA_ALLOC_CONF", raising=False)
         seen: dict[str, str | None] = {}
@@ -156,8 +156,8 @@ class TestTransformersAdapter:
     def test_cpu_fallback_asks_for_a_driver_update_only_for_cuda_13_builds(self, monkeypatch, cuda_version, expects_hint):
         torch = pytest.importorskip("torch")
         transformers = pytest.importorskip("transformers")
-        from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
-        from zvisiongenerator.backends.prompt_enhancer_win import TransformersPromptEnhancer
+        from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
+        from zvisiongenerator.backends.cuda.prompt_enhancer import TransformersPromptEnhancer
 
         monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
         monkeypatch.setattr(torch.version, "cuda", cuda_version)
@@ -172,7 +172,7 @@ class TestTransformersAdapter:
     def test_cuda_load_does_not_warn_about_the_driver(self, monkeypatch):
         torch = pytest.importorskip("torch")
         transformers = pytest.importorskip("transformers")
-        from zvisiongenerator.backends.prompt_enhancer_win import TransformersPromptEnhancer
+        from zvisiongenerator.backends.cuda.prompt_enhancer import TransformersPromptEnhancer
 
         monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
         monkeypatch.setattr(torch.version, "cuda", "13.0")
@@ -186,7 +186,7 @@ class TestTransformersAdapter:
     def test_cpu_load_has_no_quantization(self, monkeypatch):
         torch = pytest.importorskip("torch")
         transformers = pytest.importorskip("transformers")
-        from zvisiongenerator.backends.prompt_enhancer_win import TransformersPromptEnhancer
+        from zvisiongenerator.backends.cuda.prompt_enhancer import TransformersPromptEnhancer
 
         tokenizer = MagicMock()
         tokenizer.convert_tokens_to_ids.return_value = 7
@@ -398,7 +398,7 @@ class TestReviewFixes:
         assert not session.busy()
 
     def test_unknown_im_end_token_is_not_a_stop_token(self, monkeypatch):
-        from zvisiongenerator.backends.prompt_enhancer_mac import MlxPromptEnhancer
+        from zvisiongenerator.backends.mac.prompt_enhancer import MlxPromptEnhancer
 
         fake = _install_fake_mlx(monkeypatch, load_side_effect=None)
         fake.load.side_effect = None
@@ -423,7 +423,7 @@ class TestReviewFixes:
     def test_transformers_temperature_zero_is_greedy(self, monkeypatch):
         torch = pytest.importorskip("torch")
         transformers = pytest.importorskip("transformers")
-        from zvisiongenerator.backends.prompt_enhancer_win import TransformersPromptEnhancer
+        from zvisiongenerator.backends.cuda.prompt_enhancer import TransformersPromptEnhancer
 
         tokenizer = MagicMock(eos_token_id=3, unk_token_id=0, pad_token_id=None)
         tokenizer.convert_tokens_to_ids.return_value = 7

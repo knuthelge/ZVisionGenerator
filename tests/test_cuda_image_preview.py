@@ -15,7 +15,7 @@ diffusers = pytest.importorskip("diffusers")
 
 @pytest.fixture()
 def preview_module():
-    import zvisiongenerator.backends.image_win_preview as module
+    import zvisiongenerator.backends.cuda.image.preview as module
 
     return module
 

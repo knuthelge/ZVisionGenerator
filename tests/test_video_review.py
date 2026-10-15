@@ -11,8 +11,8 @@ import pytest
 
 from tests.conftest import _make_mock_video_backend, _make_plan, _make_video_args
 from zvisiongenerator.backends import supports_video_upscale_review
-from zvisiongenerator.backends.video_diffusers import DiffusersVideoBackend
-from zvisiongenerator.backends.video_mac import LtxVideoBackend, _LtxModel
+from zvisiongenerator.backends.cuda.video.backend import DiffusersVideoBackend
+from zvisiongenerator.backends.mac.video import LtxVideoBackend, _LtxModel
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.review import REVIEW_PROMPT

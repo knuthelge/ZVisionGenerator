@@ -1,4 +1,4 @@
-"""Mock-patched tests for zvisiongenerator.backends.image_win on macOS CI.
+"""Mock-patched tests for zvisiongenerator.backends.cuda.image.backend on macOS CI.
 
 Exercises DiffusersBackend code paths without real torch/diffusers/CUDA by
 mocking all heavy dependencies at the module level before import.
@@ -68,8 +68,8 @@ def _fresh_import(fake_modules):
     The caller MUST be inside a ``patch.dict(sys.modules, fake_modules)`` context
     so that lazy imports inside methods also resolve to fakes.
     """
-    sys.modules.pop("zvisiongenerator.backends.image_win", None)
-    import zvisiongenerator.backends.image_win as mod  # noqa: E402
+    sys.modules.pop("zvisiongenerator.backends.cuda.image.backend", None)
+    import zvisiongenerator.backends.cuda.image.backend as mod  # noqa: E402
 
     return mod
 
@@ -95,7 +95,7 @@ def win_backend():
         yield mod, torch_mod, diffusers_mod
 
     # Clean up cached module so other test files aren't affected
-    sys.modules.pop("zvisiongenerator.backends.image_win", None)
+    sys.modules.pop("zvisiongenerator.backends.cuda.image.backend", None)
 
 
 @pytest.fixture()
@@ -109,7 +109,7 @@ def win_backend_no_cuda():
         mod = _fresh_import(fakes)
         yield mod, torch_mod, diffusers_mod
 
-    sys.modules.pop("zvisiongenerator.backends.image_win", None)
+    sys.modules.pop("zvisiongenerator.backends.cuda.image.backend", None)
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +223,7 @@ class TestLoadModelDriverHint:
 
     @pytest.mark.parametrize(("cuda_version", "expects_hint"), [("13.0", True), ("12.6", False), (None, False)])
     def test_hint_follows_the_cuda_version_of_the_build(self, win_backend_no_cuda, cuda_version, expects_hint):
-        from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
+        from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
 
         mod, torch_mod, _ = win_backend_no_cuda
         torch_mod.version.cuda = cuda_version
@@ -420,7 +420,7 @@ class TestLoadModelLoRA:
         lokr_module.apply_lokr.return_value = ()
         safetensors_torch = MagicMock()
         safetensors_torch.load_file.side_effect = lambda path: parts[path]
-        fakes = {"safetensors.torch": safetensors_torch, "zvisiongenerator.backends.image_win_lokr": lokr_module}
+        fakes = {"safetensors.torch": safetensors_torch, "zvisiongenerator.backends.cuda.image.lokr": lokr_module}
         with patch.dict(sys.modules, fakes), patch.object(mod, "_has_lokr", side_effect=lambda path: path in lokr_paths):
             yield mod, parts, lokr_paths, lokr_module
 

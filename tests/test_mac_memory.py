@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from zvisiongenerator.backends.memory_mac import BUFFER_CACHE_LIMIT_BYTES, apply_buffer_cache_policy, materialize_weights, memory_size_bytes, mlx_cache_limit
+from zvisiongenerator.backends.mac.memory import BUFFER_CACHE_LIMIT_BYTES, apply_buffer_cache_policy, materialize_weights, memory_size_bytes, mlx_cache_limit
 
 
 @pytest.fixture

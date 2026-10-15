@@ -58,7 +58,7 @@ class MlxPromptEnhancer:
         from mlx_lm import stream_generate
         from mlx_lm.sample_utils import make_sampler
 
-        from zvisiongenerator.backends.memory_mac import release_memory
+        from zvisiongenerator.backends.mac.memory import release_memory
 
         if self._model is None:
             raise RuntimeError("The prompt enhancer model has been released.")
@@ -74,7 +74,7 @@ class MlxPromptEnhancer:
 
     def close(self) -> None:
         """Drop the weights and return MLX's buffer cache to the system."""
-        from zvisiongenerator.backends.memory_mac import release_memory
+        from zvisiongenerator.backends.mac.memory import release_memory
 
         self._model = None
         self._tokenizer = None

@@ -1,4 +1,4 @@
-"""Tests for zvisiongenerator.backends.lora_peft."""
+"""Tests for zvisiongenerator.backends.cuda.lora_peft."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from zvisiongenerator.backends.lora_peft import is_unmatched_adapter_error, restore_cpu_offload, warn_unmatched_lora
+from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, restore_cpu_offload, warn_unmatched_lora
 
 
 class TestIsUnmatchedAdapterError:

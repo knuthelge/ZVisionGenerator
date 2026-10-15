@@ -16,7 +16,7 @@ Checked against the pinned versions (mflux 0.20.0, diffusers 0.40.0):
 |---|---|---|
 | Z-Image | diffusers `ZImageInpaintPipeline`; nothing in mflux (its Z-Image ControlNet has canny/depth/pose/hed/mlsd, no inpaint) | — |
 | FLUX.2 Klein | diffusers `Flux2KleinInpaintPipeline` (also takes `image_reference`); nothing in mflux | mflux `Flux2KleinEdit` (`image_paths`, several images); diffusers `Flux2KleinPipeline(image=[…])` |
-| Krea 2 | nothing in either; we already build its img2img latents ourselves (`backends/image_win.py`) | — |
+| Krea 2 | nothing in either; we already build its img2img latents ourselves (`backends/cuda/image/backend.py`) | — |
 | Ideogram 4 | no img2img at all (`supports_img2img: false`) | — |
 
 None of these families has an inpainting-trained checkpoint. Both diffusers inpaint pipelines use the same model-agnostic method: at every step, the area outside the mask is reset to the source image noised to the current sigma, `latents = (1 - mask) * noised_source + mask * latents` (`pipeline_z_image_inpaint.py:901`). That method works for any flow-matching model we run, so one implementation covers Z-Image, Klein and Krea 2 on both platforms.

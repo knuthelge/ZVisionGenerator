@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(sys.platform != "darwin", reason="mflux/MLX back
 def image_mac(monkeypatch):
     pytest.importorskip("mflux")
     pytest.importorskip("mlx.core")
-    import zvisiongenerator.backends.image_mac as module
+    import zvisiongenerator.backends.mac.image as module
 
     fake_mx = MagicMock(name="mx")
     # load_model sets mflux's process-wide precision from mx; restore it so the fake never leaks into other tests.

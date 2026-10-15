@@ -33,7 +33,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 
 - **Change:** Pass `quantize` to `Ideogram4(...)` and set `supports_quantize` to true for `ideo`, so the stored-quant flow creates `ideo@q4` and `ideo@q8` like the other families.
 - **Evidence:**
-  - `zvisiongenerator/backends/image_mac.py:366-372` builds `Ideogram4` without `quantize`, with a comment that the transformer is FP8-locked.
+  - `zvisiongenerator/backends/mac/image.py:366-372` builds `Ideogram4` without `quantize`, with a comment that the transformer is FP8-locked.
   - `zvisiongenerator/config.yaml:158` sets `supports_quantize: false`.
   - The stored-quant flow is `zvisiongenerator/image_model_loader.py:196-254`.
   - mflux supports it (`mflux.models.ideogram4`, README section on quantization). Its `Fp8Linear` (`model/ideogram4_transformer/fp8_linear.py`) dequantizes FP8 to dense bf16 on every forward. The model is 27.5 GB (two 9.3 GB transformers plus an 8.8 GB text encoder) on a 32 GB machine. The README says a quantized copy "removes FP8 dequantization step from every forward".
@@ -51,7 +51,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 
 ### 3. LTX compute dtype (shipped)
 
-- **Change:** `_generation_scope` in `zvisiongenerator/backends/video_mac.py` defaults `LTX2_COMPUTE_DTYPE` to `float16` while a generation runs, unless the user already set the variable.
+- **Change:** `_generation_scope` in `zvisiongenerator/backends/mac/video.py` defaults `LTX2_COMPUTE_DTYPE` to `float16` while a generation runs, unless the user already set the variable.
 - **Evidence:** the vendored hook is in `packages/ltx_pipelines_mlx/_base.py`. The LTX DiT computes in float32 by default because float32 AdaLN tables promote the activations. Upstream reports, on an M1 Max, float16 cutting a run from 701 s to 563 s (-20%) and bfloat16 about 0%.
 - **Measured on the M5 (32 GB), idle machine, `ltx-4`, same seed:**
 
@@ -71,7 +71,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
   - The lifetime peak footprint dropped only about 1.8 GB in every scenario (t2v, upscale 2, LoRA). Max RSS was 1–2 GB higher with streaming (mmap). There was no swap in either mode.
   - The steady-state denoise footprint fell from about 14 GB to 1.7–3.5 GB, but the peak is set earlier, so that did not help.
   - Seconds per step: t2v +5% and −1%, upscale stage 1 +6.7% and stage 2 −4%, LoRA +98% (17.5 against 8.8).
-- **Decision:** the rule was to keep 32 only if the peak dropped by at least 4 GB (or swap was avoided) and no scenario regressed by more than 10%. Neither held, so the threshold is 24 GiB (`zvisiongenerator/backends/video_mac.py`, `_LOW_RAM_THRESHOLD_BYTES`).
+- **Decision:** the rule was to keep 32 only if the peak dropped by at least 4 GB (or swap was avoided) and no scenario regressed by more than 10%. Neither held, so the threshold is 24 GiB (`zvisiongenerator/backends/mac/video.py`, `_LOW_RAM_THRESHOLD_BYTES`).
 - **Not measured:** 24 GB and 16 GB Macs. The 24 GiB threshold keeps streaming where the transformer plus the other components may not fit resident.
 
 ### 4a. LoRA under streaming is about 2x slower
@@ -106,7 +106,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 ### 7. Load Gemma once per LTX batch
 
 - **Change:** Encode every prompt of a job in one Gemma load.
-- **Evidence:** each clip reloads Gemma (`zvisiongenerator/backends/video_mac.py:148`, `free_after=low_memory`) and drops the DiT and decoders (`:218-223`). Upstream's `PromptEncoder` accepts a list (`ltx_pipelines_mlx.utils.blocks`, around lines 234-266).
+- **Evidence:** each clip reloads Gemma (`zvisiongenerator/backends/mac/video.py:148`, `free_after=low_memory`) and drops the DiT and decoders (`:218-223`). Upstream's `PromptEncoder` accepts a list (`ltx_pipelines_mlx.utils.blocks`, around lines 234-266).
 - **Estimated gain:** (N-1) Gemma loads and encodes saved for an N-clip batch. The size of one load is not measured.
 - **Output:** identical.
 - **Effort / risk:** medium / not assessed.
@@ -114,7 +114,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 ### 8. Two stage-2 steps instead of three in LTX upscale
 
 - **Change:** Pass `stage2_steps=2` in the two-stage upscale path.
-- **Evidence:** `zvisiongenerator/backends/video_mac.py:243-253`; `packages/ltx_pipelines_mlx/ti2vid_two_stages.py` around lines 735-746; upstream `docs/PIPELINES.md` around line 268. Stage 2 is the full-resolution stage.
+- **Evidence:** `zvisiongenerator/backends/mac/video.py:243-253`; `packages/ltx_pipelines_mlx/ti2vid_two_stages.py` around lines 735-746; upstream `docs/PIPELINES.md` around line 268. Stage 2 is the full-resolution stage.
 - **Estimated gain:** about one third of the full-resolution stage. Basis: 2 of 3 steps.
 - **Output:** changes.
 - **Effort / risk:** small / not assessed. Needs a visual comparison before it is a default.
@@ -122,7 +122,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 ### 9. Image VAE and temp PNG
 
 - **Change:**
-  - Offer a bf16 VAE. We upcast the VAE to float32 even in bf16 mode (`zvisiongenerator/backends/image_mac.py:383-387`).
+  - Offer a bf16 VAE. We upcast the VAE to float32 even in bf16 mode (`zvisiongenerator/backends/mac/image.py:383-387`).
   - Write the img2img temporary PNG with `compress_level=0` (`:436-438` use the default compression).
 - **Estimated gain:** a faster decode and encode at size `m` and on upscales for the VAE (not sized). For the PNG, an estimated 0.3–1 s per 4 MP upscale.
 - **Output:** the VAE option changes the picture slightly; the PNG change is identical.
@@ -139,7 +139,7 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 ### 11. Smaller items
 
 - **`--no-audio` on LTX:** set `pipe.generate_audio=False` instead of decoding audio and stripping it with ffmpeg (`zvisiongenerator/workflows/__init__.py:83-84`; vendored `_base.py` around lines 494-506). Identical for the video.
-- **Fewer steps (output changes):** Ideogram's `V4_TURBO_12` preset has 40% fewer steps than the hard-coded `V4_DEFAULT_20` (`zvisiongenerator/backends/image_mac.py:524`). `zit` could run 9 steps instead of 10 (`zvisiongenerator/config.yaml:116`).
+- **Fewer steps (output changes):** Ideogram's `V4_TURBO_12` preset has 40% fewer steps than the hard-coded `V4_DEFAULT_20` (`zvisiongenerator/backends/mac/image.py:524`). `zit` could run 9 steps instead of 10 (`zvisiongenerator/config.yaml:116`).
 - **Krea 2 with a LoRA:** mflux re-quantizes LoRA-touched q4 layers to q8 (`mflux.models.common.lora.mapping.lora_saver`, around lines 307-317). Compare speed without the LoRA and with `bake_lora=False` before deciding whether the 7.0 s per step is the LoRA's doing.
 - **Enhancer:** mlx-lm's `batch_generate` (`mlx_lm.generate`, around line 1910) could shorten the 20–35 s preflight, but the rewrites would change.
 
@@ -155,7 +155,7 @@ Run in this order. Each is a measurement only, with no product change, on the M5
 
 ## Windows/Linux (secondary)
 
-Not researched in depth. One candidate: the video backend enables VAE slicing and tiling unconditionally (`zvisiongenerator/backends/video_diffusers.py:164-169`). Enabling them only on low memory or at large sizes would avoid the slicing cost on GPUs with room. It needs a CUDA measurement before it is proposed properly.
+Not researched in depth. One candidate: the video backend enables VAE slicing and tiling unconditionally (`zvisiongenerator/backends/cuda/video/backend.py:164-169`). Enabling them only on low memory or at large sizes would avoid the slicing cost on GPUs with room. It needs a CUDA measurement before it is proposed properly.
 
 ## Rejected
 
@@ -164,7 +164,7 @@ Not researched in depth. One candidate: the video backend enables VAE slicing an
 - **LTX TeaCache.** Upstream refuses it on distilled models (`docs/PIPELINES.md`, around line 266).
 - **PiD decode.** It is a 4x image decode, slower, and changes the picture.
 - **Live previews as a cost.** They are a linear projection at three milestones (`progress_events.py:16`), which is negligible.
-- **Removing `mx.eval` in `_ProgressChecker`** (`zvisiongenerator/backends/image_mac.py:223`). mflux evaluates the same latents right afterwards (`z_image.py:133`), so there is nothing to save.
+- **Removing `mx.eval` in `_ProgressChecker`** (`zvisiongenerator/backends/mac/image.py:223`). mflux evaluates the same latents right afterwards (`z_image.py:133`), so there is nothing to save.
 - **A smaller MLX cache cap or clearing the cache per image.** Already measured with no slowdown in [image-model-memory.md](archive/image-model-memory.md); not worth more work.
 - **VAE tiling.** Already off (`flux2_initializer.py:48`).
 - **Shorter text padding.** Changes the conditioning.

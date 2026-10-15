@@ -25,8 +25,8 @@ from mflux.utils.exceptions import StopImageGenerationException
 import mlx.core as mx
 from mlx.utils import tree_map
 
-from zvisiongenerator.backends.image_mac_preview import estimate_clean_latents, render_latent_preview
-from zvisiongenerator.backends.memory_mac import apply_buffer_cache_policy, materialize_weights
+from zvisiongenerator.backends.mac.image_preview import estimate_clean_latents, render_latent_preview
+from zvisiongenerator.backends.mac.memory import apply_buffer_cache_policy, materialize_weights
 from zvisiongenerator.core.progress_events import preview_milestone_steps
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 

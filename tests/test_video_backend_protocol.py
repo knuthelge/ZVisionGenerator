@@ -26,12 +26,12 @@ class TestVideoBackendProtocol:
 
     @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only backends")
     def test_ltx_backend_satisfies_protocol(self):
-        from zvisiongenerator.backends.video_mac import LtxVideoBackend
+        from zvisiongenerator.backends.mac.video import LtxVideoBackend
 
         assert isinstance(LtxVideoBackend(), VideoBackend)
 
     def test_diffusers_video_backend_satisfies_protocol(self):
-        from zvisiongenerator.backends.video_diffusers import DiffusersVideoBackend
+        from zvisiongenerator.backends.cuda.video.backend import DiffusersVideoBackend
 
         assert isinstance(DiffusersVideoBackend(), VideoBackend)
 
@@ -71,18 +71,18 @@ class TestVideoExtenderProtocol:
 
     @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only backends")
     def test_ltx_backend_provides_extend_video_with_the_protocol_signature(self):
-        from zvisiongenerator.backends.video_mac import LtxVideoBackend
+        from zvisiongenerator.backends.mac.video import LtxVideoBackend
 
         assert _shape(LtxVideoBackend.extend_video) == _shape(VideoExtender.extend_video)
 
     @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-only backends")
     def test_ltx_backend_is_still_a_video_backend(self):
-        from zvisiongenerator.backends.video_mac import LtxVideoBackend
+        from zvisiongenerator.backends.mac.video import LtxVideoBackend
 
         assert isinstance(LtxVideoBackend(), VideoBackend)
 
     def test_diffusers_backend_is_a_video_backend_without_extend_video(self):
-        from zvisiongenerator.backends.video_diffusers import DiffusersVideoBackend
+        from zvisiongenerator.backends.cuda.video.backend import DiffusersVideoBackend
 
         backend = DiffusersVideoBackend()
 

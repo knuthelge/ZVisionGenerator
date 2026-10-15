@@ -8,8 +8,8 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from zvisiongenerator.backends import block_streaming  # noqa: E402
-from zvisiongenerator.backends.block_streaming import move_outside, offload_type, stream_blocks  # noqa: E402
+from zvisiongenerator.backends.cuda import block_streaming  # noqa: E402
+from zvisiongenerator.backends.cuda.block_streaming import move_outside, offload_type, stream_blocks  # noqa: E402
 
 _DEVICE = torch.device("meta")
 

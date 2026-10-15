@@ -9,7 +9,7 @@ pytest.importorskip("diffusers")
 
 from diffusers.models.autoencoders.autoencoder_kl_ltx2 import AutoencoderKLLTX2Video  # noqa: E402
 
-from zvisiongenerator.backends.streaming_decode import decode_frames  # noqa: E402
+from zvisiongenerator.backends.cuda.video.streaming_decode import decode_frames  # noqa: E402
 
 
 class _FakeVae:

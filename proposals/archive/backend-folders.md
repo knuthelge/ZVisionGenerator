@@ -1,6 +1,6 @@
 # Group the backends into platform folders
 
-**Status:** Proposed (2026-10-15)
+**Status:** Done (2026-10-15), in the `refactor(backends)` commit that follows `f95eeac`. The shipped layout is below; it goes two levels deep under `cuda/`.
 
 ## Problem
 
@@ -24,14 +24,33 @@ Checked 2026-10-15 on the `cuda-video-quant` branch:
 | The same in `tests/` | 129 references in 25 files, many of them `monkeypatch.setattr("zvisiongenerator.backends....")` strings that must change with the path |
 | `backends/` paths in `docs/development.md` | 13, plus the project structure tree |
 
-## Proposed change
+## Change
 
-A pure move, with no behaviour change:
+A pure move, with no behaviour change. The rule: **a task gets its own folder once it has helpers of its own; what two tasks share stays one level up.** On CUDA, image and video each have helpers, so they get folders and the modules both use (`quant.py` included: the LTX weights use its FP8 and fill helpers) stay in `cuda/`. macOS has six modules and video is one file, so `mac/` stays flat.
 
 ```
 backends/
-  __init__.py                 backend and accelerator selection (unchanged role; the only place that picks a platform)
+  __init__.py                 backend and accelerator selection (the only place that picks a platform)
   prompt_enhancer_session.py  shared
+  cuda/
+    driver.py                 was cuda_driver.py
+    memory.py                 was memory_cuda.py
+    block_streaming.py
+    safetensors_stream.py
+    quant.py                  was image_win_quant.py
+    lora_peft.py
+    prompt_enhancer.py        was prompt_enhancer_win.py
+    image/
+      backend.py              was image_win.py
+      lokr.py                 was image_win_lokr.py
+      preview.py              was image_win_preview.py
+    video/
+      backend.py              was video_diffusers.py
+      weights.py              was ltx_cuda_weights.py
+      streaming_decode.py
+      token_chunking.py
+      timestep_runs.py
+      encode.py               was video_encode.py
   mac/
     image.py                  was image_mac.py
     image_preview.py          was image_mac_preview.py
@@ -39,32 +58,15 @@ backends/
     memory.py                 was memory_mac.py
     seedvr2.py                was seedvr2_mac.py
     prompt_enhancer.py        was prompt_enhancer_mac.py
-  cuda/
-    image.py                  was image_win.py
-    image_lokr.py             was image_win_lokr.py
-    image_preview.py          was image_win_preview.py
-    image_quant.py            was image_win_quant.py
-    video.py                  was video_diffusers.py
-    memory.py                 was memory_cuda.py
-    driver.py                 was cuda_driver.py
-    lora_peft.py
-    prompt_enhancer.py        was prompt_enhancer_win.py
-    block_streaming.py
-    safetensors_stream.py
-    video_encode.py
-    ltx/
-      weights.py              was ltx_cuda_weights.py
-      streaming_decode.py
-      token_chunking.py
 ```
 
-- One `refactor(backends): …` commit, not a breaking change since nothing outside the package imports these paths: `git mv` every file, update imports, `backends/__init__.py`, the tests' patch strings and `docs/development.md` (structure tree and prose). The test files can follow the same split (`tests/backends/mac/…`) or stay flat; keep them flat unless the move is cheap.
-- Keep the platform folders free of each other: `mac/` never imports from `cuda/` and the reverse, which the move makes visible. Anything both use moves up to `backends/`.
+- `git mv` for every file, imports and the tests' patch strings rewritten, and `docs/development.md` (structure tree and prose) updated. Tests stay flat; those named after a renamed module were renamed to match (`test_image_win.py` → `test_cuda_image.py`, `test_video_diffusers.py` → `test_cuda_video.py`, and so on).
+- The platform folders never import from each other, and neither do `cuda/image/` and `cuda/video/`.
 - `backends/__init__.py` stays the only place that picks a backend, per AGENTS.md.
 
 ## Verification
 
-- `make check` passes with no test changes beyond paths.
+- `make check` passes with no test changes beyond paths (3791 passed, 81 skipped, as before the move).
 - `git log --follow` works on the moved files (pure `git mv`, no edits in the same commit as the rename where possible: rename first, then fix imports in a second commit, or one commit with high similarity).
 - A grep for the old module names (`image_win`, `video_diffusers`, `_mac.py`) in code, tests and docs finds nothing.
 

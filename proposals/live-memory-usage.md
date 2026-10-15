@@ -34,7 +34,7 @@ The one real gap is the Windows *Sysmem Fallback* case, where we can't simply ca
 ### CUDA: from documentation; not yet measured on hardware
 
 - `torch.cuda.memory_reserved()`, `memory_allocated()` and the peak counters read PyTorch's own allocator on the host. They are free and never synchronise. They miss the CUDA context, about 0.3 to 0.5 GB, and anything allocated outside PyTorch.
-- `torch.cuda.mem_get_info()` calls `cudaMemGetInfo` and reports the whole device, so other apps and the desktop are included. It needs a CUDA context: calling it before the backend has started CUDA would create one early and bypass `configure_allocator()` (`backends/memory_cuda.py`). The sampler must therefore check `torch.cuda.is_initialized()` first, and never import torch itself.
+- `torch.cuda.mem_get_info()` calls `cudaMemGetInfo` and reports the whole device, so other apps and the desktop are included. It needs a CUDA context: calling it before the backend has started CUDA would create one early and bypass `configure_allocator()` (`backends/cuda/memory.py`). The sampler must therefore check `torch.cuda.is_initialized()` first, and never import torch itself.
 - **Linux:** NVML can report each process's GPU memory. We don't need it, since the PyTorch counters cover our own use. Safetensors are memory-mapped, so plain RSS includes file pages during a load. Anonymous RSS excludes them, and it does include the pinned host memory that group offload streams from. PSI is already the signal the [systemd-oomd proposal](archive/linux-oomd-model-loads.md) measures.
 - **Windows:** under WDDM, NVML's per-process GPU memory always returns `NVML_VALUE_NOT_AVAILABLE`, because Windows rather than the NVIDIA driver manages the memory. This doesn't matter, because the PyTorch counters still work.
 - **Windows Sysmem Fallback:** since driver 536.40, when VRAM runs out the driver moves allocations into system memory instead of raising out-of-memory. The job then runs much more slowly, and nothing tells the user why. In that state PyTorch's counters still report the memory as allocated, and `mem_get_info` reports only dedicated VRAM, so neither shows the spill. The per-process PDH counters `\GPU Process Memory(pid_<pid>_*)\Shared Usage` and `Dedicated Usage` do show it; Task Manager reads the same data. We can read them through `pdh.dll` with `ctypes` in roughly 60 lines, without pywin32. This is the one piece that needs a Windows machine to build and verify.
@@ -48,7 +48,7 @@ Instead, a **sampler thread runs for the length of each job and reads the counte
 ## Proposed shape
 
 - **Backend** (atomic, one module per platform beside the existing ones):
-  - `backends/memory_mac.py` and `backends/memory_cuda.py` each gain a pure `memory_usage() -> MemoryUsage` reader.
+  - `backends/mac/memory.py` and `backends/cuda/memory.py` each gain a pure `memory_usage() -> MemoryUsage` reader.
   - `MemoryUsage` is a frozen dataclass: `process_bytes`, `accelerator_bytes`, `device_used_bytes | None`, `spilled_bytes | None`, `pressure: "normal" | "warn" | "critical" | None`.
   - `backends/__init__.py` picks the reader for the platform, as it already does for `get_accelerator_memory_budget()`.
   - A small sampler in `core/` takes the reader and a `ProgressCallback` as arguments, so it can be tested with a fake reader.

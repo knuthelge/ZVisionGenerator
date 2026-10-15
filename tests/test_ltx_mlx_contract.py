@@ -1,4 +1,4 @@
-"""Pin the vendored LTX MLX internals that ``backends/video_mac.py`` relies on.
+"""Pin the vendored LTX MLX internals that ``backends/mac/video.py`` relies on.
 
 Introspection, plus a few tiny-array shape checks: no pipeline is constructed and no weights are loaded. A failure here after
 ``make update-ltx`` means upstream changed a name or signature the macOS video backend calls.

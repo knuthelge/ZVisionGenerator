@@ -26,7 +26,7 @@ def _import_backend_module():
     pytest.importorskip("mflux")
     pytest.importorskip("mlx.core")
 
-    import zvisiongenerator.backends.image_mac as image_mac_module
+    import zvisiongenerator.backends.mac.image as image_mac_module
 
     return image_mac_module
 

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends.memory_mac import memory_size_bytes, mlx_cache_limit
+from zvisiongenerator.backends.mac.memory import memory_size_bytes, mlx_cache_limit
 from zvisiongenerator.core.video_types import ExtendSegment
 from zvisiongenerator.utils.video_extend import CARRY_FRAMES, EXTEND_FRAME_STEP, audio_lead_samples, carry_latent_frames, cut_window_audio, window_audio_cut, window_frames
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model

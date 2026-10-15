@@ -75,30 +75,34 @@ zvisiongenerator/
 ├── seedvr2_loader.py              SeedVR2 loading through its stored 8-bit copy (download, quantize, save, delete the download)
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
-├── backends/
-│   ├── block_streaming.py         Stream a model's blocks to the GPU as they run (group offloading, or a parameter swap that carries NF4)
-│   ├── cuda_driver.py             NVIDIA driver hint when a CUDA build of PyTorch cannot start
-│   ├── image_mac.py               macOS image backend (mflux/MLX)
-│   ├── image_mac_preview.py       Cheap latent → RGB live previews for the mflux backend
-│   ├── image_win.py               Windows/Linux image backend (diffusers/CUDA)
-│   ├── image_win_lokr.py          LyCORIS LoKr adapters for the diffusers backend (applied like mflux)
-│   ├── image_win_preview.py       Cheap latent → RGB live previews for the diffusers backend
-│   ├── image_win_quant.py         NF4 (q4) and FP8 (q8) weights for the diffusers backend, at load and as stored quants
-│   ├── lora_peft.py               Detect and report LoRA files that match no module (peft)
-│   ├── ltx_cuda_weights.py        LTX-2.3 weights on CUDA: the single-file transformer and the Gemma text encoder, prepared once per quantize level
-│   ├── memory_cuda.py             CUDA memory release after a job, and GPU and system memory sizes
-│   ├── memory_mac.py              MLX memory release, recommended GPU memory budget, machine memory size and scoped cache limit
-│   ├── prompt_enhancer_mac.py     macOS prompt-enhancer LLM (mlx-lm)
-│   ├── prompt_enhancer_win.py     Windows/Linux prompt-enhancer LLM (transformers)
+├── backends/                      Backend selection (__init__.py, the only place that picks a platform)
 │   ├── prompt_enhancer_session.py Single resident prompt-enhancer model: exclusive use and idle release
-│   ├── safetensors_stream.py      Read and write safetensors one tensor at a time, keeping them out of the page cache
-│   ├── seedvr2_mac.py             macOS SeedVR2 upscaler (mflux)
-│   ├── streaming_decode.py        Decode LTX-2 video latents a few frames at a time, straight to 8-bit frames
-│   ├── timestep_runs.py           Run the LTX-2 transformer on per-token (image-to-video) timesteps by runs
-│   ├── token_chunking.py          Run token-wise layers (feed-forward, RMSNorm) over a long sequence in chunks
-│   ├── video_encode.py            Write frames and audio to MP4 with PyAV (H.264 CRF 18, AAC)
-│   ├── video_mac.py               macOS video backend (LTX via MLX)
-│   └── video_diffusers.py         Windows/Linux video backend (LTX via diffusers/CUDA)
+│   ├── cuda/                      Windows and Linux (diffusers/CUDA); what image and video share sits here
+│   │   ├── block_streaming.py     Stream a model's blocks to the GPU as they run (group offloading, or a parameter swap that carries NF4)
+│   │   ├── driver.py              NVIDIA driver hint when a CUDA build of PyTorch cannot start
+│   │   ├── lora_peft.py           Detect and report LoRA files that match no module (peft)
+│   │   ├── memory.py              CUDA memory release after a job, and GPU and system memory sizes
+│   │   ├── prompt_enhancer.py     Prompt-enhancer LLM (transformers)
+│   │   ├── quant.py               NF4 (q4) and FP8 (q8) weights, at load and as stored quants
+│   │   ├── safetensors_stream.py  Read and write safetensors one tensor at a time, keeping them out of the page cache
+│   │   ├── image/
+│   │   │   ├── backend.py         Image backend
+│   │   │   ├── lokr.py            LyCORIS LoKr adapters (applied like mflux)
+│   │   │   └── preview.py         Cheap latent → RGB live previews
+│   │   └── video/
+│   │       ├── backend.py         LTX video backend
+│   │       ├── encode.py          Write frames and audio to MP4 with PyAV (H.264 CRF 18, AAC)
+│   │       ├── streaming_decode.py Decode LTX-2 video latents a few frames at a time, straight to 8-bit frames
+│   │       ├── timestep_runs.py   Run the LTX-2 transformer on per-token (image-to-video) timesteps by runs
+│   │       ├── token_chunking.py  Run token-wise layers (feed-forward, RMSNorm) over a long sequence in chunks
+│   │       └── weights.py         LTX-2.3 weights: the single-file transformer and the Gemma text encoder, prepared once per quantize level
+│   └── mac/                       macOS (MLX)
+│       ├── image.py               Image backend (mflux)
+│       ├── image_preview.py       Cheap latent → RGB live previews for the mflux backend
+│       ├── memory.py              MLX memory release, recommended GPU memory budget, machine memory size and scoped cache limit
+│       ├── prompt_enhancer.py     Prompt-enhancer LLM (mlx-lm)
+│       ├── seedvr2.py             SeedVR2 upscaler (mflux)
+│       └── video.py               LTX video backend (MLX)
 ├── converters/
 │   ├── convert_checkpoint.py      Safetensors checkpoint → diffusers converter (ziv-model model)
 │   ├── list_assets.py             List installed models, video models, and LoRAs (ziv-model list)
@@ -186,23 +190,23 @@ prompts.yaml                       Default prompt definitions
 
 ### Backend Protocol
 
-Platform backends live in `backends/image_mac.py` (mflux/MLX), `backends/image_win.py` (Windows/Linux diffusers image), `backends/video_mac.py` (MLX video), and `backends/video_diffusers.py` (Windows/Linux diffusers video). Image backends implement the `ImageBackend` Protocol from `core/image_backend.py`; video backends implement the `VideoBackend` Protocol from `core/video_backend.py`. The prompt-enhancer LLM follows the same split: `backends/prompt_enhancer_mac.py` (mlx-lm) and `backends/prompt_enhancer_win.py` (transformers) implement the `PromptEnhancer` Protocol from `core/prompt_enhancer.py`. Backend and accelerator selection stays centralized in `backends/__init__.py` — never branch on `sys.platform` elsewhere to pick a backend. OS-level checks unrelated to backends (file pickers, ffmpeg install hints, terminal handling) are fine where they are needed.
+Platform backends live in `backends/mac/image.py` (mflux/MLX), `backends/cuda/image/backend.py` (Windows/Linux diffusers image), `backends/mac/video.py` (MLX video), and `backends/cuda/video/backend.py` (Windows/Linux diffusers video). Image backends implement the `ImageBackend` Protocol from `core/image_backend.py`; video backends implement the `VideoBackend` Protocol from `core/video_backend.py`. The prompt-enhancer LLM follows the same split: `backends/mac/prompt_enhancer.py` (mlx-lm) and `backends/cuda/prompt_enhancer.py` (transformers) implement the `PromptEnhancer` Protocol from `core/prompt_enhancer.py`. Backend and accelerator selection stays centralized in `backends/__init__.py` — never branch on `sys.platform` elsewhere to pick a backend. OS-level checks unrelated to backends (file pickers, ffmpeg install hints, terminal handling) are fine where they are needed.
 
-SeedVR2, the plain upscale of existing images, is macOS-only and has its own small Protocol, `SeedVR2Upscaler` in `core/seedvr2.py`, implemented by `backends/seedvr2_mac.py` (mflux). `supports_seedvr2()` and `get_seedvr2_upscaler()` in `backends/__init__.py` expose it, so other code asks for the capability instead of checking the platform. `seedvr2_loader.py` loads it through a stored 8-bit copy in the same way `image_model_loader.py` does for image models, and `tests/test_mflux_seedvr2_contract.py` records the mflux surface it relies on; re-run it on every mflux bump.
+SeedVR2, the plain upscale of existing images, is macOS-only and has its own small Protocol, `SeedVR2Upscaler` in `core/seedvr2.py`, implemented by `backends/mac/seedvr2.py` (mflux). `supports_seedvr2()` and `get_seedvr2_upscaler()` in `backends/__init__.py` expose it, so other code asks for the capability instead of checking the platform. `seedvr2_loader.py` loads it through a stored 8-bit copy in the same way `image_model_loader.py` does for image models, and `tests/test_mflux_seedvr2_contract.py` records the mflux surface it relies on; re-run it on every mflux bump.
 
-The `image_win.py` module is the shared diffusers/CUDA image backend for both Windows and Linux. The filename is historical; platform selection still happens only in `backends/__init__.py`.
+Backends are grouped by platform: `backends/cuda/` (Windows and Linux) and `backends/mac/`. A task with helpers of its own gets a folder (`cuda/image/`, `cuda/video/`); what two tasks share stays one level up. The platform folders never import from each other. Platform selection still happens only in `backends/__init__.py`.
 
 Windows and Linux video resolution is config-driven through `video_model_presets.ltx.diffusers`: `ltx-4` and `ltx-8` both resolve to `default_repo`, `quantize` maps each name to its level (there is no unquantized path), and `utils.config.ltx_load_options` turns the config into the backend's load arguments for both the CLI and the Web UI. Only distilled LTX-2.3 checkpoints are supported.
 
-`video_diffusers.load_model` keeps LTX within the system memory of a 32 GB machine and the GPU memory of a 10 GB one. The rules a change must keep:
+`cuda/video/backend.load_model` keeps LTX within the system memory of a 32 GB machine and the GPU memory of a 10 GB one. The rules a change must keep:
 
 - The text encoder and the transformer never share system memory unless both fit (`_check_system_memory`). When they do not, they take turns: the transformer is released while the text encoder encodes each new prompt (`_encode_prompt`, `_attach_transformer`, `_release_transformer`); when they do, the text encoder stays loaded between prompts. LoRAs are applied when the transformer is attached.
-- The transformer is the single-file checkpoint in `video_model_presets.ltx.diffusers.transformer`. `ltx_cuda_weights` prepares it and the text encoder once per level under `<models>/<alias>@q<bits>/`, streaming tensor by tensor through `safetensors_stream` so a 46 GB file never sits in memory.
+- The transformer is the single-file checkpoint in `video_model_presets.ltx.diffusers.transformer`. `cuda/video/weights` prepares it and the text encoder once per level under `<models>/<alias>@q<bits>/`, streaming tensor by tensor through `safetensors_stream` so a 46 GB file never sits in memory.
 - In low-memory mode the transformer streams to the GPU block by block (`block_streaming`): FP8 with diffusers' group offloading, NF4 with `stream_blocks`, because group offloading leaves bitsandbytes' quantization state on the CPU. The VAEs and vocoder move to the GPU only to encode or decode. Video never uses `enable_model_cpu_offload()`.
 - Nothing may hold a full-length activation per token beyond the hidden states: the token-wise layers run in chunks (`token_chunking`), image-to-video's per-token timesteps are applied per run of equal timesteps (`timestep_runs`), and the final pass returns latents that `streaming_decode` decodes a few frames at a time. Each keeps diffusers' output unchanged, and its tests compare against diffusers.
 - Clips are written by `video_encode` (H.264 CRF 18 and AAC, as on macOS).
 
-`backends/video_diffusers.py` passes the distilled sigma tables from `diffusers.pipelines.ltx2.utils` on every generation call, with `num_inference_steps` equal to their length and every guidance term at its neutral value (`_DISTILLED_GUIDANCE`); diffusers' own defaults for the audio, spatio-temporal and modality terms over-cook a distilled model. Fewer steps than the table keep its first sigma and its tail. The `--upscale 2` flow is two-stage:
+`backends/cuda/video/backend.py` passes the distilled sigma tables from `diffusers.pipelines.ltx2.utils` on every generation call, with `num_inference_steps` equal to their length and every guidance term at its neutral value (`_DISTILLED_GUIDANCE`); diffusers' own defaults for the audio, spatio-temporal and modality terms over-cook a distilled model. Fewer steps than the table keep its first sigma and its tail. The `--upscale 2` flow is two-stage:
 
 1. Stage 1 runs the generation pipeline at half the requested size with `output_type="latent"`.
 2. An `LTX2LatentUpsamplePipeline` upsamples the latents 2×. It is built around the generation pipeline's own VAE and is never moved with `.to()` or given CPU offload, since either would re-hook that shared VAE. In low-memory mode the upsampler model waits on the CPU and visits the GPU only for this pass.
@@ -222,7 +226,7 @@ Image stage functions in `workflows/image_stages.py` have the uniform signature 
 
 ### Review Before Upscaling
 
-`--review` pauses a generation after the small render of an upscale until the user approves or discards it. The review state lives in `SkipSignal` (`utils/interactive.py`), the shared wait in `review.py`, and images pass through `review_stage` before `upscale_stage`. Video passes a `review` keyword to the backend: only `video_mac` honours it, `video_diffusers` refuses, and `supports_video_upscale_review()` in `backends/__init__.py` tells the form, server and CLI whether to offer it. The Web UI sends approve and discard through the job controls and shows a video review from `GET /jobs/{id}/review`. Everything stays in memory while the review waits, so an approved output equals one made without review.
+`--review` pauses a generation after the small render of an upscale until the user approves or discards it. The review state lives in `SkipSignal` (`utils/interactive.py`), the shared wait in `review.py`, and images pass through `review_stage` before `upscale_stage`. Video passes a `review` keyword to the backend: only the macOS backend (`mac/video`) honours it, the CUDA one (`cuda/video/backend`) refuses, and `supports_video_upscale_review()` in `backends/__init__.py` tells the form, server and CLI whether to offer it. The Web UI sends approve and discard through the job controls and shows a video review from `GET /jobs/{id}/review`. Everything stays in memory while the review waits, so an approved output equals one made without review.
 
 ### Job Phases: Preflight and Generation
 
@@ -311,7 +315,7 @@ Mock heavy image and video dependencies in tests. Diffusers backend tests patch 
 
 - **Pin.** `LTX_COMMIT` in the `Makefile` must be the commit of a release tag; the comment above it names the tag.
 - **Update.** `make update-ltx` replaces both packages with the pinned commit. It does not carry their dependencies: mirror the `dependencies` of upstream's `packages/*/pyproject.toml` into ours by hand, macOS-only and capped at the minor version that upstream's `uv.lock` tests (for example `mlx-arsenal>=0.2.4,<0.3`).
-- **Internals we rely on.** `backends/video_mac.py` uses upstream attributes and call shapes that are not public API. Re-check each on every bump. `tests/test_ltx_mlx_contract.py` pins their names and signatures by introspection, and the mocked tests in `tests/test_video_upscale.py` cover our calls:
+- **Internals we rely on.** `backends/mac/video.py` uses upstream attributes and call shapes that are not public API. Re-check each on every bump. `tests/test_ltx_mlx_contract.py` pins their names and signatures by introspection, and the mocked tests in `tests/test_video_upscale.py` cover our calls:
     - `_pending_loras` on the pipeline (LoRAs applied at load)
     - the duck-typed `stepwise` slot and its `bind(..., stage=)` contract, which returns the stage's `on_step` callable
     - `_pre_denoise_flush(video_state, audio_state)` (guards against the Metal watchdog) and `_decode_and_save_video(frame_rate=, seed=)`
@@ -326,7 +330,7 @@ Mock heavy image and video dependencies in tests. Diffusers backend tests patch 
     - Extending a clip, audio side: `ltx_core_mlx.utils.audio.load_audio(path, target_sample_rate, start_time, max_duration, mono)` reads the tail's sound at its position in the file; `audio_vae.encode_audio(waveform, sample_rate, encoder, processor)` encodes it inside `audio_conditioner(fn, free_after=)`; `extend_distilled.fit_audio_latent(audio_latent, audio_tokens)` fits the `(1, 8, T, 16)` latent before `audio_patchifier.patchify`, and `extend_distilled.carry_audio_tokens(frame_rate, carry_pixel_frames)` gives the token count
     - Extending a clip, decode: the pipeline's `_loaded` flag (cleared with `dit = None` so the next `load()` reloads the transformer), `video_decoder_block.load()` and `video_decoder_block.video_decoder` (the diffusion decoder is rejected), `video_vae.VideoDecoder.tiled_decode(latent, tiling_config)`, `video_vae._compute_decode_tiling(latent_shape, frame_rate, budget_bytes)` (which may return `None` or temporal tiles), `video_vae.decode_cache_limit()`, `video_vae.stream_chunks_to_ffmpeg(chunks, proc)` and `video_vae._ffmpeg_sink(cmd)`, and `audio_decoder_block.__call__(audio_latent)`
     - Extending a clip: `ltx_core_mlx.utils.audio.load_audio` returns an `AudioData` whose `.waveform` and `.sample_rate` are passed to `encode_audio`, and `video_patchifier.patchify` and `audio_patchifier.patchify` return `(tokens, dims)` tuples, so the tokens are `patchify(...)[0]`
-- **Cache limit.** `low_ram_streaming` makes the pipeline set the MLX buffer-cache limit to 0 for the whole process. `backends/memory_mac.mlx_cache_limit` scopes that to model construction and each generation, then restores the previous limit.
+- **Cache limit.** `low_ram_streaming` makes the pipeline set the MLX buffer-cache limit to 0 for the whole process. `backends/mac/memory.mlx_cache_limit` scopes that to model construction and each generation, then restores the previous limit.
 
 ## Releasing
 

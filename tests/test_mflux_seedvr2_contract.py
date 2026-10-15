@@ -1,4 +1,4 @@
-"""Pin the mflux SeedVR2 internals that ``backends/seedvr2_mac.py`` and the stored 8-bit copy rely on.
+"""Pin the mflux SeedVR2 internals that ``backends/mac/seedvr2.py`` and the stored 8-bit copy rely on.
 
 Introspection only: no model is constructed and no weights are loaded. A failure here after an mflux bump
 means upstream changed a name, signature or file layout the SeedVR2 upscale depends on.

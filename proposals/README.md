@@ -22,7 +22,6 @@ These files are not part of the published docs site, and the docs don't link to 
 | [Upscale existing videos 2× on macOS](video-upscale-existing.md) | Proposed | Generate at `m`, extend, then upscale the finished video 2× from the viewer with LTX's own upsampler and a 1–3 step distilled refine, tiled over time for long clips; original audio kept. Replaces a SeedVR2 plan that won't fit a 32 GB Mac; a half-day spike sets steps and tiling |
 | [Edit images: inpaint, extend and Klein edits](image-editing.md) | Proposed | Paint a mask and redraw it, extend the canvas, and (Klein) edit from a prompt, through one editor opened from any image |
 | [First run: pick a model, download it, and no gated defaults](first-run.md) | Proposed | Ungated mirrors for the shipped aliases, a Welcome panel that recommends a model for this machine, downloads with progress, and a Hugging Face token field |
-| [Group the backends into platform folders](backend-folders.md) | Proposed | Move the 23 flat `backends/` modules into `mac/` and `cuda/` (with `cuda/ltx/`), and drop the misleading `_win` names; a pure move done on its own after the CUDA LTX branch |
 | [Show model download progress in Web UI jobs](model-download-progress.md) | Proposed | Download a missing model as its own step before loading, and show bytes, speed and ETA on the job card, with Stop and resume |
 | [Faster generation on macOS](macos-speed.md) | Proposed | Ranked speed opportunities on Apple Silicon (Ideogram quants, model reuse across Web UI jobs, LTX dtype and streaming, Klein text encoder), with a measurement plan to size them first |
 | [Show memory use while a job runs](live-memory-usage.md) | Proposed | Feasibility study: live memory use during generation is readable on macOS, Windows and Linux; Windows VRAM spill into shared memory is the one part still to verify |
@@ -31,6 +30,7 @@ These files are not part of the published docs site, and the docs don't link to 
 
 | Proposal | Status | Summary |
 |---|---|---|
+| [Group the backends into platform folders](archive/backend-folders.md) | Done (unreleased) | `backends/` split into `cuda/` (with `image/` and `video/`) and a flat `mac/`; the `_win`/`_mac` names dropped. A pure move |
 | [Extend a video](archive/video-extend.md) | Done (unreleased) | Continue a clip from its last 25 frames in the one-stage loop and splice the new part onto the untouched original, with audio, on macOS; Windows/Linux moved to platform parity |
 | [A scene for video prompts](archive/video-scene.md) | Done (unreleased) | An optional Scene beside the video prompt (CLI, prompt files, Web UI), sent first, and an enhancer that writes both a scene and an action in one call |
 | [Upscale existing images on macOS with SeedVR2](archive/image-upscale-seedvr2-mac.md) | Done (unreleased) | Plain 2×/4× in the viewer's Upscale menu are a one-step SeedVR2 upscale (no prompt or source model, about linear cost), today's path is 2×/4× creative; the model tier is picked per Mac from its memory, stored as an 8-bit copy. Spike: creative never won a test set |

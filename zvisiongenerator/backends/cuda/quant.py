@@ -24,8 +24,8 @@ from collections.abc import Callable, Collection, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends.memory_cuda import drop_cached_files, release_memory
-from zvisiongenerator.backends.safetensors_stream import iter_tensors
+from zvisiongenerator.backends.cuda.memory import drop_cached_files, release_memory
+from zvisiongenerator.backends.cuda.safetensors_stream import iter_tensors
 
 if TYPE_CHECKING:
     import torch

@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from zvisiongenerator.backends import image_win_quant as quant
+from zvisiongenerator.backends.cuda import quant
 
 
 @pytest.fixture

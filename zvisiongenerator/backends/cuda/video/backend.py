@@ -14,8 +14,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Final
 
-from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
-from zvisiongenerator.backends.lora_peft import is_unmatched_adapter_error, warn_unmatched_lora
+from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
+from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, warn_unmatched_lora
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 
 logger = logging.getLogger(__name__)
@@ -170,7 +170,7 @@ def _load_runtime_dependencies() -> _RuntimeDependencies:
         import av  # noqa: F401 - the encoder needs it
         import diffusers
 
-        from zvisiongenerator.backends.video_encode import encode_video
+        from zvisiongenerator.backends.cuda.video.encode import encode_video
     except ImportError as exc:
         raise RuntimeError("Video diffusers dependencies are unavailable. Install the Windows/Linux video runtime with `uv sync`.") from exc
 
@@ -216,7 +216,7 @@ def _validate_cuda(runtime: _RuntimeDependencies) -> None:
 
 def _configure_torch_runtime(torch: Any) -> None:
     """Apply the same lightweight CUDA tuning used by the image diffusers backend."""
-    from zvisiongenerator.backends.memory_cuda import configure_allocator
+    from zvisiongenerator.backends.cuda.memory import configure_allocator
 
     configure_allocator()
     if hasattr(torch, "backends") and hasattr(torch.backends, "cudnn"):
@@ -270,7 +270,7 @@ def _load_generation_pipeline(
         The pipeline, and where its text encoder and transformer load from.
     """
 
-    from zvisiongenerator.backends.memory_cuda import release_memory
+    from zvisiongenerator.backends.cuda.memory import release_memory
 
     checkpoint = _download_hub_file(*transformer_source, "LTX transformer") if transformer_source else None
     repo_dir = _repo_dir(model_path, with_transformer=checkpoint is None)
@@ -302,10 +302,10 @@ def _load_generation_pipeline(
 def _attach_transformer(pipeline: Any, source: _TransformerSource, torch: Any) -> None:
     """Load the transformer from *source*, place it for the memory mode, give it to *pipeline* and apply the LoRAs."""
 
-    from zvisiongenerator.backends.block_streaming import unload_before
-    from zvisiongenerator.backends.ltx_cuda_weights import load_transformer
-    from zvisiongenerator.backends.memory_cuda import release_memory
-    from zvisiongenerator.backends.timestep_runs import modulate_by_runs
+    from zvisiongenerator.backends.cuda.block_streaming import unload_before
+    from zvisiongenerator.backends.cuda.video.weights import load_transformer
+    from zvisiongenerator.backends.cuda.memory import release_memory
+    from zvisiongenerator.backends.cuda.video.timestep_runs import modulate_by_runs
 
     transformer = load_transformer(source.config, prepared=source.prepared, bits=source.quantize, compute_dtype=source.torch_dtype)
     _place_transformer(transformer, torch, quantize=source.quantize, low_memory=source.low_memory)
@@ -327,7 +327,7 @@ def _attach_transformer(pipeline: Any, source: _TransformerSource, torch: Any) -
 def _release_transformer(pipeline: Any, source: _TransformerSource) -> None:
     """Remove the transformer (and its LoRAs, from the connectors too) from *pipeline* and free its memory."""
 
-    from zvisiongenerator.backends.memory_cuda import release_memory
+    from zvisiongenerator.backends.cuda.memory import release_memory
 
     if source.loras and hasattr(pipeline, "unload_lora_weights"):
         pipeline.unload_lora_weights()
@@ -389,7 +389,7 @@ def _check_system_memory(repo_dir: Path, transformer_input: Path, quantize: int)
 
     import psutil
 
-    from zvisiongenerator.backends.ltx_cuda_weights import component_elements, text_encoder_bytes, transformer_elements
+    from zvisiongenerator.backends.cuda.video.weights import component_elements, text_encoder_bytes, transformer_elements
     from zvisiongenerator.utils.model_memory import estimate_ltx_cuda_system_memory
 
     block_matrices, transformer_rest = transformer_elements(transformer_input)
@@ -423,7 +423,7 @@ def _prepared_weights(model_name: str | None, model_path: str, repo_dir: Path, t
     Writing reads the source weights once (tens of gigabytes) and can take several minutes.
     """
 
-    from zvisiongenerator.backends.ltx_cuda_weights import ensure_prepared, text_encoder_sources, transformer_sources, write_text_encoder, write_transformer
+    from zvisiongenerator.backends.cuda.video.weights import ensure_prepared, text_encoder_sources, transformer_sources, write_text_encoder, write_transformer
     from zvisiongenerator.utils.paths import get_ziv_data_dir
     from zvisiongenerator.utils.stored_quant import stored_quant_name
 
@@ -448,7 +448,7 @@ def _transformer_config(repo_dir: Path) -> dict[str, Any]:
 def _load_connectors(repo_dir: Path, torch_dtype: Any) -> Any:
     """Load the text connectors with FP8 weight storage."""
 
-    from zvisiongenerator.backends.ltx_cuda_weights import load_connectors
+    from zvisiongenerator.backends.cuda.video.weights import load_connectors
 
     return load_connectors(repo_dir / "connectors", compute_dtype=torch_dtype)
 
@@ -461,7 +461,7 @@ def _place_components(pipeline: Any, torch: Any, *, low_memory: bool) -> None:
     it denoises. Otherwise everything moves to the GPU.
     """
 
-    from zvisiongenerator.backends.block_streaming import group_offload, load_when_used
+    from zvisiongenerator.backends.cuda.block_streaming import group_offload, load_when_used
 
     device = torch.device("cuda")
     for component in _codec_components(pipeline):
@@ -486,7 +486,7 @@ def _codec_components(pipeline: Any) -> list[Any]:
 def _place_transformer(transformer: Any, torch: Any, *, quantize: int, low_memory: bool) -> None:
     """Stream the transformer to the GPU block by block in low-memory mode, else move it there."""
 
-    from zvisiongenerator.backends.block_streaming import group_offload, move_outside, stream_blocks
+    from zvisiongenerator.backends.cuda.block_streaming import group_offload, move_outside, stream_blocks
 
     device = torch.device("cuda")
     if not low_memory:
@@ -506,7 +506,7 @@ def _chunk_token_wise_layers(transformer: Any) -> None:
     computes tokens independently, so chunking leaves the output unchanged.
     """
 
-    from zvisiongenerator.backends.token_chunking import chunk_tokens
+    from zvisiongenerator.backends.cuda.video.token_chunking import chunk_tokens
 
     modules: list[Any] = []
     for block in getattr(transformer, "transformer_blocks", ()):
@@ -638,7 +638,7 @@ def _decode_clip(pipeline: Any, result: Any) -> _GeneratedClip:
     system memory holds a full-precision copy of the clip.
     """
 
-    from zvisiongenerator.backends.streaming_decode import decode_frames
+    from zvisiongenerator.backends.cuda.video.streaming_decode import decode_frames
 
     frames = decode_frames(pipeline.vae, result.frames)
     return _GeneratedClip(frames=frames, audio=_decode_audio(pipeline, getattr(result, "audio", None)), sample_rate=_audio_sample_rate(pipeline))
@@ -987,9 +987,9 @@ def _encode_prompt(model: _LoadedVideoModel, pipeline: Any, prompt: str) -> dict
     if model.prompt_cache is not None and model.prompt_cache[0] == prompt:
         return model.prompt_cache[1]
 
-    from zvisiongenerator.backends.block_streaming import group_offload
-    from zvisiongenerator.backends.ltx_cuda_weights import load_text_encoder
-    from zvisiongenerator.backends.memory_cuda import release_memory
+    from zvisiongenerator.backends.cuda.block_streaming import group_offload
+    from zvisiongenerator.backends.cuda.video.weights import load_text_encoder
+    from zvisiongenerator.backends.cuda.memory import release_memory
 
     torch = model.runtime.torch
     device = torch.device("cuda")

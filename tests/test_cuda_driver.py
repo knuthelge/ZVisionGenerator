@@ -1,4 +1,4 @@
-"""Tests for zvisiongenerator.backends.cuda_driver."""
+"""Tests for zvisiongenerator.backends.cuda.driver."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
+from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
 
 
 @pytest.mark.parametrize("cuda_version", ["13.0", "13.2", "14.0"])

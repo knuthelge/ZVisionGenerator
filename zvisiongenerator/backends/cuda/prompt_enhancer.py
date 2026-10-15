@@ -29,8 +29,8 @@ class TransformersPromptEnhancer:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
 
-        from zvisiongenerator.backends.cuda_driver import cuda_driver_hint
-        from zvisiongenerator.backends.memory_cuda import configure_allocator
+        from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
+        from zvisiongenerator.backends.cuda.memory import configure_allocator
 
         # Preflight enhancement can be the first thing in the process to start CUDA.
         configure_allocator()
@@ -107,7 +107,7 @@ class TransformersPromptEnhancer:
 
     def close(self) -> None:
         """Drop the weights and free CUDA cache."""
-        from zvisiongenerator.backends.memory_cuda import release_memory
+        from zvisiongenerator.backends.cuda.memory import release_memory
 
         self._model = None
         self._tokenizer = None

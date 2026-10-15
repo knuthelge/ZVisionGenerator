@@ -6,7 +6,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from zvisiongenerator.backends import image_win_lokr as lokr  # noqa: E402
+from zvisiongenerator.backends.cuda.image import lokr  # noqa: E402
 
 
 def _converter(state):

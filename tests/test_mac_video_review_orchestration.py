@@ -19,7 +19,7 @@ pytest.importorskip("ltx_pipelines_mlx")
 from ltx_pipelines_mlx import DistilledPipeline  # noqa: E402
 from ltx_pipelines_mlx.utils import _orchestration  # noqa: E402
 
-from zvisiongenerator.backends.video_mac import LtxVideoBackend, _LtxModel  # noqa: E402
+from zvisiongenerator.backends.mac.video import LtxVideoBackend, _LtxModel  # noqa: E402
 
 _STAGE1 = SimpleNamespace(video_tokens="video_tokens", audio_tokens="audio_tokens", latent_dims=(3, 7, 11))
 

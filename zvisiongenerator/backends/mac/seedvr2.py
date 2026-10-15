@@ -7,7 +7,7 @@ from typing import Any
 
 from PIL import Image
 
-from zvisiongenerator.backends import memory_mac
+from zvisiongenerator.backends.mac import memory as memory_mac
 
 # SeedVR2 model name → the ``ModelConfig`` factory that describes its layout. mflux does not infer the
 # variant from the weights, so the config is always passed explicitly.

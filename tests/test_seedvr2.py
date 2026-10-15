@@ -55,7 +55,7 @@ def seedvr2_mac(monkeypatch):
     import mflux.models.seedvr2 as mflux_seedvr2
     from mflux.models.common.config.model_config import ModelConfig
 
-    import zvisiongenerator.backends.seedvr2_mac as module
+    import zvisiongenerator.backends.mac.seedvr2 as module
 
     monkeypatch.setattr(ModelConfig, "precision", "other")
     seedvr2_class = MagicMock(name="SeedVR2")

@@ -33,13 +33,13 @@ BACKENDS: dict[str, "ImageBackend"] = {}
 
 
 def _create_mflux_backend() -> "ImageBackend":
-    from zvisiongenerator.backends.image_mac import MfluxBackend
+    from zvisiongenerator.backends.mac.image import MfluxBackend
 
     return MfluxBackend()
 
 
 def _create_diffusers_backend() -> "ImageBackend":
-    from zvisiongenerator.backends.image_win import DiffusersBackend
+    from zvisiongenerator.backends.cuda.image.backend import DiffusersBackend
 
     return DiffusersBackend()
 
@@ -86,13 +86,13 @@ VIDEO_BACKENDS: dict[str, "VideoBackend"] = {}
 
 
 def _create_ltx_video_backend() -> "VideoBackend":
-    from zvisiongenerator.backends.video_mac import LtxVideoBackend
+    from zvisiongenerator.backends.mac.video import LtxVideoBackend
 
     return LtxVideoBackend()
 
 
 def _create_diffusers_video_backend() -> "VideoBackend":
-    from zvisiongenerator.backends.video_diffusers import DiffusersVideoBackend
+    from zvisiongenerator.backends.cuda.video.backend import DiffusersVideoBackend
 
     return DiffusersVideoBackend()
 
@@ -140,7 +140,7 @@ def get_video_backend(family: str) -> "VideoBackend":
 
 
 def _create_mflux_seedvr2_upscaler() -> "SeedVR2Upscaler":
-    from zvisiongenerator.backends.seedvr2_mac import MfluxSeedVR2Upscaler
+    from zvisiongenerator.backends.mac.seedvr2 import MfluxSeedVR2Upscaler
 
     return MfluxSeedVR2Upscaler()
 
@@ -173,13 +173,13 @@ def get_seedvr2_upscaler() -> "SeedVR2Upscaler | None":
 def release_accelerator_memory() -> None:
     """Return a finished job's model memory to the system (MLX's buffer cache on macOS; collected models on CUDA)."""
     if sys.platform in ("win32", "linux"):
-        from zvisiongenerator.backends.memory_cuda import release_memory as release_cuda_memory
+        from zvisiongenerator.backends.cuda.memory import release_memory as release_cuda_memory
 
         release_cuda_memory()
         return
     if sys.platform != "darwin":
         return
-    from zvisiongenerator.backends.memory_mac import release_memory
+    from zvisiongenerator.backends.mac.memory import release_memory
 
     release_memory()
 
@@ -193,12 +193,12 @@ def get_accelerator_memory_budget() -> MemoryBudget | None:
     from zvisiongenerator.utils.model_memory import MemoryBudget
 
     if sys.platform == "darwin":
-        from zvisiongenerator.backends.memory_mac import memory_budget_bytes, memory_size_bytes
+        from zvisiongenerator.backends.mac.memory import memory_budget_bytes, memory_size_bytes
 
         budget = memory_budget_bytes()
         return MemoryBudget(budget, unified_bytes=memory_size_bytes()) if budget else None
     if sys.platform in ("win32", "linux"):
-        from zvisiongenerator.backends.memory_cuda import memory_sizes
+        from zvisiongenerator.backends.cuda.memory import memory_sizes
 
         sizes = memory_sizes()
         return MemoryBudget(*sizes) if sizes else None
@@ -246,11 +246,11 @@ def supports_video_upscale_review() -> bool:
 def create_prompt_enhancer(repo: str, revision: str | None) -> "PromptEnhancer":
     """Load the platform prompt-enhancer LLM (mlx-lm on macOS, transformers elsewhere)."""
     if sys.platform == "darwin":
-        from zvisiongenerator.backends.prompt_enhancer_mac import MlxPromptEnhancer
+        from zvisiongenerator.backends.mac.prompt_enhancer import MlxPromptEnhancer
 
         return MlxPromptEnhancer(repo, revision)
     if sys.platform in ("win32", "linux"):
-        from zvisiongenerator.backends.prompt_enhancer_win import TransformersPromptEnhancer
+        from zvisiongenerator.backends.cuda.prompt_enhancer import TransformersPromptEnhancer
 
         return TransformersPromptEnhancer(repo, revision)
     raise RuntimeError(f"Unsupported platform: {sys.platform}. Prompt enhancement supports macOS, Windows, and Linux.")

@@ -16,7 +16,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from zvisiongenerator.backends.memory_cuda import drop_cached_file
+from zvisiongenerator.backends.cuda.memory import drop_cached_file
 
 if TYPE_CHECKING:
     import torch
