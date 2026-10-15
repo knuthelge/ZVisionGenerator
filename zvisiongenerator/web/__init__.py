@@ -46,13 +46,26 @@ def _ensure_web_runtime_dependencies(*, prog: str) -> None:
         raise RuntimeError(_missing_web_runtime_message(prog=prog, missing=missing))
 
 
+_HOST_ALIASES = {"local": "0.0.0.0"}
+
+
+def _resolve_host(value: str) -> str:
+    """Return the bind address for a ``--host`` value, expanding aliases such as ``local``."""
+    return _HOST_ALIASES.get(value.strip().lower(), value)
+
+
 def _build_parser(*, prog: str) -> argparse.ArgumentParser:
     """Build the Web UI launcher parser."""
     parser = argparse.ArgumentParser(
         prog=prog,
         description="Launch the Z-Vision Generator Web UI.",
     )
-    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host interface to bind the Web UI server to.")
+    parser.add_argument(
+        "--host",
+        type=_resolve_host,
+        default="127.0.0.1",
+        help="Host interface to bind the Web UI server to ('local' is short for 0.0.0.0, reachable from your network).",
+    )
     parser.add_argument("--port", type=int, default=8080, help="Preferred local port for the Web UI server.")
     parser.add_argument("--no-browser", action="store_true", help="Start the server without opening a browser tab.")
     return parser
@@ -161,6 +174,21 @@ def _bound_hostnames(host: str) -> list[str]:
     return [] if address.is_loopback else _machine_hostnames()
 
 
+def _lan_address(host: str) -> str | None:
+    """Return this machine's network IP when *host* is a wildcard bind, or ``None`` when there is none to show."""
+    if host not in _WILDCARD_HOSTS:
+        return None
+    family, target = (socket.AF_INET6, "2001:4860:4860::8888") if host == "::" else (socket.AF_INET, "8.8.8.8")
+    try:
+        # Connecting a UDP socket sends nothing; it only picks the interface that routes outward.
+        with socket.socket(family, socket.SOCK_DGRAM) as probe:
+            probe.connect((target, 80))
+            address = probe.getsockname()[0]
+    except OSError:
+        return None
+    return None if ipaddress.ip_address(address).is_loopback else address
+
+
 def run_server(*, host: str = "127.0.0.1", port: int = 8080, open_browser: bool = True) -> None:
     """Launch the FastAPI Web UI server."""
     _ensure_web_runtime_dependencies(prog="The Web UI launcher")
@@ -173,6 +201,10 @@ def run_server(*, host: str = "127.0.0.1", port: int = 8080, open_browser: bool 
     url = f"http://[{host}]:{selected_port}" if ":" in host else f"http://{host}:{selected_port}"
 
     print(f"Starting Z-Vision Generator Web UI at {url}")
+    lan_address = _lan_address(host)
+    if lan_address is not None:
+        lan_host = f"[{lan_address}]" if ":" in lan_address else lan_address
+        print(f"On your network: http://{lan_host}:{selected_port}")
     log_path = log_file_path()
     if log_path is not None:
         print(f"Error log: {log_path}")

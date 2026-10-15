@@ -91,6 +91,42 @@ def test_bound_hostnames(monkeypatch, host, machine, expected):
     assert web._bound_hostnames(host) == expected
 
 
+class _FakeUdpSocket:
+    def __init__(self, address: str | None) -> None:
+        self._address = address
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+    def connect(self, _target) -> None:
+        if self._address is None:
+            raise OSError("Network is unreachable")
+
+    def getsockname(self):
+        return (self._address, 0)
+
+
+@pytest.mark.parametrize(
+    ("host", "detected", "expected"),
+    [
+        ("0.0.0.0", "192.168.1.20", "192.168.1.20"),
+        ("::", "fd00::20", "fd00::20"),
+        ("0.0.0.0", None, None),
+        ("0.0.0.0", "127.0.0.1", None),
+        ("127.0.0.1", "192.168.1.20", None),
+        ("192.168.1.20", "192.168.1.20", None),
+    ],
+)
+def test_lan_address(monkeypatch, host, detected, expected):
+    from zvisiongenerator import web
+
+    monkeypatch.setattr(web.socket, "socket", lambda *_args: _FakeUdpSocket(detected))
+    assert web._lan_address(host) == expected
+
+
 def test_configured_hostnames_are_allowed_without_touching_env(monkeypatch, reset_configured_hostnames):
     monkeypatch.delenv(request_guard.ALLOWED_HOSTS_ENV_VAR, raising=False)
     request_guard.configure_allowed_hostnames(["mymac", "mymac.local"])

@@ -120,6 +120,14 @@ class TestWebCli:
 
         run_server.assert_called_once_with(host="0.0.0.0", port=9090, open_browser=True)
 
+    @pytest.mark.parametrize("alias", ["local", "LOCAL"])
+    def test_local_host_alias_binds_all_interfaces(self, alias):
+        """--host local is short for 0.0.0.0."""
+        with patch("zvisiongenerator.web.run_server") as run_server:
+            web_main(["--host", alias, "--no-browser"], prog="ziv-ui")
+
+        run_server.assert_called_once_with(host="0.0.0.0", port=8080, open_browser=False)
+
     def test_standalone_entrypoint_rejects_invalid_port(self):
         """ziv-ui rejects out-of-range ports before launching the server."""
         with patch("zvisiongenerator.web.run_server") as run_server:

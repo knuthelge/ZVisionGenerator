@@ -31,7 +31,7 @@ The base package install includes the Web UI runtime, so `ziv ui` and `ziv-ui` w
 
 | Argument | Default | Description |
 |---|---|---|
-| `--host` | `127.0.0.1` | Host interface to bind the local Web UI server to |
+| `--host` | `127.0.0.1` | Host interface to bind the local Web UI server to. `local` is short for `0.0.0.0`, which makes the UI reachable from other devices on your network; the launcher then also prints this machine's network address |
 | `--port` | `8080` | Preferred local port; the app chooses the next available port if this one is busy |
 | `--no-browser` | off | Start the server without opening a browser tab |
 

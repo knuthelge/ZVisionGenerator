@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
+- Web UI: `ziv ui --host local` is short for `--host 0.0.0.0`, and when the UI listens on all interfaces the launcher prints the address to open it from other devices on your network
 - Windows/Linux: `ltx-4` and `ltx-8` work for video, as on macOS. They need about 20 GB and 27 GB of system memory, and the first run of each takes a while to download and prepare the model
 - Windows/Linux: `video_model_presets.ltx.diffusers.transformer` (`repo`, `filename`) names a single-file LTX-2 transformer checkpoint to use instead of the repository's own; set it to `null` to use the repository's
 - Video (macOS): Text to Video and Image to Video warn when the chosen size and length may not fit in memory. The Web UI shows a note under **Duration (s)** as you change the model, size, duration, **Low memory** or **Upscale**, and `ziv-video` prints one warning at the start of a run. The job is never blocked
