@@ -14,10 +14,13 @@ from diffusers import AutoPipelineForText2Image
 
 from zvisiongenerator.backends.cuda.block_streaming import group_offload
 from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
+from zvisiongenerator.backends.cuda.image.ideogram4 import generate as generate_ideogram4
+from zvisiongenerator.backends.cuda.image.ideogram4 import load_pipeline as load_ideogram4_pipeline
 from zvisiongenerator.backends.cuda.image.preview import LivePreview, create_live_preview
 from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, restore_cpu_offload, warn_unmatched_lora
 from zvisiongenerator.backends.cuda.memory import configure_allocator
 from zvisiongenerator.backends.cuda.quant import load_fp8_components, load_nf4_components, write_fp8_copy
+from zvisiongenerator.core.ideogram4 import sampler_settings
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.stored_quant import STORED_QUANT_BITS, stored_quant_bits
 
@@ -350,12 +353,36 @@ class DiffusersBackend:
         self._model_info = model_info
 
         if model_info.family == "ideogram4":
-            raise RuntimeError("Ideogram 4 is not supported on this platform (macOS/MLX only).")
+            if lora_paths:
+                raise ValueError("LoRAs are not supported for Ideogram 4 on Windows and Linux yet.")
+            pipeline = load_ideogram4_pipeline(model_path, torch_dtype)
+        else:
+            pipeline = self._load_pipeline(model_path, model_info, quantize, torch_dtype, lora_paths, lora_weights)
 
+        # Decode in slices and tiles to bound VAE memory. Called on the VAE itself: some pipelines (Krea 2) have no
+        # enable_vae_tiling wrapper and would otherwise decode the whole frame at once.
+        for method in ("enable_slicing", "enable_tiling"):
+            try:
+                getattr(pipeline.vae, method, lambda: None)()
+            except NotImplementedError:
+                pass  # diffusers' base VAE class has the method but this VAE cannot tile or slice
+
+        return pipeline, model_info
+
+    @staticmethod
+    def _load_pipeline(
+        model_path: str,
+        model_info: ImageModelInfo,
+        quantize: int | None,
+        torch_dtype: torch.dtype,
+        lora_paths: list[str] | None,
+        lora_weights: list[float] | None,
+    ) -> Any:
+        """Load a text-to-image pipeline at the requested quantize level (or a stored copy's), with its LoRAs."""
         stored_bits = stored_quant_bits(Path(model_path))
         bits = stored_bits if stored_bits is not None else quantize
         if bits not in (None, 4, 8):
-            warnings.warn(f"Unsupported quantize value {bits!r}; loading at full precision. Use 4 (NF4) or 8 (FP8).", stacklevel=2)
+            warnings.warn(f"Unsupported quantize value {bits!r}; loading at full precision. Use 4 (NF4) or 8 (FP8).", stacklevel=3)
             bits = None
 
         if bits == 4:
@@ -369,16 +396,7 @@ class DiffusersBackend:
 
         if lora_paths:
             _load_loras(pipeline, lora_paths, lora_weights, cpu_offload=bits == 4 and model_info.family in _Q4_CPU_OFFLOAD_FAMILIES)
-
-        # Decode in slices and tiles to bound VAE memory. Called on the VAE itself: some pipelines (Krea 2) have no
-        # enable_vae_tiling wrapper and would otherwise decode the whole frame at once.
-        for method in ("enable_slicing", "enable_tiling"):
-            try:
-                getattr(pipeline.vae, method, lambda: None)()
-            except NotImplementedError:
-                pass  # diffusers' base VAE class has the method but this VAE cannot tile or slice
-
-        return pipeline, model_info
+        return pipeline
 
     def _step_callback_kwargs(self, skip_signal, step_callback, steps: int, height: int, width: int) -> dict[str, Any]:
         """Build the pipeline's step-end callback kwargs, with live previews when progress is reported."""
@@ -494,6 +512,42 @@ class DiffusersBackend:
             return None
         return result.images[0]
 
+    def _ideogram4_text_to_image(
+        self,
+        pipe: Any,
+        prompt: str,
+        width: int,
+        height: int,
+        seed: int,
+        steps: int,
+        guidance: float,
+        skip_signal: Any | None,
+        step_callback: Any | None,
+        steps_explicit: bool,
+        guidance_explicit: bool,
+        first_sigma: float | None,
+    ) -> Image.Image | None:
+        """Run Ideogram 4 with its default sampler preset unless steps or guidance were given, and the first-step sigma override."""
+        sampler = sampler_settings(steps, guidance, steps_explicit=steps_explicit, guidance_explicit=guidance_explicit)
+        callback_kwargs: dict[str, Any] = {}
+        if skip_signal is not None or step_callback is not None:
+            callback_kwargs = self._step_callback_kwargs(skip_signal, step_callback, sampler.steps, height, width)
+        result = generate_ideogram4(
+            pipe,
+            prompt,
+            width=width,
+            height=height,
+            generator=torch.Generator(device="cpu").manual_seed(seed),
+            sampler=sampler,
+            first_sigma=first_sigma,
+            callback_kwargs=callback_kwargs,
+        )
+        torch.cuda.empty_cache()
+        if skip_signal is not None and pipe._interrupt:
+            pipe._interrupt = False
+            return None
+        return result.images[0]
+
     @torch.inference_mode()
     def text_to_image(
         self,
@@ -514,6 +568,8 @@ class DiffusersBackend:
     ) -> Image.Image | None:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
+        if self._model_info.family == "ideogram4":
+            return self._ideogram4_text_to_image(model, prompt, width, height, seed, steps, guidance, skip_signal, step_callback, steps_explicit, guidance_explicit, first_sigma)
         original_scheduler = model.scheduler
         try:
             scheduler_kwargs = _apply_beta_scheduler(model, self._model_info.family, steps) if scheduler == "beta" else {}

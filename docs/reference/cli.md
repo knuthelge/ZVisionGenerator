@@ -97,7 +97,7 @@ The free-text direction is not part of the spec; pass it with `--enhance-note`.
 
 See [Enhancing Prompts](../guides/prompts.md#enhancing-prompts).
 
-The `ideo` alias selects Ideogram 4 (`ideogram-ai/ideogram-4-fp8`), a macOS/MLX-only image model. Its width and height must be in the 256–2048 range and multiples of 16. Size presets that exceed this range — `--size xl` with `--ratio 16:9` or `--ratio 9:16` (2176 px) — are rejected before the model loads, as are `--image` and `--upscale` (both require img2img, which Ideogram 4 does not support).
+The `ideo` alias selects Ideogram 4 (`ideogram-ai/ideogram-4-fp8`), an image model on macOS (MLX), Windows and Linux (CUDA, using `ideogram-ai/ideogram-4-nf4-diffusers`). Its width and height must be in the 256–2048 range and multiples of 16. Size presets that exceed this range — `--size xl` with `--ratio 16:9` or `--ratio 9:16` (2176 px) — are rejected before the model loads, as are `--image` and `--upscale` (both require img2img, which Ideogram 4 does not support).
 
 ## `ziv-video` — Video Generation
 

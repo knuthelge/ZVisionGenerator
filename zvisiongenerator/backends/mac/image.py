@@ -27,17 +27,11 @@ from mlx.utils import tree_map
 
 from zvisiongenerator.backends.mac.image_preview import estimate_clean_latents, render_latent_preview
 from zvisiongenerator.backends.mac.memory import apply_buffer_cache_policy, materialize_weights
+from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, wrap_ideogram4_prompt as _wrap_ideogram4_prompt
 from zvisiongenerator.core.progress_events import preview_milestone_steps
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 
-# First-step sigma override applied to every Ideogram 4 generation to reduce
-# false positives from the safety filter on harmless prompts (the grey
-# "Image blocked by safety filter" frame).
-# Overrides only the first denoising step's timestep: t_values[-1] = 1.0 - value.
-# Best-effort mitigation (not guaranteed); retune or set to None to disable.
-IDEOGRAM4_INITIAL_SIGMA: float | None = 1.004
-
-# Per-run override slot, distinct from the always-on default constant above.
+# Per-run override slot, distinct from the always-on default constant (IDEOGRAM4_INITIAL_SIGMA).
 # The sentinel distinguishes "no override" (use the default) from "override to
 # None" (disable the sigma adjustment for one run).
 # The override is thread-local so concurrent web generations (the web runner uses a
@@ -251,28 +245,6 @@ class _ProgressChecker:
             warnings.warn(f"Live preview failed for {self._family}: {exc}", stacklevel=2)
             self._previews_enabled = False
             return None
-
-
-def _wrap_ideogram4_prompt(prompt: str) -> str | dict[str, Any]:
-    """Wrap a plain-text prompt into Ideogram 4's minimal structured JSON caption.
-
-    Prompts that already look like JSON captions (start with "{") are returned
-    unchanged so callers retain full control.
-
-    Args:
-        prompt: The user-supplied prompt text.
-
-    Returns:
-        The original prompt when it is already a JSON caption, otherwise a
-        minimal structured caption dict that mflux serializes without emitting
-        its plain-text caption warning.
-    """
-    if prompt.strip().startswith("{"):
-        return prompt
-    return {
-        "high_level_description": prompt,
-        "compositional_deconstruction": {"background": prompt, "elements": []},
-    }
 
 
 def _upcast_model_weights(model, components):

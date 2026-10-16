@@ -100,12 +100,11 @@ model_aliases:
   klein9b: "black-forest-labs/FLUX.2-klein-9B"
   klein4b: "black-forest-labs/FLUX.2-klein-4B"
   krea2: "unsloth/Krea-2-Turbo"
+  # Ideogram 4: the FP8 repo on macOS; the official NF4 diffusers repo (about 15 GB) on Windows and Linux.
   ideo:
     darwin: "ideogram-ai/ideogram-4-fp8"
-    win32:
-      message: "Alias 'ideo' is macOS-only. Ideogram 4 requires the mflux/MLX backend."
-    linux:
-      message: "Alias 'ideo' is macOS-only. Ideogram 4 requires the mflux/MLX backend."
+    win32: "ideogram-ai/ideogram-4-nf4-diffusers"
+    linux: "ideogram-ai/ideogram-4-nf4-diffusers"
 
 # Declared per-alias image families let the Web UI surface known aliases offline
 # (no network round-trip through detect_image_model).

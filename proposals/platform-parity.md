@@ -1,6 +1,6 @@
 # Feature parity between macOS and Windows/Linux
 
-**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 1 (Klein img2img on CUDA), 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, with its review), 5 (quantized, streamed video on CUDA, which absorbed step 6), 7 (video memory estimates), 8 (scheduler default), 9 (ffmpeg install) and 11 (extend a video on CUDA) are done. Steps 12 and 13 are still open. Step 10 was measured on 2026-10-16 and needs no change. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
+**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 1 (Klein img2img on CUDA), 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, with its review), 5 (quantized, streamed video on CUDA, which absorbed step 6), 7 (video memory estimates), 8 (scheduler default), 9 (ffmpeg install), 11 (extend a video on CUDA) and 13 (Ideogram 4 on CUDA) are done. Step 12 is still open. Step 10 was measured on 2026-10-16 and needs no change. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
 
 ## Where things stand
 
@@ -9,7 +9,7 @@ Re-audited against `main` at v0.13.0b20 (diffusers 0.41.0, mflux 0.22.0, torch 2
 | Feature | macOS | Windows / Linux | Step |
 |---|---|---|---|
 | Text to image: Z-Image, FLUX.2 Klein, Krea 2 | yes | yes | |
-| Ideogram 4 | yes | no; refused in `load_model` | 13 |
+| Ideogram 4 | yes | yes, NF4 repo, up to about 1.8 MP on a 10 GB card; no LoRAs | 13 |
 | q4 / q8 with stored quants, image memory badges | yes | yes | |
 | LoRAs and LoKr (image) | yes | yes | |
 | Live image previews | yes | yes | |
@@ -122,7 +122,7 @@ Each step is its own PR. Order for what's left:
 2. ~~Steps 8 and 9 (scheduler default, ffmpeg install).~~ Done.
 3. ~~Step 7 (video memory estimates).~~ Done.
 4. ~~Step 3's review before upscaling.~~ Done.
-5. Steps 13 and 12 (Ideogram 4, SeedVR2). Both are accepted. Each starts with a spike that picks the approach: which implementation for SeedVR2, which repo for Ideogram 4.
+5. ~~Step 13 (Ideogram 4)~~, done, and step 12 (SeedVR2), which starts with a spike that picks the implementation.
 6. Step 10 (enhancer download) is measured and needs no change.
 
 Step 4 was dropped. The step numbers stay as they are so references keep working.
@@ -300,6 +300,25 @@ macOS runs SeedVR2 through mflux ([shipped](archive/image-upscale-seedvr2-mac.md
 
 ### 13. Ideogram 4 on CUDA
 
+**Done (2026-10-16).** `model_aliases.ideo` resolves to `ideogram-ai/ideogram-4-nf4-diffusers` on Windows and Linux, and `DiffusersBackend` loads and runs it through `backends/cuda/image/ideogram4.py`; the first-sigma default, the caption wrapper and the sampler preset are in `core/ideogram4.py`, shared with the macOS backend.
+
+- **Spike result.** The NF4 repo (15.2 GB: text encoder 4.67 GiB, two transformers 4.32 GiB each, VAE 0.16 GiB in memory) loads as is, but `Ideogram4Pipeline.from_pretrained` puts every NF4 component on the GPU as it goes and runs out of memory on a 10 GB card, so each component is loaded and moved to the CPU before the next. Both transformers then stream block by block with `block_streaming.stream_blocks` (diffusers' group offloading breaks NF4, as in step 5). The pipeline calls the text encoder's layers directly, so model CPU offload would run it on the CPU; it is put on the GPU for the call and sent back by a hook right after its hidden states are computed. The hook matters: the pipeline then builds a float32 conditioning tensor over every image token (about 53,000 features each, 2 GiB at 2 MP), which does not fit beside the 4.7 GiB encoder (1 MP peaked at 8.28 GiB allocated without it and 6.08 with it).
+- **Defaults match macOS.** With neither steps nor guidance given, the run is mflux's `V4_DEFAULT_20` as diffusers takes it: 20 steps, guidance 7.0 with 3.0 on the last two steps (mflux lists the schedule from the clean end, diffusers from the noisy end), mean 0.0, standard deviation 1.75. Explicit steps keep the two polish steps; explicit guidance is a constant. The first-step sigma of 1.004 (`--first-sigma` overrides it) replaces the first sigma of the schedule the pipeline builds, which sets the same first timestep as mflux's `t_values[-1] = 1 - sigma`. Without it the first run returned the grey "Image blocked by safety filter" frame for a plain fox prompt; with it the image is clean. JSON captions go to the pipeline as compact JSON text, plain prompts wrapped as on macOS.
+- **Measured** on a 10 GB GPU with 32 GB of system memory, 20 steps, the NF4 repo, default settings (peak allocated / reserved GPU memory):
+
+  | Size | Pixels | Peak allocated | Peak reserved | Time | Result |
+  |---|---|---|---|---|---|
+  | 1024×1024 | 1.05 MP | 6.08 GiB | 6.70 | 124–156 s | ok |
+  | 1536×1024 | 1.57 MP | 7.15 | 8.53 | 175 s | ok |
+  | 1792×1024 | 1.84 MP | 7.87 | 8.57 | 222 s | ok |
+  | 2048×1024 | 2.10 MP | out of memory in the conditional transformer's `llm_cond_norm` (a 1.6 GiB float32 copy) | | | fails |
+  | 2048×2048 | 4.19 MP | out of memory while casting the conditioning tensor (1.8 GiB) | | | fails |
+
+  The load takes 40–80 s and the process peaks at about 20 GiB of resident memory (26–28 GiB with the page cache). The ceiling is the pipeline's conditioning tensor, which spans text and image tokens at 53,248 features each; shortening `max_sequence_length` would save only the text part. Chunking `llm_cond_norm`, as step 5 did for LTX, is the way to raise it if 2 MP matters.
+- **Not done:** LoRAs (`Ideogram4LoraLoaderMixin` exists, but NF4 with streamed blocks was not run, so `--lora` is refused), a comparison against the same seeds on a Mac, a prompt with a full structured JSON caption, and the model-status badge: it uses the generic streamed-image estimate (4.2 GB GPU, 15.6 GB system) against a measured 6.1 GiB GPU and 20 GiB system at 1 MP, which is the right status on this card but the numbers are low.
+
+Original plan:
+
 diffusers 0.41.0 ships `Ideogram4Pipeline`, and both official repos are already in its layout (see the evidence table). So the "macOS only" limit now comes from our code, not from diffusers.
 
 - **Spike first.** Load `ideogram-ai/ideogram-4-nf4-diffusers` (16 GB, NF4 transformer and Qwen3-VL text encoder) on a 10 GB GPU with model or group offloading and measure 1 MP and 2 MP. Then try the FP8 repo the `ideo` alias already uses, through `load_fp8_components` and block streaming. If it loads as is, both platforms share one repo and the stored quant flow can apply. Check the `unconditional_transformer`: it doubles the transformer weights and may be the first thing that doesn't fit.
@@ -335,7 +354,7 @@ diffusers 0.41.0 ships `Ideogram4Pipeline`, and both official repos are already 
 ## Open questions
 
 - ~~Which attribute holds the LTX-2 audio sample rate in diffusers 0.41 (step 2).~~ Answered (2026-10-14): `pipeline.vocoder.config.output_sampling_rate`.
-- Whether Ideogram 4 on CUDA should use the NF4 diffusers repo or the same FP8 repo as macOS (step 13). This depends on the spike and on whether `supports_quantize: false` stays platform-wide.
+- ~~Whether Ideogram 4 on CUDA should use the NF4 diffusers repo or the same FP8 repo as macOS (step 13).~~ Answered (2026-10-16): the NF4 repo. It loads as is and `supports_quantize: false` holds on both platforms, each with its one repo.
 - Which PyTorch SeedVR2 to vendor for step 12: ByteDance's reference code or numz's node.
 - Whether "Upscale an existing video" gets a CUDA step here when [it ships](video-upscale-existing.md) on macOS. The building blocks exist: `LTX2LatentUpsamplePipeline` and step 3's `LTX2Pipeline(latents=, sigmas=)` refine.
 - ~~Whether the configured repo includes the latent upsampler, and whether `LTX2Pipeline` accepts `latents=` plus `sigmas=` for the refine stage (step 3).~~ Answered (2026-10-14): the repo has no upsampler, which is loaded from `Lightricks/LTX-2.3`, and `LTX2Pipeline` accepts both.

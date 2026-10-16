@@ -234,14 +234,85 @@ class TestLoadModelDriverHint:
         assert (cuda_driver_hint(False, "13.0") in str(excinfo.value)) is expects_hint
 
 
-class TestIdeogram4PlatformGuard:
-    def test_ideogram4_unsupported_on_this_platform(self, win_backend):
+class TestIdeogram4:
+    """Ideogram 4 loads through its own NF4 loader and runs with its sampler preset."""
+
+    def test_load_model_uses_the_ideogram_loader_and_tiles_the_vae(self, win_backend):
+        mod, _, _ = win_backend
+        pipeline = MagicMock()
+        info = _make_model_info(family="ideogram4")
+
+        with patch.object(mod, "detect_image_model", return_value=info), patch.object(mod, "load_ideogram4_pipeline", return_value=pipeline) as mock_load:
+            result, model_info = mod.DiffusersBackend().load_model("ideogram-ai/ideogram-4-nf4-diffusers")
+
+        assert result is pipeline and model_info is info
+        assert mock_load.call_args.args[0] == "ideogram-ai/ideogram-4-nf4-diffusers"
+        pipeline.vae.enable_tiling.assert_called_once()
+        mod.AutoPipelineForText2Image.from_pretrained.assert_not_called()
+
+    def test_loras_are_refused_before_anything_loads(self, win_backend):
+        mod, _, _ = win_backend
+
+        with patch.object(mod, "detect_image_model", return_value=_make_model_info(family="ideogram4")), patch.object(mod, "load_ideogram4_pipeline") as mock_load:
+            with pytest.raises(ValueError, match="LoRAs.*Ideogram 4"):
+                mod.DiffusersBackend().load_model("ideogram-ai/ideogram-4-nf4-diffusers", lora_paths=["/l/a.safetensors"])
+
+        mock_load.assert_not_called()
+
+    def _generate(self, mod, **overrides):
+        backend = mod.DiffusersBackend()
+        backend._model_info = _make_model_info(family="ideogram4")
+        pipe = MagicMock(_interrupt=False)
+        arguments = {"model": pipe, "prompt": "a car", "width": 1024, "height": 768, "seed": 5, "steps": 20, "guidance": 7.0, **overrides}
+        with patch.object(mod, "generate_ideogram4", return_value=MagicMock(images=["image"])) as mock_generate:
+            result = backend.text_to_image(**arguments)
+        return result, mock_generate, pipe
+
+    def test_text_to_image_runs_the_default_preset_unless_steps_or_guidance_were_given(self, win_backend):
+        mod, _, _ = win_backend
+
+        result, mock_generate, pipe = self._generate(mod, steps=50)
+
+        assert result == "image"
+        sampler = mock_generate.call_args.kwargs["sampler"]
+        assert (sampler.steps, sampler.guidance_scale) == (20, None)
+        assert mock_generate.call_args.args[:2] == (pipe, "a car")
+        assert (mock_generate.call_args.kwargs["width"], mock_generate.call_args.kwargs["height"]) == (1024, 768)
+
+    def test_explicit_steps_and_guidance_override_the_preset(self, win_backend):
+        mod, _, _ = win_backend
+
+        _, mock_generate, _ = self._generate(mod, steps=12, guidance=5.0, steps_explicit=True, guidance_explicit=True)
+
+        sampler = mock_generate.call_args.kwargs["sampler"]
+        assert (sampler.steps, sampler.guidance_scale, sampler.guidance_schedule) == (12, 5.0, None)
+
+    @pytest.mark.parametrize("first_sigma", [None, 1.006])
+    def test_the_per_run_first_sigma_is_passed_on(self, win_backend, first_sigma):
+        mod, _, _ = win_backend
+
+        _, mock_generate, _ = self._generate(mod, first_sigma=first_sigma)
+
+        assert mock_generate.call_args.kwargs["first_sigma"] == first_sigma
+
+    def test_progress_callbacks_are_built_for_the_sampler_steps(self, win_backend):
+        mod, _, _ = win_backend
+
+        _, mock_generate, _ = self._generate(mod, steps=50, step_callback=MagicMock())
+
+        assert "callback_on_step_end" in mock_generate.call_args.kwargs["callback_kwargs"]
+
+    def test_a_skipped_run_returns_none_and_clears_the_interrupt(self, win_backend):
         mod, _, _ = win_backend
         backend = mod.DiffusersBackend()
+        backend._model_info = _make_model_info(family="ideogram4")
+        pipe = MagicMock(_interrupt=True)
 
-        with patch.object(mod, "detect_image_model", return_value=_make_model_info(family="ideogram4")):
-            with pytest.raises(RuntimeError, match="macOS.*only"):
-                backend.load_model("ideogram-ai/ideogram-4-fp8")
+        with patch.object(mod, "generate_ideogram4", return_value=MagicMock(images=["image"])):
+            result = backend.text_to_image(model=pipe, prompt="a car", width=512, height=512, seed=1, steps=20, guidance=7.0, skip_signal=MagicMock())
+
+        assert result is None
+        assert pipe._interrupt is False
 
 
 # ---------------------------------------------------------------------------

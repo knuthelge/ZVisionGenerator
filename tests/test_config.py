@@ -233,6 +233,20 @@ def test_packaged_config_resolves_ideo_alias_on_darwin(monkeypatch, tmp_path):
     assert resolve_model_path("ideo", aliases=config["model_aliases"], platform_key="darwin") == "ideogram-ai/ideogram-4-fp8"
 
 
+def test_packaged_config_resolves_ideo_alias_on_every_platform(monkeypatch, tmp_path):
+    from zvisiongenerator.utils import config as config_module
+
+    monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+
+    config = load_config()
+    aliases = config["model_aliases"]
+
+    assert resolve_model_path("ideo", aliases=aliases, platform_key="darwin") == "ideogram-ai/ideogram-4-fp8"
+    for platform_key in ("win32", "linux"):
+        assert resolve_model_path("ideo", aliases=aliases, platform_key=platform_key) == "ideogram-ai/ideogram-4-nf4-diffusers"
+    assert config["model_alias_families"]["ideo"] == "ideogram4"
+
+
 def test_packaged_config_ships_krea2_alias_and_defaults(monkeypatch, tmp_path):
     from zvisiongenerator.utils import config as config_module
 

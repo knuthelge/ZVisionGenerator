@@ -1,6 +1,6 @@
 # Image Generation Guide
 
-Generate images from text prompts using `ziv-image`. Supports Z-Image / FLUX / Krea 2 models on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux with NVIDIA GPUs via diffusers/CUDA, plus Ideogram 4 on macOS.
+Generate images from text prompts using `ziv-image`. Supports Z-Image / FLUX / Krea 2 models on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux with NVIDIA GPUs via diffusers/CUDA, plus Ideogram 4 on all three.
 
 On Windows and Linux, image generation requires CUDA to be visible to PyTorch. CPU fallback is not available for the diffusers image backend.
 
@@ -13,7 +13,7 @@ Built-in shorthands for common image models.
 | `zit` | `Tongyi-MAI/Z-Image-Turbo` |
 | `klein4b` | `black-forest-labs/FLUX.2-klein-4B` |
 | `klein9b` | `black-forest-labs/FLUX.2-klein-9B` |
-| `ideo` | `ideogram-ai/ideogram-4-fp8` |
+| `ideo` | `ideogram-ai/ideogram-4-fp8` (macOS), `ideogram-ai/ideogram-4-nf4-diffusers` (Windows and Linux) |
 | `krea2` | `unsloth/Krea-2-Turbo` |
 
 For video aliases, see [Video Guide → Supported Models](video.md#supported-models).
@@ -27,13 +27,13 @@ ziv-image -m krea2 -q 4 --prompt "a portrait"
 
 ### Ideogram 4
 
-Ideogram 4 runs on macOS (Apple Silicon via mflux/MLX) only; it is unavailable on Windows and Linux. It ships as a single FP8 model, so quantization tiers do not apply: `ziv-image` rejects `-q 4` / `-q 8` for it, as the Web UI does. Width and height must be in the 256–2048 range and multiples of 16; size presets that exceed this range (for example `--size xl` with `--ratio 16:9`) are rejected before the model loads.
+Ideogram 4 runs on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux (NVIDIA GPU via diffusers/CUDA). It uses one model per platform, an FP8 one on macOS and the official NF4 one on Windows and Linux (a 15 GB download that needs a Hugging Face account that has accepted the model's terms), so quantization tiers do not apply: `ziv-image` rejects `-q 4` / `-q 8` for it, as the Web UI does. Width and height must be in the 256–2048 range and multiples of 16; size presets that exceed this range (for example `--size xl` with `--ratio 16:9`) are rejected before the model loads.
 
 ```bash
 ziv-image -m ideo --prompt "a portrait"
 ```
 
-Ideogram 4 does not support negative prompts or reference-image (img2img) steering; a negative prompt is dropped with a warning, and both `--image` and `--upscale` are rejected (each requires img2img, which Ideogram 4 does not support). LoRA weights work at parity with other mflux models via `--lora`.
+Ideogram 4 does not support negative prompts or reference-image (img2img) steering; a negative prompt is dropped with a warning, and both `--image` and `--upscale` are rejected (each requires img2img, which Ideogram 4 does not support). LoRA weights work at parity with other mflux models via `--lora` on macOS; on Windows and Linux `--lora` is refused for Ideogram 4 for now.
 
 Plain-text prompts are automatically wrapped into Ideogram 4's structured JSON caption format, so they generate without a plain-text caption warning while preserving the original wording. To supply a full structured JSON caption instead, pass it as the value of `--json-prompt` (mutually exclusive with `--prompt`): this skips random-choice `{a|b|c}` expansion and sends the caption verbatim. Without `--json-prompt`, `{...}` in a prompt is treated as random-choice syntax and corrupts a JSON caption. The `--json-prompt` value must be a valid JSON object, or generation is rejected before the model loads:
 
@@ -42,6 +42,8 @@ ziv-image -m ideo --json-prompt '{"high_level_description": "a portrait"}'
 ```
 
 When neither `--steps` nor `--guidance` is given, Ideogram 4 uses its built-in tuned quality schedule. Supplying `--steps` and/or `--guidance` overrides that schedule with the explicit values.
+
+On Windows and Linux the model does not fit a consumer GPU at once, so the two transformers stream to the GPU block by block and the text encoder is on it only while it reads the prompt. On a 10 GB GPU with 32 GB of system memory, a 1024×1024 image with the default 20 steps takes about 2.5 minutes and peaks at about 6 GB of GPU memory and 20 GB of system memory; sizes up to about 1.8 megapixels (for example 1792×1024) work, taking longer, and larger ones (2048×1024 and up) run out of GPU memory. The first run also loads about 15 GB, which takes a minute or two.
 
 Ideogram 4 sometimes returns a grey "Image blocked by safety filter" frame for harmless prompts. ZVisionGenerator adjusts the first denoising step slightly, which reduces these false positives without changing the prompt, seed or resolution. This is best-effort and not a way around the filter: prompts the filter actually objects to are still blocked. The adjustment defaults to a first-step sigma of `1.004` and can be overridden per run with `--first-sigma` (for example `--first-sigma 1.005` or `--first-sigma 1.006`) when a harmless prompt is still blocked.
 

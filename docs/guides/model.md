@@ -43,7 +43,7 @@ Checkpoints can be bfloat16, float16, float32, or FP8. Scaled FP8 checkpoints (f
 
 `krea2-turbo` converts a fine-tune of Krea 2 Turbo. Native Krea 2 and ComfyUI checkpoints are both accepted, and a bundled text encoder or VAE is ignored; the text encoder and VAE come from unsloth's ungated mirror `unsloth/Krea-2-Turbo`.
 
-> **Ideogram 4** is used via the `ideo` alias or a local FP8 model directory and is distributed ready-to-use. It has no checkpoint-convert path, so it is not a `--model-type` option.
+> **Ideogram 4** is used via the `ideo` alias or a local FP8 (macOS) or NF4 (Windows and Linux) model directory and is distributed ready-to-use. It has no checkpoint-convert path, so it is not a `--model-type` option.
 
 ## Importing LoRAs (`lora` subcommand)
 
