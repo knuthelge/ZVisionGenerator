@@ -243,7 +243,7 @@ def test_packaged_config_resolves_ideo_alias_on_every_platform(monkeypatch, tmp_
 
     assert resolve_model_path("ideo", aliases=aliases, platform_key="darwin") == "ideogram-ai/ideogram-4-fp8"
     for platform_key in ("win32", "linux"):
-        assert resolve_model_path("ideo", aliases=aliases, platform_key=platform_key) == "ideogram-ai/ideogram-4-nf4-diffusers"
+        assert resolve_model_path("ideo", aliases=aliases, platform_key=platform_key) == "unsloth/ideogram-4-nf4-diffusers"
     assert config["model_alias_families"]["ideo"] == "ideogram4"
 
 

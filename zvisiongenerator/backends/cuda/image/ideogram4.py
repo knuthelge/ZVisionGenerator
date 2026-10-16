@@ -1,6 +1,6 @@
 """Ideogram 4 on the diffusers/CUDA image backend: load, placement, the first-step sigma and the pipeline call.
 
-The model is the official NF4 diffusers repo: a text encoder and two transformers (the conditional one and the
+The model is the NF4 diffusers repo (Unsloth's ungated mirror of the official one): a text encoder and two transformers (the conditional one and the
 unconditional one that asymmetric guidance needs) in bitsandbytes NF4, about 15 GB in all. They do not fit a 10 GB card
 together, so the transformers stay in system memory and stream to the GPU block by block, and the text encoder is on the
 GPU only while it encodes the prompt.
@@ -62,7 +62,7 @@ def _require_nf4(model_path: str) -> None:
         config_path = Path(hf_hub_download(model_path, "transformer/config.json"))
     quantization = json.loads(config_path.read_text(encoding="utf-8")).get("quantization_config") or {}
     if quantization.get("quant_method") != "bitsandbytes":
-        raise RuntimeError("Ideogram 4 on Windows and Linux needs the NF4 repo (ideogram-ai/ideogram-4-nf4-diffusers); the model at '" + model_path + "' is not quantized with bitsandbytes.")
+        raise RuntimeError("Ideogram 4 on Windows and Linux needs an NF4 copy such as unsloth/ideogram-4-nf4-diffusers; the model at '" + model_path + "' is not quantized with bitsandbytes.")
 
 
 def _place(pipeline: Any, device: torch.device) -> None:

@@ -13,7 +13,7 @@ Built-in shorthands for common image models.
 | `zit` | `Tongyi-MAI/Z-Image-Turbo` |
 | `klein4b` | `black-forest-labs/FLUX.2-klein-4B` |
 | `klein9b` | `black-forest-labs/FLUX.2-klein-9B` |
-| `ideo` | `ideogram-ai/ideogram-4-fp8` (macOS), `ideogram-ai/ideogram-4-nf4-diffusers` (Windows and Linux) |
+| `ideo` | `ideogram-ai/ideogram-4-fp8` (macOS), `unsloth/ideogram-4-nf4-diffusers` (Windows and Linux) |
 | `krea2` | `unsloth/Krea-2-Turbo` |
 
 For video aliases, see [Video Guide → Supported Models](video.md#supported-models).
@@ -27,7 +27,7 @@ ziv-image -m krea2 -q 4 --prompt "a portrait"
 
 ### Ideogram 4
 
-Ideogram 4 runs on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux (NVIDIA GPU via diffusers/CUDA). It uses one model per platform, an FP8 one on macOS and the official NF4 one on Windows and Linux (a 15 GB download that needs a Hugging Face account that has accepted the model's terms), so quantization tiers do not apply: `ziv-image` rejects `-q 4` / `-q 8` for it, as the Web UI does. Width and height must be in the 256–2048 range and multiples of 16; size presets that exceed this range (for example `--size xl` with `--ratio 16:9`) are rejected before the model loads.
+Ideogram 4 runs on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux (NVIDIA GPU via diffusers/CUDA). It uses one model per platform, an FP8 one on macOS and an NF4 one on Windows and Linux (a 15 GB download), so quantization tiers do not apply: `ziv-image` rejects `-q 4` / `-q 8` for it, as the Web UI does. Width and height must be in the 256–2048 range and multiples of 16; size presets that exceed this range (for example `--size xl` with `--ratio 16:9`) are rejected before the model loads.
 
 ```bash
 ziv-image -m ideo --prompt "a portrait"
@@ -42,6 +42,8 @@ ziv-image -m ideo --json-prompt '{"high_level_description": "a portrait"}'
 ```
 
 When neither `--steps` nor `--guidance` is given, Ideogram 4 uses its built-in tuned quality schedule. Supplying `--steps` and/or `--guidance` overrides that schedule with the explicit values.
+
+The macOS model is gated on Hugging Face: accept its terms and log in (`hf auth login`) before the first download. The Windows and Linux model is downloaded from Unsloth's unmodified mirror of Ideogram's NF4 repo, whose files are byte for byte the official ones, so it needs no account. Either way the model is under Ideogram's non-commercial license, which applies as soon as you download or use it: see the `LICENSE.md` in the model folder. To use the official NF4 repo instead, pass `-m ideogram-ai/ideogram-4-nf4-diffusers` (it needs the login).
 
 On Windows and Linux the model does not fit a consumer GPU at once, so the two transformers stream to the GPU block by block and the text encoder is on it only while it reads the prompt. On a 10 GB GPU with 32 GB of system memory, a 1024×1024 image with the default 20 steps takes about 2.5 minutes and peaks at about 6 GB of GPU memory and 20 GB of system memory; sizes up to about 1.8 megapixels (for example 1792×1024) work, taking longer, and larger ones (2048×1024 and up) run out of GPU memory. The first run also loads about 15 GB, which takes a minute or two.
 
