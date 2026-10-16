@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -48,6 +49,21 @@ def strip_audio(video_path: Path) -> None:
         raise
 
 
+def _install_options() -> list[tuple[str, list[str], str]]:
+    """Return the ffmpeg install options for this platform as ``(executable, command, manager)``, best first."""
+    if sys.platform == "darwin":
+        return [("brew", ["brew", "install", "ffmpeg"], "Homebrew"), ("port", ["sudo", "port", "install", "ffmpeg"], "MacPorts")]
+    if sys.platform == "win32":
+        return [("winget", ["winget", "install", "--id", "Gyan.FFmpeg", "--exact"], "winget")]
+    # Package managers need root; skip sudo when already running as root (containers, for one).
+    sudo = [] if os.geteuid() == 0 else ["sudo"]
+    return [
+        ("apt", [*sudo, "apt", "install", "ffmpeg"], "apt"),
+        ("dnf", [*sudo, "dnf", "install", "ffmpeg"], "dnf"),
+        ("pacman", [*sudo, "pacman", "-S", "ffmpeg"], "pacman"),
+    ]
+
+
 def ensure_ffmpeg() -> None:
     """Check that ffmpeg is on PATH; offer to install it if missing.
 
@@ -60,32 +76,27 @@ def ensure_ffmpeg() -> None:
 
     print("ffmpeg is required for video generation but was not found on PATH.")
 
-    # Determine install command based on platform
-    if sys.platform == "darwin":
-        if shutil.which("brew"):
-            _offer_install("brew install ffmpeg", manager="Homebrew")
-        elif shutil.which("port"):
-            _offer_install("sudo port install ffmpeg", manager="MacPorts")
-        else:
-            print("Install ffmpeg manually: https://ffmpeg.org/download.html")
-            raise SystemExit(1)
-    else:
-        print("Install ffmpeg for your platform: https://ffmpeg.org/download.html")
-        raise SystemExit(1)
+    for executable, command, manager in _install_options():
+        if shutil.which(executable):
+            _offer_install(command, manager=manager)
+            return
+    print("Install ffmpeg manually: https://ffmpeg.org/download.html")
+    raise SystemExit(1)
 
 
-def _offer_install(command: str, *, manager: str) -> None:
+def _offer_install(command: list[str], *, manager: str) -> None:
     """Prompt the user to install ffmpeg and run the command if accepted.
 
     Args:
-        command: The shell command to install ffmpeg.
+        command: The install command and its arguments.
         manager: Name of the package manager (for display).
 
     Raises:
         SystemExit: If the user declines or installation fails.
     """
+    shown = " ".join(command)
     try:
-        answer = input(f"Install ffmpeg via {manager}? ({command}) [y/N] ").strip().lower()
+        answer = input(f"Install ffmpeg via {manager}? ({shown}) [y/N] ").strip().lower()
     except (EOFError, KeyboardInterrupt):  # fmt: skip
         print()
         raise SystemExit(1)
@@ -94,15 +105,18 @@ def _offer_install(command: str, *, manager: str) -> None:
         print("ffmpeg is required. Install it manually and try again.")
         raise SystemExit(1)
 
-    print(f"Running: {command}")
-    result = subprocess.run(command.split(), check=False)
+    print(f"Running: {shown}")
+    result = subprocess.run(command, check=False)
     if result.returncode != 0:
         print(f"Installation failed (exit code {result.returncode}). Install ffmpeg manually and try again.")
         raise SystemExit(1)
 
     # Verify installation succeeded
     if not shutil.which("ffmpeg"):
-        print("ffmpeg still not found after installation. Check your PATH and try again.")
+        if sys.platform == "win32":
+            print("ffmpeg is installed but this terminal does not see it yet. Open a new terminal and run the command again.")
+        else:
+            print("ffmpeg still not found after installation. Check your PATH and try again.")
         raise SystemExit(1)
 
     print("ffmpeg installed successfully.\n")

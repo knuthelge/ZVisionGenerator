@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- **`ziv-video` offers to install a missing ffmpeg on Windows and Linux.** On Windows it uses `winget`, and on Linux `apt`, `dnf` or `pacman`, the way macOS already did with Homebrew and MacPorts. It asks first and tells you to open a new terminal on Windows when `PATH` has not updated yet
+
 ### Changed
 - **Web UI: the history strip scrolls through all your history.** Older images and videos load as you scroll toward the end of the strip, or step through them in the viewer, instead of stopping at the newest few. The count beside **History** shows your whole history
 - **Web UI: LoRAs are remembered per model family.** Switching to a model of another family brings back the LoRAs you last chose for it instead of carrying over LoRAs made for a different model, and switching back restores yours

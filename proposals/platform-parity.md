@@ -1,6 +1,6 @@
 # Feature parity between macOS and Windows/Linux
 
-**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 1 (Klein img2img on CUDA), 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, except review), 5 (quantized, streamed video on CUDA, which absorbed step 6), 8 (scheduler default) and 11 (extend a video on CUDA) are done. Steps 3's review, 7, 9, 12 and 13 are still open. Step 10 was measured on 2026-10-16 and needs no change. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
+**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 1 (Klein img2img on CUDA), 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, except review), 5 (quantized, streamed video on CUDA, which absorbed step 6), 8 (scheduler default), 9 (ffmpeg install) and 11 (extend a video on CUDA) are done. Steps 3's review, 7, 12 and 13 are still open. Step 10 was measured on 2026-10-16 and needs no change. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
 
 ## Where things stand
 
@@ -27,7 +27,7 @@ Re-audited against `main` at v0.13.0b20 (diffusers 0.41.0, mflux 0.22.0, torch 2
 | Per-clip memory check (Duration note, Extend note, CLI warning) | yes | no (`clip_memory_fit` returns `None` for a discrete GPU) | 7 |
 | Load-time memory check for video | n/a | yes (`estimate_ltx_cuda_system_memory`) | 5 |
 | Prompt enhancer | yes, 2.4 GB download | yes, 9 GB download | 10 |
-| Offer to install a missing ffmpeg | Homebrew, MacPorts | prints a URL and exits | 9 |
+| Offer to install a missing ffmpeg | Homebrew, MacPorts | winget, apt, dnf, pacman | 9 |
 | Upscale an existing video | proposed, macOS only ([video-upscale-existing](video-upscale-existing.md)) | not planned yet | when it ships |
 
 Same on both, nothing to do: the CLI, the Web UI (queue, gallery, prompt builder, config, file picker, Models page), `ziv-model` and the LoRA import, size presets, accelerator memory release, and the LTX-2 LoRA format (diffusers 0.41's `_convert_non_diffusers_ltx2_lora_to_diffusers` converts the official `diffusion_model.*` layout that macOS loads).
@@ -57,7 +57,7 @@ Also missing on Windows and Linux, found in the 2026-10-15 re-audit:
 Different defaults or behaviour for the same feature:
 
 8. ~~**Z-Image's default scheduler differs.**~~ *Done (2026-10-16), see step 8.* `model_presets.zimage.default_scheduler` is `beta` for mflux and `null` (FlowMatch Euler) for diffusers, so the same settings look different on each platform. The diffusers backend already supports `beta` (`FlowMatchEulerDiscreteScheduler(use_beta_sigmas=True)`).
-9. **Missing ffmpeg.** On macOS, `utils/ffmpeg.ensure_ffmpeg` offers to install it with Homebrew or MacPorts. Elsewhere it prints a URL and exits.
+9. ~~**Missing ffmpeg.**~~ *Done (2026-10-16), see step 9.* On macOS, `utils/ffmpeg.ensure_ffmpeg` offers to install it with Homebrew or MacPorts. Elsewhere it prints a URL and exits.
 10. **The prompt enhancer download is 9 GB on Windows and Linux**, against 2.4 GB on macOS. `coder3101/Qwen3.5-4B-heretic` is the full bfloat16 repo, quantized to NF4 at load.
 
 ### Not in scope
@@ -119,7 +119,7 @@ The stored copy loads and generates. Quantizing at load costs about 0.8 s, becau
 Each step is its own PR. Order for what's left:
 
 1. ~~Step 1 (Klein img2img).~~ Done.
-2. Step 9 (ffmpeg install). Small. Step 8 (scheduler default) is done.
+2. ~~Steps 8 and 9 (scheduler default, ffmpeg install).~~ Done.
 3. Step 7 (video memory estimates). It needs the clip-length measurements from step 5 and a few more at q8.
 4. Step 3's review before upscaling.
 5. Steps 13 and 12 (Ideogram 4, SeedVR2). Both are accepted. Each starts with a spike that picks the approach: which implementation for SeedVR2, which repo for Ideogram 4.
@@ -236,6 +236,10 @@ Original plans:
 - **Check on a 10 GB NVIDIA GPU (diffusers 0.41.0), `zit` at `-q 8`, 10 steps, 1024×1024, seed 1234, four prompts:** the default, the new beta and diffusers' own beta all give clean images with no artifacts, and the new beta changes composition and detail a little, as a different schedule should. The images are a matter of taste, so beta is the default for parity, not because it is clearly better.
 
 ### 9. Offer to install ffmpeg on Windows and Linux
+
+**Done (2026-10-16).** `ensure_ffmpeg` walks a per-platform list of install options (`_install_options`) and offers the first package manager found. Windows uses `winget install --id Gyan.FFmpeg --exact` (the exact ID avoids winget's ambiguous-match prompt for a bare `ffmpeg`). Linux tries `apt`, `dnf` and `pacman` with `sudo`, without it when already root. When ffmpeg is still missing after a Windows install, it says to open a new terminal. Unit tested with mocked `shutil.which` and `subprocess.run`; the install itself was not run on Windows. Fedora's own repositories only ship `ffmpeg-free`, so `dnf install ffmpeg` needs RPM Fusion; the docs say so.
+
+Original plan:
 
 - Extend `ensure_ffmpeg` the way macOS works: on Windows offer `winget install ffmpeg` when `winget` is on `PATH`. On Linux, offer the distribution's package manager (`apt`, `dnf`, `pacman`) when present, with `sudo`.
 - After installing on Windows, a new terminal may be needed before `PATH` picks up ffmpeg. Say so instead of failing with "still not found".

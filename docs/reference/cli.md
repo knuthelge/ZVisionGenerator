@@ -137,7 +137,7 @@ Platform-aware aliases:
 
 Operational notes:
 
-- Video generation requires `ffmpeg` on every platform.
+- Video generation requires `ffmpeg` on every platform. If it is missing, `ziv-video` offers to install it with Homebrew or MacPorts (macOS), `winget` (Windows), or `apt`, `dnf` or `pacman` (Linux), and asks before running anything. On Windows, open a new terminal afterwards so `PATH` picks it up. On Fedora, `dnf install ffmpeg` needs RPM Fusion enabled.
 - Windows and Linux video generation are CUDA-only.
 - On Windows and Linux a model that cannot fit in system memory stops before loading, and the first run of each model takes a while to download and prepare it.
 

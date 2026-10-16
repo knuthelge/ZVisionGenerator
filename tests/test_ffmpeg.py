@@ -100,6 +100,124 @@ class TestEnsureFfmpegInstallFails:
         assert exc_info.value.code == 1
 
 
+class TestEnsureFfmpegWindowsAndLinux:
+    """ffmpeg missing on Windows and Linux → offer the platform's package manager."""
+
+    @staticmethod
+    def _which(available):
+        """Return a ``shutil.which`` stand-in: ffmpeg is found only after install, listed managers are found."""
+        state = {"installed": False}
+
+        def which(name):
+            if name == "ffmpeg":
+                return "/bin/ffmpeg" if state["installed"] else None
+            return f"/bin/{name}" if name in available else None
+
+        return which, state
+
+    @pytest.mark.parametrize(
+        ("available", "expected"),
+        [
+            ({"apt", "dnf"}, ["sudo", "apt", "install", "ffmpeg"]),
+            ({"dnf", "pacman"}, ["sudo", "dnf", "install", "ffmpeg"]),
+            ({"pacman"}, ["sudo", "pacman", "-S", "ffmpeg"]),
+        ],
+    )
+    def test_linux_uses_the_first_package_manager_found(self, available, expected):
+        which, state = self._which(available)
+
+        def run(command, check):
+            state["installed"] = True
+            return MagicMock(returncode=0)
+
+        with (
+            patch("zvisiongenerator.utils.ffmpeg.sys.platform", "linux"),
+            patch("zvisiongenerator.utils.ffmpeg.os.geteuid", return_value=1000, create=True),
+            patch("zvisiongenerator.utils.ffmpeg.shutil.which", side_effect=which),
+            patch("zvisiongenerator.utils.ffmpeg.input", return_value="y"),
+            patch("zvisiongenerator.utils.ffmpeg.subprocess.run", side_effect=run) as mock_run,
+        ):
+            ensure_ffmpeg()
+
+        mock_run.assert_called_once_with(expected, check=False)
+
+    def test_linux_root_runs_without_sudo(self):
+        which, state = self._which({"apt"})
+
+        def run(command, check):
+            state["installed"] = True
+            return MagicMock(returncode=0)
+
+        with (
+            patch("zvisiongenerator.utils.ffmpeg.sys.platform", "linux"),
+            patch("zvisiongenerator.utils.ffmpeg.os.geteuid", return_value=0, create=True),
+            patch("zvisiongenerator.utils.ffmpeg.shutil.which", side_effect=which),
+            patch("zvisiongenerator.utils.ffmpeg.input", return_value="y"),
+            patch("zvisiongenerator.utils.ffmpeg.subprocess.run", side_effect=run) as mock_run,
+        ):
+            ensure_ffmpeg()
+
+        mock_run.assert_called_once_with(["apt", "install", "ffmpeg"], check=False)
+
+    def test_linux_without_a_known_package_manager_exits_with_the_download_page(self, capsys):
+        which, _ = self._which(set())
+
+        with (
+            patch("zvisiongenerator.utils.ffmpeg.sys.platform", "linux"),
+            patch("zvisiongenerator.utils.ffmpeg.os.geteuid", return_value=1000, create=True),
+            patch("zvisiongenerator.utils.ffmpeg.shutil.which", side_effect=which),
+            patch("zvisiongenerator.utils.ffmpeg.subprocess.run") as mock_run,
+            pytest.raises(SystemExit),
+        ):
+            ensure_ffmpeg()
+
+        mock_run.assert_not_called()
+        assert "ffmpeg.org" in capsys.readouterr().out
+
+    def test_windows_installs_with_winget(self):
+        which, state = self._which({"winget"})
+
+        def run(command, check):
+            state["installed"] = True
+            return MagicMock(returncode=0)
+
+        with (
+            patch("zvisiongenerator.utils.ffmpeg.sys.platform", "win32"),
+            patch("zvisiongenerator.utils.ffmpeg.shutil.which", side_effect=which),
+            patch("zvisiongenerator.utils.ffmpeg.input", return_value="y"),
+            patch("zvisiongenerator.utils.ffmpeg.subprocess.run", side_effect=run) as mock_run,
+        ):
+            ensure_ffmpeg()
+
+        assert mock_run.call_args.args[0][:2] == ["winget", "install"]
+
+    def test_windows_exits_when_path_is_not_updated_yet(self):
+        which, _ = self._which({"winget"})
+
+        with (
+            patch("zvisiongenerator.utils.ffmpeg.sys.platform", "win32"),
+            patch("zvisiongenerator.utils.ffmpeg.shutil.which", side_effect=which),
+            patch("zvisiongenerator.utils.ffmpeg.input", return_value="y"),
+            patch("zvisiongenerator.utils.ffmpeg.subprocess.run", return_value=MagicMock(returncode=0)),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            ensure_ffmpeg()
+
+        assert exc_info.value.code == 1
+
+    def test_windows_without_winget_exits_with_the_download_page(self, capsys):
+        which, _ = self._which(set())
+
+        with (
+            patch("zvisiongenerator.utils.ffmpeg.sys.platform", "win32"),
+            patch("zvisiongenerator.utils.ffmpeg.shutil.which", side_effect=which),
+            pytest.raises(SystemExit),
+        ):
+            ensure_ffmpeg()
+
+        assert "ffmpeg.org" in capsys.readouterr().out
+
+
 class TestToolError:
     @pytest.mark.parametrize("stderr", [b"  boom\n", "  boom\n"])
     def test_ends_with_the_stripped_stderr(self, stderr):
