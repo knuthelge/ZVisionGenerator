@@ -16,7 +16,7 @@ __all__ = ["LivePreview", "create_live_preview", "estimate_clean_latents", "rend
 
 # FLUX.2 and FLUX.2 Klein pipelines share the FLUX.2 VAE and its packed latent layout.
 _FLUX2_FAMILIES = frozenset({"flux2", "flux2_klein"})
-_PREVIEW_FAMILIES = _FLUX2_FAMILIES | {"zimage", "krea2"}
+_PREVIEW_FAMILIES = _FLUX2_FAMILIES | {"zimage", "krea2", "ideogram4"}
 
 
 def estimate_clean_latents(previous: torch.Tensor, current: torch.Tensor, noise_previous: float, noise_current: float) -> torch.Tensor:
@@ -47,7 +47,7 @@ def render_latent_preview(pipe: Any, family: str, latents: torch.Tensor, height:
 
     Args:
         pipe: The running diffusers pipeline (FLUX.2 needs its VAE batch-norm statistics).
-        family: Image model family (``zimage``, ``flux2``, ``flux2_klein`` or ``krea2``).
+        family: Image model family (``zimage``, ``flux2``, ``flux2_klein``, ``krea2`` or ``ideogram4``).
         latents: Latents exactly as the pipeline passes them to ``callback_on_step_end``.
         height: Output image height in pixels.
         width: Output image width in pixels.
@@ -61,6 +61,8 @@ def render_latent_preview(pipe: Any, family: str, latents: torch.Tensor, height:
         return _project_to_image(_flux2_spatial(pipe, latents, height, width), FLUX2_RGB_FACTORS, FLUX2_RGB_BIAS)
     if family == "krea2":
         return _project_to_image(_krea2_spatial(pipe, latents, height, width), QWEN_IMAGE_RGB_FACTORS, QWEN_IMAGE_RGB_BIAS)
+    if family == "ideogram4":
+        return _project_to_image(_ideogram4_spatial(pipe, latents, height, width), FLUX2_RGB_FACTORS, FLUX2_RGB_BIAS)
     return None
 
 
@@ -136,6 +138,24 @@ def _flux2_spatial(pipe: Any, latents: torch.Tensor, height: int, width: int) ->
     packed = packed * std.view(-1, 1, 1) + bn.running_mean.float().to(packed.device).view(-1, 1, 1)
     spatial = packed.reshape(channels // 4, 2, 2, patch_h, patch_w).permute(0, 3, 1, 4, 2)
     return spatial.reshape(channels // 4, patch_h * 2, patch_w * 2)
+
+
+def _ideogram4_spatial(pipe: Any, latents: torch.Tensor, height: int, width: int) -> torch.Tensor:
+    """Undo Ideogram 4's token packing and batch-norm to recover ``(32, h, w)`` VAE latents, as its pipeline does before decoding.
+
+    The VAE is FLUX.2's, but the packed channels are ordered ``(patch row, patch column, latent channel)`` here, not
+    ``(latent channel, patch row, patch column)`` as in FLUX.2.
+    """
+    patch = pipe.vae_scale_factor * pipe.patch_size
+    grid_h, grid_w = height // patch, width // patch
+    tokens, channels = latents.shape[1:]
+    if tokens != grid_h * grid_w:
+        raise ValueError(f"Expected {grid_h * grid_w} latent tokens for {width}x{height}, got {tokens}.")
+    bn = pipe.vae.bn
+    std = torch.sqrt(bn.running_var.float() + pipe.vae.config.batch_norm_eps).to(latents.device)
+    packed = latents[0].float() * std + bn.running_mean.float().to(latents.device)
+    spatial = packed.reshape(grid_h, grid_w, pipe.patch_size, pipe.patch_size, channels // pipe.patch_size**2)
+    return spatial.permute(4, 0, 2, 1, 3).reshape(channels // pipe.patch_size**2, grid_h * pipe.patch_size, grid_w * pipe.patch_size)
 
 
 def _krea2_spatial(pipe: Any, latents: torch.Tensor, height: int, width: int) -> torch.Tensor:

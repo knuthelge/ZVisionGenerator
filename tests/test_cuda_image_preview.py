@@ -23,7 +23,7 @@ def preview_module():
 def _flux2_pipe(channels: int = 128, *, scheduler=None):
     bn = SimpleNamespace(running_mean=torch.zeros(channels), running_var=torch.ones(channels))
     vae = SimpleNamespace(bn=bn, config=SimpleNamespace(batch_norm_eps=0.0))
-    return SimpleNamespace(vae=vae, vae_scale_factor=8, scheduler=scheduler, num_timesteps=None)
+    return SimpleNamespace(vae=vae, vae_scale_factor=8, patch_size=2, scheduler=scheduler, num_timesteps=None)
 
 
 def _euler_scheduler(steps: int):
@@ -90,6 +90,41 @@ class TestRenderLatentPreview:
         with pytest.raises(ValueError, match="latent tokens"):
             preview_module._flux2_spatial(_flux2_pipe(), torch.zeros((1, 10, 128)), height=128, width=64)
 
+    def test_ideogram4_preview_is_one_eighth_resolution_and_zero_latents_map_to_bias(self, preview_module):
+        latents = torch.zeros((1, 8 * 4, 128))
+
+        image = preview_module.render_latent_preview(_flux2_pipe(), "ideogram4", latents, height=128, width=64)
+
+        assert image.size == (8, 16)
+        actual, expected = _pixel(image, FLUX2_RGB_BIAS)
+        assert np.allclose(actual, expected, atol=1)
+
+    def test_ideogram4_unpacks_like_its_pipeline_decodes(self, preview_module):
+        """Ideogram 4's channels are packed (patch row, patch column, latent channel), unlike FLUX.2's (channel, row, column)."""
+        height, width, patch, channels = 128, 64, 2, 32
+        grid_h, grid_w = height // 16, width // 16
+        spatial_in = torch.randn((1, channels, grid_h * patch, grid_w * patch))
+        # The inverse of the pipeline's decode: view (B, gh, gw, p, p, c), permute (0, 5, 1, 3, 2, 4), view (B, c, gh*p, gw*p).
+        packed = spatial_in.view(1, channels, grid_h, patch, grid_w, patch).permute(0, 2, 4, 3, 5, 1).reshape(1, grid_h * grid_w, patch * patch * channels)
+
+        spatial = preview_module._ideogram4_spatial(_flux2_pipe(), packed, height, width)
+
+        assert spatial.shape == (channels, grid_h * patch, grid_w * patch)
+        assert torch.allclose(spatial, spatial_in[0])
+
+    def test_ideogram4_undoes_batch_norm(self, preview_module):
+        pipe = _flux2_pipe()
+        pipe.vae.bn.running_mean = torch.full((128,), 0.5)
+        pipe.vae.bn.running_var = torch.full((128,), 4.0)
+
+        spatial = preview_module._ideogram4_spatial(pipe, torch.ones((1, 8 * 4, 128)), height=128, width=64)
+
+        assert torch.allclose(spatial, torch.full_like(spatial, 2.5))
+
+    def test_ideogram4_rejects_a_token_count_that_does_not_match_the_size(self, preview_module):
+        with pytest.raises(ValueError, match="latent tokens"):
+            preview_module._ideogram4_spatial(_flux2_pipe(), torch.zeros((1, 10, 128)), height=128, width=64)
+
     def test_krea2_preview_is_one_eighth_resolution_and_zero_latents_map_to_bias(self, preview_module):
         pipe = _krea2_pipe()
         latents = torch.zeros((1, 8 * 4, 64))
@@ -133,11 +168,11 @@ class TestEstimateCleanLatents:
 
 
 class TestCreateLivePreview:
-    @pytest.mark.parametrize("family", ["zimage", "flux2", "flux2_klein", "krea2"])
+    @pytest.mark.parametrize("family", ["zimage", "flux2", "flux2_klein", "krea2", "ideogram4"])
     def test_supported_families(self, preview_module, family):
         assert isinstance(preview_module.create_live_preview(family, 8, 64, 64), preview_module.LivePreview)
 
-    @pytest.mark.parametrize("family", ["flux1", "ideogram4", "unknown"])
+    @pytest.mark.parametrize("family", ["flux1", "unknown"])
     def test_unsupported_families(self, preview_module, family):
         assert preview_module.create_live_preview(family, 8, 64, 64) is None
 
