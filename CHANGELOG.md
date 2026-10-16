@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+- **Z-Image on Windows and Linux now uses the `beta` scheduler by default**, as on macOS, so the same prompt and seed look alike on both. `--scheduler beta` on Z-Image also now follows the macOS schedule instead of diffusers' own beta spacing
+
 ## [0.13.0b21] - 2026-10-15
 
 ### Changed

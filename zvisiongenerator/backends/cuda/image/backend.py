@@ -57,6 +57,25 @@ def _img2img_sigmas(steps: int, strength: float) -> list[float]:
     return grid[steps - run :]
 
 
+def _apply_beta_scheduler(pipe: Any, family: str, steps: int) -> dict[str, Any]:
+    """Switch *pipe* to the beta schedule and return the extra pipeline kwargs it needs.
+
+    Z-Image matches mflux: the pipeline gets the beta grid as ``sigmas`` and shifts it with the
+    resolution-dependent ``mu``, so the shift applies after the beta spacing. diffusers' own
+    ``use_beta_sigmas`` shifts first and spreads the beta spacing over the shifted range, which ends the
+    schedule at sigma 0.25 instead of near 0. Other families keep ``use_beta_sigmas``.
+    """
+    from diffusers import FlowMatchEulerDiscreteScheduler
+
+    if family == "zimage":
+        from zvisiongenerator.schedulers.beta_sigmas import beta_sigmas
+
+        pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(pipe.scheduler.config, use_dynamic_shifting=True)
+        return {"sigmas": beta_sigmas(steps)}
+    pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(pipe.scheduler.config, use_beta_sigmas=True)
+    return {}
+
+
 def _krea2_size(pipe: Any, image: Image.Image) -> tuple[int, int]:
     """Return *image*'s ``(width, height)`` rounded down to the pixel multiple Krea 2's latent patches need."""
     multiple = pipe.vae_scale_factor * pipe.patch_size
@@ -372,10 +391,7 @@ class DiffusersBackend:
         # no reference to the model outlives the job. Without a dtype, from_pipe casts the shared components to
         # float32; the VAE carries the dtype the model loaded in.
         img2img = AutoPipelineForImage2Image.from_pipe(model, torch_dtype=model.vae.dtype)
-        if scheduler == "beta":
-            from diffusers import FlowMatchEulerDiscreteScheduler
-
-            img2img.scheduler = FlowMatchEulerDiscreteScheduler.from_config(img2img.scheduler.config, use_beta_sigmas=True)
+        scheduler_kwargs = _apply_beta_scheduler(img2img, self._model_info.family, steps) if scheduler == "beta" else {}
 
         _is_flux = self._model_info.family in ("flux1", "flux2", "flux2_klein")
 
@@ -390,6 +406,7 @@ class DiffusersBackend:
             num_inference_steps=steps,
             guidance_scale=guidance if guidance is not None else (1.0 if _is_flux else 0.0),
             generator=generator,
+            **scheduler_kwargs,
         )
         if not _is_flux and negative_prompt is not None:
             pipe_kwargs["negative_prompt"] = negative_prompt
@@ -465,10 +482,7 @@ class DiffusersBackend:
             raise RuntimeError("load_model() must be called before generation")
         original_scheduler = model.scheduler
         try:
-            if scheduler == "beta":
-                from diffusers import FlowMatchEulerDiscreteScheduler
-
-                model.scheduler = FlowMatchEulerDiscreteScheduler.from_config(model.scheduler.config, use_beta_sigmas=True)
+            scheduler_kwargs = _apply_beta_scheduler(model, self._model_info.family, steps) if scheduler == "beta" else {}
             _is_flux = self._model_info is not None and self._model_info.family in ("flux1", "flux2", "flux2_klein")
 
             generator = torch.Generator(device="cpu").manual_seed(seed)
@@ -478,6 +492,7 @@ class DiffusersBackend:
                 height=height,
                 generator=generator,
                 num_inference_steps=steps,
+                **scheduler_kwargs,
             )
             if self._model_info.family == "krea2":
                 kwargs["guidance_scale"] = _krea2_guidance_scale(guidance)

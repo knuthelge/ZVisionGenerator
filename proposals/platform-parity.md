@@ -56,7 +56,7 @@ Also missing on Windows and Linux, found in the 2026-10-15 re-audit:
 
 Different defaults or behaviour for the same feature:
 
-8. **Z-Image's default scheduler differs.** `model_presets.zimage.default_scheduler` is `beta` for mflux and `null` (FlowMatch Euler) for diffusers, so the same settings look different on each platform. The diffusers backend already supports `beta` (`FlowMatchEulerDiscreteScheduler(use_beta_sigmas=True)`).
+8. ~~**Z-Image's default scheduler differs.**~~ *Done (2026-10-16), see step 8.* `model_presets.zimage.default_scheduler` is `beta` for mflux and `null` (FlowMatch Euler) for diffusers, so the same settings look different on each platform. The diffusers backend already supports `beta` (`FlowMatchEulerDiscreteScheduler(use_beta_sigmas=True)`).
 9. **Missing ffmpeg.** On macOS, `utils/ffmpeg.ensure_ffmpeg` offers to install it with Homebrew or MacPorts. Elsewhere it prints a URL and exits.
 10. **The prompt enhancer download is 9 GB on Windows and Linux**, against 2.4 GB on macOS. `coder3101/Qwen3.5-4B-heretic` is the full bfloat16 repo, quantized to NF4 at load.
 
@@ -109,7 +109,7 @@ Re-checked 2026-10-15 at v0.13.0b20, against the installed diffusers 0.41.0 and 
 Each step is its own PR. Order for what's left:
 
 1. Step 1 (Klein img2img). It's a hard failure on the default model, so it goes first.
-2. Steps 8 and 9 (scheduler default, ffmpeg install). Small.
+2. Step 9 (ffmpeg install). Small. Step 8 (scheduler default) is done.
 3. Step 7 (video memory estimates). It needs the clip-length measurements from step 5 and a few more at q8.
 4. Step 3's review before upscaling.
 5. Steps 13 and 12 (Ideogram 4, SeedVR2). Both are accepted. Each starts with a spike that picks the approach: which implementation for SeedVR2, which repo for Ideogram 4.
@@ -215,8 +215,11 @@ Original plans:
 
 ### 8. Same Z-Image default scheduler
 
-- Set `model_presets.zimage.default_scheduler.diffusers` to `beta`. The backend already implements it.
-- Check with the same prompts and seeds on CUDA: if `beta` doesn't look better with diffusers' Z-Image, keep the default and note the difference in the model guide instead.
+**Done (2026-10-16, needs a look on other GPUs).** `model_presets.zimage.default_scheduler.diffusers` is now `beta`. Setting it alone would not have matched macOS, so the backend changed too:
+
+- **diffusers' `use_beta_sigmas` is a different schedule from mflux's.** mflux takes the beta(0.6, 0.6) grid and then applies the resolution-dependent shift. diffusers shifts first and spreads the beta spacing linearly between the shifted end points, so at 10 steps and 1024×1024 it ends at sigma 0.25 where mflux ends at 0.115 (diffusers' linear default also ends at 0.25).
+- **Fix.** `_apply_beta_scheduler` (`backends/cuda/image/backend.py`) gives Z-Image the beta grid from `schedulers/beta_sigmas.py` as `sigmas=` and turns on dynamic shifting, so the pipeline shifts with the same `mu` as mflux. The mflux `BetaScheduler` uses the same grid function. Other families keep `use_beta_sigmas`.
+- **Check on a 10 GB NVIDIA GPU (diffusers 0.41.0), `zit` at `-q 8`, 10 steps, 1024×1024, seed 1234, four prompts:** the default, the new beta and diffusers' own beta all give clean images with no artifacts, and the new beta changes composition and detail a little, as a different schedule should. The images are a matter of taste, so beta is the default for parity, not because it is clearly better.
 
 ### 9. Offer to install ffmpeg on Windows and Linux
 

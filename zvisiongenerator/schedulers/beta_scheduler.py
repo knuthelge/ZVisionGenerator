@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING
 
 import mlx.core as mx
 import numpy as np
-from scipy.stats import beta as beta_dist
 
 if TYPE_CHECKING:
     from mflux.models.common.config.config import Config
 
 from mflux.models.common.schedulers.base_scheduler import BaseScheduler
+
+from zvisiongenerator.schedulers.beta_sigmas import beta_sigmas
 
 
 class BetaScheduler(BaseScheduler):
@@ -33,11 +34,7 @@ class BetaScheduler(BaseScheduler):
         model_config = self.config.model_config
         num_steps = self.config.num_inference_steps
 
-        # Beta PPF (inverse CDF) concentrates timesteps at both ends of the
-        # schedule, matching ComfyUI's beta scheduler.
-        # Reference: https://arxiv.org/abs/2407.12173
-        ts = 1 - np.linspace(0, 1, num_steps, endpoint=False)
-        sigmas_np = beta_dist.ppf(ts, 0.6, 0.6).astype(np.float32)
+        sigmas_np = np.array(beta_sigmas(num_steps), dtype=np.float32)
         sigmas_np = np.append(sigmas_np, 0.0)
 
         # Apply sigma shift if required (same logic as LinearScheduler)

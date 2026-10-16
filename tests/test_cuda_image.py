@@ -746,6 +746,29 @@ class TestTextToImage:
         )
         assert mock_model.scheduler is original_scheduler
 
+    def test_zimage_beta_passes_beta_sigmas(self, win_backend):
+        """Z-Image gets the beta grid as ``sigmas`` so the model shift applies after the beta spacing."""
+        mod, _, _ = win_backend
+        backend, mock_model = self._ready_backend(mod)
+        backend.text_to_image(model=mock_model, prompt="a cat", width=64, height=64, seed=42, steps=6, guidance=0.0, scheduler="beta")
+        sigmas = mock_model.call_args[1]["sigmas"]
+        assert len(sigmas) == 6
+        assert sigmas[0] == pytest.approx(1.0)
+        assert sigmas == sorted(sigmas, reverse=True)
+
+    def test_other_families_beta_passes_no_sigmas(self, win_backend):
+        mod, _, _ = win_backend
+        backend, mock_model = self._ready_backend(mod)
+        backend._model_info = _make_model_info(family="flux2")
+        backend.text_to_image(model=mock_model, prompt="a cat", width=64, height=64, seed=42, steps=4, guidance=None, scheduler="beta")
+        assert "sigmas" not in mock_model.call_args[1]
+
+    def test_no_scheduler_passes_no_sigmas(self, win_backend):
+        mod, _, _ = win_backend
+        backend, mock_model = self._ready_backend(mod)
+        backend.text_to_image(model=mock_model, prompt="a cat", width=64, height=64, seed=42, steps=4, guidance=0.0)
+        assert "sigmas" not in mock_model.call_args[1]
+
     def test_default_guidance_for_flux(self, win_backend):
         """Flux models get guidance_scale=1.0 when guidance is None."""
         mod, _, _ = win_backend

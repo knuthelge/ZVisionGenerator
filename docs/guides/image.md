@@ -49,6 +49,10 @@ Ideogram 4 sometimes returns a grey "Image blocked by safety filter" frame for h
 
 Ideogram 4 is selectable in the workspace model dropdown. When it is selected, the workspace exposes a structured-JSON-caption input and a first-step-sigma control that mirror `--json-prompt` and `--first-sigma`. Reference-image (img2img) and upscale are unavailable for it, and width and height are constrained to the 256–2048 range in multiples of 16.
 
+### Z-Image scheduler
+
+Z-Image uses the `beta` scheduler by default on every platform, so a prompt and seed look alike on macOS, Windows and Linux. Pass `--scheduler` with another name, or pick one in the Web UI, to change it for a run.
+
 ### Krea 2
 
 `krea2` is Krea 2 Turbo, a 12B text-to-image model distilled to 8 steps. The alias points to unsloth's ungated mirror of Krea's repo, so no Hugging Face token is needed; the weights are under the [Krea 2 Community License](https://huggingface.co/krea/Krea-2-Turbo). It defaults to 8 steps and guidance 1.0, which turns classifier-free guidance off; guidance above 1.0 turns it on, and each step then takes about twice as long. Negative prompts are turned off for Krea 2.

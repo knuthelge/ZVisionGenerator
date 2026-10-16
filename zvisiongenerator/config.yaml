@@ -77,7 +77,8 @@ saturation:
 schedulers:
   beta:
     mflux_class: "zvisiongenerator.schedulers.beta_scheduler.BetaScheduler"
-    # diffusers uses built-in: FlowMatchEulerDiscreteScheduler(use_beta_sigmas=True)
+    # diffusers: Z-Image gets the beta grid as custom sigmas (same shape as mflux); other models use
+    # FlowMatchEulerDiscreteScheduler(use_beta_sigmas=True)
 
 platforms:
   darwin: macOS
@@ -121,7 +122,7 @@ model_presets:
       default_upscale_steps: 3
     default_scheduler:
       mflux: beta
-      diffusers: null
+      diffusers: beta
 
   flux2_klein:
     supports_negative_prompt: false
