@@ -250,14 +250,32 @@ class TestIdeogram4:
         pipeline.vae.enable_tiling.assert_called_once()
         mod.AutoPipelineForText2Image.from_pretrained.assert_not_called()
 
-    def test_loras_are_refused_before_anything_loads(self, win_backend):
+    def test_loras_load_onto_the_pipeline_after_it_is_placed(self, win_backend):
+        mod, _, _ = win_backend
+        pipeline = MagicMock()
+        order: list[str] = []
+
+        with (
+            patch.object(mod, "detect_image_model", return_value=_make_model_info(family="ideogram4")),
+            patch.object(mod, "load_ideogram4_pipeline", side_effect=lambda *args: order.append("load") or pipeline),
+            patch.object(mod, "_load_loras", side_effect=lambda *args, **kwargs: order.append("lora")) as mock_loras,
+        ):
+            mod.DiffusersBackend().load_model("ideogram-ai/ideogram-4-nf4-diffusers", lora_paths=["/l/a.safetensors"], lora_weights=[0.7])
+
+        assert order == ["load", "lora"]
+        assert mock_loras.call_args.args == (pipeline, ["/l/a.safetensors"], [0.7])
+
+    def test_without_loras_the_lora_loader_is_not_called(self, win_backend):
         mod, _, _ = win_backend
 
-        with patch.object(mod, "detect_image_model", return_value=_make_model_info(family="ideogram4")), patch.object(mod, "load_ideogram4_pipeline") as mock_load:
-            with pytest.raises(ValueError, match="LoRAs.*Ideogram 4"):
-                mod.DiffusersBackend().load_model("ideogram-ai/ideogram-4-nf4-diffusers", lora_paths=["/l/a.safetensors"])
+        with (
+            patch.object(mod, "detect_image_model", return_value=_make_model_info(family="ideogram4")),
+            patch.object(mod, "load_ideogram4_pipeline", return_value=MagicMock()),
+            patch.object(mod, "_load_loras") as mock_loras,
+        ):
+            mod.DiffusersBackend().load_model("ideogram-ai/ideogram-4-nf4-diffusers")
 
-        mock_load.assert_not_called()
+        mock_loras.assert_not_called()
 
     def _generate(self, mod, **overrides):
         backend = mod.DiffusersBackend()

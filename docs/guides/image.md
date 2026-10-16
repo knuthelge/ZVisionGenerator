@@ -33,7 +33,7 @@ Ideogram 4 runs on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux 
 ziv-image -m ideo --prompt "a portrait"
 ```
 
-Ideogram 4 does not support negative prompts or reference-image (img2img) steering; a negative prompt is dropped with a warning, and both `--image` and `--upscale` are rejected (each requires img2img, which Ideogram 4 does not support). LoRA weights work at parity with other mflux models via `--lora` on macOS; on Windows and Linux `--lora` is refused for Ideogram 4 for now.
+Ideogram 4 does not support negative prompts or reference-image (img2img) steering; a negative prompt is dropped with a warning, and both `--image` and `--upscale` are rejected (each requires img2img, which Ideogram 4 does not support). LoRA weights work via `--lora` (and the Web UI's LoRA picker) on every platform. On Windows and Linux they load onto Ideogram 4's main transformer, so a LoRA made for its unconditional transformer is not supported, and a LoRA adds about 1 GB of GPU memory, so the largest sizes may then no longer fit.
 
 Plain-text prompts are automatically wrapped into Ideogram 4's structured JSON caption format, so they generate without a plain-text caption warning while preserving the original wording. To supply a full structured JSON caption instead, pass it as the value of `--json-prompt` (mutually exclusive with `--prompt`): this skips random-choice `{a|b|c}` expansion and sends the caption verbatim. Without `--json-prompt`, `{...}` in a prompt is treated as random-choice syntax and corrupts a JSON caption. The `--json-prompt` value must be a valid JSON object, or generation is rejected before the model loads:
 

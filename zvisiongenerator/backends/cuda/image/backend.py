@@ -353,9 +353,9 @@ class DiffusersBackend:
         self._model_info = model_info
 
         if model_info.family == "ideogram4":
-            if lora_paths:
-                raise ValueError("LoRAs are not supported for Ideogram 4 on Windows and Linux yet.")
             pipeline = load_ideogram4_pipeline(model_path, torch_dtype)
+            if lora_paths:
+                _load_loras(pipeline, lora_paths, lora_weights)
         else:
             pipeline = self._load_pipeline(model_path, model_info, quantize, torch_dtype, lora_paths, lora_weights)
 
