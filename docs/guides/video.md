@@ -224,12 +224,12 @@ On Windows and Linux:
 
 ## Memory Check
 
-On macOS, Text to Video and Image to Video check the clip's size and length against the Mac's memory before generating, and Extend Video checks the extension the same way (see [Memory](#memory)). The check never blocks a job; it warns when the clip may run slowly or fail.
+Text to Video and Image to Video check the clip's size and length against the machine's memory before generating, and Extend Video checks the extension the same way (see [Memory](#memory)). On macOS the check is against the Mac's memory. On Windows and Linux it is against the GPU's memory and the system memory, once the model's files are downloaded. The check never blocks a job; it warns when the clip may run slowly or fail.
 
-- **Web UI**: under **Duration (s)**, a note appears when the clip is **tight** (the Mac may slow down while generating) or **too large** (expect heavy swapping or an out-of-memory error). It follows the model, size, duration, **Low memory** and **Upscale**, and stays hidden while the clip fits. The memory badge on a video model is the estimate for a 5 s clip at 768×448 without upscale.
+- **Web UI**: under **Duration (s)**, a note appears when the clip is **tight** (the Mac may slow down while generating; on Windows and Linux the GPU is nearly full or system memory is short) or **too large** (expect heavy swapping or an out-of-memory error). The note names the memory it is about. It follows the model, size, duration, **Low memory** and **Upscale**, and stays hidden while the clip fits. The memory badge on a video model is the estimate for a 5 s clip at 768×448 without upscale.
 - **Command line**: `ziv-video` prints one warning at the start of a run and carries on. Shorten the clip with `--frames`, use a smaller `--size`, and keep `--low-memory` on.
 
-The estimate grows with the number of frames and the pixels per frame. It was measured with `ltx-4` on a Mac with 32 GB of memory, for clips up to about 10 s at 704×448; far beyond that it is extrapolated. Macs with 24 GB or less stream the transformer from disk, so the estimate is on the high side there. It does not count memory already used by other apps or by an image model that is still loaded.
+The estimate grows with the number of frames and the pixels per frame. On macOS it was measured with `ltx-4` on a Mac with 32 GB of memory, for clips up to about 10 s at 704×448; far beyond that it is extrapolated. Macs with 24 GB or less stream the transformer from disk, so the estimate is on the high side there. On Windows and Linux it was measured on one 10 GB GPU with 32 GB of system memory, at `ltx-4` and `ltx-8`: the GPU need stays flat for short clips and grows once a clip passes about 26,000 tokens at `ltx-4` (for example 1408×896 beyond about 10 s), and it adds room for the allocator. On a card with more or less memory the thresholds are an extrapolation. It does not count memory already used by other apps or by an image model that is still loaded.
 
 ## Model Detection
 

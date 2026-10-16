@@ -1370,7 +1370,17 @@ def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[st
     require_upscale_factor(upscale)
     resolved_model, model_info = resolve_video_model(app_config, model_name)
     clip = resolve_video_clip(app_config, model_info, ratio=ratio, size=size, steps=None, width=width, height=height, frames=frames, upscale=bool(upscale), quiet=True)
-    memory_fit = clip_memory_fit(resolved_model, width=clip.width, height=clip.height, frames=clip.num_frames, low_memory=low_memory is not False, upscale=bool(upscale), budget=memory_budget())
+    memory_fit = clip_memory_fit(
+        resolved_model,
+        width=clip.width,
+        height=clip.height,
+        frames=clip.num_frames,
+        low_memory=low_memory is not False,
+        upscale=bool(upscale),
+        budget=memory_budget(),
+        model_name=model_name,
+        app_config=app_config,
+    )
     return {"memory_fit": memory_fit, "width": clip.width, "height": clip.height, "frames": clip.num_frames}
 
 

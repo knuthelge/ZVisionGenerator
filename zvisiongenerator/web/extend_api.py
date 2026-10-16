@@ -164,7 +164,7 @@ def _extend_memory_fit(model: str | None, source: ExtendSource, window: int, low
         resolved = resolve_model_path(model, aliases=web_config.app_config.get("model_aliases", {}), platform_key=sys.platform)
     except KeyError, ValueError:
         return None
-    return clip_memory_fit(resolved, width=source.width, height=source.height, frames=window, low_memory=low_memory, budget=budget)
+    return clip_memory_fit(resolved, width=source.width, height=source.height, frames=window, low_memory=low_memory, budget=budget, model_name=model, app_config=web_config.app_config)
 
 
 def extend_context_from_body(raw: dict[str, Any], prompt: str) -> EnhanceContext:

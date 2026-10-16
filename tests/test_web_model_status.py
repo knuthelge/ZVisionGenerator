@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from zvisiongenerator.utils.model_memory import CudaMemoryEstimate, MemoryBudget
+from zvisiongenerator.utils.model_memory import CudaMemoryEstimate, LtxCudaMemoryEstimate, MemoryBudget
 from zvisiongenerator.web import model_status
 from zvisiongenerator.web.model_status import VIDEO_ESTIMATE_NOTE, describe_model_status
 
@@ -92,7 +92,22 @@ class TestDescribeCudaModelStatus:
             },
         }
 
-    def test_video_is_not_estimated(self, tmp_path):
-        status = describe_model_status("owner/ltx", kind="video", budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=_finder({"owner/ltx": tmp_path}))
+    def test_cuda_video_is_estimated_at_the_models_level(self, tmp_path, monkeypatch):
+        system = LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB)
+        monkeypatch.setattr(model_status, "ltx_cuda_system_memory", lambda resolved, name, config, finder: system if name == "ltx-4" else None)
+
+        status = describe_model_status("owner/ltx", kind="video", budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=_finder({"owner/ltx": tmp_path}), model_name="ltx-4", app_config={})
+
+        fit = status["memory_fit"]
+        assert status["downloaded"] is True
+        assert (fit["kind"], fit["budget_gb"], fit["system_budget_gb"], fit["note"]) == ("discrete", 10.0, 30.0, VIDEO_ESTIMATE_NOTE)
+        assert set(fit["by_quantize"]) == {"none"}
+        assert fit["by_quantize"]["none"]["required_gb"] < fit["without_low_memory"]["required_gb"]  # the transformer stays on the GPU
+        assert fit["by_quantize"]["none"]["system_gb"] == fit["without_low_memory"]["system_gb"]
+
+    def test_cuda_video_without_its_files_or_level_is_not_estimated(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(model_status, "ltx_cuda_system_memory", lambda *args: None)
+
+        status = describe_model_status("owner/ltx", kind="video", budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=_finder({"owner/ltx": tmp_path}), model_name="ltx-4", app_config={})
 
         assert status == {"downloaded": True, "memory_fit": None}

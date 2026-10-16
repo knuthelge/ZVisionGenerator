@@ -18,6 +18,7 @@ from zvisiongenerator.utils.model_memory import (
     clip_memory_fit,
     estimate_cuda_image_memory,
     estimate_image_memory,
+    estimate_ltx_cuda_clip_memory,
     estimate_ltx_cuda_system_memory,
     estimate_ltx_mlx_clip_memory,
     ltx_decode_budget_bytes,
@@ -338,8 +339,8 @@ class TestClipMemoryFit:
         assert capped is not None and capped["required_gb"] == round(12 + _DECODER_GIB, 1)
         assert unknown is not None and unknown["required_gb"] > 16
 
-    @pytest.mark.parametrize("budget", [None, MemoryBudget(0), MemoryBudget(10 * _GIB, 32 * _GIB)])
-    def test_no_unified_memory_budget_means_no_estimate_and_no_filesystem_lookup(self, budget):
+    @pytest.mark.parametrize("budget", [None, MemoryBudget(0)])
+    def test_no_memory_budget_means_no_estimate_and_no_filesystem_lookup(self, budget):
         finder = MagicMock(return_value=None)
 
         assert clip_memory_fit("example/model", budget=budget, find_local_dir=finder, **self._CLIP) is None
@@ -474,3 +475,101 @@ class TestEstimateLtxCudaSystemMemory:
 
         assert estimate.taking_turns == 15 * _GIB + runtime
         assert estimate.together == 25 * _GIB + runtime
+
+
+class TestEstimateLtxCudaClipMemory:
+    _SYSTEM = model_memory.LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB)
+
+    def _clip(self, system=None, **overrides):
+        clip = {"width": 704, "height": 448, "frames": 121, "low_memory": True, **overrides}
+        return estimate_ltx_cuda_clip_memory(system or self._SYSTEM, **clip)
+
+    @pytest.mark.parametrize("quantize", [4, 8])
+    def test_the_gpu_peak_is_flat_for_clips_below_the_knee(self, quantize):
+        system = model_memory.LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB, quantize=quantize)
+        flat = model_memory._LTX_CUDA_GPU_PLATEAU_BYTES[quantize] + model_memory._LTX_CUDA_GPU_HEADROOM_BYTES
+
+        assert ltx_video_tokens(704, 448, 121) < model_memory._LTX_CUDA_GPU_KNEE_TOKENS[quantize]
+        assert self._clip(system).gpu_bytes == self._clip(system, frames=9).gpu_bytes == flat
+
+    def test_q8_peaks_lower_than_q4_for_a_small_clip(self):
+        q8 = model_memory.LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=18 * _GIB, quantize=8)
+
+        assert self._clip(q8).gpu_bytes < self._clip().gpu_bytes
+
+    def test_a_longer_clip_never_needs_less_gpu_memory(self):
+        sizes = [self._clip(width=1408, height=896, frames=frames).gpu_bytes for frames in (121, 241, 289, 361)]
+
+        assert sizes == sorted(sizes)
+
+    def test_the_xl_clip_that_ran_out_of_memory_on_a_10_gb_card_does_not_fit_it(self):
+        xl_15_seconds = self._clip(width=1408, height=896, frames=361)
+
+        assert classify_cuda_memory_fit(xl_15_seconds, MemoryBudget(10 * _GIB, 30 * _GIB)) == "too_large"
+
+    @pytest.mark.parametrize("frames", [241, 289, 337])
+    def test_the_xl_clips_that_ran_on_a_10_gb_card_are_not_too_large_for_it(self, frames):
+        xl = self._clip(width=1408, height=896, frames=frames)
+
+        assert classify_cuda_memory_fit(xl, MemoryBudget(10 * _GIB, 32 * _GIB)) != "too_large"
+
+    def test_without_low_memory_the_transformer_stays_on_the_gpu(self):
+        assert self._clip(low_memory=False).gpu_bytes == self._clip().gpu_bytes + self._SYSTEM.transformer_bytes
+
+    def test_system_memory_is_the_weights_peak_and_the_upscale_adds_its_components(self):
+        plain = self._clip()
+
+        assert plain.system_bytes == self._SYSTEM.taking_turns
+        assert self._clip(upscale=True).system_bytes == plain.system_bytes + model_memory._LTX_CUDA_UPSCALE_SYSTEM_BYTES
+
+
+class TestClipMemoryFitOnCuda:
+    _CLIP = {"width": 704, "height": 448, "frames": 121, "low_memory": True}
+    _SYSTEM = model_memory.LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB)
+
+    @pytest.fixture()
+    def weights(self, monkeypatch):
+        calls: list[tuple] = []
+
+        def _system(resolved_model, model_name, app_config, find_local_dir):
+            calls.append((resolved_model, model_name))
+            return self._SYSTEM
+
+        monkeypatch.setattr(model_memory, "ltx_cuda_system_memory", _system)
+        return calls
+
+    def test_reports_the_gpu_when_it_is_the_tighter_memory(self, weights):
+        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(7 * _GIB, 64 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP)
+
+        assert result is not None
+        assert (result["kind"], result["resource"], result["budget_gb"]) == ("discrete", "gpu", 7.0)
+        assert result["status"] == "tight"  # 6.9 GiB with headroom is over 90% of 7
+        assert weights == [("repo/ltx", "ltx-4")]
+
+    def test_reports_system_memory_when_that_is_the_tighter_memory(self, weights):
+        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(24 * _GIB, 24 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP)
+
+        assert result is not None
+        assert (result["resource"], result["budget_gb"]) == ("system", 24.0)
+        assert result["status"] == "tight"  # the weights' peak is over 80% of 24
+
+    def test_a_gpu_smaller_than_the_clip_needs_is_too_large(self, weights):
+        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(4 * _GIB, 64 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP)
+
+        assert result is not None and result["status"] == "too_large"
+
+    def test_a_clip_that_fits_says_so(self, weights):
+        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(24 * _GIB, 64 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP)
+
+        assert result is not None and result["status"] == "fits"
+
+    def test_an_unknown_model_has_no_estimate(self, monkeypatch):
+        monkeypatch.setattr(model_memory, "ltx_cuda_system_memory", lambda *args: None)
+
+        assert clip_memory_fit("repo/ltx", budget=MemoryBudget(10 * _GIB, 30 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP) is None
+
+    def test_a_model_without_a_quantize_level_has_no_estimate_and_no_filesystem_lookup(self):
+        finder = MagicMock(return_value=None)
+
+        assert clip_memory_fit("repo/ltx", budget=MemoryBudget(10 * _GIB, 30 * _GIB), find_local_dir=finder, model_name="not-ltx", app_config={}, **self._CLIP) is None
+        finder.assert_not_called()

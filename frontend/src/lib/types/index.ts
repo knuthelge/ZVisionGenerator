@@ -82,6 +82,10 @@ export interface ClipMemoryFit {
   status: string;
   required_gb: number;
   budget_gb: number;
+  /** `discrete` on a CUDA GPU; absent (unified memory) on Apple Silicon. */
+  kind?: MemoryKind;
+  /** Discrete GPUs only: the memory the figures are about, whichever is closer to its limit. */
+  resource?: 'gpu' | 'system';
 }
 
 /** What `POST /api/video/memory-fit` reports: the size and length a video job would use, and how that clip fits memory. */

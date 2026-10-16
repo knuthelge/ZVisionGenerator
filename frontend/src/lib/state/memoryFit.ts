@@ -30,10 +30,26 @@ const CONSEQUENCE: Record<MemoryNote['status'], string> = {
   tight: 'The Mac may slow down while generating.',
   too_large: 'Expect heavy swapping or an out-of-memory error.',
 };
+/** The same on a CUDA GPU, by the memory the figures are about. */
+const DISCRETE_RESOURCE: Record<'gpu' | 'system', string> = { gpu: 'GPU memory', system: 'system memory' };
+const DISCRETE_CONSEQUENCE: Record<'gpu' | 'system', Record<MemoryNote['status'], string>> = {
+  gpu: {
+    tight: 'The GPU is nearly full, so it may fail on a longer or larger clip.',
+    too_large: 'Expect an out-of-memory error. Use fewer frames or a smaller size.',
+  },
+  system: {
+    tight: 'It runs, but slowly, and other apps may stall while it generates.',
+    too_large: 'Expect the run to be stopped for lack of memory. Use ltx-4, or a shorter clip.',
+  },
+};
 
 /** The memory note of a clip or an extension: shown for tight and too-large fits only, which never block Generate. */
 export function memoryFitNote(fit: ClipMemoryFit | null, context: MemoryFitContext): MemoryNote | null {
   if (fit === null || (fit.status !== 'tight' && fit.status !== 'too_large')) return null;
+  if (fit.kind === 'discrete') {
+    const resource = fit.resource ?? 'gpu';
+    return { status: fit.status, text: `${LEAD[context][fit.status]} ~${fit.required_gb} GB of ${fit.budget_gb} GB of ${DISCRETE_RESOURCE[resource]}. ${DISCRETE_CONSEQUENCE[resource][fit.status]}` };
+  }
   return { status: fit.status, text: `${LEAD[context][fit.status]} ~${fit.required_gb} GB of ${fit.budget_gb} GB. ${CONSEQUENCE[fit.status]}` };
 }
 

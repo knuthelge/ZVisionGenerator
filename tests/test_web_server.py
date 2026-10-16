@@ -1960,9 +1960,12 @@ def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
     web_config.video_inventory = (VideoInventoryEntry(name="ltx-8", family="ltx", supports_i2v=True, source="alias", resolved_path="owner/ltx"),)
     web_config.app_config["model_presets"] = {"ideogram4": {"supports_quantize": False}}
     calls: list[tuple[str, str, tuple[int, ...]]] = []
+    video_names: list[tuple[str | None, bool]] = []
 
-    def _fake_status(resolved_path, *, kind, quantize_options=(), budget=None, find_local_dir=None):
+    def _fake_status(resolved_path, *, kind, quantize_options=(), budget=None, find_local_dir=None, model_name=None, app_config=None):
         calls.append((resolved_path, kind, quantize_options))
+        if kind == "video":
+            video_names.append((model_name, app_config is web_config.app_config))
         return {"downloaded": resolved_path != "owner/ltx", "memory_fit": None}
 
     monkeypatch.setattr(workspace_api_module, "describe_model_status", _fake_status)
@@ -1997,6 +2000,7 @@ def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
     assert ("owner/zit", "image", ()) in workspace_calls
     assert calls[len(workspace_calls) :] == workspace_calls
     assert ("owner/ltx", "video", ()) in calls
+    assert video_names and set(video_names) == {("ltx-8", True)}  # a video model's level comes from its name and the config
 
 
 def test_workspace_models_without_inventory_entry_report_unknown_status(monkeypatch):
@@ -2508,7 +2512,16 @@ def test_inspect_route_adds_the_memory_fit_of_the_window(clip, monkeypatch):
     payload = _inspect({"path": str(clip.path), "extend_frames": 48, "low_memory": False}).json()
 
     assert payload["memory_fit"] == {"status": "tight", "required_gb": 21.0, "budget_gb": 24.0}
-    assert calls == [{"model": "/models/ltx-8", "width": 512, "height": 256, "frames": 73, "low_memory": False, "budget": MemoryBudget(24 * 2**30)}]
+    assert len(calls) == 1
+    assert {key: value for key, value in calls[0].items() if key != "app_config"} == {
+        "model": "/models/ltx-8",
+        "width": 512,
+        "height": 256,
+        "frames": 73,
+        "low_memory": False,
+        "budget": MemoryBudget(24 * 2**30),
+        "model_name": "ltx-8",
+    }
 
 
 def test_inspect_route_uses_the_requested_model_and_defaults_low_memory_on(clip, monkeypatch):
@@ -2914,17 +2927,17 @@ def test_memory_fit_route_checks_the_aligned_clip_against_the_budget(clip_fit):
 
     assert response.status_code == 200
     assert response.json() == {"memory_fit": {"status": "tight", "required_gb": 21.0, "budget_gb": 24.0}, "width": 736, "height": 448, "frames": 49}
-    assert clip_fit.calls == [
-        {
-            "model": "/models/ltx-8",
-            "width": 736,
-            "height": 448,
-            "frames": 49,
-            "low_memory": False,
-            "upscale": False,
-            "budget": MemoryBudget(24 * 2**30, unified_bytes=32 * 2**30),
-        }
-    ]
+    assert len(clip_fit.calls) == 1
+    assert {key: value for key, value in clip_fit.calls[0].items() if key != "app_config"} == {
+        "model": "/models/ltx-8",
+        "width": 736,
+        "height": 448,
+        "frames": 49,
+        "low_memory": False,
+        "upscale": False,
+        "budget": MemoryBudget(24 * 2**30, unified_bytes=32 * 2**30),
+        "model_name": "ltx-8",
+    }
 
 
 def test_memory_fit_route_defaults_the_model_and_turns_low_memory_on(clip_fit):

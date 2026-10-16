@@ -403,17 +403,9 @@ def _check_system_memory(repo_dir: Path, transformer_input: Path, quantize: int)
 
     import psutil
 
-    from zvisiongenerator.backends.cuda.video.weights import component_elements, text_encoder_bytes, transformer_elements
-    from zvisiongenerator.utils.model_memory import estimate_ltx_cuda_system_memory
+    from zvisiongenerator.backends.cuda.video.memory_estimate import ltx_system_estimate
 
-    block_matrices, transformer_rest = transformer_elements(transformer_input)
-    estimate = estimate_ltx_cuda_system_memory(
-        block_matrices=block_matrices,
-        transformer_rest=transformer_rest,
-        connectors=component_elements(repo_dir / "connectors"),
-        text_encoder=text_encoder_bytes(repo_dir / "text_encoder"),
-        quantize=quantize,
-    )
+    estimate = ltx_system_estimate(repo_dir, transformer_input, quantize)
     total = int(psutil.virtual_memory().total)
     need = estimate.taking_turns
     level = f"q{quantize}"

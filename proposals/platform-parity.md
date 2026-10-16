@@ -1,6 +1,6 @@
 # Feature parity between macOS and Windows/Linux
 
-**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 1 (Klein img2img on CUDA), 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, except review), 5 (quantized, streamed video on CUDA, which absorbed step 6), 8 (scheduler default), 9 (ffmpeg install) and 11 (extend a video on CUDA) are done. Steps 3's review, 7, 12 and 13 are still open. Step 10 was measured on 2026-10-16 and needs no change. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
+**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 1 (Klein img2img on CUDA), 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, except review), 5 (quantized, streamed video on CUDA, which absorbed step 6), 7 (video memory estimates), 8 (scheduler default), 9 (ffmpeg install) and 11 (extend a video on CUDA) are done. Steps 3's review, 12 and 13 are still open. Step 10 was measured on 2026-10-16 and needs no change. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
 
 ## Where things stand
 
@@ -23,8 +23,8 @@ Re-audited against `main` at v0.13.0b20 (diffusers 0.41.0, mflux 0.22.0, torch 2
 | Two-stage video upscale | yes | yes | 3 |
 | Review before upscaling (video) | yes | no; `--review` refused, option hidden | 3 |
 | Extend a video, with its sound | yes | yes | 11 |
-| Video model memory badge | yes | no (`memory_fit: None`) | 7 |
-| Per-clip memory check (Duration note, Extend note, CLI warning) | yes | no (`clip_memory_fit` returns `None` for a discrete GPU) | 7 |
+| Video model memory badge | yes | yes | 7 |
+| Per-clip memory check (Duration note, Extend note, CLI warning) | yes | yes, fitted on one 10 GB card | 7 |
 | Load-time memory check for video | n/a | yes (`estimate_ltx_cuda_system_memory`) | 5 |
 | Prompt enhancer | yes, 2.4 GB download | yes, 9 GB download | 10 |
 | Offer to install a missing ffmpeg | Homebrew, MacPorts | winget, apt, dnf, pacman | 9 |
@@ -44,7 +44,7 @@ Missing on Windows and Linux:
 4. ~~**No float16 compute option.**~~ *Dropped (2026-10-11).* `deps-macos` proposed a `compute_precision` option for mflux, but it gave 0–4% on an M5 and was removed, so macOS has nothing to match. See [macos-speed.md](macos-speed.md) and [deps-macos.md](archive/deps-macos.md#what-changed-from-the-plan).
 5. ~~**No quantized video, and video doesn't fit a 32 GB machine.**~~ *Done (2026-10-14), see step 5.* macOS has `ltx-4` and `ltx-8` (MLX q4/q8). CUDA had only `ltx-2.3` in bfloat16, which holds about 66 GB in system memory, and runs an older transformer (distilled 1.0) than macOS (1.1).
 6. ~~**No low-RAM video streaming.**~~ *Merged into step 5.* `--low-memory` on CUDA meant `enable_model_cpu_offload()`, which moves each whole component onto the GPU in turn.
-7. **No video memory estimates.** `model_status.describe_model_status` returns `memory_fit: None` for CUDA video ("CUDA video is not estimated"). The per-clip check that shipped on macOS later (the note under **Duration (s)**, the Extend Video note, `POST /api/video/memory-fit` and the `ziv-video` warning) is unified-memory only too: `clip_memory_fit` returns `None` when the budget has a separate system memory. On CUDA the clip length is what runs out first (XL 15 s fails on a 10 GB GPU, step 5), so this check matters more there than the badge.
+7. ~~**No video memory estimates.**~~ *Done (2026-10-16), see step 7.* `model_status.describe_model_status` returns `memory_fit: None` for CUDA video ("CUDA video is not estimated"). The per-clip check that shipped on macOS later (the note under **Duration (s)**, the Extend Video note, `POST /api/video/memory-fit` and the `ziv-video` warning) is unified-memory only too: `clip_memory_fit` returns `None` when the budget has a separate system memory. On CUDA the clip length is what runs out first (XL 15 s fails on a 10 GB GPU, step 5), so this check matters more there than the badge.
 
 Also missing on Windows and Linux, found in the 2026-10-15 re-audit:
 
@@ -120,7 +120,7 @@ Each step is its own PR. Order for what's left:
 
 1. ~~Step 1 (Klein img2img).~~ Done.
 2. ~~Steps 8 and 9 (scheduler default, ffmpeg install).~~ Done.
-3. Step 7 (video memory estimates). It needs the clip-length measurements from step 5 and a few more at q8.
+3. ~~Step 7 (video memory estimates).~~ Done.
 4. Step 3's review before upscaling.
 5. Steps 13 and 12 (Ideogram 4, SeedVR2). Both are accepted. Each starts with a spike that picks the approach: which implementation for SeedVR2, which repo for Ideogram 4.
 6. Step 10 (enhancer download) is measured and needs no change.
@@ -221,6 +221,25 @@ Original plans:
 - (6) With `--low-memory`, apply block-level group offloading to the LTX transformer instead of `enable_model_cpu_offload()`. Measure peak VRAM and seconds per step on a 12 GB and a 24 GB card.
 
 ### 7. Video memory estimates on CUDA: badges and the per-clip check
+
+**Done (2026-10-16).** `estimate_ltx_cuda_clip_memory` (`utils/model_memory.py`) turns the weights' system-memory estimate (now read by `backends/cuda/video/memory_estimate.py`, which the load-time check shares) and the clip's token count into a `CudaMemoryEstimate`. `clip_memory_fit` handles a discrete budget, returning the memory that is closer to its limit (`resource`: `gpu` or `system`), and `describe_model_status` gives CUDA video a `discrete` `memory_fit` at the level of the picked name (`ltx-4`, `ltx-8`). Both only use files already on disk. The Duration note, the Extend note, the `ziv-video` warning and the badge work unchanged; the note names the memory it is about.
+
+Fitted on one 10 GB GPU with 32 GB of system memory, 2-step t2v runs with `--low-memory`, peak allocated GPU memory:
+
+| Level | Tokens | Clip | Peak allocated | Peak reserved | Result |
+|---|---|---|---|---|---|
+| q4 | 5,376 | 704×448, 5 s | 4.40 GiB | 5.43 | ok |
+| q4 | 19,712 | 1408×896, 5 s | 4.40 | 5.43 | ok |
+| q4 | 38,192 | 1408×896, 10 s | 5.8 (step 5) | | ok |
+| q4 | 45,584 | 1408×896, 12 s | 6.44 | 8.22 | ok |
+| q4 | 52,976 | 1408×896, 14 s | 7.21 | 8.44 | ok |
+| q4 | 56,672 | 1408×896, 15 s | 7.6 (extrapolated; step 5 saw the same) | | out of memory |
+| q8 | 5,376 | 704×448, 5 s | 3.61 | 5.14 | ok |
+| q8 | 45,584 | 1408×896, 12 s | 6.30 | 8.52 | ok |
+
+The peak is flat up to a knee (about 26,000 tokens at q4, 19,700 at q8) and then grows by about 1.04e-4 GiB per token at both levels. A 2.5 GiB headroom for allocator fragmentation (reserved ran 1.0–2.2 GiB above allocated), the CUDA context and the desktop is added, so XL 14 s is `tight` and XL 15 s `too_large` on 10 GiB, as they ran. System memory is the weights' peak (21.2 GiB at q4 against 20.7 measured, 27.0 at q8 against 24.4–25.6) plus 4 GiB for the two-stage upscale (XL 10 s: 25.2 estimated against 25.6 measured). Not measured: a 12 GB or 24 GB card (the thresholds are an extrapolation there), `--no-low-memory` (adds the transformer's size, which a 10 GB card cannot run), i2v and extend (assumed to match t2v, as step 11 found), and the q8 knee beyond two points.
+
+Original plan:
 
 - Add `estimate_cuda_video_memory` to `utils/model_memory.py`, mirroring how step 5 loads the model, for `ltx-4` and `ltx-8` (there's no unquantized path any more). The transformer streams; the VAEs and vocoder stay off the GPU while it runs, and the decode streams its chunks. The system-memory half exists as `estimate_ltx_cuda_system_memory`. It needs the transformer checkpoint's header, which `huggingface_hub.get_safetensors_metadata` can read before the download.
 - Use it in `model_status.describe_model_status` for CUDA video, in the same `discrete` shape as image models, with the existing `VIDEO_ESTIMATE_NOTE`.

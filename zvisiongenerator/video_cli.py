@@ -226,7 +226,7 @@ def _warn_if_still_original_prompt(prompt: str | None, source: ExtendSource) -> 
         warnings.warn("Still the original prompt. Change it to what happens next.", stacklevel=2)
 
 
-def _clip_fit(args: argparse.Namespace, *, upscale: bool) -> dict[str, Any] | None:
+def _clip_fit(args: argparse.Namespace, config: dict[str, Any], *, upscale: bool) -> dict[str, Any] | None:
     """Return how the run's clip fits this machine's memory (``status``, ``required_gb``, ``budget_gb``), or ``None`` when unknown."""
     return clip_memory_fit(
         args.model,
@@ -236,12 +236,14 @@ def _clip_fit(args: argparse.Namespace, *, upscale: bool) -> dict[str, Any] | No
         low_memory=args.low_memory,
         upscale=upscale,
         budget=accelerator_memory_budget_or_none(),
+        model_name=getattr(args, "model_name", None),
+        app_config=config,
     )
 
 
-def _warn_if_too_large(args: argparse.Namespace, *, extending: bool) -> None:
+def _warn_if_too_large(args: argparse.Namespace, config: dict[str, Any], *, extending: bool) -> None:
     """Warn when the clip, or the window of an extension, may not fit in memory; the run continues either way."""
-    fit = _clip_fit(args, upscale=bool(args.upscale))
+    fit = _clip_fit(args, config, upscale=bool(args.upscale))
     if fit is None or fit["status"] == "fits":
         return
     if extending:
@@ -456,7 +458,7 @@ def main(*, prog: str = "ziv-video") -> None:
     except RuntimeError as e:
         parser.error(str(e))
 
-    _warn_if_too_large(args, extending=source is not None)
+    _warn_if_too_large(args, config, extending=source is not None)
 
     # Determine mode hint
     mode = "extend" if source is not None else "i2v" if args.image_path else "t2v"

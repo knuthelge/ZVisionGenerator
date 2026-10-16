@@ -54,6 +54,18 @@ _CUDA_SYSTEM_FITS_RATIO = 0.8
 # LTX on CUDA: beyond the weights, the process holds the CUDA runtime, the VAEs' and tokenizer's CPU side and the
 # copies a load stages. Measured at q4 on a 10 GB GPU: peaks of 20-21 GB against 14.3 GiB of weights.
 _LTX_CUDA_RUNTIME_BYTES = 6 * GIB
+# LTX on CUDA, per clip. With the transformer streamed (low-memory mode), the peak allocated GPU memory is flat up to a
+# knee, then grows linearly with the token count (the float32 temporaries outside the chunked layers). Measured on a
+# 10 GB card with 2-step runs: q4 4.40 GiB from 5k to 20k tokens, then 6.44 at 45.6k and 7.21 at 53.0k; q8 3.61 GiB at
+# 5k and 6.30 at 45.6k. The same slope fits both levels and predicts 7.6 GiB at 56.7k tokens, where XL 15 s ran out of memory.
+_LTX_CUDA_GPU_PLATEAU_BYTES = {4: int(4.40 * GIB), 8: int(3.61 * GIB)}
+_LTX_CUDA_GPU_KNEE_TOKENS = {4: 26000, 8: 19700}
+_LTX_CUDA_GPU_BYTES_PER_TOKEN = int(1.04e-4 * GIB)
+# Beyond the allocated peak, the caching allocator fragments (reserved was 1.0-2.2 GiB above allocated) and the CUDA
+# context and desktop take their share; with it XL 14 s (7.21 GiB) is tight and XL 15 s (7.6 GiB) too large on 10 GiB.
+_LTX_CUDA_GPU_HEADROOM_BYTES = int(2.5 * GIB)
+# The two-stage upscale also holds the upsampler and the first stage's latents: measured +3 to +5 GB of system memory.
+_LTX_CUDA_UPSCALE_SYSTEM_BYTES = 4 * GIB
 
 _DTYPE_BYTES = {
     "F64": 8,
@@ -351,6 +363,8 @@ def clip_memory_fit(
     budget: MemoryBudget | None,
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
     env: Mapping[str, str] | None = None,
+    model_name: str | None = None,
+    app_config: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Check a clip against the memory budget; callers warn on ``tight`` or ``too_large`` and never block.
 
@@ -364,13 +378,29 @@ def clip_memory_fit(
         budget: The accelerator's memory budget, or ``None`` when unknown.
         find_local_dir: Locates a downloaded model directory.
         env: The environment to read the decode budget from; the process environment when omitted.
+        model_name: The name the model was picked by (``ltx-4``), which sets the quantize level on a discrete GPU.
+        app_config: The loaded config, which sets that level and names the single-file transformer (discrete GPU only).
 
     Returns:
-        ``{"status", "required_gb", "budget_gb"}``, or ``None`` when there is no unified-memory budget (none known, or a
-        discrete GPU's) or the model is not a downloaded LTX MLX model with its text encoder.
+        ``{"status", "required_gb", "budget_gb"}``, or ``None`` when no memory budget is known or the model is not a
+        downloaded LTX model with its text encoder. On a discrete GPU (CUDA) it adds ``"kind": "discrete"`` and
+        ``"resource"`` (``"gpu"`` or ``"system"``): the memory the numbers are about, whichever is closer to its limit.
     """
-    if budget is None or budget.system_bytes is not None or not budget.gpu_bytes:
-        return None  # Only unified memory (Apple Silicon) is estimated; a discrete GPU never reaches the filesystem.
+    if budget is None or not budget.gpu_bytes:
+        return None
+    if budget.system_bytes is not None:
+        return _cuda_clip_fit(
+            resolved_model,
+            width=width,
+            height=height,
+            frames=frames,
+            low_memory=low_memory,
+            upscale=upscale,
+            budget=budget,
+            find_local_dir=find_local_dir,
+            model_name=model_name,
+            app_config=app_config,
+        )
     model_dir = find_local_dir(resolved_model)
     if model_dir is None or not is_ltx_mlx_layout(model_dir):
         return None
@@ -381,6 +411,52 @@ def clip_memory_fit(
     if required is None:
         return None
     return {"status": classify_memory_fit(required, budget.gpu_bytes), "required_gb": round(required / GIB, 1), "budget_gb": round(budget.gpu_bytes / GIB, 1)}
+
+
+def ltx_cuda_system_memory(
+    resolved_model: str,
+    model_name: str | None,
+    app_config: dict[str, Any] | None,
+    find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
+) -> LtxCudaMemoryEstimate | None:
+    """Return the system memory of the LTX model picked as *model_name* on a CUDA machine, or ``None`` when its level or files are unknown.
+
+    The level comes from the config (``ltx-4`` is 4). Nothing is downloaded: the files must already be on disk.
+    """
+    from zvisiongenerator.backends.cuda.video.memory_estimate import cached_ltx_system_estimate
+    from zvisiongenerator.utils.config import ltx_diffusers_quantize
+
+    config = app_config or {}
+    quantize = ltx_diffusers_quantize(config, model_name)
+    if quantize is None:
+        return None
+    return cached_ltx_system_estimate(config, resolved_model, quantize, find_local_dir=find_local_dir)
+
+
+def _cuda_clip_fit(
+    resolved_model: str,
+    *,
+    width: int,
+    height: int,
+    frames: int,
+    low_memory: bool,
+    upscale: bool,
+    budget: MemoryBudget,
+    find_local_dir: Callable[[str], Path | None],
+    model_name: str | None,
+    app_config: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Check an LTX clip against a discrete GPU's budget, or return ``None`` when the model's files or level are unknown."""
+    system = ltx_cuda_system_memory(resolved_model, model_name, app_config, find_local_dir)
+    if system is None:
+        return None
+    estimate = estimate_ltx_cuda_clip_memory(system, width=width, height=height, frames=frames, low_memory=low_memory, upscale=upscale)
+    # Report the memory that is closer to its limit, so the note's numbers explain its status.
+    system_budget = budget.system_bytes or 0
+    resource, required, limit = "gpu", estimate.gpu_bytes, budget.gpu_bytes
+    if system_budget and estimate.system_bytes / (system_budget * _CUDA_SYSTEM_FITS_RATIO) > estimate.gpu_bytes / (budget.gpu_bytes * _CUDA_GPU_FITS_RATIO):
+        resource, required, limit = "system", estimate.system_bytes, system_budget
+    return {"status": classify_cuda_memory_fit(estimate, budget), "required_gb": round(required / GIB, 1), "budget_gb": round(limit / GIB, 1), "kind": "discrete", "resource": resource}
 
 
 def classify_memory_fit(required_bytes: int, budget_bytes: int) -> str:
@@ -403,6 +479,7 @@ class LtxCudaMemoryEstimate:
     text_encoder_bytes: int  # the text encoder while it encodes a prompt
     transformer_bytes: int  # the transformer, held while generating
     resident_bytes: int = 0  # the connectors, held throughout
+    quantize: int = 4  # the transformer's level, 4 or 8
 
     @property
     def taking_turns(self) -> int:
@@ -430,7 +507,37 @@ def estimate_ltx_cuda_system_memory(*, block_matrices: int, transformer_rest: in
     """
     bytes_per_block_weight = {8: 1, 4: _NF4_BYTES_PER_WEIGHT}[quantize]
     transformer_bytes = block_matrices * bytes_per_block_weight + transformer_rest * 2
-    return LtxCudaMemoryEstimate(text_encoder_bytes=text_encoder, transformer_bytes=int(transformer_bytes), resident_bytes=connectors)
+    return LtxCudaMemoryEstimate(text_encoder_bytes=text_encoder, transformer_bytes=int(transformer_bytes), resident_bytes=connectors, quantize=quantize)
+
+
+def estimate_ltx_cuda_clip_memory(
+    system: LtxCudaMemoryEstimate,
+    *,
+    width: int,
+    height: int,
+    frames: int,
+    low_memory: bool,
+    upscale: bool = False,
+) -> CudaMemoryEstimate:
+    """Estimate the peak GPU and system memory of one LTX clip on the diffusers/CUDA backend.
+
+    In low-memory mode the transformer streams to the GPU block by block and the peak depends only on the clip's
+    token count. Without it the whole transformer stays on the GPU as well. System memory is the weights' peak plus,
+    for the two-stage upscale, the second stage's extra components.
+
+    Args:
+        system: The weights' system memory, from :func:`estimate_ltx_cuda_system_memory`.
+        width: Output width in pixels.
+        height: Output height in pixels.
+        frames: Output frame count.
+        low_memory: Whether the transformer streams to the GPU instead of staying there.
+        upscale: Whether the clip is upscaled 2x.
+    """
+    tokens = ltx_video_tokens(width, height, frames)
+    gpu = _LTX_CUDA_GPU_PLATEAU_BYTES[system.quantize] + max(tokens - _LTX_CUDA_GPU_KNEE_TOKENS[system.quantize], 0) * _LTX_CUDA_GPU_BYTES_PER_TOKEN + _LTX_CUDA_GPU_HEADROOM_BYTES
+    if not low_memory:
+        gpu += system.transformer_bytes
+    return CudaMemoryEstimate(gpu_bytes=int(gpu), system_bytes=system.taking_turns + (_LTX_CUDA_UPSCALE_SYSTEM_BYTES if upscale else 0))
 
 
 def classify_cuda_memory_fit(estimate: CudaMemoryEstimate, budget: MemoryBudget) -> str:

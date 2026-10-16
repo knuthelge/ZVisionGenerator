@@ -24,6 +24,15 @@ describe('memoryFitNote', () => {
     expect(tooLarge?.text).toMatch(/\b40\b.*\b24\b/);
   });
 
+  it.each(['clip', 'extension'] as const)('names the memory a discrete GPU runs short of in a %s', (context) => {
+    const gpu = memoryFitNote({ status: 'too_large', required_gb: 11.2, budget_gb: 10, kind: 'discrete', resource: 'gpu' }, context);
+    const system = memoryFitNote({ status: 'tight', required_gb: 26, budget_gb: 30.3, kind: 'discrete', resource: 'system' }, context);
+
+    expect(gpu?.text).toMatch(/\b11\.2\b.*\b10\b.*GPU/);
+    expect(system?.text).toMatch(/\b26\b.*\b30\.3\b.*system/);
+    expect(system?.status).toBe('tight');
+  });
+
   it.each(['clip', 'extension'] as const)('has nothing to say about a %s that fits or is unknown', (context) => {
     expect(memoryFitNote({ status: 'fits', required_gb: 10, budget_gb: 24 }, context)).toBeNull();
     expect(memoryFitNote(null, context)).toBeNull();

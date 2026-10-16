@@ -15,7 +15,9 @@ from zvisiongenerator.utils.model_memory import (
     classify_memory_fit,
     estimate_cuda_image_memory,
     estimate_image_memory,
+    estimate_ltx_cuda_clip_memory,
     estimate_ltx_mlx_clip_memory,
+    ltx_cuda_system_memory,
 )
 
 NO_QUANTIZE_KEY = "none"
@@ -33,6 +35,8 @@ def describe_model_status(
     quantize_options: tuple[int, ...] = (),
     budget: MemoryBudget | None = None,
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
+    model_name: str | None = None,
+    app_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return the ``downloaded`` flag and ``memory_fit`` summary for one inventory model.
 
@@ -42,14 +46,16 @@ def describe_model_status(
         quantize_options: Quantization levels the model supports (empty when it cannot be quantized).
         budget: This machine's memory budget, or ``None`` when this platform is not estimated.
         find_local_dir: Resolver for fully downloaded model directories.
+        model_name: The name the model is picked by (``ltx-4``); on CUDA it sets a video model's quantize level.
+        app_config: The loaded config, for the same.
 
     Returns:
         ``{"downloaded": bool, "memory_fit": dict | None}``. ``memory_fit`` holds ``kind`` (``"unified"`` on
         Apple Silicon, ``"discrete"`` on CUDA), ``budget_gb`` (the GPU budget) and ``by_quantize`` (``"none"``
         and each quantize level mapped to ``{"status", "required_gb"}``, the GPU need). On CUDA it adds
         ``system_budget_gb`` and each estimate's ``system_gb``. LTX MLX video adds a ``without_low_memory``
-        estimate in the same shape plus a ``note``. It is ``None`` when the model cannot be estimated (CUDA
-        video is not estimated).
+        estimate in the same shape plus a ``note``; CUDA video has the same, in the ``discrete`` shape. It is
+        ``None`` when the model cannot be estimated (its files are not all on disk, or CUDA video has no level).
     """
     model_dir = find_local_dir(resolved_path)
     text_encoder_dir = None
@@ -63,7 +69,7 @@ def describe_model_status(
     if downloaded and model_dir is not None and budget is not None:
         levels = (None, *quantize_options)
         if budget.system_bytes is not None:
-            memory_fit = _cuda_image_memory_fit(model_dir, levels, budget) if kind == "image" else None
+            memory_fit = _cuda_image_memory_fit(model_dir, levels, budget) if kind == "image" else _cuda_video_memory_fit(resolved_path, budget, find_local_dir, model_name, app_config)
         elif kind == "video":
             memory_fit = _video_memory_fit(model_dir, text_encoder_dir, budget)
         else:
@@ -88,6 +94,22 @@ def _cuda_image_memory_fit(model_dir: Path, levels: tuple[int | None, ...], budg
         "budget_gb": _to_gb(budget.gpu_bytes),
         "system_budget_gb": _to_gb(budget.system_bytes or 0),
         "by_quantize": {_level_key(level): _cuda_fit(estimate, budget) for level, estimate in estimates.items()},
+    }
+
+
+def _cuda_video_memory_fit(resolved_path: str, budget: MemoryBudget, find_local_dir: Callable[[str], Path | None], model_name: str | None, app_config: dict[str, Any] | None) -> dict[str, Any] | None:
+    system = ltx_cuda_system_memory(resolved_path, model_name, app_config, find_local_dir)
+    if system is None:
+        return None
+    staged = estimate_ltx_cuda_clip_memory(system, low_memory=True, **_REFERENCE_CLIP)
+    resident = estimate_ltx_cuda_clip_memory(system, low_memory=False, **_REFERENCE_CLIP)
+    return {
+        "kind": DISCRETE_MEMORY,
+        "budget_gb": _to_gb(budget.gpu_bytes),
+        "system_budget_gb": _to_gb(budget.system_bytes or 0),
+        "by_quantize": {NO_QUANTIZE_KEY: _cuda_fit(staged, budget)},
+        "without_low_memory": _cuda_fit(resident, budget),
+        "note": VIDEO_ESTIMATE_NOTE,
     }
 
 

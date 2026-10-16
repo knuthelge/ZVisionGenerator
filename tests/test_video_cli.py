@@ -487,8 +487,8 @@ def _run_cli(
     fits: list = []
     real_clip_fit = video_cli._clip_fit
 
-    def _spy_clip_fit(args, *, upscale):
-        fits.append(real_clip_fit(args, upscale=upscale))
+    def _spy_clip_fit(args, config, *, upscale):
+        fits.append(real_clip_fit(args, config, upscale=upscale))
         return fits[-1]
 
     monkeypatch.setattr(video_cli, "_clip_fit", _spy_clip_fit)

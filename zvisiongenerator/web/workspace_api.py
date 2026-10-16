@@ -260,7 +260,9 @@ def _status_resolver(
             return dict(_UNKNOWN_STATUS)
         quantize_options = _image_quantize_levels(web_config, image_model_defaults.get(entry.name, {})) if kind == "image" else ()
         try:
-            return describe_model_status(entry.resolved_path, kind=kind, quantize_options=quantize_options, budget=budget, find_local_dir=find_local_dir)
+            return describe_model_status(
+                entry.resolved_path, kind=kind, quantize_options=quantize_options, budget=budget, find_local_dir=find_local_dir, model_name=entry.name, app_config=web_config.app_config
+            )
         except Exception as exc:  # noqa: BLE001 - one unreadable model must not break the whole listing
             warnings.warn(f"Could not determine status for model '{entry.name}': {exc}", stacklevel=2)
             return dict(_UNKNOWN_STATUS)
