@@ -1,6 +1,6 @@
 # Feature parity between macOS and Windows/Linux
 
-**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, except review), 5 (quantized, streamed video on CUDA, which absorbed step 6) and 11 (extend a video on CUDA) are done. Steps 1, 3's review, 7, 8, 9, 10, 12 and 13 are still open. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
+**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, except review), 5 (quantized, streamed video on CUDA, which absorbed step 6) and 11 (extend a video on CUDA) are done. Steps 1, 3's review, 7, 9, 12 and 13 are still open. Step 10 was measured on 2026-10-16 and needs no change. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
 
 ## Where things stand
 
@@ -104,6 +104,16 @@ Re-checked 2026-10-15 at v0.13.0b20, against the installed diffusers 0.41.0 and 
 | `model_presets.zimage.default_scheduler` | Still `mflux: beta`, `diffusers: null` |
 | Pre-quantized `Qwen3.5-4B-heretic` for transformers | None among the 60 Hub results that aren't MLX or GGUF. The CUDA enhancer still downloads the 9 GB bfloat16 repo and quantizes it to NF4 when it loads |
 
+Measured 2026-10-16 on a 10 GB NVIDIA GPU (transformers 5.19.0, bitsandbytes NF4, `coder3101/Qwen3.5-4B-heretic` already in the Hugging Face cache), in a separate systemd unit:
+
+| Prompt enhancer load | Time | GPU peak |
+|---|---|---|
+| bfloat16 file, quantized to NF4 at load, first load | 13.0 s | 3.36 GB |
+| Same, second load (file cached) | 1.5 s | 3.36 GB |
+| Stored NF4 copy via `save_pretrained` (3.28 GB against 9.08 GB), file cached | 0.7 s | 3.29 GB |
+
+The stored copy loads and generates. Quantizing at load costs about 0.8 s, because the memory-mapped file is quantized layer by layer on the GPU. The first load was slower mostly from reading 9 GB off disk; a cold load of the stored copy was not timed. Process peak RSS over all four loads was 9.7 GB.
+
 ## Proposed change
 
 Each step is its own PR. Order for what's left:
@@ -113,7 +123,7 @@ Each step is its own PR. Order for what's left:
 3. Step 7 (video memory estimates). It needs the clip-length measurements from step 5 and a few more at q8.
 4. Step 3's review before upscaling.
 5. Steps 13 and 12 (Ideogram 4, SeedVR2). Both are accepted. Each starts with a spike that picks the approach: which implementation for SeedVR2, which repo for Ideogram 4.
-6. Step 10 (enhancer download). Lowest priority.
+6. Step 10 (enhancer download) is measured and needs no change.
 
 Step 4 was dropped. The step numbers stay as they are so references keep working.
 
@@ -230,7 +240,8 @@ Original plans:
 
 - Look for a public, pinned NF4 or other pre-quantized copy of the same model that transformers loads directly. If one exists, point `prompt_enhancer.model.win32` / `.linux` at it and update `download_size_label`.
 - Otherwise keep the 9 GB repo. It's a one-time download, and the label already tells users. Lowest priority.
-- Re-checked 2026-10-15: no such copy exists yet (see the evidence table). A second option is to save our own NF4 copy with the stored-quant flow and drop the bfloat16 download afterwards. That cuts disk use from 9 GB to about 3 GB and load time, but not the download. It's only worth it if the load-time quantization shows up in timings.
+- Re-checked 2026-10-15: no such copy exists yet (see the evidence table). The only heretic quants of other Qwen/Gemma models are AWQ, GPTQ, FP8 or OpenVINO; `darrellbest/Qwen3.5-4B-Heretic-FP8` is 6.8 GB and needs `compressed-tensors`, and FP8 isn't native on RTX 20 and 30-series cards. `techwithsergiu/Qwen3.5-text-4B-bnb-4bit` is 3.1 GB but is the censored base model.
+- **Decided 2026-10-16: no change.** Saving our own NF4 copy (and dropping the bfloat16 file) was measured and isn't worth it: it saves under a second per load and about 5.8 GB of disk, and the download stays 9 GB (see the evidence table). The only way to cut the download without losing the uncensored behavior is to publish our own NF4 heretic repo, which we decided not to maintain for now. Reopen this step if that changes, or if a public pre-quantized heretic copy appears. A repo of our own would also need a separate answer for the CPU fallback, since a bitsandbytes copy can't run there.
 
 ### 11. Extend a video on CUDA
 
