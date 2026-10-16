@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 - **Web UI: Reuse settings now uses exactly the source's LoRAs.** Reusing an image or video made without LoRAs used to keep the LoRAs already chosen, so the reused job could differ from the original. The same applies to **Load settings** on a queued job and to **Extend**
+- **FLUX.2 Klein reference images and upscale on Windows and Linux.** Using a reference image, `--upscale`, or the viewer's Upscale with Klein (the default model) failed with an error there. It now works, as on macOS
 
 ## [0.13.0b21] - 2026-10-15
 

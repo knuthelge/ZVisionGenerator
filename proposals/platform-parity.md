@@ -1,6 +1,6 @@
 # Feature parity between macOS and Windows/Linux
 
-**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, except review), 5 (quantized, streamed video on CUDA, which absorbed step 6) and 11 (extend a video on CUDA) are done. Steps 1, 3's review, 7, 9, 12 and 13 are still open. Step 10 was measured on 2026-10-16 and needs no change. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
+**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 1 (Klein img2img on CUDA), 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, except review), 5 (quantized, streamed video on CUDA, which absorbed step 6), 8 (scheduler default) and 11 (extend a video on CUDA) are done. Steps 3's review, 7, 9, 12 and 13 are still open. Step 10 was measured on 2026-10-16 and needs no change. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
 
 ## Where things stand
 
@@ -14,7 +14,7 @@ Re-audited against `main` at v0.13.0b20 (diffusers 0.41.0, mflux 0.22.0, torch 2
 | LoRAs and LoKr (image) | yes | yes | |
 | Live image previews | yes | yes | |
 | Image to image, `--upscale`, gallery creative upscale: Z-Image, Krea 2 | yes | yes | |
-| Same, FLUX.2 Klein (the default model) | yes | **fails with `TypeError`** | 1 |
+| Same, FLUX.2 Klein (the default model) | yes | yes | 1 |
 | Plain upscale of an existing image (SeedVR2) | yes | no; creative items only | 12 |
 | Review before upscaling (image) | yes | yes | |
 | Z-Image default scheduler | `beta` | FlowMatch Euler | 8 |
@@ -38,7 +38,7 @@ Most development has happened on macOS. [Quantization parity on CUDA](archive/cu
 
 Missing on Windows and Linux:
 
-1. **FLUX.2 Klein can't refine an existing image.** Reference images, `--upscale` and gallery Upscale fail with the default model `klein9b`. `DiffusersBackend.image_to_image` (`backends/cuda/image/backend.py`) builds `AutoPipelineForImage2Image.from_pipe(model)` and passes `strength=`. diffusers maps the `flux2-klein` family to `Flux2KleinPipeline` for img2img, and its `__call__` has no `strength` parameter and no `**kwargs`, so the call raises `TypeError`. This is unchanged in 0.41.0. `flux2_klein` doesn't set `supports_img2img: false`, so the Web UI and CLI offer the feature. Z-Image (`ZImageImg2ImgPipeline`) and Krea 2 (our own latent path) work.
+1. ~~**FLUX.2 Klein can't refine an existing image.**~~ *Done (2026-10-16), see step 1.* Reference images, `--upscale` and gallery Upscale fail with the default model `klein9b`. `DiffusersBackend.image_to_image` (`backends/cuda/image/backend.py`) builds `AutoPipelineForImage2Image.from_pipe(model)` and passes `strength=`. diffusers maps the `flux2-klein` family to `Flux2KleinPipeline` for img2img, and its `__call__` has no `strength` parameter and no `**kwargs`, so the call raises `TypeError`. This is unchanged in 0.41.0. `flux2_klein` doesn't set `supports_img2img: false`, so the Web UI and CLI offer the feature. Z-Image (`ZImageImg2ImgPipeline`) and Krea 2 (our own latent path) work.
 2. ~~**Videos have no audio.**~~ *Done (2026-10-14), see step 2.* `LTX2PipelineOutput` returns `frames` and `audio`, but `video_diffusers._export_video` writes only the frames with `export_to_video`. `--audio`, which is on by default, does nothing.
 3. ~~**Video upscale isn't the two-stage upscale.**~~ *Done (2026-10-14), see step 3.* On macOS, `--upscale 2` generates at half resolution, upsamples the latents 2× and refines them at full resolution. On CUDA, stage 1 runs at the full requested size. `_upscale_video` then passes that size to `LTX2LatentUpsamplePipeline`, which reads `height`/`width` as the size of its *input* video. So the output is about 2× the requested size, nothing refines it, and stage 2 shows up as one jump in progress.
 4. ~~**No float16 compute option.**~~ *Dropped (2026-10-11).* `deps-macos` proposed a `compute_precision` option for mflux, but it gave 0–4% on an M5 and was removed, so macOS has nothing to match. See [macos-speed.md](macos-speed.md) and [deps-macos.md](archive/deps-macos.md#what-changed-from-the-plan).
@@ -118,7 +118,7 @@ The stored copy loads and generates. Quantizing at load costs about 0.8 s, becau
 
 Each step is its own PR. Order for what's left:
 
-1. Step 1 (Klein img2img). It's a hard failure on the default model, so it goes first.
+1. ~~Step 1 (Klein img2img).~~ Done.
 2. Step 9 (ffmpeg install). Small. Step 8 (scheduler default) is done.
 3. Step 7 (video memory estimates). It needs the clip-length measurements from step 5 and a few more at q8.
 4. Step 3's review before upscaling.
@@ -128,6 +128,10 @@ Each step is its own PR. Order for what's left:
 Step 4 was dropped. The step numbers stay as they are so references keep working.
 
 ### 1. FLUX.2 Klein img2img on CUDA
+
+**Done (2026-10-16).** `DiffusersBackend.image_to_image` runs Klein through `Flux2KleinPipeline` itself, the same way as Krea 2: `_klein_img2img_latents` VAE-encodes the image with the pipeline's own `_encode_vae_image`, noises it to the first sigma of the tail of the schedule (the shift uses `compute_empirical_mu` at the run's token count and step count, as the pipeline does) and passes `latents=` and `sigmas=`. Both families share `_latent_image_to_image` and `_img2img_sigmas`; no per-backend capability flag was needed. Run on a 10 GB GPU with `klein9b` at q8: a reference image at strength 0.6 keeps the composition and follows the changed prompt, and `--upscale 2` completes its refine stage. Still open: `klein4b`, q4 and the gallery Upscale button, not run.
+
+Original plan:
 
 - Give Klein the same treatment as Krea 2: a `_flux2_klein_image_to_image` path in `image_win.py` that VAE-encodes the image, noises it to the first sigma of the tail of the schedule, and runs `Flux2KleinPipeline` with `latents=` and `sigmas=`. Reuse the Krea 2 helpers where they're shape-agnostic (`_img2img_sigmas`, the sigma lookup), and move them to a small shared module if both families need them.
 - The alternative is `Flux2KleinInpaintPipeline` with an all-white mask. It's an official pipeline with `strength`. But it runs the inpaint blending every step for nothing, and it doesn't exist in 0.40. Try it in the spike only as a reference for output quality.

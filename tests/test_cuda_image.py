@@ -1149,3 +1149,59 @@ class TestKrea2:
 
         assert mock_components.call_args.kwargs["text_encoder_to_cpu"] is False
         pipeline.enable_model_cpu_offload.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# FLUX.2 Klein
+# ---------------------------------------------------------------------------
+
+
+class TestFlux2KleinImg2Img:
+    """FLUX.2 Klein img2img runs through its text-to-image pipeline, whose ``__call__`` has no ``strength``."""
+
+    @staticmethod
+    def _strict_pipe():
+        """Build a pipeline stand-in with Flux2KleinPipeline's call signature: unknown keywords raise ``TypeError``."""
+
+        def call(prompt, width, height, num_inference_steps, sigmas, latents, guidance_scale, generator, callback_on_step_end=None, callback_on_step_end_tensor_inputs=None):
+            return SimpleNamespace(images=[Image.new("RGB", (width, height))])
+
+        return MagicMock(side_effect=call, vae_scale_factor=8, _interrupt=False)
+
+    def test_image_to_image_never_passes_strength(self, win_backend):
+        mod, _, _ = win_backend
+        backend = mod.DiffusersBackend()
+        backend._model_info = _make_model_info(family="flux2_klein")
+        pipe = self._strict_pipe()
+
+        with patch.object(mod, "_klein_img2img_latents", return_value="noised-latents") as mock_latents:
+            result = backend.image_to_image(model=pipe, image=Image.new("RGB", (70, 50)), prompt="p", strength=0.4, steps=8, seed=1, guidance=None)
+
+        assert result.size == (64, 48)
+        kwargs = pipe.call_args.kwargs
+        assert kwargs["sigmas"] == pytest.approx([0.5, 0.375, 0.25, 0.125])
+        assert kwargs["num_inference_steps"] == 4
+        assert kwargs["latents"] == "noised-latents"
+        assert kwargs["guidance_scale"] == 1.0
+        assert mock_latents.call_args.args[2:5] == (kwargs["sigmas"], 64, 48)
+        sys.modules["diffusers"].AutoPipelineForImage2Image.from_pipe.assert_not_called()
+
+    def test_image_to_image_returns_none_when_skipped(self, win_backend):
+        mod, _, _ = win_backend
+        backend = mod.DiffusersBackend()
+        backend._model_info = _make_model_info(family="flux2_klein")
+        pipe = self._strict_pipe()
+        pipe._interrupt = True
+
+        with patch.object(mod, "_klein_img2img_latents", return_value="noised-latents"):
+            result = backend.image_to_image(model=pipe, image=Image.new("RGB", (64, 64)), prompt="p", strength=0.5, steps=8, seed=1, guidance=1.0, skip_signal=MagicMock())
+
+        assert result is None
+        assert pipe._interrupt is False
+
+    def test_size_rounds_down_to_the_packed_latent_multiple(self, win_backend):
+        mod, _, _ = win_backend
+        pipe = MagicMock(vae_scale_factor=8)
+
+        assert mod._klein_size(pipe, Image.new("RGB", (70, 50))) == (64, 48)
+        assert mod._klein_size(pipe, Image.new("RGB", (5, 5))) == (16, 16)
