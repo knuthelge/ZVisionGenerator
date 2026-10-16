@@ -219,12 +219,6 @@ def accelerator_memory_budget_or_none() -> "MemoryBudget | None":
         return None
 
 
-def _video_backend_is_ltx_mlx() -> bool:
-    """Return whether this platform's video backend is the LTX MLX one."""
-    registration = _VIDEO_BACKENDS_MAP.get(sys.platform)
-    return registration is not None and registration[1] is _create_ltx_video_backend
-
-
 def supports_video_audio() -> bool:
     """Return whether this platform's video backend writes an audio track (every registered LTX backend does)."""
     return sys.platform in _VIDEO_BACKENDS_MAP
@@ -236,8 +230,8 @@ def supports_video_extend() -> bool:
 
 
 def supports_video_upscale_review() -> bool:
-    """Return whether this platform's video backend can pause after the half-size render of an upscale (LTX MLX on macOS only)."""
-    return _video_backend_is_ltx_mlx()
+    """Return whether this platform's video backend can pause after the half-size render of an upscale (every registered LTX backend can)."""
+    return sys.platform in _VIDEO_BACKENDS_MAP
 
 
 # --- Prompt enhancer ---

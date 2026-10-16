@@ -6,6 +6,7 @@ import inspect
 import json
 import logging
 import sys
+import tempfile
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -576,15 +577,39 @@ def _filter_supported_kwargs(callable_obj: Any, kwargs: dict[str, Any]) -> dict[
     return {key: value for key, value in kwargs.items() if key in parameters}
 
 
-def _refuse_review(kwargs: dict[str, Any]) -> None:
-    """Raise when a review before upscaling is requested: the diffusers upscale has no half-size render to pause at.
+def _check_review_arguments(review: Callable[[Path], None] | None, stage1_steps: int | None) -> None:
+    """Ensure a review is only asked for with the two-stage upscale, the only run that has a half-size render to look at.
 
     Raises:
-        ValueError: If *kwargs* carries a ``review`` callable.
+        ValueError: If *review* is set without *stage1_steps*.
     """
 
-    if kwargs.get("review") is not None:
-        raise ValueError("Review before upscaling is not supported by the diffusers video backend.")
+    if review is not None and stage1_steps is None:
+        raise ValueError("review needs stage1_steps: only the two-stage upscale has a half-size render to review")
+
+
+def _preview_small_render(model: _LoadedVideoModel, pipeline: Any, stage1: Any, review: Callable[[Path], None]) -> None:
+    """Decode the half-size result of stage 1 to a temporary video file and hand its path to *review*.
+
+    The file lives in a temporary directory outside the output folder and is deleted when *review* returns or raises.
+    The decode streams like the final one, and in low-memory mode the codecs go back to the CPU right after it, before the
+    wait for the decision and the latent upsample (they would otherwise stay on the GPU until the transformer next runs).
+
+    Args:
+        model: The loaded model, for the frame rate and the video encoder.
+        pipeline: The pipeline that has just run stage 1.
+        stage1: Its output (``output_type="latent"``).
+        review: Receives the path of the decoded video; it raises to end the generation.
+    """
+
+    with tempfile.TemporaryDirectory(prefix="ziv-review-") as directory:
+        path = Path(directory) / "small-render.mp4"
+        _export_video(model, _decode_clip(pipeline, stage1), str(path))
+        if model.low_memory:
+            for component in _codec_components(pipeline):
+                component.to("cpu")
+            model.runtime.torch.cuda.empty_cache()
+        review(path)
 
 
 def _fit_image(image: Any, width: int, height: int) -> Any:
@@ -933,11 +958,13 @@ def _generate_two_stage(
     stage1_steps: int,
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
+    review: Callable[[Path], None] | None = None,
 ) -> _GeneratedClip:
     """Render at half size, upsample the latents 2x and refine at full size on the same pipeline.
 
     Both denoising passes run on *pipeline* so its LoRA adapters apply to each. Progress covers both passes as one
-    run of ``len(stage-1 sigmas) + len(stage-2 sigmas)`` steps.
+    run of ``len(stage-1 sigmas) + len(stage-2 sigmas)`` steps. With *review*, the half-size result is decoded to a
+    temporary video and passed to it before the upsample; an exception from it ends the generation.
     """
 
     if width % 64 or height % 64:
@@ -961,6 +988,8 @@ def _generate_two_stage(
             extra_kwargs=extra_kwargs,
         )
     )
+    if review is not None:
+        _preview_small_render(model, pipeline, stage1, review)
     upsampled = _upsample_latents(model.upsample_pipeline, stage1.frames, width=width, height=height, num_frames=num_frames, low_memory=model.low_memory)
 
     refine_kwargs = {**extra_kwargs, "latents": upsampled, "audio_latents": stage1.audio, "noise_scale": stage2_sigmas[0]}
@@ -1003,10 +1032,11 @@ def _generate_clip(
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
     audio_carry: AudioCarry | None = None,
+    review: Callable[[Path], None] | None = None,
 ) -> _GeneratedClip:
     """Generate a clip at *fps* in one stage, or in two stages when *stage1_steps* is set; the prompt is encoded once for both.
 
-    *audio_carry* (one stage only) pins sound at the start of the clip.
+    *audio_carry* (one stage only) pins sound at the start of the clip. *review* (two stages only) sees the half-size render first.
     """
 
     prompt_inputs = _encode_prompt(model, pipeline, prompt)
@@ -1040,6 +1070,7 @@ def _generate_clip(
         stage1_steps=stage1_steps,
         step_callback=step_callback,
         extra_kwargs=extra_kwargs,
+        review=review,
     )
 
 
@@ -1195,9 +1226,10 @@ class DiffusersVideoBackend:
         if model.text_to_video is None:
             raise RuntimeError("This loaded video model does not include a text-to-video pipeline.")
 
-        _refuse_review(kwargs)
         stage1_steps = kwargs.get("stage1_steps")
+        review = kwargs.get("review")
         _check_upscale_arguments(model, stage1_steps)
+        _check_review_arguments(review, stage1_steps)
 
         with model.runtime.torch.inference_mode():
             clip = _generate_clip(
@@ -1213,6 +1245,7 @@ class DiffusersVideoBackend:
                 stage1_steps=stage1_steps,
                 step_callback=step_callback,
                 extra_kwargs={},
+                review=review,
             )
             output = _export_video(model, clip, output_path)
         _cleanup(model.runtime)
@@ -1237,9 +1270,10 @@ class DiffusersVideoBackend:
         if model.image_to_video is None:
             raise RuntimeError("This loaded video model does not include an image-to-video pipeline.")
 
-        _refuse_review(kwargs)
         stage1_steps = kwargs.get("stage1_steps")
+        review = kwargs.get("review")
         _check_upscale_arguments(model, stage1_steps)
+        _check_review_arguments(review, stage1_steps)
 
         with model.runtime.image_module.open(image_path) as image:
             input_image = _fit_image(image.convert("RGB"), width, height)
@@ -1258,6 +1292,7 @@ class DiffusersVideoBackend:
                 stage1_steps=stage1_steps,
                 step_callback=step_callback,
                 extra_kwargs={"image": input_image},
+                review=review,
             )
             output = _export_video(model, clip, output_path)
         _cleanup(model.runtime)

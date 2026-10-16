@@ -249,15 +249,15 @@ class TestLtxReviewWrapper:
 # ---------------------------------------------------------------------------
 
 
-class TestDiffusersRefusesReview:
+class TestDiffusersReviewNeedsAnUpscale:
     @pytest.mark.parametrize("method", ["text_to_video", "image_to_video"])
-    def test_review_raises_before_any_work(self, method):
-        model = MagicMock()
-        kwargs = dict(model=model, prompt="p", width=704, height=448, num_frames=49, seed=1, steps=8, output_path="/tmp/o.mp4", stage1_steps=8, review=lambda path: None)
+    def test_review_without_stage1_steps_raises_before_any_work(self, method):
+        model = MagicMock(upsample_pipeline=None)
+        kwargs = dict(model=model, prompt="p", width=704, height=448, num_frames=49, seed=1, steps=8, output_path="/tmp/o.mp4", review=lambda path: None)
         if method == "image_to_video":
             kwargs["image_path"] = "/tmp/in.png"
 
-        with pytest.raises(ValueError, match="Review before upscaling"):
+        with pytest.raises(ValueError, match="review"):
             getattr(DiffusersVideoBackend(), method)(**kwargs)
 
         model.text_to_video.assert_not_called()
@@ -265,8 +265,8 @@ class TestDiffusersRefusesReview:
 
 
 class TestSupportsVideoUpscaleReview:
-    @pytest.mark.parametrize(("platform", "expected"), [("darwin", True), ("win32", False), ("linux", False)])
-    def test_only_the_ltx_mlx_backend_supports_review(self, monkeypatch, platform, expected):
+    @pytest.mark.parametrize(("platform", "expected"), [("darwin", True), ("win32", True), ("linux", True), ("freebsd", False)])
+    def test_every_registered_video_backend_supports_review(self, monkeypatch, platform, expected):
         monkeypatch.setattr(sys, "platform", platform)
 
         assert supports_video_upscale_review() is expected

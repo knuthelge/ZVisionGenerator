@@ -97,7 +97,7 @@ Each video records the settings it was made with, as images do (see [Output File
 
 ### Review before upscaling
 
-`--review` works as for images (see [Review before upscaling](image.md#review-before-upscaling)) and is macOS only for now: Windows and Linux refuse `--review` and hide the option. The sound may change slightly after upscaling.
+`--review` works as for images (see [Review before upscaling](image.md#review-before-upscaling)) on macOS, Windows and Linux. The small render is decoded to a short preview, so the pause adds a few seconds before the full-size pass. The sound may change slightly after upscaling.
 
 ## Video LoRA
 

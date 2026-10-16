@@ -1880,3 +1880,100 @@ class TestExtendVideo:
         model = self._load(monkeypatch, mode="t2v")
         DiffusersVideoBackend().text_to_video(model, "prompt", 512, 256, 25, 7, 8, str(tmp_path / "out.mp4"))
         assert model.text_to_video.calls[0]["frame_rate"] == model.model_info.default_fps
+
+
+class TestUpscaleReview:
+    """The half-size render is decoded to a temporary video and shown to ``review`` before stage 2 starts."""
+
+    @staticmethod
+    def _recording_runtime():
+        """Return a runtime whose encoder writes a file and notes each call, for the preview and the final export."""
+        runtime = _make_runtime()
+        calls: list[Path] = []
+
+        def _encode(video, fps, output_path, audio=None, audio_sample_rate=None):
+            Path(output_path).write_bytes(b"mp4")
+            calls.append(Path(output_path))
+
+        runtime.encode_video = _encode
+        return runtime, calls
+
+    def test_review_sees_the_decoded_half_size_render_before_stage_2(self, monkeypatch, tmp_path):
+        runtime, encoded = self._recording_runtime()
+        model = _load_upscale_model(monkeypatch, low_memory=False, runtime=runtime)
+        seen: list[dict] = []
+
+        def review(path):
+            seen.append({"path": path, "exists": path.is_file(), "calls_so_far": len(model.text_to_video.calls), "upsampled": len(model.upsample_pipeline.calls)})
+
+        DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, review=review, **_text_to_video_args(tmp_path))
+
+        (shown,) = seen
+        assert shown["exists"] and shown["path"].suffix == ".mp4"
+        assert shown["calls_so_far"] == 1  # only stage 1 had run
+        assert shown["upsampled"] == 0
+        assert len(model.text_to_video.calls) == 2  # stage 2 followed
+        assert encoded[0] == shown["path"] and encoded[1] == tmp_path / "upscaled.mp4"
+
+    def test_the_preview_file_is_deleted_when_review_returns(self, monkeypatch, tmp_path):
+        runtime, _ = self._recording_runtime()
+        model = _load_upscale_model(monkeypatch, low_memory=False, runtime=runtime)
+        shown: list[Path] = []
+
+        DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, review=shown.append, **_text_to_video_args(tmp_path))
+
+        assert not shown[0].exists() and not shown[0].parent.exists()
+
+    def test_a_review_that_raises_skips_stage_2_and_the_export(self, monkeypatch, tmp_path):
+        runtime, encoded = self._recording_runtime()
+        model = _load_upscale_model(monkeypatch, low_memory=False, runtime=runtime)
+        shown: list[Path] = []
+
+        class Discarded(Exception):
+            pass
+
+        def review(path):
+            shown.append(path)
+            raise Discarded
+
+        with pytest.raises(Discarded):
+            DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, review=review, **_text_to_video_args(tmp_path))
+
+        assert len(model.text_to_video.calls) == 1  # stage 1 only
+        assert model.upsample_pipeline.calls == []
+        assert encoded == shown  # the preview was the only encode
+        assert not shown[0].exists()
+        assert not (tmp_path / "upscaled.mp4").exists()
+
+    def test_image_to_video_reviews_too(self, monkeypatch, tmp_path):
+        runtime, _ = self._recording_runtime()
+        model = _load_upscale_model(monkeypatch, low_memory=False, mode="i2v", runtime=runtime)
+        image = tmp_path / "in.png"
+        Image.new("RGB", (64, 64)).save(image)
+        shown: list[Path] = []
+
+        DiffusersVideoBackend().image_to_video(model=model, image_path=str(image), stage1_steps=4, review=shown.append, **_text_to_video_args(tmp_path))
+
+        assert len(shown) == 1
+        assert len(model.image_to_video.calls) == 2
+
+    @pytest.mark.parametrize(("low_memory", "expects_offload"), [(True, True), (False, False)])
+    def test_low_memory_sends_the_codecs_back_to_the_cpu_before_the_wait_for_the_decision(self, monkeypatch, tmp_path, low_memory, expects_offload):
+        runtime, _ = self._recording_runtime()
+        model = _load_upscale_model(monkeypatch, low_memory=low_memory, runtime=runtime)
+        events: list[str] = []
+        vae = model.text_to_video.vae
+        vae.to = lambda device: events.append(f"vae->{device}")
+
+        DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, review=lambda path: events.append("review"), **_text_to_video_args(tmp_path))
+
+        assert (events[:2] == ["vae->cpu", "review"]) is expects_offload
+        assert ("review" in events) and (events.index("review") == (1 if expects_offload else 0))
+
+    def test_without_review_nothing_is_decoded_before_the_final_export(self, monkeypatch, tmp_path):
+        runtime, encoded = self._recording_runtime()
+        model = _load_upscale_model(monkeypatch, low_memory=False, runtime=runtime)
+
+        DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, **_text_to_video_args(tmp_path))
+
+        assert encoded == [tmp_path / "upscaled.mp4"]

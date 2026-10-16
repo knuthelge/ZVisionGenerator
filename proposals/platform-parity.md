@@ -1,6 +1,6 @@
 # Feature parity between macOS and Windows/Linux
 
-**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 1 (Klein img2img on CUDA), 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, except review), 5 (quantized, streamed video on CUDA, which absorbed step 6), 7 (video memory estimates), 8 (scheduler default), 9 (ffmpeg install) and 11 (extend a video on CUDA) are done. Steps 3's review, 12 and 13 are still open. Step 10 was measured on 2026-10-16 and needs no change. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
+**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 1 (Klein img2img on CUDA), 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, with its review), 5 (quantized, streamed video on CUDA, which absorbed step 6), 7 (video memory estimates), 8 (scheduler default), 9 (ffmpeg install) and 11 (extend a video on CUDA) are done. Steps 12 and 13 are still open. Step 10 was measured on 2026-10-16 and needs no change. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
 
 ## Where things stand
 
@@ -21,7 +21,7 @@ Re-audited against `main` at v0.13.0b20 (diffusers 0.41.0, mflux 0.22.0, torch 2
 | Video t2v and i2v, `ltx-4` / `ltx-8`, LoRAs | yes | yes (LoRAs on NF4 not run on hardware) | 5 |
 | Video audio | yes | yes | 2 |
 | Two-stage video upscale | yes | yes | 3 |
-| Review before upscaling (video) | yes | no; `--review` refused, option hidden | 3 |
+| Review before upscaling (video) | yes | yes | 3 |
 | Extend a video, with its sound | yes | yes | 11 |
 | Video model memory badge | yes | yes | 7 |
 | Per-clip memory check (Duration note, Extend note, CLI warning) | yes | yes, fitted on one 10 GB card | 7 |
@@ -48,7 +48,7 @@ Missing on Windows and Linux:
 
 Also missing on Windows and Linux, found in the 2026-10-15 re-audit:
 
-- **Review before upscaling for video.** Planned as part of step 3 but not built: `supports_video_upscale_review()` is true only for LTX MLX, `video_cli` and the Web UI refuse `review`, and `_refuse_review` in `backends/cuda/video/backend.py` raises.
+- ~~**Review before upscaling for video.**~~ *Done (2026-10-16), see step 3.* Planned as part of step 3 but not built: `supports_video_upscale_review()` is true only for LTX MLX, `video_cli` and the Web UI refuse `review`, and `_refuse_review` in `backends/cuda/video/backend.py` raises.
 - **SeedVR2, the plain upscale of existing images** ([shipped on macOS](archive/image-upscale-seedvr2-mac.md)). `supports_seedvr2()` is macOS only, so the viewer offers only the creative items, and the X chord runs a creative upscale instead of a plain one. See step 12.
 - **Ideogram 4.** This was out of scope because "diffusers has no Ideogram 4 pipeline", but diffusers 0.41.0 does ship one. See step 13.
 
@@ -121,7 +121,7 @@ Each step is its own PR. Order for what's left:
 1. ~~Step 1 (Klein img2img).~~ Done.
 2. ~~Steps 8 and 9 (scheduler default, ffmpeg install).~~ Done.
 3. ~~Step 7 (video memory estimates).~~ Done.
-4. Step 3's review before upscaling.
+4. ~~Step 3's review before upscaling.~~ Done.
 5. Steps 13 and 12 (Ideogram 4, SeedVR2). Both are accepted. Each starts with a spike that picks the approach: which implementation for SeedVR2, which repo for Ideogram 4.
 6. Step 10 (enhancer download) is measured and needs no change.
 
@@ -151,7 +151,7 @@ Original plan:
 
 ### 3. Two-stage video upscale on CUDA
 
-**Done (2026-10-14), except review before upscaling** (the last bullet of the original plan below), which is still open. The default repo is now the distilled `diffusers/LTX-2.3-Distilled-Diffusers`, the upsampler is loaded from `Lightricks/LTX-2.3` (`video_model_presets.ltx.diffusers.latent_upsampler`), stage 1 runs at half size, and the refine runs through `LTX2Pipeline(latents=, sigmas=)` on the same pipeline, so DFR was not needed. Every diffusers call now passes the distilled sigmas and `guidance_scale=1.0`. Still open: the manual run on an NVIDIA GPU (t2v and i2v, `--low-memory` on and off, LoRA, Cancel during stage 2). The guidance question is answered in step 5: the 0.41 defaults cost speed and change the look, and are now turned off.
+**Done (2026-10-14); review before upscaling (the last bullet of the original plan below) followed on 2026-10-16.** The default repo is now the distilled `diffusers/LTX-2.3-Distilled-Diffusers`, the upsampler is loaded from `Lightricks/LTX-2.3` (`video_model_presets.ltx.diffusers.latent_upsampler`), stage 1 runs at half size, and the refine runs through `LTX2Pipeline(latents=, sigmas=)` on the same pipeline, so DFR was not needed. Every diffusers call now passes the distilled sigmas and `guidance_scale=1.0`. Still open: the manual run on an NVIDIA GPU (t2v and i2v, `--low-memory` on and off, LoRA, Cancel during stage 2). The guidance question is answered in step 5: the 0.41 defaults cost speed and change the look, and are now turned off.
 
 Original plan:
 
@@ -163,7 +163,8 @@ Match the macOS flow (half-res stage 1, 2× latent upsample, refine at full res)
 - Progress: stage 1 and stage 2 report real steps under the existing `video_upscale_stage_1` / `video_upscale_stage_2` phases, with one total, as on macOS.
 - Confirm that the configured `ltx-2.3` repo ships a `latent_upsampler` component. If not, load it from a separate repo, configured under `video_model_presets.ltx.diffusers`. (It does not; see the evidence table.)
 - Tests: mocked pipelines; assert the stage-1 size is half the target, the upsampler gets the half size, stage 2 runs at the target size, and the step totals.
-- **Review before upscaling for video** (moved here from [Review before upscaling](archive/upscale-review.md), which shipped for images everywhere and video on macOS). Once stage 1 returns latents, decode them to a temporary mp4 and call the backend's `review(path)` before stage 2, as `video_mac` does. Then make `supports_video_upscale_review()` in `backends/__init__.py` true on CUDA and drop the `ValueError` that `video_diffusers` raises for `review`. Measure the peak VRAM during the preview decode against the no-review peak; if it is higher, free the transformer for the preview and reload it on Approve. Tests: the mocked stage-1 latents are decoded and passed to `review` before stage 2 runs, and a discard skips stage 2.
+- **Review before upscaling for video, done (2026-10-16).** `_generate_two_stage` decodes stage 1's latents to a temporary mp4 (`_preview_small_render`, with the same streaming decode and encoder as the final export), calls `review(path)` and deletes the file afterwards; an exception from `review` (discard, quit) ends the generation before the upsample, and `review` without an upscale raises `ValueError`. `supports_video_upscale_review()` is true for every registered video backend, so the Web UI control and `--review` are available. In low-memory mode the codecs go back to the CPU right after the preview decode: left alone they stay on the GPU until the transformer next runs, through the upsample and the wait for the decision. Measured on a 10 GB GPU with `ltx-4`, low memory, 2-stage upscale (peak allocated / reserved): 704×448, 5 s: 5.04 / 5.79 GiB without review and 5.04 / 6.75 with it; 1408×896, 10 s: 5.67 / 8.01 without and 5.67 / 8.95 with it. Before the codec fix the review runs peaked at 6.74 and 6.75 GiB allocated. At the review point itself the peak is still 4.40 GiB, so the transformer needs no release for the preview. A discard at 704×448 stopped after stage 1 and wrote nothing. Not run on hardware: Cancel during the review in the Web UI, i2v with review, and a LoRA with review.
+- Original plan: **Review before upscaling for video** (moved here from [Review before upscaling](archive/upscale-review.md), which shipped for images everywhere and video on macOS). Once stage 1 returns latents, decode them to a temporary mp4 and call the backend's `review(path)` before stage 2, as `video_mac` does. Then make `supports_video_upscale_review()` in `backends/__init__.py` true on CUDA and drop the `ValueError` that `video_diffusers` raises for `review`. Measure the peak VRAM during the preview decode against the no-review peak; if it is higher, free the transformer for the preview and reload it on Approve. Tests: the mocked stage-1 latents are decoded and passed to `review` before stage 2 runs, and a discard skips stage 2.
 
 ### 4. `compute_precision` on CUDA (dropped)
 
@@ -237,7 +238,7 @@ Fitted on one 10 GB GPU with 32 GB of system memory, 2-step t2v runs with `--low
 | q8 | 5,376 | 704×448, 5 s | 3.61 | 5.14 | ok |
 | q8 | 45,584 | 1408×896, 12 s | 6.30 | 8.52 | ok |
 
-The peak is flat up to a knee (about 26,000 tokens at q4, 19,700 at q8) and then grows by about 1.04e-4 GiB per token at both levels. A 2.5 GiB headroom for allocator fragmentation (reserved ran 1.0–2.2 GiB above allocated), the CUDA context and the desktop is added, so XL 14 s is `tight` and XL 15 s `too_large` on 10 GiB, as they ran. System memory is the weights' peak (21.2 GiB at q4 against 20.7 measured, 27.0 at q8 against 24.4–25.6) plus 4 GiB for the two-stage upscale (XL 10 s: 25.2 estimated against 25.6 measured). Not measured: a 12 GB or 24 GB card (the thresholds are an extrapolation there), `--no-low-memory` (adds the transformer's size, which a 10 GB card cannot run), i2v and extend (assumed to match t2v, as step 11 found), and the q8 knee beyond two points.
+The peak is flat up to a knee (about 26,000 tokens at q4, 19,700 at q8) and then grows by about 1.04e-4 GiB per token at both levels. A 2.5 GiB headroom for allocator fragmentation (reserved ran 1.0–2.2 GiB above allocated), the CUDA context and the desktop is added, so XL 14 s is `tight` and XL 15 s `too_large` on 10 GiB, as they ran. An upscaled small clip peaked 0.64 GiB over the plateau (5.04 GiB at q4: the latent upsampler is on the GPU), which the estimate adds for the two-stage upscale; at XL 10 s the same run peaked at 5.67 GiB, the plain clip's figure. System memory is the weights' peak (21.2 GiB at q4 against 20.7 measured, 27.0 at q8 against 24.4–25.6) plus 4 GiB for the two-stage upscale (XL 10 s: 25.2 estimated against 25.6 measured). Not measured: a 12 GB or 24 GB card (the thresholds are an extrapolation there), `--no-low-memory` (adds the transformer's size, which a 10 GB card cannot run), i2v and extend (assumed to match t2v, as step 11 found), and the q8 knee beyond two points.
 
 Original plan:
 

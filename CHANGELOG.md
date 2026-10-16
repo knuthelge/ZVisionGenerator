@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
+- **Review before upscaling for video on Windows and Linux.** Turn on **Review** under Upscale (Web UI) or add `--review` to `--upscale 2` and the video pauses after the small render, so you can approve or discard it before the full-size pass runs, as on macOS
 - **Memory check for video on Windows and Linux.** Text to Video, Image to Video and Extend Video now warn when a clip may not fit your GPU or system memory, in the Web UI as a note under the length and on the command line as one warning when the run starts. The memory badge on a video model in the Web UI and on the Models page shows an estimate for a 5 s clip, too. The job is never blocked
 - **`ziv-video` offers to install a missing ffmpeg on Windows and Linux.** On Windows it uses `winget`, and on Linux `apt`, `dnf` or `pacman`, the way macOS already did with Homebrew and MacPorts. It asks first and tells you to open a new terminal on Windows when `PATH` has not updated yet
 

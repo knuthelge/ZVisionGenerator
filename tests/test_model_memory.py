@@ -513,6 +513,15 @@ class TestEstimateLtxCudaClipMemory:
 
         assert classify_cuda_memory_fit(xl, MemoryBudget(10 * _GIB, 32 * _GIB)) != "too_large"
 
+    def test_the_upscale_holds_the_upsampler_on_the_gpu_for_a_small_clip_and_adds_nothing_for_a_large_one(self):
+        small = self._clip()
+        small_upscaled = self._clip(upscale=True)
+        large = self._clip(width=1408, height=896, frames=241)
+        large_upscaled = self._clip(width=1408, height=896, frames=241, upscale=True)
+
+        assert small_upscaled.gpu_bytes == small.gpu_bytes + model_memory._LTX_CUDA_UPSCALE_GPU_BYTES
+        assert large_upscaled.gpu_bytes == large.gpu_bytes
+
     def test_without_low_memory_the_transformer_stays_on_the_gpu(self):
         assert self._clip(low_memory=False).gpu_bytes == self._clip().gpu_bytes + self._SYSTEM.transformer_bytes
 

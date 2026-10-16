@@ -61,6 +61,8 @@ _LTX_CUDA_RUNTIME_BYTES = 6 * GIB
 _LTX_CUDA_GPU_PLATEAU_BYTES = {4: int(4.40 * GIB), 8: int(3.61 * GIB)}
 _LTX_CUDA_GPU_KNEE_TOKENS = {4: 26000, 8: 19700}
 _LTX_CUDA_GPU_BYTES_PER_TOKEN = int(1.04e-4 * GIB)
+# The two-stage upscale also holds the latent upsampler on the GPU: a small clip peaked at 5.04 GiB at q4, 0.64 over its plateau.
+_LTX_CUDA_UPSCALE_GPU_BYTES = int(0.64 * GIB)
 # Beyond the allocated peak, the caching allocator fragments (reserved was 1.0-2.2 GiB above allocated) and the CUDA
 # context and desktop take their share; with it XL 14 s (7.21 GiB) is tight and XL 15 s (7.6 GiB) too large on 10 GiB.
 _LTX_CUDA_GPU_HEADROOM_BYTES = int(2.5 * GIB)
@@ -534,7 +536,11 @@ def estimate_ltx_cuda_clip_memory(
         upscale: Whether the clip is upscaled 2x.
     """
     tokens = ltx_video_tokens(width, height, frames)
-    gpu = _LTX_CUDA_GPU_PLATEAU_BYTES[system.quantize] + max(tokens - _LTX_CUDA_GPU_KNEE_TOKENS[system.quantize], 0) * _LTX_CUDA_GPU_BYTES_PER_TOKEN + _LTX_CUDA_GPU_HEADROOM_BYTES
+    plateau = _LTX_CUDA_GPU_PLATEAU_BYTES[system.quantize]
+    gpu = plateau + max(tokens - _LTX_CUDA_GPU_KNEE_TOKENS[system.quantize], 0) * _LTX_CUDA_GPU_BYTES_PER_TOKEN
+    if upscale:
+        gpu = max(gpu, plateau + _LTX_CUDA_UPSCALE_GPU_BYTES)
+    gpu += _LTX_CUDA_GPU_HEADROOM_BYTES
     if not low_memory:
         gpu += system.transformer_bytes
     return CudaMemoryEstimate(gpu_bytes=int(gpu), system_bytes=system.taking_turns + (_LTX_CUDA_UPSCALE_SYSTEM_BYTES if upscale else 0))
