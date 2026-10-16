@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from zvisiongenerator.utils.config import (
@@ -18,6 +20,7 @@ from zvisiongenerator.utils.config import (
     validate_video_size_choice,
 )
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.paths import split_huggingface_revision
 from zvisiongenerator.utils.paths import resolve_model_path
 
 
@@ -243,7 +246,9 @@ def test_packaged_config_resolves_ideo_alias_on_every_platform(monkeypatch, tmp_
 
     assert resolve_model_path("ideo", aliases=aliases, platform_key="darwin") == "ideogram-ai/ideogram-4-fp8"
     for platform_key in ("win32", "linux"):
-        assert resolve_model_path("ideo", aliases=aliases, platform_key=platform_key) == "unsloth/ideogram-4-nf4-diffusers"
+        repo, revision = split_huggingface_revision(resolve_model_path("ideo", aliases=aliases, platform_key=platform_key))
+        assert repo == "unsloth/ideogram-4-nf4-diffusers"
+        assert revision is not None and re.fullmatch(r"[0-9a-f]{40}", revision)  # pinned to a commit
     assert config["model_alias_families"]["ideo"] == "ideogram4"
 
 

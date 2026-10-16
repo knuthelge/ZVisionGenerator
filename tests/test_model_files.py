@@ -144,18 +144,41 @@ class TestFindLocalModelDir:
 
         assert find_local_model_dir("owner/repo") is None
 
-    def test_pinned_revision_resolves_only_that_snapshot(self, tmp_path, monkeypatch):
-        _touch(tmp_path / "model.safetensors")
-        lookups: list[tuple[str, str | None]] = []
+    def _cache(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("huggingface_hub.constants.HF_HUB_CACHE", str(tmp_path))
+        return tmp_path / "models--owner--repo"
 
-        def _snapshot_download(repo_id, *, revision, local_files_only):
-            lookups.append((repo_id, revision))
-            return str(tmp_path)
+    def test_a_pinned_commit_resolves_only_that_snapshot(self, tmp_path, monkeypatch):
+        repo = self._cache(tmp_path, monkeypatch)
+        pinned = _touch(repo / "snapshots" / "abc123" / "model.safetensors").parent
+        _touch(repo / "snapshots" / "def456" / "model.safetensors")
 
-        monkeypatch.setattr("huggingface_hub.snapshot_download", _snapshot_download)
+        assert find_local_model_dir("owner/repo@abc123") == pinned
+        assert find_local_model_dir("owner/repo@fff999") is None
 
-        assert find_local_model_dir("owner/repo@v2") == tmp_path
-        assert lookups == [("owner/repo", "v2")]
+    def test_a_pinned_snapshot_with_only_the_files_diffusers_loads_counts_as_downloaded(self, tmp_path, monkeypatch):
+        """The Hub's own offline lookup would call this incomplete, as the repo has files (a README) that were never fetched."""
+        repo = self._cache(tmp_path, monkeypatch)
+        snapshot = repo / "snapshots" / "abc123"
+        _write_model_index(snapshot)
+        for component in ("transformer", "text_encoder", "vae"):
+            _touch(snapshot / component / "model.safetensors")
+
+        assert find_local_model_dir("owner/repo@abc123") == snapshot
+
+    def test_a_pinned_tag_resolves_through_its_ref(self, tmp_path, monkeypatch):
+        repo = self._cache(tmp_path, monkeypatch)
+        snapshot = _touch(repo / "snapshots" / "abc123" / "model.safetensors").parent
+        (repo / "refs").mkdir()
+        (repo / "refs" / "v2").write_text("abc123\n", encoding="utf-8")
+
+        assert find_local_model_dir("owner/repo@v2") == snapshot
+
+    def test_a_pinned_snapshot_without_all_its_weights_is_not_downloaded(self, tmp_path, monkeypatch):
+        repo = self._cache(tmp_path, monkeypatch)
+        _touch(repo / "snapshots" / "abc123" / "model-00001-of-00002.safetensors")
+
+        assert find_local_model_dir("owner/repo@abc123") is None
 
 
 def test_model_weight_files_ignore_files_outside_index_components(tmp_path):

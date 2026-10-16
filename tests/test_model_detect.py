@@ -220,3 +220,25 @@ class TestRelativePathDetection:
         """Paths with multiple segments (a/b/c) don't match HF pattern."""
         with pytest.raises(FileNotFoundError, match="Local model directory not found"):
             detect_image_model("models/subdir/nested")
+
+
+class TestDetectWithRevision:
+    """A repo pinned as owner/repo@revision is looked up at that revision."""
+
+    def test_the_revision_is_passed_to_the_hub(self, tmp_path):
+        index = tmp_path / "model_index.json"
+        index.write_text(json.dumps({"_class_name": "Ideogram4Pipeline"}))
+        mock_download = MagicMock(return_value=str(index))
+
+        with patch("huggingface_hub.hf_hub_download", mock_download):
+            info = detect_image_model("org/some-model@abc123")
+
+        assert info.family == "ideogram4"
+        mock_download.assert_called_once_with(repo_id="org/some-model", filename="model_index.json", local_files_only=True, revision="abc123")
+
+    def test_a_revision_is_not_mistaken_for_a_local_path(self, tmp_path):
+        index = tmp_path / "model_index.json"
+        index.write_text(json.dumps({"_class_name": "ZImagePipeline"}))
+
+        with patch("huggingface_hub.hf_hub_download", MagicMock(return_value=str(index))):
+            assert detect_image_model("org/some-model@v1.0").family == "zimage"

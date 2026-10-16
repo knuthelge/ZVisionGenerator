@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, split_huggingface_revision
+
 _HF_REPO_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
 
 _CLASS_NAME_MAP: dict[str, str] = {
@@ -54,7 +56,7 @@ def detect_image_model(model_path: str) -> ImageModelInfo:
             raise FileNotFoundError(f"Local model directory not found: {model_path}")
 
         # Paths with / that don't match HF repo pattern (org/repo)
-        if "/" in model_path and _HF_REPO_PATTERN.match(model_path) is None:
+        if "/" in model_path and _HF_REPO_PATTERN.match(model_path) is None and parse_huggingface_repo_reference(model_path) is None:
             raise FileNotFoundError(f"Local model directory not found: {model_path}")
         # Remaining: bare names or org/repo → treat as HF repo ID
 
@@ -102,8 +104,9 @@ def _read_model_index(model_path: str, is_local: bool) -> dict:
     except ImportError:
         raise ImportError("huggingface_hub is required to detect model type from HuggingFace repo IDs. Install it with: uv add huggingface_hub")
 
+    repo_id, revision = split_huggingface_revision(model_path)
     try:
-        downloaded_path = _hf_hub_file(hf_hub_download, model_path, "model_index.json")
+        downloaded_path = _hf_hub_file(hf_hub_download, repo_id, "model_index.json", revision)
     except Exception as e:
         first_segment = model_path.split("/")[0]
         if os.path.isdir(first_segment):
@@ -113,12 +116,13 @@ def _read_model_index(model_path: str, is_local: bool) -> dict:
         return json.load(f)
 
 
-def _hf_hub_file(hf_hub_download: Any, repo_id: str, filename: str) -> str:
-    """Return a Hub file path, preferring the local HF cache over a network metadata request."""
+def _hf_hub_file(hf_hub_download: Any, repo_id: str, filename: str, revision: str | None = None) -> str:
+    """Return a Hub file path (at *revision*, when given), preferring the local HF cache over a network metadata request."""
+    options = {} if revision is None else {"revision": revision}
     try:
-        return hf_hub_download(repo_id=repo_id, filename=filename, local_files_only=True)
+        return hf_hub_download(repo_id=repo_id, filename=filename, local_files_only=True, **options)
     except Exception:
-        return hf_hub_download(repo_id=repo_id, filename=filename)
+        return hf_hub_download(repo_id=repo_id, filename=filename, **options)
 
 
 def _detect_klein_size(model_path: str, is_local: bool) -> str | None:
@@ -147,7 +151,8 @@ def _detect_klein_size(model_path: str, is_local: bool) -> str | None:
                 from huggingface_hub import hf_hub_download
             except ImportError:
                 return None
-            downloaded = _hf_hub_file(hf_hub_download, model_path, "transformer/config.json")
+            repo_id, revision = split_huggingface_revision(model_path)
+            downloaded = _hf_hub_file(hf_hub_download, repo_id, "transformer/config.json", revision)
             with open(downloaded, encoding="utf-8") as f:
                 config = json.load(f)
 

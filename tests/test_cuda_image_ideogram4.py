@@ -241,6 +241,49 @@ class TestRequireNf4:
         assert asked == [("owner/ideogram-nf4", "transformer/config.json")]
 
 
+class TestRevisions:
+    def _fakes(self, module, monkeypatch):
+        loads: list[dict] = []
+        component = MagicMock()
+        diffusers, transformers = MagicMock(), MagicMock()
+        diffusers.AutoModel.from_pretrained.side_effect = lambda path, **kwargs: loads.append({"path": path, **kwargs}) or component
+        transformers.AutoModel.from_pretrained.side_effect = lambda path, **kwargs: loads.append({"path": path, **kwargs}) or component
+        diffusers.Ideogram4Pipeline.from_pretrained.side_effect = lambda path, **kwargs: loads.append({"path": path, **kwargs}) or MagicMock()
+        monkeypatch.setitem(sys.modules, "diffusers", diffusers)
+        monkeypatch.setitem(sys.modules, "transformers", transformers)
+        monkeypatch.setattr(module, "_require_nf4", lambda path: None)
+        monkeypatch.setattr(module, "_place", lambda pipe, device: None)
+        return loads
+
+    def test_a_pinned_repo_loads_every_component_at_its_revision(self, ideogram4, monkeypatch):
+        module, _ = ideogram4
+        loads = self._fakes(module, monkeypatch)
+
+        module.load_pipeline("owner/ideogram-nf4@abc123", "bf16")
+
+        assert len(loads) == 4
+        assert {(load["path"], load["revision"]) for load in loads} == {("owner/ideogram-nf4", "abc123")}
+
+    def test_an_unpinned_repo_passes_no_revision(self, ideogram4, monkeypatch):
+        module, _ = ideogram4
+        loads = self._fakes(module, monkeypatch)
+
+        module.load_pipeline("owner/ideogram-nf4", "bf16")
+
+        assert all("revision" not in load for load in loads)
+
+    def test_the_nf4_check_reads_the_config_at_the_pinned_revision(self, ideogram4, tmp_path, monkeypatch):
+        module, _ = ideogram4
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps({"quantization_config": {"quant_method": "bitsandbytes"}}), encoding="utf-8")
+        asked: list[tuple] = []
+        monkeypatch.setattr("huggingface_hub.hf_hub_download", lambda repo, filename, **kwargs: asked.append((repo, filename, kwargs)) or str(config_path))
+
+        module._require_nf4("owner/ideogram-nf4@abc123")
+
+        assert asked == [("owner/ideogram-nf4", "transformer/config.json", {"revision": "abc123"})]
+
+
 class TestLoadPipeline:
     def test_each_component_leaves_the_gpu_before_the_next_loads_and_the_pipeline_is_placed(self, ideogram4, monkeypatch):
         module, torch = ideogram4

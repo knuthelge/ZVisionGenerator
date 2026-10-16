@@ -209,15 +209,24 @@ def huggingface_cache_repo_dir(repo_id: str) -> Path:
 
 
 def _cached_snapshots(repo_id: str, revision: str | None) -> list[Path]:
-    """Return candidate cache snapshots, newest first, as mflux's offline resolution considers them."""
-    if revision is not None:
-        from huggingface_hub import snapshot_download
+    """Return candidate cache snapshots, newest first, as mflux's offline resolution considers them.
 
-        try:
-            return [Path(snapshot_download(repo_id, revision=revision, local_files_only=True))]
-        except Exception:  # noqa: BLE001 - any cache miss or malformed cache simply means "not downloaded"
+    With a *revision* only that snapshot counts: a commit hash is its folder's name, and a tag or branch name maps to
+    its commit through ``refs/``. The cache folder is read directly, because the Hub's own offline lookup refuses a
+    snapshot that lacks any file of the repo, and diffusers only downloads the files it loads.
+    """
+    repo_dir = huggingface_cache_repo_dir(repo_id)
+    if revision is not None:
+        if revision in (".", ".."):
             return []
-    snapshots_dir = huggingface_cache_repo_dir(repo_id) / "snapshots"
+        ref = repo_dir / "refs" / revision
+        try:
+            commit = ref.read_text(encoding="utf-8").strip() if ref.is_file() else revision
+        except OSError:
+            return []
+        snapshot = repo_dir / "snapshots" / commit
+        return [snapshot] if snapshot.is_dir() else []
+    snapshots_dir = repo_dir / "snapshots"
     try:
         snapshots = [path for path in snapshots_dir.iterdir() if path.is_dir()]
     except OSError:

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends.cuda.block_streaming import move_outside, stream_blocks, unload_before
 from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, Ideogram4Sampler, caption_text
+from zvisiongenerator.utils.paths import split_huggingface_revision
 
 if TYPE_CHECKING:
     import torch
@@ -29,7 +30,8 @@ _MAX_SEQUENCE_LENGTH = 2048
 def load_pipeline(model_path: str, torch_dtype: torch.dtype) -> Any:
     """Load the Ideogram 4 pipeline from the NF4 repo at *model_path* and place it for a small GPU.
 
-    Each NF4 component loads onto the GPU, so it is moved to system memory before the next one loads.
+    *model_path* may be a local folder, a repo id, or ``owner/repo@revision`` to load that exact revision. Each NF4
+    component loads onto the GPU, so it is moved to system memory before the next one loads.
 
     Raises:
         RuntimeError: If *model_path* is not an NF4 copy (the macOS FP8 repo does not fit a consumer GPU).
@@ -40,13 +42,15 @@ def load_pipeline(model_path: str, torch_dtype: torch.dtype) -> Any:
     from transformers import AutoModel as HFAutoModel
 
     _require_nf4(model_path)
-    text_encoder = HFAutoModel.from_pretrained(model_path, subfolder="text_encoder", dtype=torch_dtype)
+    repo, revision = split_huggingface_revision(model_path)
+    options = {} if revision is None else {"revision": revision}
+    text_encoder = HFAutoModel.from_pretrained(repo, subfolder="text_encoder", dtype=torch_dtype, **options)
     text_encoder.to("cpu")
-    transformer = DiffusersAutoModel.from_pretrained(model_path, subfolder="transformer", torch_dtype=torch_dtype)
+    transformer = DiffusersAutoModel.from_pretrained(repo, subfolder="transformer", torch_dtype=torch_dtype, **options)
     transformer.to("cpu")
-    unconditional = DiffusersAutoModel.from_pretrained(model_path, subfolder="unconditional_transformer", torch_dtype=torch_dtype)
+    unconditional = DiffusersAutoModel.from_pretrained(repo, subfolder="unconditional_transformer", torch_dtype=torch_dtype, **options)
     unconditional.to("cpu")
-    pipeline = Ideogram4Pipeline.from_pretrained(model_path, text_encoder=text_encoder, transformer=transformer, unconditional_transformer=unconditional, torch_dtype=torch_dtype)
+    pipeline = Ideogram4Pipeline.from_pretrained(repo, text_encoder=text_encoder, transformer=transformer, unconditional_transformer=unconditional, torch_dtype=torch_dtype, **options)
     _place(pipeline, torch.device("cuda"))
     return pipeline
 
@@ -59,7 +63,8 @@ def _require_nf4(model_path: str) -> None:
     else:
         from huggingface_hub import hf_hub_download
 
-        config_path = Path(hf_hub_download(model_path, "transformer/config.json"))
+        repo, revision = split_huggingface_revision(model_path)
+        config_path = Path(hf_hub_download(repo, "transformer/config.json", **({} if revision is None else {"revision": revision})))
     quantization = json.loads(config_path.read_text(encoding="utf-8")).get("quantization_config") or {}
     if quantization.get("quant_method") != "bitsandbytes":
         raise RuntimeError("Ideogram 4 on Windows and Linux needs an NF4 copy such as unsloth/ideogram-4-nf4-diffusers; the model at '" + model_path + "' is not quantized with bitsandbytes.")

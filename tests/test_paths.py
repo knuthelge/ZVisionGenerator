@@ -398,3 +398,16 @@ class TestHomeCollapse:
         assert expand_home(collapse_home("/home/me/ref.png")) == "/home/me/ref.png"
         assert expand_home("/srv/ref.png") == "/srv/ref.png"
         assert expand_home("~user/ref.png") == "~user/ref.png"
+
+
+class TestSplitHuggingfaceRevision:
+    def test_a_repo_with_a_revision_is_split(self):
+        from zvisiongenerator.utils.paths import split_huggingface_revision
+
+        assert split_huggingface_revision("owner/repo@abc123") == ("owner/repo", "abc123")
+
+    @pytest.mark.parametrize("value", ["owner/repo", "/models/ltx", "./local@dir", "C:\\models\\x", "owner/repo@a@b", "single"])
+    def test_anything_else_comes_back_unchanged(self, value):
+        from zvisiongenerator.utils.paths import split_huggingface_revision
+
+        assert split_huggingface_revision(value) == (value, None)

@@ -93,6 +93,18 @@ def parse_huggingface_repo_reference(value: str) -> HuggingFaceRepoReference | N
     return HuggingFaceRepoReference(repo_id=f"{owner}/{repo_name}", revision=revision)
 
 
+def split_huggingface_revision(value: str) -> tuple[str, str | None]:
+    """Split ``owner/repo@revision`` into the repo id and its revision.
+
+    Any other value (a plain repo id, a local path) comes back unchanged with no revision.
+    """
+
+    reference = parse_huggingface_repo_reference(value)
+    if reference is None or reference.revision is None:
+        return value, None
+    return reference.repo_id, reference.revision
+
+
 def is_huggingface_repo_id(value: str) -> bool:
     """Return whether value matches the conservative HuggingFace repo contract."""
 
