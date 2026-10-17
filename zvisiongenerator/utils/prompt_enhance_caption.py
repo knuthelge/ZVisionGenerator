@@ -43,12 +43,14 @@ _MAX_INVENTED_TEXTS = 3
 
 _ART_MEDIUM = {"illustration": "illustration", "anime": "illustration", "comic": "illustration", "3d": "3d_render", "painterly": "painting"}
 # Prompt words that point to an art medium when the style is kept, checked in order.
+# Words that are also everyday things ("olive oil", "a canvas tent", "a kitchen blender") count only in a medium phrase.
 _MEDIUM_WORDS = (
-    ("3d_render", re.compile(r"\b(?:3d|render(?:ed|ing)?|cgi|octane|blender)\b", re.I)),
-    ("painting", re.compile(r"\b(?:paint(?:ing|ed)?|oil|watercolou?r|gouache|acrylic|canvas)\b", re.I)),
+    ("3d_render", re.compile(r"\b(?:3d|render(?:ed|ing)?|cgi|octane render|blender render)\b", re.I)),
+    ("painting", re.compile(r"\b(?:paint(?:ing|ed)?|oil (?:painting|on canvas|portrait)|in oils?|on canvas|watercolou?r|gouache|acrylic)\b", re.I)),
     ("illustration", re.compile(r"\b(?:illustrat\w*|drawing|drawn|sketch\w*|cartoon|anime|manga|comic|vector|pixel art|line art)\b", re.I)),
 )
-_PHOTO_WORDS = re.compile(r"\b(?:photo\w*|camera|lens|shot|dslr|35mm|portrait|snapshot|bokeh)\b", re.I)
+# Words that make a prompt a photo even when it names a medium; "portrait" and "shot" fit a painting or a render too.
+_PHOTO_WORDS = re.compile(r"\b(?:photo\w*|camera|lens|dslr|35mm|snapshot|bokeh)\b", re.I)
 # A design the image IS (not one shown inside a scene): the noun opens the prompt, after at most four words that describe
 # it ("a vintage travel poster", "birthday card"). A preposition, a second article or a verb before it ("men playing cards",
 # "a girl reading a menu") makes it a thing in a scene; -ing words that name or describe a design are allowed.
@@ -424,7 +426,7 @@ def _elements(draft: _Draft, lettering: _Lettering) -> list[dict[str, Any]]:
             continue
         words, look = item[1], item[2] if len(item) > 2 else ""
         key = _key(words)
-        prefix = next((quote for quote in by_key if key != quote and key.startswith(f"{quote} ")), None)
+        prefix = None if key in by_key else next((quote for quote in by_key if key.startswith(f"{quote} ")), None)
         if prefix is not None and not look:  # 'TEXT: LISBOA in bold serif': the words, then the look, unquoted.
             key, look = prefix, words[len(by_key[prefix]) :].strip(" ,|-:")
         elif lettering.mode == "design" and not look:  # 'TEXT: Happy 80th Birthday Grandma displayed at the top': the prompt's words, then the look.

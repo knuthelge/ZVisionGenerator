@@ -567,6 +567,18 @@ class TestClipMemoryFitOnCuda:
 
         assert result is not None and result["status"] == "too_large"
 
+    def test_weights_beyond_system_memory_are_too_large_since_the_load_is_refused(self, weights):
+        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(24 * _GIB, 16 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP)
+
+        assert result is not None
+        assert (result["status"], result["resource"]) == ("too_large", "system")
+
+    def test_a_clip_out_of_gpu_memory_names_the_gpu_even_when_system_memory_is_fuller(self, weights):
+        result = clip_memory_fit("repo/ltx", budget=MemoryBudget(4 * _GIB, 16 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP)
+
+        assert result is not None
+        assert (result["status"], result["resource"], result["budget_gb"]) == ("too_large", "gpu", 4.0)
+
     def test_a_clip_that_fits_says_so(self, weights):
         result = clip_memory_fit("repo/ltx", budget=MemoryBudget(24 * _GIB, 64 * _GIB), model_name="ltx-4", app_config={}, **self._CLIP)
 

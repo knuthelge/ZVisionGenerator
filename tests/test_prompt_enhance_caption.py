@@ -83,6 +83,22 @@ class TestCaptionShape:
         assert caption["style_description"]["art_style"] == "flat retro poster"
 
 
+class TestMediumDetection:
+    @pytest.mark.parametrize(
+        ("prompt", "medium"),
+        [
+            ("a bottle of olive oil on a wooden table", "photograph"),
+            ("a canvas tent in the forest", "photograph"),
+            ("a kitchen blender on the counter", "photograph"),
+            ("an oil portrait of a king", "painting"),
+            ("a 3D render shot from above", "3d_render"),
+            ("a watercolor of a harbor, photo of the original", "photograph"),
+        ],
+    )
+    def test_the_medium_comes_from_medium_phrases_only(self, prompt: str, medium: str) -> None:
+        assert _caption(prompt, _REPLY)["style_description"]["medium"] == medium
+
+
 class TestDesignDetection:
     @pytest.mark.parametrize(
         "prompt",
@@ -147,6 +163,11 @@ class TestLettering:
     )
     def test_unquoted_and_single_quoted_lettering_is_read_whole(self, prompt: str, text: str) -> None:
         assert _texts(_caption(prompt, _reply("OBJECT: a sign"))) == [text]
+
+    def test_a_text_line_matching_a_longer_quote_is_not_split_by_a_shorter_one(self) -> None:
+        caption = _caption('a street with signs "OPEN" and "OPEN LATE"', _reply("OBJECT: a street", 'TEXT: "OPEN LATE"', 'TEXT: "OPEN" | red neon'))
+        elements = [(element["text"], element["desc"]) for element in caption["compositional_deconstruction"]["elements"] if element["type"] == "text"]
+        assert elements == [("OPEN LATE", "The words OPEN LATE."), ("OPEN", "red neon")]
 
     def test_a_name_in_a_scene_is_not_lettering(self) -> None:
         caption = _caption("a golden retriever named Max running on a beach", _reply("OBJECT: a golden retriever", 'TEXT: "Max" | collar'))

@@ -458,7 +458,14 @@ def _cuda_clip_fit(
     resource, required, limit = "gpu", estimate.gpu_bytes, budget.gpu_bytes
     if system_budget and estimate.system_bytes / (system_budget * _CUDA_SYSTEM_FITS_RATIO) > estimate.gpu_bytes / (budget.gpu_bytes * _CUDA_GPU_FITS_RATIO):
         resource, required, limit = "system", estimate.system_bytes, system_budget
-    return {"status": classify_cuda_memory_fit(estimate, budget), "required_gb": round(required / GIB, 1), "budget_gb": round(limit / GIB, 1), "kind": "discrete", "resource": resource}
+    status = classify_cuda_memory_fit(estimate, budget)
+    # The LTX backend refuses to load weights that need more than the machine's system memory, unlike an image model.
+    if system_budget and estimate.system_bytes > system_budget:
+        status = "too_large"
+    # A clip out of GPU memory is about the GPU, even when system memory is fuller.
+    if status == "too_large" and estimate.gpu_bytes > budget.gpu_bytes:
+        resource, required, limit = "gpu", estimate.gpu_bytes, budget.gpu_bytes
+    return {"status": status, "required_gb": round(required / GIB, 1), "budget_gb": round(limit / GIB, 1), "kind": "discrete", "resource": resource}
 
 
 def classify_memory_fit(required_bytes: int, budget_bytes: int) -> str:
