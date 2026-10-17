@@ -159,3 +159,37 @@ class TestWebCli:
         assert exc_info.value.code == 1
         assert all(token in captured.err for token in ("fastapi", "uvicorn", "ziv-ui", "z-vision-generator"))
         run_server.assert_not_called()
+
+    def test_background_flag_starts_background_server(self):
+        """--background hands off to the background launcher instead of running the server here."""
+        with patch("zvisiongenerator.web.run_server") as run_server, patch("zvisiongenerator.web.run_background", return_value=0) as run_background:
+            with pytest.raises(SystemExit) as exc_info:
+                web_main(["--background", "--host", "local", "--port", "9100"], prog="ziv ui")
+
+        assert exc_info.value.code == 0
+        run_background.assert_called_once_with(host="0.0.0.0", port=9100, open_browser=True)
+        run_server.assert_not_called()
+
+    def test_background_stop_flag_stops_servers_without_touching_the_log(self):
+        """--background-stop stops the servers and leaves their error log alone."""
+        with (
+            patch("zvisiongenerator.web.run_server") as run_server,
+            patch("zvisiongenerator.web.stop_all_servers", return_value=1) as stop_all_servers,
+            patch("zvisiongenerator.web.setup_logging") as setup_logging,
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                web_main(["--background-stop"], prog="ziv ui")
+
+        assert exc_info.value.code == 1
+        stop_all_servers.assert_called_once_with()
+        run_server.assert_not_called()
+        setup_logging.assert_not_called()
+
+    def test_background_flags_are_mutually_exclusive(self):
+        """--background and --background-stop cannot be combined."""
+        with patch("zvisiongenerator.web.run_server") as run_server:
+            with pytest.raises(SystemExit) as exc_info:
+                web_main(["--background", "--background-stop"], prog="ziv ui")
+
+        assert exc_info.value.code == 2
+        run_server.assert_not_called()

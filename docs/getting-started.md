@@ -82,9 +82,15 @@ ziv ui
 
 # From a repository checkout
 uv run ziv ui --no-browser
+
+# Keep it running after you close the terminal, then stop it later
+ziv ui --background
+ziv ui --background-stop
 ```
 
 By default, the Web UI listens on `http://127.0.0.1:8080/` and opens your browser automatically. If port `8080` is busy, Z-Vision Generator chooses the next available local port and prints the final address in the terminal. If a local environment is missing required Web UI packages, `ziv ui` and `ziv-ui` print repair guidance for the base install instead of failing with an import traceback.
+
+`ziv ui --background` starts the Web UI, prints its address and gives you the prompt back; the server keeps running after you close the terminal. `ziv ui --background-stop` stops every running Web UI, including ones running in the foreground in another terminal, and any job they are running.
 
 While a generation is running, the Web UI keeps the active job attached to the current browser tab. Refreshing the tab reconnects to the running job when the server still has it, and stale completed or missing jobs are cleared automatically. Job controls are shown only when the running job supports them.
 

@@ -34,6 +34,10 @@ The base package install includes the Web UI runtime, so `ziv ui` and `ziv-ui` w
 | `--host` | `127.0.0.1` | Host interface to bind the local Web UI server to. `local` is short for `0.0.0.0`, which makes the UI reachable from other devices on your network; the launcher then also prints this machine's network address |
 | `--port` | `8080` | Preferred local port; the app chooses the next available port if this one is busy |
 | `--no-browser` | off | Start the server without opening a browser tab |
+| `--background` | off | Start the server in the background and return to the prompt once it is reachable. It keeps running after the terminal closes; its output goes only to the error log |
+| `--background-stop` | off | Stop every running Web UI server, whether started with `--background` or running in another terminal. Any job they are running stops too. Cannot be combined with `--background` |
+
+Every running server records itself in `~/.ziv/run/` (or `$ZIV_DATA_DIR/run/`), which is how `--background-stop` finds them. A server is asked to shut down first and is force-stopped if it has not exited after 10 seconds, together with any process it started. On Windows a server is stopped immediately. Servers started by versions before this flag existed are not recorded and must be stopped by hand.
 
 The server only answers requests addressed to an IP address, `localhost`, the `--host` value, or (when bound to `0.0.0.0`, `::` or a LAN IP) this machine's hostname in both bare and `.local` form, and rejects state-changing requests from other sites. This protects against DNS-rebinding and cross-site attacks from pages open in the same browser. To reach the UI through another hostname, list it in `ZIV_UI_ALLOWED_HOSTS` (comma-separated), for example `ZIV_UI_ALLOWED_HOSTS=studio.lan ziv-ui --host 0.0.0.0`.
 

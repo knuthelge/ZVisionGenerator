@@ -6,13 +6,19 @@ import argparse
 import importlib.util
 import ipaddress
 import errno
+import os
+from pathlib import Path
 import socket
+import subprocess
 import sys
 import threading
 import time
+import uuid
 import webbrowser
 
 from zvisiongenerator.utils.app_log import log_file_path, setup_logging, uvicorn_log_config
+from zvisiongenerator.utils.paths import get_ziv_data_dir
+from zvisiongenerator.web.instances import UiInstance, instances_dir, list_instances, register_instance, stop_instances, unregister_instance
 
 
 _WEB_RUNTIME_MODULES = {
@@ -68,6 +74,17 @@ def _build_parser(*, prog: str) -> argparse.ArgumentParser:
     )
     parser.add_argument("--port", type=int, default=8080, help="Preferred local port for the Web UI server.")
     parser.add_argument("--no-browser", action="store_true", help="Start the server without opening a browser tab.")
+    background = parser.add_mutually_exclusive_group()
+    background.add_argument(
+        "--background",
+        action="store_true",
+        help="Run the server in the background and return to the prompt; it keeps running after the terminal closes.",
+    )
+    background.add_argument(
+        "--background-stop",
+        action="store_true",
+        help="Stop every running Web UI server, in the background or in another terminal, including any job it is running.",
+    )
     return parser
 
 
@@ -189,6 +206,27 @@ def _lan_address(host: str) -> str | None:
     return None if ipaddress.ip_address(address).is_loopback else address
 
 
+def _server_url(host: str, port: int) -> str:
+    """Return the Web UI address for a server bound to *host*:*port*."""
+    return f"http://[{host}]:{port}" if ":" in host else f"http://{host}:{port}"
+
+
+def _print_addresses(host: str, port: int, log_path: Path | str | None, *, heading: str) -> None:
+    """Print where the Web UI can be reached and where its error log is."""
+    print(f"{heading} {_server_url(host, port)}")
+    lan_address = _lan_address(host)
+    if lan_address is not None:
+        lan_host = f"[{lan_address}]" if ":" in lan_address else lan_address
+        print(f"On your network: http://{lan_host}:{port}")
+    if log_path is not None:
+        print(f"Error log: {log_path}")
+
+
+_LAUNCH_ID_ENV = "ZIV_UI_LAUNCH_ID"
+# Open job event streams never finish on their own; past this many seconds a stopping server drops them and shuts down.
+_GRACEFUL_SHUTDOWN_SECONDS = 3
+
+
 def run_server(*, host: str = "127.0.0.1", port: int = 8080, open_browser: bool = True) -> None:
     """Launch the FastAPI Web UI server."""
     _ensure_web_runtime_dependencies(prog="The Web UI launcher")
@@ -198,22 +236,109 @@ def run_server(*, host: str = "127.0.0.1", port: int = 8080, open_browser: bool 
 
     configure_allowed_hostnames(_bound_hostnames(host))
     selected_port = _find_available_port(host, port)
-    url = f"http://[{host}]:{selected_port}" if ":" in host else f"http://{host}:{selected_port}"
-
-    print(f"Starting Z-Vision Generator Web UI at {url}")
-    lan_address = _lan_address(host)
-    if lan_address is not None:
-        lan_host = f"[{lan_address}]" if ":" in lan_address else lan_address
-        print(f"On your network: http://{lan_host}:{selected_port}")
     log_path = log_file_path()
-    if log_path is not None:
-        print(f"Error log: {log_path}")
+    _print_addresses(host, selected_port, log_path, heading="Starting Z-Vision Generator Web UI at")
 
     if open_browser:
-        opener = threading.Thread(target=_open_browser, args=(url, host, selected_port), daemon=True)
+        opener = threading.Thread(target=_open_browser, args=(_server_url(host, selected_port), host, selected_port), daemon=True)
         opener.start()
 
-    uvicorn.run("zvisiongenerator.web.server:app", host=host, port=selected_port, log_level="info", log_config=uvicorn_log_config())
+    record = register_instance(
+        instances_dir(get_ziv_data_dir()),
+        host=host,
+        port=selected_port,
+        log=log_path,
+        launch_id=os.environ.get(_LAUNCH_ID_ENV),
+    )
+    try:
+        uvicorn.run(
+            "zvisiongenerator.web.server:app",
+            host=host,
+            port=selected_port,
+            log_level="info",
+            log_config=uvicorn_log_config(),
+            timeout_graceful_shutdown=_GRACEFUL_SHUTDOWN_SECONDS,
+        )
+    finally:
+        unregister_instance(record)
+
+
+_BACKGROUND_SERVER_CODE = "import sys; from zvisiongenerator.web import main; main(sys.argv[1:], prog='ziv ui')"
+_BACKGROUND_START_TIMEOUT = 180.0
+
+
+def _detach_options() -> dict[str, object]:
+    """Return ``subprocess.Popen`` options that keep a child running after the terminal that started it closes."""
+    if sys.platform == "win32":
+        # A hidden console of its own, not DETACHED_PROCESS: without a console, every ffmpeg or converter the server
+        # starts would open a visible console window.
+        return {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _spawn_background_server(host: str, port: int, launch_id: str) -> subprocess.Popen[bytes]:
+    """Start a detached Web UI server process tagged with *launch_id*."""
+    return subprocess.Popen(
+        [sys.executable, "-c", _BACKGROUND_SERVER_CODE, "--host", host, "--port", str(port), "--no-browser"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env={**os.environ, _LAUNCH_ID_ENV: launch_id},
+        **_detach_options(),
+    )
+
+
+def _wait_for_background_server(process: subprocess.Popen[bytes], directory: Path, launch_id: str, *, timeout: float = _BACKGROUND_START_TIMEOUT, delay: float = 0.2) -> UiInstance | None:
+    """Wait until the server tagged *launch_id* accepts connections; ``None`` when it exits or times out first."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return None
+        instance = next((item for item in list_instances(directory) if item.launch_id == launch_id), None)
+        if instance is not None and _wait_for_server(instance.host, instance.port, attempts=1, delay=delay):
+            return instance
+        time.sleep(delay)
+    return None
+
+
+def run_background(*, host: str = "127.0.0.1", port: int = 8080, open_browser: bool = True) -> int:
+    """Start the Web UI server in the background and return once it is reachable.
+
+    Returns:
+        The process exit status: ``0`` when the server is up, ``1`` when it failed to start.
+    """
+    directory = instances_dir(get_ziv_data_dir())
+    launch_id = uuid.uuid4().hex
+    print("Starting Z-Vision Generator Web UI in the background...")
+    process = _spawn_background_server(host, port, launch_id)
+    instance = _wait_for_background_server(process, directory, launch_id)
+    if instance is None:
+        if process.poll() is None:
+            process.kill()
+        print("The Web UI did not start in the background. Run ziv ui without --background to see why.", file=sys.stderr)
+        return 1
+
+    _print_addresses(instance.host, instance.port, instance.log, heading="Web UI running in the background at")
+    print("Stop it with: ziv ui --background-stop")
+    if open_browser:
+        _open_browser(_server_url(instance.host, instance.port), instance.host, instance.port)
+    return 0
+
+
+def stop_all_servers() -> int:
+    """Stop every running Web UI server and report each one.
+
+    Returns:
+        The process exit status: ``0`` when every server stopped (or none was running), ``1`` otherwise.
+    """
+    running = list_instances(instances_dir(get_ziv_data_dir()))
+    if not running:
+        print("No Web UI is running.")
+        return 0
+    stopped = stop_instances(running)
+    for instance in stopped:
+        print(f"Stopped Web UI at {_server_url(instance.host, instance.port)} (process {instance.pid})")
+    return 0 if len(stopped) == len(running) else 1
 
 
 def main(argv: list[str] | None = None, *, prog: str = "ziv-ui") -> None:
@@ -224,13 +349,21 @@ def main(argv: list[str] | None = None, *, prog: str = "ziv-ui") -> None:
     if args.port < 1 or args.port > 65535:
         parser.error("--port must be between 1 and 65535")
 
-    setup_logging("ui")
+    if args.background_stop:
+        # No setup_logging here: it would clear the error log of the servers being stopped.
+        parser.exit(status=stop_all_servers())
+
     try:
         _ensure_web_runtime_dependencies(prog=prog)
     except RuntimeError as exc:
         parser.exit(status=1, message=f"{exc}\n")
 
+    if args.background:
+        # The background server opens the error log itself.
+        parser.exit(status=run_background(host=args.host, port=args.port, open_browser=not args.no_browser))
+
+    setup_logging("ui")
     run_server(host=args.host, port=args.port, open_browser=not args.no_browser)
 
 
-__all__ = ["main", "run_server"]
+__all__ = ["main", "run_background", "run_server", "stop_all_servers"]
