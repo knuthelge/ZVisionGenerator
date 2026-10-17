@@ -591,8 +591,9 @@ def _check_review_arguments(review: Callable[[Path], None] | None, stage1_steps:
 def _preview_small_render(model: _LoadedVideoModel, pipeline: Any, stage1: Any, review: Callable[[Path], None]) -> None:
     """Decode the half-size result of stage 1 to a temporary video file and hand its path to *review*.
 
-    The file lives in a temporary directory outside the output folder and is deleted when *review* returns or raises.
-    The decode streams like the final one, and in low-memory mode the codecs go back to the CPU right after it, before the
+    The file lives in a temporary directory outside the output folder and is deleted when *review* returns or raises; a
+    file still open elsewhere (the browser streaming it on Windows) is left for the system to clean up. The decode
+    streams like the final one, and in low-memory mode the codecs go back to the CPU right after it, before the
     wait for the decision and the latent upsample (they would otherwise stay on the GPU until the transformer next runs).
 
     Args:
@@ -602,7 +603,7 @@ def _preview_small_render(model: _LoadedVideoModel, pipeline: Any, stage1: Any, 
         review: Receives the path of the decoded video; it raises to end the generation.
     """
 
-    with tempfile.TemporaryDirectory(prefix="ziv-review-") as directory:
+    with tempfile.TemporaryDirectory(prefix="ziv-review-", ignore_cleanup_errors=True) as directory:
         path = Path(directory) / "small-render.mp4"
         _export_video(model, _decode_clip(pipeline, stage1), str(path))
         if model.low_memory:
