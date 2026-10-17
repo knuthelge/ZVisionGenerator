@@ -1,6 +1,6 @@
 # Feature parity between macOS and Windows/Linux
 
-**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 1 (Klein img2img on CUDA), 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, with its review), 5 (quantized, streamed video on CUDA, which absorbed step 6), 7 (video memory estimates), 8 (scheduler default), 9 (ffmpeg install), 11 (extend a video on CUDA) and 13 (Ideogram 4 on CUDA) are done. Step 12 is still open. Step 10 was measured on 2026-10-16 and needs no change. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
+**Status:** In progress (re-audited 2026-10-15 at v0.13.0b20). Steps 1 (Klein img2img on CUDA), 2 (audio in CUDA video), 3 (two-stage video upscale on CUDA, with its review), 5 (quantized, streamed video on CUDA, which absorbed step 6), 7 (video memory estimates), 8 (scheduler default), 9 (ffmpeg install), 11 (extend a video on CUDA) and 13 (Ideogram 4 on CUDA) are done. Step 12 is still open; its implementation question was settled on 2026-10-17 (vendor numz's PyTorch code, see the evidence table). Step 10 was measured on 2026-10-16 and needs no change. The re-audit added steps 12 (SeedVR2 upscale) and 13 (Ideogram 4), both accepted on 2026-10-15, and widened step 7 to cover the per-clip memory check.
 
 ## Where things stand
 
@@ -115,6 +115,19 @@ Measured 2026-10-16 on a 10 GB NVIDIA GPU (transformers 5.19.0, bitsandbytes NF4
 
 The stored copy loads and generates. Quantizing at load costs about 0.8 s, because the memory-mapped file is quantized layer by layer on the GPU. The first load was slower mostly from reading 9 GB off disk; a cold load of the stored copy was not timed. Process peak RSS over all four loads was 9.7 GB.
 
+Re-checked 2026-10-17 for step 12, against PyPI, the GitHub API and the repositories' source:
+
+| Check | Result |
+|---|---|
+| diffusers | 0.41.0 (2026-10-06) is the newest release. `main` has 93 pipeline directories and none for SeedVR; no issue or pull request in the repo mentions SeedVR. Nothing is coming in 0.42 |
+| PyPI | No `seedvr2`, `seedvr` or similar package |
+| `numz/ComfyUI-SeedVR2_VideoUpscaler` (v2.5.24, 2025-12-24, Apache-2.0) | 95 `.py` files, about 1 MB. `inference_cli.py` and `src/core`, `src/models`, `src/optimization`, `src/utils` import nothing from ComfyUI; the nodes are the five files under `src/interfaces/`, plus three try-guarded optional imports (progress bar, interrupt check, models folder). Single images (PNG, alpha), fp8 and GGUF weights, block swap (0–32 blocks for 3B, 0–36 for 7B), tiled VAE encode and decode, torch.compile and colour fix are all in the core. Its `pyproject.toml` has no build configuration and the package is named `src`, with a mix of `from src...` and relative imports, so it cannot be pip-installed and a vendored copy needs its package name rewritten. Dependencies beyond ours: `einops`, `omegaconf`, `rotary_embedding_torch`, `gguf`; `opencv-python` and `matplotlib` serve only the CLI and debug output. Ships the fixed text embeddings `pos_emb.pt` and `neg_emb.pt` (1.2 MB) |
+| `ByteDance-Seed/SeedVR` (reference code, Apache-2.0) | 73 `.py` files, 392 KB. Needs NVIDIA apex and `flash_attn==2.5.9.post1`, runs under `torchrun`, documents video input only, lists tiled VAE and progressive sampling as future work, and sizes for one H100 80 GB at 720p (four for 1080p) |
+| `numz/SeedVR2_comfyUI` (weights) | `seedvr2_ema_3b_fp16` 6.78 GB, `_3b_fp8_e4m3fn` 3.39 GB, `_7b_fp16` 16.5 GB, `_7b_fp8_e4m3fn` 8.24 GB, `ema_vae_fp16` 0.5 GB; GGUF Q4_K_M and Q8_0 in `AInVFX/SeedVR2_comfyUI` |
+| numz issues #483 and #496 | A 12 GB card ran out of memory upscaling 1328 px to 2656 px with 3B fp8 and 32 blocks swapped, VAE tiling off. The maintainer reports a 32 GB card running out while decoding 1080p without tiling. Tiled decode is mandatory at our sizes |
+| mflux's MLX port, for comparison | 47 files, 110 KB |
+| Other upscalers on CUDA | spandrel 0.4.2 (MIT, 2026-02-21) loads Real-ESRGAN, DAT, HAT, SPAN, RealPLKSR and more from one `pip install`; permissive weights exist (Real-ESRGAN x4plus BSD-3, Nomos DAT/HAT and 4xLexicaDAT2 CC-BY-4.0; 4x-UltraSharp is CC-BY-NC-SA). SUPIR is non-commercial and needs about 12 GB for SDXL plus 16 GB for LLaVA. InvSR is under the non-commercial NTU S-Lab licence, repo-only, pinned to torch 2.4. AuraSR is CC-BY-SA-4.0, 4× only, has tile seams and no release since 2024-07. diffusers' SD x4 upscaler is the 2022 prompt-driven 512 px tile model |
+
 ## Proposed change
 
 Each step is its own PR. Order for what's left:
@@ -123,7 +136,7 @@ Each step is its own PR. Order for what's left:
 2. ~~Steps 8 and 9 (scheduler default, ffmpeg install).~~ Done.
 3. ~~Step 7 (video memory estimates).~~ Done.
 4. ~~Step 3's review before upscaling.~~ Done.
-5. ~~Step 13 (Ideogram 4)~~, done, and step 12 (SeedVR2), which starts with a spike that picks the implementation.
+5. ~~Step 13 (Ideogram 4)~~, done, and step 12 (SeedVR2), which vendors numz's PyTorch code and starts with a sizing spike.
 6. Step 10 (enhancer download) is measured and needs no change.
 
 Step 4 was dropped. The step numbers stay as they are so references keep working.
@@ -292,12 +305,13 @@ Spike results (a 10 GB GPU with 32 GB of system memory, torch 2.14, diffusers 0.
 
 ### 12. SeedVR2 plain upscale on CUDA
 
-macOS runs SeedVR2 through mflux ([shipped](archive/image-upscale-seedvr2-mac.md)). diffusers 0.41 has no SeedVR2 pipeline, so CUDA would need a PyTorch implementation of its own:
+macOS runs SeedVR2 through mflux ([shipped](archive/image-upscale-seedvr2-mac.md)). diffusers has no SeedVR2 pipeline, none is in progress, and there is no SeedVR2 package on PyPI (checked 2026-10-17, see the evidence table), so CUDA needs vendored PyTorch code. The code to vendor is numz's `ComfyUI-SeedVR2_VideoUpscaler` (Apache-2.0, v2.5.24), not ByteDance's reference code; see Alternatives considered.
 
-- **Spike first.** Candidates: ByteDance's reference code (`ByteDance-Seed/SeedVR`, Apache-2.0) with the `ByteDance-Seed/SeedVR2-3B` / `-7B` weights, or numz's ComfyUI node, which already does tiling and block swap on consumer GPUs but is built around ComfyUI. Vendor only the inference path (DiT, VAE, window attention). Measure 2× and 4× of a 1 MP image on a 10 GB GPU at 3B and 7B, with the transformer streamed by `block_streaming` and the VAE tiled.
-- **If it fits:** a `backends/cuda/seedvr2.py` that implements the `SeedVR2Upscaler` Protocol (`core/seedvr2.py`), registered in `_SEEDVR2_UPSCALERS_MAP` for `win32` and `linux`. The tier choice in `config.yaml` (`seedvr2.tiers`) needs CUDA estimates in the `discrete` shape. The stored 8-bit copy goes through `seedvr2_loader.py` like the image models' copies, using `backends/cuda/quant.py`. The Web UI, the X chord and the Models page row need no changes, because they already follow `supports_seedvr2()`.
-- **If 7B doesn't fit a 10 GB GPU,** the tier choice picks 3B there, as it does on smaller Macs.
-- Tests: the Protocol contract with a mocked model, the tier pick against a `discrete` budget, and the registry returning the upscaler on Linux.
+- **Vendor numz's inference core** under `packages/seedvr2_torch` with a `make update-seedvr2` target pinned to a commit, like `packages/ltx_*`. Take `src/core`, `src/models`, `src/optimization` and `src/utils` plus `pos_emb.pt` and `neg_emb.pt`; leave out `src/interfaces/` (the ComfyUI nodes), `inference_cli.py` and the three optional ComfyUI imports. Rewrite the `from src...` imports to the new package name. The core already handles single images with alpha, fp8 and GGUF weights, block swap, tiled VAE encode and decode, torch.compile and colour fix, so nothing about memory has to be written. New dependencies for Windows and Linux: `einops`, `omegaconf`, `rotary_embedding_torch`; `gguf` only if GGUF tiers are offered. Not `opencv-python` or `matplotlib`.
+- **Sizing spike first, not an existence check.** On a 10 GB GPU, run 2× and 4× of the same 1 MP images as the macOS spike with `seedvr2_ema_3b_fp8_e4m3fn` (3.39 GB) and `seedvr2_ema_7b_fp8_e4m3fn` (8.24 GB), each with `ema_vae_fp16` (0.5 GB). Tiled VAE decode is mandatory: a 12 GB card ran out of memory decoding a 7 MP output with tiling off, and the 4× target here is 16 MP. 7B does not sit on a 10 GB card without block swap, so measure it swapped. Record time, peak VRAM, system memory and the look against macOS, and fit the `discrete` memory estimates from the numbers.
+- **If it fits:** a `backends/cuda/seedvr2.py` that implements the `SeedVR2Upscaler` Protocol (`core/seedvr2.py`) by calling the vendored sequence (download, generation context, runner, text embeddings, generation info, then encode, upscale, decode, postprocess), registered in `_SEEDVR2_UPSCALERS_MAP` for `win32` and `linux`. The tier choice in `config.yaml` (`seedvr2.tiers`) gets CUDA estimates in the `discrete` shape. The Hub files are already fp8, so the stored 8-bit copy step of `seedvr2_loader.py` does not apply on CUDA; the loader only has to download the tier's two files. The Web UI, the X chord and the Models page row need no changes, because they already follow `supports_seedvr2()`.
+- **If 7B doesn't fit a 10 GB GPU** even swapped, or is too slow, the tier choice picks 3B there, as it does on smaller Macs.
+- Tests: the Protocol contract with a mocked runner, the tier pick against a `discrete` budget, the registry returning the upscaler on Linux, and an import smoke test proving the vendored package loads without ComfyUI.
 
 ### 13. Ideogram 4 on CUDA
 
@@ -337,7 +351,7 @@ diffusers 0.41.0 ships `Ideogram4Pipeline`, and both official repos are already 
 - Step 1: `klein4b` and `klein9b` with a reference image, `--upscale 2`, and gallery Upscale, unquantized and at q4/q8.
 - Steps 2, 3, 5: `ltx-8` and `ltx-4` t2v and i2v, with and without `--audio`, with `--upscale 2`, at each quantize level, with `--low-memory` on and off. Compare against the same seeds on a Mac for overall look and audio sync, not pixels.
 - Step 7: compare the badge's estimate with the peak VRAM in the job log. For the per-clip check, run one clip just under the limit it predicts and one just over.
-- Step 12: 2× and 4× of the same images as the macOS spike, comparing time, peak VRAM and system memory, and the look against macOS.
+- Step 12: 2× and 4× of the same images as the macOS spike, with tiled decode on and 7B block-swapped, comparing time, peak VRAM and system memory, and the look against macOS.
 - Step 13: the same prompts and seeds as on a Mac, with and without first sigma and with a JSON prompt, at 1 MP and 2 MP.
 - Still owed from the done steps, on an NVIDIA GPU: audio sync against a Mac (step 2); `--low-memory` off, LoRA and Cancel during the refine stage (step 3); q8 against q4 for quality, and LoRAs on the NF4 transformer (step 5).
 
@@ -354,12 +368,15 @@ diffusers 0.41.0 ships `Ideogram4Pipeline`, and both official repos are already 
 - **One big parity PR.** Rejected: the video steps need hardware to verify and would hold back the small fixes (1, 2, 8).
 - **Turn off Klein img2img on CUDA permanently.** Rejected: Klein is the default model, and refining images is a core feature.
 - **Use only `LTX2DFRPipeline` for the CUDA upscale.** Possible, but it's new in 0.41 and its output isn't compared with the macOS two-stage flow yet. The spike in step 3 decided: `LTX2Pipeline` was enough.
+- **ByteDance's reference code for step 12.** Rejected (2026-10-17): it needs NVIDIA apex and a pinned flash_attn, runs under `torchrun`, documents video only, has no VAE tiling or block swap and sizes for H100s. Vendoring it means writing image input, tiling and streaming ourselves, which numz has already done.
+- **Run numz's `inference_cli.py` as a subprocess in its own venv** (what the Hugging Face Space does). Rejected: a second Python environment to install and update, a PNG round trip, and no in-process progress or cancel.
+- **A different upscaler on CUDA instead of SeedVR2.** Rejected (2026-10-17). spandrel with permissively licensed weights is a `pip install` and would run on macOS too, but gives a sharp enlargement rather than SeedVR2's faithful detail, and "2×" would then mean a different model on each platform, the kind of gap this proposal closes. It may return as a separate fast tier. SUPIR and InvSR are non-commercial, AuraSR is copyleft and unmaintained, and diffusers' SD x4 upscaler is what the creative path already beats.
 
 ## Open questions
 
 - ~~Which attribute holds the LTX-2 audio sample rate in diffusers 0.41 (step 2).~~ Answered (2026-10-14): `pipeline.vocoder.config.output_sampling_rate`.
 - ~~Whether Ideogram 4 on CUDA should use the NF4 diffusers repo or the same FP8 repo as macOS (step 13).~~ Answered (2026-10-16): the NF4 repo. It loads as is and `supports_quantize: false` holds on both platforms, each with its one repo.
-- Which PyTorch SeedVR2 to vendor for step 12: ByteDance's reference code or numz's node.
+- ~~Which PyTorch SeedVR2 to vendor for step 12: ByteDance's reference code or numz's node.~~ Answered (2026-10-17): numz's inference core, without its ComfyUI node files. See the evidence table and Alternatives considered.
 - Whether "Upscale an existing video" gets a CUDA step here when [it ships](video-upscale-existing.md) on macOS. The building blocks exist: `LTX2LatentUpsamplePipeline` and step 3's `LTX2Pipeline(latents=, sigmas=)` refine.
 - ~~Whether the configured repo includes the latent upsampler, and whether `LTX2Pipeline` accepts `latents=` plus `sigmas=` for the refine stage (step 3).~~ Answered (2026-10-14): the repo has no upsampler, which is loaded from `Lightricks/LTX-2.3`, and `LTX2Pipeline` accepts both.
 - Whether the per-backend capability override in step 1 is worth adding, or the fix should ship directly.

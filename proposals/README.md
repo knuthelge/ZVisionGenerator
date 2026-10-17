@@ -17,7 +17,7 @@ These files are not part of the published docs site, and the docs don't link to 
 | Proposal | Status | Summary |
 |---|---|---|
 | [Controls for Web UI video jobs](video-job-controls.md) | In progress | Quit has shipped; Next and Pause for video jobs remain |
-| [Feature parity between macOS and Windows/Linux](platform-parity.md) | In progress | Done: video audio, two-stage video upscale, quantized and streamed video with the 1.1 transformer, extending a video. Open: Klein img2img, video review and memory estimates, SeedVR2 upscale, Ideogram 4, the Z-Image scheduler, ffmpeg install and the enhancer download |
+| [Feature parity between macOS and Windows/Linux](platform-parity.md) | In progress | Done: Klein img2img, video audio, two-stage video upscale and its review, quantized and streamed video with the 1.1 transformer, video memory estimates, extending a video, Ideogram 4, the Z-Image scheduler and ffmpeg install; the enhancer download was measured and stays. Open: SeedVR2 plain upscale on CUDA, vendoring numz's PyTorch code after a sizing spike |
 | [First and last frame for image-to-video](video-first-last-frame.md) | Proposed | An optional end image for `img2vid`: macOS first (MLX keyframe on the true last frame), then CUDA via `LTX2ConditionPipeline.from_pipe` with generate-and-trim once a spike confirms it; Last frame picker, `--end-image`, recorded settings and a two-frame enhancer rule |
 | [Upscale existing videos 2× on macOS](video-upscale-existing.md) | Proposed | Generate at `s`, extend, then upscale the finished video 2× from the viewer with LTX's own upsampler and a 1–3 step distilled refine, tiled over time for long clips; original audio kept. Replaces a SeedVR2 plan that won't fit a 32 GB Mac; a half-day spike sets steps and tiling |
 | [Edit images: inpaint, extend and Klein edits](image-editing.md) | Proposed | Paint a mask and redraw it, extend the canvas, and (Klein) edit from a prompt, through one editor opened from any image |
@@ -25,6 +25,17 @@ These files are not part of the published docs site, and the docs don't link to 
 | [Show model download progress in Web UI jobs](model-download-progress.md) | Proposed | Download a missing model as its own step before loading, and show bytes, speed and ETA on the job card, with Stop and resume |
 | [Faster generation on macOS](macos-speed.md) | Proposed | Ranked speed opportunities on Apple Silicon (Ideogram quants, model reuse across Web UI jobs, LTX dtype and streaming, Klein text encoder), with a measurement plan to size them first |
 | [Show memory use while a job runs](live-memory-usage.md) | Proposed | Feasibility study: live memory use during generation is readable on macOS, Windows and Linux; Windows VRAM spill into shared memory is the one part still to verify |
+| [Search and favourites in the Gallery](gallery-search-favourites.md) | Proposed | A search field and model, workflow, date and favourites filters in the Gallery, backed by an in-memory asset index; a star on every tile stored in a sidecar file in the output folder |
+| [Variations and sweeps from the Workspace](seed-variations-and-sweeps.md) | Proposed | "Variations" on any output queues N new-seed runs of its settings; a Sweep section expands one or two settings over a list of values into queued jobs, with the axis values recorded on each output |
+| [Recent prompts, rewrite history and "save to a prompt file"](workspace-prompt-recents.md) | Proposed | A recents list of submitted prompts, the last five enhancer rewrites with a stepper, and saving a Workspace prompt into a prompt file |
+| [Know when a job is done](job-notifications.md) | Proposed | Progress and the result in the tab title and favicon, an optional sound, and browser notifications where the page is a secure context |
+| [A log of past jobs](job-log.md) | Proposed | One JSON line per finished job on disk and a Jobs drawer on every page with duration, outputs, failure text, Load settings and a copyable command |
+| [A phone layout and an installable app](phone-layout.md) | Proposed | A web app manifest, a bottom tab bar, stage-first Workspace with a sticky Generate bar and a Settings sheet, touch steppers for numbers, swipe in the viewer |
+| [Named presets, and what a LoRA is for](settings-presets.md) | Proposed | Server-side presets of settings, LoRAs and style text applied from the Settings header or `--preset`; LoRA trigger words and previews read from the file and sidecars |
+| [Grab a frame from a video](video-frame-grab.md) | Proposed | Frame stepping in the viewer and a Grab frame action that writes a PNG with provenance and can make it the reference for the next image or clip |
+| [One Gallery](one-gallery.md) | Proposed | Call the Workspace strip Gallery, share one store and one endpoint between the strip and the page |
+| [Merge the Models and Config pages](admin-page-merge.md) | Proposed | One Setup page with General, Models, LoRAs and Folders tabs, redirects for the old routes, one nav slot fewer |
+| [Copy a CLI command from any asset](asset-cli-command.md) | Proposed | Build the reproducing `ziv` command from an asset's recorded settings in the tile menu and viewer, with a parity test against Reuse settings |
 
 ## Archive
 
