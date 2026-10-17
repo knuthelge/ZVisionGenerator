@@ -1111,6 +1111,10 @@
       <HistoryStrip
         assets={historyStore.assets}
         loading={historyStore.loading}
+        totalCount={historyStore.totalCount}
+        hasMore={historyStore.hasMore}
+        loadingMore={historyStore.loadingMore}
+        onloadmore={() => void historyStore.loadMore()}
         {deletingIds}
         onpreview={openHistoryViewer}
         onreuse={reuseAsset}
@@ -1133,6 +1137,7 @@
   {deletingIds}
   onclose={closeLightbox}
   onnavigate={navigateLightbox}
+  onnearend={() => { if (lightboxMode === 'history') void historyStore.loadMore(); }}
   onreuse={reuseAsset}
   onreference={useAsReference}
   onextend={extendAsset}

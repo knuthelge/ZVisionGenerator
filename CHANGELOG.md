@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Changed
+- **Web UI: the history strip scrolls through all your history.** Older images and videos load as you scroll toward the end of the strip, or step through them in the viewer, instead of stopping at the newest few. The count beside **History** shows your whole history
 - **Web UI: LoRAs are remembered per model family.** Switching to a model of another family brings back the LoRAs you last chose for it instead of carrying over LoRAs made for a different model, and switching back restores yours
 - **Z-Image on Windows and Linux now uses the `beta` scheduler by default**, as on macOS, so the same prompt and seed look alike on both. `--scheduler beta` on Z-Image also now follows the macOS schedule instead of diffusers' own beta spacing
 

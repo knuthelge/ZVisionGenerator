@@ -2,7 +2,7 @@
   import { draft } from '$lib/state/draft.svelte';
   import { router } from '$lib/state/router.svelte';
   import { assetAspect, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
-  import { Icon } from '$lib/components/atoms';
+  import { Icon, Spinner } from '$lib/components/atoms';
   import { AssetTile } from '$lib/components/molecules';
   import type { GalleryAsset } from '$lib/types';
 
@@ -11,12 +11,43 @@
     loading?: boolean;
     deletingIds?: ReadonlySet<string>;
     referenceUnavailable?: Partial<Record<ReferenceTarget, string>>;
+    totalCount?: number | null;
+    hasMore?: boolean;
+    loadingMore?: boolean;
+    onloadmore?: () => void;
   }
 
-  let { assets, loading = false, deletingIds = new Set<string>(), referenceUnavailable = {}, ...handlers }: Props = $props();
+  let {
+    assets,
+    loading = false,
+    deletingIds = new Set<string>(),
+    referenceUnavailable = {},
+    totalCount = null,
+    hasMore = false,
+    loadingMore = false,
+    onloadmore,
+    ...handlers
+  }: Props = $props();
+
+  let scrollEl = $state<HTMLElement | null>(null);
+  let sentinelEl = $state<HTMLElement | null>(null);
 
   const collapsed = $derived(draft.state.historyCollapsed);
   const TILE_HEIGHT_PX = 96;
+  // Start fetching older tiles about two screens of strip before the end comes into view.
+  const PREFETCH_MARGIN = '0px 200% 0px 0px';
+
+  // Re-observing after each page lands re-checks the sentinel, so a short page that leaves it in view loads the next one.
+  $effect(() => {
+    void assets.length;
+    if (!scrollEl || !sentinelEl || !hasMore || loadingMore || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(
+      (entries) => { if (entries[0]?.isIntersecting) onloadmore?.(); },
+      { root: scrollEl, rootMargin: PREFETCH_MARGIN }
+    );
+    io.observe(sentinelEl);
+    return () => io.disconnect();
+  });
 
   // Left/right arrows move focus between tiles; Tab still walks through each tile's actions.
   function onKeydown(event: KeyboardEvent): void {
@@ -45,7 +76,7 @@
     >
       <Icon name="chevdown" size={14} class="strip-chev" />
       <span id="ws-history-title" class="ui-area-label">History</span>
-      <span class="strip-count font-mono">{assets.length}</span>
+      <span class="strip-count font-mono">{totalCount ?? assets.length}</span>
     </button>
     <span class="flex-1"></span>
     {#if !collapsed && assets.length > 0}
@@ -61,7 +92,9 @@
       class="strip-scroll"
       role="list"
       aria-label="History, newest first"
+      aria-busy={loadingMore}
       onkeydown={onKeydown}
+      bind:this={scrollEl}
     >
       {#if loading && assets.length === 0}
         <p class="strip-empty">Loading history…</p>
@@ -73,6 +106,11 @@
             <AssetTile {asset} density="compact" deleting={deletingIds.has(asset.id)} {referenceUnavailable} class="h-full w-full" {...handlers} />
           </div>
         {/each}
+        {#if hasMore}
+          <div bind:this={sentinelEl} class="strip-sentinel" style="height: {TILE_HEIGHT_PX}px" aria-hidden="true">
+            {#if loadingMore}<Spinner />{/if}
+          </div>
+        {/if}
       {/if}
     </div>
   {/if}
@@ -89,5 +127,6 @@
   .strip-hint { font-size: var(--text-meta); color: var(--color-text-muted); }
   .strip-scroll { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 10px 12px; }
   .strip-item { flex: none; }
+  .strip-sentinel { flex: none; display: flex; align-items: center; justify-content: center; width: 32px; }
   .strip-empty { padding: 12px 0 18px; font-size: var(--text-ui); color: var(--color-text-muted); }
 </style>
