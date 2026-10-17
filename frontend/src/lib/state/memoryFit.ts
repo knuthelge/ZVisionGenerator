@@ -37,18 +37,22 @@ const DISCRETE_CONSEQUENCE: Record<'gpu' | 'system', Record<MemoryNote['status']
     tight: 'The GPU is nearly full, so it may fail on a longer or larger clip.',
     too_large: 'Expect an out-of-memory error. Use fewer frames or a smaller size.',
   },
+  // The model's weights (plus the upscale's extra stage) fill system memory, whatever the clip's length or size.
   system: {
-    tight: 'It runs, but slowly, and other apps may stall while it generates.',
-    too_large: 'Expect the run to be stopped for lack of memory. Use ltx-4, or a shorter clip.',
+    tight: 'It runs, but slowly, and other apps may stall while it generates. A shorter or smaller clip does not change this.',
+    too_large: 'Expect the job to be stopped for lack of memory. A shorter or smaller clip does not help; ltx-4 needs less than ltx-8, and Upscale adds about 4 GB.',
   },
 };
+/** System memory is about the model, not the clip, so its note does not lead with the size and length. */
+const SYSTEM_LEAD = 'The model needs';
 
 /** The memory note of a clip or an extension: shown for tight and too-large fits only, which never block Generate. */
 export function memoryFitNote(fit: ClipMemoryFit | null, context: MemoryFitContext): MemoryNote | null {
   if (fit === null || (fit.status !== 'tight' && fit.status !== 'too_large')) return null;
   if (fit.kind === 'discrete') {
     const resource = fit.resource ?? 'gpu';
-    return { status: fit.status, text: `${LEAD[context][fit.status]} ~${fit.required_gb} GB of ${fit.budget_gb} GB of ${DISCRETE_RESOURCE[resource]}. ${DISCRETE_CONSEQUENCE[resource][fit.status]}` };
+    const lead = resource === 'system' ? SYSTEM_LEAD : LEAD[context][fit.status];
+    return { status: fit.status, text: `${lead} ~${fit.required_gb} GB of ${fit.budget_gb} GB of ${DISCRETE_RESOURCE[resource]}. ${DISCRETE_CONSEQUENCE[resource][fit.status]}` };
   }
   return { status: fit.status, text: `${LEAD[context][fit.status]} ~${fit.required_gb} GB of ${fit.budget_gb} GB. ${CONSEQUENCE[fit.status]}` };
 }
