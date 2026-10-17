@@ -5,18 +5,21 @@ from __future__ import annotations
 import functools
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
     from zvisiongenerator.core.image_backend import ImageBackend
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
     from zvisiongenerator.core.seedvr2 import SeedVR2Upscaler
-    from zvisiongenerator.utils.model_memory import MemoryBudget
+    from zvisiongenerator.utils.model_memory import LtxCudaMemoryEstimate, MemoryBudget
 
 __all__ = [
     "create_prompt_enhancer",
     "accelerator_memory_budget_or_none",
+    "estimate_ltx_system_memory",
     "get_accelerator_memory_budget",
     "get_backend",
     "get_backend_name",
@@ -232,6 +235,15 @@ def supports_video_extend() -> bool:
 def supports_video_upscale_review() -> bool:
     """Return whether this platform's video backend can pause after the half-size render of an upscale (every registered LTX backend can)."""
     return sys.platform in _VIDEO_BACKENDS_MAP
+
+
+def estimate_ltx_system_memory(config: dict[str, Any], resolved_model: str, quantize: int, *, find_local_dir: Callable[[str], Path | None]) -> "LtxCudaMemoryEstimate | None":
+    """Return the CUDA video backend's system-memory estimate of LTX from files on disk, or ``None`` elsewhere or when files are missing."""
+    if sys.platform not in ("win32", "linux"):
+        return None
+    from zvisiongenerator.backends.cuda.video.memory_estimate import cached_ltx_system_estimate
+
+    return cached_ltx_system_estimate(config, resolved_model, quantize, find_local_dir=find_local_dir)
 
 
 # --- Prompt enhancer ---

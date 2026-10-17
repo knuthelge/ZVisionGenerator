@@ -55,18 +55,18 @@ class Ideogram4Sampler:
 def wrap_ideogram4_prompt(prompt: str) -> str | dict[str, Any]:
     """Wrap a plain-text prompt into Ideogram 4's minimal structured JSON caption.
 
-    Prompts that already look like JSON captions (start with "{") are returned
-    unchanged so callers retain full control.
+    Prompts that already look like JSON captions (start with "{") keep their content so callers retain full
+    control; a valid one is laid out on a single line, the form Ideogram 4 reads, wherever it came from.
 
     Args:
         prompt: The user-supplied prompt text.
 
     Returns:
-        The original prompt when it is already a JSON caption, otherwise a
-        minimal structured caption dict.
+        The caption as compact JSON text when it is already a JSON caption (as written when it does not parse),
+        otherwise a minimal structured caption dict.
     """
     if prompt.strip().startswith("{"):
-        return prompt
+        return compact_caption(json.loads(prompt)) if is_json_caption(prompt) else prompt
     return {
         "high_level_description": prompt,
         "compositional_deconstruction": {"background": prompt, "elements": []},
@@ -74,7 +74,7 @@ def wrap_ideogram4_prompt(prompt: str) -> str | dict[str, Any]:
 
 
 def caption_text(prompt: str) -> str:
-    """Return the text a backend that takes a string feeds Ideogram 4: JSON captions verbatim, plain text wrapped and serialized compactly."""
+    """Return the text a backend that takes a string feeds Ideogram 4: compact JSON, with plain text wrapped first."""
     wrapped = wrap_ideogram4_prompt(prompt)
     return wrapped if isinstance(wrapped, str) else compact_caption(wrapped)
 

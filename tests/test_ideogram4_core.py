@@ -16,10 +16,13 @@ class TestCaptions:
             "compositional_deconstruction": {"background": "a red car", "elements": []},
         }
 
-    @pytest.mark.parametrize("prompt", ['{"high_level_description": "x"}', '  {"a": 1}'])
-    def test_a_json_caption_is_kept_as_written(self, prompt):
-        assert wrap_ideogram4_prompt(prompt) == prompt
-        assert caption_text(prompt) == prompt
+    @pytest.mark.parametrize("prompt", ['{"high_level_description": "x"}', '  {\n  "high_level_description": "x"\n}\n'])
+    def test_a_json_caption_keeps_its_content_on_one_line(self, prompt):
+        assert wrap_ideogram4_prompt(prompt) == '{"high_level_description":"x"}'
+        assert caption_text(prompt) == '{"high_level_description":"x"}'
+
+    def test_text_that_only_looks_like_json_is_kept_as_written(self):
+        assert caption_text("{a red car") == "{a red car"
 
     def test_the_text_for_a_string_backend_is_compact_json_that_keeps_unicode(self):
         text = caption_text("blå bil")

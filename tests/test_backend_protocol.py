@@ -14,6 +14,17 @@ from zvisiongenerator.core.image_backend import ImageBackend
 
 
 class TestBackendRegistryLookup:
+    def test_ltx_system_memory_is_estimated_only_by_the_cuda_backend(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+        import zvisiongenerator.backends.cuda.video.memory_estimate as memory_estimate
+
+        estimate = object()
+        monkeypatch.setattr(memory_estimate, "cached_ltx_system_estimate", lambda config, model, quantize, *, find_local_dir: estimate)
+        monkeypatch.setattr(backends.sys, "platform", "linux")
+        assert backends.estimate_ltx_system_memory({}, "owner/ltx", 4, find_local_dir=lambda reference: None) is estimate
+        monkeypatch.setattr(backends.sys, "platform", "darwin")
+        assert backends.estimate_ltx_system_memory({}, "owner/ltx", 4, find_local_dir=lambda reference: None) is None
+
     def test_get_backend_name_uses_dict_lookup_for_darwin(self, monkeypatch):
         import zvisiongenerator.backends as backends
 
@@ -539,7 +550,7 @@ class TestIdeogram4MfluxBackend:
         image_mac_module = self._import_backend_module()
         prompt = '   {"high_level_description":"x","compositional_deconstruction":{"background":"x","elements":[]}}'
 
-        assert image_mac_module._wrap_ideogram4_prompt(prompt) == prompt
+        assert image_mac_module._wrap_ideogram4_prompt(prompt) == prompt.strip()
 
     def test_ideogram4_text_to_image_omits_steps_and_guidance_when_not_explicit(self):
         image_mac_module = self._import_backend_module()

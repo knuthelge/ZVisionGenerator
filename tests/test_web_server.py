@@ -674,6 +674,7 @@ def test_submit_image_job_rejects_json_enhancement_for_models_without_json_capti
     [
         ({"model": "ideo", "prompt": "hello", "steps": "28", "guidance": "6.0"}, 28, 6.0, True, True),
         ({"model": "ideo", "prompt": "hello"}, 10, 3.5, False, False),
+        ({"model": "ideo", "prompt": "hello", "steps": "10", "guidance": "3.5"}, 10, 3.5, False, False),
     ],
 )
 def test_submit_image_job_threads_steps_and_guidance_explicit_flags_to_authoritative_args(

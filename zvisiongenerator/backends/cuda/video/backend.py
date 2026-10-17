@@ -1232,24 +1232,26 @@ class DiffusersVideoBackend:
         _check_upscale_arguments(model, stage1_steps)
         _check_review_arguments(review, stage1_steps)
 
-        with model.runtime.torch.inference_mode():
-            clip = _generate_clip(
-                model,
-                model.text_to_video,
-                prompt=prompt,
-                width=width,
-                height=height,
-                num_frames=num_frames,
-                fps=model.model_info.default_fps,
-                seed=seed,
-                steps=steps,
-                stage1_steps=stage1_steps,
-                step_callback=step_callback,
-                extra_kwargs={},
-                review=review,
-            )
-            output = _export_video(model, clip, output_path)
-        _cleanup(model.runtime)
+        try:
+            with model.runtime.torch.inference_mode():
+                clip = _generate_clip(
+                    model,
+                    model.text_to_video,
+                    prompt=prompt,
+                    width=width,
+                    height=height,
+                    num_frames=num_frames,
+                    fps=model.model_info.default_fps,
+                    seed=seed,
+                    steps=steps,
+                    stage1_steps=stage1_steps,
+                    step_callback=step_callback,
+                    extra_kwargs={},
+                    review=review,
+                )
+                output = _export_video(model, clip, output_path)
+        finally:
+            _cleanup(model.runtime)
         return output
 
     def image_to_video(
@@ -1279,24 +1281,26 @@ class DiffusersVideoBackend:
         with model.runtime.image_module.open(image_path) as image:
             input_image = _fit_image(image.convert("RGB"), width, height)
 
-        with model.runtime.torch.inference_mode():
-            clip = _generate_clip(
-                model,
-                model.image_to_video,
-                prompt=prompt,
-                width=width,
-                height=height,
-                num_frames=num_frames,
-                fps=model.model_info.default_fps,
-                seed=seed,
-                steps=steps,
-                stage1_steps=stage1_steps,
-                step_callback=step_callback,
-                extra_kwargs={"image": input_image},
-                review=review,
-            )
-            output = _export_video(model, clip, output_path)
-        _cleanup(model.runtime)
+        try:
+            with model.runtime.torch.inference_mode():
+                clip = _generate_clip(
+                    model,
+                    model.image_to_video,
+                    prompt=prompt,
+                    width=width,
+                    height=height,
+                    num_frames=num_frames,
+                    fps=model.model_info.default_fps,
+                    seed=seed,
+                    steps=steps,
+                    stage1_steps=stage1_steps,
+                    step_callback=step_callback,
+                    extra_kwargs={"image": input_image},
+                    review=review,
+                )
+                output = _export_video(model, clip, output_path)
+        finally:
+            _cleanup(model.runtime)
         return output
 
     def extend_video(
@@ -1353,23 +1357,25 @@ class DiffusersVideoBackend:
         tail = read_source_tail(source)
         tail_audio = read_source_tail_audio(source, pipeline.audio_vae.config.sample_rate) if source.has_audio else None
         carry = model.runtime.pipeline_classes.video_condition(frames=tail, index=0, strength=1.0)
-        with model.runtime.torch.inference_mode():
-            audio_carry = encode_audio_carry(pipeline, tail_audio, _audio_tokens(pipeline, CARRY_FRAMES, source.fps)) if tail_audio is not None else None
-            clip = _generate_clip(
-                model,
-                pipeline,
-                prompt=prompt,
-                width=source.width,
-                height=source.height,
-                num_frames=window_frames(extend_frames),
-                fps=source.fps,
-                seed=seed,
-                steps=steps,
-                stage1_steps=None,
-                step_callback=step_callback,
-                extra_kwargs={"conditions": [carry]},
-                audio_carry=audio_carry,
-            )
-            segment = _write_extend_segment(clip, source, extend_frames, Path(segment_dir), audio=audio_output and source.has_audio)
-        _cleanup(model.runtime)
+        try:
+            with model.runtime.torch.inference_mode():
+                audio_carry = encode_audio_carry(pipeline, tail_audio, _audio_tokens(pipeline, CARRY_FRAMES, source.fps)) if tail_audio is not None else None
+                clip = _generate_clip(
+                    model,
+                    pipeline,
+                    prompt=prompt,
+                    width=source.width,
+                    height=source.height,
+                    num_frames=window_frames(extend_frames),
+                    fps=source.fps,
+                    seed=seed,
+                    steps=steps,
+                    stage1_steps=None,
+                    step_callback=step_callback,
+                    extra_kwargs={"conditions": [carry]},
+                    audio_carry=audio_carry,
+                )
+                segment = _write_extend_segment(clip, source, extend_frames, Path(segment_dir), audio=audio_output and source.has_audio)
+        finally:
+            _cleanup(model.runtime)
         return segment

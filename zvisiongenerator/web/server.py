@@ -1005,8 +1005,10 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     # Capture explicit-intent flags on args BEFORE the resolved defaults overwrite
     # args.steps/args.guidance, so run_batch's authoritative request rebuild sees them
     # via getattr(args, ...) (mirrors image_cli.py's args.steps_explicit assignment).
-    args.steps_explicit = args.steps is not None
-    args.guidance_explicit = args.guidance is not None
+    # The form always sends both, so only a value that differs from the model's default counts as chosen.
+    model_defaults = resolve_defaults(model_info, app_config, {}, get_backend_name())
+    args.steps_explicit = args.steps is not None and args.steps != model_defaults["steps"]
+    args.guidance_explicit = args.guidance is not None and args.guidance != model_defaults["guidance"]
     args.steps = defaults["steps"]
     args.guidance = defaults["guidance"]
     # A model with its own sampler ignores a scheduler carried over from another model, as with negative prompts.

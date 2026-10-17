@@ -21,6 +21,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 - **Web UI: Reuse settings now uses exactly the source's LoRAs.** Reusing an image or video made without LoRAs used to keep the LoRAs already chosen, so the reused job could differ from the original. The same applies to **Load settings** on a queued job and to **Extend**
+- **Ideogram 4 in the Web UI uses its default guidance schedule.** Leaving Steps and Guidance at the model's defaults now runs the same 7.0-then-3.0 schedule as the command line, instead of a flat 7.0, so the same seed gives the same image
+- **JSON captions reach Ideogram 4 on one line wherever they come from.** A multi-line caption from `--json-prompt` or a prompt file is now sent in the same compact form as one from the Web UI
 - **Reusing a JSON-caption image.** **Reuse** on an image made from a structured JSON caption now opens it in the `{ } JSON` box instead of the prompt, where its braces were read as `{a|b}` choices
 - **FLUX.2 Klein reference images and upscale on Windows and Linux.** Using a reference image, `--upscale`, or the viewer's Upscale with Klein (the default model) failed with an error there. It now works, as on macOS
 

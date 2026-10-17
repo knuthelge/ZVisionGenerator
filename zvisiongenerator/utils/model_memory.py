@@ -425,14 +425,14 @@ def ltx_cuda_system_memory(
 
     The level comes from the config (``ltx-4`` is 4). Nothing is downloaded: the files must already be on disk.
     """
-    from zvisiongenerator.backends.cuda.video.memory_estimate import cached_ltx_system_estimate
+    from zvisiongenerator.backends import estimate_ltx_system_memory
     from zvisiongenerator.utils.config import ltx_diffusers_quantize
 
     config = app_config or {}
     quantize = ltx_diffusers_quantize(config, model_name)
     if quantize is None:
         return None
-    return cached_ltx_system_estimate(config, resolved_model, quantize, find_local_dir=find_local_dir)
+    return estimate_ltx_system_memory(config, resolved_model, quantize, find_local_dir=find_local_dir)
 
 
 def _cuda_clip_fit(

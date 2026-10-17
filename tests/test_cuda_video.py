@@ -1944,6 +1944,7 @@ class TestUpscaleReview:
         assert encoded == shown  # the preview was the only encode
         assert not shown[0].exists()
         assert not (tmp_path / "upscaled.mp4").exists()
+        assert runtime.torch.cuda.empty_cache_calls == 1  # memory handed back even though the clip was discarded
 
     def test_image_to_video_reviews_too(self, monkeypatch, tmp_path):
         runtime, _ = self._recording_runtime()
