@@ -244,7 +244,7 @@ For video, one rewrite returns two parts: a **scene** and an **action** (see [Sc
 | Direction | both |
 
 - **Text to video** splits and expands, so it works when you wrote everything in the prompt or gave only a scene: the setting, look and camera setup go to the scene, and events in time order, camera moves, sound and quoted dialogue go to the action.
-- **Image to video** writes a short scene (style, and what the image does not show) and an action that describes the change.
+- **Image to video** keeps your scene (what the image shows) and writes only the action by default. With a blank scene, or with Rewrite set to Scene and action, it writes a short scene (style, and what the image does not show) and an action that describes the change.
 - **Extend** writes the action that happens next, using the previous clip's prompt as context so it does not repeat its actions or spoken lines. From a clip made without a scene, the enhancer takes a scene from the old prompt. See [Extend a Video](video.md#extend-a-video).
 - **Length** applies to the scene and the action together.
 - If the enhancer does not return a scene and an action, it tries once more, then uses its rewrite as the action and keeps your scene, with a warning.
@@ -258,7 +258,7 @@ The **Rewrite** option (`parts` in the CLI and prompt files) chooses what the en
 | Scene and action | `both` | A rewritten scene and a rewritten action. With no scene, the enhancer splits your text into both. |
 | Action only | `action` | Your scene is kept exactly as written. The enhancer reads it and writes an action that fits it. |
 
-- The default depends on the workflow: **Extend Video** rewrites the action only when the clip has a scene, so a chain of extensions keeps its look. **Text to Video** and **Image to Video** rewrite both.
+- The default depends on the workflow: **Extend Video** rewrites the action only when the clip has a scene, so a chain of extensions keeps its look, and **Image to Video** does the same when it has a scene, so the scene that describes the starting image is not restyled. **Text to Video** rewrites both.
 - Style, Mood and Details shape the scene, so they have no effect while Rewrite is Action only. Motion, Sound, Length and Direction still shape the action.
 - With Action only and a scene, Enhance always rewrites the action, even when every other option is left at "keep".
 - **Action only needs a scene.** With a blank scene, Action only is unavailable in the Web UI, and the run rewrites both parts. On the command line it does the same and warns once.

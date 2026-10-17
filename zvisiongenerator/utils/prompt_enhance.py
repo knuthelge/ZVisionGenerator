@@ -213,7 +213,8 @@ class EnhanceSettings:
     """A choice on every axis of the option matrix, plus the video-only ``parts`` choice.
 
     ``parts`` is ``"both"`` (rewrite scene and action), ``"action"`` (keep the scene, rewrite only the action) or
-    ``None`` for auto, which ``resolve_parts`` turns into ``"action"`` when extending a clip that has a scene and
+    ``None`` for auto, which ``resolve_parts`` turns into ``"action"`` when extending a clip that has a scene, or
+    starting from an image with a scene, and
     ``"both"`` otherwise. Image rewrites ignore it.
     """
 
@@ -271,7 +272,7 @@ def matrix_contract() -> dict[str, Any]:
     """Serialize the option matrix and defaults for the Web UI.
 
     ``parts`` describes the video-only Rewrite choice; its ``default`` is ``None`` (auto: ``action`` when extending a
-    clip that has a scene, else ``both``), and ``defaults.parts`` is ``None`` too.
+    clip that has a scene or starting from an image with a scene, else ``both``), and ``defaults.parts`` is ``None`` too.
     """
     return {
         "parts": {
@@ -580,15 +581,16 @@ def entry_scene(scene_by_set: dict[str, list[str | None]] | None, set_name: str,
     return None
 
 
-def resolve_parts(settings: EnhanceSettings, *, scene: str | None, extends: bool = False) -> str:
+def resolve_parts(settings: EnhanceSettings, *, scene: str | None, extends: bool = False, reference_image: bool = False) -> str:
     """Return ``"action"`` or ``"both"``: which parts of a video prompt one rewrite writes.
 
     An explicit ``parts`` wins, except that ``"action"`` needs a scene to keep: with a blank *scene* it falls back to
     ``"both"`` (the text is split into scene and action), without error. With ``parts`` unset (auto), an extension of a
-    clip that has a scene writes only the action, and every other video job writes both.
+    clip that has a scene writes only the action, and so does an image-to-video job with a scene (the scene describes
+    the starting image, which the rewrite must not restyle); every other video job writes both.
     """
     has_scene = bool((scene or "").strip())
-    wanted = settings.parts if settings.parts is not None else ("action" if extends else "both")
+    wanted = settings.parts if settings.parts is not None else ("action" if extends or reference_image else "both")
     return "action" if wanted == "action" and has_scene else "both"
 
 

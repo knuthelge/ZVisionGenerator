@@ -33,13 +33,14 @@ describe('asset actions', () => {
     expect(canUseAsReference(makeAsset({ media_type: 'video' }))).toBe(false);
   });
 
-  it('maps the reference target to its workflow, the asset path and its prompt', () => {
+  it('maps the reference target to its workflow and the asset path, with the prompt as an image prompt or a video scene', () => {
     expect(referenceParams(makeAsset(), 'image')).toEqual({ workflow: 'img2img', image_path: '/outputs/out/a.png', prompt: 'a fox' });
-    expect(referenceParams(makeAsset(), 'video')).toEqual({ workflow: 'img2vid', image_path: '/outputs/out/a.png', prompt: 'a fox' });
+    expect(referenceParams(makeAsset(), 'video')).toEqual({ workflow: 'img2vid', image_path: '/outputs/out/a.png', scene: 'a fox' });
   });
 
   it('leaves the prompt out when the asset has none', () => {
     expect(referenceParams(makeAsset({ prompt: '' }), 'image')).toEqual({ workflow: 'img2img', image_path: '/outputs/out/a.png' });
+    expect(referenceParams(makeAsset({ prompt: '' }), 'video')).toEqual({ workflow: 'img2vid', image_path: '/outputs/out/a.png' });
   });
 
   it('clamps the aspect ratio and defaults to square without dimensions', () => {

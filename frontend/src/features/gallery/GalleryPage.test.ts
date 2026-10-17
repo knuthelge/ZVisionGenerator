@@ -288,7 +288,7 @@ describe('GalleryPage regressions', () => {
     });
   });
 
-  it('sends an image to the workspace as a reference with its prompt through router params', async () => {
+  it('sends an image to the workspace as a first frame with its prompt as the scene through router params', async () => {
     const asset = makeAsset({ file_path: '/outputs/nested/asset.png' });
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
 
@@ -299,7 +299,7 @@ describe('GalleryPage regressions', () => {
     flushSync();
     (document.querySelector('[role="menu"] [data-action="reference-video"]') as HTMLButtonElement).click();
 
-    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', { workflow: 'img2vid', image_path: '/outputs/nested/asset.png', prompt: asset.prompt });
+    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', { workflow: 'img2vid', image_path: '/outputs/nested/asset.png', scene: asset.prompt });
   });
 
   it('sends a video to the Extend Video workflow from its menu, with its model, and leaves the text to the source', async () => {

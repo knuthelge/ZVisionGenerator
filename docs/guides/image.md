@@ -120,7 +120,7 @@ ziv-image -m my-model --prompt "Cyberpunk cityscape" --image sketch.png --image-
 
 The reference image is automatically resized to match target dimensions. Works on macOS, Windows, and Linux.
 
-In the Web UI, **Use as reference** (`E`) in the asset viewer opens an image as the reference for img2img or img2vid and loads its prompt too, replacing an Enhanced prompt made for the previous one.
+In the Web UI, **Use as reference** (`E`) in the asset viewer opens an image as the reference for img2img or img2vid and loads its prompt too, replacing an Enhanced prompt made for the previous one. For img2img the prompt goes into the Prompt box; for img2vid it goes into Scene, since it describes the first frame, and Action is left for what happens (see [Scene and Action](video.md#scene-and-action)).
 
 ## LoRA Support
 

@@ -53,8 +53,8 @@ In the Web UI, Scene is the compact box above Action on the Text to Video, Image
 The [prompt enhancer](prompts.md#enhancing-prompts) works on the pair. One call returns a scene and an action:
 
 - **Text to Video** splits and expands what you wrote. Writing everything in Action is fine: the enhancer moves the setting, look and camera setup into the scene and the events into the action.
-- **Image to Video** writes a short scene (style, and what the image does not show) and an action that describes the change.
-- **Extend Video** keeps your scene as it is and writes only the action by default. See [Extend a Video](#extend-a-video).
+- **Image to Video** keeps your scene as it is and writes only the action by default, the way Extend Video does: put what the image shows in Scene and what happens in Action. **Use as reference** on a gallery image fills Scene with the image's prompt and leaves Action empty for you. With a blank Scene, or with **Scene and action** chosen, it writes a short scene (style, and what the image does not show) and an action that describes the change.
+- **Extend Video** keeps the clip's scene as it is and writes only the action by default. See [Extend a Video](#extend-a-video).
 
 The **Rewrite** option chooses what is written: **Scene and action**, or **Action only**, which keeps your scene exactly as written and writes an action that fits it. It works in all three workflows (`--enhance parts=action` in `ziv-video`) and needs a scene: with none, both parts are written. See [Rewrite](prompts.md#rewrite-scene-and-action-or-action-only). In the Web UI each part is used on its own: Generate sends a part's Enhanced text when it has any and your text otherwise, and **Use mine** next to a part goes back to your text for that part.
 

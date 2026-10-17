@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+- **Web UI: Image to Video starts from the image's description as the scene.** **Use as reference** on a gallery image now fills Scene with the image's prompt and leaves Action empty for what happens, instead of putting the description in Action. The enhancer's **Rewrite** defaults to **Action only** for Image to Video when there is a scene, as it does for Extend Video, so it keeps your description of the first frame and writes only the motion; `ziv-video --image` with `--scene` and `--enhance` does the same. The Scene and Action boxes say what belongs in each for a starting image
+
 ## [0.13.0b23] - 2026-10-17
 
 ### Fixed

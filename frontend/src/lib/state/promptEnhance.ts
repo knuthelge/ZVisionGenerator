@@ -33,9 +33,12 @@ export function workflowMode(workflow: Workflow): WorkflowMode {
 
 const FALLBACK_SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', details: ['lighting', 'composition'], length: 'same', motion: ['action'], sound: [], note: '' };
 
-/** What Rewrite starts as: an extension keeps its scene and writes the next action; the other video workflows write both. */
+/**
+ * What Rewrite starts as: an extension keeps its scene and writes the next action, and so does Image to Video, whose scene
+ * describes the starting image; Text to Video writes both. A blank Scene still means both (see `runParts`).
+ */
 export function defaultParts(workflow: Workflow): EnhanceParts {
-  return workflow === 'extend' ? 'action' : 'both';
+  return workflow === 'extend' || workflow === 'img2vid' ? 'action' : 'both';
 }
 
 /** The Rewrite choice remembered for the current workflow, or that workflow's default. */

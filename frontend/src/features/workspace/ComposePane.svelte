@@ -62,14 +62,19 @@
   const textMissing = $derived(!enhancedUsed && !canSubmitText(s));
 
   const SCENE_PLACEHOLDER = 'Who and where, look, style, camera. Kept for extensions.';
+  const IMAGE_SCENE_PLACEHOLDER = 'What the image shows: who and where, look, style, camera.';
   const LEGACY_SCENE_PLACEHOLDER = 'Move the scene description here from the prompt (who, where, look). Then change the prompt to what happens next.';
   const extending = $derived(s.workflow === 'extend');
+  const fromImage = $derived(s.workflow === 'img2vid');
   const promptPlaceholder = $derived(
-    extending ? 'What happens next…' : caps.showScene ? 'What happens: action, camera moves, sound, dialogue.' : 'Describe the scene...'
+    extending ? 'What happens next…'
+      : fromImage ? 'What happens from the image: motion, camera moves, sound, dialogue.'
+      : caps.showScene ? 'What happens: action, camera moves, sound, dialogue.'
+      : 'Describe the scene...'
   );
   // A source that recorded one prompt and no scene: the old prompt is pre-filled and the scene is left for the user to write.
   const legacySource = $derived(extending && draft.extendSource?.legacy === true);
-  const scenePlaceholder = $derived(legacySource ? LEGACY_SCENE_PLACEHOLDER : SCENE_PLACEHOLDER);
+  const scenePlaceholder = $derived(legacySource ? LEGACY_SCENE_PLACEHOLDER : fromImage ? IMAGE_SCENE_PLACEHOLDER : SCENE_PLACEHOLDER);
   // Shown from the prefill until the Prompt is edited; it never blocks Generate.
   const originalPromptShown = $derived(extending && !promptFileMode && isOriginalLegacyPrompt(s, draft.extendSource));
   // The parts a part's Enhanced box stands for, so its placeholder tells what Generate does with it.

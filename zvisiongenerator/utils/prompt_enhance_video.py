@@ -460,7 +460,7 @@ def enhance_video_prompt(
     if not extends and not scene and not prompt:
         raise ValueError("Enter a scene or a prompt to enhance.")
     validate_settings(settings, mode="video", split=extends or not scene)
-    if resolve_parts(settings, scene=scene, extends=extends) == "action":
+    if resolve_parts(settings, scene=scene, extends=extends, reference_image=context.reference_image) == "action":
         return _enhance_action_only(
             enhancer, scene, prompt, settings, seed=seed, ceiling=ceiling, context=context, length_cfg=length_cfg, temperature=temperature, max_tokens=max_tokens, on_text=on_text, cancelled=cancelled
         )

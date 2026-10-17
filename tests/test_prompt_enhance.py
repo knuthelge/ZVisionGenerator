@@ -1243,21 +1243,24 @@ class TestPartsGrammar:
 
 class TestResolveParts:
     @pytest.mark.parametrize(
-        ("parts", "scene", "extends", "expected"),
+        ("parts", "scene", "extends", "reference_image", "expected"),
         [
-            (None, "A castle.", False, "both"),
-            (None, "A castle.", True, "action"),
-            (None, "", True, "both"),
-            (None, "  ", False, "both"),
-            ("both", "A castle.", True, "both"),
-            ("action", "A castle.", False, "action"),
-            ("action", "A castle.", True, "action"),
-            ("action", "", False, "both"),
-            ("action", None, True, "both"),
+            (None, "A castle.", False, False, "both"),
+            (None, "A castle.", True, False, "action"),
+            (None, "A castle.", False, True, "action"),
+            (None, "", True, False, "both"),
+            (None, "", False, True, "both"),
+            (None, "  ", False, False, "both"),
+            ("both", "A castle.", True, False, "both"),
+            ("both", "A castle.", False, True, "both"),
+            ("action", "A castle.", False, False, "action"),
+            ("action", "A castle.", True, False, "action"),
+            ("action", "", False, False, "both"),
+            ("action", None, True, False, "both"),
         ],
     )
-    def test_rule(self, parts, scene, extends, expected):
-        assert resolve_parts(EnhanceSettings(parts=parts), scene=scene, extends=extends) == expected
+    def test_rule(self, parts, scene, extends, reference_image, expected):
+        assert resolve_parts(EnhanceSettings(parts=parts), scene=scene, extends=extends, reference_image=reference_image) == expected
 
 
 class TestPartsNoop:

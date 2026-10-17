@@ -80,10 +80,15 @@ export function canUseAsReference(asset: GalleryAsset): boolean {
   return asset.media_type === 'image' && Boolean(asset.file_path);
 }
 
-/** Return the workspace prefill params that make an asset the reference image, carrying its prompt. */
+/**
+ * Return the workspace prefill params that make an asset the reference image, carrying its prompt.
+ *
+ * For a video the prompt describes what the first frame shows, so it fills the Scene and leaves the Action for what happens;
+ * for an image it is the prompt.
+ */
 export function referenceParams(asset: GalleryAsset, target: ReferenceTarget): Record<string, string> {
   const params: Record<string, string> = { workflow: REFERENCE_WORKFLOWS[target], image_path: asset.file_path ?? '' };
-  if (asset.prompt) params.prompt = asset.prompt;
+  if (asset.prompt) params[target === 'video' ? 'scene' : 'prompt'] = asset.prompt;
   return params;
 }
 

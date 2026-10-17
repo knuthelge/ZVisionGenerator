@@ -18,7 +18,7 @@ function state(overrides: Partial<DraftState> = {}): DraftState {
 describe('the server matrix contract with defaults.parts = null', () => {
   it.each([
     ['txt2vid', 'both'],
-    ['img2vid', 'both'],
+    ['img2vid', 'action'],
     ['extend', 'action'],
   ] as const)('does not override the %s default (%s)', (workflow, parts) => {
     expect(effectiveEnhanceSettings(state({ workflow }), CONTRACT).parts).toBe(parts);

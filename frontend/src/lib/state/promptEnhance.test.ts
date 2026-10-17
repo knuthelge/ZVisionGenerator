@@ -294,12 +294,18 @@ describe('scene and prompt pair', () => {
   });
 
   describe('Rewrite', () => {
-    it('defaults to Action only for an extension and Scene and action for the other videos', () => {
+    it('defaults to Action only for an extension and Image to Video, and Scene and action for Text to Video', () => {
       expect(defaultParts('extend')).toBe('action');
+      expect(defaultParts('img2vid')).toBe('action');
       expect(defaultParts('txt2vid')).toBe('both');
-      expect(defaultParts('img2vid')).toBe('both');
       expect(rememberedParts(state({ workflow: 'extend' }))).toBe('action');
+      expect(rememberedParts(state({ workflow: 'img2vid' }))).toBe('action');
       expect(rememberedParts(state({ workflow: 'txt2vid' }))).toBe('both');
+    });
+
+    it('rewrites both parts of an Image to Video run while its Scene is blank', () => {
+      expect(runParts(state({ workflow: 'img2vid', scene: '', prompt: 'She waves.' }))).toBe('both');
+      expect(runParts(state({ workflow: 'img2vid', scene: 'A fox on a hill.', prompt: 'She waves.' }))).toBe('action');
     });
 
     it('remembers the choice for each video workflow apart', () => {
@@ -309,7 +315,8 @@ describe('scene and prompt pair', () => {
       const action = withRememberedParts(settings, 'txt2vid', 'action');
       expect(rememberedParts(state({ workflow: 'txt2vid', enhanceSettings: action }))).toBe('action');
       expect(rememberedParts(state({ workflow: 'extend', enhanceSettings: action }))).toBe('both');
-      expect(rememberedParts(state({ workflow: 'img2vid', enhanceSettings: action }))).toBe('both');
+      expect(rememberedParts(state({ workflow: 'img2vid', enhanceSettings: action }))).toBe('action');
+      expect(rememberedParts(state({ workflow: 'img2vid', enhanceSettings: withRememberedParts(action, 'img2vid', 'both') }))).toBe('both');
     });
 
     it('falls back to both while the Scene is blank, without changing the remembered choice', () => {

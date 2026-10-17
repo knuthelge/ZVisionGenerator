@@ -596,7 +596,7 @@ def _enhance_for_job(job: dict[str, Any], enhancer: Any, frames: queue.Queue[dic
     scene = expand_random_choices(job.get("scene", ""))
     context = job.get("context")
     # Only the action is written when the settings ask for it and there is a scene to keep: no scene text streams.
-    action_only = resolve_parts(job["settings"], scene=scene, extends=bool(context is not None and context.extends)) == "action"
+    action_only = resolve_parts(job["settings"], scene=scene, extends=bool(context is not None and context.extends), reference_image=bool(context is not None and context.reference_image)) == "action"
 
     def _on_text(text: str) -> None:
         part_scene, part_prompt = split_scene_action(text, action_only=action_only)
