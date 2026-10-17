@@ -105,6 +105,14 @@ class TestDescribeCudaModelStatus:
         assert fit["by_quantize"]["none"]["required_gb"] < fit["without_low_memory"]["required_gb"]  # the transformer stays on the GPU
         assert fit["by_quantize"]["none"]["system_gb"] == fit["without_low_memory"]["system_gb"]
 
+    def test_cuda_video_weights_beyond_system_memory_are_too_large(self, tmp_path, monkeypatch):
+        system = LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB)
+        monkeypatch.setattr(model_status, "ltx_cuda_system_memory", lambda *args: system)
+
+        status = describe_model_status("owner/ltx", kind="video", budget=MemoryBudget(24 * _GIB, 16 * _GIB), find_local_dir=_finder({"owner/ltx": tmp_path}), model_name="ltx-4", app_config={})
+
+        assert status["memory_fit"]["by_quantize"]["none"]["status"] == "too_large"  # the backend refuses the load
+
     def test_cuda_video_without_its_files_or_level_is_not_estimated(self, tmp_path, monkeypatch):
         monkeypatch.setattr(model_status, "ltx_cuda_system_memory", lambda *args: None)
 

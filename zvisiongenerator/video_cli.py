@@ -246,6 +246,14 @@ def _warn_if_too_large(args: argparse.Namespace, config: dict[str, Any], *, exte
     fit = _clip_fit(args, config, upscale=bool(args.upscale))
     if fit is None or fit["status"] == "fits":
         return
+    if fit.get("resource") == "system":
+        # The weights, not the clip, are what fill system memory: a shorter or smaller clip does not help.
+        smaller = " Use ltx-4, the smaller model." if getattr(args, "model_name", None) == "ltx-8" else " Close other apps to free memory."
+        warnings.warn(
+            f"The model needs about {fit['required_gb']:g} GB of system memory; this machine has {fit['budget_gb']:g} GB ({fit['status'].replace('_', ' ')}). Continuing; it may be slow or fail.{smaller}",
+            stacklevel=2,
+        )
+        return
     if extending:
         subject = f"The {args.num_frames}-frame extension window"
         advice = "Use --extend-seconds or --extend-frames for a shorter extension"

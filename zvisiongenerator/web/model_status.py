@@ -12,6 +12,7 @@ from zvisiongenerator.utils.model_memory import (
     CudaMemoryEstimate,
     MemoryBudget,
     classify_cuda_memory_fit,
+    classify_ltx_cuda_memory_fit,
     classify_memory_fit,
     estimate_cuda_image_memory,
     estimate_image_memory,
@@ -108,8 +109,8 @@ def _cuda_video_memory_fit(resolved_path: str, budget: MemoryBudget, find_local_
         "kind": DISCRETE_MEMORY,
         "budget_gb": _to_gb(budget.gpu_bytes),
         "system_budget_gb": _to_gb(budget.system_bytes or 0),
-        "by_quantize": {NO_QUANTIZE_KEY: _cuda_fit(staged, budget)},
-        "without_low_memory": _cuda_fit(resident, budget),
+        "by_quantize": {NO_QUANTIZE_KEY: _cuda_fit(staged, budget, classify=classify_ltx_cuda_memory_fit)},
+        "without_low_memory": _cuda_fit(resident, budget, classify=classify_ltx_cuda_memory_fit),
         "note": VIDEO_ESTIMATE_NOTE,
     }
 
@@ -135,8 +136,8 @@ def _fit(required_bytes: int, budget_bytes: int) -> dict[str, Any]:
     return {"status": classify_memory_fit(required_bytes, budget_bytes), "required_gb": _to_gb(required_bytes)}
 
 
-def _cuda_fit(estimate: CudaMemoryEstimate, budget: MemoryBudget) -> dict[str, Any]:
-    return {"status": classify_cuda_memory_fit(estimate, budget), "required_gb": _to_gb(estimate.gpu_bytes), "system_gb": _to_gb(estimate.system_bytes)}
+def _cuda_fit(estimate: CudaMemoryEstimate, budget: MemoryBudget, *, classify: Callable[[CudaMemoryEstimate, MemoryBudget], str] = classify_cuda_memory_fit) -> dict[str, Any]:
+    return {"status": classify(estimate, budget), "required_gb": _to_gb(estimate.gpu_bytes), "system_gb": _to_gb(estimate.system_bytes)}
 
 
 def _level_key(level: int | None) -> str:

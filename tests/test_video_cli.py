@@ -1142,3 +1142,18 @@ class TestAlignLtxFrames:
             align_ltx_frames(50)
             assert len(w) == 1
             assert "8k+1" in str(w[0].message)
+
+
+@pytest.mark.parametrize(("model_name", "advice"), [("ltx-8", "Use ltx-4"), ("ltx-4", "Close other apps")])
+def test_a_clip_limited_by_system_memory_points_at_the_model_not_the_clip(monkeypatch, model_name, advice):
+    import argparse
+
+    import zvisiongenerator.video_cli as video_cli
+
+    monkeypatch.setattr(video_cli, "_clip_fit", lambda *_args, **_kwargs: {"status": "too_large", "required_gb": 40.0, "budget_gb": 32.0, "kind": "discrete", "resource": "system"})
+    args = argparse.Namespace(upscale=None, model_name=model_name, width=704, height=448, num_frames=121, low_memory=True)
+
+    with pytest.warns(UserWarning, match=advice) as caught:
+        video_cli._warn_if_too_large(args, {}, extending=False)
+
+    assert "--frames" not in str(caught[0].message)

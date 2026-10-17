@@ -458,10 +458,7 @@ def _cuda_clip_fit(
     resource, required, limit = "gpu", estimate.gpu_bytes, budget.gpu_bytes
     if system_budget and estimate.system_bytes / (system_budget * _CUDA_SYSTEM_FITS_RATIO) > estimate.gpu_bytes / (budget.gpu_bytes * _CUDA_GPU_FITS_RATIO):
         resource, required, limit = "system", estimate.system_bytes, system_budget
-    status = classify_cuda_memory_fit(estimate, budget)
-    # The LTX backend refuses to load weights that need more than the machine's system memory, unlike an image model.
-    if system_budget and estimate.system_bytes > system_budget:
-        status = "too_large"
+    status = classify_ltx_cuda_memory_fit(estimate, budget)
     # A clip out of GPU memory is about the GPU, even when system memory is fuller.
     if status == "too_large" and estimate.gpu_bytes > budget.gpu_bytes:
         resource, required, limit = "gpu", estimate.gpu_bytes, budget.gpu_bytes
@@ -565,6 +562,16 @@ def classify_cuda_memory_fit(estimate: CudaMemoryEstimate, budget: MemoryBudget)
     if estimate.gpu_bytes > budget.gpu_bytes * _CUDA_GPU_FITS_RATIO or estimate.system_bytes > system_limit:
         return "tight"
     return "fits"
+
+
+def classify_ltx_cuda_memory_fit(estimate: CudaMemoryEstimate, budget: MemoryBudget) -> str:
+    """Classify an LTX estimate on CUDA like :func:`classify_cuda_memory_fit`, but weights beyond system memory are ``too_large``.
+
+    The LTX backend refuses to load weights that need more than the machine's system memory, unlike an image model.
+    """
+    if budget.system_bytes and estimate.system_bytes > budget.system_bytes:
+        return "too_large"
+    return classify_cuda_memory_fit(estimate, budget)
 
 
 def _cuda_level_estimate(components: dict[str, WeightTotals], quantize: int | None, text_encoder_offloaded: bool) -> CudaMemoryEstimate:
