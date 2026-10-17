@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b23] - 2026-10-17
+
 ### Fixed
 - **Fresh installs on macOS no longer fail with `cannot import name '_IntegralLike' from 'numbers'`.** Pillow 13.0.0 breaks mflux on Python 3.14, so the install now stays on Pillow 12 until mflux works with Pillow 13. If an existing install already has Pillow 13, reinstall with `uv tool install --force --prerelease allow z-vision-generator`
 
