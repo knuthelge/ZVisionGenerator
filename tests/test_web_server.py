@@ -410,6 +410,38 @@ def test_video_bootstrap_defaults_include_frame_alignment(monkeypatch, family, a
     assert defaults["frame_alignment"] == alignment
 
 
+@pytest.mark.parametrize(("detected", "expected"), [("ltx", "ltx"), ("unknown", None)])
+def test_video_bootstrap_defaults_include_detected_family(monkeypatch, detected, expected):
+    """Video defaults name the detected family so the Workspace can remember LoRAs per family."""
+    web_config = _make_web_config()
+    monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(
+        workspace_api_module,
+        "detect_video_model",
+        lambda _model: VideoModelInfo(family=detected, backend=detected, supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32),
+    )
+
+    assert workspace_api_module._build_video_bootstrap_defaults("ltx-8", web_config)["family"] == expected
+
+
+def test_image_bootstrap_defaults_include_detected_family(monkeypatch):
+    """Image defaults name the detected family, and none when detection fails."""
+    web_config = _make_web_config()
+    monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: model)
+    monkeypatch.setattr(workspace_api_module, "get_backend_name", lambda: "mflux")
+    monkeypatch.setattr(workspace_api_module, "resolve_defaults", lambda *_: _make_resolved_image_defaults())
+    monkeypatch.setattr(workspace_api_module, "detect_image_model", lambda _model: ImageModelInfo(family="zimage", is_distilled=True, size=None))
+
+    assert workspace_api_module._build_image_bootstrap_defaults("zit", web_config)["family"] == "zimage"
+
+    def _fail(_model):
+        raise RuntimeError("no model")
+
+    monkeypatch.setattr(workspace_api_module, "detect_image_model", _fail)
+
+    assert workspace_api_module._build_image_bootstrap_defaults("missing", web_config)["family"] is None
+
+
 def test_video_bootstrap_defaults_fall_back_to_unaligned_frames_when_detection_fails(monkeypatch):
     """A model that cannot be detected should leave frame counts unconstrained."""
     web_config = _make_web_config()
@@ -2440,6 +2472,13 @@ def test_inspect_route_resolves_the_recorded_model_against_the_video_models(clip
 
     assert payload["model"] is None
     assert payload["lora"] == "/loras/style.safetensors:0.8"
+
+
+def test_inspect_route_reports_no_loras_as_blank_for_a_source_with_settings(clip):
+    """Blank, not null: the source recorded its LoRAs and had none, so extending it clears the chosen ones."""
+    clip.config = {"prompt": "A walk.", "model": "ltx-8"}
+
+    assert _inspect({"path": str(clip.path)}).json()["lora"] == ""
 
 
 @pytest.mark.parametrize(("requested", "expected"), [(50, 48), (1, 8)])

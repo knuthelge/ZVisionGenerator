@@ -1,4 +1,5 @@
 import { extendPrefillFor } from './extend';
+import { keepInstalledLoras } from './loras';
 import { workflowMode } from './promptEnhance';
 import { alignFrameCount, defaultExtendFrames, snapExtendFrames } from './videoDuration';
 import type { DraftState, ExtendSourceInfo, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
@@ -38,6 +39,7 @@ const DEFAULT_DRAFT: DraftState = {
   runs: 1,
   seed: null,
   loraString: '',
+  lorasByFamily: {},
   referenceImagePath: null,
   referenceImageStrength: 0,
   frameCount: 0,
@@ -214,6 +216,27 @@ function _modelDefaultsFor(ctx: WorkspaceContext, workflow: Workflow, model: str
   return (defaultsMap?.[model] ?? (model === currentModel ? fallback : null)) as ImageModelDefaults | VideoModelDefaults | null;
 }
 
+/** Return the key a model's LoRAs are remembered under: its family, or the model itself when the family is unknown. */
+function _loraFamilyKey(ctx: WorkspaceContext, model: string): string {
+  const family = (ctx.image_model_defaults?.[model] ?? ctx.video_model_defaults?.[model])?.family;
+  return family ? family : `model:${model}`;
+}
+
+/**
+ * Carry LoRAs across a model change: a new family gets back the LoRAs last chosen for it (or none), and the old
+ * family's are remembered. Within one family the LoRAs stay. Remembered LoRAs that were since removed are dropped.
+ */
+function _swapFamilyLoras(ctx: WorkspaceContext, state: DraftState, fromModel: string, toModel: string): Partial<DraftState> {
+  if (!fromModel || !toModel) return {};
+  const fromKey = _loraFamilyKey(ctx, fromModel);
+  const toKey = _loraFamilyKey(ctx, toModel);
+  if (fromKey === toKey) return {};
+  return {
+    lorasByFamily: { ...state.lorasByFamily, [fromKey]: state.loraString },
+    loraString: keepInstalledLoras(state.lorasByFamily[toKey] ?? '', ctx.loras),
+  };
+}
+
 /**
  * Return a video model's frame rate and frame alignment, falling back to the default video model's.
  *
@@ -380,7 +403,8 @@ export const draft = {
       const alignment = ctx ? videoTimingFor(ctx, prefill.model ?? _draft.model).frameAlignment : 1;
       prefill.frameCount = alignFrameCount(Number(params.frames), alignment);
     }
-    if (params.lora && canApply('lora')) prefill.loraString = params.lora;
+    // A named but blank list clears the LoRAs: a reused job runs with exactly its source's.
+    if (params.lora !== undefined && canApply('lora')) prefill.loraString = params.lora;
     if (params.image_path && canApply('image_path')) prefill.referenceImagePath = params.image_path;
     if (params.negative_prompt && canApply('negative_prompt')) prefill.negativePrompt = params.negative_prompt;
     if (params.scheduler && canApply('scheduler')) prefill.scheduler = params.scheduler;
@@ -399,7 +423,9 @@ export const draft = {
     // Reused assets carry both their preset and their pixel size; a "custom" size means width/height rule.
     if (prefill.ratio !== undefined || prefill.size !== undefined) prefill.dimensionMode = prefill.size === 'custom' ? 'custom' : 'ratio';
     else if (prefill.width !== undefined || prefill.height !== undefined) prefill.dimensionMode = 'custom';
-    _draft = { ..._draft, ...prefill };
+    // A model named here without a re-hydration still swaps LoRAs by family; LoRAs the URL names win over remembered ones.
+    const loras = ctx && prefill.model !== undefined ? _swapFamilyLoras(ctx, _draft, _draft.model, prefill.model) : {};
+    _draft = { ..._draft, ...loras, ...prefill };
   },
 
   /**
@@ -427,7 +453,7 @@ export const draft = {
 
     const keepSettings = options.keepSettings === true && model === _draft.model;
     const promptSource = keepSettings && ctx.prompt_sources.includes(_draft.promptSource) ? _draft.promptSource : ctx.default_prompt_source;
-    let nextState = _withModelDefaults(ctx, { ..._draft, workflow, model, promptSource });
+    let nextState = _withModelDefaults(ctx, { ..._draft, workflow, model, promptSource, ..._swapFamilyLoras(ctx, _draft, _draft.model, model) });
     if (keepSettings) {
       // Same model: the user's settings win over its defaults. A preset that no longer exists falls back to the default size.
       const saved: Partial<DraftState> = _pickSettings(_draft);
@@ -486,6 +512,7 @@ export const draft = {
       workflow: s.workflow,
       model: s.model,
       loraString: s.loraString,
+      lorasByFamily: s.lorasByFamily,
       quantize: s.quantize,
       historyCollapsed: s.historyCollapsed,
       sidebarCollapsed: s.sidebarCollapsed,
@@ -580,7 +607,6 @@ export const draft = {
         updates.enhancedFrom = null;
       }
       updates.extendPrefill = { path: sourceKey, scene: updates.scene ?? previous?.scene ?? '', prompt: updates.prompt ?? previous?.prompt ?? '' };
-      if (info.lora) updates.loraString = info.lora;
     }
     _draft = { ..._draft, ...updates };
     if (!settled || options.replaceText) {
@@ -588,6 +614,9 @@ export const draft = {
         if (ctx) this.hydrateFromContext(ctx, info.model);
         else _draft = { ..._draft, model: info.model };
       }
+      // After the model change, which swaps in the new family's LoRAs. A source that recorded its settings brings its
+      // LoRAs, none included; one without recorded settings leaves them.
+      if (info.lora !== null) _draft = { ..._draft, loraString: info.lora };
     }
     this.saveDraft();
   },

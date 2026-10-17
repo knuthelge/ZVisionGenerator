@@ -552,6 +552,8 @@ export interface ImageModelDefaults {
   dimension_max: number | null;
   dimension_step: number;
   enhance_max_words?: number;
+  /** The detected model family; null when it could not be detected. */
+  family?: string | null;
 }
 
 export interface VideoModelDefaults {
@@ -572,6 +574,8 @@ export interface VideoModelDefaults {
   frame_alignment?: number;
   upscale: UpscaleDefaults;
   enhance_max_words?: number;
+  /** The detected model family; null when it could not be detected. */
+  family?: string | null;
 }
 
 export interface WorkflowContractEntry {
@@ -668,6 +672,8 @@ export interface DraftState {
   runs: number;
   seed: number | null; // null = random
   loraString: string;
+  /** LoRAs last chosen for each model family (keyed `model:<id>` when the family is unknown); `loraString` holds the current family's. */
+  lorasByFamily: Record<string, string>;
   referenceImagePath: string | null;
   referenceImageStrength: number;
   frameCount: number;

@@ -108,7 +108,7 @@ describe('extend actions', () => {
   });
 
   it('never sends the display prompt, which is the file name for a clip with no recorded text', () => {
-    expect(extendParams(video({ scene: null, prompt: 'clip mp4' }))).toEqual({ workflow: 'extend', source_video: '/outputs/out/clip.mp4' });
+    expect(extendParams(video({ scene: null, prompt: 'clip mp4' }))).toEqual({ workflow: 'extend', source_video: '/outputs/out/clip.mp4', lora: '' });
   });
 
   it('labels the workflow and explains the extend fallbacks', () => {

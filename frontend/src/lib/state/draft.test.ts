@@ -983,6 +983,12 @@ describe('extend', () => {
       expect(draft.state).toMatchObject({ model: 'ltx-2', loraString: 'style:0.7', steps: 12 });
     });
 
+    it('clears the LoRAs when the source recorded settings without any', () => {
+      draft.patch({ model: 'ltx-v-0.9', loraString: 'mine:1' });
+      draft.applyExtendSource(sourceInfo({ model: 'ltx-v-0.9', lora: '' }));
+      expect(draft.state.loraString).toBe('');
+    });
+
     it('keeps the model and LoRAs when the source offers none', () => {
       draft.patch({ model: 'ltx-v-0.9', loraString: 'mine:1' });
       draft.applyExtendSource(sourceInfo());
@@ -1052,6 +1058,140 @@ describe('extend', () => {
       draft.patch({ extendFrames: 96, scene: 'Kept.' });
       draft.resetSelections(ctx);
       expect(draft.state).toMatchObject({ extendSourcePath: SOURCE, extendFrames: 64, scene: 'Kept.', fps: 30 });
+    });
+  });
+});
+
+describe('LoRAs remembered per model family', () => {
+  const loras = [{ name: 'zi-style', path: '/loras/zi-style.safetensors' }, { name: 'flux-style', path: '/loras/flux-style.safetensors' }];
+  const familyContext = (): WorkspaceContext => {
+    const ctx = makeContext({
+      image_models: [
+        { id: 'zit', label: 'Z-Image Turbo', type: 'image' },
+        { id: 'zib', label: 'Z-Image Base', type: 'image' },
+        { id: 'flux-dev', label: 'FLUX Dev', type: 'image' },
+        { id: 'mystery', label: 'Mystery', type: 'image' },
+      ],
+      image_model_defaults: {
+        zit: makeImageDefaults({ family: 'zimage' }),
+        zib: makeImageDefaults({ family: 'zimage' }),
+        'flux-dev': makeImageDefaults({ family: 'flux1' }),
+        mystery: makeImageDefaults({ family: null }),
+      },
+      video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ family: 'ltx' }) },
+      current_image_model: 'zit',
+      loras,
+    });
+    ctx.workflow_contract.definitions.txt2img.visible_controls.push('loras');
+    ctx.workflow_contract.definitions.txt2vid.visible_controls.push('loras');
+    return ctx;
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  it('restores the LoRAs last chosen for a family when switching back to it', () => {
+    const ctx = familyContext();
+    draft.hydrateFromContext(ctx, 'zit');
+    draft.update('loraString', 'zi-style:0.8');
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    expect(draft.state.loraString).toBe('');
+    draft.update('loraString', 'flux-style:1');
+    draft.hydrateFromContext(ctx, 'zit');
+    expect(draft.state.loraString).toBe('zi-style:0.8');
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    expect(draft.state.loraString).toBe('flux-style:1');
+  });
+
+  it('keeps the LoRAs when switching between models of the same family', () => {
+    const ctx = familyContext();
+    draft.hydrateFromContext(ctx, 'zit');
+    draft.update('loraString', 'zi-style:0.8');
+    draft.hydrateFromContext(ctx, 'zib');
+    expect(draft.state.loraString).toBe('zi-style:0.8');
+  });
+
+  it('treats a model of unknown family as its own family', () => {
+    const ctx = familyContext();
+    draft.hydrateFromContext(ctx, 'zit');
+    draft.update('loraString', 'zi-style:0.8');
+    draft.hydrateFromContext(ctx, 'mystery');
+    expect(draft.state.loraString).toBe('');
+  });
+
+  it('remembers image LoRAs across a switch to a video workflow and back', () => {
+    const ctx = familyContext();
+    draft.hydrateFromContext(ctx, 'zit');
+    draft.update('loraString', 'zi-style:0.8');
+    draft.onWorkflowChange('txt2vid', ctx);
+    expect(draft.state.loraString).toBe('');
+    draft.onWorkflowChange('txt2img', ctx);
+    expect(draft.state).toMatchObject({ model: 'zit', loraString: 'zi-style:0.8' });
+  });
+
+  it('drops remembered LoRAs that are no longer installed', () => {
+    const ctx = familyContext();
+    draft.hydrateFromContext(ctx, 'zit');
+    draft.update('loraString', 'zi-style:0.8,gone:1');
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    draft.hydrateFromContext(ctx, 'zit');
+    expect(draft.state.loraString).toBe('zi-style:0.8');
+  });
+
+  it('keeps the remembered LoRAs through Reset', () => {
+    const ctx = familyContext();
+    draft.hydrateFromContext(ctx, 'zit');
+    draft.update('loraString', 'zi-style:0.8');
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    draft.resetSelections(ctx);
+    draft.hydrateFromContext(ctx, 'zit');
+    expect(draft.state.loraString).toBe('zi-style:0.8');
+  });
+
+  describe('Reuse', () => {
+    const reuse = (ctx: WorkspaceContext, params: Record<string, string>): void => {
+      draft.hydrateFromContext(ctx, params.model ?? null);
+      draft.loadFromUrl(params, ctx);
+    };
+
+    it('clears the chosen LoRAs when the source had none', () => {
+      const ctx = familyContext();
+      draft.hydrateFromContext(ctx, 'zit');
+      draft.update('loraString', 'zi-style:0.8');
+      reuse(ctx, { workflow: 'txt2img', model: 'zib', lora: '' });
+      expect(draft.state.loraString).toBe('');
+    });
+
+    it('takes the source LoRAs over the remembered ones and remembers them for its family', () => {
+      const ctx = familyContext();
+      draft.hydrateFromContext(ctx, 'zit');
+      draft.update('loraString', 'zi-style:0.8');
+      draft.hydrateFromContext(ctx, 'flux-dev');
+      reuse(ctx, { workflow: 'txt2img', model: 'zit', lora: '/loras/zi-style.safetensors:0.3' });
+      expect(draft.state.loraString).toBe('/loras/zi-style.safetensors:0.3');
+      draft.hydrateFromContext(ctx, 'flux-dev');
+      draft.hydrateFromContext(ctx, 'zit');
+      expect(draft.state.loraString).toBe('zi-style:0.3');
+    });
+
+    it('remembers the current LoRAs when a URL changes the model without re-hydrating', () => {
+      const ctx = familyContext();
+      draft.hydrateFromContext(ctx, 'zit');
+      draft.update('loraString', 'zi-style:0.8');
+      draft.loadFromUrl({ model: 'flux-dev', lora: 'flux-style:1' }, ctx);
+      expect(draft.state.loraString).toBe('flux-style:1');
+      draft.hydrateFromContext(ctx, 'zit');
+      expect(draft.state.loraString).toBe('zi-style:0.8');
+    });
+
+    it('leaves the LoRAs alone when the URL names none, as a reference image does', () => {
+      const ctx = familyContext();
+      draft.hydrateFromContext(ctx, 'zit');
+      draft.update('loraString', 'zi-style:0.8');
+      draft.loadFromUrl({ workflow: 'txt2img', prompt: 'a cat' }, ctx);
+      expect(draft.state.loraString).toBe('zi-style:0.8');
     });
   });
 });

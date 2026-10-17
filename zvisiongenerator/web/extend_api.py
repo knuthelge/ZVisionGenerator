@@ -140,7 +140,7 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, media_root: Pa
         "prompt": prompt,
         "legacy": scene is None and prompt is not None,
         "model": recorded_model if recorded_model in web_config.video_model_options else None,
-        "lora": inspection.recorded.lora if inspection.recorded is not None else None,
+        "lora": (inspection.recorded.lora or "") if inspection.recorded is not None else None,
         "problems": [{"code": problem.code, "message": problem.message} for problem in inspection.problems],
         "extend_frames": extend_frames,
         "window_frames": window,

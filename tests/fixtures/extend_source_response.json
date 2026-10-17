@@ -13,7 +13,7 @@
   "prompt": "She opens a black umbrella and walks away.",
   "legacy": false,
   "model": "ltx-8",
-  "lora": null,
+  "lora": "",
   "problems": [],
   "extend_frames": 48,
   "window_frames": 73,

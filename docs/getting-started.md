@@ -92,7 +92,7 @@ You can keep working while a job runs: change the settings and press **Add to qu
 
 The **Prompts** page builds prompt files visually: snippets, sets of prompts, and per-prompt enhancement. See [Prompt Builder](guides/prompts.md#prompt-builder-web-ui).
 
-Workspace settings are remembered in the browser between visits and restarts, as long as the Web UI starts on the same port. Choosing a different model applies that model's defaults.
+Workspace settings are remembered in the browser between visits and restarts, as long as the Web UI starts on the same port. Choosing a different model applies that model's defaults. LoRAs are remembered per model family: switching to a model of another family brings back the LoRAs you last used with that family (or none), and switching between models of the same family keeps them. **Reuse settings**, **Load settings** on a queued job and **Extend** use exactly the LoRAs the source was made with, so a source made without LoRAs clears them.
 
 If the server can't start a job with the current settings, for example image-to-image without a reference image, the reason shows above the Generate button and in a notice. It goes away when you change a setting.
 

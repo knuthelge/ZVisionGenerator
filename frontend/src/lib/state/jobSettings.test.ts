@@ -23,6 +23,12 @@ describe('jobSettingsPrefill', () => {
     });
   });
 
+  it('keeps a blank LoRA list so loading a job without LoRAs clears them', () => {
+    const { params } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', model: 'zit', lora: '', steps: '' });
+
+    expect(params).toEqual({ workflow: 'txt2img', model: 'zit', lora: '' });
+  });
+
   it('restores auto sharpening when the job sent no sharpen amount', () => {
     const { patch } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', prompt: 'a lake', sharpen_enabled: 'true' });
 

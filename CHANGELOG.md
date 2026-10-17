@@ -7,7 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Changed
+- **Web UI: LoRAs are remembered per model family.** Switching to a model of another family brings back the LoRAs you last chose for it instead of carrying over LoRAs made for a different model, and switching back restores yours
 - **Z-Image on Windows and Linux now uses the `beta` scheduler by default**, as on macOS, so the same prompt and seed look alike on both. `--scheduler beta` on Z-Image also now follows the macOS schedule instead of diffusers' own beta spacing
+
+### Fixed
+- **Web UI: Reuse settings now uses exactly the source's LoRAs.** Reusing an image or video made without LoRAs used to keep the LoRAs already chosen, so the reused job could differ from the original. The same applies to **Load settings** on a queued job and to **Extend**
 
 ## [0.13.0b21] - 2026-10-15
 

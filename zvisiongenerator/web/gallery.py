@@ -191,8 +191,8 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         reuse_params.update(_reuse_text_params(asset, video=workflow_mode(resolved_workflow) == "video"))
         if resolved_model:
             reuse_params["model"] = resolved_model
-        if asset.lora:
-            reuse_params["lora"] = asset.lora
+        # Always named, even blank: a reused job runs with exactly the source's LoRAs, never the ones already chosen.
+        reuse_params["lora"] = asset.lora or ""
         if asset.steps is not None:
             reuse_params["steps"] = str(asset.steps)
         if asset.guidance is not None and workflow_mode(resolved_workflow) == "image":

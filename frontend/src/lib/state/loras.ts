@@ -35,6 +35,11 @@ export function formatLoraString(chips: LoraChip[]): string {
   return chips.map((chip) => `${chip.name}:${chip.weight}`).join(',');
 }
 
+/** Keep only the LoRAs in a `ref:weight` list that are still installed, written back by name. */
+export function keepInstalledLoras(value: string, installed: LoraInfo[]): string {
+  return formatLoraString(parseLoraString(value, installed).filter((chip) => installed.some((lora) => lora.name === chip.name)));
+}
+
 /** Show a LoRA by name: a path is shortened to its file name without the extension. */
 export function loraLabel(ref: string): string {
   return /[\\/]/.test(ref) ? fileName(ref).replace(/\.safetensors$/i, '') : ref;

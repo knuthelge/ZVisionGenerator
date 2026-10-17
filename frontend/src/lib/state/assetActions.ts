@@ -108,7 +108,7 @@ export function extendParams(asset: GalleryAsset): Record<string, string> {
   const params: Record<string, string> = { workflow: 'extend', source_video: asset.file_path ?? '' };
   const model = asset.reuse_state?.resolved_model;
   if (model) params.model = model;
-  if (asset.lora) params.lora = asset.lora;
+  params.lora = asset.lora ?? '';
   return params;
 }
 

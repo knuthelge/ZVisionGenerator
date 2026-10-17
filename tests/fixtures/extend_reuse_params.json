@@ -6,6 +6,7 @@
     "enhanced_scene": "A wet street at night.",
     "enhanced_prompt": "She waves slowly.",
     "model": "ltx-8",
+    "lora": "",
     "steps": "8",
     "seed": "1",
     "source_video": "/clips/walk.mp4",
@@ -15,6 +16,7 @@
   "blank_text": {
     "workflow": "extend",
     "model": "ltx-8",
+    "lora": "",
     "steps": "8",
     "seed": "1",
     "source_video": "/clips/walk.mp4",

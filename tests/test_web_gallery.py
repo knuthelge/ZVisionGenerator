@@ -577,6 +577,14 @@ def test_other_videos_carry_no_source(tmp_path, monkeypatch):
     assert (payload["source_video"], payload["extend_frames"]) == (None, None)
 
 
+@pytest.mark.parametrize(("lora", "expected"), [(None, ""), ("/loras/style.safetensors:0.8", "/loras/style.safetensors:0.8")])
+def test_reuse_always_names_the_recorded_loras_even_when_there_are_none(tmp_path, lora, expected):
+    """A blank ``lora`` tells the Workspace to clear the LoRAs already chosen, so the reused job matches its source."""
+    _payload, params = _video_reuse(tmp_path, {"prompt": "A knight rides in.", "lora": lora})
+
+    assert params["lora"] == expected
+
+
 def test_reuse_of_an_extend_output_returns_to_extend_with_source_length_and_text(tmp_path, monkeypatch):
     monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
     source = tmp_path / "source.mp4"

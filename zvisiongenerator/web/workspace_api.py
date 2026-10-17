@@ -351,6 +351,11 @@ def _pick_supported_image_bootstrap_preset(web_config: WebUiConfig, defaults: di
     return preferred_ratio, preferred_size
 
 
+def _known_family(family: object) -> str | None:
+    """Return a detected model family, or None when detection could not name one."""
+    return family if isinstance(family, str) and family and family != "unknown" else None
+
+
 def _resolve_video_bootstrap_family(app_config: dict[str, Any], family: str | None) -> str:
     if family and family != "unknown":
         return family
@@ -380,6 +385,7 @@ def _video_bootstrap_upscale() -> dict[str, Any]:
 def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) -> dict[str, Any]:
     app_config = web_config.app_config
     preferred_ratio, preferred_size = resolve_image_ratio_size_defaults(web_config)
+    family: str | None = None
     try:
         resolved_model = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
         declared = declared_image_family(app_config, model_name)
@@ -388,6 +394,7 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         else:
             model_info = detect_image_model(resolved_model)
         defaults = resolve_defaults(model_info, app_config, {}, get_backend_name())
+        family = _known_family(model_info.family)
         enhance_max_words = resolve_enhance_ceiling(app_config, family=model_info.family, mode="image")
     except Exception:
         enhance_max_words = resolve_enhance_ceiling(app_config, family=None, mode="image")
@@ -430,6 +437,7 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         "dimension_max": defaults.get("dimension_max", None),
         "dimension_step": int(defaults.get("dimension_step", 16)),
         "enhance_max_words": enhance_max_words,
+        "family": family,
     }
 
 
@@ -439,10 +447,12 @@ def _build_video_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
     supports_i2v = False
     fps = 24
     frame_alignment = 1
+    detected_family: str | None = None
     try:
         resolved_model = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
         model_info = detect_video_model(resolved_model)
-        family = _resolve_video_bootstrap_family(app_config, getattr(model_info, "family", None))
+        detected_family = _known_family(getattr(model_info, "family", None))
+        family = _resolve_video_bootstrap_family(app_config, detected_family)
         supports_i2v = bool(getattr(model_info, "supports_i2v", False))
         fps_value = getattr(model_info, "default_fps", 24)
         fps = fps_value if isinstance(fps_value, int) else 24
@@ -468,4 +478,5 @@ def _build_video_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         "frame_alignment": frame_alignment,
         "upscale": _video_bootstrap_upscale(),
         "enhance_max_words": resolve_enhance_ceiling(app_config, family=family, mode="video"),
+        "family": detected_family,
     }

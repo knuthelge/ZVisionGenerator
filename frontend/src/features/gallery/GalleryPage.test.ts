@@ -338,7 +338,7 @@ describe('GalleryPage regressions', () => {
 
     // The gallery's prompt may only be a display fallback; the text comes from the server once it has read the source.
     (getViewer()!.querySelector('[data-action="extend"]') as HTMLButtonElement).click();
-    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', { workflow: 'extend', source_video: '/outputs/walk.mp4' });
+    expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', { workflow: 'extend', source_video: '/outputs/walk.mp4', lora: '' });
 
     (target.querySelector(`button[aria-label="More actions for ${image.filename}"]`) as HTMLButtonElement).click();
     flushSync();

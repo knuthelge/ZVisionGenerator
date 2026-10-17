@@ -53,7 +53,8 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
   const params: Record<string, string> = {};
   for (const key of PREFILL_KEYS) {
     const value = first(settings, key);
-    if (value !== undefined && value !== '') params[key] = value;
+    // A blank LoRA list is kept: the job ran without LoRAs, so loading it clears them.
+    if (value !== undefined && (value !== '' || key === 'lora')) params[key] = value;
   }
 
   const promptSource = (first(settings, 'prompt_source') ?? 'inline') as PromptSource;
