@@ -74,7 +74,7 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `--enhance-note TEXT` | — | Free-text direction for the enhancer, e.g. `"at night, in the rain"` (up to 300 characters). Implies `--enhance` |
 | `--no-enhance` | — | Disable enhancement, including prompt-file `enhance:` entries |
 | `--enhance-model` | `fast` | Enhancer LLM: `fast`, `smart` (larger, needs more memory; falls back to `fast` with a warning where it does not fit), or `REPO[@REVISION]` or a local folder. Use `./smart` for a folder named `smart` |
-| `--enhance-format` | `text` | `json` writes an Ideogram 4 JSON caption instead of a rewritten prompt, for every prompt of the job. Needs a model that takes JSON captions (`ideo`). Implies `--enhance` |
+| `--enhance-format` | `text` | `json` writes an Ideogram 4 JSON caption instead of a rewritten prompt, Needs a model that takes JSON captions (`ideo`). Implies `--enhance` for `--prompt`; with `--prompts-file` it applies to entries with their own `enhance:` unless `--enhance` is given |
 
 Run `ziv-image --help` for the full list.
 

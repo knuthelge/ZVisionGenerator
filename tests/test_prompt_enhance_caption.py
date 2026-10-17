@@ -133,6 +133,21 @@ class TestLettering:
     def test_called_name_becomes_text(self) -> None:
         assert _texts(_caption("logo for a coffee shop called Moonbean, minimal, flat", _reply("OBJECT: a bean", 'TEXT: "Moonbean" | below'))) == ["Moonbean"]
 
+    def test_the_thing_carrying_quoted_text_is_kept(self) -> None:
+        caption = _caption('a white coffee mug with the text "BEST DAD"', _reply('OBJECT: A white ceramic coffee mug with the text "BEST DAD" in red', 'TEXT: "BEST DAD" | red'))
+        kinds = [element["type"] for element in caption["compositional_deconstruction"]["elements"]]
+        assert kinds == ["obj", "text"]
+
+    def test_a_line_that_only_describes_the_lettering_is_dropped(self) -> None:
+        caption = _caption("a poster with the text 'LISBOA'", _reply('OBJECT: A bold serif font text "LISBOA" in gold', 'TEXT: "LISBOA" | gold'))
+        assert [element["type"] for element in caption["compositional_deconstruction"]["elements"]] == ["text"]
+
+    @pytest.mark.parametrize(
+        ("prompt", "text"), [("a diner sign with the text OPEN 24 HOURS", "OPEN 24 HOURS"), ("a poster with the text PLAN B", "PLAN B"), ("a neon sign saying 'Joe's Diner'", "Joe's Diner")]
+    )
+    def test_unquoted_and_single_quoted_lettering_is_read_whole(self, prompt: str, text: str) -> None:
+        assert _texts(_caption(prompt, _reply("OBJECT: a sign"))) == [text]
+
     def test_a_name_in_a_scene_is_not_lettering(self) -> None:
         caption = _caption("a golden retriever named Max running on a beach", _reply("OBJECT: a golden retriever", 'TEXT: "Max" | collar'))
         assert _texts(caption) == []

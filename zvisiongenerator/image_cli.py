@@ -11,7 +11,7 @@ import warnings
 from pathlib import Path
 
 from zvisiongenerator.backends import get_backend, release_accelerator_memory
-from zvisiongenerator.enhance_cli import add_enhance_arguments, parse_enhance_args
+from zvisiongenerator.enhance_cli import add_enhance_arguments, defer_format_to_entries, parse_enhance_args
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.app_log import setup_logging
 from zvisiongenerator.image_model_loader import SAVING_QUANT_PHASE, load_image_model
@@ -257,6 +257,7 @@ def main(*, prog: str = "ziv-image") -> None:
         except (FileNotFoundError, ValueError) as e:
             parser.error(str(e))
         prompts_data, enhance_by_set = inspection.prompts_data, enhance_by_set_for_mode(inspection.enhance_by_set, mode="image", caption=args.enhance_format == "json")
+        defer_format_to_entries(args, enhance_by_set)
     model_suffix = f" ({model_info.size or 'unknown size'})" if model_info.family == "flux2_klein" else ""
     print(f"Model type: {model_info.family}{model_suffix}")
 

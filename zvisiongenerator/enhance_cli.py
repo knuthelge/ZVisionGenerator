@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import warnings
 from dataclasses import replace
 
-from zvisiongenerator.utils.prompt_enhance import ENHANCE_FORMATS, parse_enhance_spec, settings_from_mapping, validate_settings
+from zvisiongenerator.utils.prompt_enhance import ENHANCE_FORMATS, EnhanceSettings, parse_enhance_spec, settings_from_mapping, validate_settings
 
 
 def add_enhance_arguments(parser: argparse.ArgumentParser, *, mode: str) -> None:
@@ -57,6 +58,8 @@ def parse_enhance_args(parser: argparse.ArgumentParser, args: argparse.Namespace
     spec = args.enhance
     note = getattr(args, "enhance_note", None)
     caption = getattr(args, "enhance_format", None) == "json"
+    # Only --enhance-format asked for enhancement: a prompt file's own enhance: entries keep their settings.
+    args.enhance_implied = caption and spec is None and note is None
     if args.no_enhance and (spec is not None or note is not None or caption):
         parser.error("--enhance, --enhance-note and --enhance-format cannot be combined with --no-enhance.")
     if spec is None and note is None and not caption:
@@ -70,3 +73,15 @@ def parse_enhance_args(parser: argparse.ArgumentParser, args: argparse.Namespace
     except ValueError as exc:
         parser.error(f"--enhance: {exc}")
     args.enhance = settings
+
+
+def defer_format_to_entries(args: argparse.Namespace, enhance_by_set: dict[str, list[EnhanceSettings | None]] | None) -> None:
+    """Let ``--enhance-format`` alone set the output format of a prompt file's own ``enhance:`` entries, as the Web UI does.
+
+    Without ``--enhance`` or ``--enhance-note`` it enhances no other prompt, and warns when no entry has settings.
+    """
+    if not getattr(args, "enhance_implied", False):
+        return
+    args.enhance = None
+    if not any(settings is not None for entries in (enhance_by_set or {}).values() for settings in entries):
+        warnings.warn("--enhance-format json applies to prompt-file entries with their own 'enhance:'; none have one. Add --enhance to enhance every prompt.", stacklevel=2)

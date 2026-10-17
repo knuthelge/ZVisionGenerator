@@ -76,17 +76,20 @@ _SCRIPTS = (
     ("hindi", r"[ऀ-ॿ]"),
 )
 # Quoted text: paired quotes, guillemets and CJK brackets anywhere; single quotes only around a phrase of two or more
-# characters (an apostrophe as in "Moe's" or "rock 'n' roll" is not a quote); an all-caps word after "text", "reads" or
-# "says".
+# characters, which may hold an apostrophe between letters ('Joe's Diner'), while an apostrophe on its own as in "Moe's" or
+# "rock 'n' roll" is not a quote; an all-caps phrase after "text", "reads" or "says", which may go on with numbers and
+# single letters (OPEN 24 HOURS, PLAN B).
 _QUOTE_RES = (
     re.compile(r'"([^"\n]+)"|“([^”\n]+)”|«\s*([^»\n]+?)\s*»|「([^」\n]+)」|『([^』\n]+)』'),
-    re.compile(r"(?<![\w'‘])['‘]([^'’\n]{2,})['’](?!\w)"),
-    re.compile(r"\b(?:text|word|words|reads|reading|says|saying|lettering)\s+([A-Z][A-Z0-9]+(?:\s[A-Z][A-Z0-9]+)*)\b"),
+    re.compile(r"(?<![\w'‘])['‘]((?:[^'’\n]|(?<=\w)['’](?=\w)){2,})['’](?!\w)"),
+    re.compile(r"\b(?:text|word|words|reads|reading|says|saying|lettering)\s+([A-Z][A-Z0-9]+(?:\s(?:[A-Z][A-Z0-9]*|[0-9]+))*)\b"),
 )
 # A capitalized name after "called", "named" or "titled": lettering only on a design ("a logo for a shop called Moonbean"),
 # never in a scene ("a dog named Max").
 _NAME_RE = re.compile(r"\b(?:called|named|titled)\s+([A-Z][\w'’&]*(?:\s+[A-Z0-9][\w'’&]*)*)")
 _LETTERING_RE = re.compile(r"\b(?:text|letter\w*|font|typeface|typograph\w*|title|word\w*|serif|sans)\b", re.I)
+# Words that tie lettering to a thing carrying it ("a mug with the text ...", "a sign on the door reading ...").
+_CARRIER_RE = re.compile(r"\b(?:with|on|of|bearing|showing|displaying|printed|painted|engraved|carved|stamped)\b", re.I)
 _DOUBLE_QUOTED_RE = re.compile(r'"([^"]+)"|“([^”]+)”')
 
 _LABELS = {
@@ -246,6 +249,7 @@ def _design(prompt: str) -> str | None:
 
 
 def _lettering(prompt: str, note: str) -> _Lettering:
+    """Decide what lettering the caption may hold from the prompt and the user's direction."""
     source = f"{prompt}\n{note}"
     design = _design(prompt) is not None
     quotes = _quoted_texts(source, names=design)
@@ -255,6 +259,7 @@ def _lettering(prompt: str, note: str) -> _Lettering:
 
 
 def _lettering_rule(lettering: _Lettering) -> str:
+    """Return the rule that tells the model which TEXT lines to write."""
     if lettering.mode == "quotes":
         listed = ", ".join(f'"{words}"' for words in lettering.quotes)
         return f"Lettering: write one TEXT line for each of these texts, copied exactly: {listed}. Write no other TEXT lines. Lettering goes only in TEXT lines, never in OBJECT lines."
@@ -414,7 +419,7 @@ def _elements(draft: _Draft, lettering: _Lettering) -> list[dict[str, Any]]:
                 if _key(spoken) not in used:
                     used.add(_key(spoken))
                     elements.append({"type": "text", "text": spoken, "desc": item[1]})
-            elif not (lettering.quotes and _LETTERING_RE.search(item[1]) and any(words.casefold() in item[1].casefold() for words in lettering.quotes)):
+            elif not _lettering_only(item[1], lettering.quotes):
                 elements.append({"type": "obj", "desc": item[1]})
             continue
         words, look = item[1], item[2] if len(item) > 2 else ""
@@ -440,6 +445,19 @@ def _elements(draft: _Draft, lettering: _Lettering) -> list[dict[str, Any]]:
     return elements
 
 
+def _lettering_only(desc: str, quotes: tuple[str, ...]) -> bool:
+    """Return whether an OBJECT line only describes the user's lettering ('Bold gold letters reading "LISBOA"').
+
+    A line naming a thing that carries the text ('A white mug with the text "BEST DAD"') is an object and is kept.
+    """
+    folded = desc.casefold()
+    starts = [folded.find(words.casefold()) for words in quotes if words.casefold() in folded]
+    if not starts:
+        return False
+    head = desc[: min(starts)]
+    return bool(_LETTERING_RE.search(head)) and not _CARRIER_RE.search(head)
+
+
 def _prompt_prefix(text: str, source: str) -> tuple[str, str]:
     """Split *text* into its longest leading run of two or more words found in *source*, and the rest; else ``(text, "")``."""
     tokens = text.split()
@@ -460,4 +478,5 @@ def _prompt_words_in_quotes(desc: str, source: str) -> str | None:
 
 
 def _key(words: str) -> str:
+    """Return *words* casefolded with punctuation dropped, for comparing texts."""
     return " ".join(re.sub(r"[^\w\s]", " ", words.casefold()).split())

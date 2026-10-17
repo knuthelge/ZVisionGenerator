@@ -395,6 +395,23 @@ class TestCliFlags:
         assert (args.enhance_format, args.enhance) == ("json", EnhanceSettings())
         assert _cli(["--enhance", "details=,length=same", "--enhance-format", "json"]).enhance is not None
 
+    def test_json_format_alone_leaves_a_prompt_file_to_its_entries(self):
+        from zvisiongenerator.enhance_cli import defer_format_to_entries
+
+        args = _cli(["--enhance-format", "json"])
+        defer_format_to_entries(args, {"set": [EnhanceSettings(style="anime"), None]})
+        assert args.enhance is None
+
+        with_spec = _cli(["--enhance", "style=photo", "--enhance-format", "json"])
+        defer_format_to_entries(with_spec, {"set": [EnhanceSettings(style="anime")]})
+        assert with_spec.enhance == EnhanceSettings(style="photo")
+
+    def test_json_format_alone_warns_when_no_entry_enhances(self):
+        from zvisiongenerator.enhance_cli import defer_format_to_entries
+
+        with pytest.warns(UserWarning, match="none have one"):
+            defer_format_to_entries(_cli(["--enhance-format", "json"]), {"set": [None]})
+
     def test_json_format_is_image_only(self, capsys):
         with pytest.raises(SystemExit):
             _cli(["--enhance-format", "json"], mode="video")

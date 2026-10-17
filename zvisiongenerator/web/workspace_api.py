@@ -187,6 +187,7 @@ def _size_label(section: dict[str, Any]) -> str | None:
 
 
 def _gpu_budget_bytes() -> int | None:
+    """Return this machine's accelerator memory in bytes, or ``None`` when unknown."""
     budget = memory_budget()
     return budget.gpu_bytes if budget is not None else None
 

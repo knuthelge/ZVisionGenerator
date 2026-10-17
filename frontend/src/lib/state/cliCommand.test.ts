@@ -116,6 +116,11 @@ describe('cliCommand', () => {
       .toBe('ziv video --prompt a --enhance --enhance-model smart');
   });
 
+  it('writes JSON captions for a prompt file without auto-enhance with the format alone', () => {
+    expect(cliCommand({ mode: 'image', prompt_source: 'file', prompts_file: '/p/prompts.yaml', enhance_format: 'json' }).command)
+      .toBe('ziv image --prompts-file /p/prompts.yaml --enhance-format json');
+  });
+
   it('spells out the Rewrite choice only where it is not the default of the workflow', () => {
     const settings = (parts: string) => JSON.stringify({ style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'], parts });
     const video = { mode: 'video', prompt: 'a', enhance_auto: 'true' };

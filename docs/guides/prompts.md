@@ -275,7 +275,7 @@ Ideogram 4 reads structured JSON captions (see [Ideogram 4](image.md#ideogram-4)
 - If the enhancer returns no usable caption twice, the run reports it and keeps your prompt.
 - **Smart** writes noticeably better captions than Fast.
 
-On the command line use `--enhance-format json`; it turns on enhancement by itself. It applies to every prompt of the job, including prompt-file entries with their own `enhance:`, and needs a model that takes JSON captions.
+On the command line use `--enhance-format json`; it needs a model that takes JSON captions. With `--prompt` it turns on enhancement by itself. With a prompt file it writes captions for the entries that have their own `enhance:`, keeping their settings, as the Web UI does without auto-enhance; add `--enhance` to rewrite every prompt with the same settings.
 
 ### In the Web UI
 

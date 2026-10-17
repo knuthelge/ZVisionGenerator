@@ -9,7 +9,7 @@ Re-audited against `main` at v0.13.0b20 (diffusers 0.41.0, mflux 0.22.0, torch 2
 | Feature | macOS | Windows / Linux | Step |
 |---|---|---|---|
 | Text to image: Z-Image, FLUX.2 Klein, Krea 2 | yes | yes | |
-| Ideogram 4 | yes | yes, NF4 repo, up to about 1.8 MP on a 10 GB card; no LoRAs | 13 |
+| Ideogram 4 | yes | yes, NF4 repo, up to about 1.8 MP on a 10 GB card, with LoRAs and live previews | 13 |
 | q4 / q8 with stored quants, image memory badges | yes | yes | |
 | LoRAs and LoKr (image) | yes | yes | |
 | Live image previews | yes | yes | |

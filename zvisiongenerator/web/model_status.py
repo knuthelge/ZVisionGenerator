@@ -98,6 +98,7 @@ def _cuda_image_memory_fit(model_dir: Path, levels: tuple[int | None, ...], budg
 
 
 def _cuda_video_memory_fit(resolved_path: str, budget: MemoryBudget, find_local_dir: Callable[[str], Path | None], model_name: str | None, app_config: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return an LTX model's memory fit on a CUDA machine, or ``None`` when its level or files are unknown."""
     system = ltx_cuda_system_memory(resolved_path, model_name, app_config, find_local_dir)
     if system is None:
         return None
