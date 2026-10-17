@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b22] - 2026-10-17
+
 ### Added
 - **Run the Web UI in the background.** `ziv ui --background` starts the Web UI, prints its address and returns to the prompt, and the server keeps running after you close the terminal. `ziv ui --background-stop` stops every running Web UI, in the background or in another terminal, together with any job it is running
 - **Ideogram 4 on Windows and Linux.** The `ideo` alias now works with an NVIDIA GPU, using the NF4 model (a 15 GB download from Unsloth's unmodified mirror of Ideogram's official repo, pinned to a checked revision, so no Hugging Face account is needed; the model stays under Ideogram's non-commercial license). It runs on a 10 GB GPU: a 1024×1024 image takes about 2.5 minutes, and sizes up to about 1.8 megapixels work. It has the same default settings, the first-step-sigma option, JSON captions, live previews and LoRA support as on macOS
