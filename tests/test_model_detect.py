@@ -238,7 +238,14 @@ class TestDetectWithRevision:
 
     def test_a_revision_is_not_mistaken_for_a_local_path(self, tmp_path):
         index = tmp_path / "model_index.json"
-        index.write_text(json.dumps({"_class_name": "ZImagePipeline"}))
+        index.write_text(json.dumps({"_class_name": "Ideogram4Pipeline"}))
 
         with patch("huggingface_hub.hf_hub_download", MagicMock(return_value=str(index))):
-            assert detect_image_model("org/some-model@v1.0").family == "zimage"
+            assert detect_image_model("org/some-model@v1.0").family == "ideogram4"
+
+    def test_a_revision_on_a_model_whose_loader_cannot_pin_is_refused(self, tmp_path):
+        index = tmp_path / "model_index.json"
+        index.write_text(json.dumps({"_class_name": "ZImagePipeline"}))
+
+        with patch("huggingface_hub.hf_hub_download", MagicMock(return_value=str(index))), pytest.raises(ValueError, match="only supported for Ideogram 4"):
+            detect_image_model("org/some-model@v1.0")

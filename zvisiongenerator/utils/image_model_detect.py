@@ -70,6 +70,10 @@ def detect_image_model(model_path: str) -> ImageModelInfo:
 
     if family == "flux2":
         raise ValueError("FLUX.2-dev (32B) is not supported. Use FLUX.2 Klein variants (4B/9B).")
+    # Only the Ideogram 4 loader passes a revision on; every other loader would take 'owner/repo@rev' as the repo id.
+    reference = None if is_local else parse_huggingface_repo_reference(model_path)
+    if reference is not None and reference.revision is not None and family != "ideogram4":
+        raise ValueError(f"A pinned revision ('{model_path}') is only supported for Ideogram 4. Use '{reference.repo_id}' without '@{reference.revision}'.")
 
     if family == "flux2_klein":
         is_distilled = index.get("is_distilled", True)

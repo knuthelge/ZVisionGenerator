@@ -65,6 +65,20 @@ class TestFirstSigmaOverride:
 
         assert scheduler.received == [[0.9998, 0.5]]
 
+    def test_a_call_without_sigmas_passes_through(self, ideogram4):
+        module, _ = ideogram4
+        calls: list[tuple] = []
+
+        class _StepScheduler:
+            def set_timesteps(self, num_inference_steps, device=None):
+                calls.append((num_inference_steps, device))
+
+        scheduler = _StepScheduler()
+        with module.first_sigma_override(scheduler, 1.004):
+            scheduler.set_timesteps(20, device="cuda")
+
+        assert calls == [(20, "cuda")]
+
 
 class _Pipeline:
     """A pipeline stand-in with Ideogram4Pipeline's call signature: an unknown keyword raises ``TypeError``."""

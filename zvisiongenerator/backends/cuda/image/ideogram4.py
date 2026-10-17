@@ -114,6 +114,8 @@ def first_sigma_override(scheduler: Any, sigma: float | None) -> Iterator[None]:
     original = scheduler.set_timesteps
 
     def set_timesteps(*args: Any, sigmas: Any = None, **kwargs: Any) -> Any:
+        if sigmas is None:  # a call by step count or timesteps has no sigmas to start elsewhere
+            return original(*args, **kwargs)
         sigmas = list(sigmas)
         sigmas[0] = sigma
         return original(*args, sigmas=sigmas, **kwargs)
