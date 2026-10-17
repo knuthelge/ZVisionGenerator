@@ -1888,7 +1888,7 @@ requires-dist = [
     { name = "mlx-lm", marker = "sys_platform == 'darwin'", specifier = ">=0.32.0" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "peft", marker = "sys_platform != 'darwin'", specifier = ">=0.21.2" },
-    { name = "pillow", specifier = ">=12.3.0" },
+    { name = "pillow", specifier = ">=12.3.0,<13" },
     { name = "psutil", specifier = ">=5.9.0" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "pyyaml", specifier = ">=6.0.3" },

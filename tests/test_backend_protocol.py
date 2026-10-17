@@ -500,7 +500,7 @@ class TestIdeogram4MfluxBackend:
         assert "scheduler" not in kwargs
         assert "negative_prompt" not in kwargs
 
-    def test_ideogram4_text_to_image_passes_whitespace_prefixed_json_prompt_through_unchanged(self):
+    def test_ideogram4_text_to_image_keeps_a_whitespace_prefixed_json_caption_on_one_line(self):
         image_mac_module = self._import_backend_module()
         backend = image_mac_module.MfluxBackend()
         backend._model_info = image_mac_module.ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
@@ -525,7 +525,7 @@ class TestIdeogram4MfluxBackend:
         assert image is not None
         model.generate_image.assert_called_once()
         kwargs = model.generate_image.call_args.kwargs
-        assert kwargs["prompt"] == prompt
+        assert kwargs["prompt"] == prompt.strip()
         assert "scheduler" not in kwargs
         assert "negative_prompt" not in kwargs
 

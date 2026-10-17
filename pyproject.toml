@@ -32,7 +32,7 @@ dependencies = [
     "mflux>=0.22.0,<0.23; sys_platform == 'darwin'",
     "numpy>=2.0.0",
     "peft>=0.21.2; sys_platform != 'darwin'",
-    "Pillow>=12.3.0",
+    "Pillow>=12.3.0,<13",
     "python-multipart>=0.0.32",
     "psutil>=5.9.0",
     "pyyaml>=6.0.3",
