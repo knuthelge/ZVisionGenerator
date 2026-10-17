@@ -82,6 +82,8 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
     seed: numberOrNull(first(settings, 'seed')),
     dimensionMode: settings.width !== undefined ? 'custom' : 'ratio',
     enhanceAuto: settings.enhance_auto !== undefined,
+    enhanceModel: first(settings, 'enhance_model') === 'smart' ? 'smart' : 'fast',
+    enhanceFormat: first(settings, 'enhance_format') === 'json' ? 'json' : 'text',
   };
   if (isVideo) patch.scene = ownScene;
   // An extension's boxes are the job's own text, blank scene included; the source's recorded text must not replace them.

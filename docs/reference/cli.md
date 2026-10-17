@@ -73,7 +73,8 @@ The server only answers requests addressed to an IP address, `localhost`, the `-
 | `--enhance [SPEC]` | disabled | Rewrite each prompt with a local LLM before the model loads. `SPEC` is optional, e.g. `style=photo,details=lighting+camera,length=longer`. Overrides prompt-file `enhance:` entries. Ignored with `--json-prompt` |
 | `--enhance-note TEXT` | — | Free-text direction for the enhancer, e.g. `"at night, in the rain"` (up to 300 characters). Implies `--enhance` |
 | `--no-enhance` | — | Disable enhancement, including prompt-file `enhance:` entries |
-| `--enhance-model` | config | Enhancer LLM as `REPO[@REVISION]` or a local folder |
+| `--enhance-model` | `fast` | Enhancer LLM: `fast`, `smart` (larger, needs more memory; falls back to `fast` with a warning where it does not fit), or `REPO[@REVISION]` or a local folder. Use `./smart` for a folder named `smart` |
+| `--enhance-format` | `text` | `json` writes an Ideogram 4 JSON caption instead of a rewritten prompt, for every prompt of the job. Needs a model that takes JSON captions (`ideo`). Implies `--enhance` |
 
 Run `ziv-image --help` for the full list.
 
@@ -133,7 +134,7 @@ Platform-aware aliases:
 | `--enhance [SPEC]` | disabled | Rewrite each prompt with a local LLM before the model loads (see the `--enhance` spec above; `motion` and `sound` are allowed) |
 | `--enhance-note TEXT` | — | Free-text direction for the enhancer (up to 300 characters). Implies `--enhance` |
 | `--no-enhance` | — | Disable enhancement, including prompt-file `enhance:` entries |
-| `--enhance-model` | config | Enhancer LLM as `REPO[@REVISION]` or a local folder |
+| `--enhance-model` | `fast` | Enhancer LLM: `fast`, `smart`, or `REPO[@REVISION]` or a local folder (see `ziv-image`) |
 
 Operational notes:
 

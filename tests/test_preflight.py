@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from argparse import Namespace
 from unittest.mock import MagicMock, patch
 
@@ -224,6 +225,18 @@ def _types(events):
 
 
 class TestRunPreflight:
+    def test_json_format_writes_captions(self):
+        reply = "SUMMARY: A fox.\nAESTHETICS: calm\nLIGHTING: soft\nCAMERA: 50mm\nCOLORS: red\nBACKGROUND: Snow.\nOBJECT: A red fox."
+        enhancer = _FakeEnhancer([], texts=[reply, reply])
+        plan, _events, _release, _enhancer = _run(enhancer=enhancer, args=_args(enhance_format="json"), family="ideogram4")
+        assert all(json.loads(it.enhanced_prompt)["high_level_description"] == "A fox." for it in plan.iterations)
+        assert "OBJECT:" in enhancer.systems[0]
+
+    def test_text_format_stays_prose(self):
+        plan, _events, _release, enhancer = _run(args=_args(enhance_format=None))
+        assert all(not it.enhanced_prompt.startswith("{") for it in plan.iterations)
+        assert "OBJECT:" not in enhancer.systems[0]
+
     def test_rewrites_then_closes_then_releases(self):
         order: list[str] = []
         plan, _events, release, enhancer = _run(order=order)

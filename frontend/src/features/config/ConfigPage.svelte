@@ -58,11 +58,11 @@
     'ui.default_models.video': 'the first available video model',
     'generation.default_size': "the app's base resolution",
     'ui.output_dir': 'the outputs folder in the data folder',
-    'prompt_enhancer.user_model': 'the built-in model for this computer',
+    'prompt_enhancer.user_model': 'Fast or Smart, chosen in the Enhance popover',
   };
 
   const FIELD_HINTS: Record<string, string> = {
-    'prompt_enhancer.user_model': 'A Hugging Face repo (owner/name, optionally @revision) or a local folder with a chat model.',
+    'prompt_enhancer.user_model': 'A Hugging Face repo (owner/name, optionally @revision) or a local folder with a chat model. Replaces the Fast/Smart choice.',
   };
 
   /** A setting is changed when it has a value of its own; an empty value means "use the default". */

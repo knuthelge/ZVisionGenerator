@@ -109,6 +109,13 @@ describe('cliCommand', () => {
     expect(cliCommand({ mode: 'image', prompt: 'a', enhance_auto: 'true' }).command).toBe('ziv image --prompt a --enhance');
   });
 
+  it('names the Smart enhancer and JSON captions', () => {
+    expect(cliCommand({ mode: 'image', prompt: 'a', enhance_auto: 'true', enhance_model: 'smart', enhance_format: 'json' }).command)
+      .toBe('ziv image --prompt a --enhance --enhance-model smart --enhance-format json');
+    expect(cliCommand({ mode: 'video', prompt: 'a', enhance_auto: 'true', enhance_model: 'smart', enhance_format: 'json' }).command)
+      .toBe('ziv video --prompt a --enhance --enhance-model smart');
+  });
+
   it('spells out the Rewrite choice only where it is not the default of the workflow', () => {
     const settings = (parts: string) => JSON.stringify({ style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'], parts });
     const video = { mode: 'video', prompt: 'a', enhance_auto: 'true' };

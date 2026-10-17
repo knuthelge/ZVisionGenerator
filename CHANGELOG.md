@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Ideogram 4 on Windows and Linux.** The `ideo` alias now works with an NVIDIA GPU, using the NF4 model (a 15 GB download from Unsloth's unmodified mirror of Ideogram's official repo, pinned to a checked revision, so no Hugging Face account is needed; the model stays under Ideogram's non-commercial license). It runs on a 10 GB GPU: a 1024×1024 image takes about 2.5 minutes, and sizes up to about 1.8 megapixels work. It has the same default settings, the first-step-sigma option, JSON captions, live previews and LoRA support as on macOS
 - **Review before upscaling for video on Windows and Linux.** Turn on **Review** under Upscale (Web UI) or add `--review` to `--upscale 2` and the video pauses after the small render, so you can approve or discard it before the full-size pass runs, as on macOS
 - **Memory check for video on Windows and Linux.** Text to Video, Image to Video and Extend Video now warn when a clip may not fit your GPU or system memory, in the Web UI as a note under the length and on the command line as one warning when the run starts. The memory badge on a video model in the Web UI and on the Models page shows an estimate for a 5 s clip, too. The job is never blocked
+- **Fast or Smart prompt enhancer.** Every Enhance popover now has an **Enhancer** choice: **Fast** is the model used so far, and **Smart** is a larger one that follows your options and wording more closely (Qwen3.5-9B on Windows and Linux, a 19 GB download that needs about 9 GB of GPU memory; Qwen3.5-27B on macOS, 16 GB). Where Smart does not fit, the popover says why and Fast runs. On the command line use `--enhance-model smart`. A custom model set on the Config page replaces the choice
+- **JSON captions from the prompt enhancer (Ideogram 4).** With `ideo`, the Enhance popover's **Write as** choice can write a full Ideogram 4 JSON caption (subjects, background, lighting, colors and the exact lettering you asked for) instead of a rewritten prompt. It appears in the Enhanced tab, and Generate sends it as the structured caption. On the command line use `--enhance-format json`. Smart writes better captions than Fast
 - **`ziv-video` offers to install a missing ffmpeg on Windows and Linux.** On Windows it uses `winget`, and on Linux `apt`, `dnf` or `pacman`, the way macOS already did with Homebrew and MacPorts. It asks first and tells you to open a new terminal on Windows when `PATH` has not updated yet
 
 ### Changed
@@ -19,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 - **Web UI: Reuse settings now uses exactly the source's LoRAs.** Reusing an image or video made without LoRAs used to keep the LoRAs already chosen, so the reused job could differ from the original. The same applies to **Load settings** on a queued job and to **Extend**
+- **Reusing a JSON-caption image.** **Reuse** on an image made from a structured JSON caption now opens it in the `{ } JSON` box instead of the prompt, where its braces were read as `{a|b}` choices
 - **FLUX.2 Klein reference images and upscale on Windows and Linux.** Using a reference image, `--upscale`, or the viewer's Upscale with Klein (the default model) failed with an error there. It now works, as on macOS
 
 ## [0.13.0b21] - 2026-10-15

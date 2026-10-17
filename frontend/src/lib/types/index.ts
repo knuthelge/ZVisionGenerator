@@ -325,8 +325,23 @@ export interface PromptEnhancerContract {
   default_max_words: number;
   /** Whether this platform's video backend writes an audio track; without one the Sound axis never applies. */
   video_audio?: boolean;
+  /** The larger Smart enhancer; null when a custom model is configured (then there is no Fast/Smart choice). */
+  smart?: SmartEnhancerContract | null;
   error: string | null;
 }
+
+export interface SmartEnhancerContract {
+  /** Approximate first-use download size, null once downloaded. */
+  download_size_label: string | null;
+  /** Why Smart cannot run on this machine, or null when it can. */
+  unavailable: string | null;
+}
+
+/** Which enhancer model runs: the default Fast one or the larger Smart one. */
+export type EnhancerTier = 'fast' | 'smart';
+
+/** What an image enhancement writes: a rewritten prompt or a structured JSON caption. */
+export type EnhanceFormat = 'text' | 'json';
 
 /** What an Enhanced prompt (or Enhanced scene and prompt) was produced from; null for hand-typed text (never out of date). */
 export interface EnhancedSource {
@@ -719,6 +734,10 @@ export interface DraftState {
   enhanceSettings: EnhanceSettings | null;
   /** Enhance each image's prompt on the server at generation time. */
   enhanceAuto: boolean;
+  /** The enhancer chosen in the popover; Smart falls back to Fast where it is unavailable. */
+  enhanceModel: EnhancerTier;
+  /** What image enhancement writes; JSON applies only to models that take JSON captions. */
+  enhanceFormat: EnhanceFormat;
   /** Extend: the video to continue; null until one is chosen. Its facts are fetched again on load. */
   extendSourcePath: string | null;
   /** Extend: the new frames, a multiple of 8; null until a source sets the 2 s default. Never aligned to 8k+1. */

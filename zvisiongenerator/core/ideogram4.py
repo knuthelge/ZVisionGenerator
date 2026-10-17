@@ -10,6 +10,8 @@ __all__ = [
     "IDEOGRAM4_INITIAL_SIGMA",
     "Ideogram4Sampler",
     "caption_text",
+    "compact_caption",
+    "is_json_caption",
     "sampler_settings",
     "wrap_ideogram4_prompt",
 ]
@@ -74,7 +76,22 @@ def wrap_ideogram4_prompt(prompt: str) -> str | dict[str, Any]:
 def caption_text(prompt: str) -> str:
     """Return the text a backend that takes a string feeds Ideogram 4: JSON captions verbatim, plain text wrapped and serialized compactly."""
     wrapped = wrap_ideogram4_prompt(prompt)
-    return wrapped if isinstance(wrapped, str) else json.dumps(wrapped, ensure_ascii=False, separators=(",", ":"))
+    return wrapped if isinstance(wrapped, str) else compact_caption(wrapped)
+
+
+def compact_caption(caption: dict[str, Any]) -> str:
+    """Return *caption* as the single-line JSON Ideogram 4 reads (non-ASCII characters kept as-is)."""
+    return json.dumps(caption, ensure_ascii=False, separators=(",", ":"))
+
+
+def is_json_caption(text: str) -> bool:
+    """Return whether *text* is a JSON object, i.e. a structured caption rather than a plain prompt."""
+    if not text.strip().startswith("{"):
+        return False
+    try:
+        return isinstance(json.loads(text), dict)
+    except json.JSONDecodeError:
+        return False
 
 
 def sampler_settings(steps: int, guidance: float, *, steps_explicit: bool, guidance_explicit: bool) -> Ideogram4Sampler:

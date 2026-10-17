@@ -29,6 +29,11 @@ describe('jobSettingsPrefill', () => {
     expect(params).toEqual({ workflow: 'txt2img', model: 'zit', lora: '' });
   });
 
+  it('restores the enhancer and format a job ran with', () => {
+    expect(jobSettingsPrefill({ mode: 'image', prompt: 'a', enhance_auto: 'true', enhance_model: 'smart', enhance_format: 'json' }).patch).toMatchObject({ enhanceModel: 'smart', enhanceFormat: 'json' });
+    expect(jobSettingsPrefill({ mode: 'image', prompt: 'a' }).patch).toMatchObject({ enhanceModel: 'fast', enhanceFormat: 'text' });
+  });
+
   it('restores auto sharpening when the job sent no sharpen amount', () => {
     const { patch } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', prompt: 'a lake', sharpen_enabled: 'true' });
 

@@ -2,7 +2,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import { api, errorText } from '$lib/api/client';
   import { draft, videoTimingFor } from '$lib/state/draft.svelte';
-  import { anyEnhancedUsed, submittedPair } from '$lib/state/promptEnhance';
+  import { anyEnhancedUsed, submittedCaption, submittedPair } from '$lib/state/promptEnhance';
   import { jobStore } from '$lib/state/job.svelte';
   import { historyStore } from '$lib/state/history.svelte';
   import { router } from '$lib/state/router.svelte';
@@ -656,8 +656,14 @@
     // Sync lora string
     formData.set('lora', formatLoraString(loraChips));
     // Each part with Enhanced text is sent enhanced and the other as written (never in JSON-caption, file, or auto-enhance mode).
+    const caption = run ? null : submittedCaption(draft.state);
     if (run) {
       applyPromptRun(formData, run);
+    } else if (caption !== null && formData.has('prompt')) {
+      // An Enhanced JSON caption runs as the structured caption, like one written in the { } JSON box.
+      formData.delete('prompt');
+      formData.delete('negative_prompt');
+      formData.set('json_prompt', caption);
     } else if (anyEnhancedUsed(draft.state) && formData.has('prompt')) {
       // The Enhanced parts run; the user's own text is recorded beside them so Reuse can offer either.
       const pair = submittedPair(draft.state);

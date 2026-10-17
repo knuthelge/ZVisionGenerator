@@ -154,6 +154,29 @@ class TestEnhanceEndpoint:
         system, user = enhancer.messages[0][0]["content"], enhancer.messages[0][1]["content"]
         assert "A castle at dusk." in system and "kept exactly as written" in system and user == "he draws his sword"
 
+    def test_json_format_writes_a_caption(self, monkeypatch, no_active_job):
+        reply = "SUMMARY: A fox in snow.\nAESTHETICS: calm\nLIGHTING: soft\nCAMERA: 50mm\nCOLORS: white\nBACKGROUND: Snowy trees.\nOBJECT: A red fox."
+        enhancer = _FakeEnhancer([reply])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        keep_all = {"style": "keep", "mood": "keep", "details": [], "length": "same"}
+        with TestClient(web_server.app) as client:
+            frames = _frames(client.post("/api/prompt/enhance", json={"prompt": "a fox", "mode": "image", "format": "json", "settings": keep_all}))
+        done = frames[-1]
+        assert done["type"] == "done" and "\n" not in done["prompt"]
+        assert json.loads(done["prompt"])["compositional_deconstruction"]["elements"] == [{"type": "obj", "desc": "A red fox."}]
+        assert any(frame["type"] == "text" and frame["text"].startswith("SUMMA") for frame in frames)  # the labelled lines stream
+
+    @pytest.mark.parametrize(("key", "value"), [("enhance_model", "someone/repo"), ("format", "yaml")])
+    def test_enhancer_and_format_are_allow_listed(self, key, value):
+        with pytest.raises(ValueError, match=key):
+            web_server._validate_enhance_body({"prompt": "a fox", "settings": {"style": "photo"}, key: value})
+
+    def test_smart_resolves_the_smart_model(self, monkeypatch):
+        monkeypatch.setattr(web_server, "smart_budget_bytes", lambda choice: 64 * 2**30)
+        monkeypatch.setattr(web_server, "load_config", lambda: {"prompt_enhancer": {"model": "fast/m", "smart": {"model": "smart/m", "min_memory_gb": 9}}})
+        job = web_server._validate_enhance_body({"prompt": "a fox", "settings": {"style": "photo"}, "enhance_model": "smart"})
+        assert (job["repo"], job["revision"]) == ("smart/m", None)
+
     def test_video_action_only_with_keep_all_settings_is_valid(self, no_active_job):
         keep_all = {"style": "keep", "mood": "keep", "details": [], "length": "same", "motion": [], "sound": [], "parts": "action"}
         job = web_server._validate_enhance_body({"scene": "A castle.", "prompt": "a knight", "mode": "video", "settings": keep_all})
@@ -378,6 +401,25 @@ class TestGenerateFields:
         web_server._submit_image_job(_Form({"prompt_source": "file", "prompts_file": str(prompt_file), "prompt_option_id": ["a:0", "a:1"]}), web_config)
         assert submitted[0]["enhance_by_set"] == {"a": [EnhanceSettings(style="anime"), None]}
         assert submitted[0]["args"].enhance is None
+
+    def test_enhancer_and_format_reach_args(self):
+        args = SimpleNamespace()
+        form = {"enhance_auto": "true", "enhance_settings": self._KEEP_ALL_IMAGE, "enhance_model": "smart", "enhance_format": "json"}
+        web_server._apply_enhance_submission(args, form, mode="image", json_caption=False)
+        assert (args.enhance_model, args.enhance_format) == ("smart", "json")
+        assert args.enhance is not None  # A JSON caption is never a no-op.
+
+    @pytest.mark.parametrize(("key", "value"), [("enhance_model", "someone/repo"), ("enhance_format", "yaml")])
+    def test_enhancer_and_format_are_allow_listed(self, key, value):
+        with pytest.raises(ValueError, match=key):
+            web_server._apply_enhance_submission(SimpleNamespace(), {key: value}, mode="image", json_caption=False)
+
+    def test_format_is_image_only(self):
+        args = SimpleNamespace()
+        web_server._apply_enhance_submission(args, {"enhance_format": "json"}, mode="video", json_caption=False)
+        assert args.enhance_format is None
+
+    _KEEP_ALL_IMAGE = json.dumps({"style": "keep", "mood": "keep", "details": [], "length": "same"})
 
     def test_job_admission_rejects_while_enhancing(self, monkeypatch):
         monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(busy=True))
@@ -616,6 +658,17 @@ class TestWorkspaceContract:
         config = self._config(user_model="someone/bigger-llm")
         contract = workspace_api_module.build_prompt_enhancer_contract(config, downloaded=lambda repo, rev: False)
         assert contract["model"] == "someone/bigger-llm" and contract["download_size_label"] is None
+
+    def test_smart_reports_size_and_availability(self):
+        smart = {"model": "big/m", "revision": "s", "download_size_label": {"darwin": "19 GB", "win32": "19 GB", "linux": "19 GB"}, "min_memory_gb": 9}
+        contract = workspace_api_module.build_prompt_enhancer_contract(self._config(smart=smart), downloaded=lambda repo, rev: False, budget_bytes=lambda: 6 * 2**30)
+        assert contract["smart"] == {"download_size_label": "19 GB", "unavailable": "Needs about 9 GB of memory; this machine has 6 GB."}
+        fits = workspace_api_module.build_prompt_enhancer_contract(self._config(smart=smart), downloaded=lambda repo, rev: True, budget_bytes=lambda: 16 * 2**30)
+        assert fits["smart"] == {"download_size_label": None, "unavailable": None}
+
+    def test_custom_model_has_no_tiers(self):
+        contract = workspace_api_module.build_prompt_enhancer_contract(self._config(user_model="me/mine"), downloaded=lambda repo, rev: False, budget_bytes=lambda: None)
+        assert contract["smart"] is None
 
     def test_missing_model_reports_error(self):
         contract = workspace_api_module.build_prompt_enhancer_contract(SimpleNamespace(app_config={}), downloaded=lambda repo, rev: False)

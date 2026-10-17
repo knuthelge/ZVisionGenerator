@@ -256,7 +256,7 @@ def main(*, prog: str = "ziv-image") -> None:
             inspection = inspect_prompts_file(args.prompts_file)
         except (FileNotFoundError, ValueError) as e:
             parser.error(str(e))
-        prompts_data, enhance_by_set = inspection.prompts_data, enhance_by_set_for_mode(inspection.enhance_by_set, mode="image")
+        prompts_data, enhance_by_set = inspection.prompts_data, enhance_by_set_for_mode(inspection.enhance_by_set, mode="image", caption=args.enhance_format == "json")
     model_suffix = f" ({model_info.size or 'unknown size'})" if model_info.family == "flux2_klein" else ""
     print(f"Model type: {model_info.family}{model_suffix}")
 
@@ -279,6 +279,9 @@ def main(*, prog: str = "ziv-image") -> None:
                 f"--json-prompt is intended for Ideogram 4 structured captions; for the '{model_info.family}' family it is passed as a literal prompt and skips {{a|b|c}} random-choice expansion.",
                 stacklevel=2,
             )
+
+    if args.enhance_format == "json" and not defaults.get("supports_json_prompt", False):
+        parser.error(f"--enhance-format json needs a model that takes JSON captions (such as ideo); '{model_info.family}' does not.")
 
     if args.json_prompt_enabled and args.enhance is not None:
         warnings.warn("--enhance does not apply to --json-prompt structured captions; ignoring.", stacklevel=2)

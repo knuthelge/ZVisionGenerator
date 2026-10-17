@@ -200,6 +200,14 @@ describe('draft store', () => {
     expect(draft.state.prompt).toBe('from url');
   });
 
+  it('reuses a JSON caption into the JSON box, laid out, with the text boxes cleared', () => {
+    draft.update('prompt', 'older text');
+    draft.loadFromUrl({ workflow: 'txt2img', json_prompt: '{"high_level_description":"A {red} fox."}' }, makeContext());
+    expect(draft.state.jsonPromptEnabled).toBe(true);
+    expect(draft.state.jsonPrompt).toBe('{\n  "high_level_description": "A {red} fox."\n}');
+    expect(draft.state.prompt).toBe('');
+  });
+
   it('applies a reused negative prompt and scheduler when the workflow shows them', () => {
     const ctx = makeContext();
     ctx.workflow_contract.definitions.txt2img.visible_controls.push('negative_prompt', 'scheduler');

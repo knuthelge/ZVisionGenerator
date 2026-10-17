@@ -248,8 +248,9 @@ video_model_presets:
 # --- Prompt enhancer (local LLM) ---
 
 prompt_enhancer:
-  # Public Hugging Face repos, pinned. Override with prompt_enhancer.user_model (REPO[@REVISION] or a folder)
-  # (Config page) or --enhance-model REPO[@REVISION].
+  # Public Hugging Face repos, pinned. The model below is the default Fast choice; `smart` holds the larger one.
+  # Override both with prompt_enhancer.user_model (REPO[@REVISION] or a folder) (Config page) or
+  # --enhance-model REPO[@REVISION].
   model:
     darwin: McG-221/Qwen3.5-4B-heretic-mlx-4Bit
     win32: coder3101/Qwen3.5-4B-heretic
@@ -262,6 +263,25 @@ prompt_enhancer:
     darwin: 2.4 GB
     win32: 9 GB
     linux: 9 GB
+  # The larger model behind the Smart choice (--enhance-model smart). min_memory_gb is the accelerator memory it
+  # needs in GiB (VRAM on Windows/Linux, the GPU working set on macOS); with less, Smart is unavailable.
+  smart:
+    model:
+      darwin: TheCluster/Qwen3.5-27B-Heretic-MLX-4bit
+      win32: coder3101/Qwen3.5-9B-heretic
+      linux: coder3101/Qwen3.5-9B-heretic
+    revision:
+      darwin: 31502f7f1babc6b6b7c201cdd79a8dbd30bb93a8
+      win32: 554c40af4aef30991d9de3f2e692457f49c28691
+      linux: 554c40af4aef30991d9de3f2e692457f49c28691
+    download_size_label:
+      darwin: 16 GB
+      win32: 19 GB
+      linux: 19 GB
+    min_memory_gb:
+      darwin: 20
+      win32: 9
+      linux: 9
   temperature: 0.7
   max_new_tokens: 700
   idle_release_seconds: 120

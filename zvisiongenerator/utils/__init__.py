@@ -44,6 +44,7 @@ from .provenance import (
 )
 from .prompt_compose import expand_random_choices
 from .prompt_enhance import EnhanceResult, EnhanceSettings, enhance_prompt, matrix_contract, parse_enhance_entry, parse_enhance_spec
+from .prompt_enhance_caption import enhance_caption
 from .prompts import load_prompts_file
 from .video_extend import load_extend_source
 from .video_model_detect import VideoModelInfo, detect_video_model
@@ -74,6 +75,7 @@ __all__ = [
     "expand_home",
     "embed_mp4_config",
     "embed_png_config",
+    "enhance_caption",
     "enhance_prompt",
     "ensure_ffmpeg",
     "expand_random_choices",

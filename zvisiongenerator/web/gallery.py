@@ -13,6 +13,7 @@ from urllib.parse import quote, unquote, urlencode
 from PIL import Image, UnidentifiedImageError
 
 from zvisiongenerator.backends import supports_video_extend
+from zvisiongenerator.core.ideogram4 import is_json_caption
 from zvisiongenerator.utils.provenance import image_prompt_text, optional_float, optional_int, optional_text, read_mp4_config, read_png_config, recorded_settings
 from zvisiongenerator.utils.config import model_capabilities
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label, seedvr2_tier_label
@@ -320,7 +321,8 @@ def _reuse_text_params(asset: GalleryAsset, *, video: bool) -> dict[str, str]:
     enhanced action. Without recorded inputs (plain or older assets) the recorded text is what the user wrote.
     """
     if not video:
-        return {"prompt": asset.prompt}
+        # A structured caption reuses into the JSON box: as a text prompt its braces would read as {a|b} choices.
+        return {"json_prompt": asset.prompt} if is_json_caption(asset.prompt) else {"prompt": asset.prompt}
     if asset.scene_input or asset.prompt_input:
         pairs = {
             "scene": asset.scene_input,

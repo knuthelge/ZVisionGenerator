@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -34,12 +35,21 @@ from zvisiongenerator.backends import (
     supports_video_extend,
     supports_video_upscale_review,
 )
-from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu
+from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu, smart_budget_bytes
 from zvisiongenerator.converters.convert_checkpoint import MODEL_TYPES
 from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_local
+from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
-from zvisiongenerator.utils.config import load_config, resolve_defaults, resolve_enhancer_model, resolve_upscale_steps, validate_scheduler, validate_sharpen_amount
+from zvisiongenerator.utils.config import (
+    ENHANCER_TIERS,
+    load_config,
+    resolve_defaults,
+    resolve_enhancer_model,
+    resolve_upscale_steps,
+    validate_scheduler,
+    validate_sharpen_amount,
+)
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import resolve_lora_references
@@ -47,6 +57,7 @@ from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.model_memory import clip_memory_fit
 from zvisiongenerator.utils.prompt_compose import expand_random_choices
 from zvisiongenerator.utils.prompt_enhance import (
+    ENHANCE_FORMATS,
     EnhanceContext,
     EnhanceResult,
     EnhanceSettings,
@@ -58,6 +69,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     settings_from_mapping,
     validate_settings,
 )
+from zvisiongenerator.utils.prompt_enhance_caption import enhance_caption
 from zvisiongenerator.utils.prompt_enhance_video import EnhancePairResult, enhance_video_prompt, split_scene_action
 from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
 from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
@@ -473,8 +485,10 @@ def _validate_enhance_body(body: Any) -> dict[str, Any]:
     if mode == "video" and not context.extends and not (prompt.strip() or scene.strip()):
         raise ValueError("Enter a scene or a prompt to enhance.")
     settings = settings_from_mapping(body.get("settings") or {}, mode=mode, motion_in_image="warn")
-    # An extension always writes a new action, and so does ``parts="action"``, so neither is ever a no-op.
-    validate_settings(settings, mode=mode, split=context.extends or (mode == "video" and not scene.strip() and bool(prompt.strip())))
+    tier = _body_choice(body, "enhance_model", ENHANCER_TIERS)
+    caption = mode == "image" and _body_choice(body, "format", ENHANCE_FORMATS) == "json"
+    # An extension always writes a new action, and so does ``parts="action"``, so neither is ever a no-op; nor is a JSON caption.
+    validate_settings(settings, mode=mode, split=context.extends or (mode == "video" and not scene.strip() and bool(prompt.strip())), caption=caption)
     app_config = load_config()
     options = enhance_options(app_config)
     max_words = body.get("max_words")
@@ -482,11 +496,12 @@ def _validate_enhance_body(body: Any) -> dict[str, Any]:
         max_words = int(options["length"]["max_words"])
     if isinstance(max_words, bool) or not isinstance(max_words, int) or not 1 <= max_words <= 1000:
         raise ValueError("max_words must be an integer between 1 and 1000.")
-    repo, revision = resolve_enhancer_model(app_config, platform_key=sys.platform)
+    repo, revision = resolve_enhancer_model(app_config, platform_key=sys.platform, cli_model=tier, budget_bytes=smart_budget_bytes(tier))
     return {
         "prompt": prompt,
         "scene": scene,
         "mode": mode,
+        "caption": caption,
         "settings": settings,
         "context": context,
         "ceiling": max_words,
@@ -495,6 +510,14 @@ def _validate_enhance_body(body: Any) -> dict[str, Any]:
         "options": options,
         "idle_seconds": options["idle_release_seconds"],
     }
+
+
+def _body_choice(body: dict[str, Any], key: str, allowed: tuple[str, ...]) -> str | None:
+    """Return the request body's *key* when it is one of *allowed*, ``None`` when absent."""
+    value = body.get(key)
+    if value is not None and value not in allowed:
+        raise ValueError(f"{key} must be one of: {', '.join(allowed)}.")
+    return value
 
 
 def _enhance_context_from_body(raw: Any, *, mode: str, prompt: str = "") -> EnhanceContext:
@@ -568,7 +591,8 @@ def _enhance_for_job(job: dict[str, Any], enhancer: Any, frames: queue.Queue[dic
         "cancelled": cancelled.is_set,
     }
     if job["mode"] != "video":
-        return enhance_prompt(enhancer, expand_random_choices(job["prompt"]), job["settings"], mode="image", on_text=lambda text: frames.put({"type": "text", "text": text}), **common)
+        rewrite = enhance_caption if job.get("caption") else partial(enhance_prompt, mode="image")
+        return rewrite(enhancer, expand_random_choices(job["prompt"]), job["settings"], on_text=lambda text: frames.put({"type": "text", "text": text}), **common)
     scene = expand_random_choices(job.get("scene", ""))
     context = job.get("context")
     # Only the action is written when the settings ask for it and there is a scene to keep: no scene text streams.
@@ -960,20 +984,21 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
             raise ValueError(f'json_prompt must be a JSON object, e.g. \'{{"high_level_description": "..."}}\': {exc}') from exc
         if not isinstance(parsed, dict):
             raise ValueError(f"json_prompt must be a JSON object, got {type(parsed).__name__}.")
-        prompt = json_prompt_text
+        # The Web UI shows captions pretty-printed; Ideogram 4 reads the single-line form.
+        prompt = compact_caption(parsed)
         negative_prompt = None
-        prompts_data = {"prompt": [(json_prompt_text, None)]}
+        prompts_data = {"prompt": [(prompt, None)]}
         args.json_prompt_enabled = True
         enhance_by_set = None
     else:
         _prompt_source, prompt, negative_prompt, prompts_data, enhance_by_set, _scene_by_set = _resolve_prompt_submission_with_enhance(form)
-        enhance_by_set = enhance_by_set_for_mode(enhance_by_set, mode="image")
+        enhance_by_set = enhance_by_set_for_mode(enhance_by_set, mode="image", caption=_optional_text(form, "enhance_format") == "json")
     _apply_enhance_submission(args, form, mode="image", json_caption=args.json_prompt_enabled)
     first_sigma = _optional_float(form, "first_sigma")
     if first_sigma is not None and not (0.0 < first_sigma <= 2.0):
         raise ValueError(f"first_sigma must be in (0.0, 2.0], got {first_sigma}.")
     args.first_sigma = first_sigma
-    if args.json_prompt_enabled and not defaults.get("supports_json_prompt", False):
+    if (args.json_prompt_enabled or args.enhance_format == "json") and not defaults.get("supports_json_prompt", False):
         raise ValueError("This model does not support structured JSON captions.")
     if args.first_sigma is not None and not defaults.get("supports_first_sigma", False):
         raise ValueError("This model does not support the first-step sigma control.")
@@ -1242,14 +1267,16 @@ def _resolve_prompt_submission_with_enhance(
 
 
 def _apply_enhance_submission(args: argparse.Namespace, form: Any, *, mode: str, json_caption: bool, split: bool = False) -> None:
-    """Set ``args.enhance`` from the auto-enhance toggle (job-wide settings) or ``None``; never for JSON captions.
+    """Set ``args.enhance`` from the auto-enhance toggle (job-wide settings) or ``None``, plus the job's enhancer
+    (``enhance_model``: fast or smart) and, for images, what it writes (``enhance_format``: text or json); never for JSON captions.
 
     Args:
         split: A video job whose default scene is blank, so prompts are split into scene and action (never a no-op).
     """
     args.no_enhance = False
-    args.enhance_model = None
     args.enhance = None
+    args.enhance_model = None if json_caption else _form_choice(form, "enhance_model", ENHANCER_TIERS)
+    args.enhance_format = None if json_caption or mode != "image" else _form_choice(form, "enhance_format", ENHANCE_FORMATS)
     if json_caption or not _checkbox(form, "enhance_auto"):
         return
     raw = _optional_text(form, "enhance_settings")
@@ -1258,8 +1285,16 @@ def _apply_enhance_submission(args: argparse.Namespace, form: Any, *, mode: str,
     except json.JSONDecodeError as exc:
         raise ValueError(f"enhance_settings must be a JSON object: {exc}") from exc
     settings = settings_from_mapping(data, mode=mode, motion_in_image="warn")
-    validate_settings(settings, mode=mode, split=mode == "video" and split)
+    validate_settings(settings, mode=mode, split=mode == "video" and split, caption=args.enhance_format == "json")
     args.enhance = settings
+
+
+def _form_choice(form: Any, key: str, allowed: tuple[str, ...]) -> str | None:
+    """Return the form's *key* when it is one of *allowed*, ``None`` when absent."""
+    value = _optional_text(form, key)
+    if value is not None and value not in allowed:
+        raise ValueError(f"{key} must be one of: {', '.join(allowed)}.")
+    return value
 
 
 def _replace_prompt_negatives(

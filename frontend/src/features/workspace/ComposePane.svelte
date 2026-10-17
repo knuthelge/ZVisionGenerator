@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { draft } from '$lib/state/draft.svelte';
-  import { anyEnhancedUsed, canSubmitText, enhancedPartUsed, isEnhancedStale, runParts } from '$lib/state/promptEnhance';
+  import { anyEnhancedUsed, canSubmitText, enhancedPartUsed, isEnhancedStale, isJsonCaption, runParts } from '$lib/state/promptEnhance';
   import { isOriginalLegacyPrompt, normalizePromptText } from '$lib/state/extend';
   import { autogrow } from '$lib/actions/autogrow';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
@@ -280,6 +280,7 @@
       <textarea
         id="ws-enhanced-prompt"
         class="prompt-text"
+        class:font-mono={!enhancing && isJsonCaption(enhancedValue)}
         role={pairMode ? undefined : 'tabpanel'}
         aria-labelledby={pairMode ? undefined : 'ws-tab-enhanced'}
         hidden={!showingEnhanced}
@@ -311,6 +312,7 @@
         variant="inline"
         {busy}
         {jobsActive}
+        jsonCapable={caps.supportsJsonPrompt}
         maxWords={caps.enhanceMaxWords}
         onstart={() => { activeTab = 'enhanced'; noticeText = null; }}
       />
@@ -475,7 +477,7 @@
     >
       {#snippet tools()}
         {#if caps.showEnhanceAuto && caps.enhancer}
-          <PromptEnhancer contract={caps.enhancer} variant="file" {busy} {jobsActive} maxWords={caps.enhanceMaxWords} />
+          <PromptEnhancer contract={caps.enhancer} variant="file" {busy} {jobsActive} jsonCapable={caps.supportsJsonPrompt} maxWords={caps.enhanceMaxWords} />
         {/if}
       {/snippet}
     </PromptFileField>

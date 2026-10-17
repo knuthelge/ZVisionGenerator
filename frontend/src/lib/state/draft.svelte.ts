@@ -1,6 +1,6 @@
 import { extendPrefillFor } from './extend';
 import { keepInstalledLoras } from './loras';
-import { workflowMode } from './promptEnhance';
+import { isJsonCaption, prettyCaption, workflowMode } from './promptEnhance';
 import { alignFrameCount, defaultExtendFrames, snapExtendFrames } from './videoDuration';
 import type { DraftState, ExtendSourceInfo, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
@@ -73,6 +73,8 @@ const DEFAULT_DRAFT: DraftState = {
   enhancedFrom: null,
   enhanceSettings: null,
   enhanceAuto: false,
+  enhanceModel: 'fast',
+  enhanceFormat: 'text',
   extendSourcePath: null,
   extendFrames: null,
   missingSourceVideo: false,
@@ -356,6 +358,10 @@ export const draft = {
     // An extension names its source: the URL then describes the whole job, so its text replaces whatever the boxes held.
     const extending = workflow === 'extend' && canApply('source_video') && Boolean(params.source_video || params.missing_source_video);
     // Reusing text fills both boxes of the pair (a missing part is blank), and the Enhanced pair when the asset kept one.
+    // A structured caption reuses into the JSON box; the text boxes are cleared so nothing older stands beside it.
+    if (params.json_prompt && canApply('prompt') && workflowMode(workflow) === 'image') {
+      Object.assign(prefill, { jsonPrompt: prettyCaption(params.json_prompt), jsonPromptEnabled: true, prompt: '', enhancedPrompt: '', enhancedFrom: null });
+    }
     const reusesText = extending || ['prompt', 'scene', 'enhanced_prompt', 'enhanced_scene'].some((key) => params[key]);
     if (extending) {
       // A source that moved still names its old path; the Workspace asks for it to be chosen again.
@@ -464,6 +470,9 @@ export const draft = {
     }
     const modelDefaults = _modelDefaultsFor(ctx, workflow, model);
 
+    // An Enhanced JSON caption only means something to a model that takes JSON captions.
+    const imageTakesJson = !isVideoMode && (modelDefaults as ImageModelDefaults | null)?.supports_json_prompt === true;
+    if (!imageTakesJson && isJsonCaption(nextState.enhancedPrompt)) nextState = { ...nextState, enhancedPrompt: '', enhancedFrom: null };
     if (isVideoMode) {
       nextState = { ...nextState, negativePrompt: '', quantize: null, jsonPromptEnabled: false, jsonPrompt: '', firstSigma: null };
       // A kept or restored count may predate snapping; show the count the server will generate.

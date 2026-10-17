@@ -41,6 +41,8 @@ Plain-text prompts are automatically wrapped into Ideogram 4's structured JSON c
 ziv-image -m ideo --json-prompt '{"high_level_description": "a portrait"}'
 ```
 
+The automatic wrapper only repeats your prompt in the caption's fields, and Ideogram 4 often renders such sparse captions as a flat cut-out on a checkerboard background, especially posters and product shots. For a fuller caption, let the prompt enhancer write one: `--enhance-format json`, or **Write as: JSON** in the Enhance popover (see [JSON Captions](prompts.md#json-captions-ideogram-4)). The **Smart** enhancer writes better captions than Fast.
+
 When neither `--steps` nor `--guidance` is given, Ideogram 4 uses its built-in tuned quality schedule. Supplying `--steps` and/or `--guidance` overrides that schedule with the explicit values.
 
 The macOS model is gated on Hugging Face: accept its terms and log in (`hf auth login`) before the first download. The Windows and Linux model is downloaded from Unsloth's unmodified mirror of Ideogram's NF4 repo, pinned to a revision whose files were checked byte for byte against the official ones, so it needs no account. Either way the model is under Ideogram's non-commercial license, which applies as soon as you download or use it: see the `LICENSE.md` in the model folder. To use the official NF4 repo instead, pass `-m ideogram-ai/ideogram-4-nf4-diffusers` (it needs the login).

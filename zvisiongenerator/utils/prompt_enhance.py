@@ -14,6 +14,8 @@ if TYPE_CHECKING:
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
 
 ENHANCE_MODES = ("image", "video")
+# What an image rewrite writes: a prompt (``text``) or a structured JSON caption (``json``) for models that take one.
+ENHANCE_FORMATS = ("text", "json")
 DEFAULT_LENGTH_CONFIG: dict[str, Any] = {
     "percent": {"shorter": 50, "same": 100, "longer": 200, "extra": 300},
     "floor_words": {"shorter": 12, "longer": 40, "extra": 80},
@@ -30,6 +32,10 @@ _LABEL_RE = re.compile(r"^\s*(?:rewritten prompt|enhanced prompt|prompt)\s*:\s*"
 _REFUSAL_RE = re.compile(r"^\s*(?:I can['’]t|I cannot|I won['’]t|I'm sorry|I’m sorry|I am sorry|As an AI)\b", re.I)
 # Only double quotes: single quotes double as apostrophes ("Moe's"), so stripping them would cut real text.
 _QUOTE_PAIRS = {'"': '"', "“": "”"}
+PRESERVATION_RULES = (
+    "EVERY DETAIL IS IMPORTANT: keep the user's subject, intent and every element they mention.",
+    "Never add new people, animals, characters or major objects.",
+)
 NO_USABLE_MESSAGE = "The enhancer returned no usable rewrite (empty, unchanged, or a refusal). Try different settings."
 
 
@@ -494,12 +500,13 @@ def parse_enhance_entry(value: Any, *, mode: str, where: str) -> EnhanceSettings
     raise ValueError(f"Invalid 'enhance' in {where}: expected true, false, or a mapping, got {type(value).__name__}.")
 
 
-def validate_settings(settings: EnhanceSettings, *, mode: str, split: bool = False) -> None:
+def validate_settings(settings: EnhanceSettings, *, mode: str, split: bool = False, caption: bool = False) -> None:
     """Reject unknown slugs and the no-op combination (keep style and mood, no details, same length, no motion, sound or direction).
 
     Args:
         split: Whether a video prompt has no scene, so the rewrite splits it into scene and action (never a no-op).
             ``parts="action"`` is never a no-op either.
+        caption: Whether the rewrite writes a JSON caption, which is never a no-op.
     """
     _check_mode(mode)
     if settings.parts is not None and settings.parts not in PARTS_VALUES:
@@ -513,7 +520,7 @@ def validate_settings(settings: EnhanceSettings, *, mode: str, split: bool = Fal
         MOTION_AXIS.option(slug)
     for slug in settings.sound:
         SOUND_AXIS.option(slug)
-    if is_noop(settings, mode=mode, split=split):
+    if not caption and is_noop(settings, mode=mode, split=split):
         raise ValueError("Nothing to enhance: pick a style, a mood, a detail, a length, or write a direction.")
 
 
@@ -603,14 +610,16 @@ def enhance_by_set_for_mode(
     mode: str,
     scene_by_set: dict[str, list[str | None]] | None = None,
     job_scene: str | None = None,
+    caption: bool = False,
 ) -> dict[str, list[EnhanceSettings | None]] | None:
     """Drop prompt-file entries that change nothing in *mode* (e.g. motion-only entries in an image run), warning once.
 
     Args:
         scene_by_set: Each entry's scene, aligned with *enhance_by_set*; video entries without a scene split their prompt into scene and action.
         job_scene: The scene used by entries that have none of their own.
+        caption: The job writes JSON captions, which always change the prompt, so nothing is dropped.
     """
-    if not enhance_by_set:
+    if not enhance_by_set or caption:
         return enhance_by_set
     dropped = 0
     result: dict[str, list[EnhanceSettings | None]] = {}
@@ -771,8 +780,7 @@ def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: L
     context = context or EnhanceContext()
     kind = "text-to-video" if mode == "video" else "text-to-image"
     rules = [
-        "EVERY DETAIL IS IMPORTANT: keep the user's subject, intent and every element they mention.",
-        "Never add new people, animals, characters or major objects.",
+        *PRESERVATION_RULES,
         perception_rule(mode, context),
         *context_rules(mode, context),
     ]

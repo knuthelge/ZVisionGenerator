@@ -526,6 +526,17 @@ def test_reuse_of_an_image_keeps_only_the_prompt(tmp_path, monkeypatch):
     assert not {"scene", "enhanced_scene", "enhanced_prompt"} & set(params)
 
 
+def test_reuse_of_a_json_caption_image_fills_the_json_prompt(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
+    caption = '{"high_level_description":"A {red} fox."}'
+    _make_png_with_config(tmp_path / "pic.png", {"schema": "zvisiongenerator.config.v1", "workflow": "txt2img", "prompt": caption, "model": "ideo", "seed": 1, "steps": 20})
+
+    params = _reuse_params(gallery_asset_to_json(_find_asset(list_gallery_assets(str(tmp_path)), "pic.png"), _reuse_web_config()))
+
+    assert params["json_prompt"] == caption
+    assert "prompt" not in params
+
+
 # ---------------------------------------------------------------------------
 # Extend: capability block, source and Reuse
 # ---------------------------------------------------------------------------

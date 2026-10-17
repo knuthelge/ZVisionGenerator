@@ -179,6 +179,20 @@ def get_prompt_enhancer_session() -> PromptEnhancerSession:
         return _SESSION
 
 
+def smart_budget_bytes(choice: str | None, *, probe: Callable[[], Any] | None = None) -> int | None:
+    """Return this machine's accelerator memory when *choice* asks for the Smart enhancer, else None (no probe).
+
+    Args:
+        probe: Returns a ``MemoryBudget`` or None (defaults to ``accelerator_memory_budget_or_none``).
+    """
+    if (choice or "").strip() != "smart":
+        return None
+    if probe is None:
+        from zvisiongenerator.backends import accelerator_memory_budget_or_none as probe
+    budget = probe()
+    return budget.gpu_bytes if budget is not None else None
+
+
 def plan_job_enhancer(
     config: dict[str, Any],
     *,
@@ -187,8 +201,13 @@ def plan_job_enhancer(
     override: EnhanceSettings | None,
     enhance_by_set: dict[str, list[EnhanceSettings | None]] | None,
     cli_model: str | None = None,
+    budget_bytes: int | None = None,
 ) -> tuple[str, str | None] | None:
     """Return the enhancer ``(repo, revision)`` when any prompt in the job is enhanced, after checking that it is available.
+
+    Args:
+        cli_model: ``fast``, ``smart`` or ``REPO[@REVISION]``; see :func:`resolve_enhancer_model`.
+        budget_bytes: The machine's accelerator memory, which decides whether Smart can run.
 
     Raises:
         ValueError: When no enhancer model is configured or *cli_model* is malformed.
@@ -196,7 +215,7 @@ def plan_job_enhancer(
     """
     if not enhancement_requested(disabled=disabled, override=override, enhance_by_set=enhance_by_set):
         return None
-    repo, revision = resolve_enhancer_model(config, platform_key=platform_key, cli_model=cli_model)
+    repo, revision = resolve_enhancer_model(config, platform_key=platform_key, cli_model=cli_model, budget_bytes=budget_bytes)
     ensure_available(repo, revision)
     return repo, revision
 

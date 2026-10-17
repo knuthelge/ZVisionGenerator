@@ -388,6 +388,20 @@ class TestCliFlags:
 
     def test_model(self):
         assert _cli(["--enhance-model", "me/llm@v1"]).enhance_model == "me/llm@v1"
+        assert _cli(["--enhance-model", "smart"]).enhance_model == "smart"
+
+    def test_json_format_implies_enhance_and_is_never_a_no_op(self):
+        args = _cli(["--enhance-format", "json"])
+        assert (args.enhance_format, args.enhance) == ("json", EnhanceSettings())
+        assert _cli(["--enhance", "details=,length=same", "--enhance-format", "json"]).enhance is not None
+
+    def test_json_format_is_image_only(self, capsys):
+        with pytest.raises(SystemExit):
+            _cli(["--enhance-format", "json"], mode="video")
+
+    def test_json_format_with_no_enhance_exits(self, capsys):
+        with pytest.raises(SystemExit):
+            _cli(["--enhance-format", "json", "--no-enhance"])
 
     @pytest.mark.parametrize(
         ("argv", "mode"),

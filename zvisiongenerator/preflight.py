@@ -30,6 +30,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     resolve_enhance_ceiling,
     resolve_item_enhance,
 )
+from zvisiongenerator.utils.prompt_enhance_caption import enhance_caption
 from zvisiongenerator.utils.prompt_enhance_video import PAIR_FALLBACK_WARNING, PARTS_FALLBACK_WARNING, enhance_video_prompt
 from zvisiongenerator.utils.video_extend import extend_enhance_context
 
@@ -173,13 +174,21 @@ def run_preflight(
             prompt_enhancer_session.release_resident_enhancer()
         return _finish(JobPlan(iterations), mode=mode, progress_callback=progress_callback)
 
+    cli_model = getattr(args, "enhance_model", None)
     reference = prompt_enhancer_session.plan_job_enhancer(
-        config, platform_key=sys.platform, disabled=disabled, override=override, enhance_by_set=enhance_by_set, cli_model=getattr(args, "enhance_model", None)
+        config,
+        platform_key=sys.platform,
+        disabled=disabled,
+        override=override,
+        enhance_by_set=enhance_by_set,
+        cli_model=cli_model,
+        budget_bytes=prompt_enhancer_session.smart_budget_bytes(cli_model),
     )
     if reference is None:
         raise RuntimeError("Prompt enhancement was requested but no enhancer model could be planned.")
     pause = _make_pause(control, mode=mode, total_iterations=total_iterations, progress_callback=progress_callback)
-    rewrite = _make_rewriter(config, mode=mode, model_family=model_family, context=_job_context(args, mode=mode))
+    caption = mode == "image" and getattr(args, "enhance_format", None) == "json"
+    rewrite = _make_rewriter(config, mode=mode, model_family=model_family, context=_job_context(args, mode=mode), caption=caption)
 
     def _on_phase(phase: str) -> None:
         _print_enhancer_phase(phase)
@@ -273,9 +282,13 @@ def _iteration_context(context: EnhanceContext, iteration: IterationPlan) -> Enh
 
 
 def _make_rewriter(
-    config: dict[str, Any], *, mode: str, model_family: str | None, context: EnhanceContext
+    config: dict[str, Any], *, mode: str, model_family: str | None, context: EnhanceContext, caption: bool = False
 ) -> Callable[[PromptEnhancer, IterationPlan, Callable[[], bool] | None], tuple[IterationPlan, str | None]]:
-    """Bind the job's word ceiling, context and enhancer options into a single-iteration rewrite function."""
+    """Bind the job's word ceiling, context and enhancer options into a single-iteration rewrite function.
+
+    Args:
+        caption: Image prompts are rewritten as JSON captions (``--enhance-format json``).
+    """
     ceiling = resolve_enhance_ceiling(config, family=model_family, mode=mode)
     options = enhance_options(config)
 
@@ -298,7 +311,10 @@ def _make_rewriter(
                 if pair.format_fallback:
                     warnings.warn(PAIR_FALLBACK_WARNING, stacklevel=2)
                 return replace(iteration, enhanced_prompt=pair.prompt, enhanced_scene=pair.scene or None, enhance_status=EnhanceStatus.ENHANCED), None
-            result = enhance_prompt(enhancer, iteration.resolved_prompt, iteration.enhance, mode=mode, **shared)
+            if caption:
+                result = enhance_caption(enhancer, iteration.resolved_prompt, iteration.enhance, **shared)
+            else:
+                result = enhance_prompt(enhancer, iteration.resolved_prompt, iteration.enhance, mode=mode, **shared)
         except Exception as exc:  # noqa: BLE001 - enhancement is optional: any adapter/template failure falls back to the prompt
             return iteration, str(exc) or type(exc).__name__
         return replace(iteration, enhanced_prompt=result.prompt, enhance_status=EnhanceStatus.ENHANCED), None

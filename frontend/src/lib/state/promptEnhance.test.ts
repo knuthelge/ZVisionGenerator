@@ -9,6 +9,11 @@ import {
   anyEnhancedUsed,
   actionOnlyBlocked,
   defaultParts,
+  effectiveFormat,
+  effectiveTier,
+  isJsonCaption,
+  prettyCaption,
+  submittedCaption,
   enhancedPartUsed,
   hasAudio,
   isEnhancedStale,
@@ -43,6 +48,49 @@ function state(overrides: Partial<DraftState> = {}): DraftState {
 }
 
 const SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
+
+describe('Fast/Smart and Text/JSON', () => {
+  const contract = (smart: PromptEnhancerContract['smart']): PromptEnhancerContract =>
+    ({ matrix: { axes: [], defaults: SETTINGS }, model: 'fast/m', revision: null, downloaded: true, download_size_label: null, default_max_words: 300, smart, error: null }) as PromptEnhancerContract;
+
+  it('runs Smart only when chosen and available', () => {
+    const available = contract({ download_size_label: '19 GB', unavailable: null });
+    expect(effectiveTier(state({ enhanceModel: 'smart' }), available)).toBe('smart');
+    expect(effectiveTier(state({ enhanceModel: 'fast' }), available)).toBe('fast');
+    expect(effectiveTier(state({ enhanceModel: 'smart' }), contract({ download_size_label: null, unavailable: 'Needs about 9 GB of memory.' }))).toBe('fast');
+    expect(effectiveTier(state({ enhanceModel: 'smart' }), contract(null))).toBe('fast');
+  });
+
+  it('writes JSON only for image models that take JSON captions', () => {
+    expect(effectiveFormat(state({ enhanceFormat: 'json' }), true)).toBe('json');
+    expect(effectiveFormat(state({ enhanceFormat: 'json' }), false)).toBe('text');
+    expect(effectiveFormat(state({ enhanceFormat: 'json', workflow: 'txt2vid' }), true)).toBe('text');
+  });
+
+  it('a JSON caption is never a no-op', () => {
+    expect(isNoOpSettings(SETTINGS, 'image')).toBe(true);
+    expect(isNoOpSettings(SETTINGS, 'image', false, false, true)).toBe(false);
+  });
+
+  it('detects and lays out captions', () => {
+    expect(isJsonCaption('{"high_level_description":"x"}')).toBe(true);
+    expect(isJsonCaption('{a|b} fox')).toBe(false);
+    expect(prettyCaption('{"a":1}')).toBe('{\n  "a": 1\n}');
+    expect(prettyCaption('a fox')).toBe('a fox');
+  });
+
+  it('submits an Enhanced caption as the JSON prompt', () => {
+    expect(submittedCaption(state({ enhancedPrompt: '{\n  "a": 1\n}' }))).toBe('{\n  "a": 1\n}');
+    expect(submittedCaption(state({ enhancedPrompt: 'A fox in snow.' }))).toBeNull();
+    expect(submittedCaption(state({ enhancedPrompt: '{"a":1}', enhanceAuto: true }))).toBeNull();
+    expect(submittedCaption(state({ enhancedPrompt: '{"a":1}', workflow: 'txt2vid' }))).toBeNull();
+  });
+
+  it('names a caption run in the status line', () => {
+    expect(enhancePhaseMessage('generating', null, true)).toBe('Writing a JSON caption…');
+    expect(enhancePhaseMessage('generating', null)).toBe('Enhancing…');
+  });
+});
 
 describe('submission rule', () => {
   it.each([

@@ -1203,6 +1203,91 @@ describe('WorkspacePage', () => {
     expect((enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0] as { prompt: string }).prompt).toBe('a fox');
   });
 
+  describe('Fast/Smart and Text/JSON', () => {
+    function ideoEnhancerContext(smart: PromptEnhancerContract['smart'] = null): WorkspaceContext {
+      const ideogramDefaults = makeIdeogramDefaults();
+      const context = withEnhancer(makeContext({
+        image_models: [{ id: 'ideo', label: 'ideo', type: 'image' }],
+        defaults: ideogramDefaults,
+        current_image_model: 'ideo',
+        image_model_defaults: { ideo: ideogramDefaults },
+      }));
+      context.prompt_enhancer = { ...context.prompt_enhancer!, smart };
+      return context;
+    }
+
+    it('writes a JSON caption into the Enhanced tab and generates it as the JSON prompt', async () => {
+      enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
+        const onFrame = rest[0] as (frame: EnhanceFrame) => void;
+        onFrame({ type: 'done', prompt: '{"high_level_description":"A fox."}', clamped: false });
+      });
+      draft.update('prompt', 'a fox');
+      draft.update('enhanceFormat', 'json');
+      await mountWorkspace(ideoEnhancerContext());
+      const run = await openEnhanceRun();
+      expect(document.querySelector('[data-choice="json"]')?.getAttribute('aria-checked')).toBe('true');
+      run.click();
+      await settle();
+
+      expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ format: 'json' });
+      expect(draft.state.enhancedPrompt).toBe('{\n  "high_level_description": "A fox."\n}');
+      const submitted = await submitForm();
+      expect(submitted.get('json_prompt')).toBe('{\n  "high_level_description": "A fox."\n}');
+      expect(submitted.has('prompt')).toBe(false);
+    });
+
+    it('offers Write as only for models that take JSON captions', async () => {
+      await mountWorkspace(withEnhancer(makeContext()));
+      await openEnhanceRun();
+      expect(document.querySelector('[data-choice="json"]')).toBeNull();
+    });
+
+    it('disables Smart with its reason and runs Fast', async () => {
+      enhanceApiMocks.enhancePrompt.mockResolvedValue();
+      draft.update('prompt', 'a fox');
+      draft.update('enhanceModel', 'smart');
+      await mountWorkspace(ideoEnhancerContext({ download_size_label: '19 GB', unavailable: 'Needs about 9 GB of memory; this machine has 6 GB.' }));
+      const run = await openEnhanceRun();
+      const smart = document.querySelector('[data-choice="smart"]') as HTMLButtonElement;
+      expect(smart.disabled).toBe(true);
+      expect(document.querySelector('[data-choice="fast"]')?.getAttribute('aria-checked')).toBe('true');
+      expect(document.getElementById(smart.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Needs about 9 GB of memory; this machine has 6 GB.');
+      run.click();
+      await settle();
+      expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).not.toHaveProperty('enhance_model');
+    });
+
+    it('runs Smart when chosen and available, and shows its first-use size', async () => {
+      enhanceApiMocks.enhancePrompt.mockResolvedValue();
+      draft.update('prompt', 'a fox');
+      draft.update('enhanceModel', 'smart');
+      await mountWorkspace(ideoEnhancerContext({ download_size_label: '19 GB', unavailable: null }));
+      const run = await openEnhanceRun();
+      expect(document.body.textContent).toContain('First use downloads ≈19 GB.');
+      run.click();
+      await settle();
+      expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ enhance_model: 'smart' });
+    });
+
+    it('sends the enhancer and format with an auto-enhance job', async () => {
+      draft.update('prompt', 'a fox');
+      draft.update('enhanceAuto', true);
+      draft.update('enhanceModel', 'smart');
+      draft.update('enhanceFormat', 'json');
+      await mountWorkspace(ideoEnhancerContext({ download_size_label: null, unavailable: null }));
+      const submitted = await submitForm();
+      expect(submitted.get('enhance_model')).toBe('smart');
+      expect(submitted.get('enhance_format')).toBe('json');
+    });
+
+    it('shows a custom model instead of the Fast/Smart choice', async () => {
+      await mountWorkspace(ideoEnhancerContext(null));
+      await openEnhanceRun();
+      expect(document.querySelector('[data-choice="smart"]')).toBeNull();
+      expect(document.body.textContent).toContain('Enhancer: owner/llm');
+    });
+  });
+
   it('submits the Enhanced prompt instead of the prompt when it has text', async () => {
     draft.update('prompt', 'a fox');
     draft.update('enhancedPrompt', 'A red fox in deep snow, golden light.');
@@ -1453,7 +1538,9 @@ describe('WorkspacePage', () => {
         await mountWorkspace(withVideoEnhancer(makeContext()));
         await openEnhanceRun();
         expect(document.querySelector('#ws-enhance-rewrite-label')?.textContent?.trim()).toBe('Rewrite');
-        expect(document.querySelector('#ws-enhance-panel fieldset')?.querySelector('#ws-enhance-rewrite-label')).not.toBeNull();
+        const rewriteLabel = document.querySelector('#ws-enhance-rewrite-label')!;
+        const styleLabel = document.querySelector('#ws-enhance-panel [id$="-style-label"]')!;
+        expect(rewriteLabel.compareDocumentPosition(styleLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
         expect(rewriteChips().map((el) => el.textContent?.trim())).toEqual(['Scene and action', 'Action only']);
 
         draft.update('workflow', 'txt2img');
@@ -1467,12 +1554,10 @@ describe('WorkspacePage', () => {
         await mountWorkspace(withVideoEnhancer(makeContext()));
         await openEnhanceRun();
         expect(rewriteChips().map((el) => el.getAttribute('aria-checked'))).toEqual(['true', 'false']);
-        expect(document.querySelector('#ws-enhance-rewrite-help')?.textContent).toBe('Enhance rewrites both from your text.');
 
         chip('Action only').click();
         await settle();
         expect(rewriteChips().map((el) => el.getAttribute('aria-checked'))).toEqual(['false', 'true']);
-        expect(document.querySelector('#ws-enhance-rewrite-help')?.textContent).toBe('Your scene is kept as written.');
         expect(draft.state.enhanceSettings?.partsByWorkflow).toEqual({ txt2vid: 'action' });
       });
 
@@ -1486,9 +1571,9 @@ describe('WorkspacePage', () => {
         const actionOnly = chip('Action only');
         expect(actionOnly.disabled).toBe(true);
         expect(chip('Scene and action').getAttribute('aria-checked')).toBe('true');
-        const help = document.querySelector('#ws-enhance-rewrite-help') as HTMLElement;
-        expect(help.textContent).toBe('Write a scene first. With no scene, Enhance splits your text into both.');
-        expect(actionOnly.getAttribute('aria-describedby')).toBe(help.id);
+        // The reason is announced with the disabled chip.
+        const reason = document.getElementById(actionOnly.getAttribute('aria-describedby') ?? '');
+        expect(reason?.textContent).toContain('Write a scene first');
 
         (document.querySelector('#ws-enhance-run') as HTMLButtonElement).click();
         await settle();
@@ -4245,7 +4330,6 @@ describe('WorkspacePage extend', () => {
         await settle();
         await openEnhanceRun();
         expect(rewrite().map((el) => el.getAttribute('aria-checked'))).toEqual(['false', 'true']);
-        expect(document.querySelector('#ws-enhance-rewrite-help')?.textContent).toBe('Your scene is kept as written.');
         (document.querySelector('#ws-enhance-run') as HTMLButtonElement).click();
         await settle();
         expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ scene: 'A woman on a rainy street.', prompt: 'She waves.', settings: { parts: 'action' } });

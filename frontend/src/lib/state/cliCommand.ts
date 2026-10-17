@@ -192,6 +192,9 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
     args.push('--enhance');
     if (spec) args.push(spec);
   }
+  // The enhancer and format are sent only when the job enhances (auto-enhance or prompt-file entries) and differ from the defaults.
+  if (!isJson && text(settings, 'enhance_model') === 'smart') args.push('--enhance-model', 'smart');
+  if (!isJson && !isVideo && text(settings, 'enhance_format') === 'json') args.push('--enhance-format', 'json');
 
   if (options.outputDir) args.push('--output', options.outputDir);
   return { command: args.map(shellQuote).join(' '), caveats };

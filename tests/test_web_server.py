@@ -643,6 +643,32 @@ def test_submit_image_job_threads_json_prompt_and_first_sigma_to_authoritative_a
     assert submitted[0]["request"].prompt == '{"high_level_description":"x"}'
 
 
+def test_submit_image_job_compacts_a_pretty_json_prompt(monkeypatch, tmp_path):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    _patch_image_submit_dependencies(
+        monkeypatch,
+        model_info=ImageModelInfo(family="ideogram4", is_distilled=False, size=None),
+        defaults=_make_resolved_image_defaults(supports_json_prompt=True, supports_first_sigma=True),
+        submitted=submitted,
+    )
+    web_server._submit_image_job({"model": "ideo", "json_prompt": '{\n  "high_level_description": "Café"\n}'}, web_config)
+    assert submitted[0]["prompts_data"] == {"prompt": [('{"high_level_description":"Café"}', None)]}
+
+
+def test_submit_image_job_rejects_json_enhancement_for_models_without_json_captions(monkeypatch, tmp_path):
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    _patch_image_submit_dependencies(
+        monkeypatch,
+        model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None),
+        defaults=_make_resolved_image_defaults(supports_json_prompt=False),
+    )
+    with pytest.raises(ValueError, match="does not support structured JSON captions"):
+        web_server._submit_image_job({"model": "zimage", "prompt": "a fox", "enhance_auto": "true", "enhance_format": "json"}, web_config)
+
+
 @pytest.mark.parametrize(
     ("form", "expected_steps", "expected_guidance", "expected_steps_explicit", "expected_guidance_explicit"),
     [

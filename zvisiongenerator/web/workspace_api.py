@@ -12,7 +12,7 @@ from typing import Any
 from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, get_backend_name, supports_stored_quants, supports_video_audio
 from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
-from zvisiongenerator.utils.config import resolve_defaults, resolve_enhancer_model, resolve_video_defaults
+from zvisiongenerator.utils.config import resolve_defaults, resolve_enhancer_model, resolve_video_defaults, smart_enhancer_model, smart_unavailable
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
 from zvisiongenerator.utils.model_files import directory_bytes, find_local_model_dir
@@ -132,20 +132,31 @@ def build_workspace_response(
     }
 
 
-def build_prompt_enhancer_contract(web_config: WebUiConfig, *, downloaded: Callable[[str, str | None], bool] = is_model_downloaded) -> dict[str, Any]:
-    """Describe the prompt enhancer for the SPA: option matrix, effective model, and download state."""
+def build_prompt_enhancer_contract(
+    web_config: WebUiConfig,
+    *,
+    downloaded: Callable[[str, str | None], bool] = is_model_downloaded,
+    budget_bytes: Callable[[], int | None] | None = None,
+) -> dict[str, Any]:
+    """Describe the prompt enhancer for the SPA: option matrix, effective (Fast or custom) model, download state, and Smart.
+
+    ``smart`` is ``None`` when a custom model is configured (no Fast/Smart choice); otherwise it holds the Smart model's
+    first-download size label (``None`` once downloaded) and ``unavailable``, the reason it cannot run here, or ``None``.
+
+    Args:
+        budget_bytes: Returns the machine's accelerator memory, or ``None`` when unknown.
+    """
     app_config = web_config.app_config
     section = app_config.get("prompt_enhancer") or {}
-    sizes = section.get("download_size_label") or {}
-    size_label = sizes.get(sys.platform) if isinstance(sizes, dict) else None
     contract: dict[str, Any] = {
         "matrix": matrix_contract(),
         "model": None,
         "revision": None,
         "downloaded": False,
-        "download_size_label": size_label if isinstance(size_label, str) else None,
+        "download_size_label": _size_label(section),
         "default_max_words": resolve_enhance_ceiling(app_config, family=None, mode="image"),
         "video_audio": supports_video_audio(),
+        "smart": None,
         "error": None,
     }
     try:
@@ -158,7 +169,26 @@ def build_prompt_enhancer_contract(web_config: WebUiConfig, *, downloaded: Calla
     # The size label describes the built-in default; a custom model's size is unknown.
     if contract["downloaded"] or section.get("user_model"):
         contract["download_size_label"] = None
+    if not section.get("user_model"):
+        smart = smart_enhancer_model(app_config, platform_key=sys.platform)
+        budget = (budget_bytes or _gpu_budget_bytes)()
+        contract["smart"] = {
+            "download_size_label": _size_label(section.get("smart") or {}) if smart is not None and not downloaded(*smart) else None,
+            "unavailable": smart_unavailable(app_config, platform_key=sys.platform, budget_bytes=budget),
+        }
     return contract
+
+
+def _size_label(section: dict[str, Any]) -> str | None:
+    """Return a tier section's download size label for this platform, if any."""
+    sizes = section.get("download_size_label") or {}
+    label = sizes.get(sys.platform) if isinstance(sizes, dict) else None
+    return label if isinstance(label, str) else None
+
+
+def _gpu_budget_bytes() -> int | None:
+    budget = memory_budget()
+    return budget.gpu_bytes if budget is not None else None
 
 
 def build_models_response(

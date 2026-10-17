@@ -9,6 +9,10 @@ export interface EnhanceRequest {
   settings: Partial<EnhanceSettings>;
   max_words?: number;
   context?: EnhanceContext;
+  /** `smart` runs the larger enhancer; absent is Fast. */
+  enhance_model?: 'smart';
+  /** `json` writes a structured JSON caption (images on models that take one); absent is text. */
+  format?: 'json';
 }
 
 /** Incrementally split an NDJSON byte stream (decoded to text) into frames, tolerating chunk boundaries. */

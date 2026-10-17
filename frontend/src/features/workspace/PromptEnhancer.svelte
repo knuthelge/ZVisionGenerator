@@ -1,14 +1,24 @@
+<script lang="ts" module>
+  import { SvelteSet } from 'svelte/reactivity';
+  import type { EnhancerTier } from '$lib/types';
+
+  /** Enhancer models downloaded during this session, so their first-use size stops showing. */
+  const downloadedTiers = new SvelteSet<EnhancerTier>();
+</script>
+
 <script lang="ts">
   import { draft } from '$lib/state/draft.svelte';
   import { enhancePrompt } from '$lib/api/promptEnhance';
   import { extendEnhanceHint, extendGuard } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
-  import { EnhanceOptions, EnhanceRewrite } from '$lib/components/molecules';
+  import { EnhanceChoice, EnhanceOptions, EnhanceRewrite } from '$lib/components/molecules';
   import { Icon, Toggle } from '$lib/components/atoms';
   import { popover } from '$lib/actions/popover';
   import {
     clampedNote,
     effectiveEnhanceSettings,
+    effectiveFormat,
+    effectiveTier,
     enhanceContext,
     enhancedSourceFor,
     enhancePhaseMessage,
@@ -16,14 +26,16 @@
     hasAudio,
     autoSplitsPrompt,
     actionOnlyBlocked,
+    isJsonCaption,
     isNoOpSettings,
+    prettyCaption,
     runParts,
     settingsPayload,
     splitsPrompt,
     withRememberedParts,
     workflowMode,
   } from '$lib/state/promptEnhance';
-  import type { EnhanceParts, EnhanceSettings, PromptEnhancerContract } from '$lib/types';
+  import type { EnhanceFormat, EnhanceParts, EnhanceSettings, PromptEnhancerContract } from '$lib/types';
 
   interface Props {
     contract: PromptEnhancerContract;
@@ -46,6 +58,8 @@
     statusText?: string | null;
     /** Called when an enhancement starts, so the Enhanced tab can come forward. */
     onstart?: () => void;
+    /** The image model takes JSON captions, so the popover offers Write as: Text or JSON. */
+    jsonCapable?: boolean;
   }
 
   let {
@@ -53,6 +67,7 @@
     variant,
     busy,
     jobsActive = false,
+    jsonCapable = false,
     maxWords,
     enhancing = $bindable(false),
     streamingText = $bindable(''),
@@ -77,17 +92,28 @@
   const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath)));
   // A video prompt without a scene is split into scene and action, so it is never a no-op. On demand that needs a prompt;
   // auto-enhance (also in file mode, where the prompt box is blank) only needs the default scene to be blank.
-  const autoNoOp = $derived(isNoOpSettings(runSettings, mode, audio, autoSplitsPrompt(draft.state)));
-  const noOp = $derived(isNoOpSettings(runSettings, mode, audio, splitsPrompt(draft.state)));
+  const tier = $derived(effectiveTier(draft.state, contract));
+  const format = $derived(effectiveFormat(draft.state, jsonCapable));
+  const caption = $derived(format === 'json');
+  const autoNoOp = $derived(isNoOpSettings(runSettings, mode, audio, autoSplitsPrompt(draft.state), caption));
+  const noOp = $derived(isNoOpSettings(runSettings, mode, audio, splitsPrompt(draft.state), caption));
   const available = $derived(contract.model !== null);
+  const TIER_OPTIONS = $derived([
+    { value: 'fast' as const, label: 'Fast', help: 'The default model.' },
+    { value: 'smart' as const, label: 'Smart', help: 'Follows your options and wording more closely.', unavailable: contract.smart?.unavailable ?? null },
+  ]);
+  const FORMAT_OPTIONS: { value: EnhanceFormat; label: string; help: string }[] = [
+    { value: 'text', label: 'Text', help: 'A rewritten prompt.' },
+    { value: 'json', label: 'JSON', help: 'A full Ideogram 4 JSON caption (subjects, lettering, colors).' },
+  ];
 
   let panelOpen = $state(false);
   let toggleEl = $state<HTMLButtonElement | null>(null);
-  let downloadedThisSession = $state(false);
   let phase: 'downloading' | 'loading' | 'generating' | 'generating_cpu' | null = null;
   let abort: AbortController | null = null;
 
-  const downloadSize = $derived(downloadedThisSession ? null : contract.download_size_label);
+  const downloadSize = $derived(downloadedTiers.has(tier) ? null : (tier === 'smart' ? contract.smart?.download_size_label : contract.download_size_label) ?? null);
+  const fastUndownloaded = $derived(tier === 'fast' && !contract.downloaded && !downloadedTiers.has('fast'));
   const enhanceDisabled = $derived(busy || jobsActive || enhancing || noOp || !available || !canSubmitText(draft.state) || sourceGuard.blocked);
   const disabledHint = $derived(
     !available ? (contract.error ?? 'No prompt enhancer model is configured.')
@@ -116,29 +142,42 @@
     const source = enhancedSourceFor(draft.state);
     const requested = runSettings;
     const parts = rewriteParts;
+    const runTier = tier;
+    const runCaption = caption;
     enhancing = true;
     streamingText = '';
     streamingScene = '';
     errorText = null;
     noteText = null;
-    statusText = enhancePhaseMessage('generating', null);
+    statusText = enhancePhaseMessage('generating', null, runCaption);
     abort = new AbortController();
     try {
       await enhancePrompt(
-        { prompt: source.prompt, ...(mode === 'video' ? { scene: source.scene } : {}), mode, settings: settingsPayload(requested, mode, audio), max_words: maxWords, context: enhanceContext(draft.state, audioSupported, sourceHasAudio) },
+        {
+          prompt: source.prompt,
+          ...(mode === 'video' ? { scene: source.scene } : {}),
+          mode,
+          settings: settingsPayload(requested, mode, audio),
+          max_words: maxWords,
+          context: enhanceContext(draft.state, audioSupported, sourceHasAudio),
+          ...(runTier === 'smart' ? { enhance_model: 'smart' as const } : {}),
+          ...(runCaption ? { format: 'json' as const } : {}),
+        },
         (frame) => {
           if (frame.type === 'status') {
             phase = frame.phase;
-            statusText = enhancePhaseMessage(frame.phase, downloadSize);
+            statusText = enhancePhaseMessage(frame.phase, downloadSize, runCaption);
           } else if (frame.type === 'text') {
             // Video frames carry the server's split; images stream their whole text into the prompt.
             streamingText = frame.prompt ?? frame.text;
             streamingScene = frame.scene ?? '';
           } else if (frame.type === 'done') {
-            draft.patch({ enhancedPrompt: frame.prompt, enhancedScene: source.mode === 'video' && parts === 'both' ? frame.scene ?? '' : '', enhancedFrom: source });
+            // A caption arrives on one line; it is laid out for reading, and Generate sends it as the JSON prompt.
+            const prompt = runCaption ? prettyCaption(frame.prompt) : frame.prompt;
+            draft.patch({ enhancedPrompt: prompt, enhancedScene: source.mode === 'video' && parts === 'both' ? frame.scene ?? '' : '', enhancedFrom: source });
             const notes = [frame.clamped ? clampedNote(requested.length) : null, frame.warning ?? null].filter((note) => note !== null);
             noteText = notes.length > 0 ? notes.join(' ') : null;
-            downloadedThisSession = true;
+            downloadedTiers.add(runTier);
           } else if (frame.type === 'error') {
             errorText = frame.detail;
           }
@@ -179,9 +218,22 @@
 </script>
 
 {#snippet options()}
-  {#if mode === 'video'}
-    <EnhanceRewrite value={rewriteParts} actionOnlyBlocked={rewriteBlocked} disabled={enhancing} onchange={updateParts} />
-    <hr class="rewrite-sep" />
+  {#if contract.smart || (jsonCapable && mode === 'image') || mode === 'video'}
+    <!-- The run-shaping choices share one compact row that wraps on narrow screens; their help is in the tooltips. -->
+    <div class="choices">
+      {#if contract.smart}
+        <EnhanceChoice label="Enhancer" options={TIER_OPTIONS} value={tier} disabled={enhancing} idPrefix={`ws-enhance-${variant}-model`} onchange={(value) => draft.update('enhanceModel', value)} />
+      {/if}
+      {#if jsonCapable && mode === 'image'}
+        <EnhanceChoice label="Write as" options={FORMAT_OPTIONS} value={format} disabled={enhancing} idPrefix={`ws-enhance-${variant}-format`} onchange={(value) => draft.update('enhanceFormat', value)} />
+      {/if}
+      {#if mode === 'video'}
+        <EnhanceRewrite value={rewriteParts} actionOnlyBlocked={rewriteBlocked} disabled={enhancing} onchange={updateParts} />
+      {/if}
+    </div>
+  {/if}
+  {#if contract.smart === null && contract.model}
+    <p class="ui-help" title="Set on the Config page">Enhancer: <span class="font-mono break-all">{contract.model}</span></p>
   {/if}
   <EnhanceOptions axes={contract.matrix.axes} {settings} {mode} {audio} disabled={enhancing} idPrefix={`ws-enhance-${variant}`} onchange={updateSettings} />
 
@@ -228,14 +280,18 @@
             disabled={enhanceDisabled}
             onclick={runEnhance}
           >
-            {draft.state.enhancedPrompt.trim() || draft.state.enhancedScene.trim() ? 'Enhance again' : 'Enhance prompt'}
+            {#if caption}
+              {isJsonCaption(draft.state.enhancedPrompt) ? 'Write caption again' : 'Write caption'}
+            {:else}
+              {draft.state.enhancedPrompt.trim() || draft.state.enhancedScene.trim() ? 'Enhance again' : 'Enhance prompt'}
+            {/if}
           </button>
         {/if}
         {#if disabledHint && !enhancing}
           <span class="ui-help">{disabledHint}</span>
         {:else if downloadSize && !enhancing}
           <span class="ui-help">First use downloads ≈{downloadSize}.</span>
-        {:else if !contract.downloaded && !downloadedThisSession && !enhancing}
+        {:else if fastUndownloaded && !enhancing}
           <span class="ui-help">First use downloads the model.</span>
         {/if}
       </div>
@@ -252,8 +308,14 @@
   <input type="hidden" name="enhance_auto" value="true" />
   <input type="hidden" name="enhance_settings" value={JSON.stringify(settingsPayload(runSettings, mode, audio))} />
 {/if}
+<!-- The enhancer and format apply to the whole job: auto-enhance, or prompt-file entries with their own `enhance:`. -->
+{#if (variant === 'inline' && draft.state.promptSource === 'inline' && draft.state.enhanceAuto) || (variant === 'file' && draft.state.promptSource === 'file')}
+  {#if tier === 'smart'}<input type="hidden" name="enhance_model" value="smart" />{/if}
+  {#if caption}<input type="hidden" name="enhance_format" value="json" />{/if}
+{/if}
 
 <style>
-  .enhance-popover { z-index: 70; width: 320px; padding: 12px; border-radius: var(--radius-md); }
-  .rewrite-sep { border: 0; border-top: 1px solid var(--color-border-subtle); }
+  /* Never taller or wider than the window: on small screens the options scroll inside the popover. */
+  .enhance-popover { z-index: 70; width: min(320px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow-y: auto; padding: 12px; border-radius: var(--radius-md); }
+  .choices { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
 </style>

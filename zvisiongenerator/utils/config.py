@@ -10,6 +10,7 @@ resolve_defaults() for the config layering precedence:
 from __future__ import annotations
 
 import importlib.resources
+import warnings
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -553,27 +554,75 @@ def split_model_revision(value: str) -> tuple[str, str | None]:
     return repo.strip(), revision.strip()
 
 
-def resolve_enhancer_model(config: dict[str, Any], *, platform_key: str, cli_model: str | None = None) -> tuple[str, str | None]:
-    """Return the prompt-enhancer ``(repo, revision)``: CLI > user override (``REPO[@REVISION]``) > platform default.
+ENHANCER_TIERS = ("fast", "smart")
+_GIB = 2**30
+
+
+def _platform_value(section: dict[str, Any], key: str, platform_key: str) -> Any:
+    """Return *section[key]* for *platform_key* (a per-platform mapping or one value for every platform)."""
+    values = section.get(key)
+    return values.get(platform_key) if isinstance(values, dict) else values
+
+
+def _tier_model(section: dict[str, Any], platform_key: str) -> tuple[str, str | None] | None:
+    """Return the ``(repo, revision)`` a tier section configures for *platform_key*, or None."""
+    repo = _platform_value(section, "model", platform_key)
+    if not isinstance(repo, str) or not repo.strip():
+        return None
+    revision = _platform_value(section, "revision", platform_key)
+    return repo.strip(), revision.strip() if isinstance(revision, str) and revision.strip() else None
+
+
+def smart_enhancer_model(config: dict[str, Any], *, platform_key: str) -> tuple[str, str | None] | None:
+    """Return the Smart enhancer ``(repo, revision)`` configured for *platform_key*, or None."""
+    return _tier_model((config.get("prompt_enhancer") or {}).get("smart") or {}, platform_key)
+
+
+def smart_unavailable(config: dict[str, Any], *, platform_key: str, budget_bytes: int | None) -> str | None:
+    """Return why the Smart enhancer cannot run on this machine, or None when it can.
+
+    Args:
+        budget_bytes: The accelerator memory (VRAM, or the GPU working set on Apple Silicon); ``None`` when unknown,
+            which counts as unavailable.
+    """
+    smart = (config.get("prompt_enhancer") or {}).get("smart") or {}
+    if smart_enhancer_model(config, platform_key=platform_key) is None or budget_bytes is None:
+        return "Smart is not available on this machine."
+    need = _platform_value(smart, "min_memory_gb", platform_key)
+    if isinstance(need, (int, float)) and budget_bytes < need * _GIB:
+        return f"Needs about {need:g} GB of memory; this machine has {budget_bytes / _GIB:.0f} GB."
+    return None
+
+
+def resolve_enhancer_model(config: dict[str, Any], *, platform_key: str, cli_model: str | None = None, budget_bytes: int | None = None) -> tuple[str, str | None]:
+    """Return the prompt-enhancer ``(repo, revision)``: CLI choice > user override (``REPO[@REVISION]``) > Fast.
+
+    The CLI choice is ``fast``, ``smart`` or ``REPO[@REVISION]``. Smart falls back to Fast, with a warning, when
+    :func:`smart_unavailable` gives a reason.
 
     Args:
         config: Loaded config mapping.
         platform_key: Platform key such as ``darwin`` or ``win32``.
-        cli_model: Optional ``REPO[@REVISION]`` from ``--enhance-model``.
+        cli_model: Optional ``fast``, ``smart`` or ``REPO[@REVISION]`` from ``--enhance-model``.
+        budget_bytes: The machine's accelerator memory, for the Smart check; ``None`` when unknown.
 
     Raises:
         ValueError: If no model is configured for the platform or *cli_model* is malformed.
     """
-    if cli_model and cli_model.strip():
-        return split_model_revision(cli_model)
+    choice = (cli_model or "").strip()
     section = config.get("prompt_enhancer") or {}
+    if choice and choice not in ENHANCER_TIERS:
+        return split_model_revision(choice)
     user_model = section.get("user_model")
-    if isinstance(user_model, str) and user_model.strip():
+    if not choice and isinstance(user_model, str) and user_model.strip():
         return split_model_revision(user_model)
-    models = section.get("model") or {}
-    repo = models.get(platform_key) if isinstance(models, dict) else models
-    if not isinstance(repo, str) or not repo.strip():
+    if choice == "smart":
+        reason = smart_unavailable(config, platform_key=platform_key, budget_bytes=budget_bytes)
+        smart = smart_enhancer_model(config, platform_key=platform_key)
+        if reason is None and smart is not None:
+            return smart
+        warnings.warn(f"The Smart enhancer is unavailable: {reason} Using Fast.", stacklevel=2)
+    fast = _tier_model(section, platform_key)
+    if fast is None:
         raise ValueError(f"No prompt enhancer model is configured for platform '{platform_key}'. Set prompt_enhancer.user_model.")
-    revisions = section.get("revision") or {}
-    revision = revisions.get(platform_key) if isinstance(revisions, dict) else revisions
-    return repo.strip(), revision.strip() if isinstance(revision, str) and revision.strip() else None
+    return fast

@@ -6,12 +6,13 @@ import os
 import sys
 import types
 import warnings
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession, ensure_available
-from zvisiongenerator.utils.config import resolve_enhancer_model, split_model_revision
+from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession, ensure_available, smart_budget_bytes
+from zvisiongenerator.utils.config import resolve_enhancer_model, smart_unavailable, split_model_revision
 
 
 # ── mlx-lm adapter ──────────────────────────────────────────────────────────
@@ -355,6 +356,55 @@ class TestResolveModel:
     def test_missing_platform(self):
         with pytest.raises(ValueError, match="platform 'linux'"):
             resolve_enhancer_model(_CONFIG, platform_key="linux")
+
+
+_GIB = 2**30
+_TIERED = {
+    "prompt_enhancer": {
+        "model": {"win32": "fast/model"},
+        "revision": {"win32": "fastrev"},
+        "smart": {"model": {"win32": "smart/model"}, "revision": {"win32": "smartrev"}, "min_memory_gb": {"win32": 9}},
+    }
+}
+
+
+class TestEnhancerTiers:
+    def test_fast_is_the_default(self):
+        assert resolve_enhancer_model(_TIERED, platform_key="win32") == ("fast/model", "fastrev")
+
+    def test_smart_when_it_fits(self):
+        assert resolve_enhancer_model(_TIERED, platform_key="win32", cli_model="smart", budget_bytes=16 * _GIB) == ("smart/model", "smartrev")
+
+    @pytest.mark.parametrize("budget", [6 * _GIB, None])
+    def test_smart_that_does_not_fit_warns_and_uses_fast(self, budget):
+        with pytest.warns(UserWarning, match="Smart enhancer is unavailable"):
+            assert resolve_enhancer_model(_TIERED, platform_key="win32", cli_model="smart", budget_bytes=budget) == ("fast/model", "fastrev")
+
+    def test_smart_not_configured_warns_and_uses_fast(self):
+        with pytest.warns(UserWarning, match="Smart enhancer is unavailable"):
+            assert resolve_enhancer_model(_CONFIG, platform_key="win32", cli_model="smart", budget_bytes=64 * _GIB) == ("win/model", "winrev")
+
+    def test_cli_tier_beats_user_model(self):
+        config = {"prompt_enhancer": {**_TIERED["prompt_enhancer"], "user_model": "me/mine"}}
+        assert resolve_enhancer_model(config, platform_key="win32") == ("me/mine", None)
+        assert resolve_enhancer_model(config, platform_key="win32", cli_model="fast") == ("fast/model", "fastrev")
+        assert resolve_enhancer_model(config, platform_key="win32", cli_model="smart", budget_bytes=16 * _GIB) == ("smart/model", "smartrev")
+
+    @pytest.mark.parametrize(
+        ("budget", "expected"),
+        [(16 * _GIB, None), (6 * _GIB, "Needs about 9 GB of memory; this machine has 6 GB."), (None, "Smart is not available on this machine.")],
+    )
+    def test_smart_unavailable(self, budget, expected):
+        assert smart_unavailable(_TIERED, platform_key="win32", budget_bytes=budget) == expected
+
+    def test_smart_unavailable_when_not_configured(self):
+        assert smart_unavailable(_CONFIG, platform_key="win32", budget_bytes=64 * _GIB) == "Smart is not available on this machine."
+
+    def test_budget_is_probed_only_for_smart(self):
+        probe = MagicMock(return_value=SimpleNamespace(gpu_bytes=8 * _GIB))
+        assert smart_budget_bytes("fast", probe=probe) is None
+        probe.assert_not_called()
+        assert smart_budget_bytes("smart", probe=probe) == 8 * _GIB
 
     @pytest.mark.parametrize(("value", "expected"), [("a/b", ("a/b", None)), ("a/b@main", ("a/b", "main")), ("/models/llm", ("/models/llm", None))])
     def test_split(self, value, expected):

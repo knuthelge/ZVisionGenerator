@@ -186,14 +186,20 @@ With `--extend`, each entry's prompt is the action that follows the source clip,
 
 A small local LLM can rewrite a prompt with more visual detail before it is generated. It runs on your machine. The default model is an uncensored variant of Qwen3.5-4B, because small instruction-tuned models often refuse or tone down ordinary creative prompts, such as a battle scene, a horror shot or a villain's portrait. The uncensored variant rewrites them faithfully instead.
 
-| Platform | Default model | First-use download |
-|---|---|---|
-| macOS | `McG-221/Qwen3.5-4B-heretic-mlx-4Bit` (mlx-lm, 4-bit) | ≈2.4 GB |
-| Windows / Linux | `coder3101/Qwen3.5-4B-heretic` (transformers, 4-bit on CUDA) | ≈9 GB |
+There are two built-in models. **Fast** is the default. **Smart** is larger and follows your options and wording more closely (it keeps counts, adds fewer things you did not ask for, and writes better JSON captions), but needs more memory and a larger download.
+
+| Platform | Enhancer | Model | First-use download | Needs |
+|---|---|---|---|---|
+| macOS | Fast | `McG-221/Qwen3.5-4B-heretic-mlx-4Bit` (mlx-lm, 4-bit) | ≈2.4 GB | |
+| macOS | Smart | `TheCluster/Qwen3.5-27B-Heretic-MLX-4bit` (mlx-lm, 4-bit) | ≈16 GB | about 20 GB of GPU memory (a Mac with 32 GB) |
+| Windows / Linux | Fast | `coder3101/Qwen3.5-4B-heretic` (transformers, 4-bit on CUDA) | ≈9 GB | |
+| Windows / Linux | Smart | `coder3101/Qwen3.5-9B-heretic` (transformers, 4-bit on CUDA) | ≈19 GB | about 9 GB of GPU memory |
+
+Choose **Fast** or **Smart** under **Enhancer** in the Enhance popover, or pass `--enhance-model smart` on the command line. The choice applies to the whole job. On a machine where Smart does not fit (too little GPU memory, or no NVIDIA GPU on Windows or Linux), the popover shows why and Smart cannot be picked; on the command line a warning says so and Fast runs. Downloaded models stay in the Hugging Face cache; delete them there to free the disk space.
 
 Without a CUDA GPU, Windows and Linux run the enhancer on the CPU: it works, but each rewrite can take a few minutes and about 10 GB of RAM. The status line says so when this happens. If the machine has an NVIDIA GPU, a warning also suggests updating its driver to 580 or newer, the usual reason CUDA is missing.
 
-Both defaults are pinned to a revision. To use another chat model, set **Prompt Enhancer Model** on the Config page to a Hugging Face `owner/name` (optionally `owner/name@revision`) or a local folder, or pass `--enhance-model REPO[@REVISION]`. Thinking-tuned or heavily merged models are slower and follow the length and style options less reliably.
+All built-in models are pinned to a revision. To use another chat model, set **Prompt Enhancer Model** on the Config page to a Hugging Face `owner/name` (optionally `owner/name@revision`) or a local folder; it then replaces the Fast/Smart choice. `--enhance-model REPO[@REVISION]` does the same for one run. Thinking-tuned or heavily merged models are slower and follow the length and style options less reliably.
 
 ### Options
 
@@ -258,6 +264,19 @@ The **Rewrite** option (`parts` in the CLI and prompt files) chooses what the en
 - **Action only needs a scene.** With a blank scene, Action only is unavailable in the Web UI, and the run rewrites both parts. On the command line it does the same and warns once.
 - Image workflows ignore Rewrite.
 
+### JSON Captions (Ideogram 4)
+
+Ideogram 4 reads structured JSON captions (see [Ideogram 4](image.md#ideogram-4)). With `ideo`, the Enhance popover has a **Write as** choice: **Text** rewrites your prompt as usual, **JSON** writes a full caption from it instead, with a summary, the look, lighting and colors, the background, one element per thing you named, and the lettering you asked for.
+
+- The same options apply: Style decides photo or artwork, Mood shapes the look and colors, Details and Length decide how much is described, and Direction is followed.
+- Quoted text (`"OPEN"`, `'LISBOA'`, `「パン屋」`) and names after *called* or *named* become text elements, copied exactly. On a card or logo, words you wrote without quotes are used too. Signs you mention without their words may get short words that fit, in the language you name.
+- The caption appears in the **Enhanced** tab, laid out for reading, and Generate sends it as the structured caption. Edit it there like any Enhanced text.
+- With **Enhance each image when generating**, every image gets its own caption.
+- If the enhancer returns no usable caption twice, the run reports it and keeps your prompt.
+- **Smart** writes noticeably better captions than Fast.
+
+On the command line use `--enhance-format json`; it turns on enhancement by itself. It applies to every prompt of the job, including prompt-file entries with their own `enhance:`, and needs a model that takes JSON captions.
+
 ### In the Web UI
 
 - **Enhance**: click ✨ **Enhance** in the prompt box, pick options, and click **Enhance prompt**. The rewrite appears in the **Enhanced** tab. The button is unavailable while generation jobs are running or queued. Enhance again always starts from your text, and **Clear** empties the Enhanced text.
@@ -303,6 +322,8 @@ ziv-image -m klein9b -p prompts.yaml --enhance style=photo,mood=serene,details=l
 ziv-video -m ltx-8 --prompt "a fox runs" --enhance style=cinematic,motion=action+camera-move,sound=ambient+effects
 ziv-video -m ltx-8 --scene "A fox in a snowy birch forest at dawn." --prompt "it runs" --enhance parts=action
 ziv-image -m klein9b --prompt "a lighthouse" --enhance-note "in a storm, at night"
+ziv-image -m klein9b --prompt "a fox in snow" --enhance --enhance-model smart
+ziv-image -m ideo --prompt "a travel poster for Lisbon with the text 'LISBOA'" --enhance-format json
 ziv-image -m klein9b -p prompts.yaml --no-enhance
 ```
 

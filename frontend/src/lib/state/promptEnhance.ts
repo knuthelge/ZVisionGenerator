@@ -1,4 +1,30 @@
-import type { DraftState, EnhanceContext, EnhancedSource, EnhanceParts, EnhanceSettings, PromptEnhancerContract, Workflow, WorkflowMode } from '$lib/types';
+import type { DraftState, EnhanceContext, EnhancedSource, EnhanceFormat, EnhanceParts, EnhancerTier, EnhanceSettings, PromptEnhancerContract, Workflow, WorkflowMode } from '$lib/types';
+
+/** The enhancer a run uses: Smart when chosen and available here, otherwise Fast. */
+export function effectiveTier(state: Pick<DraftState, 'enhanceModel'>, contract: PromptEnhancerContract | undefined | null): EnhancerTier {
+  return state.enhanceModel === 'smart' && contract?.smart && !contract.smart.unavailable ? 'smart' : 'fast';
+}
+
+/** What a run writes: a JSON caption only for an image model that takes JSON captions. */
+export function effectiveFormat(state: Pick<DraftState, 'enhanceFormat' | 'workflow'>, jsonCapable: boolean): EnhanceFormat {
+  return state.enhanceFormat === 'json' && jsonCapable && workflowMode(state.workflow) === 'image' ? 'json' : 'text';
+}
+
+/** Whether *text* is a JSON object, i.e. a structured caption rather than a prompt. */
+export function isJsonCaption(text: string): boolean {
+  if (!text.trim().startsWith('{')) return false;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
+  } catch {
+    return false;
+  }
+}
+
+/** A JSON caption laid out for reading and editing; other text is returned unchanged. */
+export function prettyCaption(text: string): string {
+  return isJsonCaption(text) ? JSON.stringify(JSON.parse(text), null, 2) : text;
+}
 
 /** Media mode of a canonical workflow. */
 export function workflowMode(workflow: Workflow): WorkflowMode {
@@ -61,8 +87,10 @@ export function hasAudio(state: DraftState, supported = true, sourceHasAudio: bo
  * parts the run uses (a blank scene means both), as `runParts` gives them.
  *
  * @param split The job is a video whose scene is blank and whose prompt is not, so the rewrite splits it.
+ * @param caption The run writes a JSON caption, which is always a change.
  */
-export function isNoOpSettings(settings: EnhanceSettings, mode: WorkflowMode, audio = false, split = false): boolean {
+export function isNoOpSettings(settings: EnhanceSettings, mode: WorkflowMode, audio = false, split = false, caption = false): boolean {
+  if (caption) return false;
   // A video prompt written without a scene is split into scene and action, which is always a change.
   if (mode === 'video' && split) return false;
   if (mode === 'video' && settings.parts === 'action') return false;
@@ -179,6 +207,12 @@ export function submittedPair(state: DraftState): { scene: string; prompt: strin
   };
 }
 
+/** The Enhanced JSON caption Generate sends as `json_prompt` in place of the prompt, or null when the Enhanced text is not one. */
+export function submittedCaption(state: DraftState): string | null {
+  if (workflowMode(state.workflow) !== 'image' || !enhancedPartUsed(state, 'action')) return null;
+  return isJsonCaption(state.enhancedPrompt) ? state.enhancedPrompt : null;
+}
+
 /** The `prompt` form value to submit. */
 export function submittedPrompt(state: DraftState): string {
   return submittedPair(state).prompt;
@@ -196,12 +230,12 @@ export function isEnhancedStale(state: DraftState): boolean {
   return (source.sourceVideoPath ?? null) !== (extending ? state.extendSourcePath : null) || (source.extendFrames ?? null) !== (extending ? state.extendFrames : null);
 }
 
-/** Status line for an enhancement phase. */
-export function enhancePhaseMessage(phase: 'downloading' | 'loading' | 'generating' | 'generating_cpu', downloadSize: string | null): string {
+/** Status line for an enhancement phase; *caption* runs write a JSON caption. */
+export function enhancePhaseMessage(phase: 'downloading' | 'loading' | 'generating' | 'generating_cpu', downloadSize: string | null, caption = false): string {
   if (phase === 'downloading') return `Downloading enhancer model${downloadSize ? ` (≈${downloadSize}, first use only)` : ' (first use only)'}…`;
   if (phase === 'loading') return 'Loading enhancer…';
   if (phase === 'generating_cpu') return 'Enhancing on the CPU (no GPU found); this can take a few minutes…';
-  return 'Enhancing…';
+  return caption ? 'Writing a JSON caption…' : 'Enhancing…';
 }
 
 /** Short note for a clamped length request. */
