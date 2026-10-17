@@ -1387,7 +1387,7 @@ make install
 ├── image_cli.py                   Image CLI entry point (ziv-image)
 ├── video_cli.py                   Video CLI entry point (ziv-video)
 ├── cli.py                         Unified CLI entry point (ziv)
-├── enhance_cli.py                 Shared --enhance / --no-enhance / --enhance-model CLI handling
+├── enhance_cli.py                 Shared --enhance / --no-enhance / --enhance-model / --enhance-format CLI handling
 ├── preflight.py                   Preflight phase: plan seeds and prompts, rewrite them before the model loads
 ├── image_model_loader.py          Image model loading through stored quants (reuse, or save on first use)
 ├── image_review.py                Review of an image's small render before the upscale
@@ -1468,6 +1468,7 @@ make install
 │   ├── prompt_document_check.py   Builder document previews and problems, with the prompt loader's rules
 │   ├── prompt_enhance.py          Prompt-enhancement settings, length plans, chat messages, run, and post-processing (no model I/O)
 │   ├── prompt_enhance_video.py    Video prompts as a scene and an action: word plans, chat messages, output parsing and the run (no model I/O)
+│   ├── prompt_enhance_caption.py  Ideogram 4 JSON captions: the model writes labelled lines, code builds the caption (no model I/O)
 │   ├── prompts.py                 Prompt file loading
 │   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
 │   ├── seedvr2.py                 SeedVR2 settings, memory estimate and per-Mac tier choice

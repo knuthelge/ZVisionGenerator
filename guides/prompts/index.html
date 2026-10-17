@@ -747,6 +747,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#json-captions-ideogram-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON Captions (Ideogram 4)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#in-the-web-ui" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1175,6 +1186,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#json-captions-ideogram-4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        JSON Captions (Ideogram 4)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#in-the-web-ui" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1421,29 +1443,51 @@ castle:
 <p>With <code>--extend</code>, each entry's prompt is the action that follows the source clip, and an entry's <code>scene:</code> replaces the source's scene for that entry (see <a href="../video/#extend-a-video">Extend a Video</a>).</p>
 <h2 id="enhancing-prompts">Enhancing Prompts</h2>
 <p>A small local LLM can rewrite a prompt with more visual detail before it is generated. It runs on your machine. The default model is an uncensored variant of Qwen3.5-4B, because small instruction-tuned models often refuse or tone down ordinary creative prompts, such as a battle scene, a horror shot or a villain's portrait. The uncensored variant rewrites them faithfully instead.</p>
+<p>There are two built-in models. <strong>Fast</strong> is the default. <strong>Smart</strong> is larger and follows your options and wording more closely (it keeps counts, adds fewer things you did not ask for, and writes better JSON captions), but needs more memory and a larger download.</p>
 <table>
 <thead>
 <tr>
 <th>Platform</th>
-<th>Default model</th>
+<th>Enhancer</th>
+<th>Model</th>
 <th>First-use download</th>
+<th>Needs</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>macOS</td>
+<td>Fast</td>
 <td><code>McG-221/Qwen3.5-4B-heretic-mlx-4Bit</code> (mlx-lm, 4-bit)</td>
 <td>≈2.4 GB</td>
+<td></td>
+</tr>
+<tr>
+<td>macOS</td>
+<td>Smart</td>
+<td><code>TheCluster/Qwen3.5-27B-Heretic-MLX-4bit</code> (mlx-lm, 4-bit)</td>
+<td>≈16 GB</td>
+<td>about 20 GB of GPU memory (a Mac with 32 GB)</td>
 </tr>
 <tr>
 <td>Windows / Linux</td>
+<td>Fast</td>
 <td><code>coder3101/Qwen3.5-4B-heretic</code> (transformers, 4-bit on CUDA)</td>
 <td>≈9 GB</td>
+<td></td>
+</tr>
+<tr>
+<td>Windows / Linux</td>
+<td>Smart</td>
+<td><code>coder3101/Qwen3.5-9B-heretic</code> (transformers, 4-bit on CUDA)</td>
+<td>≈19 GB</td>
+<td>about 9 GB of GPU memory</td>
 </tr>
 </tbody>
 </table>
+<p>Choose <strong>Fast</strong> or <strong>Smart</strong> under <strong>Enhancer</strong> in the Enhance popover, or pass <code>--enhance-model smart</code> on the command line. The choice applies to the whole job. On a machine where Smart does not fit (too little GPU memory, or no NVIDIA GPU on Windows or Linux), the popover shows why and Smart cannot be picked; on the command line a warning says so and Fast runs. Downloaded models stay in the Hugging Face cache; delete them there to free the disk space.</p>
 <p>Without a CUDA GPU, Windows and Linux run the enhancer on the CPU: it works, but each rewrite can take a few minutes and about 10 GB of RAM. The status line says so when this happens. If the machine has an NVIDIA GPU, a warning also suggests updating its driver to 580 or newer, the usual reason CUDA is missing.</p>
-<p>Both defaults are pinned to a revision. To use another chat model, set <strong>Prompt Enhancer Model</strong> on the Config page to a Hugging Face <code>owner/name</code> (optionally <code>owner/name@revision</code>) or a local folder, or pass <code>--enhance-model REPO[@REVISION]</code>. Thinking-tuned or heavily merged models are slower and follow the length and style options less reliably.</p>
+<p>All built-in models are pinned to a revision. To use another chat model, set <strong>Prompt Enhancer Model</strong> on the Config page to a Hugging Face <code>owner/name</code> (optionally <code>owner/name@revision</code>) or a local folder; it then replaces the Fast/Smart choice. <code>--enhance-model REPO[@REVISION]</code> does the same for one run. Thinking-tuned or heavily merged models are slower and follow the length and style options less reliably.</p>
 <h3 id="options">Options</h3>
 <table>
 <thead>
@@ -1569,6 +1613,17 @@ castle:
 <li><strong>Action only needs a scene.</strong> With a blank scene, Action only is unavailable in the Web UI, and the run rewrites both parts. On the command line it does the same and warns once.</li>
 <li>Image workflows ignore Rewrite.</li>
 </ul>
+<h3 id="json-captions-ideogram-4">JSON Captions (Ideogram 4)</h3>
+<p>Ideogram 4 reads structured JSON captions (see <a href="../image/#ideogram-4">Ideogram 4</a>). With <code>ideo</code>, the Enhance popover has a <strong>Write as</strong> choice: <strong>Text</strong> rewrites your prompt as usual, <strong>JSON</strong> writes a full caption from it instead, with a summary, the look, lighting and colors, the background, one element per thing you named, and the lettering you asked for.</p>
+<ul>
+<li>The same options apply: Style decides photo or artwork, Mood shapes the look and colors, Details and Length decide how much is described, and Direction is followed.</li>
+<li>Quoted text (<code>"OPEN"</code>, <code>'LISBOA'</code>, <code>「パン屋」</code>) and names after <em>called</em> or <em>named</em> become text elements, copied exactly. On a card or logo, words you wrote without quotes are used too. Signs you mention without their words may get short words that fit, in the language you name.</li>
+<li>The caption appears in the <strong>Enhanced</strong> tab, laid out for reading, and Generate sends it as the structured caption. Edit it there like any Enhanced text.</li>
+<li>With <strong>Enhance each image when generating</strong>, every image gets its own caption.</li>
+<li>If the enhancer returns no usable caption twice, the run reports it and keeps your prompt.</li>
+<li><strong>Smart</strong> writes noticeably better captions than Fast.</li>
+</ul>
+<p>On the command line use <code>--enhance-format json</code>; it needs a model that takes JSON captions. With <code>--prompt</code> it turns on enhancement by itself. With a prompt file it writes captions for the entries that have their own <code>enhance:</code>, keeping their settings, as the Web UI does without auto-enhance; add <code>--enhance</code> to rewrite every prompt with the same settings.</p>
 <h3 id="in-the-web-ui">In the Web UI</h3>
 <ul>
 <li><strong>Enhance</strong>: click ✨ <strong>Enhance</strong> in the prompt box, pick options, and click <strong>Enhance prompt</strong>. The rewrite appears in the <strong>Enhanced</strong> tab. The button is unavailable while generation jobs are running or queued. Enhance again always starts from your text, and <strong>Clear</strong> empties the Enhanced text.</li>
@@ -1607,6 +1662,8 @@ ziv-image -m klein9b -p prompts.yaml --enhance style=photo,mood=serene,details=l
 ziv-video -m ltx-8 --prompt &quot;a fox runs&quot; --enhance style=cinematic,motion=action+camera-move,sound=ambient+effects
 ziv-video -m ltx-8 --scene &quot;A fox in a snowy birch forest at dawn.&quot; --prompt &quot;it runs&quot; --enhance parts=action
 ziv-image -m klein9b --prompt &quot;a lighthouse&quot; --enhance-note &quot;in a storm, at night&quot;
+ziv-image -m klein9b --prompt &quot;a fox in snow&quot; --enhance --enhance-model smart
+ziv-image -m ideo --prompt &quot;a travel poster for Lisbon with the text 'LISBOA'&quot; --enhance-format json
 ziv-image -m klein9b -p prompts.yaml --no-enhance
 </code></pre>
 <p><code>--enhance-note</code> sets the direction and turns on enhancement by itself.</p>

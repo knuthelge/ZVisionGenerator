@@ -1418,7 +1418,7 @@ ziv-video -m MODEL --upscale 2 --no-audio --prompt &quot;...&quot;
 <p>Windows and Linux video generation require CUDA. CPU fallback is not available for the diffusers video backend.</p>
 <p>Each video records the settings it was made with, as images do (see <a href="../image/#output-files">Output Files</a>); <strong>Reuse settings</strong> in the Web UI loads them.</p>
 <h3 id="review-before-upscaling">Review before upscaling</h3>
-<p><code>--review</code> works as for images (see <a href="../image/#review-before-upscaling">Review before upscaling</a>) and is macOS only for now: Windows and Linux refuse <code>--review</code> and hide the option. The sound may change slightly after upscaling.</p>
+<p><code>--review</code> works as for images (see <a href="../image/#review-before-upscaling">Review before upscaling</a>) on macOS, Windows and Linux. The small render is decoded to a short preview, so the pause adds a few seconds before the full-size pass. The sound may change slightly after upscaling.</p>
 <h2 id="video-lora">Video LoRA</h2>
 <pre><code class="language-bash"># Single LoRA
 ziv-video -m MODEL --prompt &quot;A sunset&quot; --lora /path/to/style.safetensors
@@ -1547,12 +1547,12 @@ ziv-video --extend clip.mp4 --extend-frames 96
 <li><strong>Steps</strong> — at most 8 (<code>--steps</code>).</li>
 </ul>
 <h2 id="memory-check">Memory Check</h2>
-<p>On macOS, Text to Video and Image to Video check the clip's size and length against the Mac's memory before generating, and Extend Video checks the extension the same way (see <a href="#memory">Memory</a>). The check never blocks a job; it warns when the clip may run slowly or fail.</p>
+<p>Text to Video and Image to Video check the clip's size and length against the machine's memory before generating, and Extend Video checks the extension the same way (see <a href="#memory">Memory</a>). On macOS the check is against the Mac's memory. On Windows and Linux it is against the GPU's memory and the system memory, once the model's files are downloaded. The check never blocks a job; it warns when the clip may run slowly or fail.</p>
 <ul>
-<li><strong>Web UI</strong>: under <strong>Duration (s)</strong>, a note appears when the clip is <strong>tight</strong> (the Mac may slow down while generating) or <strong>too large</strong> (expect heavy swapping or an out-of-memory error). It follows the model, size, duration, <strong>Low memory</strong> and <strong>Upscale</strong>, and stays hidden while the clip fits. The memory badge on a video model is the estimate for a 5 s clip at 768×448 without upscale.</li>
+<li><strong>Web UI</strong>: under <strong>Duration (s)</strong>, a note appears when the clip is <strong>tight</strong> (the Mac may slow down while generating; on Windows and Linux the GPU is nearly full or system memory is short) or <strong>too large</strong> (expect heavy swapping or an out-of-memory error). The note names the memory it is about. It follows the model, size, duration, <strong>Low memory</strong> and <strong>Upscale</strong>, and stays hidden while the clip fits. The memory badge on a video model is the estimate for a 5 s clip at 768×448 without upscale.</li>
 <li><strong>Command line</strong>: <code>ziv-video</code> prints one warning at the start of a run and carries on. Shorten the clip with <code>--frames</code>, use a smaller <code>--size</code>, and keep <code>--low-memory</code> on.</li>
 </ul>
-<p>The estimate grows with the number of frames and the pixels per frame. It was measured with <code>ltx-4</code> on a Mac with 32 GB of memory, for clips up to about 10 s at 704×448; far beyond that it is extrapolated. Macs with 24 GB or less stream the transformer from disk, so the estimate is on the high side there. It does not count memory already used by other apps or by an image model that is still loaded.</p>
+<p>The estimate grows with the number of frames and the pixels per frame. On macOS it was measured with <code>ltx-4</code> on a Mac with 32 GB of memory, for clips up to about 10 s at 704×448; far beyond that it is extrapolated. Macs with 24 GB or less stream the transformer from disk, so the estimate is on the high side there. On Windows and Linux it was measured on one 10 GB GPU with 32 GB of system memory, at <code>ltx-4</code> and <code>ltx-8</code>: the GPU need stays flat for short clips and grows once a clip passes about 26,000 tokens at <code>ltx-4</code> (for example 1408×896 beyond about 10 s), and it adds room for the allocator. On a card with more or less memory the thresholds are an extrapolation. It does not count memory already used by other apps or by an image model that is still loaded.</p>
 <h2 id="model-detection">Model Detection</h2>
 <p><code>ziv-video</code> auto-detects the model family from supported model values:</p>
 <ul>

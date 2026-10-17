@@ -1074,7 +1074,7 @@ ziv-model model -i checkpoint.safetensors --name my-model --quantize 8
 <p>Checkpoints can be bfloat16, float16, float32, or FP8. Scaled FP8 checkpoints (for example ComfyUI FP8 exports, which store a <code>weight_scale</code> next to each weight) are dequantized to bfloat16 during conversion. Block-wise or other quantized formats (such as NVFP4) are not supported.</p>
 <p><code>krea2-turbo</code> converts a fine-tune of Krea 2 Turbo. Native Krea 2 and ComfyUI checkpoints are both accepted, and a bundled text encoder or VAE is ignored; the text encoder and VAE come from unsloth's ungated mirror <code>unsloth/Krea-2-Turbo</code>.</p>
 <blockquote>
-<p><strong>Ideogram 4</strong> is used via the <code>ideo</code> alias or a local FP8 model directory and is distributed ready-to-use. It has no checkpoint-convert path, so it is not a <code>--model-type</code> option.</p>
+<p><strong>Ideogram 4</strong> is used via the <code>ideo</code> alias or a local FP8 (macOS) or NF4 (Windows and Linux) model directory and is distributed ready-to-use. It has no checkpoint-convert path, so it is not a <code>--model-type</code> option.</p>
 </blockquote>
 <h2 id="importing-loras-lora-subcommand">Importing LoRAs (<code>lora</code> subcommand)</h2>
 <p>Import LoRA <code>.safetensors</code> files into <code>~/.ziv/loras/</code> from local paths or HuggingFace.</p>
