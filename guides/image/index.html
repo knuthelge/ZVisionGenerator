@@ -1538,7 +1538,7 @@ ziv-image -m krea2 -q 4 --prompt &quot;a portrait&quot;
 ziv-image -m my-model --prompt &quot;Cyberpunk cityscape&quot; --image sketch.png --image-strength 0.8
 </code></pre>
 <p>The reference image is automatically resized to match target dimensions. Works on macOS, Windows, and Linux.</p>
-<p>In the Web UI, <strong>Use as reference</strong> (<code>E</code>) in the asset viewer opens an image as the reference for img2img or img2vid and loads its prompt too, replacing an Enhanced prompt made for the previous one.</p>
+<p>In the Web UI, <strong>Use as reference</strong> (<code>E</code>) in the asset viewer opens an image as the reference for img2img or img2vid and loads its prompt too, replacing an Enhanced prompt made for the previous one. For img2img the prompt goes into the Prompt box; for img2vid it goes into Scene, since it describes the first frame, and Action is left for what happens (see <a href="../video/#scene-and-action">Scene and Action</a>).</p>
 <h2 id="lora-support">LoRA Support</h2>
 <p>Both platforms support LoRA weights. Place <code>.safetensors</code> files in <code>~/.ziv/loras/</code>:</p>
 <pre><code class="language-bash"># Single LoRA at default weight (1.0)

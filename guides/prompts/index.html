@@ -1578,7 +1578,7 @@ castle:
 </table>
 <ul>
 <li><strong>Text to video</strong> splits and expands, so it works when you wrote everything in the prompt or gave only a scene: the setting, look and camera setup go to the scene, and events in time order, camera moves, sound and quoted dialogue go to the action.</li>
-<li><strong>Image to video</strong> writes a short scene (style, and what the image does not show) and an action that describes the change.</li>
+<li><strong>Image to video</strong> keeps your scene (what the image shows) and writes only the action by default. With a blank scene, or with Rewrite set to Scene and action, it writes a short scene (style, and what the image does not show) and an action that describes the change.</li>
 <li><strong>Extend</strong> writes the action that happens next, using the previous clip's prompt as context so it does not repeat its actions or spoken lines. From a clip made without a scene, the enhancer takes a scene from the old prompt. See <a href="../video/#extend-a-video">Extend a Video</a>.</li>
 <li><strong>Length</strong> applies to the scene and the action together.</li>
 <li>If the enhancer does not return a scene and an action, it tries once more, then uses its rewrite as the action and keeps your scene, with a warning.</li>
@@ -1607,7 +1607,7 @@ castle:
 </tbody>
 </table>
 <ul>
-<li>The default depends on the workflow: <strong>Extend Video</strong> rewrites the action only when the clip has a scene, so a chain of extensions keeps its look. <strong>Text to Video</strong> and <strong>Image to Video</strong> rewrite both.</li>
+<li>The default depends on the workflow: <strong>Extend Video</strong> rewrites the action only when the clip has a scene, so a chain of extensions keeps its look, and <strong>Image to Video</strong> does the same when it has a scene, so the scene that describes the starting image is not restyled. <strong>Text to Video</strong> rewrites both.</li>
 <li>Style, Mood and Details shape the scene, so they have no effect while Rewrite is Action only. Motion, Sound, Length and Direction still shape the action.</li>
 <li>With Action only and a scene, Enhance always rewrites the action, even when every other option is left at "keep".</li>
 <li><strong>Action only needs a scene.</strong> With a blank scene, Action only is unavailable in the Web UI, and the run rewrites both parts. On the command line it does the same and warns once.</li>
