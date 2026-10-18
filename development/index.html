@@ -1389,6 +1389,7 @@ make install
 ├── cli.py                         Unified CLI entry point (ziv)
 ├── enhance_cli.py                 Shared --enhance / --no-enhance / --enhance-model / --enhance-format CLI handling
 ├── preflight.py                   Preflight phase: plan seeds and prompts, rewrite them before the model loads
+├── ideogram4_instant_builder.py   Build the Ideogram 4 Instant model folder on first use (download, convert, link the base components)
 ├── image_model_loader.py          Image model loading through stored quants (reuse, or save on first use)
 ├── image_review.py                Review of an image's small render before the upscale
 ├── image_runner.py                Image generation run orchestration
@@ -1406,7 +1407,6 @@ make install
 │   │   ├── memory.py              CUDA memory release after a job, and GPU and system memory sizes
 │   │   ├── prompt_enhancer.py     Prompt-enhancer LLM (transformers)
 │   │   ├── quant.py               NF4 (q4) and FP8 (q8) weights, at load and as stored quants
-│   │   ├── safetensors_stream.py  Read and write safetensors one tensor at a time, keeping them out of the page cache
 │   │   ├── image/
 │   │   │   ├── backend.py         Image backend
 │   │   │   ├── lokr.py            LyCORIS LoKr adapters (applied like mflux)
@@ -1428,6 +1428,7 @@ make install
 │       └── video.py               LTX video backend (MLX)
 ├── converters/
 │   ├── convert_checkpoint.py      Safetensors checkpoint → diffusers converter (ziv-model model)
+│   ├── ideogram4_instant.py       Ideogram 4 Instant's single-file transformer → diffusers BF16 or mflux FP8 layout, one tensor at a time
 │   ├── list_assets.py             List installed models, video models, and LoRAs (ziv-model list)
 │   └── lora_import.py             LoRA import — local copy and HF download (ziv-model lora)
 ├── core/
@@ -1455,12 +1456,15 @@ make install
 │   ├── config.py                  Config loading (image + video)
 │   ├── console.py                 Console formatting
 │   ├── ffmpeg.py                  ffmpeg availability check and install, and the error for a failed ffmpeg or ffprobe run
+│   ├── file_links.py              Hard-link model files into a new folder, copying where linking fails
 │   ├── filename.py                Output filenames ({set}_{timestamp}) and collision counters
+│   ├── ideogram4_instant.py       Ideogram 4 Instant's pinned build sources, model folder and build record
 │   ├── image_model_detect.py      Image model type detection
 │   ├── interactive.py             Keyboard interrupt handling and review state
 │   ├── lora.py                    LoRA CLI argument parsing
 │   ├── model_files.py             Offline check for fully downloaded model weights
 │   ├── model_memory.py            Header-only memory estimates (MLX unified memory, with a per-stage LTX clip estimate by size and length; CUDA GPU and system memory)
+│   ├── page_cache.py              Drop model files from the page cache once written or read
 │   ├── paths.py                   ~/.ziv/ model store resolution
 │   ├── platform.py                Platform metadata and platform-aware alias values
 │   ├── prompt_compose.py          Structured prompt flattening &amp; snippets; video scene helpers (compose scene + prompt, quoted-line stripping, original-prompt check)
@@ -1471,6 +1475,7 @@ make install
 │   ├── prompt_enhance_caption.py  Ideogram 4 JSON captions: the model writes labelled lines, code builds the caption (no model I/O)
 │   ├── prompts.py                 Prompt file loading
 │   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
+│   ├── safetensors_stream.py      Read and write safetensors one tensor at a time, keeping them out of the page cache
 │   ├── seedvr2.py                 SeedVR2 settings, memory estimate and per-Mac tier choice
 │   ├── stored_quant.py            Stored-quant naming, manifests and folder handling
 │   ├── upscale.py                 Upscale output sizes, size limits, SeedVR2 options and denoise defaults
