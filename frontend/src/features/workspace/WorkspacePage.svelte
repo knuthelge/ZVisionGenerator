@@ -21,7 +21,7 @@
     mascotTool as pickMascotTool,
     type MascotReaction,
   } from '$lib/state/mascot';
-  import { ActionMenu, AssetTile, AssetViewer, JobCard, ModelStatusBadges, ReviewStage, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
+  import { ActionMenu, AssetTile, AssetViewer, JobCard, JobPreview, ModelStatusBadges, ReviewStage, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
   import { isReviewing } from '$lib/state/jobView';
   import { jobSettingsPrefill } from '$lib/state/jobSettings';
   import { cliCommand, formSettings, type CliCaveat, type CliCommand } from '$lib/state/cliCommand';
@@ -1109,11 +1109,16 @@
             {/if}
           </div>
         {:else if jobStore.current && (jobStore.isRunning || jobOutputs.length > 0)}
-          <div class="h-full w-full overflow-y-auto p-6">
-            <div class="mx-auto w-full max-w-4xl">
-              <MascotSpot mood={mascotMood} tool={mascotTool} size={112} class="mx-auto mb-2 w-fit" />
+          <!-- The forming image takes the stage; the card with the job's phases and controls is a column beside it. -->
+          <div class="job-view" data-testid="job-view">
+            <div class="job-view-preview">
+              <JobPreview job={jobStore.current!} />
+              <MascotSpot mood={mascotMood} tool={mascotTool} size={64} class="job-view-mascot" />
+            </div>
+            <div class="job-view-card">
               <JobCard
                 job={jobStore.current!}
+                preview={false}
                 oncancel={sendControl('quit')}
                 onpause={sendControl('pause')}
                 onresume={sendControl('resume')}
@@ -1245,6 +1250,11 @@
     .workspace-layout { display: flex; flex-direction: column; overflow-y: auto; }
     .workspace-preview { flex: none; min-height: 420px; }
   }
+  /* A running job: the preview fills the height on the left, the card is a column that scrolls on its own. */
+  .job-view { display: flex; width: 100%; height: 100%; align-items: stretch; gap: 16px; padding: 16px; }
+  .job-view-preview { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; }
+  .job-view :global(.job-view-mascot) { position: absolute; top: 0; left: 0; pointer-events: none; }
+  .job-view-card { display: flex; flex: none; width: 400px; max-width: 46%; flex-direction: column; gap: 12px; overflow-y: auto; }
   /* The in-place history arrows: visible while the pointer is over the stage, never for a finger (it swipes). */
   .stage-nav { position: absolute; top: 50%; z-index: 3; transform: translateY(-50%); opacity: 0; transition: opacity 0.12s ease; }
   .stage-nav.prev { left: 12px; }

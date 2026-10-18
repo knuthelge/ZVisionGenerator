@@ -17,9 +17,11 @@
     stepMs?: number | null;
     /** Item controls (Skip, Repeat) shown on the current task's line, before its duration. */
     itemControls?: Snippet;
+    /** Show the live preview beside the text; off when the stage shows it large (JobPreview). */
+    preview?: boolean;
   }
 
-  let { job, now, stepMs = null, itemControls }: Props = $props();
+  let { job, now, stepMs = null, itemControls, preview = true }: Props = $props();
 
   const STATUS_ICONS: Record<PhaseRowStatus, IconName> = {
     done: 'check', current: 'circle-dot', paused: 'pause', pending: 'circle', skipped: 'minus', failed: 'circle-x', stopped: 'stop', unknown: 'info'
@@ -55,7 +57,7 @@
   const lastOutput = $derived(job.outputs[job.outputs.length - 1]);
   let failedPreviewUrl = $state<string | null>(null);
   const previewSrc = $derived(pausedBetween ? (lastOutput?.thumbnail_url ?? null) : job.previewUrl);
-  const showMedia = $derived(active && generating && !isVideo(job) && !job.review);
+  const showMedia = $derived(preview && active && generating && !isVideo(job) && !job.review);
   // Some models render no live preview; once well past the first one, say so instead of promising it.
   const previewNote = $derived(activity === 'stepping' && stepFraction(job) > FIRST_PREVIEW_AT + 0.15
     ? 'No live preview for this model' : `First preview at ${FIRST_PREVIEW_AT * 100}%`);

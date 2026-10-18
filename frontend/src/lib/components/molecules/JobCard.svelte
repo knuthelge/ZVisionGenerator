@@ -24,9 +24,11 @@
     onresume?: ControlCallback;
     onnext?: ControlCallback;
     onrepeat?: ControlCallback;
+    /** Show the live preview inside the log; off when the stage shows it large beside the card. */
+    preview?: boolean;
   }
 
-  let { job, oncancel, onpause, onresume, onnext, onrepeat }: Props = $props();
+  let { job, oncancel, onpause, onresume, onnext, onrepeat, preview = true }: Props = $props();
 
   /** How long the first Esc keeps Cancel armed. */
   const ESC_ARM_MS = 3000;
@@ -266,7 +268,7 @@
       <JobControls controls={controls.item} label={phase === 'enhance' ? 'Current rewrite' : `Current ${noun}`} {names} {pending} disabled={offline} onsend={(action) => void send(action)} />
     {/if}
   {/snippet}
-  <JobPhaseLog {job} now={serverNow} {stepMs} itemControls={controls.item.length ? itemControls : undefined} />
+  <JobPhaseLog {job} now={serverNow} {stepMs} {preview} itemControls={controls.item.length ? itemControls : undefined} />
 </article>
 
 <style>
