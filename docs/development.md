@@ -315,6 +315,7 @@ The Web UI has one design system. Its tokens live in `@theme` in `frontend/src/a
 - **Reference pages:** Config and Models centre their content at `max-w-page` (1200px), with the page bar lined up to it. Settings use label-left rows (`FormField layout="row"`), and tables use `ui-table-comfortable`.
 - **Colour:** neutrals are Graphite greys with no tint. Teal means on, selected or the main action; coral (`accent-coral`, Blob's beret) marks `$snippets` and amber `{a|b}` choices; red is for errors and destructive actions, which always show red text. Info messages stay teal, never coral. Text is at least 4.5:1 on every surface. Use tokens, never raw palette classes or colour literals; `make check` fails on them.
 - **Focus:** every control shows the same 2px teal outline with a 2px offset.
+- **Touch is a layer, not a breakpoint:** `@media (pointer: coarse)` in `global.css` raises the size tokens (controls 36px, small controls 28px, rows 40px, action bars 44px, the switch 40 × 24) at every width, so an iPad in the desktop layout gets finger-sized targets and a mouse keeps the desktop density. Build sizes on the tokens, never on literal pixels, so they follow. Numbers get − and + steppers (`InspectorNumber`, press and hold to repeat) because a label cannot be scrubbed when a drag scrolls; `InspectorRow` skips scrubbing on a coarse pointer. The `layout` store (`lib/state/layoutMode.svelte.ts`) tells components the composition (`compact | tall | wide`) and whether the pointer is coarse.
 
 ### Test Strategy
 

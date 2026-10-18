@@ -1,6 +1,6 @@
 # A phone layout and an installable app
 
-**Status:** Proposed (2026-10-17)
+**Status:** In progress (2026-10-18)
 
 ## Problem
 
@@ -19,51 +19,73 @@ The Web UI is often used from another device: `ziv ui --host local` serves it on
 - `index.html` has the viewport meta and icons only.
 - Chromium and Playwright are available in CI, so a phone viewport can be tested.
 
-## Proposed change
+## Decided design (2026-10-18)
 
-### 1. Installable
+Chosen from a design study of four directions, prototyped in HTML (not committed). The first three recomposed the desktop panes for a phone and were rejected: Generate must show where the generation happens, the preview is the point of the app and must never leave the screen, a persistent tab bar spends space on the least used element, and "do not degrade desktop" means nothing hides behind mobile-style menus, not that desktop may not change. The fourth, below, starts from how the app is used.
 
-- `frontend/public/manifest.webmanifest`: name, short name `ziv`, the existing SVG and PNG icons, `display: standalone`, `start_url: /app`, `background_color` and `theme_color` from the Graphite tokens; a `theme-color` meta; `viewport-fit=cover` so the bars can use the safe-area insets.
-- No service worker: the app is useless offline and a cache would serve stale builds.
+**One Workspace, three compositions.** The same panes (Compose, Settings, Model, Stage, History) are built once and arranged for the screen; state, the form and the keyboard shortcuts are shared.
 
-### 2. Phone Workspace (under 640 px, or any width with a coarse pointer and under 900 px)
+| Mode | Screens | Composition |
+|---|---|---|
+| Wide (≥ 1024 px) | Desktop, iPad landscape | Today's layout: top bar, toolbar, sidebar, stage with the history strip. |
+| Tall (640–1023 px) | iPad portrait | The stage and strip full width on top; Compose and Settings side by side under it, Generate at the foot of Settings. |
+| Compact (< 640 px, or under 500 px tall) | iPhone | The stage is the screen. A top strip, a settings strip of chips, and a composer with Generate, in reading order. |
 
-- **Bottom tab bar** replaces the top bar: Workspace, Gallery, Prompts, More (Models, Config, shortcuts). The brand and the Review badge move to a slim top strip with the workflow as a dropdown instead of tabs.
-- **Stage first.** The preview takes the top ~45 % of the screen: the latest output, the running job card, or the review. The history strip stays under it as a horizontal row, as it is.
-- **Prompt next**, full width, with the Enhance and JSON tools where they are.
-- **Sticky Generate bar** above the tab bar: Generate (or Add to queue with the count), the model name, and a **Settings** button that opens the Settings inspector as a bottom sheet (a sheet variant of `Modal`, sized to content, swipe or Close to dismiss). The LoRA chips and quantize move into the sheet's top.
-- **Touch-friendly numbers.** With a coarse pointer, `InspectorNumber` shows − and + steppers beside the field, since scrubbing is not available; a long press repeats. The scrub hint in the Settings header is hidden there.
-- Toasts dock above the Generate bar; the safe-area inset is respected.
+**Touch is a layer, not a breakpoint.** `(pointer: coarse)` changes the size tokens (controls 28 → 36 px, rows 30 → 40 px, action bars 36 → 44 px, the switch 26 × 15 → 40 × 24) and gives numbers − and + steppers with press-and-hold, because a label cannot be scrubbed when a drag scrolls. It applies on an iPad in the desktop layout. A mouse keeps the desktop density.
 
-### 3. Gallery and viewer on a phone
+**The phone, top to bottom.**
 
-- The grid is already two columns. The viewer gains swipe left and right between assets, and the action menu opens as a bottom sheet with large rows. The details panel becomes a sheet too.
+- *Top strip*, on every page: menu (drawer with the pages), the workflow as a dropdown, the job state (Ready · Step 12 of 32 · Review), Gallery. Other pages show an arrow back and the page name in place of the workflow.
+- *Stage*: the latest output, the forming image during a job, or the review. Swipe sideways to step through history (a pill says "2 of 212 · Latest"); swipe up for the Gallery; tap for the viewer; ⋯ for the asset actions.
+- *Settings strip*: one 32 px chip per setting with its value and a dot when changed, ordered by how often each changes in the loop: Steps, Guidance, Seed, Batch, then Size, LoRA, Reference or Source where the workflow has one, then Upscale, then Model; video swaps in Length and Audio. A chip opens only that control at thumb size. All, pinned at the right, opens the full inspector as a sheet with the model controls on top.
+- *Composer*: a PROMPT label over one line of the prompt and Generate, both 44 px. Expanded: the Inline | File source switch, the Prompt and Enhanced tabs, Enhance and its options, the negative prompt, Scene over Action for video; file mode shows the path, the selected prompts and the chooser. Generate reads Queue with a count while a job runs, with progress on the composer's top edge; press and hold offers a new seed.
 
-### 4. Prompts on a phone
+**The job, on every screen.** The live preview (the server renders one at 25, 50 and 75 % of the steps) fills the stage. On wide and tall the full card sits beside it as a column: today's header (workflow, notice, Pause and Cancel, headline, time left and elapsed, item bar) and phase log (Ready with timings, Generate with Skip and Repeat, position, prompt, badges, one bar per stepped stage). On a phone a bar over the preview carries the same facts in one row, Next, Repeat and Cancel under ⋯, and Job details opens the full card as a sheet. An in-run upscale is a second stage (two bars; the review's Approve and Discard sit over the small render between them); a standalone upscale from an asset is its own one-stage job with the source as the preview.
 
-- The three columns become one at a time with a segmented switch (Snippets · Sets · Preview) at the top. Drag and drop keeps working within the shown column; moving between columns uses the existing menus. This is the lowest-priority part and can ship after the rest.
+**Desktop changes, both additive:** stepping the preview through history with ← → and hover arrows, with the indicator and Latest in the preview header; and the preview filling the stage during a job with the card beside it instead of a thumbnail in the log.
 
-### 5. Tests
+**Shared on a phone:** the viewer swipes between assets and down to close, with details as a sheet; every asset menu is one bottom sheet (stage, tile, viewer); the Gallery gets a Select mode with bulk delete; menus, the queue, the prompt chooser, the path browser and confirmations render as sheets; toasts dock above the composer. The Prompts builder becomes one column at a time with a Snippets · Sets · Preview switch, last. A web app manifest makes the UI installable; no service worker.
 
-- Vitest keeps the logic; a small Playwright run at an iPhone-sized viewport checks that the Generate bar, tab bar and sheet render and that the stage is visible on load. It runs in `make check` only when Chromium is present, as the frontend tests already gate on their tools.
+## Stages
+
+Each stage is one commit that rebuilds the SPA, passes `make check` and keeps every existing feature reachable.
+
+1. Touch layer: pointer-coarse size tokens, the switch from tokens, steppers in `InspectorNumber` with hold-to-repeat (off for W × H and Seed), no scrubbing on coarse pointers, a `layout` store (`compact | tall | wide`, `coarse`).
+2. Stage stepping through history: a view index on the Workspace, ← → and hover arrows, the indicator and Latest in the preview header, swipe on touch.
+3. The job in the stage: the live preview fills the stage; the full card beside it on wide and tall.
+4. Tall composition for portrait tablets.
+5. Compact shell: top strip, drawer, back arrow, pages; the manifest and `index.html` metas.
+6. Compact Workspace: the settings strip, one-setting popovers, the All sheet (a sheet variant of `Modal` hosting `SettingsPane` with the model controls).
+7. Composer: prompt source, tabs, the enhancer, prompt files, the negative prompt, Scene and Action.
+8. Compact job bar with Job details, the review, the queue as a sheet, swipe up to the Gallery.
+9. Viewer swipe and details sheet, menus as sheets, Gallery Select mode and back arrow, confirmations as sheets.
+10. Prompts single-column mode.
+
+### Tests
+
+- Vitest: the layout store, the stepper contract, the view index rules, the chip derivation per workflow and model, the sheet's open and close contract.
+- One Playwright run at an iPhone-sized viewport checks that the stage is visible on load, a chip opens its popover, and Generate shows the job in the stage. It runs in `make check` only when Chromium is present, as the frontend tests already gate on their tools.
 
 ### Docs and changelog
 
-- CHANGELOG `[Unreleased]`: "A phone layout for the Web UI, and the app can be added to the home screen."
-- The Web UI section of `docs/getting-started.md` gets a "From a phone" paragraph: `--host local`, Add to Home Screen, and the Settings sheet.
+- CHANGELOG `[Unreleased]`: one entry per stage under Added or Changed.
+- `docs/development.md` (Web UI Design System): the touch layer and the three compositions.
+- `docs/getting-started.md`: a "From a phone" paragraph: `--host local`, Add to Home Screen, the settings strip and All.
 
 ## Alternatives considered
 
 - **Responsive tweaks only** (smaller paddings, fewer columns). They keep the sidebar-first order, which is the actual problem. Rejected.
 - **A separate mobile build.** Two UIs to keep in step. Rejected; the phone layout reuses every component and only changes composition.
+- **Stage on top with Settings as a half-height sheet from the Generate bar; the three panes as swipeable pages; one long page with a stage that shrinks as you scroll.** The first round of the study. All three kept the inspector as the phone's settings UI and a tab bar at the bottom. Rejected for the reasons under Decided design.
 - **Hiding Prompts on phones.** Simpler, but the page still works for small edits; the single-column switch costs little.
 
 ## Open questions
 
-- Trigger by width, by `pointer: coarse`, or both? Proposed: width under 640 px always; between 640 and 900 px only with a coarse pointer (small tablets).
 - Does https matter here? An installed app on a LAN address is still plain http; it works, but notifications stay unavailable ([Job notifications](job-notifications.md)).
+- Live preview cadence: with the preview filling the stage, previews more often than 25, 50 and 75 % may be worth their cost. A backend change, measured first.
 
 ## Out of scope
 
 - Offline use and caching.
 - Uploading a reference image from the camera beyond what the existing file input already allows.
+- Phone landscape: it falls into the compact composition by the height rule and works, but is not tuned.

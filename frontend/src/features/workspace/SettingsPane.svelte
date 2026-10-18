@@ -297,9 +297,9 @@
           </div>
         </InspectorRow>
         <InspectorRow label="W × H" forId="ws-width" changed={changed('dimensionMode')} onreset={() => reset('ratio', 'size', 'dimensionMode')}>
-          <InspectorNumber id="ws-width" name={dimensionMode === 'custom' ? 'width' : undefined} ariaLabel="Width" value={shownWidth} {...dimensionSpec} onchange={(v) => setDimension('width', v)} />
+          <InspectorNumber id="ws-width" name={dimensionMode === 'custom' ? 'width' : undefined} ariaLabel="Width" value={shownWidth} {...dimensionSpec} stepper={false} onchange={(v) => setDimension('width', v)} />
           <span class="dim-times" aria-hidden="true">×</span>
-          <InspectorNumber id="ws-height" name={dimensionMode === 'custom' ? 'height' : undefined} ariaLabel="Height" value={shownHeight} {...dimensionSpec} onchange={(v) => setDimension('height', v)} />
+          <InspectorNumber id="ws-height" name={dimensionMode === 'custom' ? 'height' : undefined} ariaLabel="Height" value={shownHeight} {...dimensionSpec} stepper={false} onchange={(v) => setDimension('height', v)} />
         </InspectorRow>
         {#if dimensionMode === 'ratio'}
           <input type="hidden" name="ratio" value={s.ratio}>
@@ -363,7 +363,7 @@
       {/if}
       {#if caps.showSeed}
         <InspectorRow label="Seed" forId="ws-seed" changed={changed('seed')} onreset={() => reset('seed')}>
-          <InspectorNumber id="ws-seed" name="seed" value={s.seed} {...SPEC.seed} nullable placeholder="Random each run" onchange={(v) => draft.update('seed', v)} />
+          <InspectorNumber id="ws-seed" name="seed" value={s.seed} {...SPEC.seed} nullable placeholder="Random each run" stepper={false} onchange={(v) => draft.update('seed', v)} />
           <button
             type="button"
             class="ui-btn ui-btn-row"
@@ -664,6 +664,12 @@
   .settings-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 8px; border-bottom: 1px solid var(--color-border-subtle); }
   .settings-head-end { display: flex; align-items: center; gap: 6px; }
   .settings-hint { font-size: var(--text-meta); color: var(--color-text-muted); }
+  /* Touch: no scrubbing to hint at; selects fill like the steppers beside them. */
+  @media (pointer: coarse) {
+    .settings-hint { display: none; }
+    .inspector-select { height: 32px; padding: 0 8px; background: var(--color-bg-surface-hover); font-size: 14px; }
+    .mini-range { width: 72px; }
+  }
   .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 
   /* Presets fill the value column; each option takes an equal share. */

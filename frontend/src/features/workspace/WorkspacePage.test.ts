@@ -3766,7 +3766,7 @@ describe('WorkspacePage asset actions and settings', () => {
   it('locks the seed to the latest output and unlocks it back to random', async () => {
     const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', seed: 4242 });
     await mountWithHistory([asset]);
-    const lock = () => target.querySelector('#ws-seed')!.parentElement!.querySelector('button[aria-pressed]') as HTMLButtonElement;
+    const lock = () => target.querySelector('#ws-seed')!.closest('.inspector-value')!.querySelector('button[aria-pressed]') as HTMLButtonElement;
 
     lock().click();
     await settle();

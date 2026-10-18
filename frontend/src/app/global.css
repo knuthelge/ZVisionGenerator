@@ -137,6 +137,27 @@
     color-scheme: dark;
     font-synthesis: none;
     -webkit-font-smoothing: antialiased;
+    /* The switch: a 26 × 15 pill with an 11px knob. */
+    --toggle-track-w: 26px;
+    --toggle-track-h: 15px;
+    --toggle-knob: 11px;
+    --toggle-inset: 2px;
+  }
+
+  /* Touch is a layer, not a breakpoint: a coarse pointer (a finger) gets taller targets at every width, including an
+     iPad in the desktop layout. The size tokens change; everything built on them follows. A mouse keeps the desktop
+     density. Numbers get − and + steppers (InspectorNumber) because a label cannot be scrubbed when a drag scrolls. */
+  @media (pointer: coarse) {
+    :root {
+      --spacing-control: 36px;
+      --spacing-control-sm: 28px;
+      --spacing-row: 40px;
+      --spacing-bar: 44px;
+      --toggle-track-w: 40px;
+      --toggle-track-h: 24px;
+      --toggle-knob: 18px;
+      --toggle-inset: 3px;
+    }
   }
 
   /* One focus ring everywhere. */
@@ -293,6 +314,15 @@
   .ui-btn-row { width: 24px; height: 24px; padding: 0; background: transparent; border-radius: var(--radius-xs); color: var(--color-text-muted); }
   .ui-btn-row:hover:not(:disabled) { background: var(--color-bg-surface-hover); color: var(--color-primary-main); }
   .ui-btn-row.ui-btn-danger:hover:not(:disabled) { background: var(--color-error-surface); color: var(--color-error); }
+  /* Touch: row actions, path boxes, checkboxes and slider thumbs grow to a finger's size. */
+  @media (pointer: coarse) {
+    .ui-btn-row { width: 32px; height: 32px; }
+    .inspector-text { height: 32px; padding: 0 8px; background: var(--color-bg-surface-hover); }
+    .ui-checkbox { width: 20px; height: 20px; background-size: 14px 14px; }
+    .ui-range { height: 28px; }
+    .ui-range::-webkit-slider-thumb { width: 20px; height: 20px; margin-top: -8px; }
+    .ui-range::-moz-range-thumb { width: 20px; height: 20px; }
+  }
   .ui-action-bar { display: flex; align-items: center; gap: 8px; }
   .ui-action-bar .ui-btn { height: var(--spacing-bar); padding: 0 14px; font-size: var(--text-content); }
   .ui-action-bar .ui-btn-icon { width: var(--spacing-bar); padding: 0; }

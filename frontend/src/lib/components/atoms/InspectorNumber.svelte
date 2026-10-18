@@ -1,6 +1,8 @@
 <script lang="ts">
   import { flushSync } from 'svelte';
+  import { holdRepeat } from '$lib/actions/holdRepeat';
   import { nudgeValue, snapToSpec, type NumberSpec } from '$lib/actions/scrub';
+  import { layout } from '$lib/state/layoutMode.svelte';
 
   interface Props extends NumberSpec {
     id?: string;
@@ -15,6 +17,11 @@
     ariaLabel?: string;
     /** Tooltip, e.g. why the field is disabled. */
     title?: string;
+    /**
+     * − and + buttons beside the field, with press-and-hold repeat. `auto` shows them for a coarse pointer, where
+     * labels cannot be scrubbed; `false` keeps a plain field (W × H and Seed, which have presets and dice instead).
+     */
+    stepper?: boolean | 'auto';
     onchange: (value: number | null) => void;
   }
 
@@ -31,8 +38,12 @@
     commitOnly = false,
     ariaLabel,
     title,
+    stepper = 'auto',
     onchange,
   }: Props = $props();
+
+  const showStepper = $derived(stepper === true || (stepper === 'auto' && layout.coarse));
+  const stepLabel = $derived(ariaLabel ?? '');
 
   function onInput(event: Event): void {
     if (commitOnly) return;
@@ -86,25 +97,56 @@
     report(nudgeValue(start, event.key === 'ArrowUp' ? 1 : -1, { step, min, max }, event.shiftKey));
     showKept(input);
   }
+
+  /** A stepper press: one step from the kept value, within bounds. */
+  function nudge(direction: 1 | -1): void {
+    if (disabled) return;
+    report(nudgeValue(value, direction, { step, min, max }));
+  }
 </script>
 
-<input
-  {id}
-  {name}
-  type="number"
-  step="any"
-  {placeholder}
-  {disabled}
-  aria-label={ariaLabel}
-  {title}
-  class="inspector-number"
-  value={value ?? ''}
-  oninput={onInput}
-  onchange={onCommit}
-  onkeydown={onKeydown}
->
+<span class="inspector-number-wrap" class:with-steps={showStepper}>
+  {#if showStepper}
+    <button
+      type="button"
+      class="inspector-step"
+      tabindex="-1"
+      aria-label="Decrease {stepLabel}"
+      data-step="down"
+      {disabled}
+      use:holdRepeat={() => nudge(-1)}
+    >−</button>
+  {/if}
+  <input
+    {id}
+    {name}
+    type="number"
+    step="any"
+    {placeholder}
+    {disabled}
+    aria-label={ariaLabel}
+    {title}
+    class="inspector-number"
+    value={value ?? ''}
+    oninput={onInput}
+    onchange={onCommit}
+    onkeydown={onKeydown}
+  >
+  {#if showStepper}
+    <button
+      type="button"
+      class="inspector-step"
+      tabindex="-1"
+      aria-label="Increase {stepLabel}"
+      data-step="up"
+      {disabled}
+      use:holdRepeat={() => nudge(1)}
+    >+</button>
+  {/if}
+</span>
 
 <style>
+  .inspector-number-wrap { display: flex; flex: 1; min-width: 0; align-items: center; }
   .inspector-number {
     width: 100%;
     min-width: 0;
@@ -125,4 +167,30 @@
   .inspector-number:focus { outline: none; border-color: var(--color-primary-main); background: var(--color-bg-surface); }
   .inspector-number:disabled { opacity: 0.4; }
   .inspector-number::placeholder { color: var(--color-zinc-600); }
+
+  /* Touch: the field and its − and + make one filled control, 32px tall, with a 16px value so iOS does not zoom in. */
+  .with-steps { border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); }
+  .with-steps .inspector-number { height: 32px; min-width: 52px; background: transparent; text-align: center; font-size: 14px; }
+  .with-steps .inspector-number:focus { background: var(--color-bg-surface); }
+  .inspector-step {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 36px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 16px;
+    line-height: 1;
+    color: var(--color-text-secondary);
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: manipulation;
+    transition: background-color 0.12s ease, color 0.12s ease;
+  }
+  .inspector-step:active:not(:disabled) { background: var(--color-bg-control-hover); color: var(--color-primary-main); }
+  .inspector-step:disabled { opacity: 0.4; cursor: not-allowed; }
+  @media (pointer: coarse) {
+    .inspector-number { height: 32px; font-size: 14px; }
+  }
 </style>

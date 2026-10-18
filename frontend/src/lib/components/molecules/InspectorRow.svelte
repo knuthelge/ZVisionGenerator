@@ -2,6 +2,7 @@
   import type { Snippet } from 'svelte';
   import { Icon } from '$lib/components/atoms';
   import { scrub, type ScrubOptions } from '$lib/actions/scrub';
+  import { layout } from '$lib/state/layoutMode.svelte';
 
   interface Props {
     label: string;
@@ -26,7 +27,8 @@
     <span class="inspector-label-text">{label}</span>
     {#if changed}<span class="inspector-changed" aria-label="changed from default"></span>{/if}
   {/snippet}
-  {#if scrubber}
+  {#if scrubber && !layout.coarse}
+    <!-- A finger scrolls when it drags, so touch screens get steppers in the field instead of a scrubbable label. -->
     <label for={forId} class="inspector-label" class:scrubbable={!scrubber.disabled} title="Drag to change" use:scrub={scrubber}>
       {@render labelText()}
     </label>
@@ -52,7 +54,10 @@
 </div>
 
 <style>
-  .inspector-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 8px; min-height: 30px; padding: 0 8px 0 12px; }
+  .inspector-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 8px; min-height: var(--spacing-row); padding: 0 8px 0 12px; }
+  @media (pointer: coarse) {
+    .inspector-reset { width: 32px; height: 32px; }
+  }
   .inspector-row:hover { background: color-mix(in srgb, var(--color-bg-surface) 60%, transparent); }
   .inspector-label { display: flex; align-items: center; gap: 5px; overflow: hidden; font-size: var(--text-ui); color: var(--color-text-secondary); white-space: nowrap; user-select: none; }
   .inspector-row.sub .inspector-label { padding-left: 12px; }
