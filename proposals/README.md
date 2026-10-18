@@ -35,6 +35,7 @@ These files are not part of the published docs site, and the docs don't link to 
 | [Grab a frame from a video](video-frame-grab.md) | Proposed | Frame stepping in the viewer and a Grab frame action that writes a PNG with provenance and can make it the reference for the next image or clip |
 | [One Gallery](one-gallery.md) | Proposed | Call the Workspace strip Gallery, share one store and one endpoint between the strip and the page |
 | [Merge the Models and Config pages](admin-page-merge.md) | Proposed | One Setup page with General, Models, LoRAs and Folders tabs, redirects for the old routes, one nav slot fewer |
+| [Delete enhancer models, and a Hugging Face downloads list](huggingface-cache-manager.md) | Proposed | Enhancer rows with delete on the Models page, an Other downloads table for cached repos nothing uses, and LoRA imports that don't leave a cached copy |
 | [Copy a CLI command from any asset](asset-cli-command.md) | Proposed | Build the reproducing `ziv` command from an asset's recorded settings in the tile menu and viewer, with a parity test against Reuse settings |
 
 ## Archive
