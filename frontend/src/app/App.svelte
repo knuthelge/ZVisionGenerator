@@ -8,6 +8,9 @@
   import type { PageId, Workflow } from '$lib/types';
   import Spinner from '$lib/components/atoms/Spinner.svelte';
   import TopNav from '$lib/components/organisms/TopNav.svelte';
+  import TopStrip from '$lib/components/organisms/TopStrip.svelte';
+  import NavDrawer from '$lib/components/organisms/NavDrawer.svelte';
+  import { layout } from '$lib/state/layoutMode.svelte';
   import ToastContainer from '$lib/components/molecules/ToastContainer.svelte';
   import ShortcutsDialog from '$lib/components/organisms/ShortcutsDialog.svelte';
   import WorkspacePage from '$features/workspace/WorkspacePage.svelte';
@@ -21,6 +24,8 @@
   let ready = $state(false);
   // The workflows the Workspace's contract lists; the Workspace fills it once its context has loaded.
   let workflows = $state<Workflow[] | null>(null);
+  // Phones: the pages live in a drawer behind the strip's menu button.
+  let drawerOpen = $state(false);
 
   const baseTitle = document.title;
   $effect(() => {
@@ -45,8 +50,13 @@
 </script>
 
 {#if ready}
-  <div class="h-dvh flex flex-col overflow-hidden bg-bg-base text-text-primary font-sans">
-    <TopNav currentPage={router.page} {workflows} />
+  <div class="h-dvh flex flex-col overflow-hidden bg-bg-base text-text-primary font-sans" data-layout={layout.mode}>
+    {#if layout.compact}
+      <TopStrip currentPage={router.page} {workflows} onmenu={() => { drawerOpen = true; }} />
+      <NavDrawer open={drawerOpen} currentPage={router.page} onnavigate={(page) => router.navigate(page)} onclose={() => { drawerOpen = false; }} />
+    {:else}
+      <TopNav currentPage={router.page} {workflows} />
+    {/if}
     <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
       {#if router.page === 'workspace'}
         <WorkspacePage bind:workflows />

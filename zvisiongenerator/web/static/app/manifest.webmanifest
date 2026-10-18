@@ -1,0 +1,15 @@
+{
+  "name": "ZVision Generator",
+  "short_name": "ziv",
+  "description": "Generate images and videos with local models.",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#111214",
+  "theme_color": "#0b0c0d",
+  "icons": [
+    { "src": "/app-static/ziv-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/app-static/ziv-icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
