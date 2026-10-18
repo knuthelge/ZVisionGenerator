@@ -208,6 +208,25 @@ def huggingface_cache_repo_dir(repo_id: str) -> Path:
     return Path(HF_HUB_CACHE) / f"models--{repo_id.replace('/', '--')}"
 
 
+def huggingface_cache_repo_bytes(repo_dir: Path) -> int:
+    """Return the disk use of a HuggingFace cache repo folder, including its files in the cache-wide shared blob store.
+
+    huggingface_hub keeps Xet downloads once in ``<cache>/blobs/`` and links the repo's ``blobs/`` entries to them.
+    A file shared with another repo counts in full for each.
+    """
+    total = directory_bytes(repo_dir)
+    try:
+        linked = [entry for entry in (repo_dir / "blobs").iterdir() if entry.is_symlink()]
+    except OSError:
+        return total
+    for entry in linked:
+        try:
+            total += entry.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
 def _cached_snapshots(repo_id: str, revision: str | None) -> list[Path]:
     """Return candidate cache snapshots, newest first, as mflux's offline resolution considers them.
 

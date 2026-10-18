@@ -124,13 +124,20 @@ def delete_model(target: DeleteTarget) -> None:
     path = target.path
     if path.is_symlink():
         path.unlink()
-    elif path.is_dir():
+    elif not path.is_dir():
+        raise FileNotFoundError(f"Nothing to delete at {path}")
+    elif target.kind == "huggingface":
+        _delete_hub_repo(path)
+    else:
         # rmtree unlinks symlinks inside the folder without following them, so linked base files survive.
         shutil.rmtree(path)
-    else:
-        raise FileNotFoundError(f"Nothing to delete at {path}")
-    for extra in (*target.stored_quants, *target.companions):
+    for extra in target.stored_quants:
         shutil.rmtree(extra, ignore_errors=True)
+    for companion in target.companions:
+        try:
+            _delete_hub_repo(companion)
+        except OSError:
+            pass
 
 
 def delete_lora(loras_dir: Path, name: str) -> Path:
@@ -144,6 +151,21 @@ def delete_lora(loras_dir: Path, name: str) -> Path:
         raise FileNotFoundError(f"LoRA not found: {name}")
     path.unlink()
     return path
+
+
+def _delete_hub_repo(repo_dir: Path) -> None:
+    """Delete a HuggingFace cache repo folder, with the files it holds in the cache-wide shared blob store.
+
+    huggingface_hub keeps Xet downloads once in ``<cache>/blobs/`` and links each repo to them, so removing only
+    the repo folder frees nothing. Its delete strategy, scoped to this one folder, removes it and collects the
+    shared files no other repo links to. (``HFCacheInfo.delete_revisions`` is not used: it matches commit hashes
+    across the whole cache, which would also delete a mirror repo with the same history.)
+    """
+    from huggingface_hub import DeleteCacheStrategy
+
+    DeleteCacheStrategy(expected_freed_size=0, blobs=frozenset(), refs=frozenset(), repos=frozenset({repo_dir}), snapshots=frozenset(), cache_dir=repo_dir.parent).execute()
+    if repo_dir.is_dir():
+        shutil.rmtree(repo_dir)
 
 
 def _is_direct_child(path: Path, parent: Path) -> bool:

@@ -15,7 +15,7 @@ from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloade
 from zvisiongenerator.utils.config import enhancer_tier_models, resolve_defaults, resolve_enhancer_model, resolve_video_defaults, smart_enhancer_model, smart_unavailable
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
-from zvisiongenerator.utils.model_files import directory_bytes, find_local_model_dir
+from zvisiongenerator.utils.model_files import directory_bytes, find_local_model_dir, huggingface_cache_repo_bytes
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import matrix_contract, resolve_enhance_ceiling
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label
@@ -284,7 +284,7 @@ def _enhancer_model_rows(
     rows = []
     for tier, (repo, revision) in enhancer_tier_models(app_config, platform_key=sys.platform).items():
         target = enhancer_delete_target(repo)
-        disk_bytes = directory_bytes(target.path) if target is not None else 0
+        disk_bytes = huggingface_cache_repo_bytes(target.path) if target is not None else 0
         unavailable = smart_unavailable(app_config, platform_key=sys.platform, budget_bytes=(budget_bytes or _gpu_budget_bytes)()) if tier == "smart" else None
         rows.append(
             {

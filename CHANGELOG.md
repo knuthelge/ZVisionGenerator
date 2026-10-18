@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ### Added
 - **Web UI: delete the prompt enhancer's models from the Models page.** A new **Prompt enhancer** table lists the Fast and Smart models (and a custom one set on the Config page) with their disk use, and deletes their Hugging Face download to free space, up to 28 GB for both on Windows and Linux. They download again the next time you enhance a prompt
 
+### Fixed
+- **Deleting a Hugging Face model on the Models page frees its disk space again.** Hugging Face now keeps downloaded files in one shared folder of its cache and links each model to them, so deleting a model removed the links but left the files. Delete now removes the files too, unless another downloaded model still uses them
+
 ### Changed
 - **Web UI: Image to Video starts from the image's description as the scene.** **Use as reference** on a gallery image now fills Scene with the image's prompt and leaves Action empty for what happens, instead of putting the description in Action. The enhancer's **Rewrite** defaults to **Action only** for Image to Video when there is a scene, as it does for Extend Video, so it keeps your description of the first frame and writes only the motion; `ziv-video --image` with `--scene` and `--enhance` does the same. The Scene and Action boxes say what belongs in each for a starting image
 

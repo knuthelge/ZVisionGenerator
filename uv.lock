@@ -1881,7 +1881,7 @@ requires-dist = [
     { name = "bitsandbytes", marker = "sys_platform != 'darwin'", specifier = ">=0.50.0" },
     { name = "diffusers", specifier = "==0.41.0" },
     { name = "fastapi", specifier = ">=0.143.0" },
-    { name = "huggingface-hub", specifier = ">=1.32.0,<2.0" },
+    { name = "huggingface-hub", specifier = ">=1.33.0,<2.0" },
     { name = "mflux", marker = "sys_platform == 'darwin'", specifier = ">=0.22.0,<0.23" },
     { name = "mlx", marker = "sys_platform == 'darwin'", specifier = ">=0.32.2" },
     { name = "mlx-arsenal", marker = "sys_platform == 'darwin'", specifier = ">=0.2.4,<0.3" },

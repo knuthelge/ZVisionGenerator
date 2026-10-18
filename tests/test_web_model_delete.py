@@ -323,6 +323,55 @@ class TestSeedvr2DeleteRoute:
         assert (elsewhere / "weights.safetensors").is_file()
 
 
+def _shared_blob_repo(hub: Path, repo: str, xet_hash: str) -> Path:
+    """Cache *repo* the way huggingface_hub stores Xet downloads: its blob links into the cache-wide shared store."""
+    store = hub / "blobs"
+    store.mkdir(parents=True, exist_ok=True)
+    (store / ".huggingface-shared-blobs").write_text("1\n")
+    payload = _touch(store / xet_hash[:2] / xet_hash)
+    repo_dir = hub / f"models--{repo.replace('/', '--')}"
+    blob = repo_dir / "blobs" / f"etag-{xet_hash[:8]}"
+    blob.parent.mkdir(parents=True)
+    blob.symlink_to(Path("..", "..", "blobs", xet_hash[:2], xet_hash))
+    manifest = payload.with_name(f"{xet_hash}.refs")
+    manifest.write_text("".join(f"{line}\n" for line in [*(manifest.read_text().splitlines() if manifest.exists() else []), blob.relative_to(hub).as_posix()]))
+    snapshot = repo_dir / "snapshots" / ("a" * 40)
+    snapshot.mkdir(parents=True)
+    (snapshot / "model.safetensors").symlink_to(Path("..", "..", "blobs", blob.name))
+    _touch(repo_dir / "refs" / "main").write_text("a" * 40)
+    return payload
+
+
+def test_repo_size_counts_files_in_the_shared_blob_store(layout):
+    from zvisiongenerator.utils.model_files import huggingface_cache_repo_bytes
+
+    payload = _shared_blob_repo(layout.hub, "org/enh", "ef" * 32)
+    payload.write_bytes(b"x" * 1000)
+    _touch(layout.hub / "models--org--enh" / "blobs" / "small").write_bytes(b"y" * 10)
+
+    assert huggingface_cache_repo_bytes(layout.hub / "models--org--enh") == 1000 + 10 + 40  # shared payload, local blob, refs/main
+
+
+class TestSharedBlobDelete:
+    def test_deleting_a_download_frees_its_shared_blob(self, layout):
+        payload = _shared_blob_repo(layout.hub, "org/enh", "ab" * 32)
+
+        delete_model(enhancer_delete_target("org/enh"))
+
+        assert not (layout.hub / "models--org--enh").exists()
+        assert not payload.exists()
+
+    def test_a_blob_another_repo_still_uses_stays(self, layout):
+        payload = _shared_blob_repo(layout.hub, "org/enh", "cd" * 32)
+        _shared_blob_repo(layout.hub, "org/mirror", "cd" * 32)
+
+        delete_model(enhancer_delete_target("org/enh"))
+
+        assert not (layout.hub / "models--org--enh").exists()
+        assert payload.is_file()
+        assert (layout.hub / "models--org--mirror" / "snapshots" / ("a" * 40) / "model.safetensors").is_file()
+
+
 _ENHANCER_CONFIG = {
     "prompt_enhancer": {
         "model": "org/fast",
