@@ -24,12 +24,14 @@
     onImageFileChange: (file: File | null) => void;
     /** Copy the CLI command for the current settings. */
     oncopycli?: () => void;
+    /** Portrait tablet: Compose and Settings sit side by side under the stage, and the sidebar never collapses. */
+    tall?: boolean;
   }
 
-  let { context, busy, jobsActive = false, queuedCount = 0, submitError = null, imageFile, referencePreviewUrl = null, lastSeed = null, onImageFileChange, oncopycli }: Props = $props();
+  let { context, busy, jobsActive = false, queuedCount = 0, submitError = null, imageFile, referencePreviewUrl = null, lastSeed = null, onImageFileChange, oncopycli, tall = false }: Props = $props();
   const generateLabel = $derived(jobsActive ? 'Add to queue' : 'Generate');
   const authorityReady = $derived(context !== null && draft.authorityReady);
-  const collapsed = $derived(draft.state.sidebarCollapsed);
+  const collapsed = $derived(draft.state.sidebarCollapsed && !tall);
   // An extension waits for a source it can read; the strip's Generate follows the same rule as the footer's.
   const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath)));
   const stripTitle = $derived(sourceGuard.note ? `${generateLabel}: ${sourceGuard.note.charAt(0).toLowerCase()}${sourceGuard.note.slice(1).replace(/\.$/, '')}` : `${generateLabel} (⌘↵)`);
@@ -41,10 +43,10 @@
 
 <!-- Left column: Compose on top, Settings below with Generate pinned at its foot. When collapsed, the panes stay
      in the DOM (hidden) because their fields belong to the generate form; a narrow strip takes their place. -->
-<aside id="ws-controls-sidebar" class="workspace-left ui-pane ui-pane-left" class:collapsed aria-label="Compose and settings">
+<aside id="ws-controls-sidebar" class="workspace-left ui-pane ui-pane-left" class:collapsed class:tall aria-label="Compose and settings">
   <div class="sidebar-panes">
     {#if authorityReady && context}
-      <ComposePane {context} {busy} {jobsActive} oncollapse={() => setCollapsed(true)} />
+      <ComposePane {context} {busy} {jobsActive} oncollapse={tall ? undefined : () => setCollapsed(true)} />
       <SettingsPane {context} {busy} {jobsActive} {submitError} {imageFile} {referencePreviewUrl} {lastSeed} {onImageFileChange} {oncopycli} />
     {:else}
       <div class="flex-1 overflow-y-auto p-3">
@@ -109,4 +111,8 @@
   @media (max-width: 639px) {
     .workspace-left { flex: none; }
   }
+  /* Portrait tablet: the two panes share the width under the stage, each scrolling on its own. */
+  .workspace-left.tall .sidebar-panes { flex-direction: row; }
+  .workspace-left.tall .sidebar-panes > :global(.compose-pane) { flex: 1 1 50%; max-height: none; border-bottom: 0; border-right: 1px solid var(--color-border-subtle); }
+  .workspace-left.tall .sidebar-panes > :global(.settings-pane) { flex: 1 1 50%; min-width: 0; }
 </style>

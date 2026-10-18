@@ -39,6 +39,7 @@
   import { randomSeed } from './seed';
   import { workspaceCapabilities } from './capabilities';
   import { acceptsPageShortcut, hasOpenModal, isCommandKey } from '$lib/keyboard';
+  import { layout } from '$lib/state/layoutMode.svelte';
   import { startUpscale } from '$lib/state/upscale';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
   import type { DraftState, GalleryAsset, JobControlAction, JobSnapshot, UpscaleFactor, UpscaleMethod, WorkspaceContext, Workflow } from '$lib/types';
@@ -49,6 +50,9 @@
   }
 
   let { workflows = $bindable(null) }: Props = $props();
+
+  // Portrait tablet: the stage over Compose and Settings side by side, instead of a sidebar beside a narrow stage.
+  const tall = $derived(layout.mode === 'tall');
 
   let context = $state<WorkspaceContext | null>(null);
   let loadError = $state<string | null>(null);
@@ -1011,10 +1015,11 @@
   </div>
 
   <!-- Left column (Compose + Settings) and the stage with its history filmstrip -->
-  <main class="workspace-layout min-h-0 flex-1 overflow-hidden" class:sidebar-collapsed={draft.state.sidebarCollapsed}>
+  <main class="workspace-layout min-h-0 flex-1 overflow-hidden" class:tall class:sidebar-collapsed={!tall && draft.state.sidebarCollapsed}>
     <ControlsSidebar
       {context}
       {busy}
+      {tall}
       jobsActive={jobStore.jobsActive}
       queuedCount={jobStore.queuedJobs.length}
       submitError={generateError}
@@ -1241,10 +1246,15 @@
   .lora-remove:hover { background: var(--color-error-surface); color: var(--color-error); }
   .workspace-layout { display: grid; grid-template-columns: 360px minmax(0, 1fr); }
   .workspace-layout.sidebar-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
+  /* Portrait tablet: one column, the stage on top with the strip, the two panes under it at 46% of the height. */
+  .workspace-layout.tall { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 46%; }
+  .workspace-layout.tall > :global(.workspace-left) { order: 2; min-height: 0; border-top: 1px solid var(--color-border-subtle); }
+  .workspace-layout.tall > .workspace-preview { order: 1; }
   /* Keep toasts centred on the preview, clear of the sidebar's Generate button. */
   @media (min-width: 640px) {
     :global(:root:has(.workspace-layout)) { --toast-inset-left: 360px; }
     :global(:root:has(.workspace-layout.sidebar-collapsed)) { --toast-inset-left: 56px; }
+    :global(:root:has(.workspace-layout.tall)) { --toast-inset-left: 0px; }
   }
   @media (max-width: 639px) {
     .workspace-layout { display: flex; flex-direction: column; overflow-y: auto; }
