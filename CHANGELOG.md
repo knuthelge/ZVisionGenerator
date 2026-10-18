@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+## [0.13.0b24] - 2026-10-18
+
 ### Added
 - **Web UI: delete the prompt enhancer's models from the Models page.** A new **Prompt enhancer** table lists the Fast and Smart models (and a custom one set on the Config page) with their disk use, and deletes their Hugging Face download to free space, up to 28 GB for both on Windows and Linux. They download again the next time you enhance a prompt
 - **Web UI: free space from Hugging Face downloads nothing uses.** The Models page lists the downloads in your Hugging Face cache that no model or enhancer here uses, such as a model an alias pointed at before, with how much space deleting each frees and a delete button. It also offers to delete unused cache files that earlier deletes left behind
