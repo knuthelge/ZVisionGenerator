@@ -7,6 +7,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import Icon from '../atoms/Icon.svelte';
+  import { layout } from '$lib/state/layoutMode.svelte';
 
   interface Props {
     open?: boolean;
@@ -144,8 +145,8 @@
       aria-label="Close dialog"
       tabindex="-1"
     ></button>
-    <!-- Flex centering layer -->
-    <div class="flex items-center justify-center h-full p-4 pointer-events-none {fill ? 'max-sm:p-0' : ''}">
+    <!-- Flex centering layer. On a phone every dialog is a sheet from the bottom edge, clear of the home indicator. -->
+    <div class="flex h-full pointer-events-none {layout.compact ? 'items-end justify-stretch p-0' : 'items-center justify-center p-4'} {fill ? 'max-sm:p-0' : ''}">
       <!-- Dialog -->
       <div
         bind:this={dialogEl}
@@ -155,7 +156,7 @@
         aria-labelledby={labelledby}
         aria-describedby={describedby}
         tabindex="-1"
-        class="ui-overlay relative flex max-h-full w-full {SIZE_CLASSES[size]} flex-col focus:outline-none pointer-events-auto {fill ? 'max-sm:h-full max-sm:max-w-none max-sm:rounded-none' : ''}"
+        class="ui-overlay relative flex max-h-full w-full flex-col focus:outline-none pointer-events-auto {layout.compact ? `modal-sheet ${fill ? 'h-full' : ''}` : `${SIZE_CLASSES[size]} ${fill ? 'max-sm:h-full max-sm:max-w-none max-sm:rounded-none' : ''}`}"
       >
       {#if title}
         <div class="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-2.5">
@@ -182,3 +183,9 @@
     </div>
   </div>
 {/if}
+
+<style>
+  /* A phone's dialog: full width, rounded at the top, its foot padded for the home indicator, at most 86% tall. */
+  .modal-sheet { max-width: none; max-height: min(86%, 86dvh); border-radius: 14px 14px 0 0; padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .modal-sheet.h-full { max-height: none; height: calc(100% - 44px - env(safe-area-inset-top, 0px)); }
+</style>

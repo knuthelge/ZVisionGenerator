@@ -1490,6 +1490,8 @@
     :global(:root:has(.workspace-layout.sidebar-collapsed)) { --toast-inset-left: 56px; }
     :global(:root:has(.workspace-layout.tall)) { --toast-inset-left: 0px; }
   }
+  /* Phone: toasts dock above the composer and the strip. */
+  :global(:root:has(.compact-workspace)) { --toast-bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
   /* The phone composition. */
   .compact-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
   .compact-workspace > :global(.workspace-preview) { flex: 1; min-height: 0; }

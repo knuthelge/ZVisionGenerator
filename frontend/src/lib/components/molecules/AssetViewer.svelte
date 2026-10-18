@@ -28,6 +28,8 @@
   import { assetDetailSections, fileName, type DetailFact } from './assetDetails';
   import { referenceEntries, upscaleEntries } from './assetMenu';
   import { VIEWER_SHORTCUTS, stepUpscaleChord, viewerActionFor, type ViewerAction } from './viewerShortcuts';
+  import { assetMenuEntries } from './assetMenu';
+  import { layout } from '$lib/state/layoutMode.svelte';
 
   interface Props extends Omit<AssetActionHandlers, 'onpreview'> {
     assets: GalleryAsset[];
@@ -105,6 +107,35 @@
   // A video offers Extend where an image offers Use as reference; the button is absent without the capability.
   const showExtend = $derived(Boolean(onextend && asset?.media_type === 'video' && asset.extend));
   const extendBlocked = $derived(asset ? extendReason(asset) : null);
+
+  // A phone: one ⋯ menu holds every action (the same entries as a tile's menu, plus Reuse and Copy the prompt),
+  // the details open as a sheet, and a swipe moves between assets or closes.
+  const compact = $derived(layout.compact);
+  let moreOpen = $state(false);
+  let moreButton = $state<HTMLButtonElement | null>(null);
+  const moreItems = $derived<ActionMenuEntry[]>(asset ? [
+    ...(onreuse ? [{ kind: 'item' as const, id: 'reuse', label: 'Reuse settings', disabled: !canReuse, title: canReuse ? undefined : 'Reusable settings unavailable', onselect: () => onreuse(asset) }] : []),
+    ...(asset.prompt ? [{ kind: 'item' as const, id: 'copy-prompt', label: 'Copy the prompt', onselect: () => void copyPrompt(asset.prompt!) }] : []),
+    { kind: 'separator' as const },
+    ...assetMenuEntries(asset, { onreference, onextend, onupscale, ondelete }, deleting, referenceUnavailable),
+  ] : []);
+  let swipeStart: { x: number; y: number; at: number } | null = null;
+
+  function onSwipeStart(event: TouchEvent): void {
+    const touch = event.touches[0];
+    swipeStart = touch ? { x: touch.clientX, y: touch.clientY, at: Date.now() } : null;
+  }
+
+  function onSwipeEnd(event: TouchEvent): void {
+    const start = swipeStart;
+    swipeStart = null;
+    const touch = event.changedTouches[0];
+    if (!start || !touch || Date.now() - start.at > 600) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) >= 48 && Math.abs(dx) > Math.abs(dy) * 1.5) runAction(dx < 0 ? 'next' : 'prev');
+    else if (dy >= 80 && Math.abs(dx) < 40) onclose();
+  }
 
   const sections = $derived(asset ? assetDetailSections(asset) : null);
   const source = $derived(asset?.details?.source ?? null);
@@ -251,12 +282,19 @@
     aria-labelledby="asset-viewer-title"
     data-testid="asset-viewer"
     data-details={detailsOpen}
+    data-compact={compact}
   >
     <div class="viewer-bar">
       <div class="viewer-title">
         <b id="asset-viewer-title" class="truncate">{asset.filename}</b>
         <small>{index + 1} of {assets.length}{setLabel ? ` · ${setLabel}` : ''}</small>
       </div>
+      {#if compact}
+        <button type="button" class="viewer-btn ui-btn ui-btn-icon" data-action="details" aria-label="Details" aria-expanded={detailsOpen} aria-controls="asset-viewer-details" onclick={toggleDetails}><Icon name="info" size={16} /></button>
+        <button type="button" bind:this={moreButton} class="viewer-btn ui-btn ui-btn-icon" data-action="more" aria-label="Actions" aria-haspopup="menu" aria-expanded={moreOpen} onclick={() => { moreOpen = !moreOpen; }}><Icon name="more" size={16} /></button>
+        <ActionMenu open={moreOpen} anchor={moreButton} items={moreItems} label={asset.filename} onclose={() => { moreOpen = false; }} />
+        <button type="button" bind:this={closeButton} class="viewer-btn ui-btn ui-btn-icon" aria-label="Close viewer" onclick={onclose}><Icon name="close" size={16} /></button>
+      {:else}
       {#if onreuse}
         <button
           type="button"
@@ -349,10 +387,12 @@
         title="Close (Esc)"
         onclick={onclose}
       ><Icon name="close" size={16} /></button>
+      {/if}
     </div>
 
     <div class="viewer-main">
-      <div class="viewer-stage">
+      <!-- svelte-ignore a11y_no_static_element_interactions because the swipe duplicates the arrows and keys -->
+      <div class="viewer-stage" ontouchstart={compact ? onSwipeStart : undefined} ontouchend={compact ? onSwipeEnd : undefined}>
         <button
           type="button"
           class="viewer-nav prev ui-btn ui-btn-icon"
@@ -529,4 +569,10 @@
     .viewer-stage { padding: 12px 52px; }
     .viewer-details { position: absolute; inset: auto 0 0 0; width: auto; max-height: 50%; }
   }
+  /* Phone: no arrows (a swipe moves), the bar pads for the status bar, the details rise as a sheet. */
+  .asset-viewer[data-compact='true'] .viewer-bar { flex-wrap: nowrap; padding: calc(6px + env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) 6px max(12px, env(safe-area-inset-left, 0px)); }
+  .asset-viewer[data-compact='true'] .viewer-nav { display: none; }
+  .asset-viewer[data-compact='true'] .viewer-stage { padding: 8px 12px; touch-action: pan-y; }
+  .asset-viewer[data-compact='true'] .viewer-details { position: absolute; inset: auto 0 0 0; width: auto; max-height: 60%; border-radius: 14px 14px 0 0; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .asset-viewer[data-compact='true'] .viewer-film { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
 </style>

@@ -15,6 +15,14 @@
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import { hasOpenModal, isCommandKey, isPlainKey, isTyping } from '$lib/keyboard';
   import { gridColumns, moveInGrid } from './gridNav';
+  import { layout } from '$lib/state/layoutMode.svelte';
+
+  // Phone: a Select mode, since there is no hover to show a tile's checkbox and no keyboard to select with.
+  let selectMode = $state(false);
+  const compact = $derived(layout.compact);
+  $effect(() => {
+    if (!compact) selectMode = false;
+  });
 
   let assets = $state<GalleryAsset[]>([]);
   let page = $state(1);
@@ -517,10 +525,14 @@
         ]}
         onchange={(event) => onSortChange((event.currentTarget as HTMLSelectElement).value as 'newest' | 'oldest')}
       />
-      <span class="text-ui text-text-muted">{selectedCount} selected</span>
-      <Button variant="danger" disabled={selectedCount === 0 || deletableSelectedCount === 0} onclick={deleteSelected}>
-        {bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete selected'}
-      </Button>
+      {#if compact}
+        <Button aria-pressed={selectMode} onclick={() => { selectMode = !selectMode; if (!selectMode) selected = new Set(); }}>{selectMode ? 'Done' : 'Select'}</Button>
+      {:else}
+        <span class="text-ui text-text-muted">{selectedCount} selected</span>
+        <Button variant="danger" disabled={selectedCount === 0 || deletableSelectedCount === 0} onclick={deleteSelected}>
+          {bulkDeleteRuns > 0 ? 'Deleting…' : 'Delete selected'}
+        </Button>
+      {/if}
     {/snippet}
   </PageHeader>
 
@@ -549,8 +561,8 @@
             density="card"
             selected={selected.has(asset.id)}
             deleting={deletingIds.has(asset.id)}
-            onselect={toggleSelect}
-            onpreview={openViewer}
+            onselect={compact && !selectMode ? undefined : toggleSelect}
+            onpreview={selectMode ? (asset) => toggleSelect(asset, !selected.has(asset.id)) : openViewer}
             onreuse={reuseInWorkspace}
             onreference={useAsReference}
             onextend={extendAsset}
@@ -577,6 +589,17 @@
       </div>
     {/if}
   </section>
+  {#if selectMode}
+    <!-- Phone: the selection's actions, docked at the foot. -->
+    <div class="flex shrink-0 items-center gap-2 border-t border-border-subtle bg-bg-overlay px-3 py-2 text-ui text-text-secondary" style="padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px))" data-testid="gallery-select-bar">
+      <span>{selectedCount} selected</span>
+      <span class="flex-1"></span>
+      <Button onclick={() => { selected = new Set(assets.map((asset) => asset.id)); }}>Select all</Button>
+      <Button variant="danger" disabled={selectedCount === 0 || deletableSelectedCount === 0} onclick={deleteSelected}>
+        {bulkDeleteRuns > 0 ? 'Deleting…' : selectedCount > 0 ? `Delete ${selectedCount}` : 'Delete'}
+      </Button>
+    </div>
+  {/if}
 </div>
 
 <AssetViewer
