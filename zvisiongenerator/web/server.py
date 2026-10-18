@@ -105,7 +105,9 @@ from zvisiongenerator.web.model_delete import DeleteTarget, delete_lora, delete_
 from zvisiongenerator.review import review_enabled
 from zvisiongenerator.web.job_contract import UPSCALE_SUPPORTED_CONTROLS, image_supported_controls, video_supported_controls
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner, worker_runtime_context
-from zvisiongenerator.web.workspace_api import build_models_response, build_workspace_bootstrap_view, build_workspace_response
+from zvisiongenerator.web.workspace_api import build_models_response, build_workspace_bootstrap_view, build_workspace_response, find_other_downloads
+from zvisiongenerator.utils.hf_cache import free_stranded_shared_files
+from zvisiongenerator.utils.model_files import disk_size_label, huggingface_cache_dir
 from zvisiongenerator.web.workspace_contract import (
     CANONICAL_WORKFLOW_VALUES,
     DEFAULT_PROMPT_SOURCE,
@@ -1883,6 +1885,34 @@ def api_delete_enhancer_model(tier: str) -> dict[str, Any]:
     finally:
         session.cancel_reservation(reservation[0])
     return {"status": "ok", "tone": "success", "message": f"Deleted the HuggingFace download of '{target.repo_id}'."}
+
+
+# Declared before /api/hf-cache/{repo_id:path}, which would otherwise match it.
+@app.delete("/api/hf-cache/stranded")
+def api_free_stranded_shared_files() -> dict[str, Any]:
+    """Delete the files in the HuggingFace cache's shared store that no downloaded repo links to."""
+    _ensure_no_active_job()
+    try:
+        freed = free_stranded_shared_files(huggingface_cache_dir())
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not delete unused cache files: {exc}") from exc
+    return {"status": "ok", "tone": "success", "message": f"Freed {disk_size_label(freed)} of unused cache files."}
+
+
+@app.delete("/api/hf-cache/{repo_id:path}")
+def api_delete_other_download(repo_id: str) -> dict[str, Any]:
+    """Delete a HuggingFace download nothing on the Models page uses; downloads in use have their own delete."""
+    _ensure_no_active_job()
+    repo = next((repo for repo in find_other_downloads(load_web_config()) if repo.repo_id == repo_id), None)
+    if repo is None:
+        raise HTTPException(status_code=404, detail=f"No unused HuggingFace download named '{repo_id}'.")
+    try:
+        delete_model(DeleteTarget("huggingface", repo.path, repo_id=repo.repo_id))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"No unused HuggingFace download named '{repo_id}'.") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not delete '{repo_id}': {exc}") from exc
+    return {"status": "ok", "tone": "success", "message": f"Deleted the HuggingFace download of '{repo_id}'."}
 
 
 @app.delete("/api/loras/{name}")

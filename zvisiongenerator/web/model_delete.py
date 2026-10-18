@@ -1,4 +1,4 @@
-"""Delete installed models, LoRAs, prompt-enhancer models, and HuggingFace model downloads from the Web UI.
+"""Delete installed models, LoRAs, prompt-enhancer models, and HuggingFace downloads from the Web UI.
 
 Deletes act only on what the user picked. A converted model's folder is removed with its links, never the
 HuggingFace files those links point to; a HuggingFace download is removed from the cache while its alias
@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
-from zvisiongenerator.utils.config import ltx_companion_repos
+from zvisiongenerator.utils.config import enhancer_tier_models, ltx_companion_repos
 from zvisiongenerator.utils.model_files import find_local_model_dir, huggingface_cache_repo_dir
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 from zvisiongenerator.utils.stored_quant import stored_quant_dirs_for
@@ -105,14 +105,46 @@ def enhancer_delete_target(repo: str) -> DeleteTarget | None:
     return DeleteTarget("huggingface", path, repo_id=reference.repo_id) if path.is_dir() else None
 
 
+def used_repo_ids(
+    inventory: Iterable[ImageInventoryEntry | VideoInventoryEntry],
+    app_config: dict[str, Any],
+    *,
+    platform_key: str,
+    extra: Iterable[str] = (),
+) -> frozenset[str]:
+    """Return the HuggingFace repos the app loads, case-folded: aliases, their LTX companions, enhancer tiers and *extra*."""
+    references = [entry.resolved_path for entry in inventory if entry.source != "installed"]
+    references += [model[0] for model in enhancer_tier_models(app_config, platform_key=platform_key).values()]
+    ids = {repo.repo_id for reference in references if (repo := parse_huggingface_repo_reference(reference)) is not None}
+    ids.update(repo_id for reference in references for repo_id in ltx_companion_repos(app_config, reference))
+    ids.update(extra)
+    return frozenset(repo_id.casefold() for repo_id in ids)
+
+
+def cache_repos_linked_from(models_dir: Path, cache_dir: Path) -> frozenset[str]:
+    """Return the cache folders (``models--org--name``) that installed models link into, which deleting would break."""
+    try:
+        caches = {Path(os.path.abspath(cache_dir)), cache_dir.resolve()}
+        children = list(models_dir.iterdir())
+    except OSError:
+        return frozenset()
+    links = [child for child in children if child.is_symlink()]
+    for child in children:
+        if child.is_dir() and not child.is_symlink():
+            for root, dirs, files in os.walk(child, followlinks=False):
+                links += [entry for name in (*dirs, *files) if (entry := Path(root, name)).is_symlink()]
+    destinations = [destination for link in links for destination in _link_destinations(link)]
+    return frozenset(destination.relative_to(cache).parts[0] for destination in destinations for cache in caches if destination.is_relative_to(cache) and destination != cache) - {"blobs"}
+
+
 def installed_models_linking_to(target: Path, models_dir: Path) -> tuple[str, ...]:
     """Return installed models with a link into *target*, which deleting *target* would break."""
     try:
-        resolved_target = target.resolve()
+        targets = {Path(os.path.abspath(target)), target.resolve()}
         children = sorted(child for child in models_dir.iterdir() if child.is_dir() and not child.is_symlink())
     except OSError:
         return ()
-    return tuple(child.name for child in children if _links_into(child, resolved_target))
+    return tuple(child.name for child in children if _links_into(child, targets))
 
 
 def delete_model(target: DeleteTarget) -> None:
@@ -173,10 +205,23 @@ def _is_direct_child(path: Path, parent: Path) -> bool:
     return path.parent == parent and path.name not in {"", ".", ".."}
 
 
-def _links_into(model_dir: Path, resolved_target: Path) -> bool:
+def _links_into(model_dir: Path, targets: set[Path]) -> bool:
     for root, dirs, files in os.walk(model_dir, followlinks=False):
         for name in (*dirs, *files):
             entry = Path(root, name)
-            if entry.is_symlink() and Path(os.path.realpath(entry)).is_relative_to(resolved_target):
+            if entry.is_symlink() and any(destination.is_relative_to(target) for destination in _link_destinations(entry) for target in targets):
                 return True
     return False
+
+
+def _link_destinations(link: Path) -> tuple[Path, ...]:
+    """Return where *link* points: its own target and the fully resolved path.
+
+    Both count because a link into a repo's Xet file resolves on into the cache-wide shared store (``<cache>/blobs/``),
+    which no longer names the repo.
+    """
+    try:
+        first_hop = Path(os.path.normpath(link.parent / os.readlink(link)))
+    except OSError:
+        return (Path(os.path.realpath(link)),)
+    return (first_hop, Path(os.path.realpath(link)))

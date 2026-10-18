@@ -1080,6 +1080,15 @@ export interface EnhancerModelEntry {
   deletable: boolean;
 }
 
+/** Hugging Face cache content nothing on the Models page uses. */
+export interface OtherDownloads {
+  cache_dir: string;
+  /** Model repos no alias, enhancer tier or installed model uses; `size_label` is what deleting one frees. */
+  repos: { repo_id: string; size_label: string }[];
+  /** Files in the cache's shared store that no download links to any more, or `null` when there are none. */
+  stranded: { count: number; size_label: string } | null;
+}
+
 export interface LoraEntry {
   name: string;
   size_label?: string;
@@ -1092,6 +1101,7 @@ export interface ModelInventory {
   image_models: ModelEntry[];
   video_models: VideoModelEntry[];
   enhancer_models?: EnhancerModelEntry[];
+  other_downloads?: OtherDownloads;
   loras: LoraEntry[];
   /** Whether this platform can save quantized copies of models (macOS). */
   stored_quants_supported?: boolean;

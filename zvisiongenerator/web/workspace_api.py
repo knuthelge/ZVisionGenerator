@@ -15,15 +15,23 @@ from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloade
 from zvisiongenerator.utils.config import enhancer_tier_models, ltx_companion_repos, resolve_defaults, resolve_enhancer_model, resolve_video_defaults, smart_enhancer_model, smart_unavailable
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
-from zvisiongenerator.utils.model_files import directory_bytes, disk_size_label, find_local_model_dir, huggingface_cache_repo_bytes, huggingface_cache_repo_dir
+from zvisiongenerator.utils.hf_cache import CachedRepo, cached_model_repos, repo_disk_bytes, stranded_shared_files
+from zvisiongenerator.utils.model_files import (
+    directory_bytes,
+    disk_size_label,
+    find_local_model_dir,
+    huggingface_cache_dir,
+    huggingface_cache_repo_dir,
+    ltx_mlx_text_encoder_repo,
+)
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import matrix_contract, resolve_enhance_ceiling
 from zvisiongenerator.utils.stored_quant import stored_quant_dirs_for
-from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label
+from zvisiongenerator.utils.seedvr2 import SEEDVR2_REPO, SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
-from zvisiongenerator.web.model_delete import delete_scope, enhancer_delete_target, installed_models_linking_to, model_delete_target, seedvr2_delete_target
+from zvisiongenerator.web.model_delete import cache_repos_linked_from, delete_scope, enhancer_delete_target, installed_models_linking_to, model_delete_target, seedvr2_delete_target, used_repo_ids
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
 from zvisiongenerator.web.model_status import describe_model_status
 
@@ -246,6 +254,7 @@ def build_models_response(
             for entry in web_config.video_inventory
         ],
         "enhancer_models": _enhancer_model_rows(web_config.app_config),
+        "other_downloads": _other_downloads_payload(web_config),
         "loras": loras,
         "stored_quants_supported": supports_stored_quants(),
         "huggingface_configured": token_var is not None,
@@ -296,7 +305,7 @@ def _enhancer_model_rows(
     rows = []
     for tier, (repo, revision) in enhancer_tier_models(app_config, platform_key=sys.platform).items():
         target = enhancer_delete_target(repo)
-        disk_bytes = huggingface_cache_repo_bytes(target.path) if target is not None else 0
+        disk_bytes = repo_disk_bytes(target.path) if target is not None else 0
         unavailable = smart_unavailable(app_config, platform_key=sys.platform, budget_bytes=(budget_bytes or _gpu_budget_bytes)()) if tier == "smart" else None
         rows.append(
             {
@@ -311,6 +320,31 @@ def _enhancer_model_rows(
             }
         )
     return rows
+
+
+def find_other_downloads(web_config: WebUiConfig, *, cache_dir: Path | None = None) -> tuple[CachedRepo, ...]:
+    """Return the model repos in the HuggingFace cache that nothing on the Models page uses.
+
+    Used means an alias or enhancer tier loads it (with LTX companions, the MLX LTX text encoder and the SeedVR2
+    repo when SeedVR2 is on), or an installed model links into it.
+    """
+    cache_dir = cache_dir or huggingface_cache_dir()
+    # The MLX LTX text encoder counts as used everywhere; only the macOS backend downloads it.
+    extra = [ltx_mlx_text_encoder_repo(), *([SEEDVR2_REPO] if web_config.seedvr2 is not None else [])]
+    used = used_repo_ids((*web_config.image_inventory, *web_config.video_inventory), web_config.app_config, platform_key=sys.platform, extra=extra)
+    linked = cache_repos_linked_from(Path(web_config.models_dir), cache_dir)
+    return tuple(repo for repo in cached_model_repos(cache_dir) if repo.repo_id.casefold() not in used and repo.path.name not in linked)
+
+
+def _other_downloads_payload(web_config: WebUiConfig) -> dict[str, Any]:
+    """Describe the unused HuggingFace downloads and the shared files nothing links to, for the Models page."""
+    cache_dir = huggingface_cache_dir()
+    stranded = stranded_shared_files(cache_dir)
+    return {
+        "cache_dir": str(cache_dir),
+        "repos": [{"repo_id": repo.repo_id, "size_label": disk_size_label(repo.freed_bytes)} for repo in find_other_downloads(web_config, cache_dir=cache_dir)],
+        "stranded": {"count": len(stranded), "size_label": disk_size_label(sum(stranded.values()))} if stranded else None,
+    }
 
 
 def _stored_quant_payload(entry: ImageInventoryEntry) -> dict[str, Any] | None:
@@ -387,7 +421,7 @@ def _disk_size_resolver(models_dir: Path, *, listed: set[str], app_config: dict[
             local.append(models_dir / entry.name)
         elif (repo := parse_huggingface_repo_reference(entry.resolved_path)) is not None:
             hub = [huggingface_cache_repo_dir(repo_id) for repo_id in (repo.repo_id, *ltx_companion_repos(app_config, entry.resolved_path))]
-        total = sum(directory_bytes(path) for path in local) + sum(huggingface_cache_repo_bytes(path) for path in hub)
+        total = sum(directory_bytes(path) for path in local) + sum(repo_disk_bytes(path) for path in hub)
         return disk_size_label(total) if total else None
 
     return _disk_size

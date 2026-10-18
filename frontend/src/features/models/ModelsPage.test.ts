@@ -11,6 +11,8 @@ const modelApiMocks = vi.hoisted(() => ({
   importLoraHF: vi.fn(),
   deleteModel: vi.fn(),
   deleteEnhancerModel: vi.fn(),
+  deleteOtherDownload: vi.fn(),
+  freeStrandedCacheFiles: vi.fn(),
   deleteLora: vi.fn(),
 }));
 
@@ -27,6 +29,8 @@ vi.mock('$lib/api/models', () => ({
   importLoraHF: modelApiMocks.importLoraHF,
   deleteModel: modelApiMocks.deleteModel,
   deleteEnhancerModel: modelApiMocks.deleteEnhancerModel,
+  deleteOtherDownload: modelApiMocks.deleteOtherDownload,
+  freeStrandedCacheFiles: modelApiMocks.freeStrandedCacheFiles,
   deleteLora: modelApiMocks.deleteLora,
 }));
 
@@ -88,6 +92,8 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.importLoraHF.mockReset();
     modelApiMocks.deleteModel.mockReset();
     modelApiMocks.deleteEnhancerModel.mockReset();
+    modelApiMocks.deleteOtherDownload.mockReset();
+    modelApiMocks.freeStrandedCacheFiles.mockReset();
     modelApiMocks.deleteLora.mockReset();
     modelApiMocks.getModelInventory.mockResolvedValue(makeInventory());
     for (const mock of Object.values(browseApiMocks)) mock.mockReset();
@@ -619,6 +625,37 @@ describe('ModelsPage Browse buttons', () => {
 
     expect(modelApiMocks.deleteEnhancerModel).toHaveBeenCalledWith('fast');
     expect(modelApiMocks.getModelInventory).toHaveBeenCalledTimes(2);
+  });
+
+  it('lists other downloads and unused cache files, deleting each through its own route', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({
+      ...makeInventory(),
+      other_downloads: { cache_dir: '/hub', repos: [{ repo_id: 'org/old', size_label: '16.1 GB' }], stranded: { count: 12, size_label: '60.1 GB' } },
+    });
+    const ok = { status: 'ok', tone: 'success', message: 'Done.' };
+    modelApiMocks.deleteOtherDownload.mockResolvedValue(ok);
+    modelApiMocks.freeStrandedCacheFiles.mockResolvedValue(ok);
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    const confirm = async (row: string) => {
+      (target.querySelector(`[data-testid="${row}"] [data-testid="delete-button"]`) as HTMLButtonElement).click();
+      await settle();
+      (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
+      await settle();
+    };
+    await confirm('other-download-row');
+    expect(modelApiMocks.deleteOtherDownload).toHaveBeenCalledWith('org/old');
+    await confirm('stranded-row');
+    expect(modelApiMocks.freeStrandedCacheFiles).toHaveBeenCalledOnce();
+  });
+
+  it('hides other downloads when the cache holds nothing unused', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({ ...makeInventory(), other_downloads: { cache_dir: '/hub', repos: [], stranded: null } });
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    expect(target.querySelector('[data-testid="other-download-row"], [data-testid="stranded-row"]')).toBeNull();
   });
 
   it('hides the enhancer table when no tier is configured', async () => {

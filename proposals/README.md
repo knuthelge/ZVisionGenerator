@@ -35,13 +35,13 @@ These files are not part of the published docs site, and the docs don't link to 
 | [Grab a frame from a video](video-frame-grab.md) | Proposed | Frame stepping in the viewer and a Grab frame action that writes a PNG with provenance and can make it the reference for the next image or clip |
 | [One Gallery](one-gallery.md) | Proposed | Call the Workspace strip Gallery, share one store and one endpoint between the strip and the page |
 | [Merge the Models and Config pages](admin-page-merge.md) | Proposed | One Setup page with General, Models, LoRAs and Folders tabs, redirects for the old routes, one nav slot fewer |
-| [Delete enhancer models, and a Hugging Face downloads list](huggingface-cache-manager.md) | Proposed | Enhancer rows with delete on the Models page, an Other downloads table for cached repos nothing uses, and LoRA imports that don't leave a cached copy |
 | [Copy a CLI command from any asset](asset-cli-command.md) | Proposed | Build the reproducing `ziv` command from an asset's recorded settings in the tile menu and viewer, with a parity test against Reuse settings |
 
 ## Archive
 
 | Proposal | Status | Summary |
 |---|---|---|
+| [Delete enhancer models, and a Hugging Face downloads list](archive/huggingface-cache-manager.md) | Done (unreleased) | Enhancer rows with delete, disk use on every model, an Other downloads table for cached repos nothing uses with a cleanup of stranded shared files, deletes that free Hugging Face's shared store, and LoRA imports that skip the cache |
 | [An in-app path browser](archive/web-path-browser.md) | Done (unreleased) | A file browser drawn in the Web UI from a server listing, plus path completion in the field, replaces the host-native dialog (Tk on Linux, `osascript` on macOS), so Browse works on every OS and from any device |
 | [Group the backends into platform folders](archive/backend-folders.md) | Done (unreleased) | `backends/` split into `cuda/` (with `image/` and `video/`) and a flat `mac/`; the `_win`/`_mac` names dropped. A pure move |
 | [Extend a video](archive/video-extend.md) | Done (unreleased) | Continue a clip from its last 25 frames in the one-stage loop and splice the new part onto the untouched original, with audio, on macOS; Windows/Linux moved to platform parity |

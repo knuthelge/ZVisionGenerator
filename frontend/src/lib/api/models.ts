@@ -40,6 +40,14 @@ export function deleteEnhancerModel(tier: string): Promise<ModelOperationResult>
   return api.delete<ModelOperationResult>(`/api/enhancer-models/${encodeURIComponent(tier)}`);
 }
 
+export function deleteOtherDownload(repoId: string): Promise<ModelOperationResult> {
+  return api.delete<ModelOperationResult>(`/api/hf-cache/${repoId.split('/').map(encodeURIComponent).join('/')}`);
+}
+
+export function freeStrandedCacheFiles(): Promise<ModelOperationResult> {
+  return api.delete<ModelOperationResult>('/api/hf-cache/stranded');
+}
+
 export function deleteLora(name: string): Promise<ModelOperationResult> {
   return api.delete<ModelOperationResult>(`/api/loras/${encodeURIComponent(name)}`);
 }

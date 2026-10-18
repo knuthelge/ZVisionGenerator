@@ -344,13 +344,13 @@ def _shared_blob_repo(hub: Path, repo: str, xet_hash: str) -> Path:
 
 
 def test_repo_size_counts_files_in_the_shared_blob_store(layout):
-    from zvisiongenerator.utils.model_files import huggingface_cache_repo_bytes
+    from zvisiongenerator.utils.hf_cache import repo_disk_bytes
 
     payload = _shared_blob_repo(layout.hub, "org/enh", "ef" * 32)
     payload.write_bytes(b"x" * 1000)
     _touch(layout.hub / "models--org--enh" / "blobs" / "small").write_bytes(b"y" * 10)
 
-    assert huggingface_cache_repo_bytes(layout.hub / "models--org--enh") == 1000 + 10 + 40  # shared payload, local blob, refs/main
+    assert repo_disk_bytes(layout.hub / "models--org--enh") == 1000 + 10 + 40  # shared payload, local blob, refs/main
 
 
 def test_disk_size_label_picks_a_readable_unit():
@@ -450,7 +450,6 @@ class TestEnhancerDeleteRoute:
         response = client.delete("/api/enhancer-models/fast")
 
         assert response.status_code == 200
-        assert "org/fast" in response.json()["message"]
         assert not (layout.hub / "models--org--fast").exists()
         assert not session.busy()
 

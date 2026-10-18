@@ -210,30 +210,16 @@ def disk_size_label(num_bytes: int) -> str:
     return f"{max(1, round(num_bytes / 1e3))} KB"
 
 
-def huggingface_cache_repo_dir(repo_id: str) -> Path:
-    """Return the HuggingFace cache folder that holds every downloaded revision of *repo_id*."""
+def huggingface_cache_dir() -> Path:
+    """Return the HuggingFace hub cache folder (``HF_HUB_CACHE``, which follows ``HF_HOME``)."""
     from huggingface_hub.constants import HF_HUB_CACHE
 
-    return Path(HF_HUB_CACHE) / f"models--{repo_id.replace('/', '--')}"
+    return Path(HF_HUB_CACHE)
 
 
-def huggingface_cache_repo_bytes(repo_dir: Path) -> int:
-    """Return the disk use of a HuggingFace cache repo folder, including its files in the cache-wide shared blob store.
-
-    huggingface_hub keeps Xet downloads once in ``<cache>/blobs/`` and links the repo's ``blobs/`` entries to them.
-    A file shared with another repo counts in full for each.
-    """
-    total = directory_bytes(repo_dir)
-    try:
-        linked = [entry for entry in (repo_dir / "blobs").iterdir() if entry.is_symlink()]
-    except OSError:
-        return total
-    for entry in linked:
-        try:
-            total += entry.stat().st_size
-        except OSError:
-            continue
-    return total
+def huggingface_cache_repo_dir(repo_id: str) -> Path:
+    """Return the HuggingFace cache folder that holds every downloaded revision of *repo_id*."""
+    return huggingface_cache_dir() / f"models--{repo_id.replace('/', '--')}"
 
 
 def _cached_snapshots(repo_id: str, revision: str | None) -> list[Path]:

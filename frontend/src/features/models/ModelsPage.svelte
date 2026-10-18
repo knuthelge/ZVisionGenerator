@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { errorText } from '$lib/api/client';
-  import { getModelInventory, convertCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteLora } from '$lib/api/models';
+  import { getModelInventory, convertCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
   import { addToast } from '$lib/state/toasts.svelte';
-  import type { EnhancerModelEntry, ModelDeleteInfo, ModelInventory, ModelStatusFields } from '$lib/types';
+  import type { EnhancerModelEntry, ModelDeleteInfo, ModelInventory, ModelOperationResult, ModelStatusFields } from '$lib/types';
   import { Button, Icon, Input, Select, Tooltip } from '$lib/components/atoms';
   import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField } from '$lib/components/molecules';
   import { DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
@@ -18,7 +18,7 @@
   let localLoraPath = $state('');
   let checkpointPathReset = $state(0);
   let localLoraPathReset = $state(0);
-  let pendingDelete = $state<{ type: 'model'; name: string; info: ModelDeleteInfo; downloadSizeLabel?: string | null } | { type: 'enhancer'; name: string; model: EnhancerModelEntry } | { type: 'lora'; name: string } | null>(null);
+  let pendingDelete = $state<{ type: 'model'; name: string; info: ModelDeleteInfo; downloadSizeLabel?: string | null } | { type: 'enhancer'; name: string; model: EnhancerModelEntry } | { type: 'download'; name: string; sizeLabel: string } | { type: 'stranded'; name: string; count: number; sizeLabel: string } | { type: 'lora'; name: string } | null>(null);
   let deleteOpen = $state(false);
   let deleting = $state(false);
 
@@ -121,9 +121,21 @@
   function deleteQuestion(target: NonNullable<typeof pendingDelete>): string {
     if (target.type === 'lora') return `Delete ${target.name}.safetensors from the LoRAs folder?`;
     if (target.type === 'enhancer') return `Delete the ${target.name} enhancer model ${target.model.repo}?`;
+    if (target.type === 'download') return `Delete the Hugging Face download of ${target.name}?`;
+    if (target.type === 'stranded') return `Delete ${target.count} unused Hugging Face cache files?`;
     if (target.info.kind === 'installed') return `Delete the model folder ${target.name} from the models folder?`;
     if (target.info.kind === 'copy') return `Delete the prepared copy of ${target.name}?`;
     return `Delete the Hugging Face download of ${target.info.repo_id}?`;
+  }
+
+  function runDelete(target: NonNullable<typeof pendingDelete>): Promise<ModelOperationResult> {
+    switch (target.type) {
+      case 'model': return deleteModel(target.name);
+      case 'enhancer': return deleteEnhancerModel(target.model.tier);
+      case 'download': return deleteOtherDownload(target.name);
+      case 'stranded': return freeStrandedCacheFiles();
+      case 'lora': return deleteLora(target.name);
+    }
   }
 
   function requestDelete(target: NonNullable<typeof pendingDelete>): void {
@@ -137,7 +149,7 @@
     deleting = true;
     notice = null;
     try {
-      const result = target.type === 'model' ? await deleteModel(target.name) : target.type === 'enhancer' ? await deleteEnhancerModel(target.model.tier) : await deleteLora(target.name);
+      const result = await runDelete(target);
       notice = { tone: 'success', message: result.message };
       addToast(result.message, 'success');
       await loadInventory();
@@ -382,6 +394,47 @@
               </div>
             </Panel>
           {/if}
+
+          {#if inventory.other_downloads && (inventory.other_downloads.repos.length || inventory.other_downloads.stranded)}
+            {@const other = inventory.other_downloads}
+            <Panel title="Other downloads" icon="download" flush>
+              {#snippet actions()}{@render count(other.repos.length)}{/snippet}
+              <p class="ui-help px-3 pt-2">
+                In the Hugging Face cache (<span class="font-mono break-all">{other.cache_dir}</span>) but not used by any model here.
+              </p>
+              <div class="overflow-x-auto px-1 pb-1">
+                <table class="ui-table ui-table-comfortable">
+                  <thead>
+                    <tr>
+                      <th>Repository</th>
+                      <th>Size</th>
+                      <th class="w-8"><span class="sr-only">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each other.repos as r (r.repo_id)}
+                      <tr data-testid="other-download-row">
+                        <td class="break-all font-mono">{r.repo_id}</td>
+                        <td>{@render diskSizeCell(r.size_label)}</td>
+                        <td class="text-right">{@render deleteButton(`Delete ${r.repo_id}`, () => requestDelete({ type: 'download', name: r.repo_id, sizeLabel: r.size_label }))}</td>
+                      </tr>
+                    {/each}
+                    {#if other.stranded}
+                      {@const stranded = other.stranded}
+                      <tr data-testid="stranded-row">
+                        <td>
+                          Unused cache files
+                          <span class="ui-help block font-normal">{stranded.count} files no download links to any more, left by earlier deletes</span>
+                        </td>
+                        <td>{@render diskSizeCell(stranded.size_label)}</td>
+                        <td class="text-right">{@render deleteButton('Delete unused cache files', () => requestDelete({ type: 'stranded', name: 'Unused cache files', count: stranded.count, sizeLabel: stranded.size_label }))}</td>
+                      </tr>
+                    {/if}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          {/if}
         </div>
 
         <Panel title="LoRAs" icon="list" flush>
@@ -543,6 +596,11 @@
 >
   {#if pendingDelete}
     <div class="space-y-2" data-testid="delete-dialog">
+      {#if pendingDelete.type === 'download'}
+        <p data-testid="delete-download">Frees {pendingDelete.sizeLabel}. Another app on this computer that uses the Hugging Face cache may download it again.</p>
+      {:else if pendingDelete.type === 'stranded'}
+        <p data-testid="delete-stranded">Frees {pendingDelete.sizeLabel}. No downloaded model uses these files.</p>
+      {/if}
       {#if pendingDelete.type === 'enhancer'}
         <p data-testid="delete-enhancer">
           Frees {pendingDelete.model.disk_size_label ?? 'its download'}. It downloads again the next time you use {pendingDelete.name} to enhance a prompt.

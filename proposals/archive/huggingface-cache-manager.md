@@ -1,6 +1,13 @@
 # Delete enhancer models, and a Hugging Face downloads list
 
-**Status:** Proposed (2026-10-18)
+**Status:** Done (unreleased, 2026-10-18)
+
+Shipped as proposed, plus two things found while building it:
+
+- huggingface_hub 1.33 keeps Xet downloads once in a shared store (`<cache>/blobs/`) and links each repo to them. The Models page deleted repo folders with `rmtree`, which left the files behind; one Linux cache had 60 GB stranded this way. Deletes now run huggingface_hub's `DeleteCacheStrategy` scoped to the one repo folder (not `HFCacheInfo.delete_revisions`, which matches commit hashes cache-wide and would also delete a mirror with the same history), and **Other downloads** has an **Unused cache files** row that sweeps stranded files through huggingface_hub's own manifest checks.
+- The image and video tables show each model's disk use in place of the size letter.
+
+Open: on macOS, `seedvr2_loader._delete_cached_file` unlinks a repo blob link, which leaves a shared file behind; it now shows up under Unused cache files, but the delete itself should free it.
 
 ## Problem
 
@@ -56,5 +63,5 @@ A plain **Other downloads** table on the Models page, below the enhancer table: 
 
 ## Out of scope
 
-- Downloading models from the page, and download progress ([First run](first-run.md), [Show model download progress](model-download-progress.md)).
+- Downloading models from the page, and download progress ([First run](../first-run.md), [Show model download progress](../model-download-progress.md)).
 - Removing old revisions of a repo.
