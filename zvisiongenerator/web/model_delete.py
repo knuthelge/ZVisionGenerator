@@ -1,4 +1,4 @@
-"""Delete installed models, LoRAs, and HuggingFace model downloads from the Web UI.
+"""Delete installed models, LoRAs, prompt-enhancer models, and HuggingFace model downloads from the Web UI.
 
 Deletes act only on what the user picked. A converted model's folder is removed with its links, never the
 HuggingFace files those links point to; a HuggingFace download is removed from the cache while its alias
@@ -91,6 +91,18 @@ def seedvr2_delete_target(model: str, models_dir: Path) -> DeleteTarget | None:
     """
     copy = seedvr2_copy_dir(model, models_dir)
     return DeleteTarget("installed", copy) if copy.is_dir() else None
+
+
+def enhancer_delete_target(repo: str) -> DeleteTarget | None:
+    """Return what deleting the enhancer model *repo* removes: its whole cache folder, or ``None`` when absent or local.
+
+    A partial download counts, so an interrupted first use can be cleared too.
+    """
+    reference = parse_huggingface_repo_reference(repo)
+    if reference is None:
+        return None
+    path = huggingface_cache_repo_dir(reference.repo_id)
+    return DeleteTarget("huggingface", path, repo_id=reference.repo_id) if path.is_dir() else None
 
 
 def installed_models_linking_to(target: Path, models_dir: Path) -> tuple[str, ...]:

@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { errorText } from '$lib/api/client';
-  import { getModelInventory, convertCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteLora } from '$lib/api/models';
+  import { getModelInventory, convertCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteLora } from '$lib/api/models';
   import { addToast } from '$lib/state/toasts.svelte';
-  import type { ModelDeleteInfo, ModelInventory, ModelStatusFields } from '$lib/types';
+  import type { EnhancerModelEntry, ModelDeleteInfo, ModelInventory, ModelStatusFields } from '$lib/types';
   import { Button, Icon, Input, Select, Tooltip } from '$lib/components/atoms';
   import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField } from '$lib/components/molecules';
   import { DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
@@ -18,9 +18,11 @@
   let localLoraPath = $state('');
   let checkpointPathReset = $state(0);
   let localLoraPathReset = $state(0);
-  let pendingDelete = $state<{ type: 'model'; name: string; info: ModelDeleteInfo; downloadSizeLabel?: string | null } | { type: 'lora'; name: string } | null>(null);
+  let pendingDelete = $state<{ type: 'model'; name: string; info: ModelDeleteInfo; downloadSizeLabel?: string | null } | { type: 'enhancer'; name: string; model: EnhancerModelEntry } | { type: 'lora'; name: string } | null>(null);
   let deleteOpen = $state(false);
   let deleting = $state(false);
+
+  const ENHANCER_TIER_LABELS: Record<EnhancerModelEntry['tier'], string> = { fast: 'Fast', smart: 'Smart', custom: 'Custom' };
 
 
   onMount(async () => {
@@ -110,6 +112,7 @@
   }
 
   function notDownloadedTooltip(m: { source?: string; download_size_label?: string | null }): string {
+    if (m.source === 'enhancer') return 'Not downloaded: it downloads the first time you enhance a prompt with it.';
     return m.source === 'seedvr2' && m.download_size_label
       ? `Not downloaded: the first plain upscale downloads it (${m.download_size_label}).`
       : NOT_DOWNLOADED_TOOLTIP;
@@ -117,6 +120,7 @@
 
   function deleteQuestion(target: NonNullable<typeof pendingDelete>): string {
     if (target.type === 'lora') return `Delete ${target.name}.safetensors from the LoRAs folder?`;
+    if (target.type === 'enhancer') return `Delete the ${target.name} enhancer model ${target.model.repo}?`;
     if (target.info.kind === 'installed') return `Delete the model folder ${target.name} from the models folder?`;
     if (target.info.kind === 'copy') return `Delete the prepared copy of ${target.name}?`;
     return `Delete the Hugging Face download of ${target.info.repo_id}?`;
@@ -133,7 +137,7 @@
     deleting = true;
     notice = null;
     try {
-      const result = target.type === 'model' ? await deleteModel(target.name) : await deleteLora(target.name);
+      const result = target.type === 'model' ? await deleteModel(target.name) : target.type === 'enhancer' ? await deleteEnhancerModel(target.model.tier) : await deleteLora(target.name);
       notice = { tone: 'success', message: result.message };
       addToast(result.message, 'success');
       await loadInventory();
@@ -325,6 +329,52 @@
               </div>
             {/if}
           </Panel>
+
+          {#if inventory.enhancer_models?.length}
+            <Panel title="Prompt enhancer" icon="cube" flush>
+              {#snippet actions()}{@render count(inventory!.enhancer_models!.length)}{/snippet}
+              <div class="overflow-x-auto px-1 pb-1">
+                <table class="ui-table ui-table-comfortable">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Repository</th>
+                      <th>Size</th>
+                      <th class="w-8"><span class="sr-only">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each inventory.enhancer_models as e (e.tier)}
+                      {@const label = ENHANCER_TIER_LABELS[e.tier]}
+                      <tr data-testid="enhancer-row" data-tier={e.tier}>
+                        <td>
+                          {@render modelName({ name: label, downloaded: e.downloaded, source: 'enhancer' })}
+                          {#if e.unavailable}
+                            <span class="ui-help block font-normal" data-testid="enhancer-unavailable">{e.unavailable}</span>
+                          {/if}
+                        </td>
+                        <td class="break-all font-mono">{e.repo}</td>
+                        <td class="whitespace-nowrap font-mono">
+                          {#if e.disk_size_label}
+                            {e.disk_size_label}
+                          {:else if e.download_size_label}
+                            <span class="text-text-muted" title="Size of the first-use download">≈{e.download_size_label}</span>
+                          {:else}
+                            <span class="text-text-muted">—</span>
+                          {/if}
+                        </td>
+                        <td class="text-right">
+                          {#if e.deletable}
+                            {@render deleteButton(`Delete the ${label} enhancer model`, () => requestDelete({ type: 'enhancer', name: label, model: e }))}
+                          {/if}
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            </Panel>
+          {/if}
         </div>
 
         <Panel title="LoRAs" icon="list" flush>
@@ -486,6 +536,11 @@
 >
   {#if pendingDelete}
     <div class="space-y-2" data-testid="delete-dialog">
+      {#if pendingDelete.type === 'enhancer'}
+        <p data-testid="delete-enhancer">
+          Frees {pendingDelete.model.disk_size_label ?? 'its download'}. It downloads again the next time you use {pendingDelete.name} to enhance a prompt.
+        </p>
+      {/if}
       {#if pendingDelete.type === 'model' && pendingDelete.info.kind === 'installed' && pendingDelete.downloadSizeLabel}
         <p data-testid="delete-redownload">The next plain upscale downloads it again ({pendingDelete.downloadSizeLabel}).</p>
       {:else if pendingDelete.type === 'model' && pendingDelete.info.kind === 'installed'}

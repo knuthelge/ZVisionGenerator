@@ -10,10 +10,12 @@ import huggingface_hub.constants
 import pytest
 from fastapi.testclient import TestClient
 
+from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
+from zvisiongenerator.utils.config import enhancer_tier_models
 from zvisiongenerator.utils.seedvr2 import SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
-from zvisiongenerator.web.model_delete import delete_lora, delete_model, delete_scope, installed_models_linking_to, model_delete_target, seedvr2_delete_target
+from zvisiongenerator.web.model_delete import delete_lora, delete_model, delete_scope, enhancer_delete_target, installed_models_linking_to, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 
 
@@ -319,3 +321,81 @@ class TestSeedvr2DeleteRoute:
 
         assert not self.copy.is_symlink()
         assert (elsewhere / "weights.safetensors").is_file()
+
+
+_ENHANCER_CONFIG = {
+    "prompt_enhancer": {
+        "model": "org/fast",
+        "download_size_label": dict.fromkeys(("darwin", "win32", "linux"), "9 GB"),
+        "smart": {"model": "org/smart", "download_size_label": dict.fromkeys(("darwin", "win32", "linux"), "19 GB"), "min_memory_gb": 9},
+    }
+}
+
+
+def test_enhancer_tier_models_lists_fast_smart_and_custom():
+    assert enhancer_tier_models(_ENHANCER_CONFIG, platform_key="linux") == {"fast": ("org/fast", None), "smart": ("org/smart", None)}
+    custom = {"prompt_enhancer": {**_ENHANCER_CONFIG["prompt_enhancer"], "user_model": "org/custom@abc123"}}
+    assert enhancer_tier_models(custom, platform_key="linux")["custom"] == ("org/custom", "abc123")
+    assert enhancer_tier_models({}, platform_key="linux") == {}
+
+
+def test_enhancer_delete_target_needs_a_cached_hub_repo(layout, tmp_path):
+    target = enhancer_delete_target("org/base@abc")
+
+    assert (target.kind, target.path, target.repo_id) == ("huggingface", layout.hub / "models--org--base", "org/base")
+    assert enhancer_delete_target("org/never-downloaded") is None
+    assert enhancer_delete_target(str(tmp_path)) is None
+
+
+def test_models_payload_lists_enhancer_tiers(layout):
+    from zvisiongenerator.web.workspace_api import _enhancer_model_rows
+
+    _touch(layout.hub / "models--org--fast" / "blobs" / "weights")
+    rows = _enhancer_model_rows(_ENHANCER_CONFIG, downloaded=lambda repo, _revision: repo == "org/fast", budget_bytes=lambda: 8 * 2**30)
+
+    fast, smart = rows
+    assert (fast["tier"], fast["repo"], fast["downloaded"], fast["deletable"], fast["unavailable"]) == ("fast", "org/fast", True, True, None)
+    assert fast["disk_size_label"] is not None
+    assert (smart["tier"], smart["downloaded"], smart["deletable"], smart["disk_size_label"], smart["download_size_label"]) == ("smart", False, False, None, "19 GB")
+    assert smart["unavailable"] is not None
+
+
+class TestEnhancerDeleteRoute:
+    @pytest.fixture
+    def session(self):
+        return PromptEnhancerSession(lambda repo, revision: None, scheduler=lambda delay, callback: None, downloaded=lambda repo, revision: True)
+
+    @pytest.fixture
+    def client(self, layout, monkeypatch, session):
+        _touch(layout.hub / "models--org--fast" / "snapshots" / "abc" / "model.safetensors")
+        monkeypatch.setattr(web_server, "load_web_config", lambda: SimpleNamespace(app_config=_ENHANCER_CONFIG))
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: session)
+        with TestClient(web_server.app) as client:
+            yield client
+
+    def test_deletes_the_tier_download_and_frees_the_slot(self, client, layout, session):
+        response = client.delete("/api/enhancer-models/fast")
+
+        assert response.status_code == 200
+        assert "org/fast" in response.json()["message"]
+        assert not (layout.hub / "models--org--fast").exists()
+        assert not session.busy()
+
+    def test_unknown_or_undownloaded_tier_is_404(self, client):
+        assert client.delete("/api/enhancer-models/smart").status_code == 404
+        assert client.delete("/api/enhancer-models/org--fast").status_code == 404
+
+    def test_refused_while_an_enhancement_runs(self, client, layout, session):
+        session.reserve()
+
+        assert client.delete("/api/enhancer-models/fast").status_code == 409
+        assert (layout.hub / "models--org--fast").is_dir()
+
+    def test_refused_while_a_job_runs(self, client, layout, monkeypatch):
+        def _busy(admit, *, busy_message):
+            raise web_server.JobConflictError(busy_message)
+
+        monkeypatch.setattr(web_server.web_runner, "admit_exclusive", _busy)
+
+        assert client.delete("/api/enhancer-models/fast").status_code == 409
+        assert (layout.hub / "models--org--fast").is_dir()

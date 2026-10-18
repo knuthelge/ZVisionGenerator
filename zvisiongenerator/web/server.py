@@ -43,6 +43,7 @@ from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.config import (
     ENHANCER_TIERS,
+    enhancer_tier_models,
     load_config,
     resolve_defaults,
     resolve_enhancer_model,
@@ -100,7 +101,7 @@ from zvisiongenerator.web.upscale_api import plan_seedvr2_upscale, plan_upscale,
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
-from zvisiongenerator.web.model_delete import DeleteTarget, delete_lora, delete_model, delete_scope, model_delete_target, seedvr2_delete_target
+from zvisiongenerator.web.model_delete import DeleteTarget, delete_lora, delete_model, delete_scope, enhancer_delete_target, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.review import review_enabled
 from zvisiongenerator.web.job_contract import UPSCALE_SUPPORTED_CONTROLS, image_supported_controls, video_supported_controls
 from zvisiongenerator.web.web_runner import JobConflictError, UnsupportedJobControlError, WebRunner, worker_runtime_context
@@ -1849,6 +1850,39 @@ def api_delete_model(name: str) -> dict[str, Any]:
     messages = {"installed": f"Deleted model '{name}'.", "copy": f"Deleted the prepared copy of '{name}'."}
     message = messages.get(target.kind, f"Deleted the HuggingFace download of '{target.repo_id}'.")
     return {"status": "ok", "tone": "success", "message": message}
+
+
+@app.delete("/api/enhancer-models/{tier}")
+def api_delete_enhancer_model(tier: str) -> dict[str, Any]:
+    """Delete the HuggingFace download of the prompt-enhancer model configured for *tier* (``fast``, ``smart``, ``custom``)."""
+    model = enhancer_tier_models(load_web_config().app_config, platform_key=sys.platform).get(tier)
+    target = enhancer_delete_target(model[0]) if model is not None else None
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"No downloaded enhancer model for '{tier}'.")
+    session = get_prompt_enhancer_session()
+    reservation: list[object] = []
+
+    def _reserve() -> None:
+        token = session.reserve()
+        if token is None:
+            raise JobConflictError("Wait for the prompt enhancement to finish before deleting its model.")
+        reservation.append(token)
+
+    try:
+        # Holding the reservation keeps enhancements and jobs from starting while the files go.
+        web_runner.admit_exclusive(_reserve, busy_message="Wait for all jobs to finish before deleting models or LoRAs.")
+    except JobConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        session.release()
+        delete_model(target)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"No downloaded enhancer model for '{tier}'.") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not delete enhancer model '{target.repo_id}': {exc}") from exc
+    finally:
+        session.cancel_reservation(reservation[0])
+    return {"status": "ok", "tone": "success", "message": f"Deleted the HuggingFace download of '{target.repo_id}'."}
 
 
 @app.delete("/api/loras/{name}")

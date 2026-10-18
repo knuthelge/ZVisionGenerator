@@ -578,6 +578,22 @@ def smart_enhancer_model(config: dict[str, Any], *, platform_key: str) -> tuple[
     return _tier_model((config.get("prompt_enhancer") or {}).get("smart") or {}, platform_key)
 
 
+def enhancer_tier_models(config: dict[str, Any], *, platform_key: str) -> dict[str, tuple[str, str | None]]:
+    """Return the configured enhancer ``(repo, revision)`` per tier: ``fast``, ``smart`` and ``custom`` (``user_model``).
+
+    Tiers without a model for *platform_key* are left out, as is a malformed ``user_model``.
+    """
+    section = config.get("prompt_enhancer") or {}
+    models = {"fast": _tier_model(section, platform_key), "smart": smart_enhancer_model(config, platform_key=platform_key)}
+    user_model = section.get("user_model")
+    if isinstance(user_model, str) and user_model.strip():
+        try:
+            models["custom"] = split_model_revision(user_model)
+        except ValueError:
+            pass
+    return {tier: model for tier, model in models.items() if model is not None}
+
+
 def smart_unavailable(config: dict[str, Any], *, platform_key: str, budget_bytes: int | None) -> str | None:
     """Return why the Smart enhancer cannot run on this machine, or None when it can.
 

@@ -12,7 +12,7 @@ from typing import Any
 from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, get_backend_name, supports_stored_quants, supports_video_audio
 from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
-from zvisiongenerator.utils.config import resolve_defaults, resolve_enhancer_model, resolve_video_defaults, smart_enhancer_model, smart_unavailable
+from zvisiongenerator.utils.config import enhancer_tier_models, resolve_defaults, resolve_enhancer_model, resolve_video_defaults, smart_enhancer_model, smart_unavailable
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
 from zvisiongenerator.utils.model_files import directory_bytes, find_local_model_dir
@@ -22,7 +22,7 @@ from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes,
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
-from zvisiongenerator.web.model_delete import delete_scope, installed_models_linking_to, model_delete_target, seedvr2_delete_target
+from zvisiongenerator.web.model_delete import delete_scope, enhancer_delete_target, installed_models_linking_to, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
 from zvisiongenerator.web.model_status import describe_model_status
 
@@ -233,6 +233,7 @@ def build_models_response(
             {"name": entry.name, "family": entry.family, "supports_i2v": entry.supports_i2v, "source": entry.source, **status(entry, "video"), "delete": delete_info(entry)}
             for entry in web_config.video_inventory
         ],
+        "enhancer_models": _enhancer_model_rows(web_config.app_config),
         "loras": loras,
         "stored_quants_supported": supports_stored_quants(),
         "huggingface_configured": token_var is not None,
@@ -265,6 +266,39 @@ def _seedvr2_model_rows(setup: SeedVR2Setup | None, models_dir: Path) -> list[di
             "download_size_label": seedvr2_size_label(seedvr2_download_bytes(model)),
         }
     ]
+
+
+def _enhancer_model_rows(
+    app_config: dict[str, Any],
+    *,
+    downloaded: Callable[[str, str | None], bool] = is_model_downloaded,
+    budget_bytes: Callable[[], int | None] | None = None,
+) -> list[dict[str, Any]]:
+    """Return one Models-page row per configured enhancer tier, with its disk use and whether it can be deleted.
+
+    Args:
+        budget_bytes: Returns the machine's accelerator memory, for Smart's ``unavailable`` reason.
+    """
+    section = app_config.get("prompt_enhancer") or {}
+    size_sections = {"fast": section, "smart": section.get("smart") or {}}
+    rows = []
+    for tier, (repo, revision) in enhancer_tier_models(app_config, platform_key=sys.platform).items():
+        target = enhancer_delete_target(repo)
+        disk_bytes = directory_bytes(target.path) if target is not None else 0
+        unavailable = smart_unavailable(app_config, platform_key=sys.platform, budget_bytes=(budget_bytes or _gpu_budget_bytes)()) if tier == "smart" else None
+        rows.append(
+            {
+                "tier": tier,
+                "repo": repo,
+                "revision": revision,
+                "downloaded": downloaded(repo, revision),
+                "disk_size_label": seedvr2_size_label(disk_bytes) if disk_bytes else None,
+                "download_size_label": _size_label(size_sections[tier]) if tier in size_sections else None,
+                "unavailable": unavailable,
+                "deletable": target is not None,
+            }
+        )
+    return rows
 
 
 def _stored_quant_payload(entry: ImageInventoryEntry) -> dict[str, Any] | None:

@@ -10,6 +10,7 @@ const modelApiMocks = vi.hoisted(() => ({
   importLoraLocal: vi.fn(),
   importLoraHF: vi.fn(),
   deleteModel: vi.fn(),
+  deleteEnhancerModel: vi.fn(),
   deleteLora: vi.fn(),
 }));
 
@@ -25,6 +26,7 @@ vi.mock('$lib/api/models', () => ({
   importLoraLocal: modelApiMocks.importLoraLocal,
   importLoraHF: modelApiMocks.importLoraHF,
   deleteModel: modelApiMocks.deleteModel,
+  deleteEnhancerModel: modelApiMocks.deleteEnhancerModel,
   deleteLora: modelApiMocks.deleteLora,
 }));
 
@@ -85,6 +87,7 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.importLoraLocal.mockReset();
     modelApiMocks.importLoraHF.mockReset();
     modelApiMocks.deleteModel.mockReset();
+    modelApiMocks.deleteEnhancerModel.mockReset();
     modelApiMocks.deleteLora.mockReset();
     modelApiMocks.getModelInventory.mockResolvedValue(makeInventory());
     for (const mock of Object.values(browseApiMocks)) mock.mockReset();
@@ -586,5 +589,40 @@ describe('ModelsPage Browse buttons', () => {
 
     expect(modelApiMocks.deleteLora).toHaveBeenCalledWith('style');
     expect(target.textContent).toContain('Wait for the running job to finish');
+  });
+
+  it('lists enhancer tiers and deletes only a downloaded one, by tier', async () => {
+    const tier = { revision: null, download_size_label: null, unavailable: null };
+    modelApiMocks.getModelInventory.mockResolvedValue({
+      ...makeInventory(),
+      enhancer_models: [
+        { ...tier, tier: 'fast', repo: 'org/fast', downloaded: true, disk_size_label: '9.1 GB', deletable: true },
+        { ...tier, tier: 'smart', repo: 'org/smart', downloaded: false, disk_size_label: null, deletable: false, unavailable: 'Needs about 9 GB.' },
+      ],
+    });
+    modelApiMocks.deleteEnhancerModel.mockResolvedValue({ status: 'ok', tone: 'success', message: "Deleted the HuggingFace download of 'org/fast'." });
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    const rows = Array.from(target.querySelectorAll<HTMLElement>('[data-testid="enhancer-row"]'));
+    expect(rows.map((row) => row.dataset.tier)).toEqual(['fast', 'smart']);
+    expect(rows[1].querySelector('[data-testid="delete-button"]')).toBeNull();
+    expect(rows[1].querySelector('[data-testid="enhancer-unavailable"]')).not.toBeNull();
+
+    (rows[0].querySelector('[data-testid="delete-button"]') as HTMLButtonElement).click();
+    await settle();
+    expect(document.querySelector('[data-testid="delete-enhancer"]')).not.toBeNull();
+    (Array.from(document.querySelectorAll('button')).find((el) => el.textContent?.trim() === 'Delete') as HTMLButtonElement).click();
+    await settle();
+
+    expect(modelApiMocks.deleteEnhancerModel).toHaveBeenCalledWith('fast');
+    expect(modelApiMocks.getModelInventory).toHaveBeenCalledTimes(2);
+  });
+
+  it('hides the enhancer table when no tier is configured', async () => {
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    expect(target.querySelector('[data-testid="enhancer-row"]')).toBeNull();
   });
 });

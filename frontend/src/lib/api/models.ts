@@ -36,6 +36,10 @@ export function deleteModel(name: string): Promise<ModelOperationResult> {
   return api.delete<ModelOperationResult>(`/api/models/${encodeURIComponent(name)}`);
 }
 
+export function deleteEnhancerModel(tier: string): Promise<ModelOperationResult> {
+  return api.delete<ModelOperationResult>(`/api/enhancer-models/${encodeURIComponent(tier)}`);
+}
+
 export function deleteLora(name: string): Promise<ModelOperationResult> {
   return api.delete<ModelOperationResult>(`/api/loras/${encodeURIComponent(name)}`);
 }

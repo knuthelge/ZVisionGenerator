@@ -1062,6 +1062,22 @@ export interface VideoModelEntry extends ModelStatusFields {
   delete?: ModelDeleteInfo | null;
 }
 
+/** A prompt-enhancer model configured on this platform: the Fast or Smart tier, or a custom `user_model`. */
+export interface EnhancerModelEntry {
+  tier: 'fast' | 'smart' | 'custom';
+  repo: string;
+  revision: string | null;
+  downloaded: boolean;
+  /** Disk use of its Hugging Face download (all revisions, partial downloads included), when any. */
+  disk_size_label: string | null;
+  /** Size of the first-use download, for the built-in tiers. */
+  download_size_label: string | null;
+  /** Why Smart cannot run on this machine, or `null`. */
+  unavailable: string | null;
+  /** Whether a Hugging Face download is on disk to delete (never for a local folder). */
+  deletable: boolean;
+}
+
 export interface LoraEntry {
   name: string;
   size_label?: string;
@@ -1073,6 +1089,7 @@ export interface ModelInventory {
   loras_dir: string;
   image_models: ModelEntry[];
   video_models: VideoModelEntry[];
+  enhancer_models?: EnhancerModelEntry[];
   loras: LoraEntry[];
   /** Whether this platform can save quantized copies of models (macOS). */
   stored_quants_supported?: boolean;
