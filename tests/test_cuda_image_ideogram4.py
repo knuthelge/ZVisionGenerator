@@ -1,4 +1,4 @@
-"""Tests for Ideogram 4 on the diffusers/CUDA image backend, with mocked pipelines."""
+"""Tests for Ideogram 4 Instant on the diffusers/CUDA image backend, with mocked pipelines."""
 
 from __future__ import annotations
 
@@ -119,14 +119,14 @@ class TestGenerate:
             "width": 1024,
             "height": 768,
             "generator": object(),
-            "sampler": Ideogram4Sampler(steps=20, guidance_schedule=(7.0,) * 18 + (3.0,) * 2, guidance_scale=None, mu=0.0, std=1.75),
+            "sampler": Ideogram4Sampler(steps=8, mu=0.0, std=1.75),
             "first_sigma": None,
             "callback_kwargs": {},
             **overrides,
         }
         return module.generate(pipeline, "a red car", **options)
 
-    def test_the_pipeline_gets_the_sampler_a_json_caption_and_the_default_first_sigma(self, ideogram4):
+    def test_the_pipeline_gets_the_sampler_built_in_guidance_a_json_caption_and_the_default_first_sigma(self, ideogram4):
         module, _ = ideogram4
         pipeline = _Pipeline()
 
@@ -135,8 +135,8 @@ class TestGenerate:
         assert result.images == ["image"]
         (call,) = pipeline.calls
         assert json.loads(call["prompt"])["high_level_description"] == "a red car"
-        assert (call["width"], call["height"], call["steps"]) == (1024, 768, 20)
-        assert call["schedule"] == [7.0] * 18 + [3.0] * 2 and call["scale"] is None
+        assert (call["width"], call["height"], call["steps"]) == (1024, 768, 8)
+        assert (call["scale"], call["schedule"]) == (1.0, None)
         assert (call["mu"], call["std"]) == (0.0, 1.75)
         assert pipeline.scheduler.received == [[1.004, 0.5, 0.1]]
 
@@ -147,15 +147,6 @@ class TestGenerate:
         self._generate(module, pipeline, first_sigma=1.006)
 
         assert pipeline.scheduler.received == [[1.006, 0.5, 0.1]]
-
-    def test_a_constant_guidance_is_passed_without_a_schedule(self, ideogram4):
-        module, _ = ideogram4
-        pipeline = _Pipeline()
-
-        self._generate(module, pipeline, sampler=Ideogram4Sampler(steps=12, guidance_schedule=None, guidance_scale=5.0))
-
-        (call,) = pipeline.calls
-        assert (call["scale"], call["schedule"], call["steps"]) == (5.0, None, 12)
 
     def test_the_text_encoder_is_on_the_gpu_for_the_call_and_back_on_the_cpu_after_it(self, ideogram4):
         module, _ = ideogram4
@@ -225,82 +216,52 @@ class TestOffloadAfterEncoding:
         assert pipeline.events == ["encoder->cpu"]
 
 
-class TestRequireNf4:
-    def _write_config(self, folder, config):
-        (folder / "transformer").mkdir(parents=True)
-        (folder / "transformer" / "config.json").write_text(json.dumps(config), encoding="utf-8")
-        return str(folder)
+class TestZeroUnconditionalTransformer:
+    def test_it_has_no_weights_reports_its_dtype_and_returns_zeros(self):
+        torch = pytest.importorskip("torch")
+        sys.modules.pop("zvisiongenerator.backends.cuda.image.ideogram4", None)
+        try:
+            from zvisiongenerator.backends.cuda.image.ideogram4 import zero_unconditional_transformer
 
-    def test_a_bitsandbytes_copy_is_accepted(self, ideogram4, tmp_path):
+            stand_in = zero_unconditional_transformer(torch.bfloat16)
+            hidden = torch.ones(1, 4, 8)
+
+            (output,) = stand_in(hidden_states=hidden, timestep=torch.zeros(1), encoder_hidden_states=None)
+        finally:
+            sys.modules.pop("zvisiongenerator.backends.cuda.image.ideogram4", None)
+
+        assert list(stand_in.parameters()) == []
+        assert stand_in.dtype == torch.bfloat16
+        assert torch.equal(output, torch.zeros_like(hidden))
+
+
+def _write_index(folder, unconditional):
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "model_index.json").write_text(json.dumps({"_class_name": "Ideogram4Pipeline", "unconditional_transformer": unconditional}), encoding="utf-8")
+    return str(folder)
+
+
+class TestRequireInstant:
+    def test_an_instant_folder_is_accepted(self, ideogram4, tmp_path):
         module, _ = ideogram4
 
-        module._require_nf4(self._write_config(tmp_path, {"quantization_config": {"quant_method": "bitsandbytes"}}))
+        module._require_instant(_write_index(tmp_path / "ideo", [None, None]))
 
-    @pytest.mark.parametrize("config", [{}, {"quantization_config": {"quant_method": "fp8"}}])
-    def test_a_copy_without_bitsandbytes_is_refused_with_the_repo_to_use(self, ideogram4, tmp_path, config):
+    def test_the_base_model_is_refused_with_the_alias_to_use(self, ideogram4, tmp_path):
         module, _ = ideogram4
 
-        with pytest.raises(RuntimeError, match="ideogram-4-nf4-diffusers"):
-            module._require_nf4(self._write_config(tmp_path, config))
+        with pytest.raises(RuntimeError, match="'ideo'"):
+            module._require_instant(_write_index(tmp_path / "base", ["diffusers", "Ideogram4Transformer2DModel"]))
 
-    def test_a_hub_repo_is_checked_through_its_cached_config(self, ideogram4, tmp_path, monkeypatch):
+    def test_a_hub_repo_is_refused(self, ideogram4):
         module, _ = ideogram4
-        config_path = tmp_path / "config.json"
-        config_path.write_text(json.dumps({"quantization_config": {"quant_method": "bitsandbytes"}}), encoding="utf-8")
-        asked: list[tuple] = []
-        monkeypatch.setattr("huggingface_hub.hf_hub_download", lambda repo, filename: asked.append((repo, filename)) or str(config_path))
 
-        module._require_nf4("owner/ideogram-nf4")
-
-        assert asked == [("owner/ideogram-nf4", "transformer/config.json")]
-
-
-class TestRevisions:
-    def _fakes(self, module, monkeypatch):
-        loads: list[dict] = []
-        component = MagicMock()
-        diffusers, transformers = MagicMock(), MagicMock()
-        diffusers.AutoModel.from_pretrained.side_effect = lambda path, **kwargs: loads.append({"path": path, **kwargs}) or component
-        transformers.AutoModel.from_pretrained.side_effect = lambda path, **kwargs: loads.append({"path": path, **kwargs}) or component
-        diffusers.Ideogram4Pipeline.from_pretrained.side_effect = lambda path, **kwargs: loads.append({"path": path, **kwargs}) or MagicMock()
-        monkeypatch.setitem(sys.modules, "diffusers", diffusers)
-        monkeypatch.setitem(sys.modules, "transformers", transformers)
-        monkeypatch.setattr(module, "_require_nf4", lambda path: None)
-        monkeypatch.setattr(module, "_place", lambda pipe, device: None)
-        return loads
-
-    def test_a_pinned_repo_loads_every_component_at_its_revision(self, ideogram4, monkeypatch):
-        module, _ = ideogram4
-        loads = self._fakes(module, monkeypatch)
-
-        module.load_pipeline("owner/ideogram-nf4@abc123", "bf16")
-
-        assert len(loads) == 4
-        assert {(load["path"], load["revision"]) for load in loads} == {("owner/ideogram-nf4", "abc123")}
-
-    def test_an_unpinned_repo_passes_no_revision(self, ideogram4, monkeypatch):
-        module, _ = ideogram4
-        loads = self._fakes(module, monkeypatch)
-
-        module.load_pipeline("owner/ideogram-nf4", "bf16")
-
-        assert all("revision" not in load for load in loads)
-
-    def test_the_nf4_check_reads_the_config_at_the_pinned_revision(self, ideogram4, tmp_path, monkeypatch):
-        module, _ = ideogram4
-        config_path = tmp_path / "config.json"
-        config_path.write_text(json.dumps({"quantization_config": {"quant_method": "bitsandbytes"}}), encoding="utf-8")
-        asked: list[tuple] = []
-        monkeypatch.setattr("huggingface_hub.hf_hub_download", lambda repo, filename, **kwargs: asked.append((repo, filename, kwargs)) or str(config_path))
-
-        module._require_nf4("owner/ideogram-nf4@abc123")
-
-        assert asked == [("owner/ideogram-nf4", "transformer/config.json", {"revision": "abc123"})]
+        with pytest.raises(RuntimeError, match="'ideo'"):
+            module._require_instant("unsloth/ideogram-4-nf4-diffusers")
 
 
 class TestLoadPipeline:
-    def test_each_component_leaves_the_gpu_before_the_next_loads_and_the_pipeline_is_placed(self, ideogram4, monkeypatch):
-        module, torch = ideogram4
+    def _fakes(self, module, monkeypatch):
         events: list[str] = []
 
         def _component(name):
@@ -308,52 +269,101 @@ class TestLoadPipeline:
             component.to.side_effect = lambda device: events.append(f"{name}->{device}")
             return component
 
-        text_encoder, transformer, unconditional = _component("text_encoder"), _component("transformer"), _component("unconditional_transformer")
-        by_subfolder = {"text_encoder": text_encoder, "transformer": transformer, "unconditional_transformer": unconditional}
-
-        def _load(path, subfolder, **kwargs):
-            events.append(f"load {subfolder}")
-            return by_subfolder[subfolder]
-
-        pipeline = MagicMock()
-        diffusers = MagicMock()
-        diffusers.AutoModel.from_pretrained.side_effect = _load
-        diffusers.Ideogram4Pipeline.from_pretrained.return_value = pipeline
-        transformers = MagicMock()
-        transformers.AutoModel.from_pretrained.side_effect = _load
+        text_encoder, transformer = _component("text_encoder"), _component("transformer")
+        pipeline = SimpleNamespace()
+        diffusers, transformers = MagicMock(), MagicMock()
+        diffusers.AutoModel.from_pretrained.side_effect = lambda path, subfolder, **kwargs: events.append(f"bf16 {subfolder}") or transformer
+        diffusers.Ideogram4Pipeline.from_pretrained.side_effect = lambda path, **kwargs: events.append(f"pipeline unconditional={kwargs['unconditional_transformer']}") or pipeline
+        transformers.AutoModel.from_pretrained.side_effect = lambda path, subfolder, **kwargs: events.append(f"load {subfolder}") or text_encoder
         monkeypatch.setitem(sys.modules, "diffusers", diffusers)
         monkeypatch.setitem(sys.modules, "transformers", transformers)
-        monkeypatch.setattr(module, "_require_nf4", lambda path: events.append("checked"))
-        monkeypatch.setattr(module, "_place", lambda pipe, device: events.append("placed"))
+        monkeypatch.setattr(module, "_require_instant", lambda path: events.append("checked"))
+        monkeypatch.setattr(module, "_place", lambda pipe, device, nf4: events.append(f"placed nf4={nf4}"))
+        monkeypatch.setattr(module, "zero_unconditional_transformer", lambda dtype: "zero")
+        monkeypatch.setattr(module, "load_nf4_transformer", lambda path, dtype, prequantized: events.append(f"nf4 prequantized={prequantized}") or transformer)
+        monkeypatch.setattr(module, "load_fp8_transformer", lambda path, dtype: events.append("fp8") or transformer)
+        return events, pipeline, transformer
 
-        result = module.load_pipeline("owner/nf4", "bf16")
+    def test_bf16_loads_the_text_encoder_off_the_gpu_then_one_transformer_and_the_zero_stand_in(self, ideogram4, monkeypatch):
+        module, _ = ideogram4
+        events, pipeline, _ = self._fakes(module, monkeypatch)
+
+        result = module.load_pipeline("/models/ideo", "bf16", None, prequantized=False)
 
         assert result is pipeline
-        assert events == [
-            "checked",
-            "load text_encoder",
-            "text_encoder->cpu",
-            "load transformer",
-            "transformer->cpu",
-            "load unconditional_transformer",
-            "unconditional_transformer->cpu",
-            "placed",
-        ]
-        kwargs = diffusers.Ideogram4Pipeline.from_pretrained.call_args.kwargs
-        assert (kwargs["text_encoder"], kwargs["transformer"], kwargs["unconditional_transformer"]) == (text_encoder, transformer, unconditional)
+        assert events == ["checked", "load text_encoder", "text_encoder->cpu", "bf16 transformer", "pipeline unconditional=None", "placed nf4=False"]
+        assert pipeline.unconditional_transformer == "zero"
 
-    def test_placement_streams_both_transformers_and_sends_the_text_encoder_away_before_the_first_step(self, ideogram4, monkeypatch):
+    def test_q4_loads_an_nf4_transformer_and_moves_it_off_the_gpu(self, ideogram4, monkeypatch):
         module, _ = ideogram4
-        pipeline = SimpleNamespace(vae=MagicMock(), transformer=MagicMock(), unconditional_transformer=MagicMock(), text_encoder=MagicMock())
-        streamed, outside, unloaded = [], [], []
-        monkeypatch.setattr(module, "stream_blocks", lambda blocks, device: streamed.append(blocks))
-        monkeypatch.setattr(module, "move_outside", lambda model, blocks, device: outside.append(model))
-        monkeypatch.setattr(module, "unload_before", lambda trigger, parts: unloaded.append((trigger, list(parts))))
-        monkeypatch.setattr(module, "_offload_text_encoder_after_encoding", lambda pipe: unloaded.append(("offload hook", pipe)))
+        events, _, _ = self._fakes(module, monkeypatch)
 
-        module._place(pipeline, "cuda")
+        module.load_pipeline("/models/ideo@q4", "bf16", 4, prequantized=True)
+
+        assert events[3:] == ["nf4 prequantized=True", "transformer->cpu", "pipeline unconditional=None", "placed nf4=True"]
+
+    def test_q8_streams_an_fp8_transformer(self, ideogram4, monkeypatch):
+        module, _ = ideogram4
+        events, _, _ = self._fakes(module, monkeypatch)
+
+        module.load_pipeline("/models/ideo", "bf16", 8, prequantized=False)
+
+        assert events[3:] == ["fp8", "pipeline unconditional=None", "placed nf4=False"]
+
+
+class TestPlace:
+    def _pipeline(self):
+        return SimpleNamespace(vae=MagicMock(), transformer=MagicMock(), unconditional_transformer=MagicMock(), text_encoder=MagicMock())
+
+    def _record(self, module, monkeypatch):
+        calls: list[tuple] = []
+        monkeypatch.setattr(module, "stream_blocks", lambda blocks, device: calls.append(("stream", blocks)))
+        monkeypatch.setattr(module, "move_outside", lambda model, blocks, device: calls.append(("outside", model)))
+        monkeypatch.setattr(module, "group_offload", lambda model, device, kind: calls.append(("group", model, kind)))
+        monkeypatch.setattr(module, "unload_before", lambda trigger, parts: calls.append(("unload", trigger, list(parts))))
+        monkeypatch.setattr(module, "_offload_text_encoder_after_encoding", lambda pipe: calls.append(("offload hook", pipe)))
+        return calls
+
+    def test_an_nf4_transformer_streams_by_parameter_swap(self, ideogram4, monkeypatch):
+        module, _ = ideogram4
+        pipeline = self._pipeline()
+        calls = self._record(module, monkeypatch)
+
+        module._place(pipeline, "cuda", nf4=True)
 
         pipeline.vae.to.assert_called_once_with("cuda")
-        assert streamed == [pipeline.transformer.layers, pipeline.unconditional_transformer.layers]
-        assert outside == [pipeline.transformer, pipeline.unconditional_transformer]
-        assert unloaded == [(pipeline.transformer, [pipeline.text_encoder]), ("offload hook", pipeline)]
+        pipeline.unconditional_transformer.to.assert_called_once_with("cuda")
+        assert calls == [
+            ("stream", pipeline.transformer.layers),
+            ("outside", pipeline.transformer),
+            ("unload", pipeline.transformer, [pipeline.text_encoder]),
+            ("offload hook", pipeline),
+        ]
+
+    def test_bf16_and_fp8_transformers_stream_with_group_offloading(self, ideogram4, monkeypatch):
+        module, _ = ideogram4
+        pipeline = self._pipeline()
+        calls = self._record(module, monkeypatch)
+
+        module._place(pipeline, "cuda", nf4=False)
+
+        assert calls[0] == ("group", pipeline.transformer, "block_level")
+        assert ("stream", pipeline.transformer.layers) not in calls
+
+
+class TestSaveQuantized:
+    def test_the_transformer_is_saved_and_the_shared_components_are_linked_from_the_source(self, ideogram4, tmp_path):
+        module, _ = ideogram4
+        source = tmp_path / "ideo"
+        for name in ("scheduler", "text_encoder", "tokenizer", "vae"):
+            (source / name).mkdir(parents=True)
+            (source / name / "config.json").write_text(name, encoding="utf-8")
+        pipeline = SimpleNamespace(transformer=MagicMock(), _ziv_source_path=str(source))
+        target = tmp_path / ".ideo@q4.partial"
+
+        module.save_quantized(pipeline, str(target))
+
+        pipeline.transformer.save_pretrained.assert_called_once_with(str(target / "transformer"))
+        linked = target / "text_encoder" / "config.json"
+        assert linked.read_text(encoding="utf-8") == "text_encoder"
+        assert linked.stat().st_ino == (source / "text_encoder" / "config.json").stat().st_ino

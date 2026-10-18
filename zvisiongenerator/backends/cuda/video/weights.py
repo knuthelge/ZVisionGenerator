@@ -22,8 +22,9 @@ from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends.cuda.quant import cast_to_fp8, empty_diffusers_model, fill_weights, kept_in_compute_dtype, link_or_copy
-from zvisiongenerator.backends.cuda.safetensors_stream import ShardWriter, iter_tensors, read_header, shard_files
+from zvisiongenerator.backends.cuda.quant import cast_to_fp8, empty_diffusers_model, fill_weights, kept_in_compute_dtype
+from zvisiongenerator.utils.file_links import link_or_copy
+from zvisiongenerator.utils.safetensors_stream import ShardWriter, iter_tensors, read_header, shard_files
 from zvisiongenerator.utils.stored_quant import MANIFEST_NAME, discard_partial, manifest_matches, partial_dir, promote_partial, sweep_stale_partials, write_manifest
 
 if TYPE_CHECKING:

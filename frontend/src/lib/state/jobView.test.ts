@@ -122,6 +122,16 @@ describe('jobView', () => {
     ]);
   });
 
+  it('tells a model build apart from a download and a plain load', () => {
+    const loadRow = (overrides: Partial<ActiveJobState>) => phaseRows(job({ phase: 'load', model: 'ideo', ...overrides })).find((row) => row.key === 'load')!;
+    const building = job({ phase: 'load', model: 'ideo', loadPhase: 'building' });
+
+    expect(headline(building)).toContain('ideo');
+    expect(headline(building)).not.toBe(headline(job({ phase: 'load', model: 'ideo', loadPhase: 'downloading' })));
+    expect(loadRow({ loadPhase: 'building' }).label).not.toBe(loadRow({ loadPhase: 'loading' }).label);
+    expect(loadBody(building)).not.toBe(loadBody(job({ phase: 'load', model: 'ideo', loadPhase: 'downloading' })));
+  });
+
   it('labels the load row for a download, a copy being saved and a plain load', () => {
     const loadRow = (overrides: Partial<ActiveJobState>) => phaseRows(job({ phase: 'load', model: 'SeedVR2 7B q8', ...overrides })).find((row) => row.key === 'load')!;
 

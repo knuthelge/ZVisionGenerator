@@ -21,6 +21,7 @@ from typing import Any
 from zvisiongenerator.utils.model_files import (
     component_of,
     find_local_model_dir,
+    is_ideogram4_model,
     is_krea2_model,
     is_ltx_mlx_layout,
     ltx_mlx_text_encoder_repo,
@@ -141,8 +142,9 @@ class WeightTotals:
 
     float_matrix_elements: int = 0  # 2-D floating-point tensors: the weights quantization packs
     float_other_elements: int = 0  # other floating-point tensors (biases, norms, convolutions)
-    packed_bytes: int = 0  # non-float tensors (FP8, packed quantized weights, ints), resident as stored
+    packed_bytes: int = 0  # other non-float tensors (packed quantized weights, ints, non-2-D FP8), resident as stored
     prequantized: bool = False  # packed U32 weights: already quantized, so requested quantization is ignored
+    fp8_matrix_elements: int = 0  # 2-D FP8 tensors: one byte each as stored, and mflux quantization packs them too
 
     def __add__(self, other: WeightTotals) -> WeightTotals:
         return WeightTotals(
@@ -150,12 +152,13 @@ class WeightTotals:
             self.float_other_elements + other.float_other_elements,
             self.packed_bytes + other.packed_bytes,
             self.prequantized or other.prequantized,
+            self.fp8_matrix_elements + other.fp8_matrix_elements,
         )
 
     @property
     def bfloat16_bytes(self) -> int:
         """Return resident bytes with floats loaded as bfloat16 and everything else as stored."""
-        return (self.float_matrix_elements + self.float_other_elements) * 2 + self.packed_bytes
+        return (self.float_matrix_elements + self.float_other_elements) * 2 + self.fp8_matrix_elements + self.packed_bytes
 
 
 def read_safetensors_totals(path: Path, skipped_prefixes: tuple[str, ...] = ()) -> WeightTotals:
@@ -186,7 +189,7 @@ def _read_totals_cached(path: str, size: int, mtime_ns: int, skipped_prefixes: t
         header = json.loads(handle.read(header_len))
     if not isinstance(header, dict):
         raise ValueError(f"Malformed safetensors header in {path}")
-    matrix = other = packed = 0
+    matrix = other = packed = fp8_matrix = 0
     prequantized = False
     for name, spec in header.items():
         if name == "__metadata__" or name.startswith(skipped_prefixes):
@@ -196,14 +199,16 @@ def _read_totals_cached(path: str, size: int, mtime_ns: int, skipped_prefixes: t
             raise ValueError(f"Unsupported safetensors dtype {dtype!r} in {path}")
         shape = [int(dim) for dim in spec["shape"]]
         elements = math.prod(shape)
-        if dtype not in _FLOAT_DTYPES:
+        if dtype.startswith("F8_") and len(shape) == 2:
+            fp8_matrix += elements
+        elif dtype not in _FLOAT_DTYPES:
             packed += elements * _DTYPE_BYTES[dtype]
             prequantized = prequantized or dtype == "U32"
         elif len(shape) == 2:
             matrix += elements
         else:
             other += elements
-    return WeightTotals(matrix, other, packed, prequantized)
+    return WeightTotals(matrix, other, packed, prequantized, fp8_matrix)
 
 
 def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ...] = (None,)) -> dict[int | None, int] | None:
@@ -238,7 +243,9 @@ def estimate_cuda_image_memory(model_dir: Path, quantize_levels: tuple[int | Non
     Mirrors ``DiffusersBackend.load_model``: unquantized (bfloat16) and q8 (FP8 weight storage) keep the
     transformer and text encoder in system memory and stream them to the GPU; q4 holds them in NF4 on the GPU,
     one at a time for Krea 2 (whose NF4 pair does not fit a 10-12 GB card together). The VAE stays on the GPU.
-    A stored quant loads at its own level whatever level is asked for.
+    Ideogram 4 Instant streams its transformer at every level and keeps its pre-quantized NF4 text encoder on the
+    GPU only while it encodes (see :func:`_cuda_ideogram4_estimate`). A stored quant loads at its own level whatever
+    level is asked for.
 
     Args:
         model_dir: Directory holding the model's safetensors files.
@@ -250,9 +257,11 @@ def estimate_cuda_image_memory(model_dir: Path, quantize_levels: tuple[int | Non
     components = _image_components(model_dir)
     if components is None:
         return None
+    stored_bits = stored_quant_bits(model_dir)
+    if is_ideogram4_model(model_dir):
+        return {level: _cuda_ideogram4_estimate(components, stored_bits or level) for level in quantize_levels}
     # Mirrors _Q4_CPU_OFFLOAD_FAMILIES in backends/cuda/image/backend.py.
     text_encoder_offloaded = is_krea2_model(model_dir)
-    stored_bits = stored_quant_bits(model_dir)
     return {level: _cuda_level_estimate(components, stored_bits or level, text_encoder_offloaded) for level in quantize_levels}
 
 
@@ -587,9 +596,25 @@ def _cuda_level_estimate(components: dict[str, WeightTotals], quantize: int | No
     return CudaMemoryEstimate(vae + _CUDA_STREAMED_GPU_BYTES, int(streamed + unquantized + _CUDA_SYSTEM_WORKING_BYTES))
 
 
+def _cuda_ideogram4_estimate(components: dict[str, WeightTotals], quantize: int | None) -> CudaMemoryEstimate:
+    """Estimate Ideogram 4 Instant on CUDA, mirroring ``backends/cuda/image/ideogram4._place``.
+
+    The transformer stays in system memory at every level (NF4, FP8 or bfloat16) and streams to the GPU block by
+    block. The text encoder is stored NF4 and is counted as stored; it is on the GPU only while it encodes the
+    prompt, before the transformer runs, so the GPU holds the larger of the two phases plus the VAE.
+    """
+    vae = components["vae"].bfloat16_bytes if "vae" in components else 0
+    text_encoder = components["text_encoder"].bfloat16_bytes if "text_encoder" in components else 0
+    rest = sum(totals.bfloat16_bytes for name, totals in components.items() if name not in ("vae", "text_encoder", "transformer"))
+    bytes_per_weight = {4: _NF4_BYTES_PER_WEIGHT, 8: 1}.get(quantize, 2)
+    transformer = _cuda_component_bytes(components["transformer"], bytes_per_weight) if "transformer" in components else 0
+    gpu = max(text_encoder + _CUDA_RESIDENT_WORKING_BYTES, _CUDA_STREAMED_GPU_BYTES) + vae
+    return CudaMemoryEstimate(int(gpu), int(transformer + text_encoder + rest + _CUDA_SYSTEM_WORKING_BYTES))
+
+
 def _cuda_component_bytes(totals: WeightTotals, bytes_per_weight: float) -> float:
     """Return a component's bytes with its 2-D weights at *bytes_per_weight* and other floats in bfloat16."""
-    return totals.float_matrix_elements * bytes_per_weight + totals.float_other_elements * 2 + totals.packed_bytes
+    return totals.float_matrix_elements * bytes_per_weight + totals.float_other_elements * 2 + totals.fp8_matrix_elements + totals.packed_bytes
 
 
 def _image_components(model_dir: Path) -> dict[str, WeightTotals] | None:
@@ -613,7 +638,8 @@ def _image_component_bytes(name: str, totals: WeightTotals, quantize: int | None
     if name == "vae":
         return (totals.float_matrix_elements + totals.float_other_elements) * 4 + totals.packed_bytes
     if quantize and not totals.prequantized:
-        return totals.float_matrix_elements * (quantize / 8 + _QUANT_GROUP_OVERHEAD_BYTES) + totals.float_other_elements * 2 + totals.packed_bytes
+        matrices = totals.float_matrix_elements + totals.fp8_matrix_elements
+        return matrices * (quantize / 8 + _QUANT_GROUP_OVERHEAD_BYTES) + totals.float_other_elements * 2 + totals.packed_bytes
     return totals.bfloat16_bytes
 
 

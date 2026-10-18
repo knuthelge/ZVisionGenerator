@@ -90,6 +90,15 @@ describe('jobPhases', () => {
     expect(initialPhase('running', '100', { type: 'control_queued' }).phase).toBeUndefined();
   });
 
+  it('follows a model build and the load after it', () => {
+    let state = job({ phase: 'load' });
+    state = trackJobEvent(state, 'model_loading', { phase: 'building', model: 'ideo' }, 0);
+    expect(state.loadPhase).toBe('building');
+
+    state = trackJobEvent(state, 'model_loading', { phase: 'loading', model: 'ideo' }, 0);
+    expect(state.loadPhase).toBe('loading');
+  });
+
   it('follows the newest model_loading phase and whether the copy replaces the download', () => {
     let state = job({ phase: 'load' });
     state = trackJobEvent(state, 'model_loading', { phase: 'downloading', model: 'SeedVR2 7B q8' }, 0);

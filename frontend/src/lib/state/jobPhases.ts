@@ -121,7 +121,7 @@ export function trackJobEvent(job: ActiveJobState, type: string, event: EventDat
   if (type === 'preflight_started') next.enhanceTotal = numberField(event, 'total_rewrites') ?? 0;
   if (type === 'model_loading') {
     const loadPhase = event?.phase;
-    if (loadPhase === 'downloading' || loadPhase === 'loading' || loadPhase === 'saving_quant') next.loadPhase = loadPhase;
+    if (loadPhase === 'building' || loadPhase === 'downloading' || loadPhase === 'loading' || loadPhase === 'saving_quant') next.loadPhase = loadPhase;
     if (event?.replaces_download === true) next.loadReplacesDownload = true;
     if (loadPhase === 'saving_quant') next.loadQuant = numberField(event, 'quantize') ?? 8;
   }

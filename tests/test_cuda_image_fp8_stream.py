@@ -15,7 +15,7 @@ from diffusers.models.modeling_utils import ModelMixin  # noqa: E402
 from safetensors.torch import save_file  # noqa: E402
 
 from zvisiongenerator.backends.cuda import quant  # noqa: E402
-from zvisiongenerator.backends.cuda import safetensors_stream  # noqa: E402
+from zvisiongenerator.utils import safetensors_stream  # noqa: E402
 
 
 class _TinyTransformer(ModelMixin, ConfigMixin):

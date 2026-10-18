@@ -1,9 +1,9 @@
-"""Ideogram 4 on the diffusers/CUDA image backend: load, placement, the first-step sigma and the pipeline call.
+"""Ideogram 4 Instant on the diffusers/CUDA image backend: load, placement, the first-step sigma and the pipeline call.
 
-The model is the NF4 diffusers repo (Unsloth's ungated mirror of the official one): a text encoder and two transformers (the conditional one and the
-unconditional one that asymmetric guidance needs) in bitsandbytes NF4, about 15 GB in all. They do not fit a 10 GB card
-together, so the transformers stay in system memory and stream to the GPU block by block, and the text encoder is on the
-GPU only while it encodes the prompt.
+The model is the built Ideogram 4 Instant folder: the base model's NF4 text encoder and one distilled transformer,
+in BF16 or as a q4 (NF4) or q8 (FP8) stored copy. Instant has its guidance built in, so the pipeline's unconditional
+branch gets a stand-in without weights whose output the guidance of 1.0 multiplies by zero. The transformer stays in
+system memory and streams to the GPU block by block, and the text encoder is on the GPU only while it encodes the prompt.
 """
 
 from __future__ import annotations
@@ -14,70 +14,120 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends.cuda.block_streaming import move_outside, stream_blocks, unload_before
-from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, Ideogram4Sampler, caption_text
-from zvisiongenerator.utils.paths import split_huggingface_revision
+from zvisiongenerator.backends.cuda.block_streaming import group_offload, move_outside, stream_blocks, unload_before
+from zvisiongenerator.backends.cuda.quant import load_fp8_transformer, load_nf4_transformer
+from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, INSTANT_GUIDANCE, Ideogram4Sampler, caption_text
+from zvisiongenerator.utils.file_links import link_tree
 
 if TYPE_CHECKING:
     import torch
 
-__all__ = ["first_sigma_override", "generate", "load_pipeline"]
+__all__ = ["first_sigma_override", "generate", "load_pipeline", "save_quantized", "zero_unconditional_transformer"]
 
 # Ideogram 4's own default: the prompt is padded to this many tokens for the text encoder.
 _MAX_SEQUENCE_LENGTH = 2048
+# Components a stored copy shares with the folder it was made from (the text encoder is already NF4 there).
+_SHARED_COMPONENTS = ("scheduler", "text_encoder", "tokenizer", "vae")
+# Where the pipeline was loaded from, so a stored copy can link the components it shares.
+_SOURCE_ATTRIBUTE = "_ziv_source_path"
 
 
-def load_pipeline(model_path: str, torch_dtype: torch.dtype) -> Any:
-    """Load the Ideogram 4 pipeline from the NF4 repo at *model_path* and place it for a small GPU.
+def zero_unconditional_transformer(dtype: torch.dtype) -> Any:
+    """Return a stand-in for the unconditional transformer diffusers' Ideogram 4 pipeline always calls: no weights, zero output.
 
-    *model_path* may be a local folder, a repo id, or ``owner/repo@revision`` to load that exact revision. Each NF4
-    component loads onto the GPU, so it is moved to system memory before the next one loads.
+    The pipeline blends ``g * conditional + (1 - g) * unconditional``; at Instant's guidance of 1.0 the stand-in's
+    output is multiplied by zero, so the result is the distilled transformer's alone. It reports *dtype*, which the
+    pipeline casts the unconditional inputs to.
+    """
+    import torch
+
+    class ZeroUnconditionalTransformer(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.register_buffer("_dtype_anchor", torch.empty(0, dtype=dtype), persistent=False)
+
+        @property
+        def dtype(self) -> torch.dtype:
+            return self._dtype_anchor.dtype
+
+        def forward(self, *, hidden_states: torch.Tensor, **_kwargs: Any) -> tuple[torch.Tensor]:
+            return (torch.zeros_like(hidden_states),)
+
+    return ZeroUnconditionalTransformer()
+
+
+def load_pipeline(model_path: str, torch_dtype: torch.dtype, bits: int | None, *, prequantized: bool) -> Any:
+    """Load Ideogram 4 Instant from the folder at *model_path* and place it for a small GPU.
+
+    Args:
+        model_path: The built Instant folder, or a stored quant of it.
+        torch_dtype: The compute dtype.
+        bits: ``4`` for an NF4 transformer, ``8`` for FP8 weight storage, ``None`` for BF16.
+        prequantized: Whether *model_path* is a stored copy whose transformer is already at *bits*.
 
     Raises:
-        RuntimeError: If *model_path* is not an NF4 copy (the macOS FP8 repo does not fit a consumer GPU).
+        RuntimeError: If *model_path* is a base Ideogram 4 model (it has an unconditional transformer).
     """
     import torch
     from diffusers import AutoModel as DiffusersAutoModel
     from diffusers import Ideogram4Pipeline
     from transformers import AutoModel as HFAutoModel
 
-    _require_nf4(model_path)
-    repo, revision = split_huggingface_revision(model_path)
-    options = {} if revision is None else {"revision": revision}
-    text_encoder = HFAutoModel.from_pretrained(repo, subfolder="text_encoder", dtype=torch_dtype, **options)
+    _require_instant(model_path)
+    # The text encoder is the base repo's NF4 copy at every level; it loads onto the GPU, so it moves off before the transformer loads.
+    text_encoder = HFAutoModel.from_pretrained(model_path, subfolder="text_encoder", dtype=torch_dtype)
     text_encoder.to("cpu")
-    transformer = DiffusersAutoModel.from_pretrained(repo, subfolder="transformer", torch_dtype=torch_dtype, **options)
-    transformer.to("cpu")
-    unconditional = DiffusersAutoModel.from_pretrained(repo, subfolder="unconditional_transformer", torch_dtype=torch_dtype, **options)
-    unconditional.to("cpu")
-    pipeline = Ideogram4Pipeline.from_pretrained(repo, text_encoder=text_encoder, transformer=transformer, unconditional_transformer=unconditional, torch_dtype=torch_dtype, **options)
-    _place(pipeline, torch.device("cuda"))
+    if bits == 4:
+        transformer = load_nf4_transformer(model_path, torch_dtype, prequantized=prequantized)
+        transformer.to("cpu")
+    elif bits == 8:
+        transformer = load_fp8_transformer(model_path, torch_dtype)
+    else:
+        transformer = DiffusersAutoModel.from_pretrained(model_path, subfolder="transformer", torch_dtype=torch_dtype)
+    pipeline = Ideogram4Pipeline.from_pretrained(model_path, text_encoder=text_encoder, transformer=transformer, unconditional_transformer=None, torch_dtype=torch_dtype)
+    # The model index lists no unconditional transformer, so the stand-in is not recorded there (nor saved with a stored copy).
+    pipeline.unconditional_transformer = zero_unconditional_transformer(torch_dtype)
+    setattr(pipeline, _SOURCE_ATTRIBUTE, str(Path(model_path).expanduser()))
+    _place(pipeline, torch.device("cuda"), nf4=bits == 4)
     return pipeline
 
 
-def _require_nf4(model_path: str) -> None:
-    """Raise unless the transformer of *model_path* carries a bitsandbytes quantization config."""
-    local = Path(model_path).expanduser() / "transformer" / "config.json"
-    if local.is_file():
-        config_path = local
-    else:
-        from huggingface_hub import hf_hub_download
+def save_quantized(pipeline: Any, path: str) -> None:
+    """Write the stored copy of a pipeline loaded at q4: its NF4 transformer, and hard links to the components it shares.
 
-        repo, revision = split_huggingface_revision(model_path)
-        config_path = Path(hf_hub_download(repo, "transformer/config.json", **({} if revision is None else {"revision": revision})))
-    quantization = json.loads(config_path.read_text(encoding="utf-8")).get("quantization_config") or {}
-    if quantization.get("quant_method") != "bitsandbytes":
-        raise RuntimeError("Ideogram 4 on Windows and Linux needs an NF4 copy such as unsloth/ideogram-4-nf4-diffusers; the model at '" + model_path + "' is not quantized with bitsandbytes.")
+    transformers cannot save a text encoder that was loaded already quantized, and it would be the same bytes as
+    the source's, so it is linked like the scheduler, tokenizer and VAE.
+    """
+    target = Path(path)
+    source = Path(getattr(pipeline, _SOURCE_ATTRIBUTE))
+    pipeline.transformer.save_pretrained(str(target / "transformer"))
+    for name in _SHARED_COMPONENTS:
+        link_tree(source / name, target / name)
 
 
-def _place(pipeline: Any, device: torch.device) -> None:
-    """Stream both transformers' blocks to *device*, keep the VAE there, and send the text encoder away once it has run."""
+def _require_instant(model_path: str) -> None:
+    """Raise unless *model_path* is a local Ideogram 4 Instant folder (the base model lists an unconditional transformer)."""
+    index_path = Path(model_path).expanduser() / "model_index.json"
+    if not index_path.is_file():
+        raise RuntimeError(f"Ideogram 4 runs from the Ideogram 4 Instant folder built on first use; use 'ideo' instead of '{model_path}'.")
+    entry = json.loads(index_path.read_text(encoding="utf-8")).get("unconditional_transformer")
+    if isinstance(entry, list) and entry and entry[0] is not None:
+        raise RuntimeError(f"'{model_path}' is the base Ideogram 4 model, which is no longer supported; use 'ideo' (Ideogram 4 Instant).")
+
+
+def _place(pipeline: Any, device: torch.device, *, nf4: bool) -> None:
+    """Stream the transformer's blocks to *device*, keep the VAE there, and send the text encoder away once it has run."""
     pipeline.vae.to(device)
-    for transformer in (pipeline.transformer, pipeline.unconditional_transformer):
+    transformer = pipeline.transformer
+    if nf4:
+        # Group offloading leaves bitsandbytes' quantization state on the CPU; swapping whole parameters carries it.
         stream_blocks(transformer.layers, device)
         move_outside(transformer, transformer.layers, device)
+    else:
+        group_offload(transformer, device, "block_level")
+    pipeline.unconditional_transformer.to(device)
     # The pipeline calls the text encoder's layers directly, so it cannot offload itself: it leaves before the first denoising step.
-    unload_before(pipeline.transformer, [pipeline.text_encoder])
+    unload_before(transformer, [pipeline.text_encoder])
     _offload_text_encoder_after_encoding(pipeline)
 
 
@@ -146,7 +196,7 @@ def generate(
         width: Image width in pixels.
         height: Image height in pixels.
         generator: Seeded generator for the initial noise.
-        sampler: Steps, guidance and noise schedule.
+        sampler: Steps and noise schedule.
         first_sigma: The first-step sigma for this run, or ``None`` for the default.
         callback_kwargs: The step-end callback arguments (progress, skip).
     """
@@ -161,8 +211,8 @@ def generate(
                 height=height,
                 width=width,
                 num_inference_steps=sampler.steps,
-                guidance_scale=sampler.guidance_scale,
-                guidance_schedule=None if sampler.guidance_schedule is None else list(sampler.guidance_schedule),
+                guidance_scale=INSTANT_GUIDANCE,
+                guidance_schedule=None,
                 mu=sampler.mu,
                 std=sampler.std,
                 max_sequence_length=_MAX_SEQUENCE_LENGTH,

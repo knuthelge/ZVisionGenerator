@@ -235,7 +235,7 @@ class TestLoadModelDriverHint:
 
 
 class TestIdeogram4:
-    """Ideogram 4 loads through its own NF4 loader and runs with its sampler preset."""
+    """Ideogram 4 Instant loads through its own loader at the selected level and runs with its built-in guidance."""
 
     def test_load_model_uses_the_ideogram_loader_and_tiles_the_vae(self, win_backend):
         mod, _, _ = win_backend
@@ -243,12 +243,24 @@ class TestIdeogram4:
         info = _make_model_info(family="ideogram4")
 
         with patch.object(mod, "detect_image_model", return_value=info), patch.object(mod, "load_ideogram4_pipeline", return_value=pipeline) as mock_load:
-            result, model_info = mod.DiffusersBackend().load_model("ideogram-ai/ideogram-4-nf4-diffusers")
+            result, model_info = mod.DiffusersBackend().load_model("/models/ideo", quantize=4)
 
         assert result is pipeline and model_info is info
-        assert mock_load.call_args.args[0] == "ideogram-ai/ideogram-4-nf4-diffusers"
+        assert mock_load.call_args.args[0] == "/models/ideo"
+        assert mock_load.call_args.args[2] == 4 and mock_load.call_args.kwargs == {"prequantized": False}
         pipeline.vae.enable_tiling.assert_called_once()
         mod.AutoPipelineForText2Image.from_pretrained.assert_not_called()
+
+    def test_a_stored_copy_loads_at_its_own_level_as_prequantized(self, win_backend, tmp_path):
+        mod, _, _ = win_backend
+        stored = tmp_path / "ideo@q8"
+        stored.mkdir()
+        (stored / "ziv-quant.json").write_text('{"bits": 8}', encoding="utf-8")
+
+        with patch.object(mod, "detect_image_model", return_value=_make_model_info(family="ideogram4")), patch.object(mod, "load_ideogram4_pipeline", return_value=MagicMock()) as mock_load:
+            mod.DiffusersBackend().load_model(str(stored))
+
+        assert mock_load.call_args.args[2] == 8 and mock_load.call_args.kwargs == {"prequantized": True}
 
     def test_loras_load_onto_the_pipeline_after_it_is_placed(self, win_backend):
         mod, _, _ = win_backend
@@ -257,10 +269,10 @@ class TestIdeogram4:
 
         with (
             patch.object(mod, "detect_image_model", return_value=_make_model_info(family="ideogram4")),
-            patch.object(mod, "load_ideogram4_pipeline", side_effect=lambda *args: order.append("load") or pipeline),
+            patch.object(mod, "load_ideogram4_pipeline", side_effect=lambda *args, **kwargs: order.append("load") or pipeline),
             patch.object(mod, "_load_loras", side_effect=lambda *args, **kwargs: order.append("lora")) as mock_loras,
         ):
-            mod.DiffusersBackend().load_model("ideogram-ai/ideogram-4-nf4-diffusers", lora_paths=["/l/a.safetensors"], lora_weights=[0.7])
+            mod.DiffusersBackend().load_model("/models/ideo", lora_paths=["/l/a.safetensors"], lora_weights=[0.7])
 
         assert order == ["load", "lora"]
         assert mock_loras.call_args.args == (pipeline, ["/l/a.safetensors"], [0.7])
@@ -273,7 +285,7 @@ class TestIdeogram4:
             patch.object(mod, "load_ideogram4_pipeline", return_value=MagicMock()),
             patch.object(mod, "_load_loras") as mock_loras,
         ):
-            mod.DiffusersBackend().load_model("ideogram-ai/ideogram-4-nf4-diffusers")
+            mod.DiffusersBackend().load_model("/models/ideo")
 
         mock_loras.assert_not_called()
 
@@ -281,29 +293,28 @@ class TestIdeogram4:
         backend = mod.DiffusersBackend()
         backend._model_info = _make_model_info(family="ideogram4")
         pipe = MagicMock(_interrupt=False)
-        arguments = {"model": pipe, "prompt": "a car", "width": 1024, "height": 768, "seed": 5, "steps": 20, "guidance": 7.0, **overrides}
+        arguments = {"model": pipe, "prompt": "a car", "width": 1024, "height": 768, "seed": 5, "steps": 8, "guidance": 1.0, **overrides}
         with patch.object(mod, "generate_ideogram4", return_value=MagicMock(images=["image"])) as mock_generate:
             result = backend.text_to_image(**arguments)
         return result, mock_generate, pipe
 
-    def test_text_to_image_runs_the_default_preset_unless_steps_or_guidance_were_given(self, win_backend):
+    def test_text_to_image_runs_the_given_steps(self, win_backend):
         mod, _, _ = win_backend
 
-        result, mock_generate, pipe = self._generate(mod, steps=50)
+        result, mock_generate, pipe = self._generate(mod, steps=12)
 
         assert result == "image"
-        sampler = mock_generate.call_args.kwargs["sampler"]
-        assert (sampler.steps, sampler.guidance_scale) == (20, None)
+        assert mock_generate.call_args.kwargs["sampler"].steps == 12
         assert mock_generate.call_args.args[:2] == (pipe, "a car")
         assert (mock_generate.call_args.kwargs["width"], mock_generate.call_args.kwargs["height"]) == (1024, 768)
 
-    def test_explicit_steps_and_guidance_override_the_preset(self, win_backend):
+    def test_another_guidance_is_ignored_with_a_warning(self, win_backend):
         mod, _, _ = win_backend
 
-        _, mock_generate, _ = self._generate(mod, steps=12, guidance=5.0, steps_explicit=True, guidance_explicit=True)
+        with pytest.warns(UserWarning, match="guidance"):
+            result, _, _ = self._generate(mod, guidance=5.0, guidance_explicit=True)
 
-        sampler = mock_generate.call_args.kwargs["sampler"]
-        assert (sampler.steps, sampler.guidance_scale, sampler.guidance_schedule) == (12, 5.0, None)
+        assert result == "image"
 
     @pytest.mark.parametrize("first_sigma", [None, 1.006])
     def test_the_per_run_first_sigma_is_passed_on(self, win_backend, first_sigma):
@@ -316,7 +327,7 @@ class TestIdeogram4:
     def test_progress_callbacks_are_built_for_the_sampler_steps(self, win_backend):
         mod, _, _ = win_backend
 
-        _, mock_generate, _ = self._generate(mod, steps=50, step_callback=MagicMock())
+        _, mock_generate, _ = self._generate(mod, step_callback=MagicMock())
 
         assert "callback_on_step_end" in mock_generate.call_args.kwargs["callback_kwargs"]
 
@@ -327,7 +338,7 @@ class TestIdeogram4:
         pipe = MagicMock(_interrupt=True)
 
         with patch.object(mod, "generate_ideogram4", return_value=MagicMock(images=["image"])):
-            result = backend.text_to_image(model=pipe, prompt="a car", width=512, height=512, seed=1, steps=20, guidance=7.0, skip_signal=MagicMock())
+            result = backend.text_to_image(model=pipe, prompt="a car", width=512, height=512, seed=1, steps=8, guidance=1.0, skip_signal=MagicMock())
 
         assert result is None
         assert pipe._interrupt is False

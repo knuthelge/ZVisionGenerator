@@ -194,7 +194,8 @@ def resolve_model_path(
     Resolution order:
     1. Explicit local paths and supported repo references are returned as-is.
     2. Bare names check ~/.ziv/models/<name>/ and use it if found.
-    3. Bare aliases resolve when provided.
+    3. Bare aliases resolve when provided. An alias whose value is a bare name names a folder in
+       ~/.ziv/models/, whether or not it exists yet (a model built on first use).
     4. Otherwise the original string is returned unchanged.
     """
     stripped = name_or_path.strip()
@@ -203,19 +204,27 @@ def resolve_model_path(
     if is_explicit_local_path(stripped) or is_huggingface_repo_id(stripped):
         return stripped
 
-    candidate = get_ziv_data_dir() / "models" / stripped
+    models_dir = get_ziv_data_dir() / "models"
+    candidate = models_dir / stripped
     if candidate.is_dir():
         return str(candidate)
 
     if aliases and stripped in aliases:
         alias_value = aliases[stripped]
         if isinstance(alias_value, str):
-            return alias_value
-        if platform_key is not None:
-            return resolve_alias(alias_value, platform_key)
-        return stripped
+            target = alias_value
+        elif platform_key is not None:
+            target = resolve_alias(alias_value, platform_key)
+        else:
+            return stripped
+        return str(models_dir / target) if _is_bare_name(target) else target
 
     return stripped
+
+
+def _is_bare_name(value: str) -> bool:
+    """Return whether *value* is a plain folder name: no separators, home prefix or repo-id shape."""
+    return bool(value) and value not in {".", ".."} and not any(char in value for char in "/\\:~")
 
 
 def resolve_lora_path(name_or_path: str) -> str:

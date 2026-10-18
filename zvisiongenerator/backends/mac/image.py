@@ -17,17 +17,21 @@ from PIL import Image
 from mflux.models.flux2 import Flux2Klein
 from mflux.models.z_image import ZImageTurbo
 from mflux.models.ideogram4 import Ideogram4
+from mflux.models.ideogram4.ideogram4_initializer import Ideogram4Initializer
 from mflux.models.ideogram4.model.ideogram4_scheduler.scheduler import Ideogram4Scheduler
+from mflux.models.ideogram4.weights import Ideogram4LoRAMapping, Ideogram4WeightDefinition
+from mflux.models.common.lora.mapping.lora_loader import LoRALoader
 from mflux.models.krea2 import Krea2
 from mflux.models.common.config.model_config import ModelConfig
 from mflux.models.common.schedulers import FlowMatchEulerDiscreteScheduler, LinearScheduler
 from mflux.utils.exceptions import StopImageGenerationException
 import mlx.core as mx
+from mlx import nn
 from mlx.utils import tree_map
 
 from zvisiongenerator.backends.mac.image_preview import estimate_clean_latents, render_latent_preview
 from zvisiongenerator.backends.mac.memory import apply_buffer_cache_policy, materialize_weights
-from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, wrap_ideogram4_prompt as _wrap_ideogram4_prompt
+from zvisiongenerator.core.ideogram4 import IDEOGRAM4_INITIAL_SIGMA, INSTANT_GUIDANCE, sampler_settings, wrap_ideogram4_prompt as _wrap_ideogram4_prompt
 from zvisiongenerator.core.progress_events import preview_milestone_steps
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 
@@ -106,6 +110,61 @@ def _install_ideogram4_initial_sigma() -> None:
 
 # Ideogram4-only: activate the first-step sigma override for the whole process.
 _install_ideogram4_initial_sigma()
+
+_UNCONDITIONAL = "unconditional_transformer"
+
+
+class _NoUnconditionalTransformer(nn.Module):
+    """Take the place of mflux's unconditional Ideogram 4 transformer, which Instant does not have.
+
+    mflux skips the unconditional pass at guidance 1.0, Instant's built-in guidance, so this is never called; it holds
+    no weights, so nothing is loaded, quantized or saved for it.
+    """
+
+    def __call__(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise RuntimeError("Ideogram 4 Instant has no unconditional transformer; it runs at guidance 1.0 only.")
+
+
+@contextlib.contextmanager
+def _instant_ideogram4() -> Iterator[None]:
+    """Build, quantize or save mflux's Ideogram 4 without its unconditional transformer, for the duration of the block.
+
+    mflux always builds both transformers of the base model. Inside the block its weight definition omits the
+    unconditional one (so it is not read from disk or written by ``save_model``), the initializer puts
+    :class:`_NoUnconditionalTransformer` in its place before weights are applied, so no skeleton of 9.3B parameters
+    gets quantized either, and LoRAs are applied to the conditional transformer only.
+    """
+    original_components = Ideogram4WeightDefinition.get_components
+    original_init_models = Ideogram4Initializer._init_models
+    original_apply_lora = Ideogram4Initializer._apply_lora
+
+    def get_components() -> list[Any]:
+        return [component for component in original_components() if component.name != _UNCONDITIONAL]
+
+    def init_models(model: Any, model_path: Any) -> None:
+        original_init_models(model, model_path)
+        setattr(model, _UNCONDITIONAL, _NoUnconditionalTransformer())
+
+    def apply_lora(model: Any, lora_paths: list[str] | None, lora_scales: list[float] | None, bake_lora: bool) -> None:
+        # mflux also applies every LoRA to the unconditional transformer, which Instant does not have.
+        model.lora_paths, model.lora_scales = LoRALoader.load_and_apply_lora(
+            lora_mapping=Ideogram4LoRAMapping.get_mapping(),
+            transformer=model.conditional_transformer,
+            lora_paths=lora_paths,
+            lora_scales=lora_scales,
+            bake_lora=bake_lora,
+        )
+
+    Ideogram4WeightDefinition.get_components = staticmethod(get_components)
+    Ideogram4Initializer._init_models = staticmethod(init_models)
+    Ideogram4Initializer._apply_lora = staticmethod(apply_lora)
+    try:
+        yield
+    finally:
+        Ideogram4WeightDefinition.get_components = staticmethod(original_components)
+        Ideogram4Initializer._init_models = staticmethod(original_init_models)
+        Ideogram4Initializer._apply_lora = staticmethod(original_apply_lora)
+
 
 # Krea 2 Turbo samples with plain Euler, as Krea's own inference code does. mflux defaults to er_sde, which adds
 # fresh noise every step and leaves grain when refining an existing image (img2img, upscale).
@@ -317,12 +376,14 @@ class MfluxBackend:
                 **lora_kwargs,
             )
         elif model_info.family == "ideogram4":
-            # Ideogram 4 transformer is FP8-locked; quantize is not forwarded.
-            model = Ideogram4(
-                model_path=model_path,
-                model_config=ModelConfig.ideogram4_fp8(),
-                **lora_kwargs,
-            )
+            # Ideogram 4 Instant: the FP8 transformer, quantized to q4/q8 when asked; no unconditional transformer.
+            with _instant_ideogram4():
+                model = Ideogram4(
+                    quantize=quantize,
+                    model_path=model_path,
+                    model_config=ModelConfig.ideogram4_fp8(),
+                    **lora_kwargs,
+                )
         elif model_info.family == "krea2":
             model = Krea2(
                 quantize=quantize,
@@ -365,6 +426,10 @@ class MfluxBackend:
                 (mflux bakes LoRAs into saved weights).
             path: Destination directory.
         """
+        if self._model_info is not None and self._model_info.family == "ideogram4":
+            with _instant_ideogram4():
+                model.save_model(path)
+            return
         model.save_model(path)
 
     def image_to_image(
@@ -473,12 +538,10 @@ class MfluxBackend:
 
         try:
             if self._model_info.family == "ideogram4":
-                # Ideogram 4 has no scheduler/negative_prompt params; omit steps/guidance to keep mflux's shaped preset schedule.
-                gen_kwargs = dict(prompt=_wrap_ideogram4_prompt(prompt), width=width, height=height, seed=seed, preset="V4_DEFAULT_20")
-                if steps_explicit:
-                    gen_kwargs["num_inference_steps"] = steps
-                if guidance_explicit:
-                    gen_kwargs["guidance"] = guidance
+                # Ideogram 4 has no scheduler/negative_prompt params. Instant runs mflux's default preset's noise schedule
+                # (mean 0.0, standard deviation 1.75) over the given steps, at its built-in guidance, which skips the unconditional pass.
+                sampler = sampler_settings(steps, guidance)
+                gen_kwargs = dict(prompt=_wrap_ideogram4_prompt(prompt), width=width, height=height, seed=seed, num_inference_steps=sampler.steps, guidance=INSTANT_GUIDANCE)
             else:
                 _is_flux = self._model_info is not None and self._model_info.family in ("flux1", "flux2", "flux2_klein")
                 gen_kwargs = dict(

@@ -97,6 +97,7 @@ function statusMessageForEvent(type: string | undefined, event: Record<string, u
     const model = eventFieldString(event, 'model');
     const phase = eventFieldString(event, 'phase');
     if (phase === 'downloading') return `Downloading ${model || 'the model'} (first use only)...`;
+    if (phase === 'building') return `Building ${model || 'the model'}: downloading and converting its files (first use only)...`;
     if (phase === 'saving_quant') {
       const bits = eventFieldNumber(event, 'quantize');
       if (event?.replaces_download === true) return `Saving a q${bits} copy of ${model || 'the model'} and removing the download to save disk (first use only)...`;

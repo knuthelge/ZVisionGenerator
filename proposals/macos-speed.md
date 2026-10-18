@@ -31,6 +31,8 @@ Ranked by estimated gain for effort and risk. "Output" says whether the same see
 
 ### 1. Ideogram 4 stored q4/q8 quants
 
+*Moved to [ideogram-instant.md](ideogram-instant.md) (2026-10-18), which replaces the model with its distilled version and adds q4/q8 there.*
+
 - **Change:** Pass `quantize` to `Ideogram4(...)` and set `supports_quantize` to true for `ideo`, so the stored-quant flow creates `ideo@q4` and `ideo@q8` like the other families.
 - **Evidence:**
   - `zvisiongenerator/backends/mac/image.py:366-372` builds `Ideogram4` without `quantize`, with a comment that the transformer is FP8-locked.

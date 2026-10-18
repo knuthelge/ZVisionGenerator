@@ -20,7 +20,6 @@ from zvisiongenerator.utils.config import (
     validate_video_size_choice,
 )
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-from zvisiongenerator.utils.paths import split_huggingface_revision
 from zvisiongenerator.utils.paths import resolve_model_path
 
 
@@ -226,30 +225,44 @@ class TestNestedConfigValidation:
         assert config["model_aliases"]["ltx-2.3"]["linux"] == "custom/LTX-2.3"
 
 
-def test_packaged_config_resolves_ideo_alias_on_darwin(monkeypatch, tmp_path):
+def test_packaged_config_resolves_ideo_to_its_models_folder_on_every_platform(monkeypatch, tmp_path):
     from zvisiongenerator.utils import config as config_module
 
     monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / ".ziv"))
 
     config = load_config()
 
-    assert resolve_model_path("ideo", aliases=config["model_aliases"], platform_key="darwin") == "ideogram-ai/ideogram-4-fp8"
-
-
-def test_packaged_config_resolves_ideo_alias_on_every_platform(monkeypatch, tmp_path):
-    from zvisiongenerator.utils import config as config_module
-
-    monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
-
-    config = load_config()
-    aliases = config["model_aliases"]
-
-    assert resolve_model_path("ideo", aliases=aliases, platform_key="darwin") == "ideogram-ai/ideogram-4-fp8"
-    for platform_key in ("win32", "linux"):
-        repo, revision = split_huggingface_revision(resolve_model_path("ideo", aliases=aliases, platform_key=platform_key))
-        assert repo == "unsloth/ideogram-4-nf4-diffusers"
-        assert revision is not None and re.fullmatch(r"[0-9a-f]{40}", revision)  # pinned to a commit
+    for platform_key in ("darwin", "win32", "linux"):
+        assert resolve_model_path("ideo", aliases=config["model_aliases"], platform_key=platform_key) == str(tmp_path / ".ziv" / "models" / "ideo")
     assert config["model_alias_families"]["ideo"] == "ideogram4"
+
+
+def test_packaged_config_pins_every_ideogram4_instant_source(monkeypatch, tmp_path):
+    from zvisiongenerator.utils import config as config_module
+    from zvisiongenerator.utils.ideogram4_instant import instant_source
+
+    monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+
+    config = load_config()
+
+    formats = {}
+    for platform_key in ("darwin", "win32", "linux"):
+        source = instant_source(config, platform_key)
+        assert re.fullmatch(r"[0-9a-f]{40}", source.transformer_revision)
+        assert source.components_revision is not None and re.fullmatch(r"[0-9a-f]{40}", source.components_revision)
+        formats[platform_key] = source.transformer_format
+    assert formats == {"darwin": "fp8", "win32": "bf16", "linux": "bf16"}
+
+
+def test_packaged_config_ideogram4_preset_is_instant(monkeypatch, tmp_path):
+    from zvisiongenerator.utils import config as config_module
+
+    monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+
+    defaults = resolve_defaults(ImageModelInfo(family="ideogram4", is_distilled=False, size=None), load_config(), {}, "diffusers")
+
+    assert (defaults["steps"], defaults["guidance"], defaults["supports_quantize"]) == (8, 1.0, True)
 
 
 def test_packaged_config_ships_krea2_alias_and_defaults(monkeypatch, tmp_path):

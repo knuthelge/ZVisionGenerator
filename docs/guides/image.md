@@ -13,7 +13,7 @@ Built-in shorthands for common image models.
 | `zit` | `Tongyi-MAI/Z-Image-Turbo` |
 | `klein4b` | `black-forest-labs/FLUX.2-klein-4B` |
 | `klein9b` | `black-forest-labs/FLUX.2-klein-9B` |
-| `ideo` | `ideogram-ai/ideogram-4-fp8` (macOS), `unsloth/ideogram-4-nf4-diffusers` (Windows and Linux) |
+| `ideo` | Ideogram 4 Instant, built in `~/.ziv/models/ideo` on first use from `Hippotes/Ideogram4-Fal-ComfyUI` (transformer) plus `unsloth/ideogram-4-fp8` on macOS or `unsloth/ideogram-4-nf4-diffusers` on Windows and Linux (text encoder, VAE, tokenizer); see [Ideogram 4](#ideogram-4) |
 | `krea2` | `unsloth/Krea-2-Turbo` |
 
 For video aliases, see [Video Guide → Supported Models](video.md#supported-models).
@@ -27,13 +27,13 @@ ziv-image -m krea2 -q 4 --prompt "a portrait"
 
 ### Ideogram 4
 
-Ideogram 4 runs on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux (NVIDIA GPU via diffusers/CUDA). It uses one model per platform, an FP8 one on macOS and an NF4 one on Windows and Linux (a 15 GB download), so quantization tiers do not apply: `ziv-image` rejects `-q 4` / `-q 8` for it, as the Web UI does. Width and height must be in the 256–2048 range and multiples of 16; size presets that exceed this range (for example `--size xl` with `--ratio 16:9`) are rejected before the model loads.
+`ideo` is Ideogram 4 Instant, fal's distilled Ideogram 4. It makes an image in 8 steps with a single transformer, and its guidance is built in, so `--guidance` is ignored for it (with a warning). It runs on macOS (Apple Silicon via mflux/MLX) and on Windows and Linux (NVIDIA GPU via diffusers/CUDA). Width and height must be in the 256–2048 range and multiples of 16; size presets that exceed this range (for example `--size xl` with `--ratio 16:9`) are rejected before the model loads.
 
 ```bash
 ziv-image -m ideo --prompt "a portrait"
 ```
 
-Ideogram 4 does not support negative prompts or reference-image (img2img) steering; a negative prompt is dropped with a warning, and both `--image` and `--upscale` are rejected (each requires img2img, which Ideogram 4 does not support). LoRA weights work via `--lora` (and the Web UI's LoRA picker) on every platform. On Windows and Linux they load onto Ideogram 4's main transformer, so a LoRA made for its unconditional transformer is not supported, and a LoRA adds about 1 GB of GPU memory, so the largest sizes may then no longer fit.
+Ideogram 4 does not support negative prompts or reference-image (img2img) steering; a negative prompt is dropped with a warning, and both `--image` and `--upscale` are rejected (each requires img2img, which Ideogram 4 does not support). LoRA weights work via `--lora` (and the Web UI's LoRA picker) on every platform. On Windows and Linux a LoRA adds about 1 GB of GPU memory, so the largest sizes may then no longer fit.
 
 Plain-text prompts are automatically wrapped into Ideogram 4's structured JSON caption format, so they generate without a plain-text caption warning while preserving the original wording. To supply a full structured JSON caption instead, pass it as the value of `--json-prompt` (mutually exclusive with `--prompt`): this skips random-choice `{a|b|c}` expansion and sends the caption verbatim. Without `--json-prompt`, `{...}` in a prompt is treated as random-choice syntax and corrupts a JSON caption. The `--json-prompt` value must be a valid JSON object, or generation is rejected before the model loads:
 
@@ -43,11 +43,11 @@ ziv-image -m ideo --json-prompt '{"high_level_description": "a portrait"}'
 
 The automatic wrapper only repeats your prompt in the caption's fields, and Ideogram 4 often renders such sparse captions as a flat cut-out on a checkerboard background, especially posters and product shots. For a fuller caption, let the prompt enhancer write one: `--enhance-format json`, or **Write as: JSON** in the Enhance popover (see [JSON Captions](prompts.md#json-captions-ideogram-4)). The **Smart** enhancer writes better captions than Fast.
 
-When neither `--steps` nor `--guidance` is given, Ideogram 4 uses its built-in tuned quality schedule. Supplying `--steps` and/or `--guidance` overrides that schedule with the explicit values.
+The first job with `ideo` builds the model in `~/.ziv/models/ideo`. It downloads Instant's 18.6 GB transformer from `Hippotes/Ideogram4-Fal-ComfyUI` and converts it for your platform (FP8 on macOS, BF16 on Windows and Linux), takes the text encoder, VAE and tokenizer from Unsloth's ungated mirror of the base model (`unsloth/ideogram-4-fp8` on macOS, `unsloth/ideogram-4-nf4-diffusers` on Windows and Linux), and then deletes the download. An interrupted download resumes on the next run. The Web UI shows this as **Build model**. fal's own repo (`fal/ideogram-v4-instant`) needs a Hugging Face login, so the transformer comes from an ungated copy whose weights were checked against fal's; every source is pinned to a checked revision in the `ideogram4_instant` section of the config, and the folder is rebuilt when a pin changes. The model is under Ideogram's non-commercial license, which applies as soon as you download or use it: see the `LICENSE.md` in the folder. The base Ideogram 4 model is no longer supported.
 
-The macOS model is gated on Hugging Face: accept its terms and log in (`hf auth login`) before the first download. The Windows and Linux model is downloaded from Unsloth's unmodified mirror of Ideogram's NF4 repo, pinned to a revision whose files were checked byte for byte against the official ones, so it needs no account. Either way the model is under Ideogram's non-commercial license, which applies as soon as you download or use it: see the `LICENSE.md` in the model folder. To use the official NF4 repo instead, pass `-m ideogram-ai/ideogram-4-nf4-diffusers` (it needs the login).
+`ideo` takes `-q 4` (NF4 on Windows and Linux) and `-q 8` (FP8), saved once as `ideo@q4` / `ideo@q8` like other models. On macOS the unquantized model is the FP8 build, and q4/q8 are smaller and faster. On Windows and Linux the transformer streams to the GPU block by block and the text encoder is on it only while it reads the prompt. On a 10 GB GPU with 32 GB of system memory, q4 and q8 both take about 3.5 s per step at 1024×1024, so about a minute per job once the copy is saved (q8 peaks at about 17 GB of system memory, q4 at 14 GB). Unquantized it streams the 18.6 GB BF16 transformer, takes about 15 s per step and peaks at about 26 GB, so pick q4 or q8.
 
-On Windows and Linux the model does not fit a consumer GPU at once, so the two transformers stream to the GPU block by block and the text encoder is on it only while it reads the prompt. On a 10 GB GPU with 32 GB of system memory, a 1024×1024 image with the default 20 steps takes about 2.5 minutes and peaks at about 6 GB of GPU memory and 20 GB of system memory; sizes up to about 1.8 megapixels (for example 1792×1024) work, taking longer, and larger ones (2048×1024 and up) run out of GPU memory. The first run also loads about 15 GB, which takes a minute or two.
+LoRAs made for Ideogram 4 load onto Instant, but they were trained on the base model, so check the results.
 
 Ideogram 4 sometimes returns a grey "Image blocked by safety filter" frame for harmless prompts. ZVisionGenerator adjusts the first denoising step slightly, which reduces these false positives without changing the prompt, seed or resolution. This is best-effort and not a way around the filter: prompts the filter actually objects to are still blocked. The adjustment defaults to a first-step sigma of `1.004` and can be overridden per run with `--first-sigma` (for example `--first-sigma 1.005` or `--first-sigma 1.006`) when a harmless prompt is still blocked.
 

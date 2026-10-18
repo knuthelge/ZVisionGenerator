@@ -170,6 +170,7 @@ def test_load_web_config_surfaces_ideo_alias_offline_via_declared_family(monkeyp
     app_config["ui"]["default_models"] = {"image": "ideo"}
 
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / ".ziv"))  # alias resolution reads the models folder too
     monkeypatch.setattr(web_config_module, "load_config", lambda: app_config)
     monkeypatch.setattr(web_config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
     monkeypatch.setattr(web_config_module, "list_models", lambda _: [])
@@ -209,6 +210,7 @@ def test_load_web_config_hides_ideo_alias_on_windows(monkeypatch, tmp_path):
     app_config["ui"]["default_models"] = {"image": "ideo"}
 
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / ".ziv"))  # alias resolution reads the models folder too
     monkeypatch.setattr(web_config_module, "load_config", lambda: app_config)
     monkeypatch.setattr(web_config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
     monkeypatch.setattr(web_config_module, "list_models", lambda _: [])

@@ -33,39 +33,24 @@ class TestCaptions:
 
 
 class TestSamplerSettings:
-    def test_the_default_is_the_20_step_preset_with_two_polish_steps(self):
-        sampler = sampler_settings(20, 7.0, steps_explicit=False, guidance_explicit=False)
+    def test_the_run_uses_the_given_steps_and_instants_noise_schedule(self):
+        sampler = sampler_settings(8, 1.0)
 
-        assert sampler.steps == 20
-        assert sampler.guidance_schedule == (7.0,) * 18 + (3.0,) * 2
-        assert sampler.guidance_scale is None
-        assert (sampler.mu, sampler.std) == (0.0, 1.75)
+        assert (sampler.steps, sampler.mu, sampler.std) == (8, 0.0, 1.75)
 
-    def test_the_configured_steps_are_ignored_unless_asked_for(self):
-        assert sampler_settings(50, 7.0, steps_explicit=False, guidance_explicit=False).steps == 20
+    def test_other_step_counts_are_kept(self):
+        assert sampler_settings(12, 1.0).steps == 12
 
-    def test_explicit_steps_keep_the_polish_steps_at_the_end(self):
-        sampler = sampler_settings(30, 7.0, steps_explicit=True, guidance_explicit=False)
+    def test_a_guidance_other_than_one_is_ignored_with_a_warning(self):
+        with pytest.warns(UserWarning, match="guidance 7 is ignored"):
+            sampler = sampler_settings(8, 7.0)
 
-        assert len(sampler.guidance_schedule) == 30
-        assert sampler.guidance_schedule[:28] == (7.0,) * 28 and sampler.guidance_schedule[28:] == (3.0, 3.0)
+        assert sampler.steps == 8
 
-    @pytest.mark.parametrize("steps", [1, 2, 3])
-    def test_a_very_short_run_keeps_at_least_one_main_step(self, steps):
-        schedule = sampler_settings(steps, 7.0, steps_explicit=True, guidance_explicit=False).guidance_schedule
+    def test_the_built_in_guidance_raises_no_warning(self, recwarn):
+        sampler_settings(8, 1.0)
 
-        assert len(schedule) == steps and schedule[0] == 7.0
-
-    def test_explicit_guidance_is_one_constant_for_every_step(self):
-        sampler = sampler_settings(20, 5.5, steps_explicit=False, guidance_explicit=True)
-
-        assert (sampler.guidance_scale, sampler.guidance_schedule, sampler.steps) == (5.5, None, 20)
-
-    def test_either_a_schedule_or_a_constant_is_set_never_both(self):
-        for guidance_explicit in (False, True):
-            sampler = sampler_settings(20, 7.0, steps_explicit=False, guidance_explicit=guidance_explicit)
-
-            assert (sampler.guidance_schedule is None) != (sampler.guidance_scale is None)
+        assert not recwarn.list
 
 
 def test_the_first_sigma_default_is_just_above_pure_noise():

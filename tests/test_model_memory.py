@@ -106,12 +106,14 @@ class TestEstimateImageMemory:
         estimates = estimate_image_memory(tmp_path, (8,))
         assert estimates == {8: transformer_q8 + 1024 * 1024 * 2 + _IMAGE_MARGIN}
 
-    def test_fp8_and_prequantized_weights_stay_as_stored(self, tmp_path):
+    def test_fp8_matrices_are_one_byte_unquantized_and_pack_when_quantized_while_prequantized_weights_stay_as_stored(self, tmp_path):
         _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"w": ("F8_E4M3", [1000, 1000])})
         _write_safetensors(tmp_path / "text_encoder" / "model.safetensors", {"packed": ("U32", [1000, 125]), "scales": ("BF16", [1000, 16])})
 
-        stored = 1_000_000 + 1000 * 125 * 4 + 1000 * 16 * 2
-        assert estimate_image_memory(tmp_path, (4,)) == {4: stored + _IMAGE_MARGIN}
+        prequantized = 1000 * 125 * 4 + 1000 * 16 * 2
+        estimates = estimate_image_memory(tmp_path, (None, 4))
+        assert estimates[None] == 1_000_000 + prequantized + _IMAGE_MARGIN
+        assert estimates[4] == int(1_000_000 * (4 / 8 + 4 / 64) + prequantized) + _IMAGE_MARGIN
 
     def test_returns_none_without_weights_or_with_unreadable_weights(self, tmp_path):
         assert estimate_image_memory(tmp_path) is None
@@ -427,6 +429,20 @@ class TestEstimateCudaImageMemory:
         text_encoder = 1024 * 1024 * model_memory._NF4_BYTES_PER_WEIGHT
         assert estimate.gpu_bytes == int(transformer + 64 * 64 * 9 * 2 + model_memory._CUDA_RESIDENT_WORKING_BYTES)
         assert estimate.system_bytes == int(text_encoder + model_memory._CUDA_SYSTEM_WORKING_BYTES)
+
+    def test_ideogram4_streams_its_transformer_at_every_level_and_counts_the_nf4_text_encoder_as_stored(self, tmp_path):
+        model_dir = self._model(tmp_path, "Ideogram4Pipeline")
+        _write_safetensors(model_dir / "text_encoder" / "model.safetensors", {"packed": ("U8", [512 * 1024, 1]), "embed": ("BF16", [1024, 64])})
+
+        estimates = estimate_cuda_image_memory(model_dir, (None, 4, 8))
+
+        vae = 64 * 64 * 9 * 2
+        text_encoder = 512 * 1024 + 1024 * 64 * 2
+        gpu = max(text_encoder + model_memory._CUDA_RESIDENT_WORKING_BYTES, model_memory._CUDA_STREAMED_GPU_BYTES) + vae
+        assert estimates[None].gpu_bytes == estimates[4].gpu_bytes == estimates[8].gpu_bytes == gpu
+        transformer = {None: 4096 * 1024 * 2, 4: 4096 * 1024 * model_memory._NF4_BYTES_PER_WEIGHT, 8: 4096 * 1024}
+        for level, weights in transformer.items():
+            assert estimates[level].system_bytes == int(weights + 1024 * 2 + text_encoder + model_memory._CUDA_SYSTEM_WORKING_BYTES)
 
     def test_stored_q4_copy_holds_its_weights_on_the_gpu(self, tmp_path):
         (tmp_path / "stored").mkdir()

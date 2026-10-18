@@ -12,8 +12,8 @@ torch = pytest.importorskip("torch")
 
 from safetensors.torch import load_file, save_file  # noqa: E402
 
-from zvisiongenerator.backends.cuda import safetensors_stream  # noqa: E402
-from zvisiongenerator.backends.cuda.safetensors_stream import ShardWriter, iter_tensors, shard_files  # noqa: E402
+from zvisiongenerator.utils import safetensors_stream  # noqa: E402
+from zvisiongenerator.utils.safetensors_stream import ShardWriter, iter_tensors, shard_files  # noqa: E402
 
 
 def _tensors():

@@ -206,7 +206,7 @@ class TestBackendRegistryLookup:
     def test_drop_cached_files_syncs_and_drops_every_file(self, monkeypatch, tmp_path):
         import os
 
-        from zvisiongenerator.backends.cuda import memory as memory_cuda
+        from zvisiongenerator.utils import page_cache
 
         (tmp_path / "transformer").mkdir()
         (tmp_path / "transformer" / "weights.safetensors").write_bytes(b"w")
@@ -215,7 +215,7 @@ class TestBackendRegistryLookup:
         monkeypatch.setattr(os, "posix_fadvise", lambda fd, _offset, _length, advice: dropped.append(advice), raising=False)
         monkeypatch.setattr(os, "POSIX_FADV_DONTNEED", 4, raising=False)
 
-        memory_cuda.drop_cached_files(tmp_path)
+        page_cache.drop_cached_files(tmp_path)
 
         assert dropped == [4, 4]
 
@@ -367,7 +367,7 @@ class TestIdeogram4MfluxBackend:
 
         return image_mac_module
 
-    def test_ideogram4_load_model_uses_fp8_config_without_quantize(self):
+    def test_ideogram4_load_model_uses_fp8_config_and_forwards_quantize(self):
         image_mac_module = self._import_backend_module()
         backend = image_mac_module.MfluxBackend()
         model_info = image_mac_module.ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
@@ -380,7 +380,7 @@ class TestIdeogram4MfluxBackend:
             monkeypatch.setattr(image_mac_module, "Ideogram4", ideogram_ctor)
 
             model, loaded_info = backend.load_model(
-                "ideogram-ai/ideogram-4-fp8",
+                "/models/ideo",
                 quantize=4,
                 lora_paths=["/tmp/style.safetensors"],
                 lora_weights=[0.75],
@@ -388,14 +388,41 @@ class TestIdeogram4MfluxBackend:
 
         assert loaded_info == model_info
         assert model is ideogram_ctor.return_value
-        call_kwargs = ideogram_ctor.call_args.kwargs
-        assert call_kwargs == {
-            "model_path": "ideogram-ai/ideogram-4-fp8",
+        assert ideogram_ctor.call_args.kwargs == {
+            "quantize": 4,
+            "model_path": "/models/ideo",
             "model_config": "ideogram4-config",
             "lora_paths": ["/tmp/style.safetensors"],
             "lora_scales": [0.75],
         }
-        assert "quantize" not in call_kwargs
+
+    def test_ideogram4_loads_without_the_unconditional_component_and_restores_mflux(self):
+        image_mac_module = self._import_backend_module()
+        definition = image_mac_module.Ideogram4WeightDefinition
+        initializer = image_mac_module.Ideogram4Initializer
+        originals = (definition.get_components, initializer._init_models, initializer._apply_lora)
+
+        with image_mac_module._instant_ideogram4():
+            names = [component.name for component in definition.get_components()]
+            assert initializer._apply_lora != originals[2]
+
+        assert "unconditional_transformer" not in names and "conditional_transformer" in names
+        assert (definition.get_components, initializer._init_models, initializer._apply_lora) == originals
+
+    def test_ideogram4_loras_go_to_the_conditional_transformer_only(self):
+        image_mac_module = self._import_backend_module()
+        model = MagicMock()
+
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            loader = MagicMock()
+            loader.load_and_apply_lora.return_value = (["/l/a.safetensors"], [0.7])
+            monkeypatch.setattr(image_mac_module, "LoRALoader", loader)
+            with image_mac_module._instant_ideogram4():
+                image_mac_module.Ideogram4Initializer._apply_lora(model, ["/l/a.safetensors"], [0.7], True)
+
+        assert loader.load_and_apply_lora.call_args.kwargs["transformer"] is model.conditional_transformer
+        loader._apply_single_lora.assert_not_called()
+        assert (model.lora_paths, model.lora_scales) == (["/l/a.safetensors"], [0.7])
 
     def test_ideogram4_text_to_image_strips_scheduler_and_negative(self):
         image_mac_module = self._import_backend_module()
@@ -410,8 +437,8 @@ class TestIdeogram4MfluxBackend:
             width=1024,
             height=1024,
             seed=123,
-            steps=20,
-            guidance=7.0,
+            steps=8,
+            guidance=1.0,
             scheduler="beta",
             negative_prompt="blurry",
             steps_explicit=True,
@@ -425,9 +452,9 @@ class TestIdeogram4MfluxBackend:
         assert kwargs["width"] == 1024
         assert kwargs["height"] == 1024
         assert kwargs["seed"] == 123
-        assert kwargs["preset"] == "V4_DEFAULT_20"
-        assert kwargs["num_inference_steps"] == 20
-        assert kwargs["guidance"] == 7.0
+        assert "preset" not in kwargs
+        assert kwargs["num_inference_steps"] == 8
+        assert kwargs["guidance"] == 1.0
         assert "scheduler" not in kwargs
         assert "negative_prompt" not in kwargs
 
@@ -444,8 +471,8 @@ class TestIdeogram4MfluxBackend:
             width=1024,
             height=1024,
             seed=123,
-            steps=20,
-            guidance=7.0,
+            steps=8,
+            guidance=1.0,
             scheduler="beta",
             negative_prompt="blurry",
             steps_explicit=True,
@@ -465,9 +492,9 @@ class TestIdeogram4MfluxBackend:
         assert kwargs["width"] == 1024
         assert kwargs["height"] == 1024
         assert kwargs["seed"] == 123
-        assert kwargs["preset"] == "V4_DEFAULT_20"
-        assert kwargs["num_inference_steps"] == 20
-        assert kwargs["guidance"] == 7.0
+        assert "preset" not in kwargs
+        assert kwargs["num_inference_steps"] == 8
+        assert kwargs["guidance"] == 1.0
         assert "scheduler" not in kwargs
         assert "negative_prompt" not in kwargs
 
@@ -485,8 +512,8 @@ class TestIdeogram4MfluxBackend:
             width=1024,
             height=1024,
             seed=123,
-            steps=20,
-            guidance=7.0,
+            steps=8,
+            guidance=1.0,
             scheduler="beta",
             negative_prompt="blurry",
             steps_explicit=True,
@@ -514,8 +541,8 @@ class TestIdeogram4MfluxBackend:
             width=1024,
             height=1024,
             seed=123,
-            steps=20,
-            guidance=7.0,
+            steps=8,
+            guidance=1.0,
             scheduler="beta",
             negative_prompt="blurry",
             steps_explicit=True,
@@ -552,70 +579,30 @@ class TestIdeogram4MfluxBackend:
 
         assert image_mac_module._wrap_ideogram4_prompt(prompt) == prompt.strip()
 
-    def test_ideogram4_text_to_image_omits_steps_and_guidance_when_not_explicit(self):
+    def test_ideogram4_text_to_image_runs_the_given_steps_at_the_built_in_guidance(self):
         image_mac_module = self._import_backend_module()
         backend = image_mac_module.MfluxBackend()
         backend._model_info = image_mac_module.ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
         model = MagicMock()
         model.generate_image.return_value = _make_generated_image_result()
 
-        backend.text_to_image(
-            model=model,
-            prompt="a lighthouse in fog",
-            width=832,
-            height=1216,
-            seed=42,
-            steps=20,
-            guidance=7.0,
-            steps_explicit=False,
-            guidance_explicit=False,
-        )
+        backend.text_to_image(model=model, prompt="a lighthouse in fog", width=832, height=1216, seed=42, steps=12, guidance=1.0)
 
         kwargs = model.generate_image.call_args.kwargs
-        assert kwargs["preset"] == "V4_DEFAULT_20"
-        assert "num_inference_steps" not in kwargs
-        assert "guidance" not in kwargs
+        assert (kwargs["num_inference_steps"], kwargs["guidance"]) == (12, 1.0)
+        assert "preset" not in kwargs
 
-    @pytest.mark.parametrize(
-        ("steps_explicit", "guidance_explicit", "expected_present", "expected_absent"),
-        [
-            (True, False, "num_inference_steps", "guidance"),
-            (False, True, "guidance", "num_inference_steps"),
-        ],
-    )
-    def test_ideogram4_text_to_image_treats_explicit_flags_independently(
-        self,
-        steps_explicit,
-        guidance_explicit,
-        expected_present,
-        expected_absent,
-    ):
+    def test_ideogram4_text_to_image_ignores_another_guidance_with_a_warning(self):
         image_mac_module = self._import_backend_module()
         backend = image_mac_module.MfluxBackend()
         backend._model_info = image_mac_module.ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
         model = MagicMock()
         model.generate_image.return_value = _make_generated_image_result()
 
-        backend.text_to_image(
-            model=model,
-            prompt='{"type":"caption","text":"keep verbatim"}',
-            width=832,
-            height=1216,
-            seed=42,
-            steps=20,
-            guidance=7.0,
-            scheduler="beta",
-            negative_prompt="blurry",
-            steps_explicit=steps_explicit,
-            guidance_explicit=guidance_explicit,
-        )
+        with pytest.warns(UserWarning, match="guidance"):
+            backend.text_to_image(model=model, prompt="a lighthouse in fog", width=832, height=1216, seed=42, steps=8, guidance=7.0, guidance_explicit=True)
 
-        kwargs = model.generate_image.call_args.kwargs
-        assert kwargs["preset"] == "V4_DEFAULT_20"
-        assert kwargs[expected_present] == (20 if expected_present == "num_inference_steps" else 7.0)
-        assert expected_absent not in kwargs
-        assert "scheduler" not in kwargs
-        assert "negative_prompt" not in kwargs
+        assert model.generate_image.call_args.kwargs["guidance"] == 1.0
 
     @pytest.mark.parametrize(
         ("first_sigma", "expected_effective_sigma"),
@@ -652,8 +639,8 @@ class TestIdeogram4MfluxBackend:
                     width=1024,
                     height=1024,
                     seed=123,
-                    steps=20,
-                    guidance=7.0,
+                    steps=8,
+                    guidance=1.0,
                     steps_explicit=True,
                     guidance_explicit=True,
                     first_sigma=first_sigma,

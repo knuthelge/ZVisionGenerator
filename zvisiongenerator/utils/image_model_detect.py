@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from zvisiongenerator.utils.ideogram4_instant import is_instant_dir
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, split_huggingface_revision
 
 _HF_REPO_PATTERN = re.compile(r"^[a-zA-Z0-9._-]+/[a-zA-Z0-9._-]+$")
@@ -48,6 +49,9 @@ def detect_image_model(model_path: str) -> ImageModelInfo:
     """
     # Detect local filesystem paths that don't exist — avoid confusing HF lookups
     is_local = os.path.isdir(model_path)
+    if not is_local and is_instant_dir(model_path):
+        # Ideogram 4 Instant's folder before its first-use build.
+        return ImageModelInfo(family="ideogram4", is_distilled=False, size=None)
 
     if not is_local:
         # Explicitly local paths: absolute, starts with ./ ../ ~/, or has backslash

@@ -14,6 +14,7 @@ from zvisiongenerator.backends import get_backend, release_accelerator_memory
 from zvisiongenerator.enhance_cli import add_enhance_arguments, defer_format_to_entries, parse_enhance_args
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.app_log import setup_logging
+from zvisiongenerator.ideogram4_instant_builder import BUILDING_PHASE, ensure_instant_model
 from zvisiongenerator.image_model_loader import SAVING_QUANT_PHASE, load_image_model
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.utils.config import MAX_SHARPEN_AMOUNT, load_config, resolve_defaults, resolve_upscale_steps, select_ratio_size_defaults, validate_scheduler
@@ -300,6 +301,19 @@ def main(*, prog: str = "ziv-image") -> None:
             logger.exception("Prompt preflight failed")
             parser.error(str(e))
         if plan.cancelled:
+            return
+        try:
+            built = ensure_instant_model(
+                args.model,
+                config,
+                platform_key=sys.platform,
+                on_phase=lambda phase: print("Building Ideogram 4 Instant: downloading and converting its transformer (first use only)...", flush=True) if phase == BUILDING_PHASE else None,
+                cancelled=lambda: skip.pending() == "quit",
+            )
+        except (RuntimeError, OSError, ValueError) as e:
+            logger.exception("Failed to build model %s", args.model)
+            parser.error(f"Failed to build Ideogram 4 Instant: {e}")
+        if not built:
             return
         try:
             loaded_model, loaded_model_info = load_image_model(

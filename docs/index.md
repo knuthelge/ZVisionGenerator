@@ -11,7 +11,7 @@ Z-Vision Generator gives you a unified CLI for both image and video generation, 
 
 ## Features
 
-- **Image generation** — text-to-image with Z-Image, FLUX.2 Klein (4B/9B) and Krea 2 Turbo model families, plus Ideogram 4 (FP8 on macOS/MLX, NF4 on Windows and Linux)
+- **Image generation** — text-to-image with Z-Image, FLUX.2 Klein (4B/9B) and Krea 2 Turbo model families, plus Ideogram 4 Instant (8 steps, with q4/q8 on every platform)
 - **Video generation** — text-to-video and image-to-video with platform-specific LTX aliases, audio included by default
 - **Cross-platform** — automatic backend selection: MLX on macOS, diffusers/CUDA on Windows and Linux for images, and the shared diffusers/CUDA LTX backend on Windows and Linux for video
 - **Prompt system** — YAML prompt files with variables (`{red|blue|green}`), structured prompts, snippets, and batch runs

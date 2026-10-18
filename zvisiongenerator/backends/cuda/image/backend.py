@@ -16,6 +16,7 @@ from zvisiongenerator.backends.cuda.block_streaming import group_offload
 from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
 from zvisiongenerator.backends.cuda.image.ideogram4 import generate as generate_ideogram4
 from zvisiongenerator.backends.cuda.image.ideogram4 import load_pipeline as load_ideogram4_pipeline
+from zvisiongenerator.backends.cuda.image.ideogram4 import save_quantized as save_ideogram4_quantized
 from zvisiongenerator.backends.cuda.image.preview import LivePreview, create_live_preview
 from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, restore_cpu_offload, warn_unmatched_lora
 from zvisiongenerator.backends.cuda.memory import configure_allocator
@@ -137,6 +138,14 @@ def _klein_img2img_latents(pipe: Any, image: Image.Image, sigmas: list[float], w
     noise = torch.randn(clean.shape, generator=generator, dtype=torch.float32).to(device=clean.device, dtype=clean.dtype)
     sigma = _klein_start_sigma(pipe, sigmas, width, height)
     return (1.0 - sigma) * clean + sigma * noise
+
+
+def _supported_bits(bits: int | None) -> int | None:
+    """Return *bits* when this backend quantizes to it (4: NF4, 8: FP8), else warn and return ``None`` (full precision)."""
+    if bits in (None, 4, 8):
+        return bits
+    warnings.warn(f"Unsupported quantize value {bits!r}; loading at full precision. Use 4 (NF4) or 8 (FP8).", stacklevel=4)
+    return None
 
 
 def _load_nf4(model_path: str, torch_dtype: torch.dtype, family: str, *, prequantized: bool):
@@ -318,6 +327,9 @@ class DiffusersBackend:
 
     def save_quantized(self, model: Any, path: str) -> None:
         """Write a pipeline loaded at q4 (NF4, no LoRAs) to *path* in diffusers' pre-quantized format."""
+        if self._model_info is not None and self._model_info.family == "ideogram4":
+            save_ideogram4_quantized(model, path)
+            return
         model.save_pretrained(path)
 
     def write_quantized_files(self, source: str, path: str, bits: int, cancelled: Callable[[], bool] | None = None) -> None:
@@ -353,7 +365,9 @@ class DiffusersBackend:
         self._model_info = model_info
 
         if model_info.family == "ideogram4":
-            pipeline = load_ideogram4_pipeline(model_path, torch_dtype)
+            stored_bits = stored_quant_bits(Path(model_path))
+            bits = _supported_bits(stored_bits if stored_bits is not None else quantize)
+            pipeline = load_ideogram4_pipeline(model_path, torch_dtype, bits, prequantized=stored_bits is not None)
             if lora_paths:
                 _load_loras(pipeline, lora_paths, lora_weights)
         else:
@@ -380,10 +394,7 @@ class DiffusersBackend:
     ) -> Any:
         """Load a text-to-image pipeline at the requested quantize level (or a stored copy's), with its LoRAs."""
         stored_bits = stored_quant_bits(Path(model_path))
-        bits = stored_bits if stored_bits is not None else quantize
-        if bits not in (None, 4, 8):
-            warnings.warn(f"Unsupported quantize value {bits!r}; loading at full precision. Use 4 (NF4) or 8 (FP8).", stacklevel=3)
-            bits = None
+        bits = _supported_bits(stored_bits if stored_bits is not None else quantize)
 
         if bits == 4:
             pipeline = _load_nf4(model_path, torch_dtype, model_info.family, prequantized=stored_bits is not None)
@@ -523,12 +534,10 @@ class DiffusersBackend:
         guidance: float,
         skip_signal: Any | None,
         step_callback: Any | None,
-        steps_explicit: bool,
-        guidance_explicit: bool,
         first_sigma: float | None,
     ) -> Image.Image | None:
-        """Run Ideogram 4 with its default sampler preset unless steps or guidance were given, and the first-step sigma override."""
-        sampler = sampler_settings(steps, guidance, steps_explicit=steps_explicit, guidance_explicit=guidance_explicit)
+        """Run Ideogram 4 Instant for *steps* with its built-in guidance and the first-step sigma override."""
+        sampler = sampler_settings(steps, guidance)
         callback_kwargs: dict[str, Any] = {}
         if skip_signal is not None or step_callback is not None:
             callback_kwargs = self._step_callback_kwargs(skip_signal, step_callback, sampler.steps, height, width)
@@ -569,7 +578,7 @@ class DiffusersBackend:
         if self._model_info is None:
             raise RuntimeError("load_model() must be called before generation")
         if self._model_info.family == "ideogram4":
-            return self._ideogram4_text_to_image(model, prompt, width, height, seed, steps, guidance, skip_signal, step_callback, steps_explicit, guidance_explicit, first_sigma)
+            return self._ideogram4_text_to_image(model, prompt, width, height, seed, steps, guidance, skip_signal, step_callback, first_sigma)
         original_scheduler = model.scheduler
         try:
             scheduler_kwargs = _apply_beta_scheduler(model, self._model_info.family, steps) if scheduler == "beta" else {}

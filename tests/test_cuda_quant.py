@@ -141,6 +141,19 @@ class TestWriteFp8Copy:
             f"drop {target.name}/transformer",
         ]
 
+    def test_a_prequantized_text_encoder_is_linked_as_it_is(self, libs, tmp_path):
+        source = _source(tmp_path)
+        (source / "text_encoder").mkdir(exist_ok=True)
+        (source / "text_encoder" / "config.json").write_text(json.dumps({"quantization_config": {"quant_method": "bitsandbytes"}}))
+        target = tmp_path / ".ideo@q8.partial"
+
+        with patch.object(quant, "cast_to_fp8") as mock_cast, patch.object(quant, "_stream_fp8_transformer", return_value=MagicMock()):
+            quant.write_fp8_copy(source, target, "bf16")
+
+        mock_cast.assert_not_called()
+        libs.transformers.AutoModel.from_pretrained.assert_not_called()
+        assert json.loads((target / "text_encoder" / "config.json").read_text())["quantization_config"]["quant_method"] == "bitsandbytes"
+
     def test_stops_between_components_when_cancelled(self, libs, tmp_path):
         source = _source(tmp_path)
         answers = iter([False, True])

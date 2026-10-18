@@ -861,7 +861,7 @@ export interface ActiveJobState extends JobContext {
 }
 
 /** Phase of a `model_loading` event. */
-export type LoadPhase = 'downloading' | 'loading' | 'saving_quant';
+export type LoadPhase = 'building' | 'downloading' | 'loading' | 'saving_quant';
 
 /** Server phase order of a job: queued, prompt enhancement, model load, then the generation loop. */
 export type JobPhase = 'queue' | 'enhance' | 'load' | 'generate';

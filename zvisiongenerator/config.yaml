@@ -100,14 +100,28 @@ model_aliases:
   klein9b: "black-forest-labs/FLUX.2-klein-9B"
   klein4b: "black-forest-labs/FLUX.2-klein-4B"
   krea2: "unsloth/Krea-2-Turbo"
-  # Ideogram 4: the FP8 repo on macOS; on Windows and Linux Unsloth's ungated mirror of the official NF4 diffusers
-  # repo (about 15 GB), pinned to the revision whose files were checked byte for byte against the official ones. The
-  # model stays under Ideogram's non-commercial license. The official repo, ideogram-ai/ideogram-4-nf4-diffusers,
-  # needs a Hugging Face login.
-  ideo:
-    darwin: "ideogram-ai/ideogram-4-fp8"
+  # Ideogram 4 Instant: the models-folder entry of the same name, built on first use from ideogram4_instant below.
+  ideo: "ideo"
+
+# Ideogram 4 Instant, fal's 8-step distilled Ideogram 4 (one transformer, guidance built in), under Ideogram's
+# non-commercial license. fal's own repo (fal/ideogram-v4-instant) is gated, so the transformer comes from an ungated
+# single-file repackage whose tensors were checked against fal's; the text encoder, VAE, tokenizer and scheduler come
+# from Unsloth's ungated mirrors of the base model, checked byte for byte against the official repos. Every source is
+# pinned to the checked revision; changing a pin rebuilds the folder.
+ideogram4_instant:
+  transformer:
+    repo: "Hippotes/Ideogram4-Fal-ComfyUI"
+    revision: "9fcb42ce3f82267f61123755d4b65227c2e53a69"
+    filename: "Ideogram4-instant_bf16.safetensors"
+  components:
+    darwin: "unsloth/ideogram-4-fp8@518e05e745736960acb56d8726138ffbc174f0a9"
     win32: "unsloth/ideogram-4-nf4-diffusers@cb5b5dda5e0406c04160f3555c48256ec0cfc899"
     linux: "unsloth/ideogram-4-nf4-diffusers@cb5b5dda5e0406c04160f3555c48256ec0cfc899"
+  # fp8: the base FP8 repo's layout, which mflux loads. bf16: diffusers' layout, quantized by the stored-quant flow.
+  transformer_format:
+    darwin: "fp8"
+    win32: "bf16"
+    linux: "bf16"
 
 # Declared per-alias image families let the Web UI surface known aliases offline
 # (no network round-trip through detect_image_model).
@@ -160,14 +174,13 @@ model_presets:
     supports_negative_prompt: false
     supports_img2img: false
     supports_upscale: false
-    supports_quantize: false
     supports_json_prompt: true
     supports_first_sigma: true
     dimension_min: 256
     dimension_max: 2048
     dimension_step: 16
-    default_steps: 20
-    default_guidance: 7.0
+    default_steps: 8
+    default_guidance: 1.0  # built into Instant; other values are ignored
     default_scheduler:
       mflux: null
       diffusers: null

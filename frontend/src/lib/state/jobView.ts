@@ -232,6 +232,7 @@ export function headline(job: ActiveJobState): string {
   }
   if (phase === 'load') {
     if (job.loadPhase === 'downloading') return `Downloading ${job.model}`;
+    if (job.loadPhase === 'building') return `Building ${job.model}`;
     return job.loadQuant ? 'Preparing the model' : 'Loading the model';
   }
   if (job.workflow === 'upscale') return 'Upscaling';
@@ -372,6 +373,7 @@ export function phaseRows(job: ActiveJobState): PhaseRow[] {
 /** The explanation under the model-load row: what the load is doing and why it only happens the first time. */
 export function loadBody(job: ActiveJobState): string {
   if (job.loadPhase === 'downloading') return 'Downloading the model files. Only the first time; later upscales start from the saved copy.';
+  if (job.loadPhase === 'building') return 'Downloading the model files and converting them for this machine. Only the first time you use this model.';
   if (job.loadQuant && job.loadReplacesDownload) return 'Saving an 8-bit copy and removing the downloaded files to save disk. Only the first time.';
   if (job.loadQuant) return 'Saving a quantized copy so later jobs load in seconds. Only the first time you use this model.';
   return `Loading ${job.model} into memory.`;
@@ -379,6 +381,7 @@ export function loadBody(job: ActiveJobState): string {
 
 function loadLabel(job: ActiveJobState): string {
   if (job.loadPhase === 'downloading') return 'Download model';
+  if (job.loadPhase === 'building') return 'Build model';
   return job.loadQuant ? 'Prepare model' : 'Load model';
 }
 
@@ -390,7 +393,10 @@ function rowDetail(job: ActiveJobState, key: JobPhase, status: PhaseRowStatus, t
     if (rewrite && status !== 'done') return `${rewrite.done} of ${rewrite.total} rewritten`;
     return job.enhanceTotal ? `${job.enhanceTotal} prompt${job.enhanceTotal === 1 ? '' : 's'}` : '';
   }
-  if (key === 'load') return job.loadQuant ? `q${job.loadQuant} copy · first use only` : job.model;
+  if (key === 'load') {
+    if (job.loadPhase === 'building') return 'first use only';
+    return job.loadQuant ? `q${job.loadQuant} copy · first use only` : job.model;
+  }
   if (key === 'generate') return total > 1 ? `${total} ${itemNoun(job)}s` : '';
   return '';
 }

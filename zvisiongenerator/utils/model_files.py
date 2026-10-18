@@ -162,6 +162,12 @@ def is_krea2_model(model_dir: Path) -> bool:
     return index is not None and index.get("_class_name") == "Krea2Pipeline"
 
 
+def is_ideogram4_model(model_dir: Path) -> bool:
+    """Return whether *model_dir*'s ``model_index.json`` declares an Ideogram 4 pipeline."""
+    index = _read_model_index(model_dir)
+    return index is not None and index.get("_class_name") == "Ideogram4Pipeline"
+
+
 def has_complete_weights(model_dir: Path) -> bool:
     """Return whether *model_dir* holds every weight file its layout declares."""
     components = weighted_components(model_dir)

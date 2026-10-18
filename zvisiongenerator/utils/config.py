@@ -65,6 +65,7 @@ def load_config() -> dict[str, Any]:
         "schedulers",
         "platforms",
         "model_aliases",
+        "ideogram4_instant",
         "model_presets",
         "video_sizes",
         "video_generation",

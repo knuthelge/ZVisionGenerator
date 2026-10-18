@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.paths import (
     collapse_home,
     display_basename,
@@ -326,15 +325,20 @@ class TestResolveModelAliasPlatformAware:
 
         assert result == "Tongyi-MAI/Z-Image-Turbo"
 
-    def test_ideogram4_alias_resolves_for_darwin_platform(self, monkeypatch, tmp_path):
+    def test_an_alias_to_a_bare_name_resolves_to_that_models_folder_before_it_exists(self, monkeypatch, tmp_path):
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
-        (tmp_path / "models").mkdir(parents=True, exist_ok=True)
 
-        aliases = load_config()["model_aliases"]
+        result = resolve_model_path("ideo", aliases={"ideo": "ideo"}, platform_key="darwin")
 
-        result = resolve_model_path("ideo", aliases=aliases, platform_key="darwin")
+        assert result == str(tmp_path / "models" / "ideo")
+        assert not (tmp_path / "models" / "ideo").exists()
 
-        assert result == "ideogram-ai/ideogram-4-fp8"
+    def test_a_platform_alias_to_a_bare_name_resolves_to_that_models_folder(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path))
+
+        result = resolve_model_path("built", aliases={"built": {"linux": "built-copy", "darwin": "owner/repo"}}, platform_key="linux")
+
+        assert result == str(tmp_path / "models" / "built-copy")
 
 
 class TestResolveLoraPath:

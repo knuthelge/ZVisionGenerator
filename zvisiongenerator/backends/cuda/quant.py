@@ -17,15 +17,15 @@ is read (see :func:`_stream_fp8_transformer`), so it is never held in memory at 
 from __future__ import annotations
 
 import json
-import os
 import re
-import shutil
 from collections.abc import Callable, Collection, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends.cuda.memory import drop_cached_files, release_memory
-from zvisiongenerator.backends.cuda.safetensors_stream import iter_tensors
+from zvisiongenerator.backends.cuda.memory import release_memory
+from zvisiongenerator.utils.file_links import link_tree
+from zvisiongenerator.utils.page_cache import drop_cached_files
+from zvisiongenerator.utils.safetensors_stream import iter_tensors
 
 if TYPE_CHECKING:
     import torch
@@ -35,9 +35,10 @@ __all__ = [
     "empty_diffusers_model",
     "fill_weights",
     "kept_in_compute_dtype",
-    "link_or_copy",
     "load_fp8_components",
+    "load_fp8_transformer",
     "load_nf4_components",
+    "load_nf4_transformer",
     "write_fp8_copy",
 ]
 
@@ -92,15 +93,20 @@ def load_fp8_components(model_path: str, compute_dtype: torch.dtype) -> dict[str
     copy). It loads first, so its full-precision weights are released before the transformer loads.
     """
     text_encoder = cast_to_fp8(_load_text_encoder(model_path, compute_dtype), compute_dtype)
-    transformer = _stream_fp8_transformer(_component_dir(model_path, "transformer"), compute_dtype)
-    return {"text_encoder": text_encoder, "transformer": transformer}
+    return {"text_encoder": text_encoder, "transformer": load_fp8_transformer(model_path, compute_dtype)}
+
+
+def load_fp8_transformer(model_path: str, compute_dtype: torch.dtype) -> Any:
+    """Load the transformer of *model_path*, or of a stored FP8 copy of it, with FP8 weight storage, streamed from its files."""
+    return _stream_fp8_transformer(_component_dir(model_path, "transformer"), compute_dtype)
 
 
 def write_fp8_copy(source: Path, target: Path, compute_dtype: torch.dtype, cancelled: Callable[[], bool] | None = None) -> None:
     """Write an FP8 copy of the diffusers model at *source* into the new directory *target*.
 
     The text encoder and transformer are loaded, cast and saved one at a time; after each, its memory is
-    released and its source and new files leave the page cache. ``model_index.json`` and the other components it
+    released and its source and new files leave the page cache. A component saved already quantized (its config
+    carries a ``quantization_config``, such as a pre-quantized NF4 text encoder) is linked as it is. ``model_index.json`` and the other components it
     lists are hard-linked (or copied, across file systems); other files in *source* are left out.
     When *cancelled* turns true the write stops after the current component, leaving an incomplete folder for the
     caller to discard.
@@ -111,6 +117,7 @@ def write_fp8_copy(source: Path, target: Path, compute_dtype: torch.dtype, cance
         "text_encoder": lambda: cast_to_fp8(_load_text_encoder(str(source), compute_dtype), compute_dtype),
         "transformer": lambda: _stream_fp8_transformer(source / "transformer", compute_dtype),
     }
+    loaders = {name: load for name, load in loaders.items() if not _is_prequantized(source / name)}
     for name, load in loaders.items():
         if cancelled is not None and cancelled():
             return
@@ -120,10 +127,16 @@ def write_fp8_copy(source: Path, target: Path, compute_dtype: torch.dtype, cance
         release_memory()
         drop_cached_files(source / name)
         drop_cached_files(target / name)
-    _link_tree(source / "model_index.json", target / "model_index.json")
+    link_tree(source / "model_index.json", target / "model_index.json")
     for name in _listed_components(source):
         if name not in loaders and (source / name).exists():
-            _link_tree(source / name, target / name)
+            link_tree(source / name, target / name)
+
+
+def _is_prequantized(component_dir: Path) -> bool:
+    """Return whether the component in *component_dir* is saved already quantized (its config has a ``quantization_config``)."""
+    config = component_dir / "config.json"
+    return config.is_file() and "quantization_config" in json.loads(config.read_text(encoding="utf-8"))
 
 
 def _listed_components(model_dir: Path) -> list[str]:
@@ -142,16 +155,22 @@ def load_nf4_components(model_path: str, compute_dtype: torch.dtype, *, prequant
         text_encoder_to_cpu: Move the text encoder off the GPU before the transformer loads, for models
             whose NF4 text encoder and transformer do not fit a 10-12 GB card together.
     """
-    from diffusers import AutoModel as DiffusersAutoModel
     from transformers import AutoModel as HFAutoModel
 
     # A stored copy's configs carry its quantization; transformers rejects an explicit None config.
-    te_options, tx_options = ({}, {}) if prequantized else ({"quantization_config": config} for config in _nf4_configs(compute_dtype))
+    te_options = {} if prequantized else {"quantization_config": _nf4_configs(compute_dtype)[0]}
     text_encoder = HFAutoModel.from_pretrained(model_path, subfolder="text_encoder", dtype=compute_dtype, **te_options)
     if text_encoder_to_cpu:
         text_encoder.to("cpu")
-    transformer = DiffusersAutoModel.from_pretrained(model_path, subfolder="transformer", torch_dtype=compute_dtype, **tx_options)
-    return {"text_encoder": text_encoder, "transformer": transformer}
+    return {"text_encoder": text_encoder, "transformer": load_nf4_transformer(model_path, compute_dtype, prequantized=prequantized)}
+
+
+def load_nf4_transformer(model_path: str, compute_dtype: torch.dtype, *, prequantized: bool) -> Any:
+    """Load the transformer of *model_path* quantized to NF4 on the GPU (*prequantized*: a stored NF4 copy, loaded as saved)."""
+    from diffusers import AutoModel as DiffusersAutoModel
+
+    options = {} if prequantized else {"quantization_config": _nf4_configs(compute_dtype)[1]}
+    return DiffusersAutoModel.from_pretrained(model_path, subfolder="transformer", torch_dtype=compute_dtype, **options)
 
 
 def _nf4_configs(compute_dtype: torch.dtype) -> tuple[Any, Any]:
@@ -270,19 +289,3 @@ def _weight_files(component_dir: Path) -> list[Path]:
         return [component_dir / name for name in sorted(set(weight_map.values()))]
     single = component_dir / "diffusion_pytorch_model.safetensors"
     return [single] if single.is_file() else sorted(component_dir.glob("*.safetensors"))
-
-
-def _link_tree(source: Path, target: Path) -> None:
-    """Hard-link *source* (a file or directory, following symlinks) to *target*, copying where linking fails."""
-    if source.is_dir():
-        shutil.copytree(source, target, copy_function=link_or_copy, dirs_exist_ok=True)
-    else:
-        link_or_copy(source, target)
-
-
-def link_or_copy(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
-    """Hard-link the file *source* resolves to as *target*, or copy it when a link is impossible."""
-    try:
-        os.link(os.path.realpath(source), target)
-    except OSError:
-        shutil.copy2(source, target)

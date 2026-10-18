@@ -16,6 +16,7 @@ These files are not part of the published docs site, and the docs don't link to 
 
 | Proposal | Status | Summary |
 |---|---|---|
+| [Replace Ideogram 4 with Ideogram 4 Instant](ideogram-instant.md) | In progress | `ideo` becomes fal's 8-step distilled Instant (one transformer, no CFG), converted locally on first use from an ungated, tensor-checked copy; FP8 for mflux and NF4/FP8 stored quants on CUDA |
 | [Controls for Web UI video jobs](video-job-controls.md) | In progress | Quit has shipped; Next and Pause for video jobs remain |
 | [Feature parity between macOS and Windows/Linux](platform-parity.md) | In progress | Done: Klein img2img, video audio, two-stage video upscale and its review, quantized and streamed video with the 1.1 transformer, video memory estimates, extending a video, Ideogram 4, the Z-Image scheduler and ffmpeg install; the enhancer download was measured and stays. Open: SeedVR2 plain upscale on CUDA, vendoring numz's PyTorch code after a sizing spike |
 | [First and last frame for image-to-video](video-first-last-frame.md) | Proposed | An optional end image for `img2vid`: macOS first (MLX keyframe on the true last frame), then CUDA via `LTX2ConditionPipeline.from_pipe` with generate-and-trim once a spike confirms it; Last frame picker, `--end-image`, recorded settings and a two-frame enhancer rule |

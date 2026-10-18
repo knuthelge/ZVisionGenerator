@@ -29,6 +29,7 @@ from zvisiongenerator.backends import get_backend, get_seedvr2_upscaler, get_vid
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.core.workflow import GenerationWorkflow
+from zvisiongenerator.ideogram4_instant_builder import ensure_instant_model
 from zvisiongenerator.image_model_loader import load_image_model
 from zvisiongenerator.image_runner import run_batch
 from zvisiongenerator.preflight import run_preflight
@@ -37,6 +38,7 @@ from zvisiongenerator.seedvr2_loader import load_seedvr2
 from zvisiongenerator.upscale_runner import run_upscale
 from zvisiongenerator.utils.config import ltx_load_options
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
+from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.prompt_enhance import EnhanceSettings
@@ -717,7 +719,7 @@ class WebRunner:
         )
         if plan.cancelled:
             return
-        backend, model, model_info = _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal)
+        backend, model, model_info = _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal, config=config)
         run_batch(
             backend,
             model,
@@ -978,15 +980,27 @@ def _load_image_model_with_progress(
     quantize: int | None,
     progress_callback: Callable[[EventPayload], None],
     control_signal: SkipSignal,
+    *,
+    config: dict[str, Any] | None = None,
 ) -> tuple[Any, Any, Any]:
     """Load the request's image model (stored quants, LoRAs) and report ``model_loading`` events.
 
+    With *config*, Ideogram 4 Instant's folder is built first when it is missing (the ``building`` phase).
+
     Returns:
-        ``(backend, model, model_info)``.
+        ``(backend, model, model_info)``; the model is ``None`` when the user quit during the build.
     """
     model_label = request.model_name or model_ref
     progress_callback({"type": "model_loading", "mode": "image", "model": model_label})
     backend = get_backend()
+    if config is not None and not ensure_instant_model(
+        model_ref,
+        config,
+        platform_key=sys.platform,
+        on_phase=lambda phase: progress_callback({"type": "model_loading", "mode": "image", "model": model_label, "phase": phase}),
+        cancelled=lambda: control_signal.pending() == "quit",
+    ):
+        return backend, None, detect_image_model(model_ref)
     model, model_info = load_image_model(
         backend,
         model_ref,
