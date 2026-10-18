@@ -3,7 +3,8 @@
   import { ApiError, errorText } from '$lib/api/client';
   import { loadPromptDocument, previewPromptDocument, savePromptDocument } from '$lib/api/promptFiles';
   import { Icon, Spinner } from '$lib/components/atoms';
-  import { ActionMenu, EmptyState, PathBrowser, requestConfirm } from '$lib/components/molecules';
+  import { ActionMenu, EmptyState, PathBrowser, Segmented, requestConfirm } from '$lib/components/molecules';
+  import { layout } from '$lib/state/layoutMode.svelte';
   import type { ActionMenuEntry } from '$lib/components/molecules/ActionMenu.svelte';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { draft } from '$lib/state/draft.svelte';
@@ -35,6 +36,8 @@
   let restoreOffer = $state<PromptDocument | null>(null);
   let saving = $state(false);
   let fileMenuOpen = $state(false);
+  // Phone: which of the three builder columns is shown.
+  let shownColumn = $state<'snippets' | 'sets' | 'preview'>('sets');
   let fileMenuAnchor = $state<HTMLButtonElement | null>(null);
   let newFileOpen = $state(false);
   let browsing = $state(false);
@@ -281,7 +284,13 @@
   {/if}
 
   {#if phase === 'ready'}
-    <div class="builder">
+    {#if layout.compact}
+      <!-- A phone shows one builder column at a time; drag and drop works within the shown column, the menus across them. -->
+      <div class="column-switch">
+        <Segmented label="Builder column" class="column-seg" options={[{ value: 'snippets', label: 'Snippets' }, { value: 'sets', label: 'Sets' }, { value: 'preview', label: 'Preview' }]} value={shownColumn} onchange={(value) => { shownColumn = value; }} />
+      </div>
+    {/if}
+    <div class="builder" data-column={layout.compact ? shownColumn : 'all'}>
       <aside class="column column-snippets" aria-label="Snippets">
         <SnippetsPanel {builder} {dnd} />
       </aside>
@@ -360,9 +369,15 @@
     .column-preview { display: none; }
   }
   @media (max-width: 720px) {
-    .builder { display: block; overflow-y: auto; }
-    .column { overflow: visible; padding-bottom: 16px; }
-    .column-snippets { border-right: none; border-bottom: 1px solid var(--color-border-strong); }
     .file-folder { display: none; }
   }
+  /* Phone: one column at a time, chosen by the switch above. */
+  .column-switch { flex: none; padding: 8px 12px; border-bottom: 1px solid var(--color-border-subtle); background: var(--color-bg-surface); }
+  .column-switch :global(.column-seg) { display: flex; width: 100%; }
+  .column-switch :global(.column-seg > button) { flex: 1; height: 32px; }
+  .builder[data-column='snippets'], .builder[data-column='sets'], .builder[data-column='preview'] { grid-template-columns: minmax(0, 1fr); }
+  .builder[data-column='snippets'] .column-snippets, .builder[data-column='sets'] .column-sets, .builder[data-column='preview'] .column-preview { display: block; border: 0; }
+  .builder[data-column='snippets'] .column-sets, .builder[data-column='snippets'] .column-preview,
+  .builder[data-column='sets'] .column-snippets, .builder[data-column='sets'] .column-preview,
+  .builder[data-column='preview'] .column-snippets, .builder[data-column='preview'] .column-sets { display: none; }
 </style>

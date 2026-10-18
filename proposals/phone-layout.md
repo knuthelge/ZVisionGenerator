@@ -48,7 +48,7 @@ Chosen from a design study of four directions, prototyped in HTML (not committed
 
 ## Stages
 
-Each stage is one commit that rebuilds the SPA, passes `make check` and keeps every existing feature reachable.
+Each stage is one commit that rebuilds the SPA, passes `make check` and keeps every existing feature reachable. Stages 1 to 10 shipped on 2026-10-18 (unreleased); the Playwright check under Tests is still to do.
 
 1. Touch layer: pointer-coarse size tokens, the switch from tokens, steppers in `InspectorNumber` with hold-to-repeat (off for W × H and Seed), no scrubbing on coarse pointers, a `layout` store (`compact | tall | wide`, `coarse`).
 2. Stage stepping through history: a view index on the Workspace, ← → and hover arrows, the indicator and Latest in the preview header, swipe on touch.
