@@ -548,4 +548,8 @@
   .prompt-status { font-size: var(--text-meta); color: var(--color-text-muted); }
   .word-count { margin-left: auto; padding-right: 4px; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
   .negative-text { min-height: 34px; max-height: 96px; resize: none; }
+  /* Touch: 16px text, below which iOS zooms into a field as it focuses. */
+  @media (pointer: coarse) {
+    .prompt-text, .negative-text { font-size: 16px; }
+  }
 </style>

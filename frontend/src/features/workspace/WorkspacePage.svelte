@@ -285,6 +285,42 @@
   });
   const compactSubmitDisabled = $derived(busy || !authorityReady || promptChoiceMissing() || currentExtendGuard().blocked);
 
+  /** Open the composer and put the caret in the prompt (the Scene box comes first for a video). */
+  async function openComposer(): Promise<void> {
+    activeChip = null;
+    composerOpen = true;
+    await tick();
+    document.querySelector<HTMLElement>('.composer-pane #ws-prompt:not([hidden]), .composer-pane textarea:not([hidden]):not([disabled])')?.focus();
+  }
+
+  // Press and hold Generate on a phone for the run ⌘⇧↵ gives a keyboard: a new seed first.
+  let generateMenuOpen = $state(false);
+  let generateButton = $state<HTMLButtonElement | null>(null);
+  let holdTimer: ReturnType<typeof setTimeout> | undefined;
+  let heldOpen = false;
+  const HOLD_MS = 480;
+  const generateMenuItems = $derived<ActionMenuEntry[]>([
+    { kind: 'item', id: 'generate-new-seed', label: 'Generate with a new seed', onselect: () => { if (draft.state.seed !== null) draft.update('seed', randomSeed()); void tick().then(() => formEl?.requestSubmit()); } },
+  ]);
+
+  function onGeneratePointerDown(): void {
+    heldOpen = false;
+    clearTimeout(holdTimer);
+    holdTimer = setTimeout(() => { heldOpen = true; generateMenuOpen = true; }, HOLD_MS);
+  }
+
+  function onGeneratePointerUp(): void {
+    clearTimeout(holdTimer);
+  }
+
+  // A press that opened the menu must not also submit when it lifts.
+  function onGenerateClick(event: MouseEvent): void {
+    if (heldOpen) {
+      event.preventDefault();
+      heldOpen = false;
+    }
+  }
+
   let loraPopoverOpen = $state(false);
   let loraButtonEl = $state<HTMLButtonElement | null>(null);
   const loraMenuItems = $derived<ActionMenuEntry[]>([
@@ -897,6 +933,10 @@
       const jobCtx = await submitGenerate(formData);
       // The response omits the settings; the review line needs the upscale factor.
       jobStore.jobSubmitted({ ...jobCtx, settings: formSettings(formData) });
+      // The phone shows the job where the output lands: fold the composer and close any open control.
+      composerOpen = false;
+      activeChip = null;
+      sheetOpen = false;
       if (jobCtx.queue_position) {
         react('nodding');
         addToast(`${run ? `Queued ${run.optionId}` : 'Added to the queue'} as #${jobCtx.queue_position}.`, 'info');
@@ -1289,14 +1329,28 @@
           <div class="composer" class:expanded={composerOpen} data-testid="composer">
             {#if generateError}<p class="ui-alert ui-alert-error composer-error" role="alert"><Icon name="alert" size={14} /><span class="min-w-0 break-words">{generateError}</span></p>{/if}
             <div class="composer-row" hidden={composerOpen}>
-              <button type="button" class="composer-summary" aria-label="Edit the prompt" onclick={() => { activeChip = null; composerOpen = true; }}>
+              <button type="button" class="composer-summary" aria-label="Edit the prompt" onclick={() => void openComposer()}>
                 <span class="ui-area-label composer-label">{composerSummary.label}</span>
                 <span class="composer-line" class:placeholder={composerSummary.empty}>{composerSummary.text}</span>
               </button>
-              <button id="ws-submit-compact" type="submit" class="composer-generate ui-btn ui-btn-primary" disabled={compactSubmitDisabled}>
+              <button
+                id="ws-submit-compact"
+                bind:this={generateButton}
+                type="submit"
+                class="composer-generate ui-btn ui-btn-primary"
+                disabled={compactSubmitDisabled}
+                title="Hold for more"
+                onpointerdown={onGeneratePointerDown}
+                onpointerup={onGeneratePointerUp}
+                onpointercancel={onGeneratePointerUp}
+                onpointerleave={onGeneratePointerUp}
+                onclick={onGenerateClick}
+                oncontextmenu={(event) => event.preventDefault()}
+              >
                 <Icon name="bolt" size={16} />{busy ? 'Submitting…' : jobStore.jobsActive ? 'Queue' : 'Generate'}
                 {#if jobStore.jobsActive && jobStore.queuedJobs.length > 0}<span class="composer-q">+{jobStore.queuedJobs.length}</span>{/if}
               </button>
+              <ActionMenu open={generateMenuOpen} anchor={generateButton} label="Generate" items={generateMenuItems} onclose={() => { generateMenuOpen = false; }} />
             </div>
             <div class="composer-pane" hidden={!composerOpen}>
               <ComposePane {context} {busy} jobsActive={jobStore.jobsActive} />
