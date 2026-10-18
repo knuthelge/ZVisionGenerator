@@ -1,6 +1,6 @@
 # Replace Ideogram 4 with Ideogram 4 Instant
 
-**Status:** In progress (2026-10-18). Built on Windows/Linux and measured on a 10 GB NVIDIA GPU (below); the macOS path is written but not yet run on a Mac.
+**Status:** In progress (2026-10-18). Built on Windows/Linux and measured on a 10 GB NVIDIA GPU; the macOS test plan (step 5) passed on a 32 GB M5 (both below).
 
 ### Shipped so far
 
@@ -20,7 +20,29 @@
 | q8 from `ideo@q8` | 3.5 s | 1:07 | 17.3 GB |
 | BF16 (unquantized) | 14.6 s | 2:30 | 25.7 GB |
 
-The base model took about 2.5 minutes of denoising for 20 steps on the same card; Instant's 8 steps take about 30 s. Still open from step 4: the macOS test plan, the blocked-frame rate with first sigma 1.004 against `None`, and base-model LoRAs on Instant.
+The base model took about 2.5 minutes of denoising for 20 steps on the same card; Instant's 8 steps take about 30 s.
+
+### Measured (M5, 32 GB, mflux 0.22.0, 1024×1024, 8 steps)
+
+Every step of the macOS test plan (step 5) passed. Peaks are the process's physical footprint; swap stayed between 0.9 and 3.3 GB and did not grow during denoising.
+
+| Level | Per step | Job wall time | Peak footprint | Models page estimate |
+|---|---|---|---|---|
+| FP8 (unquantized) | 14.7 s | 2:38 | 26 GB | 18.6 GB, fits |
+| q8, saving `ideo@q8` (17 GB) | 14.4 s | 2:52 | 24 GB | 19.1 GB, fits |
+| q8 from `ideo@q8` | 14.7 s | 2:18 | 27 GB | 18.5 GB, fits |
+| q4, saving `ideo@q4` (9.1 GB) | 13.9 s | 2:38 | 24 GB | 11.0 GB, fits |
+| q4 from `ideo@q4` | 15.5 s | 2:22 | 19 GB (15 GB while denoising, the rest in the VAE decode) | 10.6 GB, fits |
+
+- **Build.** The components took about 2.5 minutes and the 18.6 GB transformer about 4.5 minutes to download; the FP8 conversion took a few seconds, with the process footprint near 3.5 GB. The build passes every check of test step 1.
+- **Speed.** At 1024² the three levels run at the same speed, so q4/q8 save memory and disk, not time. At `-s xs` (400×608, the size of the base model's ~10 s per step in [macos-speed.md](macos-speed.md)) Instant takes 3.6 s per step unquantized and 2.3 s at q4, so an image is about 6–8× faster than on the base model.
+- **Stored quants.** The second q8 and q4 runs give the same pixels as the first.
+- **Memory estimates.** MLX's own peak (`mx.get_peak_memory`, which also catches the short VAE decode the footprint samples missed) is 32.8 GiB unquantized, 33.1 GiB at q8 and 25.3 GiB at q4: 15.6–16.2 GiB above the weights, which the estimates count correctly. Denoising alone needs 4–5 GiB of that. The estimates allowed 1.5 GiB, so `estimate_image_memory` now adds 16 GiB for Ideogram 4 (33.1, 33.6 and 25.1 GiB: **Tight** unquantized and at q8, **Fits** at q4 on a 32 GB Mac). Other families also spike at the decode (Z-Image q8 +13 GiB, Krea 2 q8 +9.6 GiB at 1024²) and keep the 1.5 GiB margin for now.
+- **LoRAs.** A LyCORIS LoKr and `ostris/ideogram_4_turbotime_lora`, both made for the base model, load unquantized and at q4 and visibly change the image. At q4 mflux re-quantizes the 204 LoRA-touched layers at q8. A LoRA adds about 2.5 s per step at 1024².
+- **Interrupting the build.** Ctrl-C during the conversion leaves no `ideo/` or partial folder, and the next run skips the download. Ctrl-C during the transformer download also leaves nothing behind, but the downloaded part is lost (2.2 GB of 18.6 GB in the test), so the next run downloads it again from the start, contrary to the builder's docstring. Both print a full `KeyboardInterrupt` traceback.
+- **Blocked frames.** With a JSON caption from the enhancer, seed 42 renders a garbled "Image blocked by safety filter" text over the image at every level, and q4 degrades that image further. On that seed at q4, first sigma `None` (the schedule's own 0.99988) gives the full grey blocked frame, 1.004 the overlay and 1.006 no text but a broken image. Four random seeds with the same caption at q8 were all clean. So 1.004 stays the default; a rate needs a larger prompt and seed set.
+
+Still open from step 4: the blocked-frame rate on a fixed prompt set, and an interrupted transformer download that does not resume.
 
 
 ## Problem
@@ -68,7 +90,7 @@ The shared components (text encoder, VAE, tokenizer, scheduler) are the base mod
 ### What our stack supports
 
 - **diffusers 0.41.0.** `Ideogram4Pipeline` always calls `unconditional_transformer` and blends `v = g·pos + (1−g)·neg`. With `guidance_scale=1.0` the unconditional output is multiplied by zero, so fal's card passes a zero-parameter stand-in module that returns `zeros_like(hidden_states)`. `Ideogram4Transformer2DModel` has no single-file loader for Ideogram (`loaders/single_file_utils.py` has no entry), and it expects the split `to_q`/`to_k`/`to_v`/`to_out.0` names.
-- **mflux 0.23.0.** No Instant support. `Ideogram4Initializer` always builds both transformers. `_validate_fp8_layout` accepts only the FP8 layout (`text_encoder/config.json` flag) or an mflux-saved checkpoint. Its linears are `Fp8Linear` (E4M3 codes plus a per-row `weight_scale`), and `Fp8Linear.to_quantized` dequantizes and requantizes, so `quantize=4/8` works from an FP8 checkpoint. `generate_image` skips the unconditional forward when the step's guidance is 1.0 (mflux #441), and with `num_inference_steps=8, guidance=1.0` and the `V4_DEFAULT_20` preset it runs exactly Instant's schedule (`mu=0.0`, `std=1.75`). The "bf16" mflux-community save is in fact FP8 (U8 weights plus `weight_scale`).
+- **mflux 0.22.0.** No Instant support. `Ideogram4Initializer` always builds both transformers. `_validate_fp8_layout` accepts only the FP8 layout (`text_encoder/config.json` flag) or an mflux-saved checkpoint. Its linears are `Fp8Linear` (E4M3 codes plus a per-row `weight_scale`), and `Fp8Linear.to_quantized` dequantizes and requantizes, so `quantize=4/8` works from an FP8 checkpoint. `generate_image` skips the unconditional forward when the step's guidance is 1.0 (mflux #441), and with `num_inference_steps=8, guidance=1.0` and the `V4_DEFAULT_20` preset it runs exactly Instant's schedule (`mu=0.0`, `std=1.75`). The "bf16" mflux-community save is in fact FP8 (U8 weights plus `weight_scale`).
 - **The converter.** `converters/convert_checkpoint.py` (`ziv model`, and the Web UI converter) already builds a diffusers folder from a single-file transformer plus a base repo's other components, for Z-Image, Klein and Krea 2.
 
 ## Change
