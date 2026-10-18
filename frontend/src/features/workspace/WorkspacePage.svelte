@@ -34,7 +34,15 @@
   import QueuePanel from './QueuePanel.svelte';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import ControlsSidebar from './ControlsSidebar.svelte';
+  import ComposePane from './ComposePane.svelte';
   import HistoryStrip from './HistoryStrip.svelte';
+  import SettingsStrip from './SettingsStrip.svelte';
+  import SettingPopover from './SettingPopover.svelte';
+  import { settingsChips, type ChipKey } from './settingsChips';
+  import { BottomSheet } from '$lib/components/molecules';
+  import { fileName } from '$lib/components/molecules/assetDetails';
+  import { settingDefaultsFor } from '$lib/state/draft.svelte';
+  import { framesToSeconds, roundSeconds } from '$lib/state/videoDuration';
   import { fitOutputGrid } from './outputGrid';
   import { randomSeed } from './seed';
   import { workspaceCapabilities } from './capabilities';
@@ -53,6 +61,11 @@
 
   // Portrait tablet: the stage over Compose and Settings side by side, instead of a sidebar beside a narrow stage.
   const tall = $derived(layout.mode === 'tall');
+  // Phone: the stage is the screen; settings are a strip of chips that open one control each, the prompt a composer.
+  const compact = $derived(layout.mode === 'compact');
+  let activeChip = $state<ChipKey | null>(null);
+  let sheetOpen = $state(false);
+  let composerOpen = $state(false);
 
   let context = $state<WorkspaceContext | null>(null);
   let loadError = $state<string | null>(null);
@@ -232,6 +245,45 @@
 
   // Active lora chips parsed from draft.state.loraString; reused settings record paths, shown by LoRA name.
   const loraChips = $derived<LoraChip[]>(parseLoraString(draft.state.loraString, loraOptions));
+
+  // The phone's settings strip: one chip per setting, derived from the same state the inspector shows.
+  const chips = $derived.by(() => {
+    if (!compact || !context || !authorityReady) return [];
+    const s = draft.state;
+    const caps = workspaceCapabilities(context, s);
+    const defaults = settingDefaultsFor(context, { workflow: s.workflow, model: s.model }) as Partial<DraftState>;
+    const presets = (caps.isImageMode ? context.image_size_dimensions : (context.video_size_dimensions ?? {}))[s.ratio]?.[s.size] ?? [s.width, s.height];
+    const timing = videoTimingFor(context, s.model);
+    const sourceFps = draft.extendSource?.fps ?? null;
+    const memoryStatus = s.workflow === 'extend' ? draft.extendSource?.memory_fit?.status : clipMemory.fit?.status;
+    return settingsChips({
+      caps,
+      state: s,
+      changed: (...keys) => keys.some((key) => key in defaults && s[key] !== defaults[key]),
+      width: s.dimensionMode === 'custom' ? s.width : presets[0],
+      height: s.dimensionMode === 'custom' ? s.height : presets[1],
+      seconds: caps.showFrameCount ? roundSeconds(framesToSeconds(s.frameCount, timing.fps)) : null,
+      extendSeconds: sourceFps && s.extendFrames !== null ? roundSeconds(s.extendFrames / sourceFps) : null,
+      extendChanged: false,
+      loraNames: loraChips.map((chip) => loraLabel(chip.name)),
+      modelLabel: selectedModel?.label ?? s.model,
+      modelDownloaded: selectedModel?.downloaded !== false,
+      referenceName: imageFile?.name ?? (s.referenceImagePath ? fileName(s.referenceImagePath) : null),
+      sourceName: s.extendSourcePath ? fileName(s.extendSourcePath) : null,
+      memoryWarn: memoryStatus === 'tight' || memoryStatus === 'too_large',
+    });
+  });
+  const changedCount = $derived(chips.filter((chip) => chip.changed).length);
+  // What the folded composer reads: the prompt file and its count, the Enhanced text, or the prompt.
+  const composerSummary = $derived.by(() => {
+    const s = draft.state;
+    if (s.promptSource === 'file') return { label: 'Prompt file', text: s.promptFilePath ? `${fileName(s.promptFilePath)} · ${s.promptFileOptionIds.length} prompts` : 'Choose a prompt file', empty: !s.promptFilePath };
+    const video = s.workflow === 'img2vid' || s.workflow === 'txt2vid' || s.workflow === 'extend';
+    const enhanced = anyEnhancedUsed(s);
+    const text = enhanced ? s.enhancedPrompt || s.enhancedScene : s.prompt || s.scene;
+    return { label: enhanced ? 'Enhanced' : video ? 'Action' : 'Prompt', text: text || (video ? 'What happens in the clip…' : 'Describe what to make…'), empty: !text };
+  });
+  const compactSubmitDisabled = $derived(busy || !authorityReady || promptChoiceMissing() || currentExtendGuard().blocked);
 
   let loraPopoverOpen = $state(false);
   let loraButtonEl = $state<HTMLButtonElement | null>(null);
@@ -686,14 +738,19 @@
 
   let revealingInvalid = false;
 
-  // The browser cannot report an invalid field inside the collapsed sidebar, so expand it and report once shown.
+  // The browser cannot report an invalid field it cannot show: inside the collapsed sidebar, the folded composer or the
+  // closed All sheet. Open the pane that holds it and report once shown.
   function revealInvalidField(event: Event): void {
     const field = event.target as HTMLInputElement;
-    if (!draft.state.sidebarCollapsed || !field.closest?.('#ws-controls-sidebar')) return;
+    let reveal: (() => void) | null = null;
+    if (field.closest?.('.composer-pane') && !composerOpen) reveal = () => { composerOpen = true; };
+    else if (field.closest?.('[data-testid="bottom-sheet"]') && !sheetOpen) reveal = () => { sheetOpen = true; };
+    else if (draft.state.sidebarCollapsed && field.closest?.('#ws-controls-sidebar')) reveal = () => draft.update('sidebarCollapsed', false);
+    if (!reveal) return;
     event.preventDefault();
     if (revealingInvalid) return;
     revealingInvalid = true;
-    draft.update('sidebarCollapsed', false);
+    reveal();
     void tick().then(() => {
       revealingInvalid = false;
       field.reportValidity();
@@ -886,9 +943,10 @@
   <input type="hidden" name="workflow" value={draft.state.workflow}>
   <input type="hidden" name="lora" value={formatLoraString(loraChips)}>
 
-  <!-- Toolbar bar: model, quantize, loras -->
-  <div class="ui-pane-toolbar z-10 shrink-0">
-    <div class="flex flex-wrap items-center px-3 py-2 gap-3">
+  {#snippet toolbar(stacked: boolean)}
+  <!-- Toolbar bar: model, quantize, loras. Stacked, it heads the phone's All sheet. -->
+  <div class="ui-pane-toolbar z-10 shrink-0" class:toolbar-stacked={stacked}>
+    <div class="flex items-center px-3 py-2 gap-3 {stacked ? 'flex-col items-stretch' : 'flex-wrap'}">
 
       <!-- Model selector -->
       <div class="flex flex-wrap items-center gap-2 min-w-0">
@@ -897,7 +955,7 @@
           id="ws-model"
           name="model"
           testId="model-shell"
-          class="w-48"
+          class={stacked ? 'w-full' : 'w-48'}
           value={draft.state.model}
           disabled={!authorityReady || currentModels.length === 0}
           onchange={onModelChange}
@@ -954,7 +1012,7 @@
         {/if}
       </div>
 
-      <div class="bg-border-subtle h-6 w-px shrink-0"></div>
+      <div class="bg-border-subtle shrink-0 {stacked ? 'h-px w-full' : 'h-6 w-px'}"></div>
 
       <!-- LoRA chips area -->
       <div class="flex items-center gap-2 flex-1 min-w-0">
@@ -1014,22 +1072,9 @@
     </div>
   </div>
 
-  <!-- Left column (Compose + Settings) and the stage with its history filmstrip -->
-  <main class="workspace-layout min-h-0 flex-1 overflow-hidden" class:tall class:sidebar-collapsed={!tall && draft.state.sidebarCollapsed}>
-    <ControlsSidebar
-      {context}
-      {busy}
-      {tall}
-      jobsActive={jobStore.jobsActive}
-      queuedCount={jobStore.queuedJobs.length}
-      submitError={generateError}
-      {imageFile}
-      {referencePreviewUrl}
-      lastSeed={historyStore.assets[0]?.seed ?? null}
-      onImageFileChange={(f) => { imageFile = f; submitError = null; }}
-      oncopycli={copyCliCommand}
-    />
+  {/snippet}
 
+  {#snippet stage()}
     <section class="workspace-preview relative z-0 flex min-h-0 min-w-0 flex-col bg-bg-base">
       <div class="ui-pane-header flex h-10 shrink-0 items-center justify-between px-3">
         <h2 class="ui-area-label">Preview</h2>
@@ -1196,24 +1241,112 @@
         {/if}
       </div>
 
-      <HistoryStrip
-        assets={historyStore.assets}
-        loading={historyStore.loading}
-        totalCount={historyStore.totalCount}
-        hasMore={historyStore.hasMore}
-        loadingMore={historyStore.loadingMore}
-        onloadmore={() => void historyStore.loadMore()}
-        {deletingIds}
-        onpreview={openHistoryViewer}
-        onreuse={reuseAsset}
-        onreference={useAsReference}
-        onextend={extendAsset}
-        onupscale={upscaleAsset}
-        {referenceUnavailable}
-        ondelete={deleteWorkspaceAsset}
-      />
+      {#if !compact}
+        <HistoryStrip
+          assets={historyStore.assets}
+          loading={historyStore.loading}
+          totalCount={historyStore.totalCount}
+          hasMore={historyStore.hasMore}
+          loadingMore={historyStore.loadingMore}
+          onloadmore={() => void historyStore.loadMore()}
+          {deletingIds}
+          onpreview={openHistoryViewer}
+          onreuse={reuseAsset}
+          onreference={useAsReference}
+          onextend={extendAsset}
+          onupscale={upscaleAsset}
+          {referenceUnavailable}
+          ondelete={deleteWorkspaceAsset}
+        />
+      {/if}
     </section>
-  </main>
+  {/snippet}
+
+  {#if compact}
+    <!-- The phone: the stage is the screen; under it the settings strip, then the composer with Generate. Compose and
+         Settings stay inside the form (the composer and the All sheet host them) so every field still submits. -->
+    <div class="compact-workspace" data-testid="compact-workspace">
+      {@render stage()}
+      {#if authorityReady && context}
+        <div class="compact-controls">
+          {#if activeChip}
+            <SettingPopover
+              key={activeChip}
+              {context}
+              {busy}
+              models={currentModels}
+              quantizeOptions={supportsQuantize ? quantizeOptions : null}
+              {imageFile}
+              {referencePreviewUrl}
+              lastSeed={historyStore.assets[0]?.seed ?? null}
+              onImageFileChange={(f) => { imageFile = f; submitError = null; }}
+              onModelChange={(model) => draft.hydrateFromContext(context!, model)}
+              onUseLatestAsReference={() => { const latest = historyStore.assets[0]; if (latest) useAsReference(latest, draft.state.workflow === 'img2vid' ? 'video' : 'image'); activeChip = null; }}
+              onclose={() => { activeChip = null; }}
+            />
+          {/if}
+          <SettingsStrip {chips} activeKey={activeChip} {changedCount} onopen={(key) => { activeChip = activeChip === key ? null : key; }} onall={() => { activeChip = null; sheetOpen = true; }} />
+          <div class="composer" class:expanded={composerOpen} data-testid="composer">
+            {#if generateError}<p class="ui-alert ui-alert-error composer-error" role="alert"><Icon name="alert" size={14} /><span class="min-w-0 break-words">{generateError}</span></p>{/if}
+            <div class="composer-row" hidden={composerOpen}>
+              <button type="button" class="composer-summary" aria-label="Edit the prompt" onclick={() => { activeChip = null; composerOpen = true; }}>
+                <span class="ui-area-label composer-label">{composerSummary.label}</span>
+                <span class="composer-line" class:placeholder={composerSummary.empty}>{composerSummary.text}</span>
+              </button>
+              <button id="ws-submit-compact" type="submit" class="composer-generate ui-btn ui-btn-primary" disabled={compactSubmitDisabled}>
+                <Icon name="bolt" size={16} />{busy ? 'Submitting…' : jobStore.jobsActive ? 'Queue' : 'Generate'}
+                {#if jobStore.jobsActive && jobStore.queuedJobs.length > 0}<span class="composer-q">+{jobStore.queuedJobs.length}</span>{/if}
+              </button>
+            </div>
+            <div class="composer-pane" hidden={!composerOpen}>
+              <ComposePane {context} {busy} jobsActive={jobStore.jobsActive} />
+              <div class="composer-foot">
+                <button type="button" class="ui-btn" onclick={() => { composerOpen = false; }}>Done</button>
+                <button type="submit" class="ui-btn ui-btn-primary ui-btn-main" disabled={compactSubmitDisabled}><Icon name="bolt" size={16} />{jobStore.jobsActive ? 'Queue' : 'Generate'}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      {/if}
+      <BottomSheet bind:open={sheetOpen} title="All settings" meta={changedCount ? `${changedCount} changed` : undefined} keepMounted tall>
+        {#snippet headActions()}
+          <button type="button" class="ui-btn ui-btn-sm ui-btn-icon" title="Copy these settings as a ziv CLI command" aria-label="Copy CLI command" onclick={copyCliCommand}><Icon name="terminal" size={14} /></button>
+        {/snippet}
+        <div class="sheet-model">{@render toolbar(true)}</div>
+        <ControlsSidebar
+          {context}
+          {busy}
+          panes="settings"
+          jobsActive={jobStore.jobsActive}
+          queuedCount={jobStore.queuedJobs.length}
+          submitError={generateError}
+          {imageFile}
+          {referencePreviewUrl}
+          lastSeed={historyStore.assets[0]?.seed ?? null}
+          onImageFileChange={(f) => { imageFile = f; submitError = null; }}
+        />
+      </BottomSheet>
+    </div>
+  {:else}
+    {@render toolbar(false)}
+    <!-- Left column (Compose + Settings) and the stage with its history filmstrip -->
+    <main class="workspace-layout min-h-0 flex-1 overflow-hidden" class:tall class:sidebar-collapsed={!tall && draft.state.sidebarCollapsed}>
+      <ControlsSidebar
+        {context}
+        {busy}
+        {tall}
+        jobsActive={jobStore.jobsActive}
+        queuedCount={jobStore.queuedJobs.length}
+        submitError={generateError}
+        {imageFile}
+        {referencePreviewUrl}
+        lastSeed={historyStore.assets[0]?.seed ?? null}
+        onImageFileChange={(f) => { imageFile = f; submitError = null; }}
+        oncopycli={copyCliCommand}
+      />
+      {@render stage()}
+    </main>
+  {/if}
 </form>
 
 <!-- One viewer for history and completed outputs -->
@@ -1256,10 +1389,34 @@
     :global(:root:has(.workspace-layout.sidebar-collapsed)) { --toast-inset-left: 56px; }
     :global(:root:has(.workspace-layout.tall)) { --toast-inset-left: 0px; }
   }
-  @media (max-width: 639px) {
-    .workspace-layout { display: flex; flex-direction: column; overflow-y: auto; }
-    .workspace-preview { flex: none; min-height: 420px; }
-  }
+  /* The phone composition. */
+  .compact-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+  .compact-workspace > :global(.workspace-preview) { flex: 1; min-height: 0; }
+  .compact-workspace :global(.latest-region) { padding: 8px 12px; }
+  .compact-workspace :global(.mascot-dock) { display: none; }
+  .compact-workspace :global(.latest-meta span) { max-width: 60vw; }
+  .compact-workspace .job-view { flex-direction: column; padding: 12px; gap: 10px; }
+  .compact-workspace .job-view-card { width: auto; max-width: none; max-height: 42%; }
+  .compact-controls { position: relative; flex: none; }
+  .compact-controls > :global(.setting-popover) { position: absolute; left: 0; right: 0; bottom: 100%; z-index: 45; }
+  .composer { display: flex; flex-direction: column; gap: 8px; padding: 8px max(12px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-overlay); }
+  .composer-error { margin: 0; }
+  .composer-row { display: flex; align-items: center; gap: 8px; }
+  .composer-row[hidden] { display: none; }
+  .composer-summary { display: flex; flex: 1; min-width: 0; flex-direction: column; justify-content: center; gap: 1px; height: 44px; padding: 0 12px; border-radius: var(--radius-md); background: var(--color-bg-fill); text-align: left; color: var(--color-text-primary); }
+  .composer-label { font-size: 10px; line-height: 12px; }
+  .composer-line { overflow: hidden; font-size: 15px; line-height: 20px; white-space: nowrap; text-overflow: ellipsis; }
+  .composer-line.placeholder { color: var(--color-zinc-600); }
+  .composer-generate { flex: none; height: 44px; padding: 0 16px; border-radius: var(--radius-md); font-size: 14px; }
+  .composer-q { font-family: var(--font-mono); font-size: var(--text-ui); font-weight: 500; opacity: 0.85; }
+  .composer-pane[hidden] { display: none; }
+  .composer-pane :global(.compose-pane) { max-height: 56dvh; padding: 4px 0 0; border-bottom: 0; }
+  .composer-foot { display: flex; gap: 8px; padding-top: 4px; }
+  .composer-foot .ui-btn { height: 44px; font-size: 14px; }
+  .composer-foot .ui-btn-main { flex: 1; }
+  .sheet-model { flex: none; }
+  .sheet-model :global(.toolbar-stacked) { background: transparent; }
+  .sheet-model :global(.toolbar-stacked .ui-select-shell) { height: 40px; font-size: 14px; }
   /* A running job: the preview fills the height on the left, the card is a column that scrolls on its own. */
   .job-view { display: flex; width: 100%; height: 100%; align-items: stretch; gap: 16px; padding: 16px; }
   .job-view-preview { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; }

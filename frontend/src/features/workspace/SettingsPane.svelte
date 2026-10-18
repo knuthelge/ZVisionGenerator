@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { draft, MAX_SHARPEN_AMOUNT, offeredSizes, settingDefaultsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
+  import { draft, offeredSizes, settingDefaultsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
+  import { rangeFill, SPEC } from './settingsSpec';
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
   import { ActionBar, InspectorRow, InspectorSection, PathBrowser, PathInput } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
@@ -40,27 +41,6 @@
   const workflow = $derived(s.workflow);
   const model = $derived(s.model);
   const defaults = $derived(settingDefaultsFor(context, { workflow, model }));
-
-  /** How far along its range a slider value sits, as a CSS percentage for the filled part of the track. */
-  function rangeFill(value: number, spec: { min: number; max: number }): string {
-    const share = (value - spec.min) / (spec.max - spec.min);
-    return `${Math.min(1, Math.max(0, share)) * 100}%`;
-  }
-
-  const SPEC = {
-    runs: { step: 1, min: 1, max: 100 },
-    steps: { step: 1, min: 1, max: 60 },
-    guidance: { step: 0.1, min: 0, max: 10 },
-    strength: { step: 0.01, min: 0, max: 1 },
-    seed: { step: 1, min: 0, max: 2 ** 32 - 1 },
-    firstSigma: { step: 0.001, min: 0.001, max: 2 },
-    sharpen: { step: 0.05, min: 0, max: MAX_SHARPEN_AMOUNT },
-    contrast: { step: 0.05, min: 0.5, max: 2 },
-    saturation: { step: 0.05, min: 0.5, max: 2 },
-    upscaleDenoise: { step: 0.01, min: 0, max: 1 },
-    upscaleSteps: { step: 1, min: 1, max: 60 },
-    upscaleGuidance: { step: 0.1, min: 0, max: 20 },
-  } satisfies Record<string, NumberSpec>;
 
   // --- Dimensions -----------------------------------------------------------
   const dimensionMode = $derived(s.dimensionMode);

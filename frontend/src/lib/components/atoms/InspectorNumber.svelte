@@ -22,6 +22,8 @@
      * labels cannot be scrubbed; `false` keeps a plain field (W × H and Seed, which have presets and dice instead).
      */
     stepper?: boolean | 'auto';
+    /** `lg`: a 48px control with a 22px value, for a popover that holds one setting. */
+    size?: 'md' | 'lg';
     onchange: (value: number | null) => void;
   }
 
@@ -39,6 +41,7 @@
     ariaLabel,
     title,
     stepper = 'auto',
+    size = 'md',
     onchange,
   }: Props = $props();
 
@@ -105,7 +108,7 @@
   }
 </script>
 
-<span class="inspector-number-wrap" class:with-steps={showStepper}>
+<span class="inspector-number-wrap" class:with-steps={showStepper} class:lg={size === 'lg'}>
   {#if showStepper}
     <button
       type="button"
@@ -193,4 +196,9 @@
   @media (pointer: coarse) {
     .inspector-number { height: 32px; font-size: 14px; }
   }
+  /* One setting in a popover: a 48px control the thumb can work. */
+  .lg { border-radius: var(--radius-md); background: var(--color-bg-surface-hover); }
+  .lg .inspector-number { height: 48px; padding: 0 12px; font-size: 22px; text-align: center; background: transparent; }
+  .lg .inspector-number::placeholder { font-size: 15px; }
+  .lg .inspector-step { width: 64px; height: 48px; font-size: 22px; border-radius: var(--radius-md); }
 </style>

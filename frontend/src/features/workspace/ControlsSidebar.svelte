@@ -26,9 +26,11 @@
     oncopycli?: () => void;
     /** Portrait tablet: Compose and Settings sit side by side under the stage, and the sidebar never collapses. */
     tall?: boolean;
+    /** `settings`: Settings alone (a phone's All sheet; the composer owns Compose there). */
+    panes?: 'both' | 'settings';
   }
 
-  let { context, busy, jobsActive = false, queuedCount = 0, submitError = null, imageFile, referencePreviewUrl = null, lastSeed = null, onImageFileChange, oncopycli, tall = false }: Props = $props();
+  let { context, busy, jobsActive = false, queuedCount = 0, submitError = null, imageFile, referencePreviewUrl = null, lastSeed = null, onImageFileChange, oncopycli, tall = false, panes = 'both' }: Props = $props();
   const generateLabel = $derived(jobsActive ? 'Add to queue' : 'Generate');
   const authorityReady = $derived(context !== null && draft.authorityReady);
   const collapsed = $derived(draft.state.sidebarCollapsed && !tall);
@@ -46,7 +48,9 @@
 <aside id="ws-controls-sidebar" class="workspace-left ui-pane ui-pane-left" class:collapsed class:tall aria-label="Compose and settings">
   <div class="sidebar-panes">
     {#if authorityReady && context}
-      <ComposePane {context} {busy} {jobsActive} oncollapse={tall ? undefined : () => setCollapsed(true)} />
+      {#if panes === 'both'}
+        <ComposePane {context} {busy} {jobsActive} oncollapse={tall ? undefined : () => setCollapsed(true)} />
+      {/if}
       <SettingsPane {context} {busy} {jobsActive} {submitError} {imageFile} {referencePreviewUrl} {lastSeed} {onImageFileChange} {oncopycli} />
     {:else}
       <div class="flex-1 overflow-y-auto p-3">
