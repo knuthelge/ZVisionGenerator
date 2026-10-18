@@ -223,6 +223,14 @@
   {/if}
 {/snippet}
 
+{#snippet diskSizeCell(label: string | null | undefined)}
+  {#if label}
+    <span class="whitespace-nowrap font-mono" data-testid="disk-size" title="Disk space its files use">{label}</span>
+  {:else}
+    <span class="text-text-muted">—</span>
+  {/if}
+{/snippet}
+
 {#snippet count(n: number)}
   <span class="font-mono text-meta text-text-muted">{n}</span>
 {/snippet}
@@ -282,12 +290,9 @@
                           {#if m.stored_quant}
                             <span class="ui-help block font-normal" data-testid="stored-quant" title="Used automatically when {m.stored_quant.base_model} runs at q{m.stored_quant.bits}">q{m.stored_quant.bits} copy of {m.stored_quant.base_model}</span>
                           {/if}
-                          {#if m.disk_size_label}
-                            <span class="ui-help block font-normal" data-testid="disk-size">{m.disk_size_label} on disk</span>
-                          {/if}
                         </td>
                         <td class="font-mono">{m.family}</td>
-                        <td class="font-mono">{m.size_label ?? '—'}</td>
+                        <td>{@render diskSizeCell(m.disk_size_label)}</td>
                         <td>{@render memoryFitCell(m)}</td>
                         <td class="text-right">{@render modelDeleteCell(m)}</td>
                       </tr>
@@ -310,6 +315,7 @@
                       <th>Name</th>
                       <th>Family</th>
                       <th>Image to video</th>
+                      <th>Size</th>
                       <th>Memory</th>
                       <th class="w-8"><span class="sr-only">Actions</span></th>
                     </tr>
@@ -320,6 +326,7 @@
                         <td>{@render modelName(m)}</td>
                         <td class="font-mono">{m.family}</td>
                         <td>{m.supports_i2v ? 'Yes' : '—'}</td>
+                        <td>{@render diskSizeCell(m.disk_size_label)}</td>
                         <td>{@render memoryFitCell(m)}</td>
                         <td class="text-right">{@render modelDeleteCell(m)}</td>
                       </tr>

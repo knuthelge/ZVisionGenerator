@@ -12,12 +12,13 @@ from typing import Any
 from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, get_backend_name, supports_stored_quants, supports_video_audio
 from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
-from zvisiongenerator.utils.config import enhancer_tier_models, resolve_defaults, resolve_enhancer_model, resolve_video_defaults, smart_enhancer_model, smart_unavailable
+from zvisiongenerator.utils.config import enhancer_tier_models, ltx_companion_repos, resolve_defaults, resolve_enhancer_model, resolve_video_defaults, smart_enhancer_model, smart_unavailable
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
-from zvisiongenerator.utils.model_files import directory_bytes, find_local_model_dir, huggingface_cache_repo_bytes
-from zvisiongenerator.utils.paths import resolve_model_path
+from zvisiongenerator.utils.model_files import directory_bytes, disk_size_label, find_local_model_dir, huggingface_cache_repo_bytes, huggingface_cache_repo_dir
+from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import matrix_contract, resolve_enhance_ceiling
+from zvisiongenerator.utils.stored_quant import stored_quant_dirs_for
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
@@ -211,7 +212,9 @@ def build_models_response(
     image_defaults = {entry.name: image_defaults_for(entry.name, web_config) for entry in web_config.image_inventory} if memory_budget() else {}
     find_local_dir = functools.cache(find_local_model_dir)
     status = _status_resolver(web_config, image_defaults, find_local_dir)
-    delete_info = _delete_info_resolver(data_dir / "models", find_local_dir, inventory=(*web_config.image_inventory, *web_config.video_inventory), app_config=web_config.app_config)
+    inventory = (*web_config.image_inventory, *web_config.video_inventory)
+    delete_info = _delete_info_resolver(data_dir / "models", find_local_dir, inventory=inventory, app_config=web_config.app_config)
+    disk_size = _disk_size_resolver(data_dir / "models", listed={entry.name for entry in inventory}, app_config=web_config.app_config)
     loras = [{"name": lora.name, "file_size_mb": lora.file_size_mb, "size_label": f"{lora.file_size_mb} MB"} for lora in list_loras(data_dir)]
     return {
         "models_dir": web_config.models_dir,
@@ -225,12 +228,21 @@ def build_models_response(
                 "stored_quant": _stored_quant_payload(entry),
                 **status(entry, "image"),
                 "delete": delete_info(entry),
+                "disk_size_label": disk_size(entry),
             }
             for entry in web_config.image_inventory
         ]
         + _seedvr2_model_rows(web_config.seedvr2, Path(web_config.models_dir)),
         "video_models": [
-            {"name": entry.name, "family": entry.family, "supports_i2v": entry.supports_i2v, "source": entry.source, **status(entry, "video"), "delete": delete_info(entry)}
+            {
+                "name": entry.name,
+                "family": entry.family,
+                "supports_i2v": entry.supports_i2v,
+                "source": entry.source,
+                **status(entry, "video"),
+                "delete": delete_info(entry),
+                "disk_size_label": disk_size(entry),
+            }
             for entry in web_config.video_inventory
         ],
         "enhancer_models": _enhancer_model_rows(web_config.app_config),
@@ -292,7 +304,7 @@ def _enhancer_model_rows(
                 "repo": repo,
                 "revision": revision,
                 "downloaded": downloaded(repo, revision),
-                "disk_size_label": seedvr2_size_label(disk_bytes) if disk_bytes else None,
+                "disk_size_label": disk_size_label(disk_bytes) if disk_bytes else None,
                 "download_size_label": _size_label(size_sections[tier]) if tier in size_sections else None,
                 "unavailable": unavailable,
                 "deletable": target is not None,
@@ -358,6 +370,27 @@ def _delete_info_resolver(
         return {**info, "shared_with": list(target.shared_with)} if target.kind == "copy" else info
 
     return _delete_info
+
+
+def _disk_size_resolver(models_dir: Path, *, listed: set[str], app_config: dict[str, Any]) -> Callable[[ImageInventoryEntry | VideoInventoryEntry], str | None]:
+    """Return a resolver for each model's ``disk_size_label``: the disk its files use, or ``None`` when nothing is on disk.
+
+    An installed model counts its folder (not the HuggingFace files it links to), an alias its HuggingFace download
+    with any companion repos. Stored quants count with their model unless they are rows of their own (in *listed*).
+    """
+
+    def _disk_size(entry: ImageInventoryEntry | VideoInventoryEntry) -> str | None:
+        stored_quants = [path for path in stored_quant_dirs_for(models_dir, entry.name) if path.name not in listed]
+        local = [*stored_quants]
+        hub: list[Path] = []
+        if entry.source == "installed":
+            local.append(models_dir / entry.name)
+        elif (repo := parse_huggingface_repo_reference(entry.resolved_path)) is not None:
+            hub = [huggingface_cache_repo_dir(repo_id) for repo_id in (repo.repo_id, *ltx_companion_repos(app_config, entry.resolved_path))]
+        total = sum(directory_bytes(path) for path in local) + sum(huggingface_cache_repo_bytes(path) for path in hub)
+        return disk_size_label(total) if total else None
+
+    return _disk_size
 
 
 def _image_quantize_levels(web_config: WebUiConfig, capabilities: dict[str, Any]) -> tuple[int, ...]:

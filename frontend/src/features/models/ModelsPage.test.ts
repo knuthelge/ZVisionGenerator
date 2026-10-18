@@ -345,18 +345,20 @@ describe('ModelsPage Browse buttons', () => {
     expect(modelApiMocks.convertCheckpoint).toHaveBeenCalledWith(expect.objectContaining({ quantize: '8' }));
   });
 
-  it('renders image model sizes from size_label', async () => {
+  it('shows the disk use of image and video models, and a dash when nothing is on disk', async () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
-      image_models: [{ name: 'zit', family: 'zimage', size_label: 'xl' }],
+      image_models: [
+        { name: 'zit', family: 'zimage', size_label: 'xl', disk_size_label: '32.9 GB' },
+        { name: 'klein4b', family: 'flux2_klein', size_label: '4b', disk_size_label: null },
+      ],
+      video_models: [{ name: 'ltx-8', family: 'ltx', supports_i2v: true, disk_size_label: '112.3 GB' }],
     });
 
     app = flushSync(() => mount(ModelsPage, { target }));
     await settle();
 
-    expect(target.textContent).toContain('zit');
-    expect(target.textContent).toContain('zimage');
-    expect(target.textContent).toContain('xl');
+    expect(Array.from(target.querySelectorAll('[data-testid="disk-size"]')).map((el) => el.textContent)).toEqual(['32.9 GB', '112.3 GB']);
   });
 
   it('shows long model names and folders in full, in named sections and forms', async () => {

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 - **Web UI: delete the prompt enhancer's models from the Models page.** A new **Prompt enhancer** table lists the Fast and Smart models (and a custom one set on the Config page) with their disk use, and deletes their Hugging Face download to free space, up to 28 GB for both on Windows and Linux. They download again the next time you enhance a prompt
+- **Web UI: see how much disk each model uses.** The image and video tables on the Models page show each model's disk use in their **Size** column (for an alias, its Hugging Face download; for a converted model, its own folder), in place of the model-size letter on image models
 
 ### Fixed
 - **Deleting a Hugging Face model on the Models page frees its disk space again.** Hugging Face now keeps downloaded files in one shared folder of its cache and links each model to them, so deleting a model removed the links but left the files. Delete now removes the files too, unless another downloaded model still uses them

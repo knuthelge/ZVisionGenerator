@@ -201,6 +201,15 @@ def directory_bytes(path: Path) -> int:
     return total
 
 
+def disk_size_label(num_bytes: int) -> str:
+    """Return *num_bytes* in decimal units: "34.7 GB", "92 MB" or "4 KB"."""
+    if num_bytes >= 1e9:
+        return f"{num_bytes / 1e9:.1f} GB"
+    if num_bytes >= 1e6:
+        return f"{num_bytes / 1e6:.0f} MB"
+    return f"{max(1, round(num_bytes / 1e3))} KB"
+
+
 def huggingface_cache_repo_dir(repo_id: str) -> Path:
     """Return the HuggingFace cache folder that holds every downloaded revision of *repo_id*."""
     from huggingface_hub.constants import HF_HUB_CACHE

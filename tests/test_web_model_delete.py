@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -350,6 +351,29 @@ def test_repo_size_counts_files_in_the_shared_blob_store(layout):
     _touch(layout.hub / "models--org--enh" / "blobs" / "small").write_bytes(b"y" * 10)
 
     assert huggingface_cache_repo_bytes(layout.hub / "models--org--enh") == 1000 + 10 + 40  # shared payload, local blob, refs/main
+
+
+def test_disk_size_label_picks_a_readable_unit():
+    from zvisiongenerator.utils.model_files import disk_size_label
+
+    assert [disk_size_label(n) for n in (34_720_000_000, 92_400_000, 4_200, 12)] == ["34.7 GB", "92 MB", "4 KB", "1 KB"]
+
+
+def test_disk_size_counts_own_files_and_unlisted_stored_quants(layout):
+    from zvisiongenerator.web.workspace_api import _disk_size_resolver
+
+    # Sparse files: the sizes count, without writing gigabytes.
+    os.truncate(_touch(layout.models_dir / "base@q8" / "weights"), 2_000_000_000)
+    os.truncate(layout.models_dir / "custom" / "transformer" / "model.safetensors", 1_000_000_000)
+    disk_size = _disk_size_resolver(layout.models_dir, listed={"custom", "base"}, app_config={})
+
+    # The converted model counts its own folder, not the base files it links to.
+    assert disk_size(_image_entry("custom", "installed", "")) == "1.0 GB"
+    # The alias counts its download and its stored quant, which has no row of its own here...
+    assert disk_size(_image_entry("base", "alias", "org/base")) == "2.0 GB"
+    # ...but not one listed as its own row.
+    assert _disk_size_resolver(layout.models_dir, listed={"base", "base@q8"}, app_config={})(_image_entry("base", "alias", "org/base")) == "1 KB"
+    assert disk_size(_image_entry("missing", "alias", "org/missing")) is None
 
 
 class TestSharedBlobDelete:

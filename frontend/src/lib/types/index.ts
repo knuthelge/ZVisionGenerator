@@ -1048,7 +1048,7 @@ export interface ModelEntry extends ModelStatusFields {
   source?: string;
   stored_quant?: StoredQuantInfo | null;
   delete?: ModelDeleteInfo | null;
-  /** Disk use of the stored copy, set on the SeedVR2 row while the copy exists. */
+  /** Disk use of the model's files (with its HuggingFace companions, and stored quants that have no row of their own). */
   disk_size_label?: string | null;
   /** Size of the first-use download, set on the SeedVR2 row. */
   download_size_label?: string | null;
@@ -1060,6 +1060,8 @@ export interface VideoModelEntry extends ModelStatusFields {
   supports_i2v: boolean;
   size_label?: string;
   delete?: ModelDeleteInfo | null;
+  /** Disk use of the model's files, as on image rows. */
+  disk_size_label?: string | null;
 }
 
 /** A prompt-enhancer model configured on this platform: the Fast or Smart tier, or a custom `user_model`. */
