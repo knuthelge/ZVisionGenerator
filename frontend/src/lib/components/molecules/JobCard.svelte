@@ -13,6 +13,8 @@
   import type { ActiveJobState, JobControlAction } from '$lib/types';
   import Alert from './Alert.svelte';
   import JobControls from './JobControls.svelte';
+  import { requestConfirm } from './confirm.svelte';
+  import { layout } from '$lib/state/layoutMode.svelte';
   import JobPhaseLog from './JobPhaseLog.svelte';
 
   type ControlCallback = (jobId: string) => void | Promise<unknown>;
@@ -103,6 +105,23 @@
     } finally {
       sending = null;
     }
+  }
+
+  /**
+   * Send a control the user clicked. A finger asks before Cancel, as the job bar's menu does: the button sits right
+   * under a sheet's Close, so one slip must not end the job. A mouse keeps the direct click, and Esc arms it twice.
+   */
+  async function tapControl(action: JobControlAction): Promise<void> {
+    if (action === 'quit' && (layout.coarse || layout.compact) && !cancelArmed) {
+      const approved = await requestConfirm({
+        question: 'Cancel this job?',
+        info: `The ${noun}s already saved are kept.`,
+        confirmLabel: 'Cancel job',
+        cancelLabel: 'Keep running',
+      });
+      if (!approved) return;
+    }
+    await send(action);
   }
 
   // Esc arms Cancel and a second Esc sends it; P pauses or resumes, N skips and R repeats, unless a field, popover or dialog has the key.
@@ -214,7 +233,7 @@
       </span>
       {#if active}
         {#if controls.job.length}
-          <JobControls controls={controls.job} label="Job controls" {names} {pending} disabled={offline} {cancelArmed} onsend={(action) => void send(action)} />
+          <JobControls controls={controls.job} label="Job controls" {names} {pending} disabled={offline} {cancelArmed} onsend={(action) => void tapControl(action)} />
         {:else if !controls.item.length && phase === 'generate'}
           <span class="ui-help">No controls for {noun} jobs yet</span>
         {/if}

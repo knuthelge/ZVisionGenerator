@@ -16,10 +16,17 @@
 
   let scroller = $state<HTMLDivElement | null>(null);
 
-  // Bring the chip that opened into view, so its popover and its chip line up.
+  // Bring the chip that opened into view, so its popover and its chip line up. The row scrolls itself: scrollIntoView
+  // would also scroll the page, which jolts the screen on a phone whose address bar is in play.
   $effect(() => {
     if (!activeKey || !scroller) return;
-    scroller.querySelector<HTMLElement>(`[data-chip="${activeKey}"]`)?.scrollIntoView?.({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+    const chip = scroller.querySelector<HTMLElement>(`[data-chip="${activeKey}"]`);
+    if (!chip) return;
+    const left = chip.offsetLeft - 12;
+    const right = chip.offsetLeft + chip.offsetWidth + 12;
+    if (typeof scroller.scrollTo !== 'function') return;
+    if (left < scroller.scrollLeft) scroller.scrollTo({ left, behavior: 'smooth' });
+    else if (right > scroller.scrollLeft + scroller.clientWidth) scroller.scrollTo({ left: right - scroller.clientWidth, behavior: 'smooth' });
   });
 </script>
 

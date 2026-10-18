@@ -23,7 +23,7 @@ describe('NavDrawer', () => {
 
   it('renders nothing while closed', () => {
     app = flushSync(() => mount(NavDrawer, { target, props: { open: false, currentPage: 'workspace', onnavigate: vi.fn(), onclose: vi.fn() } }));
-    expect(target.querySelector('[data-testid="nav-drawer"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="nav-drawer"]')).toBeNull();
   });
 
   it('lists the five pages, marks the current one, navigates and closes', () => {
@@ -31,7 +31,7 @@ describe('NavDrawer', () => {
     const onclose = vi.fn();
     app = flushSync(() => mount(NavDrawer, { target, props: { open: true, currentPage: 'workspace', onnavigate, onclose } }));
 
-    const items = Array.from(target.querySelectorAll<HTMLButtonElement>('nav button'));
+    const items = Array.from(document.body.querySelectorAll<HTMLButtonElement>('nav button'));
     expect(items.map((item) => item.textContent?.trim())).toEqual(['Workspace', 'Prompts', 'Gallery', 'Models', 'Config']);
     expect(items[0].getAttribute('aria-current')).toBe('page');
 
@@ -47,7 +47,7 @@ describe('NavDrawer', () => {
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     expect(onclose).toHaveBeenCalledTimes(1);
-    (target.querySelector('button[aria-label="Close menu"]') as HTMLButtonElement).click();
+    (document.body.querySelector('button[aria-label="Close menu"]') as HTMLButtonElement).click();
     expect(onclose).toHaveBeenCalledTimes(2);
     expect(onnavigate).not.toHaveBeenCalled();
   });

@@ -1,3 +1,5 @@
+import { pushEscapeLayer } from './escapeStack';
+
 /** Where a popover's edge lines up with its anchor. */
 export type PopoverAlign = 'start' | 'end';
 
@@ -63,11 +65,8 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
     if (!node.contains(target) && !options.anchor?.contains(target)) options.onclose();
   }
 
-  // Capture phase, so an Escape meant for the popover does not also close a dialog behind it.
-  function onKeydown(event: KeyboardEvent): void {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    event.stopPropagation();
+  // Escape closes the popover when it is the innermost overlay, so a dialog behind it stays open.
+  function onEscape(): void {
     options.onclose();
     options.anchor?.focus();
   }
@@ -79,7 +78,7 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
 
   place();
   document.addEventListener('pointerdown', onPointerDown, true);
-  document.addEventListener('keydown', onKeydown, true);
+  const releaseEscape = pushEscapeLayer(onEscape);
   window.addEventListener('resize', onViewportChange);
   window.addEventListener('scroll', onViewportChange, true);
 
@@ -90,7 +89,7 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
     },
     destroy(): void {
       document.removeEventListener('pointerdown', onPointerDown, true);
-      document.removeEventListener('keydown', onKeydown, true);
+      releaseEscape();
       window.removeEventListener('resize', onViewportChange);
       window.removeEventListener('scroll', onViewportChange, true);
       node.remove();

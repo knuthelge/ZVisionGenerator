@@ -209,6 +209,8 @@
   .asset-tile[data-menu-open='true']::after { opacity: 1; }
   @media (hover: none) {
     .asset-tile-actions { opacity: 1; pointer-events: auto; }
+    /* A small tile has room for one button under a finger: ⋯ stays, and a tap on the tile opens it fullscreen. */
+    .asset-tile[data-density='compact'] .asset-tile-action:not(:last-child) { display: none; }
   }
 
   .asset-tile-action { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-sm); }

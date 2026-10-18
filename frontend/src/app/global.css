@@ -110,6 +110,19 @@
     height: 6px;
   }
 
+  /* The overlay ladder, bottom to top. Every full-screen surface is portalled to <body> (lib/actions/portal.ts),
+     so this order is the only one that decides what covers what: the viewer, then sheets and the drawer over it,
+     dialogs over those, menus over anything they open from, toasts over all but a dialog raised on purpose. */
+  :root {
+    --z-viewer: 100;
+    --z-sheet: 130;
+    --z-drawer: 140;
+    --z-modal: 150;
+    --z-menu: 170;
+    --z-toast: 180;
+    --z-modal-top: 200;
+  }
+
   *::-webkit-scrollbar-track {
     background: transparent;
   }
@@ -322,11 +335,38 @@
     .ui-range { height: 28px; }
     .ui-range::-webkit-slider-thumb { width: 20px; height: 20px; margin-top: -8px; }
     .ui-range::-moz-range-thumb { width: 20px; height: 20px; }
+    /* A finger rarely has a keyboard: buttons drop their shortcut hints, but a key that is the button's only content stays. */
+    .ui-btn kbd:not(:only-child), .ui-btn .ui-kbd:not(:only-child) { display: none; }
   }
   .ui-action-bar { display: flex; align-items: center; gap: 8px; }
   .ui-action-bar .ui-btn { height: var(--spacing-bar); padding: 0 14px; font-size: var(--text-content); }
   .ui-action-bar .ui-btn-icon { width: var(--spacing-bar); padding: 0; }
   .ui-action-bar .ui-btn-main { flex: 1; }
+
+  /* Bottom sheets: one surface, one grab handle, one head with its Close, the same width on every screen. */
+  .ui-sheet {
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    background: var(--color-bg-surface);
+    box-shadow: 0 -1px 0 color-mix(in srgb, var(--color-text-primary) 8%, transparent), 0 -12px 32px var(--color-scrim);
+  }
+  .ui-sheet-grab { display: flex; flex: none; justify-content: center; padding: 8px 0 2px; }
+  .ui-sheet-grab::before { content: ''; width: 36px; height: 4px; border-radius: 2px; background: var(--color-border-strong); }
+  .ui-sheet-head {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+    min-height: var(--spacing-bar);
+    padding: 2px max(12px, env(safe-area-inset-right, 0px)) 6px max(16px, env(safe-area-inset-left, 0px));
+  }
+  .ui-sheet-head > h2, .ui-sheet-head > h3 { font-size: var(--text-ui); }
+  .ui-sheet-head .ui-btn { height: var(--spacing-control); }
+  .ui-sheet-head .ui-btn-icon { width: var(--spacing-control); padding: 0; }
+  .ui-sheet-end { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+  /* On a wide screen a sheet is a centred panel instead of a full-width drawer. */
+  @media (min-width: 640px) {
+    .ui-sheet { width: min(520px, calc(100% - 32px)); margin-inline: auto; }
+  }
 
   /* Fields */
   .ui-field {

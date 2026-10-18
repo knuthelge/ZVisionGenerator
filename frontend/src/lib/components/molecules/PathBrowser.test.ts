@@ -73,19 +73,19 @@ describe('PathBrowser', () => {
     return { onchoose };
   }
 
-  const rows = () => Array.from(target.querySelectorAll<HTMLElement>('[role="option"]'));
+  const rows = () => Array.from(document.body.querySelectorAll<HTMLElement>('[role="option"]'));
   const rowNames = () => rows().map((row) => row.querySelector('.truncate')?.textContent);
-  const buttonByLabel = (label: string) => Array.from(target.querySelectorAll<HTMLButtonElement>('button')).find((item) => item.getAttribute('aria-label') === label || item.textContent?.trim() === label)!;
-  const list = () => target.querySelector<HTMLElement>('[role="listbox"]')!;
+  const buttonByLabel = (label: string) => Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find((item) => item.getAttribute('aria-label') === label || item.textContent?.trim() === label)!;
+  const list = () => document.body.querySelector<HTMLElement>('[role="listbox"]')!;
   const key = (el: HTMLElement, name: string, init: KeyboardEventInit = {}) => flushSync(() => el.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, ...init })));
 
   it('opens at the purpose place, titles itself and lists what the server sent', async () => {
     await open();
 
     expect(browseApiMocks.listDirectory).toHaveBeenCalledWith('lora_file', '', { hidden: false, all: false });
-    expect(target.querySelector('h2')?.textContent).toBe('Choose LoRA file');
+    expect(document.body.querySelector('h2')?.textContent).toBe('Choose LoRA file');
     expect(rowNames()).toEqual(['ink.safetensors', 'notes.txt']);
-    expect(target.textContent).toContain('2 other files hidden');
+    expect(document.body.textContent).toContain('2 other files hidden');
   });
 
   it('chooses a file by double-click, closes and remembers it', async () => {
@@ -94,7 +94,7 @@ describe('PathBrowser', () => {
     flushSync(() => rows()[0].dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
 
     expect(onchoose).toHaveBeenCalledWith('/models/loras/ink.safetensors');
-    expect(target.querySelector('[data-testid="path-browser"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="path-browser"]')).toBeNull();
     expect(readRecentPaths('lora_file')).toEqual(['/models/loras/ink.safetensors']);
   });
 
@@ -136,7 +136,7 @@ describe('PathBrowser', () => {
 
     buttonByLabel('Type a path').click();
     flushSync();
-    const path = target.querySelector<HTMLInputElement>('input[aria-label="Path"]')!;
+    const path = document.body.querySelector<HTMLInputElement>('input[aria-label="Path"]')!;
     path.value = '/models';
     path.dispatchEvent(new Event('input', { bubbles: true }));
     key(path, 'Enter');
@@ -151,10 +151,10 @@ describe('PathBrowser', () => {
 
     buttonByLabel('Home').click();
     browseApiMocks.listDirectory.mockRejectedValueOnce(new Error('Permission denied: /root.'));
-    target.querySelector<HTMLButtonElement>('.crumb')!.click();
+    document.body.querySelector<HTMLButtonElement>('.crumb')!.click();
     await settle();
 
-    expect(target.querySelector('[role="alert"]')?.textContent).toBe('Permission denied: /root.');
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('Permission denied: /root.');
   });
 
   it('asks for every file after Show all', async () => {
@@ -176,7 +176,7 @@ describe('PathBrowser', () => {
     app = flushSync(() => mount(PathBrowser, { target: form, props: { open: true, purpose: 'lora_file', initialPath: null, onchoose } }));
     await settle();
 
-    const filter = form.querySelector<HTMLInputElement>('input[aria-label="Filter this folder"]')!;
+    const filter = document.body.querySelector<HTMLInputElement>('input[aria-label="Filter this folder"]')!;
     filter.value = 'ink';
     filter.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
@@ -193,14 +193,14 @@ describe('PathBrowser', () => {
 
     buttonByLabel('Type a path').click();
     flushSync();
-    const path = target.querySelector<HTMLInputElement>('input[aria-label="Path"]')!;
+    const path = document.body.querySelector<HTMLInputElement>('input[aria-label="Path"]')!;
     path.value = '/models/missing.safetensors';
     path.dispatchEvent(new Event('input', { bubbles: true }));
     key(path, 'Enter');
     await settle();
 
     expect(onchoose).not.toHaveBeenCalled();
-    expect(target.querySelector('[role="alert"]')?.textContent).toBe('No folder at /models/missing.safetensors.');
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('No folder at /models/missing.safetensors.');
   });
 
   it('opens the purpose place, saying why, when the field path is gone', async () => {
@@ -208,7 +208,7 @@ describe('PathBrowser', () => {
 
     expect(browseApiMocks.listDirectory).toHaveBeenLastCalledWith('lora_file', '', expect.anything());
     expect(rowNames()).toEqual(['ink.safetensors', 'notes.txt']);
-    expect(target.querySelector('[role="alert"]')?.textContent).toBe('No folder at /gone/clip.safetensors.');
+    expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('No folder at /gone/clip.safetensors.');
   });
 
   it('opens a folder once on double-click', async () => {
@@ -240,7 +240,7 @@ describe('PathBrowser', () => {
 
       buttonByLabel('New folder').click();
       flushSync();
-      const name = target.querySelector<HTMLInputElement>('input[aria-label="New folder name"]')!;
+      const name = document.body.querySelector<HTMLInputElement>('input[aria-label="New folder name"]')!;
       name.value = 'renders';
       name.dispatchEvent(new Event('input', { bubbles: true }));
       flushSync();

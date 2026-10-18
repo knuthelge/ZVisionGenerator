@@ -31,9 +31,12 @@
     onImageFileChange: (file: File | null) => void;
     /** Copy the CLI command for the current settings; the button is hidden without it. */
     oncopycli?: () => void;
+    /** Off: the footer closes the pane (`ondone`) instead of generating, where another button owns Generate. */
+    submit?: boolean;
+    ondone?: () => void;
   }
 
-  let { context, busy, jobsActive = false, submitError = null, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, oncopycli }: Props = $props();
+  let { context, busy, jobsActive = false, submitError = null, imageFile, referencePreviewUrl, lastSeed, onImageFileChange, oncopycli, submit = true, ondone }: Props = $props();
 
   const s = $derived(draft.state);
   const caps = $derived(workspaceCapabilities(context, s));
@@ -624,17 +627,21 @@
         <Icon name="reset" size={14} />Reset
         {#if changedRows > 0}<span class="reset-count" data-testid="changed-count">{changedRows}</span>{/if}
       </button>
-      <button
-        id="ws-submit"
-        type="submit"
-        disabled={submitDisabled}
-        aria-describedby={generateReason ? 'ws-generate-reason' : undefined}
-        class="ui-btn ui-btn-primary ui-btn-main"
-      >
-        <Icon name="bolt" size={16} />
-        <span>{busy ? 'Submitting…' : jobsActive ? 'Add to queue' : 'Generate'}</span>
-        <kbd>⌘↵</kbd>
-      </button>
+      {#if submit}
+        <button
+          id="ws-submit"
+          type="submit"
+          disabled={submitDisabled}
+          aria-describedby={generateReason ? 'ws-generate-reason' : undefined}
+          class="ui-btn ui-btn-primary ui-btn-main"
+        >
+          <Icon name="bolt" size={16} />
+          <span>{busy ? 'Submitting…' : jobsActive ? 'Add to queue' : 'Generate'}</span>
+          <kbd>⌘↵</kbd>
+        </button>
+      {:else}
+        <button type="button" class="ui-btn ui-btn-main" onclick={ondone}>Done</button>
+      {/if}
     </ActionBar>
   </div>
 </section>

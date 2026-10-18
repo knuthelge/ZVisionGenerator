@@ -30,6 +30,8 @@
   import { VIEWER_SHORTCUTS, stepUpscaleChord, viewerActionFor, type ViewerAction } from './viewerShortcuts';
   import { assetMenuEntries } from './assetMenu';
   import { layout } from '$lib/state/layoutMode.svelte';
+  import { sheetDrag } from '$lib/actions/sheetDrag';
+  import { FIT, actualPixelsScale, clampPan, settleZoom, zoomAt, type Zoom } from './viewerZoom';
 
   interface Props extends Omit<AssetActionHandlers, 'onpreview'> {
     assets: GalleryAsset[];
@@ -119,22 +121,146 @@
     { kind: 'separator' as const },
     ...assetMenuEntries(asset, { onreference, onextend, onupscale, ondelete }, deleting, referenceUnavailable),
   ] : []);
-  let swipeStart: { x: number; y: number; at: number } | null = null;
+  // --- Touch and zoom ---
+  // A finger, at any width: a swipe moves between assets or (down) closes, a pinch or a double tap zooms an image,
+  // and a zoomed image pans under one finger. A mouse click shows an image at its real pixels; a drag then pans it.
+  const touchLayer = $derived(compact || layout.coarse);
+  let stageEl = $state<HTMLDivElement | null>(null);
+  let mediaEl = $state<HTMLImageElement | null>(null);
+  let zoom = $state<Zoom>(FIT);
+  let zoomAnimated = $state(false);
+  const zoomed = $derived(zoom.scale > 1);
+  const isImage = $derived(asset?.media_type !== 'video');
+  // Real pixels for the shown image; null until it has loaded, or when it already shows at full size.
+  let actualScale = $state<number | null>(null);
 
-  function onSwipeStart(event: TouchEvent): void {
-    const touch = event.touches[0];
-    swipeStart = touch ? { x: touch.clientX, y: touch.clientY, at: Date.now() } : null;
+  $effect(() => {
+    void asset?.id;
+    zoom = FIT;
+    actualScale = null;
+  });
+
+  function measureActual(): void {
+    if (!mediaEl) return;
+    const scale = actualPixelsScale({ width: mediaEl.naturalWidth, height: mediaEl.naturalHeight }, { width: mediaEl.clientWidth, height: mediaEl.clientHeight });
+    actualScale = scale > 1.05 ? scale : null;
   }
 
-  function onSwipeEnd(event: TouchEvent): void {
-    const start = swipeStart;
-    swipeStart = null;
+  /** A point on screen, from the stage's centre (where the fitted image's centre sits). */
+  function fromCentre(clientX: number, clientY: number): { x: number; y: number } {
+    const box = stageEl?.getBoundingClientRect();
+    return box ? { x: clientX - box.left - box.width / 2, y: clientY - box.top - box.height / 2 } : { x: 0, y: 0 };
+  }
+
+  function setZoom(next: Zoom, animated: boolean): void {
+    zoomAnimated = animated;
+    zoom = mediaEl && stageEl
+      ? clampPan(next, { width: mediaEl.clientWidth, height: mediaEl.clientHeight }, { width: stageEl.clientWidth, height: stageEl.clientHeight })
+      : next;
+  }
+
+  /** Toggle between the fitted image and a closer look at the point (real pixels, or 2× for a small image). */
+  function toggleZoomAt(clientX: number, clientY: number, minimum: number): void {
+    if (zoomed) { setZoom(FIT, true); return; }
+    const scale = Math.max(minimum, actualScale ?? 1);
+    if (scale <= 1) return;
+    const point = fromCentre(clientX, clientY);
+    setZoom(zoomAt(FIT, scale, point.x, point.y), true);
+  }
+
+  type Gesture =
+    | { kind: 'swipe'; x: number; y: number; at: number }
+    | { kind: 'pan'; x: number; y: number; at: number; from: Zoom }
+    | { kind: 'pinch'; distance: number; mid: { x: number; y: number }; from: Zoom };
+  let gesture: Gesture | null = null;
+  let lastTap: { x: number; y: number; at: number } | null = null;
+  const DOUBLE_TAP_MS = 300;
+  const TAP_SLOP_PX = 10;
+
+  function pinchOf(touches: TouchList): { distance: number; mid: { x: number; y: number } } {
+    const [a, b] = [touches[0], touches[1]];
+    return { distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY), mid: fromCentre((a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2) };
+  }
+
+  function onStageTouchStart(event: TouchEvent): void {
+    // A video's own controls take the finger: scrubbing must not step to another asset.
+    if ((event.target as Element).closest('video, .viewer-details-scrim')) { gesture = null; return; }
+    if (event.touches.length === 2 && isImage) {
+      gesture = { kind: 'pinch', ...pinchOf(event.touches), from: zoom };
+      return;
+    }
+    const touch = event.touches[0];
+    if (!touch || event.touches.length > 1) { gesture = null; return; }
+    gesture = zoomed
+      ? { kind: 'pan', x: touch.clientX, y: touch.clientY, at: Date.now(), from: zoom }
+      : { kind: 'swipe', x: touch.clientX, y: touch.clientY, at: Date.now() };
+  }
+
+  function onStageTouchMove(event: TouchEvent): void {
+    if (!gesture) return;
+    if (gesture.kind === 'pinch' && event.touches.length === 2) {
+      const now = pinchOf(event.touches);
+      const scaled = zoomAt(gesture.from, gesture.from.scale * (now.distance / Math.max(gesture.distance, 1)), gesture.mid.x, gesture.mid.y);
+      setZoom({ ...scaled, x: scaled.x + now.mid.x - gesture.mid.x, y: scaled.y + now.mid.y - gesture.mid.y }, false);
+    } else if (gesture.kind === 'pan') {
+      const touch = event.touches[0];
+      setZoom({ ...gesture.from, x: gesture.from.x + touch.clientX - gesture.x, y: gesture.from.y + touch.clientY - gesture.y }, false);
+    }
+  }
+
+  function onStageTouchEnd(event: TouchEvent): void {
+    const current = gesture;
+    if (current?.kind === 'pinch') {
+      // One finger may stay down after a pinch; it starts nothing until it lifts.
+      gesture = null;
+      setZoom(settleZoom(zoom), true);
+      lastTap = null;
+      return;
+    }
+    gesture = null;
     const touch = event.changedTouches[0];
-    if (!start || !touch || Date.now() - start.at > 600) return;
-    const dx = touch.clientX - start.x;
-    const dy = touch.clientY - start.y;
+    if (!current || !touch) return;
+    const dx = touch.clientX - current.x;
+    const dy = touch.clientY - current.y;
+    const now = Date.now();
+    if (Math.abs(dx) < TAP_SLOP_PX && Math.abs(dy) < TAP_SLOP_PX && now - current.at < DOUBLE_TAP_MS) {
+      if (isImage && lastTap && now - lastTap.at < DOUBLE_TAP_MS && Math.hypot(touch.clientX - lastTap.x, touch.clientY - lastTap.y) < 40) {
+        lastTap = null;
+        toggleZoomAt(touch.clientX, touch.clientY, 2);
+      } else {
+        lastTap = { x: touch.clientX, y: touch.clientY, at: now };
+      }
+      return;
+    }
+    lastTap = null;
+    if (current.kind !== 'swipe' || now - current.at > 900) return;
     if (Math.abs(dx) >= 48 && Math.abs(dx) > Math.abs(dy) * 1.5) runAction(dx < 0 ? 'next' : 'prev');
     else if (dy >= 80 && Math.abs(dx) < 40) onclose();
+  }
+
+  // A mouse: a click toggles real pixels at the cursor; a drag pans a zoomed image.
+  let mouseDrag: { x: number; y: number; from: Zoom; moved: boolean } | null = null;
+
+  function onMediaPointerDown(event: PointerEvent): void {
+    if (event.pointerType !== 'mouse' || event.button !== 0) return;
+    event.preventDefault();
+    mouseDrag = { x: event.clientX, y: event.clientY, from: zoom, moved: false };
+    (event.currentTarget as Element).setPointerCapture?.(event.pointerId);
+  }
+
+  function onMediaPointerMove(event: PointerEvent): void {
+    if (!mouseDrag) return;
+    const dx = event.clientX - mouseDrag.x;
+    const dy = event.clientY - mouseDrag.y;
+    if (!mouseDrag.moved && Math.hypot(dx, dy) < 4) return;
+    mouseDrag.moved = true;
+    if (zoomed) setZoom({ ...mouseDrag.from, x: mouseDrag.from.x + dx, y: mouseDrag.from.y + dy }, false);
+  }
+
+  function onMediaPointerUp(event: PointerEvent): void {
+    const drag = mouseDrag;
+    mouseDrag = null;
+    if (drag && !drag.moved) toggleZoomAt(event.clientX, event.clientY, 1);
   }
 
   const sections = $derived(asset ? assetDetailSections(asset) : null);
@@ -194,6 +320,7 @@
     switch (action) {
       case 'close':
         if (helpOpen) helpOpen = false;
+        else if (zoomed) setZoom(FIT, true);
         else onclose();
         return true;
       case 'prev':
@@ -245,7 +372,9 @@
     let upscaleWaitingSince: number | null = null;
     function handleKeydown(e: KeyboardEvent): void {
       // While a menu is open, keys belong to it.
-      if (e.defaultPrevented || referenceOpen || upscaleOpen || isTyping(e.target)) {
+      // A focused video keeps its own keys: arrows seek, Space plays.
+      const mediaKey = e.target instanceof HTMLMediaElement && (e.key.startsWith('Arrow') || e.key === ' ');
+      if (e.defaultPrevented || referenceOpen || upscaleOpen || moreOpen || isTyping(e.target) || mediaKey) {
         upscaleWaitingSince = null;
         return;
       }
@@ -303,7 +432,7 @@
           disabled={!canReuse}
           title={canReuse ? 'Load these settings into the workspace (R)' : 'Reusable settings unavailable'}
           onclick={() => onreuse(asset)}
-        ><Icon name="reuse" size={14} />Reuse settings</button>
+        ><Icon name="reuse" size={14} /><span class="viewer-btn-label">Reuse settings</span></button>
       {/if}
       {#if onreference && canUseAsReference(asset)}
         <button
@@ -315,7 +444,7 @@
           aria-expanded={referenceOpen}
           title="Use as reference (E)"
           onclick={() => { referenceOpen = !referenceOpen; }}
-        ><Icon name="reference" size={14} />Use as reference<Icon name="chevdown" size={12} class="opacity-70" /></button>
+        ><Icon name="reference" size={14} /><span class="viewer-btn-label">Use as reference</span><Icon name="chevdown" size={12} class="opacity-70" /></button>
       {/if}
       {#if showExtend}
         <button
@@ -325,7 +454,7 @@
           disabled={!canExtend(asset)}
           title={extendBlocked ?? 'Extend this video (E)'}
           onclick={() => onextend?.(asset)}
-        ><Icon name="extend" size={14} />Extend</button>
+        ><Icon name="extend" size={14} /><span class="viewer-btn-label">Extend</span></button>
       {/if}
       {#if upscaleItems.length > 0}
         <button
@@ -337,7 +466,7 @@
           aria-expanded={upscaleOpen}
           title="Upscale (X then 2 or 4)"
           onclick={() => { upscaleOpen = !upscaleOpen; }}
-        ><Icon name="expand" size={14} />Upscale<Icon name="chevdown" size={12} class="opacity-70" /></button>
+        ><Icon name="expand" size={14} /><span class="viewer-btn-label">Upscale</span><Icon name="chevdown" size={12} class="opacity-70" /></button>
       {/if}
       <a
         bind:this={downloadLink}
@@ -347,7 +476,7 @@
         download={asset.filename}
         title="Download (D)"
       >
-        <Icon name="download" size={14} />Download
+        <Icon name="download" size={14} /><span class="viewer-btn-label">Download</span>
       </a>
       {#if ondelete}
         <button
@@ -357,7 +486,7 @@
           disabled={deleting}
           title="Delete (Del)"
           onclick={() => ondelete(asset)}
-        ><Icon name="trash" size={14} />{deleting ? 'Deleting…' : 'Delete'}</button>
+        ><Icon name="trash" size={14} /><span class="viewer-btn-label">{deleting ? 'Deleting…' : 'Delete'}</span></button>
       {/if}
       <span class="viewer-sep" aria-hidden="true"></span>
       <button
@@ -368,7 +497,7 @@
         aria-controls="asset-viewer-details"
         title="Details (I)"
         onclick={toggleDetails}
-      ><Icon name="info" size={14} />Details <kbd class="viewer-kbd">I</kbd></button>
+      ><Icon name="info" size={14} /><span class="viewer-btn-label">Details</span> <kbd class="viewer-kbd">I</kbd></button>
       <button
         type="button"
         class="viewer-btn ui-btn ui-btn-icon"
@@ -391,8 +520,19 @@
     </div>
 
     <div class="viewer-main">
-      <!-- svelte-ignore a11y_no_static_element_interactions because the swipe duplicates the arrows and keys -->
-      <div class="viewer-stage" ontouchstart={compact ? onSwipeStart : undefined} ontouchend={compact ? onSwipeEnd : undefined}>
+      <!-- svelte-ignore a11y_no_static_element_interactions because the swipe and pinch duplicate the arrows, keys and click -->
+      <div
+        bind:this={stageEl}
+        class="viewer-stage"
+        data-touch={touchLayer}
+        ontouchstart={onStageTouchStart}
+        ontouchmove={onStageTouchMove}
+        ontouchend={onStageTouchEnd}
+        ontouchcancel={() => { gesture = null; }}
+      >
+        {#if compact && detailsOpen}
+          <button type="button" class="viewer-details-scrim" aria-label="Close details" tabindex="-1" onclick={toggleDetails}></button>
+        {/if}
         <button
           type="button"
           class="viewer-nav prev ui-btn ui-btn-icon"
@@ -404,7 +544,25 @@
           <!-- svelte-ignore a11y_media_has_caption because generated videos have no caption tracks -->
           <video src={asset.url} controls class="viewer-media"></video>
         {:else}
-          <img src={asset.url} alt={asset.prompt || asset.filename} class="viewer-media">
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions because the zoom is a closer look; the keys and buttons do the rest -->
+          <img
+            bind:this={mediaEl}
+            src={asset.url}
+            alt={asset.prompt || asset.filename}
+            class="viewer-media"
+            class:zoomable={actualScale !== null}
+            class:zoomed
+            class:animated={zoomAnimated}
+            style:transform={zoomed ? `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` : undefined}
+            draggable="false"
+            data-testid="viewer-image"
+            data-zoom={zoom.scale.toFixed(2)}
+            onload={measureActual}
+            onpointerdown={onMediaPointerDown}
+            onpointermove={onMediaPointerMove}
+            onpointerup={onMediaPointerUp}
+            ontransitionend={() => { zoomAnimated = false; }}
+          >
         {/if}
         <button
           type="button"
@@ -416,7 +574,17 @@
       </div>
 
       {#if detailsOpen}
-        <aside id="asset-viewer-details" class="viewer-details" aria-label="Asset details">
+        <aside id="asset-viewer-details" class="viewer-details" class:ui-sheet={compact} aria-label="Asset details" use:sheetDrag={{ enabled: compact, onclose: () => { if (detailsOpen) toggleDetails(); } }}>
+          {#if compact}
+            <div class="ui-sheet-grab" aria-hidden="true"></div>
+            <div class="ui-sheet-head">
+              <h2 class="ui-area-label">Details</h2>
+              <span class="ui-sheet-end">
+                <button type="button" class="ui-btn ui-btn-icon" aria-label="Close details" onclick={toggleDetails}><Icon name="close" size={16} /></button>
+              </span>
+            </div>
+          {/if}
+          <div class="viewer-details-body">
           {#if separateScene}
             <section data-testid="viewer-scene">
               <h4 class="viewer-h ui-area-label">Scene</h4>
@@ -462,6 +630,7 @@
               </ul>
             </section>
           {/if}
+          </div>
         </aside>
       {/if}
     </div>
@@ -529,9 +698,9 @@
 {/snippet}
 
 <style>
-  .asset-viewer { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; background: color-mix(in srgb, var(--color-bg-base) 70%, black); }
+  .asset-viewer { position: fixed; inset: 0; z-index: var(--z-viewer); display: flex; flex-direction: column; background: color-mix(in srgb, var(--color-bg-base) 70%, black); }
   .viewer-bar { display: flex; flex: none; align-items: center; gap: 6px; min-height: 44px; padding: 6px 12px 6px 16px; background: var(--color-bg-surface); }
-  .viewer-title { display: flex; min-width: 0; flex-direction: column; margin-right: auto; }
+  .viewer-title { display: flex; flex: 1 1 auto; min-width: 7rem; flex-direction: column; }
   .viewer-title b { font-size: var(--text-content); font-weight: 600; }
   .viewer-title small { font-size: var(--text-meta); color: var(--color-text-muted); }
   .viewer-sep { width: 1px; height: 20px; margin: 0 2px; background: var(--color-border-subtle); }
@@ -539,11 +708,19 @@
   .viewer-shortcuts { position: absolute; top: 52px; right: 12px; z-index: 3; width: 280px; padding: 12px; }
   .viewer-main { display: flex; flex: 1; min-height: 0; }
   .viewer-stage { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; padding: 20px 64px; }
-  .viewer-media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--radius-xs); }
+  .viewer-media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--radius-xs); transform-origin: center; user-select: none; }
+  .viewer-media.zoomable { cursor: zoom-in; }
+  .viewer-media.zoomed { position: relative; z-index: 1; cursor: grab; }
+  .viewer-media.animated { transition: transform 0.18s ease-out; }
+  /* The stage clips a zoomed image; the bar and the strip stay on top of it. */
+  .viewer-stage { overflow: hidden; }
+  /* A finger owns every gesture on the stage, so the browser neither pans nor zooms the page: only the image zooms. */
+  .viewer-stage[data-touch='true'] { touch-action: none; }
   .viewer-nav { position: absolute; top: 50%; z-index: 2; width: var(--spacing-bar); height: var(--spacing-bar); transform: translateY(-50%); }
   .viewer-nav.prev { left: 14px; }
   .viewer-nav.next { right: 14px; }
-  .viewer-details { display: flex; flex: none; flex-direction: column; gap: 16px; width: 340px; overflow-y: auto; padding: 16px; background: var(--color-bg-surface); }
+  .viewer-details { display: flex; flex: none; flex-direction: column; width: 340px; min-height: 0; background: var(--color-bg-surface); }
+  .viewer-details-body { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 16px; overflow-y: auto; overscroll-behavior: contain; padding: 16px; }
   .viewer-h { margin: 0 0 6px; }
   .viewer-prompt { padding: 8px 10px; border-radius: var(--radius-md); background: var(--color-bg-base); font-size: var(--text-content); line-height: 1.55; color: var(--color-text-secondary); white-space: pre-wrap; user-select: text; }
   .viewer-source { display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: var(--radius-md); background: var(--color-bg-base); font-size: var(--text-ui); color: var(--color-text-primary); text-align: left; }
@@ -567,12 +744,18 @@
   @media (max-width: 767px) {
     .viewer-bar { flex-wrap: wrap; padding: 8px; }
     .viewer-stage { padding: 12px 52px; }
-    .viewer-details { position: absolute; inset: auto 0 0 0; width: auto; max-height: 50%; }
+    .viewer-details { position: absolute; inset: auto 0 0 0; z-index: 3; width: auto; max-height: 50%; }
   }
   /* Phone: no arrows (a swipe moves), the bar pads for the status bar, the details rise as a sheet. */
   .asset-viewer[data-compact='true'] .viewer-bar { flex-wrap: nowrap; padding: calc(6px + env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) 6px max(12px, env(safe-area-inset-left, 0px)); }
   .asset-viewer[data-compact='true'] .viewer-nav { display: none; }
-  .asset-viewer[data-compact='true'] .viewer-stage { padding: 8px 12px; touch-action: pan-y; }
-  .asset-viewer[data-compact='true'] .viewer-details { position: absolute; inset: auto 0 0 0; width: auto; max-height: 60%; border-radius: 14px 14px 0 0; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .viewer-details-scrim { position: absolute; inset: 0; z-index: 2; background: transparent; cursor: default; }
+  .asset-viewer[data-compact='true'] .viewer-stage { padding: 8px 12px; }
+  .asset-viewer[data-compact='true'] .viewer-details { position: absolute; inset: auto 0 0 0; z-index: 3; width: auto; max-height: 60%; }
+  .asset-viewer[data-compact='true'] .viewer-details-body { padding: 4px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+  /* Below a full desktop the labelled buttons show their icons only, so the title keeps its room; the tooltip names them. */
+  @media (max-width: 1023px) {
+    .viewer-btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  }
   .asset-viewer[data-compact='true'] .viewer-film { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
 </style>

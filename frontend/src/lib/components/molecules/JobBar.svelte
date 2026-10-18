@@ -156,4 +156,9 @@
   .jb-queue { flex: none; font-size: var(--text-ui); color: var(--color-text-secondary); text-decoration: underline dotted; text-underline-offset: 3px; }
   .jb-prompt-text { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   @media (max-width: 400px) { .jb-workflow { display: none; } }
+  /* A finger gets the touch layer's full control size, not the small one. */
+  @media (pointer: coarse) {
+    .jb-controls .ui-btn { height: var(--spacing-control); }
+    .jb-controls .ui-btn-icon { width: var(--spacing-control); }
+  }
 </style>

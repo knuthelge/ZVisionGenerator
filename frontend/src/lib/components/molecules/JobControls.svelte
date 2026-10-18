@@ -71,4 +71,9 @@
   .job-controls-divider { width: 1px; height: 16px; margin: 0 6px; background: var(--color-border-strong); }
   /* Quiet, but the red icon marks Cancel as the stop. */
   .job-cancel :global(svg) { color: var(--color-error); }
+  /* A finger gets the touch layer's full control size, not the small one. */
+  @media (pointer: coarse) {
+    .job-controls :global(.ui-btn) { height: var(--spacing-control); min-width: var(--spacing-control); }
+    .job-controls { gap: 4px; }
+  }
 </style>

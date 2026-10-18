@@ -1,12 +1,13 @@
 <script lang="ts">
   import { draft } from '$lib/state/draft.svelte';
   import { Icon, Spinner } from '$lib/components/atoms';
-  import { Alert, InspectorRow, InspectorSection, PathBrowser, PathInput } from '$lib/components/molecules';
+  import { InspectorRow, InspectorSection, PathBrowser, PathInput } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
   import { extendSourceFacts, type ExtendGuard } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import type { WorkspaceContext } from '$lib/types';
+  import SourceVideoFeedback from './SourceVideoFeedback.svelte';
 
   interface Props {
     context: WorkspaceContext;
@@ -21,14 +22,12 @@
   const info = $derived(draft.extendSource);
   const sourcePath = $derived(draft.state.extendSourcePath);
   const sourceStatus = $derived(extendInspection.statusFor(sourcePath));
-  const sourceFailure = $derived(extendInspection.failureFor(sourcePath));
   const checking = $derived(sourcePath !== null && guard.kind === 'checking');
   const facts = $derived(info ? extendSourceFacts(info) : []);
   const name = $derived(info?.filename ?? (sourcePath ? fileName(sourcePath) : ''));
   const found = $derived(guard.kind === 'ok');
   // The server reports a source it could not find, or Reuse recorded one that has since moved; both ask for another choice.
   const missing = $derived(draft.state.missingSourceVideo || sourceStatus === 'not_found');
-  const problems = $derived(info?.problems ?? []);
   // The last frame of a file inside the output folder; elsewhere the browser cannot load it, so an icon stands in.
   const thumbUrl = $derived(info?.media_url ? `${info.media_url}#t=${Math.max(0, (info.duration_seconds ?? 0) - 0.05).toFixed(2)}` : null);
 
@@ -130,22 +129,7 @@
       onkeydown={onPathKeydown}
     />
   </InspectorRow>
-  <div id="ws-source-help" class="source-feedback" aria-live="polite">
-    {#if draft.state.missingSourceVideo}
-      <Alert tone="warning" testId="extend-source-moved">The source video has moved or been deleted; choose it again to extend.</Alert>
-    {:else if sourceStatus === 'not_found'}
-      <p class="ui-help ui-help-error">No video at this path.</p>
-    {:else if sourceFailure}
-      <p class="ui-help ui-help-error">{sourceFailure}</p>
-    {:else if problems.length > 0}
-      <Alert tone="error" testId="extend-source-problems">
-        <p>This video can't be extended:</p>
-        <ul class="problem-list">
-          {#each problems as problem (problem.code)}<li>{problem.message}</li>{/each}
-        </ul>
-      </Alert>
-    {/if}
-  </div>
+  <SourceVideoFeedback id="ws-source-help" />
 </InspectorSection>
 
 <PathBrowser bind:open={browsing} purpose="source_video" initialPath={pathText.trim() || sourcePath} onchoose={(path) => chooseSource(path)} />
@@ -156,8 +140,7 @@
   /* Facts wrap between facts only, so a fact such as "145 frames" never splits. */
   .source-facts { font-family: var(--font-mono); }
   .fact { white-space: nowrap; }
-  .source-feedback > :global(*) { margin: 0 12px 6px; }
-  .problem-list { margin-top: 2px; padding-left: 16px; list-style: disc; }
+  :global(#ws-source-help > *) { margin: 0 12px 6px; }
 
   .reference-thumb { display: grid; flex: none; place-items: center; width: 40px; height: 40px; margin: 4px 0; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
   .reference-thumb video { width: 100%; height: 100%; object-fit: cover; }

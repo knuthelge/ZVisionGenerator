@@ -2,7 +2,7 @@
 import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { HOLD_DELAY_MS, HOLD_INTERVAL_MS } from '$lib/actions/holdRepeat';
+import { HOLD_DELAY_MS, HOLD_INTERVAL_MS, HOLD_SLOP_PX } from '$lib/actions/holdRepeat';
 import InspectorNumber from './InspectorNumber.svelte';
 
 function press(button: HTMLButtonElement): void {
@@ -11,6 +11,10 @@ function press(button: HTMLButtonElement): void {
 
 function release(button: HTMLButtonElement): void {
   button.dispatchEvent(new PointerEvent('pointerup', { button: 0, bubbles: true }));
+}
+
+function finger(button: HTMLButtonElement, type: string, x = 10, y = 10): void {
+  button.dispatchEvent(new PointerEvent(type, { button: 0, pointerType: 'touch', clientX: x, clientY: y, bubbles: true }));
 }
 
 describe('InspectorNumber', () => {
@@ -80,6 +84,40 @@ describe('InspectorNumber', () => {
     const calls = onchange.mock.calls.length;
     release(up);
     vi.advanceTimersByTime(HOLD_INTERVAL_MS * 5);
+    expect(onchange).toHaveBeenCalledTimes(calls);
+  });
+
+  it('steps a finger on release, and not when the press turns into a scroll', () => {
+    vi.useFakeTimers();
+    const onchange = vi.fn();
+    app = flushSync(() => mount(InspectorNumber, { target, props: { value: 10, step: 1, min: 1, max: 60, stepper: true, onchange } }));
+    const up = target.querySelector<HTMLButtonElement>('[data-step="up"]')!;
+
+    finger(up, 'pointerdown');
+    expect(onchange).not.toHaveBeenCalled();
+    finger(up, 'pointerup');
+    expect(onchange).toHaveBeenCalledTimes(1);
+
+    // The browser takes the pan over.
+    onchange.mockClear();
+    finger(up, 'pointerdown');
+    finger(up, 'pointercancel');
+    vi.advanceTimersByTime(HOLD_DELAY_MS * 2);
+    expect(onchange).not.toHaveBeenCalled();
+
+    // The finger moves on the button, as when pulling a sheet down.
+    finger(up, 'pointerdown');
+    finger(up, 'pointermove', 10, 10 + HOLD_SLOP_PX + 4);
+    finger(up, 'pointerup', 10, 10 + HOLD_SLOP_PX + 4);
+    vi.advanceTimersByTime(HOLD_DELAY_MS * 2);
+    expect(onchange).not.toHaveBeenCalled();
+
+    // A held finger still repeats.
+    finger(up, 'pointerdown');
+    vi.advanceTimersByTime(HOLD_DELAY_MS + HOLD_INTERVAL_MS * 3);
+    expect(onchange.mock.calls.length).toBeGreaterThanOrEqual(3);
+    const calls = onchange.mock.calls.length;
+    finger(up, 'pointerup');
     expect(onchange).toHaveBeenCalledTimes(calls);
   });
 

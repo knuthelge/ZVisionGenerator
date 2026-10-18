@@ -1,5 +1,7 @@
 <script lang="ts">
   import { Icon } from '$lib/components/atoms';
+  import { portal } from '$lib/actions/portal';
+  import { pushEscapeLayer } from '$lib/actions/escapeStack';
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import type { PageId } from '$lib/types';
 
@@ -33,22 +35,16 @@
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
     panel?.querySelector<HTMLElement>('[aria-current="page"]')?.focus();
-    function handleKeydown(event: KeyboardEvent): void {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onclose();
-      }
-    }
-    document.addEventListener('keydown', handleKeydown);
+    const release = pushEscapeLayer(() => onclose());
     return () => {
-      document.removeEventListener('keydown', handleKeydown);
+      release();
       previous?.focus?.();
     };
   });
 </script>
 
 {#if open}
-  <div class="drawer-root" data-testid="nav-drawer">
+  <div use:portal class="drawer-root" data-testid="nav-drawer">
     <button type="button" class="drawer-scrim" aria-label="Close menu" tabindex="-1" onclick={onclose}></button>
     <div bind:this={panel} class="drawer ui-pane" role="dialog" aria-modal="true" aria-label="Menu" tabindex="-1">
       <h1 class="drawer-brand"><img src={logoSrc} alt="" class="h-6 w-6">ziv</h1>
@@ -64,7 +60,7 @@
 {/if}
 
 <style>
-  .drawer-root { position: fixed; inset: 0; z-index: 140; }
+  .drawer-root { position: fixed; inset: 0; z-index: var(--z-drawer); }
   .drawer-scrim { position: absolute; inset: 0; background: var(--color-scrim); }
   .drawer { position: absolute; top: 0; bottom: 0; left: 0; display: flex; width: min(300px, 82vw); flex-direction: column; gap: 2px; padding: calc(12px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); background: var(--color-bg-surface); outline: none; }
   .drawer-brand { display: flex; align-items: center; gap: 8px; margin: 4px 8px 16px; font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; }

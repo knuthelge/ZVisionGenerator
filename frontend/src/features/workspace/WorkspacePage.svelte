@@ -75,6 +75,7 @@
     if (requests === seenJobSheetRequests) return;
     seenJobSheetRequests = requests;
     if (jobStore.current || jobStore.queuedJobs.length > 0) jobSheetOpen = true;
+    else addToast('No job is running and the queue is empty.', 'info');
   });
   // The sheet has nothing to show once the job is gone and the queue is empty.
   $effect(() => {
@@ -125,12 +126,20 @@
     OUTPUT_GAP_PX,
     MIN_OUTPUT_CELL_PX
   ));
-  const hasCompletedOutputs = $derived(jobStore.current?.status === 'completed' && jobOutputs.length > 0);
+  // A finished job's outputs hold the stage until the user steps away (a swipe or an arrow), so the history is one
+  // gesture away again. A phone goes straight back to the latest: its stage shows one output at a time.
+  let leftOutputsOf = $state<string | null>(null);
+  const hasCompletedOutputs = $derived(
+    jobStore.current?.status === 'completed'
+      && jobOutputs.length > 0
+      && !compact
+      && leftOutputsOf !== jobStore.current.job_id
+  );
   const reviewing = $derived(isReviewing(jobStore.current));
   const previewView = $derived<'error' | 'outputs' | 'job' | 'latest' | 'empty'>(
     loadError ? 'error'
       : hasCompletedOutputs ? 'outputs'
-      : jobStore.current && (jobStore.isRunning || jobOutputs.length > 0) ? 'job'
+      : jobStore.current && (jobStore.isRunning || (jobOutputs.length > 0 && jobStore.current.status !== 'completed')) ? 'job'
       : historyStore.assets.length > 0 ? 'latest'
       : 'empty'
   );
@@ -160,6 +169,20 @@
     viewedId = null;
   }
 
+  /** Step through history from wherever the stage is: from a job's outputs, leave them for the history first. */
+  function stepStage(delta: number): void {
+    if (previewView === 'outputs') {
+      leftOutputsOf = jobStore.current?.job_id ?? null;
+      viewedId = null;
+      if (delta > 0) stepView(delta);
+      return;
+    }
+    stepView(delta);
+  }
+
+  /** The stage can step through history: it shows the latest (or an earlier) output, or a finished job's outputs. */
+  const canStepStage = $derived(previewView === 'latest' || previewView === 'empty' || previewView === 'outputs');
+
   // A job takes the stage and its output lands at the front: the stage is back at the latest when it returns.
   $effect(() => {
     if (jobStore.isRunning) viewedId = null;
@@ -172,17 +195,19 @@
 
   function onStageTouchStart(event: TouchEvent): void {
     const touch = event.touches[0];
-    swipeStart = touch ? { x: touch.clientX, y: touch.clientY, at: Date.now() } : null;
+    // A video's own controls take the finger: scrubbing must not step to another output.
+    const onVideo = (event.target as Element).closest('video') !== null;
+    swipeStart = touch && !onVideo && event.touches.length === 1 ? { x: touch.clientX, y: touch.clientY, at: Date.now() } : null;
   }
 
   function onStageTouchEnd(event: TouchEvent): void {
     const start = swipeStart;
     swipeStart = null;
     const touch = event.changedTouches[0];
-    if (!start || !touch || Date.now() - start.at > SWIPE_MAX_MS || (previewView !== 'latest' && previewView !== 'empty')) return;
+    if (!start || !touch || Date.now() - start.at > SWIPE_MAX_MS || !canStepStage) return;
     const dx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
-    if (Math.abs(dx) >= SWIPE_MIN_PX && Math.abs(dx) > Math.abs(dy) * 1.5) stepView(dx < 0 ? 1 : -1);
+    if (Math.abs(dx) >= SWIPE_MIN_PX && Math.abs(dx) > Math.abs(dy) * 1.5) stepStage(dx < 0 ? 1 : -1);
     // Up, on a phone, opens the Gallery: the stage is the newest of it.
     else if (compact && dy <= -SWIPE_UP_MIN_PX && Math.abs(dy) > Math.abs(dx) * 1.5) router.navigate('gallery');
   }
@@ -758,10 +783,10 @@
         e.preventDefault();
         if (e.shiftKey) togglePane(e.code);
         else void focusPane(e.code);
-      } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && previewView === 'latest' && acceptsPageShortcut(e)) {
-        // ← → step the preview through history; → goes back in time, like the strip reads.
+      } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && canStepStage && previewView !== 'empty' && acceptsPageShortcut(e) && !(e.target instanceof HTMLMediaElement)) {
+        // ← → step the preview through history; → goes back in time, like the strip reads. A focused video seeks instead.
         e.preventDefault();
-        stepView(e.key === 'ArrowRight' ? 1 : -1);
+        stepStage(e.key === 'ArrowRight' ? 1 : -1);
       }
     }
     document.addEventListener('keydown', handleKeydown);
@@ -1006,13 +1031,13 @@
     <div class="flex items-center px-3 py-2 gap-3 {stacked ? 'flex-col items-stretch' : 'flex-wrap'}">
 
       <!-- Model selector -->
-      <div class="flex flex-wrap items-center gap-2 min-w-0">
-        <label class="ui-label" for="ws-model">Model</label>
+      <div class="flex items-center gap-2 min-w-0 {stacked ? 'flex-nowrap' : 'flex-wrap'}">
+        <label class="ui-label {stacked ? 'sr-only' : ''}" for="ws-model">Model</label>
         <ToolbarSelectShell
           id="ws-model"
           name="model"
           testId="model-shell"
-          class={stacked ? 'w-full' : 'w-48'}
+          class={stacked ? 'min-w-0 flex-1' : 'w-48'}
           value={draft.state.model}
           disabled={!authorityReady || currentModels.length === 0}
           onchange={onModelChange}
@@ -1037,7 +1062,7 @@
           <ToolbarSelectShell
             name="quantize"
             testId="quantize-shell"
-            class="w-40"
+            class={stacked ? 'w-auto shrink-0' : 'w-40'}
             value={draft.state.quantize !== null ? String(draft.state.quantize) : ''}
             disabled={!authorityReady}
             onchange={(e) => {
@@ -1133,7 +1158,8 @@
 
   {#snippet stage()}
     <section class="workspace-preview relative z-0 flex min-h-0 min-w-0 flex-col bg-bg-base">
-      <div class="ui-pane-header flex h-10 shrink-0 items-center justify-between px-3">
+      <!-- On a phone the strip already says what the stage shows; the header appears only when stepped back in history. -->
+      <div class="ui-pane-header flex h-10 shrink-0 items-center justify-between px-3" hidden={compact && !(previewView === 'latest' && !atLatest)}>
         <h2 class="ui-area-label">Preview</h2>
         {#if previewView === 'latest' && !atLatest}
           <span class="flex items-center gap-2 text-meta text-text-muted" data-testid="stage-position">
@@ -1215,7 +1241,7 @@
               </div>
             {/if}
           </div>
-        {:else if jobStore.current && (jobStore.isRunning || jobOutputs.length > 0)}
+        {:else if previewView === 'job' && jobStore.current}
           <!-- The forming image takes the stage; the card with the job's phases and controls is a column beside it.
                On a phone the compact bar lies over the preview's foot, and the full card is a sheet under ⋯. -->
           <div class="job-view" class:job-view-compact={compact} data-testid="job-view">
@@ -1341,6 +1367,7 @@
       {#if authorityReady && context}
         <div class="compact-controls">
           {#if activeChip}
+            <button type="button" class="pop-scrim" aria-label="Close setting" tabindex="-1" onclick={() => { activeChip = null; }}></button>
             <SettingPopover
               key={activeChip}
               {context}
@@ -1418,6 +1445,8 @@
           {context}
           {busy}
           panes="settings"
+          settingsSubmit={false}
+          onsettingsdone={() => { sheetOpen = false; }}
           jobsActive={jobStore.jobsActive}
           queuedCount={jobStore.queuedJobs.length}
           submitError={generateError}
@@ -1492,6 +1521,7 @@
   }
   /* Phone: toasts dock above the composer and the strip. */
   :global(:root:has(.compact-workspace)) { --toast-bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
+  :global(:root:has(.compact-workspace .job-bar)) { --toast-bottom: calc(224px + env(safe-area-inset-bottom, 0px)); }
   /* The phone composition. */
   .compact-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; }
   .compact-workspace > :global(.workspace-preview) { flex: 1; min-height: 0; }
@@ -1504,7 +1534,11 @@
   .job-view-compact > :global(.job-bar) { position: absolute; left: 12px; right: 12px; bottom: 12px; }
   .job-sheet { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
   .compact-controls { position: relative; flex: none; }
+  /* The popover rises from the strip; a clear scrim behind it catches the tap that dismisses it, and the strip stays
+     above the scrim so another chip switches the popover in one tap. */
+  .compact-controls > .pop-scrim { position: fixed; inset: 0; z-index: 44; background: transparent; cursor: default; }
   .compact-controls > :global(.setting-popover) { position: absolute; left: 0; right: 0; bottom: 100%; z-index: 45; }
+  .compact-controls > :global(.settings-strip) { position: relative; z-index: 46; }
   .composer { display: flex; flex-direction: column; gap: 8px; padding: 8px max(12px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-overlay); }
   .composer-error { margin: 0; }
   .composer-row { display: flex; align-items: center; gap: 8px; }

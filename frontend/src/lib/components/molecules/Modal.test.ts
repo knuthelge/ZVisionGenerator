@@ -42,14 +42,14 @@ describe('Modal', () => {
     }));
     await settle();
 
-    const closeButtons = target.querySelectorAll('button[aria-label="Close dialog"]');
+    const closeButtons = document.body.querySelectorAll('button[aria-label="Close dialog"]');
     expect(closeButtons.length).toBeGreaterThan(0);
 
     (closeButtons[0] as HTMLButtonElement).click();
     await settle();
 
     expect(onclose).toHaveBeenCalledTimes(1);
-    expect(target.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(opener);
 
     opener.remove();
@@ -63,14 +63,14 @@ describe('Modal', () => {
     }));
     await settle();
 
-    const closeButtons = target.querySelectorAll('button[aria-label="Close dialog"]');
+    const closeButtons = document.body.querySelectorAll('button[aria-label="Close dialog"]');
     expect(closeButtons.length).toBeGreaterThan(1);
 
     (closeButtons[1] as HTMLButtonElement).click();
     await settle();
 
     expect(onclose).toHaveBeenCalledTimes(1);
-    expect(target.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it('dismisses from Escape and restores focus to the opener', async () => {
@@ -92,7 +92,7 @@ describe('Modal', () => {
 
     expect(escapeEvent.defaultPrevented).toBe(true);
     expect(onclose).toHaveBeenCalledTimes(1);
-    expect(target.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     expect(document.activeElement).toBe(opener);
 
     opener.remove();
@@ -126,7 +126,7 @@ describe('Modal', () => {
     }));
     await settle();
 
-    const dialog = target.querySelector('[role="dialog"]') as HTMLElement;
+    const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement;
     const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
     expect(focusable.length).toBeGreaterThan(0);
 
@@ -147,7 +147,7 @@ describe('Modal', () => {
     }));
     await settle();
 
-    const dialog = target.querySelector('[role="dialog"]') as HTMLElement;
+    const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement;
     const focusable = Array.from(dialog.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'));
     expect(focusable.length).toBeGreaterThan(0);
 
@@ -191,7 +191,7 @@ describe('Modal', () => {
     // exercising the focusin safety net exclusively).
     background.focus();
 
-    const dialog = target.querySelector('[role="dialog"]') as HTMLElement;
+    const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement;
     // Focus must be back inside the dialog after the capture-phase handler fires.
     expect(dialog.contains(document.activeElement)).toBe(true);
     expect(document.activeElement).not.toBe(background);

@@ -7,6 +7,8 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import Icon from '../atoms/Icon.svelte';
+  import { portal } from '$lib/actions/portal';
+  import { pushEscapeLayer } from '$lib/actions/escapeStack';
   import { layout } from '$lib/state/layoutMode.svelte';
 
   interface Props {
@@ -84,13 +86,11 @@
     openStack.push(token);
     const innermost = () => openStack[openStack.length - 1] === token;
 
+    // Escape goes to the innermost overlay of any kind (a sheet or popover may sit above or below this dialog).
+    const releaseEscape = pushEscapeLayer(close);
+
     function handleKeydown(e: KeyboardEvent): void {
       if (!innermost()) return;
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        close();
-        return;
-      }
 
       if (e.key === 'Tab' && el) {
         const focusable = Array.from(el.querySelectorAll<HTMLElement>(FOCUSABLE));
@@ -128,6 +128,7 @@
     document.addEventListener('focusin', handleFocusIn, true);
     return () => {
       openStack.splice(openStack.indexOf(token), 1);
+      releaseEscape();
       document.removeEventListener('keydown', handleKeydown);
       document.removeEventListener('focusin', handleFocusIn, true);
     };
@@ -135,8 +136,8 @@
 </script>
 
 {#if open}
-  <!-- Outer container: stacking context -->
-  <div class="fixed inset-0 {elevated ? 'z-[200]' : 'z-50'}">
+  <!-- Outer container: its own stacking context, moved to <body> so the opener's cannot trap it. -->
+  <div use:portal class="modal-root fixed inset-0" class:elevated>
     <!-- Backdrop (native button so click-to-dismiss requires no role suppression) -->
     <button
       type="button"
@@ -185,6 +186,8 @@
 {/if}
 
 <style>
+  .modal-root { z-index: var(--z-modal); }
+  .modal-root.elevated { z-index: var(--z-modal-top); }
   /* A phone's dialog: full width, rounded at the top, its foot padded for the home indicator, at most 86% tall. */
   .modal-sheet { max-width: none; max-height: min(86%, 86dvh); border-radius: 14px 14px 0 0; padding-bottom: env(safe-area-inset-bottom, 0px); }
   .modal-sheet.h-full { max-height: none; height: calc(100% - 44px - env(safe-area-inset-top, 0px)); }

@@ -19,7 +19,11 @@
 
 <script lang="ts">
   import { popover, type PopoverAlign } from '$lib/actions/popover';
+  import { portal } from '$lib/actions/portal';
   import { layout } from '$lib/state/layoutMode.svelte';
+  import { pushEscapeLayer } from '$lib/actions/escapeStack';
+  import { sheetDrag } from '$lib/actions/sheetDrag';
+  import Icon from '../atoms/Icon.svelte';
 
   interface Props {
     open: boolean;
@@ -56,20 +60,17 @@
     else if (event.key === 'End') { event.preventDefault(); list[list.length - 1]?.focus(); }
   }
 
+  // Keys start on the first item; a finger starts on the menu itself, or the first row would look chosen.
   $effect(() => {
-    if (open && menuEl) menuItems()[0]?.focus();
+    if (!open || !menuEl) return;
+    if (layout.compact) menuEl.focus();
+    else menuItems()[0]?.focus();
   });
 
-  // As a sheet there is no popover action to answer Escape, so the sheet does.
+  // As a sheet there is no popover action to answer Escape, so the sheet does, when it is the innermost overlay.
   $effect(() => {
     if (!open || !layout.compact) return;
-    function handleKeydown(event: KeyboardEvent): void {
-      if (event.key !== 'Escape' || event.defaultPrevented) return;
-      event.preventDefault();
-      onclose();
-    }
-    document.addEventListener('keydown', handleKeydown);
-    return () => document.removeEventListener('keydown', handleKeydown);
+    return pushEscapeLayer(() => onclose());
   });
 </script>
 
@@ -107,12 +108,19 @@
 
 {#if open && layout.compact}
   <!-- On a phone a menu is a sheet from the bottom edge with finger-sized rows; the same items, the same keys. -->
-  <div class="action-sheet-root" data-testid="action-sheet">
+  <div use:portal class="action-sheet-root" data-testid="action-sheet">
     <button type="button" class="action-sheet-scrim" aria-label="Close menu" tabindex="-1" onclick={onclose}></button>
-    <div bind:this={menuEl} class="action-menu action-sheet ui-overlay" role="menu" tabindex="-1" aria-label={label} onkeydown={onKeydown}>
-      <div class="action-sheet-grab" aria-hidden="true"><i></i></div>
-      <p class="action-menu-heading ui-area-label" role="presentation">{label}</p>
-      {@render entries()}
+    <div bind:this={menuEl} use:sheetDrag={{ onclose }} class="action-sheet ui-sheet" role="menu" tabindex="-1" aria-label={label} onkeydown={onKeydown}>
+      <div class="ui-sheet-grab" aria-hidden="true"></div>
+      <div class="ui-sheet-head" role="presentation">
+        <h2 class="ui-area-label action-sheet-title">{label}</h2>
+        <span class="ui-sheet-end">
+          <button type="button" class="ui-btn ui-btn-icon" aria-label="Close menu" onclick={onclose}><Icon name="close" size={16} /></button>
+        </span>
+      </div>
+      <div class="action-sheet-body">
+        {@render entries()}
+      </div>
     </div>
   </div>
 {:else if open}
@@ -130,14 +138,14 @@
 {/if}
 
 <style>
-  .action-sheet-root { position: fixed; inset: 0; z-index: 160; }
+  .action-sheet-root { position: fixed; inset: 0; z-index: var(--z-menu); }
   .action-sheet-scrim { position: absolute; inset: 0; background: var(--color-scrim); }
-  .action-sheet { position: absolute; left: 0; right: 0; bottom: 0; max-height: min(80%, 80dvh); border-radius: 14px 14px 0 0; padding: 4px max(12px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); }
-  .action-sheet-grab { display: flex; justify-content: center; padding: 6px 0 4px; }
-  .action-sheet-grab i { width: 36px; height: 4px; border-radius: 2px; background: var(--color-border-strong); }
+  .action-sheet { position: absolute; left: 0; right: 0; bottom: 0; display: flex; max-height: min(80%, 80dvh); flex-direction: column; outline: none; }
+  .action-sheet-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .action-sheet-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 max(12px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); }
   .action-sheet .action-menu-item { min-height: 48px; padding: 0 12px; font-size: 15px; }
   .action-sheet .action-menu-heading { padding: 6px 12px 8px; }
-  .action-menu { z-index: 120; min-width: 200px; max-height: min(60vh, 22rem); overflow-y: auto; padding: 4px; }
+  .action-menu { z-index: var(--z-menu); min-width: 200px; max-height: min(60vh, 22rem); overflow-y: auto; padding: 4px; }
   .action-menu-heading { padding: 6px 8px 3px; }
   .action-menu-separator { height: 1px; margin: 4px 0; background: var(--color-border-subtle); }
   .action-menu-item { display: flex; width: 100%; align-items: center; gap: 8px; border-radius: var(--radius-sm); padding: 6px 8px; text-align: left; font-size: var(--text-ui); color: var(--color-text-secondary); }

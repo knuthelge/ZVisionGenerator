@@ -7,7 +7,7 @@
 </script>
 
 <!-- One toast at a time, bottom centre of the page content; pages with a fixed left sidebar set --toast-inset-left. -->
-<div class="toast-zone pointer-events-none fixed z-[150] grid justify-items-center px-4" role="region" aria-label="Notifications" aria-live="polite">
+<div class="toast-zone pointer-events-none fixed z-(--z-toast) grid justify-items-center px-4" role="region" aria-label="Notifications" aria-live="polite">
   {#if current}
     {#key current.id}
       <div class="toast-slot pointer-events-none flex max-w-full justify-center" transition:fly={{ y: 8, duration: 150 }}>

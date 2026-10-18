@@ -14,6 +14,8 @@
   import { EnhanceChoice, EnhanceOptions, EnhanceRewrite } from '$lib/components/molecules';
   import { Icon, Toggle } from '$lib/components/atoms';
   import { popover } from '$lib/actions/popover';
+  import { layout } from '$lib/state/layoutMode.svelte';
+  import BottomSheet from '$lib/components/molecules/BottomSheet.svelte';
   import {
     clampedNote,
     effectiveEnhanceSettings,
@@ -259,14 +261,7 @@
   <Icon name="sparkle" size={13} />Enhance{draft.state.enhanceAuto ? ' · each image' : ''}<Icon name="chevdown" size={12} />
 </button>
 
-{#if panelOpen}
-  <div
-    use:popover={{ anchor: toggleEl, align: 'start', onclose: () => { panelOpen = false; } }}
-    id="ws-enhance-panel"
-    class="enhance-popover ui-overlay space-y-3"
-    role="dialog"
-    aria-label="Prompt enhancer"
-  >
+{#snippet panel()}
     {@render options()}
     {#if variant === 'inline' && !draft.state.enhanceAuto}
       <div class="flex flex-wrap items-center gap-2">
@@ -301,6 +296,22 @@
     {#if variant === 'file'}
       <p class="ui-help">Off: entries with their own <span class="font-mono">enhance:</span> setting (✨) are still enhanced.</p>
     {/if}
+{/snippet}
+
+{#if panelOpen && layout.compact}
+  <!-- A phone: the options as a sheet, like every menu there. -->
+  <BottomSheet open={true} title="Prompt enhancer" onclose={() => { panelOpen = false; }}>
+    <div id="ws-enhance-panel" class="enhance-sheet space-y-3">{@render panel()}</div>
+  </BottomSheet>
+{:else if panelOpen}
+  <div
+    use:popover={{ anchor: toggleEl, align: 'start', onclose: () => { panelOpen = false; } }}
+    id="ws-enhance-panel"
+    class="enhance-popover ui-overlay space-y-3"
+    role="dialog"
+    aria-label="Prompt enhancer"
+  >
+    {@render panel()}
   </div>
 {/if}
 
@@ -317,5 +328,6 @@
 <style>
   /* Never taller or wider than the window: on small screens the options scroll inside the popover. */
   .enhance-popover { z-index: 70; width: min(320px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow-y: auto; padding: 12px; border-radius: var(--radius-md); }
+  .enhance-sheet { padding: 12px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px)); }
   .choices { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
 </style>

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
+  import { Icon, InspectorNumber, Spinner, Toggle } from '$lib/components/atoms';
   import { ModelStatusBadges, PathBrowser, PathInput, Segmented } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { draft, offeredSizes, settingDefaultsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
@@ -7,7 +7,7 @@
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { memoryFitNote } from '$lib/state/memoryFit';
   import { formatLoraString, loraLabel, parseLoraString } from '$lib/state/loras';
-  import { extendGuard } from '$lib/state/extend';
+  import { extendGuard, extendSourceFacts } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { defaultExtendFrames, durationSpec, EXTEND_FRAME_STEP, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
   import type { ModelOption, WorkspaceContext } from '$lib/types';
@@ -15,7 +15,9 @@
   import { randomSeed } from './seed';
   import { rangeFill, SPEC } from './settingsSpec';
   import type { ChipKey } from './settingsChips';
-  import SourceVideoSection from './SourceVideoSection.svelte';
+  import SourceVideoFeedback from './SourceVideoFeedback.svelte';
+  import { pushEscapeLayer } from '$lib/actions/escapeStack';
+  import { sheetDrag } from '$lib/actions/sheetDrag';
 
   interface Props {
     key: ChipKey;
@@ -56,6 +58,9 @@
   function reset(): void {
     draft.patch(Object.fromEntries(resetKeys.map((k) => [k, defaults[k]])));
   }
+
+  // Escape closes, as it does every other overlay, unless a dialog opened over the popover is the innermost one.
+  $effect(() => pushEscapeLayer(() => onclose()));
 
   // --- Size ---
   const ratios = $derived(caps.isImageMode ? context.image_ratios : context.video_ratios);
@@ -120,6 +125,10 @@
   let browsing = $state(false);
   let fileInput = $state<HTMLInputElement | null>(null);
   let filePreviewUrl = $state<string | null>(null);
+  // Forget a browsed file once it stops being the reference, so choosing it again fires a change.
+  $effect(() => {
+    if (!imageFile && fileInput) fileInput.value = '';
+  });
   $effect(() => {
     const url = imageFile ? URL.createObjectURL(imageFile) : null;
     filePreviewUrl = url;
@@ -132,16 +141,48 @@
     draft.update('referenceImagePath', path);
   }
 
+  // --- Source video ---
+  // The popover only picks the video; the path field that submits it lives in the All sheet, so nothing here has a name.
+  const sourcePath = $derived(s.extendSourcePath);
+  const sourceName = $derived(info?.filename ?? (sourcePath ? fileName(sourcePath) : null));
+  const sourceFacts = $derived(info ? extendSourceFacts(info) : []);
+  const sourceThumbUrl = $derived(info?.media_url ? `${info.media_url}#t=${Math.max(0, (info.duration_seconds ?? 0) - 0.05).toFixed(2)}` : null);
+  const latestVideo = $derived(historyStore.assets.find((asset) => asset.media_type === 'video' && asset.file_path) ?? null);
+  let browsingSource = $state(false);
+
+  let sourceText = $state(draft.state.extendSourcePath ?? '');
+
+  function chooseSource(path: string | null): void {
+    sourceText = path ?? '';
+    draft.setExtendSourcePath(path);
+    void extendInspection.inspect(context, { replaceText: true });
+  }
+
+  function commitSourceText(): void {
+    const path = sourceText.trim() || null;
+    if (path !== sourcePath) chooseSource(path);
+  }
+
+  // Enter takes the typed path at once; it must not submit the form, whose Generate waits for the check.
+  function onSourceKeydown(event: KeyboardEvent): void {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    commitSourceText();
+  }
+
   const selectedModel = $derived(models.find((model) => model.id === s.model) ?? null);
 </script>
 
-<div class="setting-popover ui-panel" role="dialog" aria-label={TITLES[key]} data-testid="setting-popover" data-key={key}>
-  <div class="pop-head">
+<div class="setting-popover ui-sheet" use:sheetDrag={{ onclose }} role="dialog" aria-label={TITLES[key]} data-testid="setting-popover" data-key={key}>
+  <div class="ui-sheet-grab" aria-hidden="true"></div>
+  <div class="ui-sheet-head">
     <h3 class="ui-area-label">{TITLES[key]}</h3>
-    {#if resetKeys.length}
-      <button type="button" class="ui-btn pop-reset" disabled={!canReset} onclick={reset}><Icon name="reset" size={12} />Reset</button>
-    {/if}
-    <button type="button" class="ui-btn ui-btn-icon" aria-label="Close" onclick={onclose}><Icon name="close" size={14} /></button>
+    <span class="ui-sheet-end">
+      {#if resetKeys.length}
+        <button type="button" class="ui-btn" disabled={!canReset} onclick={reset}><Icon name="reset" size={12} />Reset</button>
+      {/if}
+      <button type="button" class="ui-btn ui-btn-icon" aria-label="Close" onclick={onclose}><Icon name="close" size={16} /></button>
+    </span>
   </div>
   <div class="pop-body">
     {#if key === 'steps'}
@@ -156,6 +197,7 @@
       <p class="ui-help">How far from the reference image the result may go.</p>
     {:else if key === 'runs'}
       <InspectorNumber ariaLabel="Batch size" value={s.runs} {...SPEC.runs} stepper size="lg" onchange={(v) => v !== null && draft.update('runs', v)} />
+      <input class="ui-range pop-range" type="range" aria-label="Batch size" min={1} max={16} step={1} value={Math.min(s.runs, 16)} style:--fill={rangeFill(Math.min(s.runs, 16), { min: 1, max: 16 })} oninput={(e) => draft.update('runs', Number(e.currentTarget.value))}>
       <p class="ui-help">{caps.isImageMode ? 'Images' : 'Clips'} per run, each with its own seed.</p>
     {:else if key === 'seconds'}
       <InspectorNumber ariaLabel="Clip length in seconds" value={shownSeconds} {...secondsSpec} stepper size="lg" commitOnly onchange={setSeconds} />
@@ -263,20 +305,30 @@
       <PathInput id="ws-pop-image-path" purpose="reference_image" class="ui-field pop-path" placeholder="/path/to/reference.png" value={s.referenceImagePath ?? ''} oninput={(text) => draft.update('referenceImagePath', text || null)} onpick={chooseImagePath} />
       <PathBrowser bind:open={browsing} purpose="reference_image" initialPath={s.referenceImagePath} onchoose={chooseImagePath} />
     {:else if key === 'source'}
-      <SourceVideoSection {context} {busy} guard={sourceGuard} />
+      <div class="pop-ref">
+        <span class="pop-thumb">{#if sourceThumbUrl}<video src={sourceThumbUrl} muted preload="metadata" aria-hidden="true"></video>{:else}<Icon name="film" size={20} />{/if}</span>
+        <span class="pop-item-text" class:muted={!sourceName} title={sourcePath ?? ''}>{sourceName ?? 'No source video yet'}</span>
+        {#if sourcePath !== null && sourceGuard.kind === 'checking'}<Spinner size="sm" />{/if}
+        {#if sourcePath !== null}<button type="button" class="ui-btn ui-btn-icon" aria-label="Clear source video" disabled={busy} onclick={() => chooseSource(null)}><Icon name="close" size={16} /></button>{/if}
+      </div>
+      {#if sourceFacts.length > 0}
+        <p class="pop-facts">{#each sourceFacts as fact, index (fact.key)}{#if index > 0}{' · '}{/if}<span title={fact.title}>{fact.text}</span>{/each}</p>
+      {/if}
+      <SourceVideoFeedback />
+      <div class="pop-list">
+        <button type="button" class="pop-item" disabled={busy} onclick={() => { browsingSource = true; }}><Icon name="folder" size={16} />Browse the server<small>output folder</small></button>
+        {#if latestVideo && latestVideo.file_path !== sourcePath}
+          <button type="button" class="pop-item" disabled={busy} onclick={() => chooseSource(latestVideo.file_path ?? null)}><Icon name="film" size={16} /><span class="pop-item-text">Use the latest video</span><small>{latestVideo.filename}</small></button>
+        {/if}
+      </div>
+      <PathInput id="ws-pop-source-path" purpose="source_video" class="ui-field pop-path" placeholder="/path/to/clip.mp4" value={sourcePath ?? ''} oninput={(text) => { sourceText = text; }} onchange={commitSourceText} onkeydown={onSourceKeydown} onpick={(path) => chooseSource(path)} />
+      <PathBrowser bind:open={browsingSource} purpose="source_video" initialPath={sourcePath} onchoose={(path) => chooseSource(path)} />
     {/if}
   </div>
 </div>
 
 <style>
-  .setting-popover { display: flex; flex-direction: column; border-radius: 14px 14px 0 0; box-shadow: 0 -1px 0 color-mix(in srgb, var(--color-text-primary) 8%, transparent), 0 -12px 32px rgb(0 0 0 / 0.45); }
-  .pop-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px max(16px, env(safe-area-inset-left, 0px)); }
-  .pop-head h3 { font-size: var(--text-ui); }
-  .pop-head .ui-btn { height: 32px; }
-  .pop-reset { margin-left: auto; }
-  .pop-head .ui-btn-icon { width: 32px; }
-  .pop-reset + .ui-btn-icon { margin-left: 0; }
-  .pop-head > .ui-btn-icon:first-of-type:not(.pop-reset ~ *) { margin-left: auto; }
+  .setting-popover { display: flex; flex-direction: column; }
   .pop-body { display: flex; flex-direction: column; gap: 12px; padding: 4px max(12px, env(safe-area-inset-right, 0px)) 12px max(12px, env(safe-area-inset-left, 0px)); max-height: 60dvh; overflow-y: auto; }
   .pop-range { width: 100%; height: 36px; }
   .pop-range::-webkit-slider-thumb { width: 24px; height: 24px; margin-top: -10px; }
@@ -286,10 +338,10 @@
   .pop-dims { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 8px; }
   .dim-times { font-family: var(--font-mono); color: var(--color-text-muted); }
   .pop-list { display: flex; flex-direction: column; gap: 2px; }
-  .pop-item { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 12px; border-radius: var(--radius-sm); font-size: 15px; text-align: left; color: var(--color-text-primary); }
+  .pop-item { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 0 12px; border-radius: var(--radius-sm); font-size: 15px; white-space: nowrap; text-align: left; color: var(--color-text-primary); }
   .pop-item:active { background: var(--color-bg-surface-hover); }
   .pop-item[aria-pressed='true'], .pop-item[aria-checked='true'] { background: color-mix(in srgb, var(--color-primary-main) 12%, transparent); color: var(--color-primary-main); }
-  .pop-item small { margin-left: auto; font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-muted); }
+  .pop-item small { flex: none; max-width: 42%; margin-left: auto; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-muted); }
   .pop-item-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .pop-item-text.muted { color: var(--color-text-muted); }
   .pop-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; font-size: 15px; }
@@ -297,7 +349,9 @@
   .pop-lora :global(.inspector-number-wrap) { flex: none; width: 170px; }
   .pop-ref { display: flex; align-items: center; gap: 12px; min-height: 56px; font-size: 15px; }
   .pop-thumb { display: grid; flex: none; place-items: center; width: 56px; height: 56px; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
-  .pop-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .pop-thumb img, .pop-thumb video { width: 100%; height: 100%; object-fit: cover; }
+  .pop-facts { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
+  .pop-item:disabled { opacity: 0.5; }
   .pop-body :global(.pop-path) { height: 40px; font-family: var(--font-mono); font-size: 13px; }
   .ui-help-warning { display: flex; gap: 4px; align-items: flex-start; }
   .ui-help-warning :global(svg) { flex: none; margin-top: 2px; }

@@ -506,7 +506,7 @@
     {#snippet actions()}
       <Select
         ariaLabel="Filter gallery media"
-        class="w-36"
+        class={compact ? 'min-w-0 flex-1' : 'w-36'}
         value={mediaFilter}
         options={[
           { value: 'all', label: 'All media' },
@@ -517,7 +517,7 @@
       />
       <Select
         ariaLabel="Sort gallery assets"
-        class="w-36"
+        class={compact ? 'min-w-0 flex-1' : 'w-36'}
         value={sortOrder}
         options={[
           { value: 'newest', label: 'Newest first' },
@@ -554,7 +554,7 @@
       </EmptyState>
     {:else}
       <!-- Grid -->
-      <div bind:this={gridEl} class="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+      <div bind:this={gridEl} class="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
         {#each assets as asset (asset.id)}
           <AssetTile
             {asset}
