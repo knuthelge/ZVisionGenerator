@@ -3777,6 +3777,65 @@ describe('WorkspacePage asset actions and settings', () => {
     await settle();
     expect(draft.state.seed).toBeNull();
   });
+
+  describe('stepping through history on the stage', () => {
+    const first = () => makeAsset({ id: 'out/first.png', filename: 'first.png' });
+    const second = () => makeAsset({ id: 'out/second.png', filename: 'second.png' });
+    const third = () => makeAsset({ id: 'out/third.png', filename: 'third.png' });
+    const stageTile = () => target.querySelector('.latest-region article') as HTMLElement;
+    const position = () => target.querySelector('[data-testid="stage-position"]');
+    const arrow = (key: 'ArrowLeft' | 'ArrowRight') => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+    };
+
+    it('steps older with → and newer with ←, shows the position, and Latest returns', async () => {
+      await mountWithHistory([first(), second(), third()]);
+      expect(stageTile().getAttribute('aria-label')).toBe('first.png');
+      expect(position()).toBeNull();
+
+      arrow('ArrowRight');
+      await settle();
+      expect(stageTile().getAttribute('aria-label')).toBe('second.png');
+      expect(position()?.textContent).toContain('2');
+
+      arrow('ArrowRight');
+      arrow('ArrowRight');
+      await settle();
+      expect(stageTile().getAttribute('aria-label')).toBe('third.png');
+
+      arrow('ArrowLeft');
+      await settle();
+      expect(stageTile().getAttribute('aria-label')).toBe('second.png');
+
+      (position()!.querySelector('button') as HTMLButtonElement).click();
+      await settle();
+      expect(stageTile().getAttribute('aria-label')).toBe('first.png');
+      expect(position()).toBeNull();
+    });
+
+    it('has Newer and Older buttons that disable at the ends', async () => {
+      await mountWithHistory([first(), second()]);
+      const newer = () => target.querySelector('button[aria-label="Newer output"]') as HTMLButtonElement;
+      const older = () => target.querySelector('button[aria-label="Older output"]') as HTMLButtonElement;
+      expect(newer().disabled).toBe(true);
+      expect(older().disabled).toBe(false);
+
+      older().click();
+      await settle();
+      expect(stageTile().getAttribute('aria-label')).toBe('second.png');
+      expect(older().disabled).toBe(true);
+      expect(newer().disabled).toBe(false);
+    });
+
+    it('ignores the arrows while typing in a field', async () => {
+      await mountWithHistory([first(), second()]);
+      const prompt = target.querySelector('#ws-prompt') as HTMLTextAreaElement;
+      prompt.focus();
+      prompt.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+      await settle();
+      expect(stageTile().getAttribute('aria-label')).toBe('first.png');
+    });
+  });
 });
 
 

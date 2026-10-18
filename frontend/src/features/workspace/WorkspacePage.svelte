@@ -38,7 +38,7 @@
   import { fitOutputGrid } from './outputGrid';
   import { randomSeed } from './seed';
   import { workspaceCapabilities } from './capabilities';
-  import { hasOpenModal, isCommandKey } from '$lib/keyboard';
+  import { acceptsPageShortcut, hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { startUpscale } from '$lib/state/upscale';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
   import type { DraftState, GalleryAsset, JobControlAction, JobSnapshot, UpscaleFactor, UpscaleMethod, WorkspaceContext, Workflow } from '$lib/types';
@@ -103,7 +103,56 @@
       : historyStore.assets.length > 0 ? 'latest'
       : 'empty'
   );
-  const latestAsset = $derived<GalleryAsset | null>(historyStore.assets[0] ?? null);
+  // The stage steps through history in place: the viewed asset is tracked by id, so new outputs arriving at the
+  // front never move it; null means the latest. A new job or a vanished asset brings it back to the latest.
+  let viewedId = $state<string | null>(null);
+  const viewedIndex = $derived.by(() => {
+    if (viewedId === null) return 0;
+    const index = historyStore.assets.findIndex((asset) => asset.id === viewedId);
+    return index < 0 ? 0 : index;
+  });
+  const viewedAsset = $derived<GalleryAsset | null>(historyStore.assets[viewedIndex] ?? null);
+  const atLatest = $derived(viewedIndex === 0);
+  const historyTotal = $derived(historyStore.totalCount ?? historyStore.assets.length);
+  const STEP_NEAR_END = 3;
+
+  /** Show the asset `delta` places older (positive) or newer (negative) than the viewed one, loading more history near the end. */
+  function stepView(delta: number): void {
+    const assets = historyStore.assets;
+    if (assets.length === 0) return;
+    const next = Math.min(assets.length - 1, Math.max(0, viewedIndex + delta));
+    viewedId = next === 0 ? null : assets[next].id;
+    if (next >= assets.length - STEP_NEAR_END && historyStore.hasMore) void historyStore.loadMore();
+  }
+
+  function showLatest(): void {
+    viewedId = null;
+  }
+
+  // A job takes the stage and its output lands at the front: the stage is back at the latest when it returns.
+  $effect(() => {
+    if (jobStore.isRunning) viewedId = null;
+  });
+
+  // A finger swipes the stage sideways to step through history (a mouse has ← → and the arrows).
+  const SWIPE_MIN_PX = 48;
+  const SWIPE_MAX_MS = 600;
+  let swipeStart: { x: number; y: number; at: number } | null = null;
+
+  function onStageTouchStart(event: TouchEvent): void {
+    const touch = event.touches[0];
+    swipeStart = touch ? { x: touch.clientX, y: touch.clientY, at: Date.now() } : null;
+  }
+
+  function onStageTouchEnd(event: TouchEvent): void {
+    const start = swipeStart;
+    swipeStart = null;
+    const touch = event.changedTouches[0];
+    if (!start || !touch || Date.now() - start.at > SWIPE_MAX_MS || previewView !== 'latest') return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dx) >= SWIPE_MIN_PX && Math.abs(dx) > Math.abs(dy) * 1.5) stepView(dx < 0 ? 1 : -1);
+  }
   // A reference path that points at a known asset can show that asset as its thumbnail.
   const referencePreviewUrl = $derived(
     draft.state.referenceImagePath
@@ -114,9 +163,9 @@
   // some browsers load nothing until play is pressed, so no load event is guaranteed.
   const latestLoading = $derived(
     previewView === 'latest'
-      && latestAsset !== null
-      && latestAsset.media_type !== 'video'
-      && loadedLatestUrl !== latestAsset.url
+      && viewedAsset !== null
+      && viewedAsset.media_type !== 'video'
+      && loadedLatestUrl !== viewedAsset.url
   );
   // The latest asset fills the stage, so the mascot docks in a corner there (outputs have their own header spot).
   const dockMascot = $derived(previewView === 'latest' && !latestLoading);
@@ -600,6 +649,10 @@
         e.preventDefault();
         if (e.shiftKey) togglePane(e.code);
         else void focusPane(e.code);
+      } else if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && previewView === 'latest' && acceptsPageShortcut(e)) {
+        // ← → step the preview through history; → goes back in time, like the strip reads.
+        e.preventDefault();
+        stepView(e.key === 'ArrowRight' ? 1 : -1);
       }
     }
     document.addEventListener('keydown', handleKeydown);
@@ -975,9 +1028,21 @@
     <section class="workspace-preview relative z-0 flex min-h-0 min-w-0 flex-col bg-bg-base">
       <div class="ui-pane-header flex h-10 shrink-0 items-center justify-between px-3">
         <h2 class="ui-area-label">Preview</h2>
-        <span class="text-meta text-text-muted">{reviewing ? 'Review' : jobStore.isRunning ? 'Generating…' : hasCompletedOutputs || historyStore.assets.length ? 'Latest output' : 'Ready'}</span>
+        {#if previewView === 'latest' && !atLatest}
+          <span class="flex items-center gap-2 text-meta text-text-muted" data-testid="stage-position">
+            Earlier output · <b class="font-mono font-medium text-text-secondary">{viewedIndex + 1}</b> of {historyTotal}
+            <button type="button" class="ui-btn ui-btn-sm" onclick={showLatest}>Latest</button>
+          </span>
+        {:else}
+          <span class="text-meta text-text-muted">{reviewing ? 'Review' : jobStore.isRunning ? 'Generating…' : hasCompletedOutputs || historyStore.assets.length ? 'Latest output' : 'Ready'}</span>
+        {/if}
       </div>
-      <div class="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
+      <!-- svelte-ignore a11y_no_static_element_interactions because the swipe is a shortcut for the arrows and keys beside it -->
+      <div
+        class="stage-body relative flex min-h-0 flex-1 items-center justify-center overflow-hidden"
+        ontouchstart={onStageTouchStart}
+        ontouchend={onStageTouchEnd}
+      >
         {#if loadError}
           <div class="flex flex-col items-center gap-3 text-center p-8">
             <MascotSpot mood={mascotMood} tool={mascotTool} size={112} />
@@ -1058,8 +1123,15 @@
               <QueuePanel jobs={jobStore.queuedJobs} onremove={removeQueuedJob} onload={loadQueuedSettings} onclear={clearQueuedJobs} />
             </div>
           </div>
-        {:else if latestAsset}
-          {@const latest = latestAsset}
+        {:else if viewedAsset}
+          {@const latest = viewedAsset}
+          <!-- Newer and older, for a mouse; they appear on hover and never on a touch screen. -->
+          <button type="button" class="stage-nav prev ui-btn ui-btn-icon" aria-label="Newer output" disabled={atLatest} onclick={() => stepView(-1)}>
+            <Icon name="chevleft" size={16} />
+          </button>
+          <button type="button" class="stage-nav next ui-btn ui-btn-icon" aria-label="Older output" disabled={viewedIndex >= historyStore.assets.length - 1 && !historyStore.hasMore} onclick={() => stepView(1)}>
+            <Icon name="chevright" size={16} />
+          </button>
           <!-- Side padding keeps wide media clear of the docked mascot. -->
           <div class="latest-region flex h-full w-full flex-col px-20 py-4">
             <AssetTile
@@ -1173,6 +1245,12 @@
     .workspace-layout { display: flex; flex-direction: column; overflow-y: auto; }
     .workspace-preview { flex: none; min-height: 420px; }
   }
+  /* The in-place history arrows: visible while the pointer is over the stage, never for a finger (it swipes). */
+  .stage-nav { position: absolute; top: 50%; z-index: 3; transform: translateY(-50%); opacity: 0; transition: opacity 0.12s ease; }
+  .stage-nav.prev { left: 12px; }
+  .stage-nav.next { right: 12px; }
+  .stage-body:hover .stage-nav:not(:disabled), .stage-nav:focus-visible { opacity: 1; }
+  @media (pointer: coarse) { .stage-nav { display: none; } }
   .latest-region :global(.latest-media) { opacity: 0; transition: opacity 250ms ease; }
   .latest-region :global(.latest-media.loaded) { opacity: 1; }
   .latest-meta { display: flex; flex: none; align-items: center; justify-content: center; gap: 14px; min-width: 0; padding-top: 8px; font-size: var(--text-ui); color: var(--color-text-muted); }
