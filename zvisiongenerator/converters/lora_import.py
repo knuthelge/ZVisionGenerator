@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import tempfile
 from pathlib import Path
 
 _INVALID_NAME_PATTERN = re.compile(r"[/\\]|\.\.|[\x00]")
@@ -68,7 +69,7 @@ def import_lora_hf(
     filename: str | None = None,
     name: str | None = None,
 ) -> Path:
-    """Download a LoRA .safetensors from a HuggingFace repo.
+    """Download a LoRA .safetensors from a HuggingFace repo into *dest_dir*, without keeping a copy in the HuggingFace cache.
 
     Args:
         repo_id: HuggingFace repo ID (e.g., "user/lora-name").
@@ -108,6 +109,8 @@ def import_lora_hf(
     if dest.exists():
         raise FileExistsError(f"Destination already exists: {dest}")
 
-    cached = hf_hub_download(repo_id=repo_id, filename=filename)
-    shutil.copy2(cached, dest)
+    # A temporary folder beside the destination keeps the final move a rename on the same drive.
+    with tempfile.TemporaryDirectory(prefix=".import-", dir=dest_dir) as download_dir:
+        downloaded = hf_hub_download(repo_id=repo_id, filename=filename, local_dir=download_dir)
+        shutil.move(downloaded, dest)
     return dest

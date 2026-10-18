@@ -123,21 +123,42 @@ class TestImportLoraLocal:
 # ── import_lora_hf ───────────────────────────────────────────────────────────
 
 
+def _download_into_local_dir(data: bytes):
+    """Fake ``hf_hub_download(..., local_dir=...)``: write the file into *local_dir* and return its path."""
+
+    def _download(*, repo_id: str, filename: str, local_dir: str) -> str:
+        path = Path(local_dir) / filename
+        path.write_bytes(data)
+        return str(path)
+
+    return _download
+
+
 class TestImportLoraHf:
     @patch("huggingface_hub.hf_hub_download")
     @patch("huggingface_hub.list_repo_files")
     def test_single_safetensors_auto_selects(self, mock_list: MagicMock, mock_dl: MagicMock, tmp_path: Path):
         mock_list.return_value = ["README.md", "model.safetensors"]
-        cached = tmp_path / "cached.safetensors"
-        cached.write_bytes(b"tensor-data")
-        mock_dl.return_value = str(cached)
+        mock_dl.side_effect = _download_into_local_dir(b"tensor-data")
 
         dest_dir = tmp_path / "loras"
         result = import_lora_hf("user/repo", dest_dir)
 
         assert result == dest_dir / "model.safetensors"
         assert result.read_bytes() == b"tensor-data"
-        mock_dl.assert_called_once_with(repo_id="user/repo", filename="model.safetensors")
+        assert mock_dl.call_args.kwargs["repo_id"] == "user/repo"
+        assert mock_dl.call_args.kwargs["filename"] == "model.safetensors"
+
+    @patch("huggingface_hub.hf_hub_download")
+    @patch("huggingface_hub.list_repo_files")
+    def test_downloads_outside_the_cache_and_leaves_no_temporary_folder(self, mock_list: MagicMock, mock_dl: MagicMock, tmp_path: Path):
+        mock_dl.side_effect = _download_into_local_dir(b"data")
+        dest_dir = tmp_path / "loras"
+
+        import_lora_hf("user/repo", dest_dir, filename="style.safetensors")
+
+        assert Path(mock_dl.call_args.kwargs["local_dir"]).parent == dest_dir
+        assert [path.name for path in dest_dir.iterdir()] == ["style.safetensors"]
 
     @patch("huggingface_hub.hf_hub_download")
     @patch("huggingface_hub.list_repo_files")
@@ -158,9 +179,7 @@ class TestImportLoraHf:
     @patch("huggingface_hub.hf_hub_download")
     @patch("huggingface_hub.list_repo_files")
     def test_explicit_filename(self, mock_list: MagicMock, mock_dl: MagicMock, tmp_path: Path):
-        cached = tmp_path / "cached.safetensors"
-        cached.write_bytes(b"data")
-        mock_dl.return_value = str(cached)
+        mock_dl.side_effect = _download_into_local_dir(b"data")
 
         dest_dir = tmp_path / "loras"
         result = import_lora_hf("user/repo", dest_dir, filename="specific.safetensors")
@@ -171,9 +190,7 @@ class TestImportLoraHf:
     @patch("huggingface_hub.hf_hub_download")
     @patch("huggingface_hub.list_repo_files")
     def test_custom_name(self, mock_list: MagicMock, mock_dl: MagicMock, tmp_path: Path):
-        cached = tmp_path / "cached.safetensors"
-        cached.write_bytes(b"data")
-        mock_dl.return_value = str(cached)
+        mock_dl.side_effect = _download_into_local_dir(b"data")
 
         dest_dir = tmp_path / "loras"
         result = import_lora_hf("user/repo", dest_dir, filename="orig.safetensors", name="renamed")
