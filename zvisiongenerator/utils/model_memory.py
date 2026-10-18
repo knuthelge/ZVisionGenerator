@@ -33,6 +33,9 @@ from zvisiongenerator.utils.stored_quant import stored_quant_bits
 
 GIB = 1024**3
 _IMAGE_WORKING_BYTES = int(1.5 * GIB)
+# Ideogram 4 Instant on MLX, above its weights at 1024x1024: the VAE decode peaks 15.6-16.2 GiB over the weights at
+# every level (FP8, q8, q4), measured on a 32 GB M5; its denoising alone needs 4-5 GiB.
+_IDEOGRAM4_MLX_WORKING_BYTES = 16 * GIB
 # Apple's recommended working set is conservative: a modest overshoot is absorbed by memory compression
 # without a noticeable slowdown.
 _FITS_RATIO = 1.1
@@ -217,7 +220,8 @@ def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ..
     Mirrors ``MfluxBackend.load_model``: floating-point weights load as bfloat16, the VAE is upcast to
     float32, FP8 and pre-quantized weights stay as stored, and quantizing packs 2-D weights. Only the
     files the loader reads count (see :func:`model_weight_files`), minus the text encoder's unused LM head,
-    and headers are read once for all levels.
+    and headers are read once for all levels. Ideogram 4 adds its measured working memory at 1024x1024, whose VAE
+    decode peaks far above the weights; other families add the fixed margin.
 
     Args:
         model_dir: Directory holding the model's safetensors files.
@@ -231,9 +235,9 @@ def estimate_image_memory(model_dir: Path, quantize_levels: tuple[int | None, ..
         return None
     # mflux keeps Krea 2's text encoder in bfloat16 at every quantize level.
     quantize_text_encoder = not is_krea2_model(model_dir)
+    working = _IDEOGRAM4_MLX_WORKING_BYTES if is_ideogram4_model(model_dir) else _IMAGE_WORKING_BYTES
     return {
-        level: int(sum(_image_component_bytes(name, totals, _component_quantize(name, level, quantize_text_encoder)) for name, totals in components.items())) + _IMAGE_WORKING_BYTES
-        for level in quantize_levels
+        level: int(sum(_image_component_bytes(name, totals, _component_quantize(name, level, quantize_text_encoder)) for name, totals in components.items())) + working for level in quantize_levels
     }
 
 

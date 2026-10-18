@@ -115,6 +115,15 @@ class TestEstimateImageMemory:
         assert estimates[None] == 1_000_000 + prequantized + _IMAGE_MARGIN
         assert estimates[4] == int(1_000_000 * (4 / 8 + 4 / 64) + prequantized) + _IMAGE_MARGIN
 
+    def test_ideogram4_adds_its_own_working_memory_at_every_level(self, tmp_path):
+        (tmp_path / "model_index.json").write_text(json.dumps({"_class_name": "Ideogram4Pipeline", "transformer": ["diffusers", "Ideogram4Transformer2DModel"]}), encoding="utf-8")
+        _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"w": ("F8_E4M3", [1000, 1000])})
+
+        estimates = estimate_image_memory(tmp_path, (None, 4))
+
+        assert estimates[None] == 1_000_000 + model_memory._IDEOGRAM4_MLX_WORKING_BYTES
+        assert estimates[4] == int(1_000_000 * (4 / 8 + 4 / 64)) + model_memory._IDEOGRAM4_MLX_WORKING_BYTES
+
     def test_returns_none_without_weights_or_with_unreadable_weights(self, tmp_path):
         assert estimate_image_memory(tmp_path) is None
         (tmp_path / "transformer").mkdir()
