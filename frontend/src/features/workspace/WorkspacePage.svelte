@@ -21,7 +21,8 @@
     mascotTool as pickMascotTool,
     type MascotReaction,
   } from '$lib/state/mascot';
-  import { ActionMenu, AssetTile, AssetViewer, JobCard, JobPreview, ModelStatusBadges, ReviewStage, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
+  import { ActionMenu, AssetTile, AssetViewer, JobBar, JobCard, JobPreview, ModelStatusBadges, ReviewStage, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
+  import { compactUi } from '$lib/state/compactUi.svelte';
   import { isReviewing } from '$lib/state/jobView';
   import { jobSettingsPrefill } from '$lib/state/jobSettings';
   import { cliCommand, formSettings, type CliCaveat, type CliCommand } from '$lib/state/cliCommand';
@@ -66,6 +67,19 @@
   let activeChip = $state<ChipKey | null>(null);
   let sheetOpen = $state(false);
   let composerOpen = $state(false);
+  // The running job's full card and the queue, as a sheet on a phone; the strip's job state asks for it too.
+  let jobSheetOpen = $state(false);
+  let seenJobSheetRequests = compactUi.jobSheetRequests;
+  $effect(() => {
+    const requests = compactUi.jobSheetRequests;
+    if (requests === seenJobSheetRequests) return;
+    seenJobSheetRequests = requests;
+    if (jobStore.current || jobStore.queuedJobs.length > 0) jobSheetOpen = true;
+  });
+  // The sheet has nothing to show once the job is gone and the queue is empty.
+  $effect(() => {
+    if (!jobStore.current && jobStore.queuedJobs.length === 0) jobSheetOpen = false;
+  });
 
   let context = $state<WorkspaceContext | null>(null);
   let loadError = $state<string | null>(null);
@@ -165,11 +179,14 @@
     const start = swipeStart;
     swipeStart = null;
     const touch = event.changedTouches[0];
-    if (!start || !touch || Date.now() - start.at > SWIPE_MAX_MS || previewView !== 'latest') return;
+    if (!start || !touch || Date.now() - start.at > SWIPE_MAX_MS || (previewView !== 'latest' && previewView !== 'empty')) return;
     const dx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
     if (Math.abs(dx) >= SWIPE_MIN_PX && Math.abs(dx) > Math.abs(dy) * 1.5) stepView(dx < 0 ? 1 : -1);
+    // Up, on a phone, opens the Gallery: the stage is the newest of it.
+    else if (compact && dy <= -SWIPE_UP_MIN_PX && Math.abs(dy) > Math.abs(dx) * 1.5) router.navigate('gallery');
   }
+  const SWIPE_UP_MIN_PX = 70;
   // A reference path that points at a known asset can show that asset as its thumbnail.
   const referencePreviewUrl = $derived(
     draft.state.referenceImagePath
@@ -1199,12 +1216,25 @@
             {/if}
           </div>
         {:else if jobStore.current && (jobStore.isRunning || jobOutputs.length > 0)}
-          <!-- The forming image takes the stage; the card with the job's phases and controls is a column beside it. -->
-          <div class="job-view" data-testid="job-view">
+          <!-- The forming image takes the stage; the card with the job's phases and controls is a column beside it.
+               On a phone the compact bar lies over the preview's foot, and the full card is a sheet under ⋯. -->
+          <div class="job-view" class:job-view-compact={compact} data-testid="job-view">
             <div class="job-view-preview">
               <JobPreview job={jobStore.current!} />
-              <MascotSpot mood={mascotMood} tool={mascotTool} size={64} class="job-view-mascot" />
+              {#if !compact}<MascotSpot mood={mascotMood} tool={mascotTool} size={64} class="job-view-mascot" />{/if}
             </div>
+            {#if compact}
+              <JobBar
+                job={jobStore.current!}
+                queuedCount={jobStore.queuedJobs.length}
+                oncancel={sendControl('quit')}
+                onpause={sendControl('pause')}
+                onresume={sendControl('resume')}
+                onnext={sendControl('next')}
+                onrepeat={sendControl('repeat')}
+                ondetails={() => { jobSheetOpen = true; }}
+              />
+            {:else}
             <div class="job-view-card">
               <JobCard
                 job={jobStore.current!}
@@ -1217,6 +1247,7 @@
               />
               <QueuePanel jobs={jobStore.queuedJobs} onremove={removeQueuedJob} onload={loadQueuedSettings} onclear={clearQueuedJobs} />
             </div>
+            {/if}
           </div>
         {:else if viewedAsset}
           {@const latest = viewedAsset}
@@ -1362,6 +1393,22 @@
           </div>
         </div>
       {/if}
+      <BottomSheet bind:open={jobSheetOpen} title="Job" tall>
+        <div class="job-sheet">
+          {#if jobStore.current}
+            <JobCard
+              job={jobStore.current}
+              preview={false}
+              oncancel={sendControl('quit')}
+              onpause={sendControl('pause')}
+              onresume={sendControl('resume')}
+              onnext={sendControl('next')}
+              onrepeat={sendControl('repeat')}
+            />
+          {/if}
+          <QueuePanel jobs={jobStore.queuedJobs} onremove={removeQueuedJob} onload={loadQueuedSettings} onclear={clearQueuedJobs} />
+        </div>
+      </BottomSheet>
       <BottomSheet bind:open={sheetOpen} title="All settings" meta={changedCount ? `${changedCount} changed` : undefined} keepMounted tall>
         {#snippet headActions()}
           <button type="button" class="ui-btn ui-btn-sm ui-btn-icon" title="Copy these settings as a ziv CLI command" aria-label="Copy CLI command" onclick={copyCliCommand}><Icon name="terminal" size={14} /></button>
@@ -1449,8 +1496,11 @@
   .compact-workspace :global(.latest-region) { padding: 8px 12px; }
   .compact-workspace :global(.mascot-dock) { display: none; }
   .compact-workspace :global(.latest-meta span) { max-width: 60vw; }
-  .compact-workspace .job-view { flex-direction: column; padding: 12px; gap: 10px; }
-  .compact-workspace .job-view-card { width: auto; max-width: none; max-height: 42%; }
+  /* Phone: the preview takes the stage with the bar over its foot. */
+  .job-view-compact { position: relative; padding: 12px 12px 12px; }
+  .job-view-compact .job-view-preview { padding-bottom: 104px; }
+  .job-view-compact > :global(.job-bar) { position: absolute; left: 12px; right: 12px; bottom: 12px; }
+  .job-sheet { display: flex; flex-direction: column; gap: 12px; padding: 12px; }
   .compact-controls { position: relative; flex: none; }
   .compact-controls > :global(.setting-popover) { position: absolute; left: 0; right: 0; bottom: 100%; z-index: 45; }
   .composer { display: flex; flex-direction: column; gap: 8px; padding: 8px max(12px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); border-top: 1px solid var(--color-border-subtle); background: var(--color-bg-overlay); }

@@ -11,6 +11,7 @@
   import TopStrip from '$lib/components/organisms/TopStrip.svelte';
   import NavDrawer from '$lib/components/organisms/NavDrawer.svelte';
   import { layout } from '$lib/state/layoutMode.svelte';
+  import { compactUi } from '$lib/state/compactUi.svelte';
   import ToastContainer from '$lib/components/molecules/ToastContainer.svelte';
   import ShortcutsDialog from '$lib/components/organisms/ShortcutsDialog.svelte';
   import WorkspacePage from '$features/workspace/WorkspacePage.svelte';
@@ -52,7 +53,7 @@
 {#if ready}
   <div class="h-dvh flex flex-col overflow-hidden bg-bg-base text-text-primary font-sans" data-layout={layout.mode}>
     {#if layout.compact}
-      <TopStrip currentPage={router.page} {workflows} onmenu={() => { drawerOpen = true; }} />
+      <TopStrip currentPage={router.page} {workflows} onmenu={() => { drawerOpen = true; }} onstatus={() => compactUi.requestJobSheet()} />
       <NavDrawer open={drawerOpen} currentPage={router.page} onnavigate={(page) => router.navigate(page)} onclose={() => { drawerOpen = false; }} />
     {:else}
       <TopNav currentPage={router.page} {workflows} />

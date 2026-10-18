@@ -11,6 +11,7 @@ export { default as Modal } from './Modal.svelte';
 export { default as BottomSheet } from './BottomSheet.svelte';
 export { default as JobCard } from './JobCard.svelte';
 export { default as JobPreview } from './JobPreview.svelte';
+export { default as JobBar } from './JobBar.svelte';
 export { default as ReviewStage } from './ReviewStage.svelte';
 export { default as ModelStatusBadges } from './ModelStatusBadges.svelte';
 export { default as PathField } from './PathField.svelte';
