@@ -63,6 +63,25 @@ update-ltx: ## Update vendored ltx-core-mlx and ltx-pipelines-mlx
 	rm -rf $(TMP)
 	@echo "✓ Vendored ltx packages updated to $(LTX_COMMIT)"
 
+SEEDVR2_REPO   ?= https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler.git
+# v2.5.24 (2025-12-24)
+SEEDVR2_COMMIT ?= 4490bd1f482e026674543386bb2a4d176da245b9
+
+.PHONY: update-seedvr2
+
+update-seedvr2: ## Update vendored SeedVR2 PyTorch inference core (Windows/Linux)
+	$(eval TMP := $(shell mktemp -d))
+	git clone --quiet $(SEEDVR2_REPO) $(TMP)
+	cd $(TMP) && git checkout --quiet $(SEEDVR2_COMMIT)
+	rm -rf packages/seedvr2_torch
+	mkdir -p packages/seedvr2_torch
+	cp -r $(TMP)/src $(TMP)/configs_3b $(TMP)/configs_7b $(TMP)/pos_emb.pt $(TMP)/neg_emb.pt $(TMP)/LICENSE packages/seedvr2_torch/
+	rm -rf packages/seedvr2_torch/src/interfaces
+	find packages/seedvr2_torch -name __pycache__ -type d -prune -exec rm -rf {} +
+	printf '"""SeedVR2 inference core vendored from numz/ComfyUI-SeedVR2_VideoUpscaler at %s, without its ComfyUI nodes."""\n' $(SEEDVR2_COMMIT) > packages/seedvr2_torch/__init__.py
+	rm -rf $(TMP)
+	@echo "✓ Vendored seedvr2_torch updated to $(SEEDVR2_COMMIT)"
+
 # ——— Frontend ————————————————————————————————————————————
 
 .PHONY: frontend-install frontend-build frontend-static-check frontend-palette-check frontend-test frontend-dev

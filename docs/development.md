@@ -27,6 +27,7 @@ make install
 | `make frontend-test` | Run frontend type checks and Vitest tests |
 | `make frontend-palette-check` | Fail on raw colour classes or literals in Svelte files (`PALETTE_STRICT=0` only warns) |
 | `make update-ltx` | Re-vendor `ltx-core-mlx` and `ltx-pipelines-mlx` into `packages/` |
+| `make update-seedvr2` | Re-vendor the SeedVR2 PyTorch inference core into `packages/seedvr2_torch` |
 | `make build` | Build wheel and sdist |
 | `make clean` | Remove build artifacts, caches, venv |
 | `make run` | Run `ziv-image` CLI (use `ARGS="..."`) |
@@ -344,6 +345,15 @@ Mock heavy image and video dependencies in tests. Diffusers backend tests patch 
     - Extending a clip, decode: the pipeline's `_loaded` flag (cleared with `dit = None` so the next `load()` reloads the transformer), `video_decoder_block.load()` and `video_decoder_block.video_decoder` (the diffusion decoder is rejected), `video_vae.VideoDecoder.tiled_decode(latent, tiling_config)`, `video_vae._compute_decode_tiling(latent_shape, frame_rate, budget_bytes)` (which may return `None` or temporal tiles), `video_vae.decode_cache_limit()`, `video_vae.stream_chunks_to_ffmpeg(chunks, proc)` and `video_vae._ffmpeg_sink(cmd)`, and `audio_decoder_block.__call__(audio_latent)`
     - Extending a clip: `ltx_core_mlx.utils.audio.load_audio` returns an `AudioData` whose `.waveform` and `.sample_rate` are passed to `encode_audio`, and `video_patchifier.patchify` and `audio_patchifier.patchify` return `(tokens, dims)` tuples, so the tokens are `patchify(...)[0]`
 - **Cache limit.** `low_ram_streaming` makes the pipeline set the MLX buffer-cache limit to 0 for the whole process. `backends/mac/memory.mlx_cache_limit` scopes that to model construction and each generation, then restores the previous limit.
+
+## Vendored SeedVR2
+
+`packages/seedvr2_torch` is the PyTorch SeedVR2 inference core from [`numz/ComfyUI-SeedVR2_VideoUpscaler`](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) (Apache-2.0), which the Windows and Linux plain upscale runs. Upstream is not a pip package, so it lives in the repository. Never edit it by hand.
+
+- **Pin.** `SEEDVR2_COMMIT` in the `Makefile` must be the commit of a release; the comment above it names the version.
+- **Layout.** `make update-seedvr2` copies upstream's `src/` without `src/interfaces/` (the ComfyUI nodes), the two model configs, the fixed text embeddings `pos_emb.pt` and `neg_emb.pt`, and the licence, and writes its own `__init__.py` in place of upstream's, which loads the nodes. Upstream's code imports itself relatively and finds its configs and embeddings three folders above `src/utils/constants.py`, so the copy keeps upstream's layout and is imported as `seedvr2_torch.src`.
+- **Update.** It does not carry dependencies: mirror upstream's `requirements.txt` into ours by hand, Windows and Linux only, leaving out `gguf` (only imported for GGUF weights) and `matplotlib` (debug output). `torchvision` comes from the same CUDA index as `torch`, and `opencv-python` is replaced by `opencv-python-headless`.
+- **Internals we rely on.** `tests/test_seedvr2_torch_contract.py` pins the entry points the upscaler calls, their keyword arguments and the bundled files.
 
 ## Releasing
 
