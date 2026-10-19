@@ -620,6 +620,13 @@ describe('draft store – saved drafts from the previous version', () => {
     draft.loadDraft();
   }
 
+  it('seeds the video options from options saved before images and video kept their own', () => {
+    const saved = { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: [], sound: [], note: '' };
+    loadSavedV2({ enhanceSettings: saved });
+    expect(draft.state.enhanceSettings).toEqual(saved);
+    expect(draft.state.enhanceSettingsVideo).toEqual(saved);
+  });
+
   it('turns the old fixed sharpen default into auto and keeps the rest', () => {
     loadSavedV2({ postprocessSharpenAmount: 0.8 });
     expect(draft.state.postprocessSharpenAmount).toBeNull();

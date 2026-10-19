@@ -72,6 +72,7 @@ const DEFAULT_DRAFT: DraftState = {
   enhancedScene: '',
   enhancedFrom: null,
   enhanceSettings: null,
+  enhanceSettingsVideo: null,
   enhanceAuto: false,
   enhanceModel: 'fast',
   enhanceFormat: 'text',
@@ -305,6 +306,8 @@ function loadFromStorage(): DraftState {
     return {
       ...DEFAULT_DRAFT,
       ...saved,
+      // Drafts saved before images and video kept their own enhance options seed both from the one set.
+      enhanceSettingsVideo: saved.enhanceSettingsVideo !== undefined ? saved.enhanceSettingsVideo : saved.enhanceSettings ?? null,
       promptFileOptionIds: saved.promptFileOptionIds ?? (promptFileOptionId ? [promptFileOptionId] : []),
     };
   } catch {

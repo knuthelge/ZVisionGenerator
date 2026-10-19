@@ -10,10 +10,14 @@
     disabled?: boolean;
     /** Prefix of the element ids, as in `EnhanceOptions`. */
     idPrefix?: string;
+    /** Show the "Rewrite" label beside the control; off where a row label already names it. */
+    showLabel?: boolean;
+    /** Stretch the segments across the available width. */
+    full?: boolean;
     onchange: (parts: EnhanceParts) => void;
   }
 
-  let { value, actionOnlyBlocked = false, disabled = false, idPrefix = 'ws-enhance', onchange }: Props = $props();
+  let { value, actionOnlyBlocked = false, disabled = false, idPrefix = 'ws-enhance', showLabel = true, full = false, onchange }: Props = $props();
 
   const BLOCKED_REASON = 'Write a scene first. With no scene, Enhance splits your text into both.';
   const options = $derived([
@@ -22,4 +26,4 @@
   ]);
 </script>
 
-<EnhanceChoice label="Rewrite" {options} {value} {disabled} idPrefix={`${idPrefix}-rewrite`} {onchange} />
+<EnhanceChoice label="Rewrite" {options} {value} {disabled} {showLabel} {full} idPrefix={`${idPrefix}-rewrite`} {onchange} />

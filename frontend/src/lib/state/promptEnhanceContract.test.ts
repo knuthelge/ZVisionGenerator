@@ -29,7 +29,7 @@ describe('the server matrix contract with defaults.parts = null', () => {
   });
 
   it('never sends a null parts or the browser-only memory to the server', () => {
-    const remembered = effectiveEnhanceSettings(state({ workflow: 'extend', enhanceSettings: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { extend: 'both' } } }), CONTRACT);
+    const remembered = effectiveEnhanceSettings(state({ workflow: 'extend', enhanceSettingsVideo: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { extend: 'both' } } }), CONTRACT);
     expect(remembered.parts).toBe('both');
     const payload = settingsPayload(remembered, 'video', true);
     expect(payload.parts).toBe('both');

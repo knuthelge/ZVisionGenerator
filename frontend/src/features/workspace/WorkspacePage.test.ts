@@ -1252,7 +1252,9 @@ describe('WorkspacePage', () => {
       await mountWorkspace(ideoEnhancerContext({ download_size_label: '19 GB', unavailable: 'Needs about 9 GB of memory; this machine has 6 GB.' }));
       const run = await openEnhanceRun();
       const smart = document.querySelector('[data-choice="smart"]') as HTMLButtonElement;
-      expect(smart.disabled).toBe(true);
+      expect(smart.getAttribute('aria-disabled')).toBe('true');
+      smart.click();
+      await settle();
       expect(document.querySelector('[data-choice="fast"]')?.getAttribute('aria-checked')).toBe('true');
       expect(document.getElementById(smart.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Needs about 9 GB of memory; this machine has 6 GB.');
       run.click();
@@ -1363,6 +1365,21 @@ describe('WorkspacePage', () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 
+  it('resets the options of the current mode only, and offers Reset only when something is picked', async () => {
+    const video = { style: 'cinematic', mood: 'keep', theme: 'keep', camera: 'orbit', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
+    draft.patch({ prompt: 'a fox', enhanceSettings: { ...video, style: 'photo', camera: 'keep' }, enhanceSettingsVideo: video });
+    await mountWorkspace(withEnhancer(makeContext()));
+    await openEnhanceRun();
+    const reset = () => Array.from(document.querySelectorAll('#ws-enhance-panel button')).find((el) => el.textContent?.trim() === 'Reset') as HTMLButtonElement;
+    expect(reset().disabled).toBe(false);
+
+    reset().click();
+    await settle();
+    expect(draft.state.enhanceSettings).toBeNull();
+    expect(draft.state.enhanceSettingsVideo).toEqual(video);
+    expect(reset().disabled).toBe(true);
+  });
+
   it('never warns that auto-enhance would change nothing: nothing picked is a general rewrite', async () => {
     draft.update('prompt', 'a fox');
     draft.update('enhanceAuto', true);
@@ -1459,7 +1476,7 @@ describe('WorkspacePage', () => {
 
     it('enhances a video with nothing picked, with or without a scene: a general rewrite', async () => {
       draft.update('workflow', 'txt2vid');
-      draft.patch({ prompt: 'a knight rides in', enhanceSettings: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } });
+      draft.patch({ prompt: 'a knight rides in', enhanceSettingsVideo: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } });
       await mountWorkspace(withVideoEnhancer(makeContext()));
       expect((await openEnhanceRun()).disabled).toBe(false);
 
@@ -1555,14 +1572,15 @@ describe('WorkspacePage', () => {
       const chip = (label: string) => Array.from(document.querySelectorAll('#ws-enhance-panel [role="radiogroup"] [role="radio"]')).find((el) => el.textContent?.trim() === label) as HTMLButtonElement;
       const rewriteChips = () => Array.from(document.querySelectorAll('#ws-enhance-panel [aria-labelledby="ws-enhance-rewrite-label"] [role="radio"]')) as HTMLButtonElement[];
 
-      it('comes first in the popover, for the video workflows only', async () => {
+      it('sits in the Output section after the look options, for the video workflows only', async () => {
         draft.update('workflow', 'txt2vid');
         await mountWorkspace(withVideoEnhancer(makeContext()));
         await openEnhanceRun();
         expect(document.querySelector('#ws-enhance-rewrite-label')?.textContent?.trim()).toBe('Rewrite');
         const rewriteLabel = document.querySelector('#ws-enhance-rewrite-label')!;
-        const styleLabel = document.querySelector('#ws-enhance-panel [id$="-style-label"]')!;
-        expect(rewriteLabel.compareDocumentPosition(styleLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        const stylePicker = document.querySelector('#ws-enhance-panel #ws-enhance-inline-style')!;
+        expect(stylePicker.compareDocumentPosition(rewriteLabel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(rewriteLabel.closest('section')?.getAttribute('aria-label')).toBe('Output');
         expect(rewriteChips().map((el) => el.textContent?.trim())).toEqual(['Scene and action', 'Action only']);
 
         draft.update('workflow', 'txt2img');
@@ -1580,18 +1598,18 @@ describe('WorkspacePage', () => {
         chip('Action only').click();
         await settle();
         expect(rewriteChips().map((el) => el.getAttribute('aria-checked'))).toEqual(['false', 'true']);
-        expect(draft.state.enhanceSettings?.partsByWorkflow).toEqual({ txt2vid: 'action' });
+        expect(draft.state.enhanceSettingsVideo?.partsByWorkflow).toEqual({ txt2vid: 'action' });
       });
 
       it('disables Action only with the reason while the Scene is blank, and the run uses both', async () => {
         enhanceApiMocks.enhancePrompt.mockResolvedValue();
         draft.update('workflow', 'txt2vid');
-        draft.patch({ prompt: 'a knight rides in', enhanceSettings: { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
+        draft.patch({ prompt: 'a knight rides in', enhanceSettingsVideo: { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
         await mountWorkspace(withVideoEnhancer(makeContext()));
         await openEnhanceRun();
 
         const actionOnly = chip('Action only');
-        expect(actionOnly.disabled).toBe(true);
+        expect(actionOnly.getAttribute('aria-disabled')).toBe('true');
         expect(chip('Scene and action').getAttribute('aria-checked')).toBe('true');
         // The reason is announced with the disabled chip.
         const reason = document.getElementById(actionOnly.getAttribute('aria-describedby') ?? '');
@@ -1601,7 +1619,7 @@ describe('WorkspacePage', () => {
         await settle();
         expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ settings: { parts: 'both' } });
         // The remembered choice survives and applies again once there is a scene.
-        expect(draft.state.enhanceSettings?.partsByWorkflow).toEqual({ txt2vid: 'action' });
+        expect(draft.state.enhanceSettingsVideo?.partsByWorkflow).toEqual({ txt2vid: 'action' });
         type('ws-scene', 'A castle.');
         await settle();
         expect(chip('Action only').disabled).toBe(false);
@@ -1629,7 +1647,7 @@ describe('WorkspacePage', () => {
         await mountWorkspace(withVideoEnhancer(makeContext()));
         expect(JSON.parse(String((await submitForm()).get('enhance_settings'))).parts).toBe('both');
 
-        draft.patch({ enhanceSettings: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
+        draft.patch({ enhanceSettingsVideo: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
         await settle();
         expect(JSON.parse(String((await submitForm()).get('enhance_settings'))).parts).toBe('action');
       });
@@ -1751,7 +1769,7 @@ describe('WorkspacePage', () => {
         expect(field('ws-enhanced-prompt').placeholder).toBe('Enhanced when the job runs');
         expect(field('ws-enhanced-scene').disabled).toBe(true);
 
-        draft.patch({ enhanceSettings: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
+        draft.patch({ enhanceSettingsVideo: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
         await settle();
         expect(field('ws-enhanced-scene').placeholder).toBe('Not enhanced. Generate uses your scene.');
         expect(field('ws-enhanced-prompt').placeholder).toBe('Enhanced when the job runs');
@@ -4402,7 +4420,7 @@ describe('WorkspacePage extend', () => {
         (document.querySelector('#ws-enhance-run') as HTMLButtonElement).click();
         await settle();
         expect(enhanceApiMocks.enhancePrompt.mock.calls[0]?.[0]).toMatchObject({ scene: 'A woman on a rainy street.', prompt: 'She waves.', settings: { parts: 'action' } });
-        expect(draft.state.enhanceSettings?.partsByWorkflow?.extend).toBeUndefined();
+        expect(draft.state.enhanceSettingsVideo?.partsByWorkflow?.extend).toBeUndefined();
       });
 
       it('leaves the Enhanced scene empty, even when an older server returns one, so an edited Scene applies', async () => {

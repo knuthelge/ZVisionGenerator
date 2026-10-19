@@ -24,6 +24,9 @@ import {
   submittedPrompt,
   withRememberedParts,
   workflowMode,
+  DEFAULT_ENHANCE_SETTINGS,
+  enhanceSettingsKey,
+  isDefaultEnhanceSettings,
 } from './promptEnhance';
 import { createNdjsonParser } from '$lib/api/promptEnhance';
 import type { DraftState, EnhanceFrame, EnhanceSettings, PromptEnhancerContract } from '$lib/types';
@@ -259,13 +262,13 @@ describe('scene and prompt pair', () => {
 
     it('remembers the choice for each video workflow apart', () => {
       const settings = withRememberedParts({ ...SETTINGS }, 'extend', 'both');
-      expect(rememberedParts(state({ workflow: 'extend', enhanceSettings: settings }))).toBe('both');
-      expect(rememberedParts(state({ workflow: 'txt2vid', enhanceSettings: settings }))).toBe('both');
+      expect(rememberedParts(state({ workflow: 'extend', enhanceSettingsVideo: settings }))).toBe('both');
+      expect(rememberedParts(state({ workflow: 'txt2vid', enhanceSettingsVideo: settings }))).toBe('both');
       const action = withRememberedParts(settings, 'txt2vid', 'action');
-      expect(rememberedParts(state({ workflow: 'txt2vid', enhanceSettings: action }))).toBe('action');
-      expect(rememberedParts(state({ workflow: 'extend', enhanceSettings: action }))).toBe('both');
-      expect(rememberedParts(state({ workflow: 'img2vid', enhanceSettings: action }))).toBe('action');
-      expect(rememberedParts(state({ workflow: 'img2vid', enhanceSettings: withRememberedParts(action, 'img2vid', 'both') }))).toBe('both');
+      expect(rememberedParts(state({ workflow: 'txt2vid', enhanceSettingsVideo: action }))).toBe('action');
+      expect(rememberedParts(state({ workflow: 'extend', enhanceSettingsVideo: action }))).toBe('both');
+      expect(rememberedParts(state({ workflow: 'img2vid', enhanceSettingsVideo: action }))).toBe('action');
+      expect(rememberedParts(state({ workflow: 'img2vid', enhanceSettingsVideo: withRememberedParts(action, 'img2vid', 'both') }))).toBe('both');
     });
 
     it('falls back to both while the Scene is blank, without changing the remembered choice', () => {
@@ -367,5 +370,24 @@ describe('extend', () => {
       const old = state({ workflow: 'txt2vid', prompt: 'p', enhancedPrompt: 'x', enhancedFrom: { prompt: 'p', mode: 'video', scene: '' } });
       expect(isEnhancedStale(old)).toBe(false);
     });
+  });
+});
+
+describe('options per mode', () => {
+  it('keeps image and video options apart', () => {
+    const image = { ...SETTINGS, style: 'photo' };
+    const video = { ...SETTINGS, style: 'cinematic', camera: 'orbit' };
+    expect(effectiveEnhanceSettings(state({ workflow: 'txt2img', enhanceSettings: image, enhanceSettingsVideo: video }), undefined).style).toBe('photo');
+    expect(effectiveEnhanceSettings(state({ workflow: 'img2vid', enhanceSettings: image, enhanceSettingsVideo: video }), undefined)).toMatchObject({ style: 'cinematic', camera: 'orbit' });
+    expect(enhanceSettingsKey('img2img')).toBe('enhanceSettings');
+    expect(enhanceSettingsKey('extend')).toBe('enhanceSettingsVideo');
+  });
+
+  it('tells default options from picked ones, ignoring the remembered Rewrite choices', () => {
+    expect(isDefaultEnhanceSettings({ ...DEFAULT_ENHANCE_SETTINGS, partsByWorkflow: { txt2vid: 'action' } })).toBe(true);
+    expect(isDefaultEnhanceSettings({ ...DEFAULT_ENHANCE_SETTINGS, note: '  ' })).toBe(true);
+    expect(isDefaultEnhanceSettings({ ...DEFAULT_ENHANCE_SETTINGS, theme: 'zen' })).toBe(false);
+    expect(isDefaultEnhanceSettings({ ...DEFAULT_ENHANCE_SETTINGS, details: ['lighting'] })).toBe(false);
+    expect(isDefaultEnhanceSettings({ ...DEFAULT_ENHANCE_SETTINGS, note: 'at dusk' })).toBe(false);
   });
 });

@@ -1,6 +1,7 @@
 export { default as EnhanceOptions } from './EnhanceOptions.svelte';
 export { default as EnhanceRewrite } from './EnhanceRewrite.svelte';
 export { default as EnhanceChoice } from './EnhanceChoice.svelte';
+export { default as EnhancePicker } from './EnhancePicker.svelte';
 export { default as FormField } from './FormField.svelte';
 export { default as ActionMenu, type ActionMenuEntry } from './ActionMenu.svelte';
 export { default as AssetTile } from './AssetTile.svelte';

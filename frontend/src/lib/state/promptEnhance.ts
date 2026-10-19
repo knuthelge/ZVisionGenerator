@@ -42,9 +42,31 @@ export function defaultParts(workflow: Workflow): EnhanceParts {
   return workflow === 'extend' || workflow === 'img2vid' ? 'action' : 'both';
 }
 
+/**
+ * Whether *settings* equal *defaults* (the server's, else nothing picked and Same length) on every option and the direction;
+ * the remembered Rewrite choices do not count.
+ */
+export function isDefaultEnhanceSettings(settings: EnhanceSettings, defaults: Partial<EnhanceSettings> = DEFAULT_ENHANCE_SETTINGS): boolean {
+  const base = { ...DEFAULT_ENHANCE_SETTINGS, ...defaults };
+  return (Object.keys(DEFAULT_ENHANCE_SETTINGS) as (keyof EnhanceSettings)[]).every((key) => {
+    const value = settings[key];
+    const fallback = base[key];
+    if (Array.isArray(value) || Array.isArray(fallback)) {
+      const [a, b] = [value ?? [], fallback ?? []] as string[][];
+      return a.length === b.length && a.every((item) => b.includes(item));
+    }
+    return key === 'note' ? String(value ?? '').trim() === String(fallback ?? '').trim() : value === fallback;
+  });
+}
+
+/** The draft field that holds the enhance options of *workflow*'s mode: images and video remember theirs apart. */
+export function enhanceSettingsKey(workflow: Workflow): 'enhanceSettings' | 'enhanceSettingsVideo' {
+  return workflowMode(workflow) === 'video' ? 'enhanceSettingsVideo' : 'enhanceSettings';
+}
+
 /** The Rewrite choice remembered for the current workflow, or that workflow's default. */
-export function rememberedParts(state: Pick<DraftState, 'workflow' | 'enhanceSettings'>): EnhanceParts {
-  return state.enhanceSettings?.partsByWorkflow?.[state.workflow] ?? defaultParts(state.workflow);
+export function rememberedParts(state: Pick<DraftState, 'workflow' | 'enhanceSettingsVideo'>): EnhanceParts {
+  return state.enhanceSettingsVideo?.partsByWorkflow?.[state.workflow] ?? defaultParts(state.workflow);
 }
 
 /** Settings with the Rewrite choice for *workflow* remembered in `partsByWorkflow`; the other fields and workflows are kept. */
@@ -69,7 +91,7 @@ export function runParts(state: DraftState, remembered: EnhanceParts = remembere
 /** The user's last-used options, with axes they never set (e.g. saved before an axis existed) taken from the backend matrix defaults. */
 export function effectiveEnhanceSettings(state: DraftState, contract: PromptEnhancerContract | undefined): EnhanceSettings {
   const defaults = { ...DEFAULT_ENHANCE_SETTINGS, ...contract?.matrix.defaults };
-  const settings: EnhanceSettings = { ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...defaults.sound], ...state.enhanceSettings };
+  const settings: EnhanceSettings = { ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...defaults.sound], ...state[enhanceSettingsKey(state.workflow)] };
   delete settings.parts;
   return workflowMode(state.workflow) === 'video' ? { ...settings, parts: rememberedParts(state) } : settings;
 }

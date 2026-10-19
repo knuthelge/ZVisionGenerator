@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { placePopover } from './popover';
+import { placePopover, popover } from './popover';
 
 function box(left: number, top: number, width: number, height: number) {
   return { left, top, width, height, right: left + width, bottom: top + height };
@@ -21,5 +21,29 @@ describe('placePopover', () => {
   it('stays inside the viewport horizontally', () => {
     expect(placePopover(box(900, 100, 80, 26), box(0, 0, 320, 200), viewport, 'start').left).toBe(672);
     expect(placePopover(box(10, 100, 28, 28), box(0, 0, 220, 200), viewport, 'end').left).toBe(8);
+  });
+});
+
+describe('popover', () => {
+  it('closes on a click outside, but not on a click inside a nested popover', () => {
+    const anchor = document.createElement('button');
+    const panel = document.createElement('div');
+    const menu = document.createElement('div');
+    menu.dataset.popoverNested = '';
+    const item = document.createElement('button');
+    menu.appendChild(item);
+    document.body.append(anchor, menu);
+    const onclose = vi.fn();
+    const handle = popover(panel, { anchor, onclose });
+
+    item.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    expect(onclose).not.toHaveBeenCalled();
+    document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    expect(onclose).toHaveBeenCalledTimes(1);
+
+    handle.destroy();
+    anchor.remove();
+    menu.remove();
+    panel.remove();
   });
 });

@@ -62,6 +62,9 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
 
   function onPointerDown(event: PointerEvent): void {
     const target = event.target as Node;
+    // A popover opened from inside this one (a menu in a panel) lives in <body> too; using it is not an outside click.
+    const nested = (target instanceof Element ? target : target.parentElement)?.closest('[data-popover-nested]');
+    if (nested && nested !== node) return;
     if (!node.contains(target) && !options.anchor?.contains(target)) options.onclose();
   }
 

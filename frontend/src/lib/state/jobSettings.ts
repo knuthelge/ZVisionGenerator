@@ -1,4 +1,4 @@
-import { DEFAULT_ENHANCE_SETTINGS } from './promptEnhance';
+import { DEFAULT_ENHANCE_SETTINGS, enhanceSettingsKey } from './promptEnhance';
 import type { DraftState, EnhanceParts, EnhanceSettings, JobSettings, PromptSource, Workflow } from '$lib/types';
 import { snapExtendFrames } from './videoDuration';
 
@@ -109,7 +109,7 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
   if (settings.first_sigma !== undefined) patch.firstSigma = numberOrNull(first(settings, 'first_sigma'));
   if (settings.quantize !== undefined) patch.quantize = numberOrNull(first(settings, 'quantize'));
   const enhance = enhanceSettings(first(settings, 'enhance_settings'), first(settings, 'workflow') as Workflow | undefined);
-  if (enhance) patch.enhanceSettings = enhance;
+  if (enhance) patch[enhanceSettingsKey((first(settings, 'workflow') as Workflow | undefined) ?? 'txt2img')] = enhance;
 
   for (const [name, enabledKey, amountKey] of [
     ['sharpen', 'postprocessSharpenEnabled', 'postprocessSharpenAmount'],

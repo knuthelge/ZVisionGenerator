@@ -755,8 +755,10 @@ export interface DraftState {
   /** The Enhanced scene of a video; used together with the Enhanced prompt. */
   enhancedScene: string;
   enhancedFrom: EnhancedSource | null;
-  /** Last-used enhancement options; null until the user picks any (backend defaults apply). */
+  /** Last-used enhancement options for images; null until the user picks any (backend defaults apply). */
   enhanceSettings: EnhanceSettings | null;
+  /** Last-used enhancement options for video, with the Rewrite choice of each video workflow; null until any are picked. */
+  enhanceSettingsVideo: EnhanceSettings | null;
   /** Enhance each image's prompt on the server at generation time. */
   enhanceAuto: boolean;
   /** The enhancer chosen in the popover; Smart falls back to Fast where it is unavailable. */

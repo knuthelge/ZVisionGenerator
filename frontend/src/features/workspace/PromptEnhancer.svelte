@@ -11,7 +11,7 @@
   import { enhancePrompt } from '$lib/api/promptEnhance';
   import { extendEnhanceHint, extendGuard } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
-  import { EnhanceChoice, EnhanceOptions, EnhanceRewrite } from '$lib/components/molecules';
+  import { EnhanceChoice, EnhanceOptions, EnhanceRewrite, InspectorRow } from '$lib/components/molecules';
   import { Icon, Toggle } from '$lib/components/atoms';
   import { popover } from '$lib/actions/popover';
   import { layout } from '$lib/state/layoutMode.svelte';
@@ -22,6 +22,9 @@
     effectiveFormat,
     effectiveTier,
     enhanceContext,
+    enhanceSettingsKey,
+    isDefaultEnhanceSettings,
+    DEFAULT_ENHANCE_SETTINGS,
     enhancedSourceFor,
     enhancePhaseMessage,
     canSubmitText,
@@ -121,11 +124,20 @@
       : null
   );
 
-  /** Remember *next*; the Rewrite choice of the current workflow lives in `partsByWorkflow` alone. */
+  /** Remember *next* for the current mode; the Rewrite choice of the current workflow lives in `partsByWorkflow` alone. */
   function updateSettings(next: EnhanceSettings): void {
     const { parts: _derived, ...stored } = next;
-    draft.update('enhanceSettings', stored);
+    draft.update(enhanceSettingsKey(draft.state.workflow), stored);
   }
+
+  /** Put every option of the current mode back to its default; the remembered Rewrite choices stay. */
+  function resetSettings(): void {
+    const remembered = settings.partsByWorkflow;
+    const { parts: _serverDefault, ...defaults } = { ...DEFAULT_ENHANCE_SETTINGS, ...contract.matrix.defaults };
+    draft.update(enhanceSettingsKey(draft.state.workflow), remembered ? { ...defaults, partsByWorkflow: remembered } : null);
+  }
+
+  const changed = $derived(!isDefaultEnhanceSettings(settings, contract.matrix.defaults));
 
   function updateParts(parts: EnhanceParts): void {
     updateSettings(withRememberedParts(settings, draft.state.workflow, parts));
@@ -214,33 +226,16 @@
   });
 </script>
 
-{#snippet options()}
-  {#if contract.smart || (jsonCapable && mode === 'image') || mode === 'video'}
-    <!-- The run-shaping choices share one compact row that wraps on narrow screens; their help is in the tooltips. -->
-    <div class="choices">
-      {#if contract.smart}
-        <EnhanceChoice label="Enhancer" options={TIER_OPTIONS} value={tier} disabled={enhancing} idPrefix={`ws-enhance-${variant}-model`} onchange={(value) => draft.update('enhanceModel', value)} />
-      {/if}
-      {#if jsonCapable && mode === 'image'}
-        <EnhanceChoice label="Write as" options={FORMAT_OPTIONS} value={format} disabled={enhancing} idPrefix={`ws-enhance-${variant}-format`} onchange={(value) => draft.update('enhanceFormat', value)} />
-      {/if}
-      {#if mode === 'video'}
-        <EnhanceRewrite value={rewriteParts} actionOnlyBlocked={rewriteBlocked} disabled={enhancing} onchange={updateParts} />
-      {/if}
-    </div>
+{#snippet outputRows()}
+  {#if mode === 'video'}
+    <InspectorRow label="Rewrite">
+      <EnhanceRewrite value={rewriteParts} actionOnlyBlocked={rewriteBlocked} disabled={enhancing} showLabel={false} full onchange={updateParts} />
+    </InspectorRow>
+  {:else if jsonCapable}
+    <InspectorRow label="Write as">
+      <EnhanceChoice label="Write as" options={FORMAT_OPTIONS} value={format} disabled={enhancing} idPrefix={`ws-enhance-${variant}-format`} showLabel={false} full onchange={(value) => draft.update('enhanceFormat', value)} />
+    </InspectorRow>
   {/if}
-  {#if contract.smart === null && contract.model}
-    <p class="ui-help" title="Set on the Config page">Enhancer: <span class="font-mono break-all">{contract.model}</span></p>
-  {/if}
-  <EnhanceOptions axes={contract.matrix.axes} {settings} {mode} {audio} disabled={enhancing} idPrefix={`ws-enhance-${variant}`} onchange={updateSettings} />
-
-  <Toggle
-    id={`ws-enhance-auto-${variant}`}
-    checked={draft.state.enhanceAuto}
-    disabled={busy || !available}
-    label="Enhance each image when generating"
-    onchange={(e) => draft.update('enhanceAuto', (e.currentTarget as HTMLInputElement).checked)}
-  />
 {/snippet}
 
 <button
@@ -256,55 +251,71 @@
   <Icon name="sparkle" size={13} />Enhance{draft.state.enhanceAuto ? ' · each image' : ''}<Icon name="chevdown" size={12} />
 </button>
 
-{#snippet panel()}
-    {@render options()}
+{#snippet panel(titled: boolean)}
+  <div class="enhance-head">
+    {#if titled}<h2 class="enhance-heading">Enhance</h2>{/if}
+    <button type="button" class="enhance-reset ui-btn ui-btn-sm ui-btn-quiet" disabled={!changed || enhancing} onclick={resetSettings}>Reset</button>
+  </div>
+  <EnhanceOptions axes={contract.matrix.axes} {settings} {mode} {audio} disabled={enhancing} idPrefix={`ws-enhance-${variant}`} output={outputRows} onchange={updateSettings} />
+  {#if contract.smart === null && contract.model}
+    <p class="ui-help enhance-pad" title="Set on the Config page">Enhancer: <span class="font-mono break-all">{contract.model}</span></p>
+  {/if}
+  <div class="enhance-pad">
+    <Toggle
+      id={`ws-enhance-auto-${variant}`}
+      checked={draft.state.enhanceAuto}
+      disabled={busy || !available}
+      label="Enhance each image when generating"
+      onchange={(e) => draft.update('enhanceAuto', (e.currentTarget as HTMLInputElement).checked)}
+    />
+  </div>
+  <div class="enhance-foot">
+    {#if contract.smart}
+      <EnhanceChoice label="Enhancer" options={TIER_OPTIONS} value={tier} disabled={enhancing} idPrefix={`ws-enhance-${variant}-model`} onchange={(value) => draft.update('enhanceModel', value)} />
+    {/if}
     {#if variant === 'inline' && !draft.state.enhanceAuto}
-      <div class="flex flex-wrap items-center gap-2">
-        {#if enhancing}
-          <button type="button" class="ui-btn ui-btn-danger" onclick={stopEnhance}>Stop</button>
-        {:else}
-          <button
-            type="button"
-            id="ws-enhance-run"
-            class="ui-btn ui-btn-primary"
-            disabled={enhanceDisabled}
-            onclick={runEnhance}
-          >
-            {#if caption}
-              {isJsonCaption(draft.state.enhancedPrompt) ? 'Write caption again' : 'Write caption'}
-            {:else}
-              {draft.state.enhancedPrompt.trim() || draft.state.enhancedScene.trim() ? 'Enhance again' : 'Enhance prompt'}
-            {/if}
-          </button>
-        {/if}
-        {#if disabledHint && !enhancing}
-          <span class="ui-help">{disabledHint}</span>
-        {:else if downloadSize && !enhancing}
-          <span class="ui-help">First use downloads ≈{downloadSize}.</span>
-        {:else if fastUndownloaded && !enhancing}
-          <span class="ui-help">First use downloads the model.</span>
-        {/if}
-      </div>
+      <span class="enhance-spacer"></span>
+      {#if enhancing}
+        <button type="button" class="ui-btn ui-btn-danger" onclick={stopEnhance}>Stop</button>
+      {:else}
+        <button type="button" id="ws-enhance-run" class="ui-btn ui-btn-primary" disabled={enhanceDisabled} onclick={runEnhance}>
+          {#if caption}
+            {isJsonCaption(draft.state.enhancedPrompt) ? 'Write caption again' : 'Write caption'}
+          {:else}
+            {draft.state.enhancedPrompt.trim() || draft.state.enhancedScene.trim() ? 'Enhance again' : 'Enhance prompt'}
+          {/if}
+        </button>
+      {/if}
     {/if}
-    {#if variant === 'file'}
-      <p class="ui-help">Off: entries with their own <span class="font-mono">enhance:</span> setting (✨) are still enhanced.</p>
+  </div>
+  {#if variant === 'inline' && !draft.state.enhanceAuto && !enhancing}
+    {#if disabledHint}
+      <p class="ui-help enhance-pad">{disabledHint}</p>
+    {:else if downloadSize}
+      <p class="ui-help enhance-pad">First use downloads ≈{downloadSize}.</p>
+    {:else if fastUndownloaded}
+      <p class="ui-help enhance-pad">First use downloads the model.</p>
     {/if}
+  {/if}
+  {#if variant === 'file'}
+    <p class="ui-help enhance-pad">Off: entries with their own <span class="font-mono">enhance:</span> setting (✨) are still enhanced.</p>
+  {/if}
 {/snippet}
 
 {#if layout.compact}
   <!-- A phone: the options as a sheet, like every menu there. -->
   <Sheet bind:open={panelOpen} title="Prompt enhancer">
-    <div id="ws-enhance-panel" class="enhance-sheet space-y-3">{@render panel()}</div>
+    <div id="ws-enhance-panel" class="enhance-sheet">{@render panel(false)}</div>
   </Sheet>
 {:else if panelOpen}
   <div
     use:popover={{ anchor: toggleEl, align: 'start', onclose: () => { panelOpen = false; } }}
     id="ws-enhance-panel"
-    class="enhance-popover ui-overlay space-y-3"
+    class="enhance-popover ui-overlay"
     role="dialog"
     aria-label="Prompt enhancer"
   >
-    {@render panel()}
+    {@render panel(true)}
   </div>
 {/if}
 
@@ -320,7 +331,13 @@
 
 <style>
   /* Never taller or wider than the window: on small screens the options scroll inside the popover. */
-  .enhance-popover { z-index: 70; width: min(320px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow-y: auto; padding: 12px; border-radius: var(--radius-md); }
-  .enhance-sheet { padding: 12px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px)); }
-  .choices { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; }
+  .enhance-popover { z-index: 70; width: min(368px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); overflow-y: auto; padding: 8px 0 0; border-radius: var(--radius-md); }
+  .enhance-sheet { padding: 4px max(4px, env(safe-area-inset-right, 0px)) 12px max(4px, env(safe-area-inset-left, 0px)); }
+  .enhance-head { display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; }
+  .enhance-heading { margin: 0; font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; }
+  .enhance-reset { margin-left: auto; }
+  .enhance-pad { padding: 0 12px; }
+  .enhance-pad:first-of-type { margin-top: 8px; }
+  .enhance-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px 12px; }
+  .enhance-spacer { flex: 1; }
 </style>

@@ -101,7 +101,8 @@ describe('jobSettingsPrefill', () => {
       enhance_auto: 'true', enhance_settings: '{"style":"keep","mood":"keep","details":[],"length":"same","motion":[],"parts":"both"}',
     });
 
-    expect(patch.enhanceSettings?.partsByWorkflow).toEqual({ extend: 'both' });
+    expect(patch.enhanceSettingsVideo?.partsByWorkflow).toEqual({ extend: 'both' });
+    expect(patch.enhanceSettings).toBeUndefined();
   });
 
   it('keeps a typed scene when an image job is loaded', () => {
