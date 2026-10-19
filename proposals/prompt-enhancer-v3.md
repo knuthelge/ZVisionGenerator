@@ -1,6 +1,6 @@
 # Prompt enhancer v3: a test bench, sharper rules, better options
 
-**Status:** Proposed (2026-10-19)
+**Status:** In progress (2026-10-19). Phase 1 (the bench) is done; phases 2 and 3 are open.
 
 Three phases, each shippable on its own:
 
@@ -92,6 +92,31 @@ The scoring functions are pure and get unit tests with canned outputs (`tests/te
 1. Cases, runner, checks with their unit tests, and compare. A baseline for Fast and Smart.
 2. The local judge.
 3. The picture sheet (needed before phase 3's style work).
+
+### Shipped (step 1, 2026-10-19)
+
+Step 1 is done (`04db36f`, `be57156`): 63 cases, the runner, the checks, `rescore` (recompute checks from stored outputs, no model) and `compare`, under `make enhance-bench`. Steps 2 and 3 moved to phase 3, which is the first phase that needs them.
+
+- **Decisions.** The length check stays strict (the planner's own range); the per-Length median ratio in the report shows how far off each choice is. Only one platform's baseline is needed: the bench is a harness for comparing changes, not a portable score.
+- **Tuned on the first runs.** `keep` matches word stems, up to two words apart, with `a|b` alternatives; `count` allows adjectives before the noun; the caption format check covers structure only, since a design caption moves its lettering lines into text elements.
+
+Baseline on Windows/Linux (63 cases × 3 seeds):
+
+| Check | Fast (4B) | Smart (9B) |
+|---|---|---|
+| usable / first try / format | 100% / 99% / 100% | 100% / 99% / 100% |
+| length in range | 54% | 44% |
+| quoted text kept | 93% | 90% |
+| keep / count | 96% / 94% | 98% / 94% |
+| median seconds per rewrite | 1.1 s | 1.2 s |
+
+What it showed, as input to phase 2:
+
+- Same on short prompts (targets of 3 to 8 words) comes back 2 to 3 times longer: the model adds the requested detail and breaks the range.
+- Shorter barely shortens a 90-word prompt (median 1.7 times the target on Fast). Smart writes about 1.6 times the target for Longer and for video pairs.
+- Quoted text loses its case and quotes ("OPEN 24 HOURS" → "open 24 hours", "CLOSED" unquoted).
+- Short rewrites on Fast often open with "Square frame," or "Landscape frame,": the frame rule is echoed instead of applied.
+- Some subjects vanish from short or styled prompts (the ramen, the picnic, the harbor).
 
 ---
 
