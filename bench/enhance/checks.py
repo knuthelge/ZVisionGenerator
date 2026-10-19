@@ -69,7 +69,7 @@ def caption_texts(output: str) -> str | None:
     """Return every string value of a JSON caption joined by newlines, or None when *output* is not a JSON object."""
     try:
         data = json.loads(output)
-    except (json.JSONDecodeError, TypeError):
+    except json.JSONDecodeError, TypeError:
         return None
     if not isinstance(data, dict):
         return None
@@ -94,7 +94,7 @@ def caption_format(output: str) -> bool:
     """
     try:
         data = json.loads(output)
-    except (json.JSONDecodeError, TypeError):
+    except json.JSONDecodeError, TypeError:
         return False
     if not isinstance(data, dict) or not data.get("high_level_description"):
         return False

@@ -644,6 +644,29 @@ def test_submit_image_job_threads_json_prompt_and_first_sigma_to_authoritative_a
     assert submitted[0]["request"].prompt == '{"high_level_description":"x"}'
 
 
+def _submit_enhanced_image(monkeypatch, tmp_path, record: str) -> list[dict[str, object]]:
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    submitted: list[dict[str, object]] = []
+    _patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="zimage", is_distilled=True, size=None), defaults=_make_resolved_image_defaults(), submitted=submitted)
+    form = {"model": "zit", "prompt": "A red fox curls up in deep snow.", "prompt_input": "a fox in snow", "enhance_record": record}
+    web_server._submit_image_job(form, web_config)
+    return submitted
+
+
+def test_submit_image_job_records_the_web_rewrite(monkeypatch, tmp_path):
+    record = json.dumps({"settings": {"style": "photo"}, "model": "someone/custom-model", "tier": "smart", "format": "text"})
+    args = _submit_enhanced_image(monkeypatch, tmp_path, record)[0]["args"]
+    assert args.prompt_input == "a fox in snow"
+    assert args.enhance_record["settings"]["style"] == "photo"
+    assert args.enhance_record["tier"] == "custom"  # worked out from the model, not taken from the browser
+
+
+def test_submit_image_job_rejects_a_malformed_enhance_record(monkeypatch, tmp_path):
+    with pytest.raises(ValueError, match="enhance"):
+        _submit_enhanced_image(monkeypatch, tmp_path, '{"settings": {"style": "nope"}, "model": "org/fast"}')
+
+
 def test_submit_image_job_compacts_a_pretty_json_prompt(monkeypatch, tmp_path):
     web_config = _make_web_config()
     web_config.output_dir = str(tmp_path)

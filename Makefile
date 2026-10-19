@@ -25,16 +25,16 @@ lock: ## Regenerate uv.lock
 .PHONY: lint lint-fix format format-check test docs-check check
 
 lint: ## Run ruff linter
-	uv run --frozen ruff check zvisiongenerator/ tests/
+	uv run --frozen ruff check zvisiongenerator/ tests/ bench/
 
 lint-fix: ## Run ruff linter with auto-fix
-	uv run --frozen ruff check --fix zvisiongenerator/ tests/
+	uv run --frozen ruff check --fix zvisiongenerator/ tests/ bench/
 
 format: ## Format code with ruff
-	uv run --frozen ruff format zvisiongenerator/ tests/
+	uv run --frozen ruff format zvisiongenerator/ tests/ bench/
 
 format-check: ## Check formatting without changes
-	uv run --frozen ruff format --check zvisiongenerator/ tests/
+	uv run --frozen ruff format --check zvisiongenerator/ tests/ bench/
 
 test: ## Run tests with pytest
 	uv run --frozen pytest

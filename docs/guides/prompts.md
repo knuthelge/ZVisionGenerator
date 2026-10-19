@@ -335,7 +335,7 @@ ziv-image -m klein9b -p prompts.yaml --no-enhance
 
 `motion` and `sound` only apply to video, and `sound` only with audio on. Prompt files shared between image and video may include them; images ignore them.
 
-The enhanced prompt is printed while prompts are enhanced and again before each generation, and stored in the image or video metadata, so Gallery shows and reuses the prompt that actually rendered.
+The enhanced prompt is printed while prompts are enhanced and again before each generation, and stored in the image or video metadata, so Gallery shows and reuses the prompt that actually rendered. The metadata also keeps your own prompt and how it was enhanced: the options, the enhancer model (Fast, Smart or your own) and Text or JSON.
 
 ### While Prompts Are Enhanced
 

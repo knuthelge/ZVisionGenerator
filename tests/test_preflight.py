@@ -10,7 +10,7 @@ import pytest
 from conftest import make_extend_source
 
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
-from zvisiongenerator.core.job_plan import EnhanceStatus
+from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus
 from zvisiongenerator.core.video_types import ExtendSource
 from zvisiongenerator.preflight import _iteration_context, _job_context, plan_iterations, run_preflight
 from zvisiongenerator.utils.interactive import SkipSignal
@@ -236,6 +236,12 @@ class TestRunPreflight:
         plan, _events, _release, enhancer = _run(args=_args(enhance_format=None))
         assert all(not it.enhanced_prompt.startswith("{") for it in plan.iterations)
         assert "OBJECT:" not in enhancer.systems[0]
+
+    def test_plan_names_the_enhancer_that_ran(self):
+        plan, _events, _release, _enhancer = _run()
+        assert plan.enhancer == EnhancerUsed("a/b", None, tier="fast", format="text")
+        quiet, _events, _release, _enhancer = _run(args=_args(no_enhance=True))
+        assert quiet.enhancer is None
 
     def test_rewrites_then_closes_then_releases(self):
         order: list[str] = []

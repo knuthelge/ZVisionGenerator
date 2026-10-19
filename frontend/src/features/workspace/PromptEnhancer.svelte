@@ -176,7 +176,8 @@
           } else if (frame.type === 'done') {
             // A caption arrives on one line; it is laid out for reading, and Generate sends it as the JSON prompt.
             const prompt = runCaption ? prettyCaption(frame.prompt) : frame.prompt;
-            draft.patch({ enhancedPrompt: prompt, enhancedScene: source.mode === 'video' && parts === 'both' ? frame.scene ?? '' : '', enhancedFrom: source });
+            const record = frame.model ? { settings: settingsPayload(requested, mode, audio), model: frame.model, format: runCaption ? ('json' as const) : ('text' as const) } : undefined;
+            draft.patch({ enhancedPrompt: prompt, enhancedScene: source.mode === 'video' && parts === 'both' ? frame.scene ?? '' : '', enhancedFrom: record ? { ...source, record } : source });
             const notes = [frame.clamped ? clampedNote(requested.length) : null, frame.warning ?? null].filter((note) => note !== null);
             noteText = notes.length > 0 ? notes.join(' ') : null;
             downloadedTiers.add(runTier);

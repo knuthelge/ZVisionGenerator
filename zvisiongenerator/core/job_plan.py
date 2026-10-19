@@ -62,16 +62,28 @@ class IterationPlan:
 
 
 @dataclass(frozen=True)
+class EnhancerUsed:
+    """The enhancer model a job's rewrites came from, its tier (``fast``, ``smart`` or ``custom``) and output format (``text`` or ``json``)."""
+
+    repo: str
+    revision: str | None
+    tier: str
+    format: str
+
+
+@dataclass(frozen=True)
 class JobPlan:
     """Every planned iteration of a job, in run → set → prompt order.
 
     Attributes:
         iterations: One plan per iteration.
         cancelled: The user quit during preflight; generation must not run.
+        enhancer: The enhancer that rewrote the job's prompts, or None when none ran.
     """
 
     iterations: tuple[IterationPlan, ...]
     cancelled: bool = False
+    enhancer: EnhancerUsed | None = None
 
     @property
     def has_rewrites(self) -> bool:

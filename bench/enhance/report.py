@@ -126,7 +126,13 @@ def _length_groups(records: tuple[dict[str, Any], ...]) -> dict[str, list[dict[s
 
 def _length_table(base: Run, new: Run) -> list[str]:
     base_groups, new_groups = _length_groups(base.records), _length_groups(new.records)
-    lines = ["", "## Length by choice", "", f"| Length / measures | n | {base.label} in range | {new.label} in range | {base.label} median ratio | {new.label} median ratio |", "|---|---|---|---|---|---|"]
+    lines = [
+        "",
+        "## Length by choice",
+        "",
+        f"| Length / measures | n | {base.label} in range | {new.label} in range | {base.label} median ratio | {new.label} median ratio |",
+        "|---|---|---|---|---|---|",
+    ]
     for key in sorted(set(base_groups) | set(new_groups)):
         b, n = base_groups.get(key, []), new_groups.get(key, [])
         in_range = lambda group: _pct(statistics.fmean(bool(r["checks"]["length_in_range"]) for r in group)) if group else "–"  # noqa: E731

@@ -120,6 +120,8 @@ class VideoGenerationRequest:
     # The user's own text, recorded when ``prompt``/``scene`` already hold an enhanced rewrite made before the job (e.g. in the Web UI)
     scene_input: str | None = None
     prompt_input: str | None = None
+    # How the text was enhanced (options, model, tier, format), recorded in the saved video; None when it was not
+    enhance_record: dict[str, Any] | None = None
 
     # Extend: the clip to continue and the new frames to add; ``None`` for a plain generation
     extend: ExtendSpec | None = None

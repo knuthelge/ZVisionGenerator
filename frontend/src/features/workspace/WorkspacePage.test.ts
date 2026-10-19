@@ -1219,7 +1219,7 @@ describe('WorkspacePage', () => {
     it('writes a JSON caption into the Enhanced tab and generates it as the JSON prompt', async () => {
       enhanceApiMocks.enhancePrompt.mockImplementation(async (_body: unknown, ...rest: unknown[]) => {
         const onFrame = rest[0] as (frame: EnhanceFrame) => void;
-        onFrame({ type: 'done', prompt: '{"high_level_description":"A fox."}', clamped: false });
+        onFrame({ type: 'done', prompt: '{"high_level_description":"A fox."}', clamped: false, model: 'org/fast@r1' });
       });
       draft.update('prompt', 'a fox');
       draft.update('enhanceFormat', 'json');
@@ -1234,6 +1234,9 @@ describe('WorkspacePage', () => {
       const submitted = await submitForm();
       expect(submitted.get('json_prompt')).toBe('{\n  "high_level_description": "A fox."\n}');
       expect(submitted.has('prompt')).toBe(false);
+      // The asset records the user's prompt and how the caption was written.
+      expect(submitted.get('prompt_input')).toBe('a fox');
+      expect(JSON.parse(String(submitted.get('enhance_record')))).toMatchObject({ model: 'org/fast@r1', format: 'json' });
     });
 
     it('offers Write as only for models that take JSON captions', async () => {
@@ -1527,6 +1530,26 @@ describe('WorkspacePage', () => {
         expect(submitted.get('scene_input')).toBe('A castle.');
         expect(submitted.get('prompt_input')).toBe('a knight');
       }
+    });
+
+    it('records the user text and how an enhanced image prompt was made', async () => {
+      const record = { settings: { style: 'photo' }, model: 'org/fast@r1', format: 'text' as const };
+      draft.patch({ prompt: 'a fox in snow', enhancedPrompt: 'A red fox curls up in deep snow.', enhancedFrom: { prompt: 'a fox in snow', mode: 'image', record } });
+      await mountWorkspace(withEnhancer(makeContext()));
+
+      const submitted = await submitForm();
+      expect(submitted.get('prompt')).toBe('A red fox curls up in deep snow.');
+      expect(submitted.get('prompt_input')).toBe('a fox in snow');
+      expect(JSON.parse(String(submitted.get('enhance_record')))).toEqual(record);
+    });
+
+    it('sends no enhance record without Enhanced text', async () => {
+      draft.patch({ prompt: 'a fox in snow', enhancedPrompt: '', enhancedFrom: null });
+      await mountWorkspace(withEnhancer(makeContext()));
+
+      const submitted = await submitForm();
+      expect(submitted.has('enhance_record')).toBe(false);
+      expect(submitted.has('prompt_input')).toBe(false);
     });
 
     describe('Rewrite row', () => {

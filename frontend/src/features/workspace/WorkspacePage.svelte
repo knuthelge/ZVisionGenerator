@@ -881,19 +881,27 @@
       formData.delete('prompt');
       formData.delete('negative_prompt');
       formData.set('json_prompt', caption);
+      recordEnhancedText(formData);
     } else if (anyEnhancedUsed(draft.state) && formData.has('prompt')) {
       // The Enhanced parts run; the user's own text is recorded beside them so Reuse can offer either.
       const pair = submittedPair(draft.state);
       formData.set('prompt', pair.prompt);
       if (formData.has('scene')) {
         formData.set('scene_input', draft.state.scene);
-        formData.set('prompt_input', draft.state.prompt);
         formData.set('scene', pair.scene);
       }
+      recordEnhancedText(formData);
     }
     // Outside an extension a blank scene is no scene: today's form data, without the field. An extension always sends it.
     finalizeSceneFields(formData, draft.state);
     return formData;
+  }
+
+  /** Record the user's own prompt and how the Enhanced text was made, so the asset keeps both. */
+  function recordEnhancedText(formData: FormData): void {
+    formData.set('prompt_input', draft.state.prompt);
+    const record = draft.state.enhancedFrom?.record;
+    if (record) formData.set('enhance_record', JSON.stringify(record));
   }
 
   /** Whether an extension may start now; any other workflow always may. */

@@ -20,6 +20,7 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.review import REVIEW_PROMPT, await_review_decision, review_enabled
+from zvisiongenerator.utils.enhance_record import planned_enhance_record
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 
 if TYPE_CHECKING:
@@ -280,6 +281,7 @@ def run_video_batch(
                     enhanced_scene=planned.enhanced_scene,
                     scene_input=getattr(args, "scene_input", None),
                     prompt_input=getattr(args, "prompt_input", None),
+                    enhance_record=planned_enhance_record(planned, plan.enhancer, mode="video") or getattr(args, "enhance_record", None),
                     extend=extend,
                     on_prompt_enhanced=_make_prompt_enhanced_callback(
                         progress_callback,

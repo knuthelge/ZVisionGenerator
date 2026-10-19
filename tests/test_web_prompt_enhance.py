@@ -78,6 +78,12 @@ def _frames(response) -> list[dict]:
     return [json.loads(line) for line in response.text.splitlines() if line.strip()]
 
 
+def _without_model(frame: dict) -> dict:
+    """Return a ``done`` frame without its ``model`` (the enhancer that wrote it), after checking it names one."""
+    assert isinstance(frame.get("model"), str) and frame["model"]
+    return {key: value for key, value in frame.items() if key != "model"}
+
+
 @pytest.fixture
 def no_active_job(monkeypatch):
     monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
@@ -99,7 +105,7 @@ class TestEnhanceEndpoint:
         assert frames[0] == {"type": "status", "phase": "loading"}
         assert frames[1] == {"type": "status", "phase": "generating"}
         assert any(frame["type"] == "text" and "grey fox" in frame["text"] for frame in frames)
-        assert frames[-1] == {"type": "done", "prompt": "A grey fox in deep snow, golden light.", "clamped": False}
+        assert _without_model(frames[-1]) == {"type": "done", "prompt": "A grey fox in deep snow, golden light.", "clamped": False}
         assert enhancer.messages[0][1]["content"] in ("Prompt: a red fox", "Prompt: a grey fox")  # choices are picked before the model sees the prompt
         assert session.acquired[0][2] == 120
 
@@ -124,7 +130,7 @@ class TestEnhanceEndpoint:
         assert texts and all({"text", "scene", "prompt"} <= set(frame) for frame in texts)
         assert all((frame["scene"], frame["prompt"]) == split_scene_action(frame["text"]) for frame in texts)  # the server splits; the client renders the parts
         assert (texts[-1]["scene"], texts[-1]["prompt"]) == ("A castle at dusk.", "A knight rides in.")
-        assert frames[-1] == {"type": "done", "scene": "A castle at dusk.", "prompt": "A knight rides in.", "clamped": False}
+        assert _without_model(frames[-1]) == {"type": "done", "scene": "A castle at dusk.", "prompt": "A knight rides in.", "clamped": False}
         assert "A castle at dusk." in enhancer.messages[0][1]["content"] and "a knight" in enhancer.messages[0][1]["content"]
 
     def test_video_prompt_only_is_split(self, monkeypatch, no_active_job):
@@ -161,7 +167,7 @@ class TestEnhanceEndpoint:
             frames = _frames(client.post("/api/prompt/enhance", json=body))
         texts = [frame for frame in frames if frame["type"] == "text"]
         assert texts and all(frame["scene"] == "" and frame["prompt"] == frame["text"] for frame in texts)
-        assert frames[-1] == {"type": "done", "scene": "", "prompt": "The knight draws his sword and raises it high.", "clamped": False}
+        assert _without_model(frames[-1]) == {"type": "done", "scene": "", "prompt": "The knight draws his sword and raises it high.", "clamped": False}
         system, user = enhancer.messages[0][0]["content"], enhancer.messages[0][1]["content"]
         assert "A castle at dusk." in system and "kept exactly as written" in system and user == "he draws his sword"
 
@@ -228,7 +234,7 @@ class TestEnhanceEndpoint:
         with TestClient(web_server.app) as client:
             frames = _frames(client.post("/api/prompt/enhance", json={"prompt": "a fox", "scene": "ignored", "mode": "image", "settings": {"style": "photo"}}))
         assert all("scene" not in frame for frame in frames)
-        assert frames[-1] == {"type": "done", "prompt": "A grey fox in snow.", "clamped": False}
+        assert _without_model(frames[-1]) == {"type": "done", "prompt": "A grey fox in snow.", "clamped": False}
 
     def test_cpu_fallback_is_reported(self, monkeypatch, no_active_job):
         enhancer = _FakeEnhancer(["A red fox in snow, golden light."])
@@ -898,7 +904,7 @@ class TestExtendEnhance:
 
         texts = [frame for frame in frames if frame["type"] == "text"]
         assert texts and all(frame["scene"] == "" and frame["prompt"] == frame["text"] for frame in texts)
-        assert frames[-1] == {"type": "done", "scene": "", "prompt": "She opens a black umbrella and steps away from the light.", "clamped": False}
+        assert _without_model(frames[-1]) == {"type": "done", "scene": "", "prompt": "She opens a black umbrella and steps away from the light.", "clamped": False}
         system, user = enhancer.messages[0][0]["content"], enhancer.messages[0][1]["content"]
         assert _SOURCE_SCENE in system and _SOURCE_ACTION in system
         assert user == "She opens an umbrella."

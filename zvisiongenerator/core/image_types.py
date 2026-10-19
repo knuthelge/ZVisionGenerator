@@ -95,6 +95,10 @@ class ImageGenerationRequest:
     resolved_prompt: str | None = None
     enhanced_prompt: str | None = None
     on_prompt_enhanced: Callable[[str], None] | None = None
+    # The user's own text, recorded when ``prompt`` already holds an enhanced rewrite made before the job (e.g. in the Web UI)
+    prompt_input: str | None = None
+    # How the prompt was enhanced (options, model, tier, format), recorded in the saved image; None when it was not
+    enhance_record: dict[str, Any] | None = None
 
 
 @dataclass

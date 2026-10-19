@@ -147,9 +147,7 @@ def run_case(enhancer: RecordingEnhancer, case: Case, seed: int, *, config: dict
     }
 
 
-def _score(
-    case: Case, *, output: str, scene: str, error: str | None, attempts: int, format_ok: bool | None, ceiling: int, options: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any] | None]:
+def _score(case: Case, *, output: str, scene: str, error: str | None, attempts: int, format_ok: bool | None, ceiling: int, options: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Return the checks of one result and the length plan they measured against (None for captions and failures)."""
     if error is not None:
         return failed_checks(), None
@@ -166,9 +164,7 @@ def rescore_record(record: dict[str, Any], case: Case, *, config: dict[str, Any]
     """
     format_ok = caption_format(record["output"]) if case.mode == "caption" else record["checks"].get("format")
     ceiling = resolve_enhance_ceiling(config, family=case.family, mode=case.media)
-    checks, plan_record = _score(
-        case, output=record["output"], scene=record["scene"], error=record["error"], attempts=len(record["attempts"]), format_ok=format_ok, ceiling=ceiling, options=options
-    )
+    checks, plan_record = _score(case, output=record["output"], scene=record["scene"], error=record["error"], attempts=len(record["attempts"]), format_ok=format_ok, ceiling=ceiling, options=options)
     return {**record, "tags": list(case.tags), "checks": checks, "plan": plan_record}
 
 
@@ -187,7 +183,7 @@ def git_state(cwd: Path | None = None) -> dict[str, Any]:
     try:
         commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True, cwd=cwd).stdout.strip()
         dirty = bool(subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, check=True, cwd=cwd).stdout.strip())
-    except (OSError, subprocess.CalledProcessError):
+    except OSError, subprocess.CalledProcessError:
         return {"commit": None, "dirty": None}
     return {"commit": commit, "dirty": dirty}
 

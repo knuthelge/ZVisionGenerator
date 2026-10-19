@@ -353,6 +353,16 @@ export interface EnhancedSource {
   sourceVideoPath?: string | null;
   /** Extend only: the new frames it was produced for. */
   extendFrames?: number | null;
+  /** How the rewrite was made; Generate sends it so the asset records it. Missing for typed-in or older Enhanced text. */
+  record?: EnhanceRecord;
+}
+
+/** The options, model and output format an Enhanced text was written with, as the server records them. */
+export interface EnhanceRecord {
+  settings: Partial<EnhanceSettings>;
+  /** The enhancer that wrote it, ``REPO[@REVISION]``; the server works out Fast, Smart or custom from it. */
+  model: string;
+  format: EnhanceFormat;
 }
 
 /**
@@ -362,7 +372,7 @@ export interface EnhancedSource {
 export type EnhanceFrame =
   | { type: 'status'; phase: 'downloading' | 'loading' | 'generating' | 'generating_cpu' }
   | { type: 'text'; text: string; scene?: string; prompt?: string }
-  | { type: 'done'; prompt: string; scene?: string; clamped: boolean; warning?: string }
+  | { type: 'done'; prompt: string; scene?: string; clamped: boolean; warning?: string; model?: string }
   | { type: 'error'; detail: string };
 
 export interface PromptFileContract {

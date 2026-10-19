@@ -45,12 +45,14 @@ from zvisiongenerator.utils.config import (
     ENHANCER_TIERS,
     enhancer_tier_models,
     load_config,
+    model_reference,
     resolve_defaults,
     resolve_enhancer_model,
     resolve_upscale_steps,
     validate_scheduler,
     validate_sharpen_amount,
 )
+from zvisiongenerator.utils.enhance_record import parse_enhance_record
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import resolve_lora_references
@@ -570,7 +572,7 @@ def _run_enhancement(job: dict[str, Any], frames: queue.Queue[dict[str, Any]], c
             with session.acquire(job["repo"], job["revision"], idle_seconds=job["idle_seconds"], on_phase=lambda phase: frames.put({"type": "status", "phase": phase})) as enhancer:
                 frames.put({"type": "status", "phase": "generating_cpu" if runs_on_cpu(enhancer) else "generating"})
                 result = _enhance_for_job(job, enhancer, frames, cancelled)
-        frames.put(_enhance_done_frame(job["mode"], result))
+        frames.put(_enhance_done_frame(job["mode"], result, model=model_reference(job["repo"], job["revision"])))
     except (RuntimeError, ValueError) as exc:
         frames.put({"type": "error", "detail": str(exc)})
     except Exception as exc:  # noqa: BLE001 - any loader/runtime failure must still end the stream
@@ -608,14 +610,15 @@ def _enhance_for_job(job: dict[str, Any], enhancer: Any, frames: queue.Queue[dic
     return enhance_video_prompt(enhancer, scene, expand_random_choices(job["prompt"]), job["settings"], on_text=_on_text, **common)
 
 
-def _enhance_done_frame(mode: str, result: EnhanceResult | EnhancePairResult) -> dict[str, Any]:
-    """Return the terminal ``done`` frame: ``{prompt, clamped, warning?}`` for images, ``{scene, prompt, clamped, warning?}`` for video.
+def _enhance_done_frame(mode: str, result: EnhanceResult | EnhancePairResult, *, model: str) -> dict[str, Any]:
+    """Return the terminal ``done`` frame: ``{prompt, clamped, model, warning?}`` for images, plus ``scene`` for video.
 
-    A video frame's ``scene`` is ``""`` when the scene was not rewritten (action only), so the client keeps the user's scene.
+    ``model`` is the enhancer that wrote it (``REPO[@REVISION]``), which the client sends back with Generate so the asset
+    records it. A video frame's ``scene`` is ``""`` when the scene was not rewritten (action only), so the client keeps the user's scene.
     """
-    frame: dict[str, Any] = {"type": "done", "prompt": result.prompt, "clamped": result.clamped}
+    frame: dict[str, Any] = {"type": "done", "prompt": result.prompt, "clamped": result.clamped, "model": model}
     if isinstance(result, EnhancePairResult):
-        frame = {"type": "done", "scene": result.scene, **{key: frame[key] for key in ("prompt", "clamped")}}
+        frame = {"type": "done", "scene": result.scene, **{key: frame[key] for key in ("prompt", "clamped", "model")}}
     if result.warning:
         frame["warning"] = result.warning
     return frame
@@ -997,6 +1000,8 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         _prompt_source, prompt, negative_prompt, prompts_data, enhance_by_set, _scene_by_set = _resolve_prompt_submission_with_enhance(form)
         enhance_by_set = enhance_by_set_for_mode(enhance_by_set, mode="image", caption=_optional_text(form, "enhance_format") == "json")
     _apply_enhance_submission(args, form, mode="image", json_caption=args.json_prompt_enabled)
+    args.prompt_input = _optional_text(form, "prompt_input")
+    args.enhance_record = _enhance_record_from_form(form, mode="image", app_config=app_config)
     first_sigma = _optional_float(form, "first_sigma")
     if first_sigma is not None and not (0.0 < first_sigma <= 2.0):
         raise ValueError(f"first_sigma must be in (0.0, 2.0], got {first_sigma}.")
@@ -1153,6 +1158,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     if review_enabled(args) and not supports_video_upscale_review():
         raise HTTPException(status_code=400, detail="Review before upscaling is not available for video on this platform.")
     _apply_enhance_submission(args, form, mode="video", json_caption=False, split=extend or not (scene or "").strip())
+    args.enhance_record = _enhance_record_from_form(form, mode="video", app_config=app_config)
     if _WORKFLOW_DEFINITIONS[workflow]["requires_reference_image"] and image_path is None:
         raise ValueError("Image-to-video requires a reference image.")
     _validate_video_args(args)
@@ -1292,6 +1298,24 @@ def _apply_enhance_submission(args: argparse.Namespace, form: Any, *, mode: str,
     settings = settings_from_mapping(data, mode=mode, motion_in_image="warn")
     validate_settings(settings, mode=mode, split=mode == "video" and split, caption=args.enhance_format == "json")
     args.enhance = settings
+
+
+def _enhance_record_from_form(form: Any, *, mode: str, app_config: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the ``enhance_record`` sent with Enhanced text (how the Web UI rewrite was made), validated; None when absent.
+
+    The tier is worked out from the model, not taken from the browser.
+    """
+    raw = _optional_text(form, "enhance_record")
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"enhance_record must be a JSON object: {exc}") from exc
+    try:
+        return parse_enhance_record(data, mode=mode, config=app_config, platform_key=sys.platform)
+    except ValueError as exc:
+        raise ValueError(f"enhance_record: {exc}") from exc
 
 
 def _form_choice(form: Any, key: str, allowed: tuple[str, ...]) -> str | None:

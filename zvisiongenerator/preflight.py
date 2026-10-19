@@ -16,9 +16,11 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends import prompt_enhancer_session, release_accelerator_memory
-from zvisiongenerator.core.job_plan import EnhanceStatus, IterationPlan, JobPlan
+from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus, IterationPlan, JobPlan
 from zvisiongenerator.core.progress_events import ProgressCallback, emit_progress
 from zvisiongenerator.utils.prompt_compose import expand_random_choices, is_original_prompt
+from zvisiongenerator.utils.config import model_reference
+from zvisiongenerator.utils.enhance_record import enhancer_tier
 from zvisiongenerator.utils.prompt_enhance import (
     EnhanceContext,
     EnhanceSettings,
@@ -200,6 +202,7 @@ def run_preflight(
         if control is not None:
             print("Commands: [n] skip rewrite  [q] quit  [p] pause\n")
         planned, cancelled = _rewrite_all(enhancer, iterations, positions, rewrite=rewrite, control=control, pause=pause, mode=mode, progress_callback=progress_callback)
+    used = EnhancerUsed(*reference, tier=enhancer_tier(config, platform_key=sys.platform, model=model_reference(*reference)), format="json" if caption else "text")
     # Reached only on the normal paths (success or quit); on an exception close() already freed the enhancer.
     (release_memory or _release_accelerator_memory)()
     if not cancelled:
@@ -207,8 +210,8 @@ def run_preflight(
     if cancelled:
         print("\n⏹ Quitting batch...")
         emit_progress(progress_callback, "batch_cancelled", mode=mode, completed_iterations=0, total_iterations=total_iterations)
-        return JobPlan(planned, cancelled=True)
-    return _finish(JobPlan(planned), mode=mode, progress_callback=progress_callback)
+        return JobPlan(planned, cancelled=True, enhancer=used)
+    return _finish(JobPlan(planned, enhancer=used), mode=mode, progress_callback=progress_callback)
 
 
 def _rewrite_all(

@@ -12,6 +12,7 @@ from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.utils.enhance_record import parse_enhance_record
 from zvisiongenerator.utils.paths import collapse_home, display_stem, expand_home
 
 IMAGE_CONFIG_SCHEMA = "zvisiongenerator.config.v1"
@@ -31,7 +32,8 @@ def build_image_config_payload(request: ImageGenerationRequest, artifacts: Image
     The top-level keys are the reusable settings (schema, workflow, prompt, negative prompt, model, family, seed,
     steps, guidance, scheduler, dimensions, ratio, size, reference image, strength, LoRAs). ``generation`` records
     how the file was made (time, upscale, post-processing) and ``source`` the image an upscale started from.
-    An auto-enhanced prompt replaces the template prompt so the asset records what rendered.
+    An auto-enhanced prompt replaces the template prompt so the asset records what rendered. An enhanced prompt also
+    records the user's own text as ``prompt_input`` and how it was enhanced as ``enhance`` (options, model, tier, format).
     """
     width = artifacts.image.width if artifacts.image is not None else request.width
     height = artifacts.image.height if artifacts.image is not None else request.height
@@ -61,6 +63,7 @@ def build_image_config_payload(request: ImageGenerationRequest, artifacts: Image
     }
     if request.image_path:
         payload["image_strength"] = request.image_strength
+    payload.update(_enhance_fields(request.enhance_record, prompt_input=_image_prompt_input(request, artifacts)))
     source = artifacts.metadata.get("upscale_source")
     if source:
         # The workflow that made the original, so Reuse settings regenerates it (img2img keeps its reference).
@@ -111,7 +114,25 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
     if extend is not None:
         payload["source_video"] = _portable_path(str(extend.source.path))
         payload["extend_frames"] = extend.frames
+    payload.update(_enhance_fields(request.enhance_record))
     return _drop_unserializable(payload)
+
+
+def _image_prompt_input(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> str | None:
+    """Return the user's own prompt of an enhanced image: the text sent beside a Web UI rewrite, or the template of a job rewrite."""
+    if request.prompt_input:
+        return request.prompt_input
+    return request.prompt if artifacts.metadata.get("enhanced_prompt") else None
+
+
+def _enhance_fields(record: dict[str, Any] | None, *, prompt_input: str | None = None) -> dict[str, Any]:
+    """Return the payload keys of an enhanced prompt: ``prompt_input`` (images) and ``enhance``, each only when known."""
+    fields: dict[str, Any] = {}
+    if optional_text(prompt_input) is not None:
+        fields["prompt_input"] = prompt_input
+    if record:
+        fields["enhance"] = record
+    return fields
 
 
 def _extend_audio_output(source: Any, *, no_audio: bool) -> bool:
@@ -241,6 +262,8 @@ class RecordedSettings:
     extend_frames: int | None = None
     # ``path:weight`` entries joined by commas, as ``--lora`` takes them.
     lora: str | None = None
+    # How the prompt was enhanced: ``{settings, model, tier, format}``; None when it was not (or the file predates it).
+    enhance: dict[str, Any] | None = None
     # How the file was made: time, quantize, upscale and post-processing (empty for files that predate it).
     generation: dict[str, Any] = field(default_factory=dict)
     # The image an upscale started from: ``{path, width, height, workflow}``.
@@ -274,7 +297,16 @@ def recorded_settings(config: dict[str, Any]) -> RecordedSettings:
         lora=_lora_string(config.get("lora")),
         generation=_generation_block(config.get("generation"), is_video=_is_video_config(config)),
         source=_source_block(config.get("source")),
+        enhance=_enhance_block(config.get("enhance"), is_video=_is_video_config(config)),
     )
+
+
+def _enhance_block(value: Any, *, is_video: bool) -> dict[str, Any] | None:
+    """Return a recorded ``enhance`` block normalized, or None when absent or malformed (an old or hand-edited file)."""
+    try:
+        return parse_enhance_record(value, mode="video" if is_video else "image")
+    except ValueError:
+        return None
 
 
 def _lora_string(value: Any) -> str | None:

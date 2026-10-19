@@ -32,6 +32,7 @@ from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.upscale import default_upscale_denoise
 from zvisiongenerator.workflows import build_workflow
+from zvisiongenerator.utils.enhance_record import planned_enhance_record
 
 
 class _QuitBatch(Exception):
@@ -379,6 +380,8 @@ def run_batch(
                             filename_base=gen_filename,
                             resolved_prompt=planned.resolved_prompt,
                             enhanced_prompt=planned.enhanced_prompt,
+                            prompt_input=getattr(args, "prompt_input", None),
+                            enhance_record=planned_enhance_record(planned, plan.enhancer, mode="image") or getattr(args, "enhance_record", None),
                             on_prompt_enhanced=_make_prompt_enhanced_callback(
                                 progress_callback,
                                 mode="image",
