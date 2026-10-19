@@ -23,6 +23,7 @@ from tests.conftest import _make_video_args, make_extend_source
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.interactive import SkipSignal
+from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import web_runner as web_runner_module
 from zvisiongenerator.workflows import build_video_workflow
@@ -380,9 +381,11 @@ class TestWebRunner:
         assert loader_calls == {"model_ref": "/models/zit", "quantize": 8, "model_name": "zit", "lora_paths": ["/l.safetensors"]}
         assert runs == [(request, workflow)]
 
-    def test_seedvr2_upscale_loads_its_own_model_and_reports_the_copy_phases(self, tmp_path, monkeypatch):
-        """A SeedVR2 request loads through load_seedvr2 (never the image loader) and its load events replace the download."""
+    @pytest.mark.parametrize(("weights", "replaces_download", "label"), [(MLX_WEIGHTS, True, "SeedVR2 7B q8"), (FP8_WEIGHTS, False, "SeedVR2 7B fp8")])
+    def test_seedvr2_upscale_loads_its_own_model_and_reports_the_copy_phases(self, tmp_path, monkeypatch, weights, replaces_download, label):
+        """A SeedVR2 request loads through load_seedvr2 (never the image loader); its load events replace the download only where a copy is stored."""
         upscaler = MagicMock(name="upscaler")
+        upscaler.weights = weights
         model = MagicMock(name="seedvr2_model")
         load_calls: list = []
         runs: list = []
@@ -420,8 +423,8 @@ class TestWebRunner:
         assert snapshot["status"] == "completed"
         assert load_calls == [(upscaler, "seedvr2-7b", tmp_path / "models")]
         assert runs == [(upscaler, model, request, workflow)]
-        assert [(event["phase"], event["quantize"], event["replaces_download"]) for event in events] == [("downloading", 8, True), ("saving_quant", 8, True)]
-        assert {event["model"] for event in events} == {"SeedVR2 7B q8"}
+        assert [(event["phase"], event["quantize"], event["replaces_download"]) for event in events] == [("downloading", 8, replaces_download), ("saving_quant", 8, replaces_download)]
+        assert {event["model"] for event in events} == {label}
 
     def test_seedvr2_upscale_without_an_engine_fails_the_job(self, tmp_path, monkeypatch):
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)

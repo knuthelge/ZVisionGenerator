@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, supports_seedvr2
+from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, get_seedvr2_upscaler, supports_seedvr2
 from zvisiongenerator.converters.list_assets import list_loras, list_models, list_video_models
 from zvisiongenerator.seedvr2_loader import build_seedvr2_setup
 from zvisiongenerator.utils.config import load_config, resolve_enhancer_model
@@ -137,10 +137,19 @@ def preferred_option(preferred: str | None, options: tuple[str, ...]) -> str | N
     return options[0] if options else None
 
 
-def _resolve_seedvr2(app_config: dict[str, Any], data_dir: Path) -> SeedVR2Setup:
-    """Return the SeedVR2 tier for this machine's memory budget and whether its stored copy exists."""
-    budget_bytes = b.gpu_bytes if (b := memory_budget()) else None
-    return build_seedvr2_setup(app_config, budget_bytes=budget_bytes, models_dir=resolve_models_dir(data_dir=data_dir))
+def _resolve_seedvr2(app_config: dict[str, Any], data_dir: Path) -> SeedVR2Setup | None:
+    """Return the SeedVR2 tier for this machine's memory and engine, and whether its weights are on disk."""
+    upscaler = get_seedvr2_upscaler()
+    if upscaler is None:
+        return None
+    budget = memory_budget()
+    return build_seedvr2_setup(
+        app_config,
+        weights=upscaler.weights,
+        budget_bytes=budget.gpu_bytes if budget else None,
+        system_bytes=budget.system_bytes if budget else None,
+        models_dir=resolve_models_dir(data_dir=data_dir),
+    )
 
 
 def _resolve_enhancer(app_config: dict[str, Any]) -> dict[str, str | None]:

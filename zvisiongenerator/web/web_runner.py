@@ -1017,10 +1017,11 @@ def _load_image_model_with_progress(
 
 
 def _load_seedvr2_with_progress(request: ImageGenerationRequest, progress_callback: Callable[[EventPayload], None]) -> tuple[Any, Any]:
-    """Load the request's SeedVR2 model (its stored copy, made on first use) and report ``model_loading`` events.
+    """Load the request's SeedVR2 model the way the engine keeps it and report ``model_loading`` events.
 
-    The events carry ``replaces_download`` because the first load deletes the downloaded files once the copy is
-    saved. There is no cancel hook: a quit during the load is consumed when the workflow starts.
+    The events carry ``replaces_download`` where the engine stores a copy, because the first load deletes the
+    downloaded files once the copy is saved. There is no cancel hook: a quit during the load is consumed when
+    the workflow starts.
 
     Returns:
         ``(upscaler, model)``.
@@ -1031,12 +1032,13 @@ def _load_seedvr2_with_progress(request: ImageGenerationRequest, progress_callba
     upscaler = get_seedvr2_upscaler()
     if upscaler is None:
         raise RuntimeError("SeedVR2 upscaling is not available on this platform.")
-    model_label = seedvr2_tier_label(request.upscale_model)
+    model_label = seedvr2_tier_label(request.upscale_model, upscaler.weights)
+    replaces_download = upscaler.weights.stores_copy
     model = load_seedvr2(
         upscaler,
         request.upscale_model,
         models_dir=get_ziv_data_dir() / "models",
-        on_phase=lambda phase: progress_callback({"type": "model_loading", "mode": "image", "model": model_label, "phase": phase, "quantize": SEEDVR2_BITS, "replaces_download": True}),
+        on_phase=lambda phase: progress_callback({"type": "model_loading", "mode": "image", "model": model_label, "phase": phase, "quantize": SEEDVR2_BITS, "replaces_download": replaces_download}),
     )
     return upscaler, model
 

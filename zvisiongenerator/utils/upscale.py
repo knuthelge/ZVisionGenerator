@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.utils.alignment import round_to_alignment
 from zvisiongenerator.utils.seedvr2 import SeedVR2Tier, estimate_seedvr2_bytes, seedvr2_over_budget
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 UPSCALE_FACTORS: tuple[int, ...] = (2, 4)
 DEFAULT_MAX_MEGAPIXELS = 20.0
@@ -14,7 +17,7 @@ _DEFAULT_DENOISE = {2: 0.3, 4: 0.4}
 _DEFAULT_EXISTING_DENOISE_SMALL = 0.4
 _DEFAULT_EXISTING_DENOISE_LARGE = 0.2
 _DEFAULT_EXISTING_LARGE_MEGAPIXELS = 2.0
-SEEDVR2_MEMORY_WARNING = "May need more memory than this Mac has: slower, and it may fail."
+SEEDVR2_MEMORY_WARNING = "May need more memory than this computer has: it may be slow or fail."
 
 
 @dataclass(frozen=True)
@@ -39,6 +42,21 @@ def seedvr2_output_size(width: int, height: int, factor: int) -> tuple[int, int]
     return int(width * factor) // 2 * 2, int(height * factor) // 2 * 2
 
 
+def seedvr2_input_image(image: Image.Image, width: int, height: int, softness: float) -> Image.Image:
+    """Return *image* as RGB at *width* × *height* for SeedVR2, pre-blurred by *softness* (0-1) the way mflux does it.
+
+    Softness maps to a factor from 1 to 8: above 1 the image is first shrunk by that factor, then enlarged to the
+    target, both bicubic; at 0 it is only enlarged.
+    """
+    from PIL import Image
+
+    rgb = image.convert("RGB")
+    factor = 1.0 + max(0.0, min(1.0, softness)) * 7.0
+    if factor > 1.0:
+        rgb = rgb.resize((max(2, int(width / factor)), max(2, int(height / factor))), Image.Resampling.BICUBIC)
+    return rgb.resize((width, height), Image.Resampling.BICUBIC)
+
+
 def seedvr2_options(width: int, height: int, tier: SeedVR2Tier, *, budget_bytes: int | None) -> list[UpscaleOption]:
     """Return every upscale factor for a *width* × *height* image under the SeedVR2 plain upscale.
 
@@ -48,7 +66,7 @@ def seedvr2_options(width: int, height: int, tier: SeedVR2Tier, *, budget_bytes:
         width: Source image width in pixels.
         height: Source image height in pixels.
         tier: The SeedVR2 tier whose memory cost applies.
-        budget_bytes: Memory this Mac may use, or ``None`` when unknown (no warning then).
+        budget_bytes: Accelerator memory this machine may use, or ``None`` when unknown (no warning then).
     """
     options: list[UpscaleOption] = []
     for factor in UPSCALE_FACTORS:

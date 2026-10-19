@@ -16,10 +16,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
+from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
 from zvisiongenerator.utils.config import enhancer_tier_models, ltx_companion_repos
 from zvisiongenerator.utils.model_files import find_local_model_dir, huggingface_cache_repo_dir
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
+from zvisiongenerator.utils.seedvr2 import SeedVR2Weights
 from zvisiongenerator.utils.stored_quant import stored_quant_dirs_for
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 
@@ -84,13 +85,13 @@ def models_sharing(entry: ImageInventoryEntry | VideoInventoryEntry, inventory: 
     return tuple(other.name for other in inventory if other.name != entry.name and other.source != "installed" and other.resolved_path == entry.resolved_path)
 
 
-def seedvr2_delete_target(model: str, models_dir: Path) -> DeleteTarget | None:
-    """Return what deleting the stored SeedVR2 copy of *model* removes, or ``None`` when no copy is on disk.
+def seedvr2_delete_target(model: str, models_dir: Path, weights: SeedVR2Weights) -> DeleteTarget | None:
+    """Return what deleting SeedVR2 *model* removes, its weights folder, or ``None`` when the folder is absent.
 
-    Only the copy goes: the Hugging Face cache is never touched, since the copy replaced those downloads.
+    Only the folder goes (the stored copy, or the downloaded files): the Hugging Face cache is never touched.
     """
-    copy = seedvr2_copy_dir(model, models_dir)
-    return DeleteTarget("installed", copy) if copy.is_dir() else None
+    folder = seedvr2_weights_dir(model, models_dir, weights)
+    return DeleteTarget("installed", folder) if folder.is_dir() else None
 
 
 def enhancer_delete_target(repo: str) -> DeleteTarget | None:

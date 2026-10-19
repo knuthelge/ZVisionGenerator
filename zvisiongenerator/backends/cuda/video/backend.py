@@ -15,7 +15,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final
 
-from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
+from zvisiongenerator.backends.cuda.driver import require_cuda
 from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, warn_unmatched_lora
 from zvisiongenerator.core.video_types import ExtendSegment
 from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE, CARRY_FRAMES, EXTEND_FRAME_STEP, audio_lead_samples, cut_window_audio, window_audio_cut, window_frames
@@ -222,11 +222,7 @@ def _platform_label() -> str:
 def _validate_cuda(runtime: _RuntimeDependencies) -> None:
     """Ensure the current runtime has an NVIDIA CUDA device available."""
 
-    torch = runtime.torch
-    if not torch.cuda.is_available() or getattr(getattr(torch, "version", None), "cuda", None) is None:
-        message = f"CUDA is not available. The {_platform_label()} diffusers video backend requires an NVIDIA GPU with CUDA support."
-        hint = cuda_driver_hint(False, getattr(getattr(torch, "version", None), "cuda", None))
-        raise RuntimeError(f"{message} {hint}" if hint else message)
+    require_cuda(runtime.torch, f"The {_platform_label()} diffusers video backend")
 
 
 def _configure_torch_runtime(torch: Any) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+from dataclasses import replace
 import io
 import json
 import os
@@ -30,10 +31,10 @@ from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils import video_extend as video_extend_module
-from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
+from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.utils.model_memory import MemoryBudget, clip_memory_fit as real_clip_memory_fit
-from zvisiongenerator.utils.seedvr2 import SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
+from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.utils.provenance import embed_png_config
 
 
@@ -1355,7 +1356,7 @@ _SEEDVR2_7B = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=10.
 
 def _models_route_with_seedvr2(monkeypatch, tmp_path, *, copy_files: dict[str, bytes] | None):
     """Serve ``GET /api/models`` with SeedVR2 on, its 7B copy holding *copy_files* (or absent when ``None``)."""
-    copy = seedvr2_copy_dir("seedvr2-7b", tmp_path / "models")
+    copy = seedvr2_weights_dir("seedvr2-7b", tmp_path / "models", MLX_WEIGHTS)
     if copy_files is not None:
         for name, content in copy_files.items():
             (copy / name).parent.mkdir(parents=True, exist_ok=True)
@@ -1364,7 +1365,7 @@ def _models_route_with_seedvr2(monkeypatch, tmp_path, *, copy_files: dict[str, b
     web_config = _make_web_config()
     web_config.data_dir = str(tmp_path)
     web_config.models_dir = str(tmp_path / "models")
-    web_config.seedvr2 = SeedVR2Setup(settings=settings, tier=_SEEDVR2_7B, budget_bytes=None, downloaded=copy_files is not None)
+    web_config.seedvr2 = SeedVR2Setup(settings=settings, tier=_SEEDVR2_7B, budget_bytes=None, downloaded=copy_files is not None, weights=MLX_WEIGHTS)
     monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
     monkeypatch.setattr(workspace_api_module, "list_loras", lambda _data_dir: [])
     return web_config
@@ -1392,6 +1393,21 @@ def test_models_route_lists_the_downloaded_seedvr2_tier_with_its_disk_use(monkey
     ]
 
 
+def test_models_route_lists_the_fp8_tier_with_its_folder_disk_use(monkeypatch, tmp_path):
+    web_config = _models_route_with_seedvr2(monkeypatch, tmp_path, copy_files=None)
+    folder = seedvr2_weights_dir("seedvr2-7b", tmp_path / "models", FP8_WEIGHTS)
+    folder.mkdir(parents=True)
+    (folder / "ema_vae_fp16.safetensors").write_bytes(b"x" * 1_500_000_000)
+    web_config.seedvr2 = replace(web_config.seedvr2, downloaded=True, weights=FP8_WEIGHTS)
+
+    with TestClient(web_server.app) as client:
+        (row,) = client.get("/api/models").json()["image_models"]
+
+    assert row["name"] == "seedvr2-7b@fp8"
+    assert row["delete"] == {"kind": "installed", "repo_id": None, "linked_by": [], "stored_quants": []}
+    assert (row["disk_size_label"], row["download_size_label"]) == ("1.5 GB", "9.0 GB")
+
+
 def test_models_route_lists_the_seedvr2_tier_as_not_downloaded_without_a_copy(monkeypatch, tmp_path):
     _models_route_with_seedvr2(monkeypatch, tmp_path, copy_files=None)
 
@@ -1407,7 +1423,7 @@ def test_models_route_reads_not_downloaded_after_the_copy_is_deleted(monkeypatch
     from zvisiongenerator.utils.stored_quant import write_manifest
 
     models_dir = tmp_path / "models"
-    copy = seedvr2_copy_dir("seedvr2-7b", models_dir)
+    copy = seedvr2_weights_dir("seedvr2-7b", models_dir, MLX_WEIGHTS)
     (copy / "w.safetensors").parent.mkdir(parents=True)
     (copy / "w.safetensors").write_bytes(b"x" * 1000)
     write_manifest(copy, {"bits": 8, "backend_format": SEEDVR2_STORED_FORMAT, "model": "seedvr2-7b"})
@@ -1417,7 +1433,7 @@ def test_models_route_reads_not_downloaded_after_the_copy_is_deleted(monkeypatch
     settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(_SEEDVR2_7B,))
 
     def load() -> SimpleNamespace:
-        web_config.seedvr2 = SeedVR2Setup(settings=settings, tier=_SEEDVR2_7B, budget_bytes=None, downloaded=seedvr2_downloaded("seedvr2-7b", models_dir))
+        web_config.seedvr2 = SeedVR2Setup(settings=settings, tier=_SEEDVR2_7B, budget_bytes=None, downloaded=seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS), weights=MLX_WEIGHTS)
         return web_config
 
     monkeypatch.setattr(web_server, "load_web_config", load)

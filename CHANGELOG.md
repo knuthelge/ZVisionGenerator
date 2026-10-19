@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- **Plain image upscale on Windows and Linux.** The viewer's **2×** and **4×** upscale with SeedVR2 now works with an NVIDIA GPU too, and **X** then **2** or **4** runs it there. The model streams from system memory, so the 7B model is used with about 22 GB of system memory and the 3B model below that; on a 10 GB GPU a 2× takes about half a minute, and a 4× of a 1 MP image is marked **high memory** because it only fits when nothing else uses the GPU. The first use downloads 9.0 GB (7B) or 3.9 GB (3B) into the models folder
+
 ## [0.13.0b24] - 2026-10-18
 
 ### Added

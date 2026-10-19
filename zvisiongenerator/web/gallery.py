@@ -513,9 +513,9 @@ def _seedvr2_upscale_json(width: int, height: int, setup: SeedVR2Setup | None) -
     model = setup.tier.model
     return {
         "options": [asdict(option) for option in seedvr2_options(width, height, setup.tier, budget_bytes=setup.budget_bytes)],
-        "model": seedvr2_tier_label(model),
+        "model": seedvr2_tier_label(model, setup.weights),
         "downloaded": setup.downloaded,
-        "download_size_label": None if setup.downloaded else seedvr2_size_label(seedvr2_download_bytes(model)),
+        "download_size_label": None if setup.downloaded else seedvr2_size_label(seedvr2_download_bytes(model, setup.weights)),
     }
 
 

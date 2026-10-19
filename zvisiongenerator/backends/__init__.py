@@ -148,15 +148,23 @@ def _create_mflux_seedvr2_upscaler() -> "SeedVR2Upscaler":
     return MfluxSeedVR2Upscaler()
 
 
+def _create_torch_seedvr2_upscaler() -> "SeedVR2Upscaler":
+    from zvisiongenerator.backends.cuda.seedvr2 import TorchSeedVR2Upscaler
+
+    return TorchSeedVR2Upscaler()
+
+
 _SEEDVR2_UPSCALERS_MAP: dict[str, Callable[[], "SeedVR2Upscaler"]] = {
     "darwin": _create_mflux_seedvr2_upscaler,
+    "win32": _create_torch_seedvr2_upscaler,
+    "linux": _create_torch_seedvr2_upscaler,
 }
 
 _SEEDVR2_UPSCALERS: dict[str, "SeedVR2Upscaler"] = {}
 
 
 def supports_seedvr2() -> bool:
-    """Return whether this platform has a SeedVR2 upscaler (macOS only)."""
+    """Return whether this platform has a SeedVR2 upscaler (mflux on macOS, the vendored PyTorch core on Windows and Linux)."""
     return sys.platform in _SEEDVR2_UPSCALERS_MAP
 
 

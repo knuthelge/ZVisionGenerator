@@ -59,14 +59,18 @@ upscale:
   existing_large_megapixels: 2
   max_megapixels: 20               # Largest output
 
-seedvr2:                       # Plain upscale on macOS (Web UI viewer)
+seedvr2:                       # Plain upscale (Web UI viewer)
   model: auto                  # auto, seedvr2-3b or seedvr2-7b
   softness: 0.75               # 0-1: pre-blur before upscaling; 0 = off
-  reference_megapixels: 16     # Output size the automatic tier must fit (a typical 4x)
-  tiers:                       # 8-bit, quality order; the first within this Mac's memory budget at reference_megapixels is used.
+  reference_megapixels: 16     # Output size the automatic tier must fit on a Mac (a typical 4x)
+  tiers:                       # macOS, 8-bit, quality order; the first within this Mac's memory budget at reference_megapixels is used.
     # Estimate = weights_gb + max(activation_floor_gb, activation_base_gb + activation_gb_per_mp * MP)
     - {model: seedvr2-7b, weights_gb: 9.26, activation_floor_gb: 10.79, activation_base_gb: 1.88, activation_gb_per_mp: 0.83}
     - {model: seedvr2-3b, weights_gb: 4.72, activation_floor_gb: 10.79, activation_base_gb: 1.10, activation_gb_per_mp: 0.89}
+  discrete_tiers:              # Windows/Linux, FP8 streamed from system memory, quality order; the first whose system_gb fits this machine is used.
+    # GPU estimate as above (weights_gb = CUDA context, the parts kept on the GPU and ~0.7 GB other apps use); system_gb = peak system memory plus 3 GB for everything else
+    - {model: seedvr2-7b, weights_gb: 1.6, activation_floor_gb: 5.0, activation_base_gb: 0.21, activation_gb_per_mp: 0.556, system_gb: 22}
+    - {model: seedvr2-3b, weights_gb: 1.6, activation_floor_gb: 5.0, activation_base_gb: 0.25, activation_gb_per_mp: 0.6, system_gb: 12.5}
 
 contrast:
   default_amount: 1.0

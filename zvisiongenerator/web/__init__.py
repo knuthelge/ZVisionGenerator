@@ -277,13 +277,17 @@ def _detach_options() -> dict[str, object]:
 
 
 def _spawn_background_server(host: str, port: int, launch_id: str) -> subprocess.Popen[bytes]:
-    """Start a detached Web UI server process tagged with *launch_id*."""
+    """Start a detached Web UI server process tagged with *launch_id*.
+
+    Its output goes nowhere, and Python would encode it with the locale's code page (cp1252 on Windows), where a
+    library's non-ASCII print, such as the SeedVR2 core's status line, raises. UTF-8 output can encode anything.
+    """
     return subprocess.Popen(
         [sys.executable, "-c", _BACKGROUND_SERVER_CODE, "--host", host, "--port", str(port), "--no-browser"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        env={**os.environ, _LAUNCH_ID_ENV: launch_id},
+        env={**os.environ, _LAUNCH_ID_ENV: launch_id, "PYTHONIOENCODING": "utf-8"},
         **_detach_options(),
     )
 

@@ -19,6 +19,7 @@ from zvisiongenerator.utils.upscale import (
     default_upscale_denoise,
     existing_image_denoise,
     max_megapixels,
+    seedvr2_input_image,
     seedvr2_options,
     seedvr2_output_size,
     upscale_options,
@@ -61,6 +62,24 @@ _BUDGET_32GB_MAC = int(26.80e9)
 )
 def test_seedvr2_output_size_rounds_down_to_even_without_16_alignment(size, factor, expected):
     assert seedvr2_output_size(*size, factor) == expected
+
+
+@pytest.mark.parametrize("softness", [0.0, 0.75, 1.0])
+def test_seedvr2_input_image_is_rgb_at_the_target_size(softness):
+    image = seedvr2_input_image(Image.new("RGBA", (50, 30), (200, 10, 10, 128)), 200, 120, softness)
+
+    assert (image.mode, image.size) == ("RGB", (200, 120))
+
+
+def test_seedvr2_input_image_softness_blurs_detail():
+    checker = Image.new("L", (64, 64))
+    checker.putdata([255 if (x // 2 + y // 2) % 2 else 0 for y in range(64) for x in range(64)])
+
+    def spread(softness: float) -> int:
+        lo, hi = seedvr2_input_image(checker, 128, 128, softness).convert("L").getextrema()
+        return hi - lo
+
+    assert spread(0.75) < spread(0.0)
 
 
 def test_seedvr2_options_never_disable_a_factor():

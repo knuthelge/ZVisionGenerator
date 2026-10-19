@@ -74,7 +74,7 @@ zvisiongenerator/
 ├── image_runner.py                Image generation run orchestration
 ├── upscale_runner.py              Upscale one existing image: read its recorded settings, run the upscale workflow
 ├── review.py                      Shared wait for a review decision
-├── seedvr2_loader.py              SeedVR2 loading through its stored 8-bit copy (download, quantize, save, delete the download)
+├── seedvr2_loader.py              SeedVR2 loading from its weights folder: a stored 8-bit copy (macOS) or the downloaded FP8 files
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/                      Backend selection (__init__.py, the only place that picks a platform)
@@ -86,6 +86,7 @@ zvisiongenerator/
 │   │   ├── memory.py              CUDA memory release after a job, and GPU and system memory sizes
 │   │   ├── prompt_enhancer.py     Prompt-enhancer LLM (transformers)
 │   │   ├── quant.py               NF4 (q4) and FP8 (q8) weights, at load and as stored quants
+│   │   ├── seedvr2.py             SeedVR2 upscaler (vendored PyTorch core, FP8 streamed from system memory)
 │   │   ├── image/
 │   │   │   ├── backend.py         Image backend
 │   │   │   ├── lokr.py            LyCORIS LoKr adapters (applied like mflux)
@@ -155,7 +156,7 @@ zvisiongenerator/
 │   ├── prompts.py                 Prompt file loading
 │   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
 │   ├── safetensors_stream.py      Read and write safetensors one tensor at a time, keeping them out of the page cache
-│   ├── seedvr2.py                 SeedVR2 settings, memory estimate and per-Mac tier choice
+│   ├── seedvr2.py                 SeedVR2 weight layouts, settings, memory estimate and tier choice
 │   ├── stored_quant.py            Stored-quant naming, manifests and folder handling
 │   ├── upscale.py                 Upscale output sizes, size limits, SeedVR2 options and denoise defaults
 │   ├── video_extend.py            Extend: source checks and problem codes, loading the source, frame and audio-sample arithmetic of the window
@@ -200,7 +201,7 @@ prompts.yaml                       Default prompt definitions
 
 Platform backends live in `backends/mac/image.py` (mflux/MLX), `backends/cuda/image/backend.py` (Windows/Linux diffusers image), `backends/mac/video.py` (MLX video), and `backends/cuda/video/backend.py` (Windows/Linux diffusers video). Image backends implement the `ImageBackend` Protocol from `core/image_backend.py`; video backends implement the `VideoBackend` Protocol from `core/video_backend.py`. The prompt-enhancer LLM follows the same split: `backends/mac/prompt_enhancer.py` (mlx-lm) and `backends/cuda/prompt_enhancer.py` (transformers) implement the `PromptEnhancer` Protocol from `core/prompt_enhancer.py`. Backend and accelerator selection stays centralized in `backends/__init__.py` — never branch on `sys.platform` elsewhere to pick a backend. OS-level checks unrelated to backends (drive listings, ffmpeg install hints, terminal handling) are fine where they are needed.
 
-SeedVR2, the plain upscale of existing images, is macOS-only and has its own small Protocol, `SeedVR2Upscaler` in `core/seedvr2.py`, implemented by `backends/mac/seedvr2.py` (mflux). `supports_seedvr2()` and `get_seedvr2_upscaler()` in `backends/__init__.py` expose it, so other code asks for the capability instead of checking the platform. `seedvr2_loader.py` loads it through a stored 8-bit copy in the same way `image_model_loader.py` does for image models, and `tests/test_mflux_seedvr2_contract.py` records the mflux surface it relies on; re-run it on every mflux bump.
+SeedVR2, the plain upscale of existing images, has its own small Protocol, `SeedVR2Upscaler` in `core/seedvr2.py`, implemented by `backends/mac/seedvr2.py` (mflux) and `backends/cuda/seedvr2.py` (the vendored PyTorch core, see [Vendored SeedVR2](#vendored-seedvr2)). `supports_seedvr2()` and `get_seedvr2_upscaler()` in `backends/__init__.py` expose it, so other code asks for the capability instead of checking the platform. Each engine's `weights` (`utils/seedvr2.SeedVR2Weights`) say which Hub files it reads (repo and file each), its precision label, which `seedvr2` config tier list prices it (`tiers` or `discrete_tiers`) and whether it keeps a stored copy. `seedvr2_loader.py` follows that, with one hidden weights folder per tier (`<models>/.seedvr2/<model>@<precision>`): on macOS it loads through a stored 8-bit copy in the same way `image_model_loader.py` does for image models; on CUDA the engine downloads the FP8 transformer and the VAE into the folder, because the vendored core reads both from one folder. The CUDA 7B tier uses the FP8 file whose last block is FP16 (`AInVFX/SeedVR2_comfyUI`), since the plain FP8 file draws streaks in flat areas. `tests/test_mflux_seedvr2_contract.py` records the mflux surface the macOS engine relies on; re-run it on every mflux bump.
 
 Backends are grouped by platform: `backends/cuda/` (Windows and Linux) and `backends/mac/`. A task with helpers of its own gets a folder (`cuda/image/`, `cuda/video/`); what two tasks share stays one level up. The platform folders never import from each other. Platform selection still happens only in `backends/__init__.py`.
 

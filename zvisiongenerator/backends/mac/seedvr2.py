@@ -8,6 +8,7 @@ from typing import Any
 from PIL import Image
 
 from zvisiongenerator.backends.mac import memory as memory_mac
+from zvisiongenerator.utils.seedvr2 import MLX_WEIGHTS
 
 # SeedVR2 model name → the ``ModelConfig`` factory that describes its layout. mflux does not infer the
 # variant from the weights, so the config is always passed explicitly.
@@ -24,6 +25,8 @@ def _use_bfloat16_precision() -> None:
 
 class MfluxSeedVR2Upscaler:
     """mflux/MLX upscaler for macOS — implements the SeedVR2Upscaler Protocol."""
+
+    weights = MLX_WEIGHTS
 
     def load_model(self, model: str, *, quantize: int | None, model_path: str) -> Any:
         """Load the SeedVR2 variant *model* from *model_path* and keep its weights resident.

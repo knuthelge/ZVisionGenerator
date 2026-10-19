@@ -14,7 +14,6 @@ from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
 from zvisiongenerator.utils.config import enhancer_tier_models, ltx_companion_repos, resolve_defaults, resolve_enhancer_model, resolve_video_defaults, smart_enhancer_model, smart_unavailable
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
-from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
 from zvisiongenerator.utils.hf_cache import CachedRepo, cached_model_repos, repo_disk_bytes, stranded_shared_files
 from zvisiongenerator.utils.model_files import (
     directory_bytes,
@@ -27,7 +26,7 @@ from zvisiongenerator.utils.model_files import (
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import matrix_contract, resolve_enhance_ceiling
 from zvisiongenerator.utils.stored_quant import stored_quant_dirs_for
-from zvisiongenerator.utils.seedvr2 import SEEDVR2_REPO, SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label
+from zvisiongenerator.utils.seedvr2 import SEEDVR2_REPO, SeedVR2Setup, seedvr2_download_bytes, seedvr2_row_name, seedvr2_size_label
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
@@ -263,28 +262,27 @@ def build_models_response(
 
 
 def _seedvr2_model_rows(setup: SeedVR2Setup | None, models_dir: Path) -> list[dict[str, Any]]:
-    """Return the Models-page row for the SeedVR2 tier this Mac uses, or no rows where SeedVR2 is off.
+    """Return the Models-page row for the SeedVR2 tier this machine uses, or no rows where SeedVR2 is off.
 
-    The row has the shape of an image model's, plus the stored copy's disk use and the size of the first-use
+    The row has the shape of an image model's, plus its weights folder's disk use and the size of the first-use
     download, which the page shows in the not-downloaded tooltip and the delete confirmation.
     """
     if setup is None:
         return []
     model = setup.tier.model
-    copy = seedvr2_copy_dir(model, models_dir)
-    can_delete = seedvr2_delete_target(model, models_dir) is not None
+    target = seedvr2_delete_target(model, models_dir, setup.weights)
     return [
         {
-            "name": copy.name,
+            "name": seedvr2_row_name(model, setup.weights),
             "family": "seedvr2",
             "size_label": model.removeprefix("seedvr2-"),
             "source": "seedvr2",
             "stored_quant": None,
             "downloaded": setup.downloaded,
             "memory_fit": None,
-            "delete": {"kind": "installed", "repo_id": None, "linked_by": [], "stored_quants": []} if can_delete else None,
-            "disk_size_label": seedvr2_size_label(directory_bytes(copy)) if can_delete else None,
-            "download_size_label": seedvr2_size_label(seedvr2_download_bytes(model)),
+            "delete": {"kind": target.kind, "repo_id": target.repo_id, "linked_by": [], "stored_quants": []} if target is not None else None,
+            "disk_size_label": seedvr2_size_label(directory_bytes(target.path)) if target is not None else None,
+            "download_size_label": seedvr2_size_label(seedvr2_download_bytes(model, setup.weights)),
         }
     ]
 
@@ -325,12 +323,13 @@ def _enhancer_model_rows(
 def find_other_downloads(web_config: WebUiConfig, *, cache_dir: Path | None = None) -> tuple[CachedRepo, ...]:
     """Return the model repos in the HuggingFace cache that nothing on the Models page uses.
 
-    Used means an alias or enhancer tier loads it (with LTX companions, the MLX LTX text encoder and the SeedVR2
-    repo when SeedVR2 is on), or an installed model links into it.
+    Used means an alias or enhancer tier loads it (with LTX companions, the MLX LTX text encoder and, where the
+    SeedVR2 engine downloads through the cache to make its stored copy, the SeedVR2 repo), or an installed model
+    links into it.
     """
     cache_dir = cache_dir or huggingface_cache_dir()
     # The MLX LTX text encoder counts as used everywhere; only the macOS backend downloads it.
-    extra = [ltx_mlx_text_encoder_repo(), *([SEEDVR2_REPO] if web_config.seedvr2 is not None else [])]
+    extra = [ltx_mlx_text_encoder_repo(), *([SEEDVR2_REPO] if web_config.seedvr2 is not None and web_config.seedvr2.weights.stores_copy else [])]
     used = used_repo_ids((*web_config.image_inventory, *web_config.video_inventory), web_config.app_config, platform_key=sys.platform, extra=extra)
     linked = cache_repos_linked_from(Path(web_config.models_dir), cache_dir)
     return tuple(repo for repo in cached_model_repos(cache_dir) if repo.repo_id.casefold() not in used and repo.path.name not in linked)

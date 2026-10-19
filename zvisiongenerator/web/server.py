@@ -75,7 +75,7 @@ from zvisiongenerator.utils.prompt_enhance_video import EnhancePairResult, enhan
 from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
 from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
-from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_tier_label
+from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_row_name, seedvr2_tier_label
 from zvisiongenerator.upscale_runner import read_upscale_source
 from zvisiongenerator.utils.video_extend import apply_extend_args
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
@@ -748,7 +748,7 @@ def _upscale_from_body(body: Any) -> JSONResponse:
     setup = web_config.seedvr2
     use_seedvr2 = method == UPSCALE_METHOD_SEEDVR2
     if use_seedvr2 and setup is None:
-        raise HTTPException(status_code=422, detail="SeedVR2 upscaling is only available on macOS.")
+        raise HTTPException(status_code=422, detail="SeedVR2 upscaling is not available on this machine.")
     try:
         source = read_upscale_source(source_path)
         if use_seedvr2:
@@ -765,7 +765,7 @@ def _upscale_from_body(body: Any) -> JSONResponse:
         "workflow": "upscale",
         "job_type": "Upscale",
         "prompt": plan.request.resolved_prompt or plan.request.prompt,
-        "model": seedvr2_tier_label(setup.tier.model) if use_seedvr2 else plan.request.model_name or "",
+        "model": seedvr2_tier_label(setup.tier.model, setup.weights) if use_seedvr2 else plan.request.model_name or "",
         "runs": 1,
         "meta": upscale_size_label(plan),
         "notices": list(plan.notices),
@@ -1826,9 +1826,10 @@ async def api_models_import_lora_hf(request: Request) -> dict[str, Any]:
 
 
 def _seedvr2_copy_target(name: str, setup: SeedVR2Setup, models_dir: Path) -> DeleteTarget | None:
-    """Return the delete target when *name* is the Models-page row of the SeedVR2 tier in use and its copy exists."""
-    target = seedvr2_delete_target(setup.tier.model, models_dir)
-    return target if target is not None and target.path.name == name else None
+    """Return the delete target when *name* is the Models-page row of the SeedVR2 tier in use and its weights are on disk."""
+    if name != seedvr2_row_name(setup.tier.model, setup.weights):
+        return None
+    return seedvr2_delete_target(setup.tier.model, models_dir, setup.weights)
 
 
 @app.delete("/api/models/{name}")

@@ -154,6 +154,7 @@ class TestBackgroundLauncher:
         options = popen.call_args.kwargs
         assert options["stdin"] == options["stdout"] == options["stderr"] == subprocess.DEVNULL
         assert options["env"][web._LAUNCH_ID_ENV]
+        assert options["env"]["PYTHONIOENCODING"] == "utf-8"
         if sys.platform != "win32":
             assert options["start_new_session"] is True
         open_browser.assert_called_once_with("http://0.0.0.0:8081", "0.0.0.0", 8081)

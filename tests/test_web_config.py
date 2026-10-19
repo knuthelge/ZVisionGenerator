@@ -11,6 +11,7 @@ from zvisiongenerator.web import config_contract as config_contract_module
 from zvisiongenerator.web import config as web_config_module
 from zvisiongenerator.web import model_inventory as model_inventory_module
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS
 
 
 def _make_app_config() -> dict[str, object]:
@@ -598,8 +599,16 @@ def test_load_web_config_has_no_seedvr2_where_it_is_unsupported(monkeypatch, tmp
     assert web_config_module.load_web_config().seedvr2 is None
 
 
-@pytest.mark.parametrize(("budget", "expected_bytes"), [(SimpleNamespace(gpu_bytes=26_800_000_000), 26_800_000_000), (None, None)])
-def test_load_web_config_builds_seedvr2_setup_from_the_memory_budget(monkeypatch, tmp_path, budget, expected_bytes):
+@pytest.mark.parametrize(
+    ("budget", "expected_gpu", "expected_system"),
+    [
+        (SimpleNamespace(gpu_bytes=26_800_000_000, system_bytes=None), 26_800_000_000, None),
+        (SimpleNamespace(gpu_bytes=10_700_000_000, system_bytes=33_400_000_000), 10_700_000_000, 33_400_000_000),
+        (None, None, None),
+    ],
+)
+@pytest.mark.parametrize("weights", [MLX_WEIGHTS, FP8_WEIGHTS])
+def test_load_web_config_builds_seedvr2_setup_from_the_memory_budget_and_engine(monkeypatch, tmp_path, budget, expected_gpu, expected_system, weights):
     _patch_minimal_web_config(monkeypatch, tmp_path)
     setup = object()
     calls: list[dict] = []
@@ -609,13 +618,15 @@ def test_load_web_config_builds_seedvr2_setup_from_the_memory_budget(monkeypatch
         return setup
 
     monkeypatch.setattr(web_config_module, "supports_seedvr2", lambda: True)
+    monkeypatch.setattr(web_config_module, "get_seedvr2_upscaler", lambda: SimpleNamespace(weights=weights))
     monkeypatch.setattr(web_config_module, "memory_budget", lambda: budget)
     monkeypatch.setattr(web_config_module, "build_seedvr2_setup", _build)
 
     web_config = web_config_module.load_web_config()
 
     assert web_config.seedvr2 is setup
-    assert calls[0]["budget_bytes"] == expected_bytes
+    assert calls[0]["weights"] is weights
+    assert (calls[0]["budget_bytes"], calls[0]["system_bytes"]) == (expected_gpu, expected_system)
     assert calls[0]["models_dir"] == tmp_path / ".ziv" / "models"
 
 
@@ -635,7 +646,8 @@ def test_gallery_api_reports_a_seedvr2_copy_stored_after_the_server_started(monk
     _patch_minimal_web_config(monkeypatch, tmp_path)
     monkeypatch.setattr(web_config_module, "load_config", _seedvr2_app_config)
     monkeypatch.setattr(web_config_module, "supports_seedvr2", lambda: True)
-    monkeypatch.setattr(web_config_module, "memory_budget", lambda: SimpleNamespace(gpu_bytes=26_800_000_000))
+    monkeypatch.setattr(web_config_module, "get_seedvr2_upscaler", lambda: SimpleNamespace(weights=MLX_WEIGHTS))
+    monkeypatch.setattr(web_config_module, "memory_budget", lambda: SimpleNamespace(gpu_bytes=26_800_000_000, system_bytes=None))
     outputs = Path(web_config_module.load_web_config().output_dir)
     Image.new("RGB", (64, 64)).save(outputs / "a.png")
 

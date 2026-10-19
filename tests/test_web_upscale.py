@@ -14,7 +14,7 @@ from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.upscale_runner import UpscaleSource
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.provenance import RecordedSettings, embed_png_config
-from zvisiongenerator.utils.seedvr2 import SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
+from zvisiongenerator.utils.seedvr2 import MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.utils.upscale import SEEDVR2_MEMORY_WARNING
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import upscale_api
@@ -269,7 +269,7 @@ _SEEDVR2_TIER = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=1
 
 def _seedvr2_setup(*, budget_bytes=None, tier=_SEEDVR2_TIER):
     settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(tier,))
-    return SeedVR2Setup(settings=settings, tier=tier, budget_bytes=budget_bytes, downloaded=False)
+    return SeedVR2Setup(settings=settings, tier=tier, budget_bytes=budget_bytes, downloaded=False, weights=MLX_WEIGHTS)
 
 
 def _forbid_image_model_detection(monkeypatch):

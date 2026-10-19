@@ -13,7 +13,7 @@ from PIL import Image
 from diffusers import AutoPipelineForText2Image
 
 from zvisiongenerator.backends.cuda.block_streaming import group_offload
-from zvisiongenerator.backends.cuda.driver import cuda_driver_hint
+from zvisiongenerator.backends.cuda.driver import require_cuda
 from zvisiongenerator.backends.cuda.image.ideogram4 import generate as generate_ideogram4
 from zvisiongenerator.backends.cuda.image.ideogram4 import load_pipeline as load_ideogram4_pipeline
 from zvisiongenerator.backends.cuda.image.ideogram4 import save_quantized as save_ideogram4_quantized
@@ -350,10 +350,7 @@ class DiffusersBackend:
         lora_paths: list[str] | None = None,
         lora_weights: list[float] | None = None,
     ) -> tuple[Any, "ImageModelInfo"]:
-        if not torch.cuda.is_available():
-            message = "CUDA is not available. The diffusers/CUDA image backend requires an NVIDIA GPU with CUDA support on Windows and Linux."
-            hint = cuda_driver_hint(False, getattr(torch.version, "cuda", None))
-            raise RuntimeError(f"{message} {hint}" if hint else message)
+        require_cuda(torch, "The diffusers/CUDA image backend on Windows and Linux")
         dtype_map = {
             "bfloat16": torch.bfloat16,
             "float16": torch.float16,

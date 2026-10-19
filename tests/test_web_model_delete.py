@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
 from zvisiongenerator.utils.config import enhancer_tier_models
-from zvisiongenerator.utils.seedvr2 import SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
+from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.web import server as web_server
-from zvisiongenerator.seedvr2_loader import seedvr2_copy_dir
+from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
 from zvisiongenerator.web.model_delete import delete_lora, delete_model, delete_scope, enhancer_delete_target, installed_models_linking_to, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 
@@ -234,26 +234,84 @@ def test_models_payload_describes_what_each_delete_removes(layout):
 
 class TestSeedvr2DeleteTarget:
     def test_a_stored_copy_is_the_target(self, layout):
-        copy = seedvr2_copy_dir("seedvr2-7b", layout.models_dir)
+        copy = seedvr2_weights_dir("seedvr2-7b", layout.models_dir, MLX_WEIGHTS)
         _touch(copy / "transformer" / "weights.safetensors")
 
-        target = seedvr2_delete_target("seedvr2-7b", layout.models_dir)
+        target = seedvr2_delete_target("seedvr2-7b", layout.models_dir, MLX_WEIGHTS)
 
         assert target is not None
         assert (target.kind, target.path, target.stored_quants) == ("installed", copy, ())
 
     def test_no_copy_means_no_target(self, layout):
-        assert seedvr2_delete_target("seedvr2-7b", layout.models_dir) is None
+        assert seedvr2_delete_target("seedvr2-7b", layout.models_dir, MLX_WEIGHTS) is None
 
     def test_deleting_the_copy_leaves_the_huggingface_cache_and_other_models(self, layout):
-        copy = seedvr2_copy_dir("seedvr2-7b", layout.models_dir)
+        copy = seedvr2_weights_dir("seedvr2-7b", layout.models_dir, MLX_WEIGHTS)
         _touch(copy / "transformer" / "weights.safetensors")
 
-        delete_model(seedvr2_delete_target("seedvr2-7b", layout.models_dir))
+        delete_model(seedvr2_delete_target("seedvr2-7b", layout.models_dir, MLX_WEIGHTS))
 
         assert not copy.exists()
         assert (layout.models_dir / "custom").is_dir()
         assert layout.base_snapshot.is_dir()
+
+
+class TestSeedvr2Fp8DeleteTarget:
+    def test_the_downloaded_files_folder_is_the_target(self, layout):
+        folder = seedvr2_weights_dir("seedvr2-7b", layout.models_dir, FP8_WEIGHTS)
+        _touch(folder / "ema_vae_fp16.safetensors")
+
+        target = seedvr2_delete_target("seedvr2-7b", layout.models_dir, FP8_WEIGHTS)
+
+        assert target is not None
+        assert (target.kind, target.path) == ("installed", folder)
+
+    def test_a_macos_copy_is_not_the_target(self, layout):
+        _touch(seedvr2_weights_dir("seedvr2-7b", layout.models_dir, MLX_WEIGHTS) / "transformer" / "weights.safetensors")
+
+        assert seedvr2_delete_target("seedvr2-7b", layout.models_dir, FP8_WEIGHTS) is None
+
+    def test_deleting_it_leaves_the_huggingface_cache(self, layout):
+        folder = seedvr2_weights_dir("seedvr2-7b", layout.models_dir, FP8_WEIGHTS)
+        _touch(folder / "ema_vae_fp16.safetensors")
+        cached = layout.hub / "models--numz--SeedVR2_comfyUI" / "snapshots" / "rev" / "ema_vae_fp16.safetensors"
+        _touch(cached)
+
+        delete_model(seedvr2_delete_target("seedvr2-7b", layout.models_dir, FP8_WEIGHTS))
+
+        assert not folder.exists()
+        assert cached.is_file()
+
+
+class TestSeedvr2Fp8DeleteRoute:
+    @pytest.fixture
+    def client(self, layout, monkeypatch):
+        tier = SeedVR2Tier("seedvr2-7b", weights_gb=0.9, activation_floor_gb=5.0, activation_base_gb=0.21, activation_gb_per_mp=0.556, system_gb=22)
+        settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(tier,))
+        self.folder = seedvr2_weights_dir("seedvr2-7b", layout.models_dir, FP8_WEIGHTS)
+        _touch(self.folder / "ema_vae_fp16.safetensors")
+        web_config = SimpleNamespace(
+            data_dir=str(layout.data_dir),
+            models_dir=str(layout.models_dir),
+            image_inventory=(),
+            video_inventory=(),
+            seedvr2=SeedVR2Setup(settings=settings, tier=tier, budget_bytes=None, downloaded=True, weights=FP8_WEIGHTS),
+        )
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
+        with TestClient(web_server.app) as client:
+            yield client
+
+    def test_the_row_name_deletes_the_weights_folder(self, client, layout):
+        response = client.delete("/api/models/seedvr2-7b@fp8")
+
+        assert response.status_code == 200
+        assert not self.folder.exists()
+        assert layout.base_snapshot.is_dir()
+
+    def test_the_macos_row_name_is_404(self, client):
+        assert client.delete("/api/models/seedvr2-7b@q8").status_code == 404
+        assert self.folder.exists()
 
 
 class TestSeedvr2DeleteRoute:
@@ -261,14 +319,14 @@ class TestSeedvr2DeleteRoute:
     def client(self, layout, monkeypatch):
         tier = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=10.79, activation_base_gb=1.88, activation_gb_per_mp=0.83)
         settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(tier,))
-        self.copy = seedvr2_copy_dir("seedvr2-7b", layout.models_dir)
+        self.copy = seedvr2_weights_dir("seedvr2-7b", layout.models_dir, MLX_WEIGHTS)
         _touch(self.copy / "transformer" / "weights.safetensors")
         self.web_config = SimpleNamespace(
             data_dir=str(layout.data_dir),
             models_dir=str(layout.models_dir),
             image_inventory=(_image_entry("custom", "installed", str(layout.models_dir / "custom")),),
             video_inventory=(),
-            seedvr2=SeedVR2Setup(settings=settings, tier=tier, budget_bytes=None, downloaded=True),
+            seedvr2=SeedVR2Setup(settings=settings, tier=tier, budget_bytes=None, downloaded=True, weights=MLX_WEIGHTS),
         )
         monkeypatch.setattr(web_server, "load_web_config", lambda: self.web_config)
         monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)

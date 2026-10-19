@@ -19,7 +19,7 @@ from mflux.models.seedvr2 import SeedVR2  # noqa: E402
 from mflux.models.seedvr2.weights.seedvr2_weight_definition import SeedVR2WeightDefinition7B, SeedVR2WeightDefinition3B  # noqa: E402
 from mflux.utils.generated_image import GeneratedImage  # noqa: E402
 
-from zvisiongenerator.utils.seedvr2 import SEEDVR2_MODEL_FILES  # noqa: E402
+from zvisiongenerator.utils.seedvr2 import MLX_WEIGHTS, SEEDVR2_REPO  # noqa: E402
 
 _DEFINITIONS = {"seedvr2-3b": SeedVR2WeightDefinition3B, "seedvr2-7b": SeedVR2WeightDefinition7B}
 
@@ -56,11 +56,12 @@ class TestSeedVR2Contract:
 class TestWeightLayoutContract:
     @pytest.mark.parametrize("model", sorted(_DEFINITIONS))
     def test_definition_reads_the_files_the_loader_deletes(self, model):
-        transformer, vae = SEEDVR2_MODEL_FILES[model]
+        (transformer_repo, transformer), (vae_repo, vae) = MLX_WEIGHTS.files[model]
         definition = _DEFINITIONS[model]
 
         assert _weight_files(definition, "transformer") == [transformer]
         assert _weight_files(definition, "vae") == [vae]
+        assert transformer_repo == vae_repo == SEEDVR2_REPO  # the repo mflux downloads from
 
     @pytest.mark.parametrize("model", sorted(_DEFINITIONS))
     def test_saved_copy_carries_its_own_vae(self, model):
