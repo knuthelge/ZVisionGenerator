@@ -241,7 +241,7 @@ Starts only if the spike's CUDA path passed. Until then, `supports_video_end_ima
   - The keyframe lands one frame after the last kept frame, about 40 ms at 24 fps (see [Evidence](#windows-and-linux-diffusers-0410)).
   - Trim the stage 1 frames *before* `_upscale_video`. The latent upsampler takes the frame count from the frames it's given, so trimming first avoids upscaling frames that get thrown away. It doesn't touch the upsampler's height/width meaning (platform parity step 3).
   - Duration and the recorded `frame_count` stay right: export uses `default_fps` on the trimmed frames, and provenance records `request.num_frames`.
-  - CUDA video has no audio yet ([platform parity](platform-parity.md) item 2). When that lands, its export must trim the audio to the same length.
+  - CUDA video has no audio yet ([platform parity](archive/platform-parity.md) item 2). When that lands, its export must trim the audio to the same length.
   - Put the trimming in a small pure helper, so it's tested without a pipeline.
   - **Cost:** +8 frames is +7% frames at 121, +16% at 49 and +89% at 9. Attention cost grows faster than the frame count, and peak VRAM rises too, so a job that just fits start-only can run out of memory with an end image. If platform parity's video memory badges (item 7) land, they must estimate an end-image job at `num_frames + 8`.
 - **Guard against silent kwarg drops.** After `_filter_supported_kwargs`, raise `RuntimeError` when the image input the call depends on (`image` for start-only, `conditions` for start+end) was filtered out.

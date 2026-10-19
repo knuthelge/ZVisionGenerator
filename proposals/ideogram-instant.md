@@ -83,7 +83,7 @@ Both fal repos are gated, and their example loads the text encoder, VAE, tokeniz
 - The other 136 are named differently. fal stores attention as `to_q`/`to_k`/`to_v`/`to_out.0` (diffusers 0.41 naming). Hippotes fuses them into `qkv` (q, k, v stacked by rows) and `o`, the naming of the base FP8 repo and of mflux. Sliced by rows, all 136 match fal's tensors.
 - fal's `transformer/config.json` is the base model's (`num_layers` 34, 18 heads × 256, `adaln_dim` 512, `llm_features_dim` 53248).
 
-So the Hippotes file is fal's Instant transformer, repackaged. The source is pinned to commit `9fcb42c…`, the same way the CUDA alias pins Unsloth's mirror ([platform-parity.md](platform-parity.md) step 13).
+So the Hippotes file is fal's Instant transformer, repackaged. The source is pinned to commit `9fcb42c…`, the same way the CUDA alias pins Unsloth's mirror ([platform-parity.md](archive/platform-parity.md) step 13).
 
 The shared components (text encoder, VAE, tokenizer, scheduler) are the base model's and keep coming from Unsloth's byte-checked mirrors: `unsloth/ideogram-4-nf4-diffusers@cb5b5dd…` on CUDA, `unsloth/ideogram-4-fp8@518e05e…` on macOS. That also removes the last gated default on macOS (see [first-run.md](first-run.md)).
 

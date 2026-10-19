@@ -31,7 +31,7 @@ LTX already has everything needed: its two-stage pipeline's second stage takes a
 
 ### Not in scope
 
-- **Windows and Linux.** diffusers has `LTX2LatentUpsamplePipeline`, but the CUDA video backend has no encode-and-refine path yet. Add it to [platform parity](platform-parity.md) when this ships, like extend.
+- **Windows and Linux.** diffusers has `LTX2LatentUpsamplePipeline`, but the CUDA video backend has no encode-and-refine path yet. Add it to [platform parity](archive/platform-parity.md) when this ships, like extend.
 - **Factors other than 2×.** The app only finds 2× spatial upsampler files (`ltx_mlx_upsampler_file`).
 - **Frame-rate upscaling.** The vendored `LatentUpsampler` has a `temporal_x2` variant; a separate feature if wanted.
 - **Videos from outside the output folder**, like the image upscale. Everything in the output folder was made by LTX, which is what the refine is trained on.

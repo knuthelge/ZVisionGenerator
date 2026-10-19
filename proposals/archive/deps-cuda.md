@@ -165,7 +165,7 @@ Peak VRAM above idle:
 Findings:
 
 - **The peft no-match branch wasn't reached on GPU.** The cross-family LoRAs available here fail earlier, in diffusers' LoRA converter (`original_state_dict should be empty ...`). That still aborts the job. It is pre-existing and listed under follow-ups. Unit tests cover the no-match skip.
-- **`--upscale` with Klein fails on CUDA** (`Flux2KleinPipeline.__call__() got an unexpected keyword argument 'strength'`). There is no img2img refine for Klein. This is a pre-existing gap; see [platform-parity.md](../platform-parity.md).
+- **`--upscale` with Klein fails on CUDA** (`Flux2KleinPipeline.__call__() got an unexpected keyword argument 'strength'`). There is no img2img refine for Klein. This is a pre-existing gap; see [platform-parity.md](platform-parity.md).
 
 Residual risks:
 

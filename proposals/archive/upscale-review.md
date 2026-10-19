@@ -1,6 +1,6 @@
 # Review before upscaling
 
-**Status:** Done (unreleased, 2026-10-12). Shipped in `a45e8e9` (feature) and `2741388` (docs): images on every platform, video on macOS through the `_stage1` wrapper in `video_mac`. The manual real-model checks on macOS (step 2) are done. Video review on CUDA moved to [platform parity](../platform-parity.md) step 3, since it builds on the two-stage upscale there; until then `supports_video_upscale_review()` is false on CUDA.
+**Status:** Done (unreleased, 2026-10-12). Shipped in `a45e8e9` (feature) and `2741388` (docs): images on every platform, video on macOS through the `_stage1` wrapper in `video_mac`. The manual real-model checks on macOS (step 2) are done. Video review on CUDA moved to [platform parity](platform-parity.md) step 3, since it builds on the two-stage upscale there; until then `supports_video_upscale_review()` is false on CUDA.
 
 ## Problem
 
@@ -123,7 +123,7 @@ The backends get one optional keyword argument, `review: Callable[[Path], None] 
 
 ### Windows and Linux
 
-Today's diffusers upscale isn't the two-stage flow ([platform parity](../platform-parity.md), step 3). Review on CUDA builds on that step. Until then:
+Today's diffusers upscale isn't the two-stage flow ([platform parity](platform-parity.md), step 3). Review on CUDA builds on that step. Until then:
 - `supports_video_upscale_review()` in `backends/__init__.py` (next to `supports_video_audio()`) returns false on CUDA;
 - the form hides the option and the server and CLI refuse it;
 - `video_diffusers` raises `ValueError` when it gets `review`, so a missed check can't be silently ignored.

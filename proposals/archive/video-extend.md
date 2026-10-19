@@ -1,6 +1,6 @@
 # Extend a video
 
-**Status:** Done (unreleased, 2026-10-12), on macOS. Windows and Linux moved to [platform parity](../platform-parity.md) step 11. The prompt design builds on [A scene for video prompts](video-scene.md).
+**Status:** Done (unreleased, 2026-10-12), on macOS. Windows and Linux moved to [platform parity](platform-parity.md) step 11. The prompt design builds on [A scene for video prompts](video-scene.md).
 
 ## Problem
 
@@ -58,7 +58,7 @@ An LTX prompt describes the whole clip in time order: scene, action, and quoted 
 
 ### Windows and Linux (phase 2)
 
-Moved to [platform parity](../platform-parity.md) step 11.
+Moved to [platform parity](platform-parity.md) step 11.
 
 ## Phases
 
@@ -105,4 +105,4 @@ Tests that run the real `ffmpeg` and `ffprobe` (tail reading, rotation, stream c
 - **Silent source:** stays silent.
 - **Prompt:** Scene is kept and Prompt is what happens next (see [Prompts](#prompts)).
 - **Seed:** normal seed rules; the source's seed is not reused.
-- **Platforms:** macOS first; Windows and Linux (video only) are [platform parity](../platform-parity.md) step 11, with Extend hidden by the capability until then.
+- **Platforms:** macOS first; Windows and Linux (video only) are [platform parity](platform-parity.md) step 11, with Extend hidden by the capability until then.
