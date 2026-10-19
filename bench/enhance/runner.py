@@ -127,12 +127,7 @@ def run_case(enhancer: RecordingEnhancer, case: Case, seed: int, *, config: dict
         except Exception as exc:  # noqa: BLE001 - a failed rewrite is a result to record, not a crash
             error = str(exc) or type(exc).__name__
     calls = list(enhancer.calls)
-    if error is None:
-        plan, measures = length_plan(case, ceiling=ceiling, length_cfg=options["length"])
-        checks = score_output(case, output=output, scene=scene, attempts=len(calls), format_ok=format_ok, plan=plan, measures=measures)
-        plan_record = None if plan is None else {"measures": measures, "target": plan.target, "lo": plan.lo, "hi": plan.hi, "clamped": plan.clamped}
-    else:
-        checks, plan_record = failed_checks(), None
+    checks, plan_record = _score(case, output=output, scene=scene, error=error, attempts=len(calls), format_ok=format_ok, ceiling=ceiling, options=options)
     first = calls[0]["messages"] if calls else []
     return {
         "case": case.id,
@@ -150,6 +145,41 @@ def run_case(enhancer: RecordingEnhancer, case: Case, seed: int, *, config: dict
         "checks": checks,
         "attempts": [{key: call[key] for key in ("seed", "raw", "seconds", "first_text_seconds", "words")} for call in calls],
     }
+
+
+def _score(
+    case: Case, *, output: str, scene: str, error: str | None, attempts: int, format_ok: bool | None, ceiling: int, options: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Return the checks of one result and the length plan they measured against (None for captions and failures)."""
+    if error is not None:
+        return failed_checks(), None
+    plan, measures = length_plan(case, ceiling=ceiling, length_cfg=options["length"])
+    checks = score_output(case, output=output, scene=scene, attempts=attempts, format_ok=format_ok, plan=plan, measures=measures)
+    plan_record = None if plan is None else {"measures": measures, "target": plan.target, "lo": plan.lo, "hi": plan.hi, "clamped": plan.clamped}
+    return checks, plan_record
+
+
+def rescore_record(record: dict[str, Any], case: Case, *, config: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
+    """Return *record* with its checks recomputed from its stored output and the current *case* expectations; no model runs.
+
+    A video's format (whether the pair parsed without fallback) cannot be told from the stored text, so it is kept.
+    """
+    format_ok = caption_format(record["output"]) if case.mode == "caption" else record["checks"].get("format")
+    ceiling = resolve_enhance_ceiling(config, family=case.family, mode=case.media)
+    checks, plan_record = _score(
+        case, output=record["output"], scene=record["scene"], error=record["error"], attempts=len(record["attempts"]), format_ok=format_ok, ceiling=ceiling, options=options
+    )
+    return {**record, "tags": list(case.tags), "checks": checks, "plan": plan_record}
+
+
+def rescore_run(run_dir: Path, cases: tuple[Case, ...], *, config: dict[str, Any], options: dict[str, Any]) -> int:
+    """Recompute the checks of every result in *run_dir* whose case still exists, rewrite ``results.jsonl``, and return how many."""
+    path = run_dir / RESULTS_FILE
+    by_id = {case.id: case for case in cases}
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    rescored = [rescore_record(record, by_id[record["case"]], config=config, options=options) if record["case"] in by_id else record for record in records]
+    path.write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in rescored), encoding="utf-8")
+    return sum(record["case"] in by_id for record in records)
 
 
 def git_state(cwd: Path | None = None) -> dict[str, Any]:

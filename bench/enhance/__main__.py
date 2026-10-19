@@ -24,6 +24,9 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--cases", default=None, help="Comma-separated case ids; run only these.")
     run.add_argument("--seeds", type=int, default=3, help="Seeds per case (default 3).")
     run.add_argument("--runs-dir", type=Path, default=RUNS_DIR, help=argparse.SUPPRESS)
+    rescore = commands.add_parser("rescore", help="Recompute the checks of stored runs from their outputs (after changing checks or expectations).")
+    rescore.add_argument("labels", nargs="+", help="Labels (or folders) of the runs to rescore.")
+    rescore.add_argument("--runs-dir", type=Path, default=RUNS_DIR, help=argparse.SUPPRESS)
     compare = commands.add_parser("compare", help="Write a Markdown report comparing two runs.")
     compare.add_argument("base", help="Label (or folder) of the baseline run.")
     compare.add_argument("new", help="Label (or folder) of the run to compare.")
@@ -74,6 +77,20 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_rescore(args: argparse.Namespace) -> int:
+    from zvisiongenerator.utils.config import load_config
+    from zvisiongenerator.utils.prompt_enhance import enhance_options
+
+    from bench.enhance.runner import rescore_run
+
+    config = load_config()
+    cases = load_cases()
+    for label in args.labels:
+        count = rescore_run(_run_dir(args.runs_dir, label), cases, config=config, options=enhance_options(config))
+        print(f"Rescored {count} results in {label}")
+    return 0
+
+
 def _cmd_compare(args: argparse.Namespace) -> int:
     base, new = load_run(_run_dir(args.runs_dir, args.base)), load_run(_run_dir(args.runs_dir, args.new))
     out = args.out or args.runs_dir / f"compare-{base.label}-{new.label}.md"
@@ -86,7 +103,8 @@ def _cmd_compare(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Run the bench command line."""
     args = _parser().parse_args(argv)
-    return _cmd_run(args) if args.command == "run" else _cmd_compare(args)
+    commands = {"run": _cmd_run, "rescore": _cmd_rescore, "compare": _cmd_compare}
+    return commands[args.command](args)
 
 
 if __name__ == "__main__":

@@ -115,6 +115,26 @@ def _checks_table(base: Run, new: Run) -> list[str]:
     return lines
 
 
+def _length_groups(records: tuple[dict[str, Any], ...]) -> dict[str, list[dict[str, Any]]]:
+    """Group the records that have a length plan by Length choice and what the plan measures, e.g. ``same / prompt``."""
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        if record["checks"].get("length_ratio") is not None:
+            groups[f"{record['input']['settings'].get('length', 'same')} / {record['plan']['measures']}"].append(record)
+    return groups
+
+
+def _length_table(base: Run, new: Run) -> list[str]:
+    base_groups, new_groups = _length_groups(base.records), _length_groups(new.records)
+    lines = ["", "## Length by choice", "", f"| Length / measures | n | {base.label} in range | {new.label} in range | {base.label} median ratio | {new.label} median ratio |", "|---|---|---|---|---|---|"]
+    for key in sorted(set(base_groups) | set(new_groups)):
+        b, n = base_groups.get(key, []), new_groups.get(key, [])
+        in_range = lambda group: _pct(statistics.fmean(bool(r["checks"]["length_in_range"]) for r in group)) if group else "–"  # noqa: E731
+        ratio = lambda group: f"{statistics.median(r['checks']['length_ratio'] for r in group):.2f}" if group else "–"  # noqa: E731
+        lines.append(f"| {key} | {len(b)}/{len(n)} | {in_range(b)} | {in_range(n)} | {ratio(b)} | {ratio(n)} |")
+    return lines
+
+
 def _tags_table(base: Run, new: Run) -> list[str]:
     base_tags, new_tags = _by_tag(base.records), _by_tag(new.records)
     lines = ["", "## Score per tag", "", f"| Tag | {base.label} | {new.label} | Δ points |", "|---|---|---|---|"]
@@ -165,5 +185,5 @@ def _changed_cases(base: Run, new: Run) -> list[str]:
 
 def compare_runs(base: Run, new: Run) -> str:
     """Return the Markdown report comparing *base* with *new*."""
-    lines = _header(base, new) + _checks_table(base, new) + _tags_table(base, new) + _speed_table(base, new) + _changed_cases(base, new)
+    lines = _header(base, new) + _checks_table(base, new) + _length_table(base, new) + _tags_table(base, new) + _speed_table(base, new) + _changed_cases(base, new)
     return "\n".join(lines) + "\n"

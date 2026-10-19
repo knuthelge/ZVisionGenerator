@@ -14,7 +14,7 @@ from bench.enhance.cases import Case
 
 # The checks every case reports, in report order; a value is True/False, a 0-1 share (keep), or None when it does not apply.
 CHECK_NAMES = ("usable", "first_try", "format", "length_in_range", "quotes_kept", "keep", "count", "forbid", "no_repeat")
-_CAPTION_OBJECTS = (3, 8)
+_CAPTION_OBJECTS = (1, 8)
 _NUMBER_WORDS = {
     "two": 2,
     "three": 3,
@@ -88,7 +88,11 @@ def _strings(value: Any) -> list[str]:
 
 
 def caption_format(output: str) -> bool:
-    """Return whether *output* is a caption with a description, a background and 3 to 8 object elements."""
+    """Return whether *output* is a caption with a description, a background and 1 to 8 object elements.
+
+    The element count is not a content check: a design's lettering lines become text elements, so a poster may have one
+    object. Missing subjects are what ``keep`` and ``count`` catch.
+    """
     try:
         data = json.loads(output)
     except (json.JSONDecodeError, TypeError):
@@ -114,24 +118,43 @@ def _normalize(text: str) -> str:
     return " ".join(_NON_WORD_RE.sub(" ", text.casefold()).split())
 
 
-def _phrase_found(phrase: str, text: str) -> bool:
-    """Return whether *phrase* occurs in *text* as whole words, case and punctuation ignored, its last word optionally plural."""
+def _phrase_found(phrase: str, text: str, *, stem: bool = False, gap: int = 0) -> bool:
+    """Return whether *phrase* occurs in *text* as whole words, case and punctuation ignored, its last word optionally plural.
+
+    Args:
+        stem: Let every word match as the start of a longer word ("river" finds "riverbank", "read" finds "reads").
+        gap: Allow up to this many extra words after the first word ("three cats" finds "three fluffy cats").
+    """
     words = _normalize(phrase).split()
     if not words:
         return False
-    pattern = r"\s+".join(re.escape(word) for word in words[:-1]) + (r"\s+" if len(words) > 1 else "") + re.escape(words[-1]) + r"(?:s|es)?"
+    tail = r"\w*" if stem else r"(?:s|es)?"
+    parts = [re.escape(word) + (r"\w*" if stem else "") for word in words[:-1]] + [re.escape(words[-1]) + tail]
+    joints = [rf"(?:\s+\w+){{0,{gap}}}\s+"] + [r"\s+"] * (len(parts) - 2) if len(parts) > 1 else []
+    pattern = parts[0] + "".join(joint + part for joint, part in zip(joints, parts[1:]))
     return re.search(rf"(?<!\w){pattern}(?!\w)", _normalize(text)) is not None
 
 
+def _kept(item: str, text: str) -> bool:
+    """Return whether any ``|``-separated alternative of a keep *item* is found, words matching as stems, up to two words apart."""
+    return any(_phrase_found(option, text, stem=True, gap=2) for option in item.split("|"))
+
+
 def keep_share(output: str, phrases: tuple[str, ...]) -> float | None:
-    """Return the share of *phrases* found in *output*, or None when there are none."""
+    """Return the share of *phrases* found in *output*, or None when there are none.
+
+    An item may list alternatives separated by ``|`` ("old man|elderly man"); words match as stems ("river" finds "riverbank").
+    """
     if not phrases:
         return None
-    return round(sum(_phrase_found(phrase, output) for phrase in phrases) / len(phrases), 3)
+    return round(sum(_kept(phrase, output) for phrase in phrases) / len(phrases), 3)
 
 
 def count_kept(output: str, phrase: str | None) -> bool | None:
-    """Return whether a counted *phrase* ("three cats") survives in *output*, as a number word or a digit; None without one."""
+    """Return whether a counted *phrase* ("three cats") survives in *output*, as a number word or a digit; None without one.
+
+    Up to two words may sit between the number and the noun ("three fluffy cats").
+    """
     if not phrase:
         return None
     first, _sep, rest = _normalize(phrase).partition(" ")
@@ -140,7 +163,7 @@ def count_kept(output: str, phrase: str | None) -> bool | None:
         variants.add(f"{_NUMBER_WORDS[first]} {rest}")
     elif first.isdigit() and int(first) in _DIGIT_WORDS:
         variants.add(f"{_DIGIT_WORDS[int(first)]} {rest}")
-    return any(_phrase_found(variant, output) for variant in variants)
+    return any(_phrase_found(variant, output, gap=2) for variant in variants)
 
 
 def forbid_clear(output: str, phrases: tuple[str, ...]) -> bool | None:

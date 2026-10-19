@@ -12,7 +12,7 @@ from bench.enhance import __main__ as bench_cli
 from bench.enhance.cases import case_seeds, load_cases, parse_case, select_cases
 from bench.enhance.checks import CHECK_NAMES, case_score, caption_format, count_kept, forbid_clear, keep_share, length_check, length_plan, quotes_kept
 from bench.enhance.report import check_rates, compare_runs, load_run
-from bench.enhance.runner import META_FILE, RESULTS_FILE, RecordingEnhancer, run_bench, run_case
+from bench.enhance.runner import META_FILE, RESULTS_FILE, RecordingEnhancer, rescore_run, run_bench, run_case
 from zvisiongenerator.utils.prompt_enhance import DEFAULT_LENGTH_CONFIG, LengthPlan
 
 _OPTIONS = {"temperature": 0.7, "max_new_tokens": 700, "idle_release_seconds": 0.0, "length": DEFAULT_LENGTH_CONFIG}
@@ -102,8 +102,15 @@ class TestChecks:
         assert keep_share("Two Foxes rest in deep snow.", ("fox", "snow", "owl")) == pytest.approx(2 / 3, abs=0.001)
         assert keep_share("text", ()) is None
 
+    def test_keep_matches_stems_alternatives_and_inserted_words(self):
+        assert keep_share("A walk along the riverbank.", ("river",)) == 1.0
+        assert keep_share("An elderly man reads.", ("old man|elderly man", "read")) == 1.0
+        assert keep_share("A green desk lamp glows.", ("green lamp",)) == 1.0
+        assert keep_share("A green field and a quiet room with a lamp.", ("green lamp",)) == 0.0
+
     def test_count_kept_as_word_or_digit(self):
         assert count_kept("Three cats sleep.", "three cats") is True
+        assert count_kept("Three fluffy grey cats sleep.", "three cats") is True
         assert count_kept("3 cats sleep.", "three cats") is True
         assert count_kept("Two cats sleep.", "three cats") is False
         assert count_kept("x", None) is None
@@ -117,7 +124,7 @@ class TestChecks:
         elements = [{"type": "obj", "desc": f"thing {index}"} for index in range(3)]
         caption = {"high_level_description": "A fox.", "compositional_deconstruction": {"background": "snow", "elements": elements}}
         assert caption_format(json.dumps(caption)) is True
-        caption["compositional_deconstruction"]["elements"] = elements[:2]
+        caption["compositional_deconstruction"]["elements"] = [{"type": "text", "text": "LISBOA", "desc": "big letters"}]
         assert caption_format(json.dumps(caption)) is False
         assert caption_format("not json") is False
 
@@ -198,6 +205,22 @@ def _write_run(run_dir: Path, reply: str) -> None:
         out_dir=run_dir,
         echo=lambda _line: None,
     )
+
+
+class TestRescore:
+    def test_rescore_uses_current_expectations(self, tmp_path):
+        _write_run(tmp_path / "run", "A red fox curls up in deep fresh snow.")
+        assert load_run(tmp_path / "run").records[0]["checks"]["keep"] == 1.0
+        count = rescore_run(tmp_path / "run", (_case(keep=["owl"]),), config=_CONFIG, options=_OPTIONS)
+        assert count == 1
+        record = load_run(tmp_path / "run").records[0]
+        assert record["checks"]["keep"] == 0.0
+        assert record["output"] == "A red fox curls up in deep fresh snow."
+
+    def test_rescore_keeps_results_of_removed_cases(self, tmp_path):
+        _write_run(tmp_path / "run", "A red fox curls up in deep fresh snow.")
+        assert rescore_run(tmp_path / "run", (), config=_CONFIG, options=_OPTIONS) == 0
+        assert len(load_run(tmp_path / "run").records) == 1
 
 
 class TestCompare:

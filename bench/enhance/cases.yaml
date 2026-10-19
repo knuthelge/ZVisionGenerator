@@ -3,7 +3,8 @@
 # Each case: id, tags, mode (image | video | caption), prompt, scene (video only), settings (as a prompt file's
 # enhance: mapping; {} = the defaults), context (ratio, width, height, frames, fps, audio, reference_image, extends,
 # previous, extract_from, new_frames, prompt_is_original), family (for the word ceiling), and optional expectations:
-# keep (phrases that must survive), count ("three cats"), forbid (phrases that must not appear).
+# keep (phrases that must survive; words match as stems, "a|b" lists alternatives), count ("three cats"),
+# forbid (phrases that must not appear). After editing expectations, `rescore` updates stored runs without a model.
 # Seeds come from the case id, so renaming a case changes its seeds.
 
 x-market: &market >-
@@ -14,7 +15,7 @@ x-market: &market >-
   at the end of the street.
 x-market-keep: &market-keep [vendor, tomatoes, lemons, basil, elderly woman, basket, melon, cat, fountain, blue door]
 x-style-subject: &style-subject a woman walking a dog along a river
-x-style-keep: &style-keep [woman, dog, river]
+x-style-keep: &style-keep [woman|female, dog, river]
 
 cases:
   # --- Short image prompts --------------------------------------------------------------------------------------
@@ -35,7 +36,7 @@ cases:
     prompt: an old man reading
     settings: {length: extra}
     context: {ratio: "2:3"}
-    keep: [old man, reading]
+    keep: [old man|elderly man, read]
   - id: short-shorter-clamped
     tags: [short, image]
     prompt: red bicycle against a wall
@@ -104,7 +105,7 @@ cases:
     prompt: a diner at night with a neon sign that says "OPEN 24 HOURS"
     settings: {}
     context: {ratio: "16:9"}
-    keep: [diner, neon sign]
+    keep: [diner, sign]
   - id: quotes-poster
     tags: [quotes, image]
     prompt: a vintage travel poster for Lisbon with the title "LISBOA" and the line "City of Light"
@@ -185,7 +186,7 @@ cases:
     prompt: can you make a picture of a cabin in the woods at night?
     settings: {length: longer}
     context: {ratio: "16:9"}
-    keep: [cabin, woods]
+    keep: [cabin, woods|forest]
     forbid: [sure, here is, i can, i'll]
   - id: request-imperative
     tags: [request, image]
@@ -199,7 +200,7 @@ cases:
     prompt: a poem about autumn written on a chalkboard
     settings: {}
     context: {ratio: "4:3"}
-    keep: [chalkboard, autumn]
+    keep: [chalkboard|blackboard|slate, autumn]
 
   # --- Styles (one subject, every style) ------------------------------------------------------------------------
   - {id: style-photo, tags: [style, image], prompt: *style-subject, settings: {style: photo}, context: {ratio: "3:2"}, keep: *style-keep}
@@ -264,7 +265,7 @@ cases:
     prompt: an old fisherman casts a line
     settings: {}
     context: {ratio: "16:9", frames: 97, fps: 24, audio: true}
-    keep: [fisherman, rowboat, lake]
+    keep: [fisherman, rowboat|boat, lake]
   - id: t2v-silent
     tags: [video, t2v]
     mode: video
@@ -311,7 +312,7 @@ cases:
     prompt: the waves crash against the rocks
     settings: {}
     context: {ratio: "16:9", frames: 97, fps: 24, audio: false, reference_image: true}
-    keep: [waves, rocks]
+    keep: [waves|ocean|sea, rock|shore]
   - id: i2v-both
     tags: [video, i2v]
     mode: video
@@ -319,7 +320,7 @@ cases:
     prompt: the train pulls out of the station, puffing smoke
     settings: {parts: both, style: cinematic}
     context: {ratio: "16:9", frames: 97, fps: 24, audio: true, reference_image: true}
-    keep: [train, station, smoke]
+    keep: [train, station, smoke|steam]
 
   # --- Video: extend --------------------------------------------------------------------------------------------
   - id: extend-scene
