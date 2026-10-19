@@ -100,7 +100,7 @@ class TestEnhanceEndpoint:
         assert frames[1] == {"type": "status", "phase": "generating"}
         assert any(frame["type"] == "text" and "grey fox" in frame["text"] for frame in frames)
         assert frames[-1] == {"type": "done", "prompt": "A grey fox in deep snow, golden light.", "clamped": False}
-        assert enhancer.messages[0][1]["content"] in ("a red fox", "a grey fox")  # choices are picked before the model sees the prompt
+        assert enhancer.messages[0][1]["content"] in ("Prompt: a red fox", "Prompt: a grey fox")  # choices are picked before the model sees the prompt
         assert session.acquired[0][2] == 120
 
     def test_video_pair_frames(self, monkeypatch, no_active_job):

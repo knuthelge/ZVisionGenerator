@@ -304,7 +304,7 @@ prompt_enhancer:
   idle_release_seconds: 120
   length:
     percent: {shorter: 50, same: 100, longer: 200, extra: 300}
-    floor_words: {shorter: 12, longer: 40, extra: 80}  # shorter never aims below 12 words
+    floor_words: {shorter: 12, same: 25, longer: 40, extra: 80}  # same grows short prompts to 25 words; shorter never aims below 12
     max_words: 300
 
 ui:

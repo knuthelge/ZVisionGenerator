@@ -25,6 +25,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     context_rules,
     direction_rules,
     duration_beats,
+    frame_rule,
     generate_raw,
     is_unusable,
     length_instruction,
@@ -224,7 +225,7 @@ def _extend_rules(context: EnhanceContext) -> list[str]:
         "The people in the scene are present; describe speakers as before.",
     ]
     if context.orientation is not None:
-        rules.append(f"Frame: {context.orientation}; compose for that shape.")
+        rules.append(frame_rule(context.orientation))
     if context.new_seconds is not None:
         window = f" of a {max(1, round(context.seconds))} second window" if context.seconds is not None else ""
         beats = duration_beats(context.new_seconds)

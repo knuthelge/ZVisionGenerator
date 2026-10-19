@@ -336,7 +336,7 @@ class TestRunPreflight:
         lines = enhancer.systems[0].splitlines()
         assert any("ambient soundscape" in line for line in lines)
         assert any(line.startswith("- Duration: about 4 seconds") for line in lines)
-        assert "- Frame: landscape; compose for that shape." in lines
+        assert "- Compose for a landscape frame; never mention the frame or its shape." in lines
         assert any(line.startswith("- The first frame is supplied as an image") for line in lines)
 
     def test_video_without_audio_has_no_sound_rule(self):
@@ -348,7 +348,7 @@ class TestRunPreflight:
     def test_image_ratio_sets_frame(self):
         enhancer = _FakeEnhancer([])
         _run({"a": [("a fox", None)]}, enhancer=enhancer, args=_args(ratio="9:16", width=None, height=None))
-        assert "- Frame: portrait; compose for that shape." in enhancer.systems[0].splitlines()
+        assert "- Compose for a portrait frame; never mention the frame or its shape." in enhancer.systems[0].splitlines()
 
     def test_json_captions_are_not_enhanced(self):
         session = MagicMock()

@@ -22,6 +22,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Web UI on a touch screen: a pinch or a double tap no longer zooms the whole app.** The viewer still zooms an image with a pinch or a double tap
 - **Web UI on a phone: a tidier preview.** The image and its caption sit together in the middle of the screen with Reuse and ⋯ on the image's corner, instead of the buttons floating at the top and the caption at the foot. Stepped back in history, a pill over the preview shows where you are and goes back to the latest, in place of a header row. A prompt file with one prompt reads "1 prompt". Until a running job's first preview arrives, its slot shimmers and says what is happening in plain text
 
+### Changed
+- **The prompt enhancer grows short prompts with Length Same.** Same now aims for at least 25 words, so "a fox in snow" gets the lighting and composition you asked for instead of being held to about four words; longer prompts keep their length. Rewrites also no longer start with "Square frame," or similar, and a prompt phrased as a request ("make it a sunny beach") is rewritten as a description
+
 ## [0.13.0b24] - 2026-10-18
 
 ### Added

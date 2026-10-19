@@ -23,8 +23,10 @@ from zvisiongenerator.utils.prompt_enhance import (
     context_rules,
     direction_rules,
     generate_raw,
+    labelled_prompt,
     perception_rule,
     plan_length,
+    prompt_rule,
     strip_reasoning,
     system_message,
     word_count,
@@ -293,6 +295,7 @@ def _messages(prompt: str, settings: EnhanceSettings, *, lettering: _Lettering, 
     branch, _medium = _look(settings, prompt)
     camera = "camera" in settings.details
     rules = [
+        prompt_rule("the image in labelled lines"),
         *PRESERVATION_RULES,
         "Give every person, animal and thing the user names its own OBJECT line, one thing per line; never put two things in one line.",
         "Something the user names once is exactly one OBJECT line: never repeat or multiply it. A group the user names (a crowd, two cats) is one OBJECT line.",
@@ -338,7 +341,7 @@ def _messages(prompt: str, settings: EnhanceSettings, *, lettering: _Lettering, 
     closing = "Reply with these labelled lines in this order and nothing else (no JSON, no markdown, no preamble):\n" + "\n".join(format_lines)
     closing += "\n\nExample of the format for a different prompt (never copy its content):\n" + _EXAMPLE[branch]
     system = system_message("You turn prompts into structured captions for a text-to-image model.", rules, closing)
-    return [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
+    return [{"role": "system", "content": system}, {"role": "user", "content": labelled_prompt(prompt)}]
 
 
 def _parse(text: str) -> _Draft:

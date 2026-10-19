@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from zvisiongenerator.utils.prompt_enhance import (
+    DEFAULT_LENGTH_CONFIG,
     EnhanceContext,
     EnhanceSettings,
     build_messages,
@@ -264,7 +265,8 @@ class TestLength:
             (29, "shorter", 14, False),  # round(14.5) is 14 (round half to even)
             (46, "shorter", 23, False),
             (1, "shorter", 1, True),
-            (15, "same", 15, False),
+            (15, "same", 25, False),  # a short prompt grows to the Same floor of 25 words
+            (30, "same", 30, False),
             (400, "same", 300, False),
             (6, "longer", 40, False),
             (46, "longer", 92, False),
@@ -325,7 +327,8 @@ class TestMessages:
     def test_user_message_is_prompt(self):
         plan = plan_length(3, "same", ceiling=300)
         messages = build_messages("a red fox", EnhanceSettings(), mode="image", plan=plan)
-        assert messages[1] == {"role": "user", "content": "a red fox"}
+        assert messages[1] == {"role": "user", "content": "Prompt: a red fox"}
+        assert messages[0]["content"].splitlines()[2].startswith("- The user gives a Prompt.")
 
     def test_details_line(self):
         assert "Add detail on: lighting, composition and framing." in _system(EnhanceSettings())
@@ -400,8 +403,8 @@ class TestMessages:
         assert _rule(_system(EnhanceSettings(), context=EnhanceContext(seconds=4.0)), "Duration:") is None
 
     def test_frame_rule(self):
-        assert _rule(_system(EnhanceSettings(), context=EnhanceContext(orientation="portrait")), "Frame:") == "Frame: portrait; compose for that shape."
-        assert _rule(_system(EnhanceSettings()), "Frame:") is None
+        assert _rule(_system(EnhanceSettings(), context=EnhanceContext(orientation="portrait")), "Compose for") == "Compose for a portrait frame; never mention the frame or its shape."
+        assert _rule(_system(EnhanceSettings()), "Compose for") is None
 
     def test_reference_image_rules(self):
         video = _system(EnhanceSettings(), mode="video", context=EnhanceContext(reference_image=True))
@@ -578,7 +581,8 @@ class TestPairLength:
         assert plan.scene.lo <= plan.scene.target <= plan.scene.hi
 
     def test_a_short_input_still_gets_the_action_floor(self):
-        plan = plan_pair_length(1, 2, "same", ceiling=300)
+        no_same_floor = {**DEFAULT_LENGTH_CONFIG, "floor_words": {**DEFAULT_LENGTH_CONFIG["floor_words"], "same": 1}}
+        plan = plan_pair_length(1, 2, "same", ceiling=300, length_cfg=no_same_floor)
         assert plan.action.target == 12 and plan.scene.target == 1
 
     def test_upper_bounds_never_exceed_the_ceiling_after_a_longer_request(self):
@@ -1030,7 +1034,7 @@ class TestExtendWithScene:
     def test_the_rules_start_from_where_the_clip_ends(self):
         _, enhancer = _extend_run(["She walks away slowly."])
         system = _sent_system(enhancer)
-        assert "final positions and poses" in system and "describe speakers as before" in system and "Frame: portrait" in system
+        assert "final positions and poses" in system and "describe speakers as before" in system and "Compose for a portrait frame" in system
 
     def test_no_reference_image_rule_and_no_style_rules_for_the_kept_scene(self):
         context = _extend_context(reference_image=True)
@@ -1325,7 +1329,7 @@ class TestActionOnlyWithoutExtending:
         context = enhance_context(mode="video", width=512, height=768, frames=121, fps=24.0)
         _, enhancer = _action_run(["The knight draws his sword."], context=context)
         system = _sent_system(enhancer)
-        assert "Frame: portrait" in system and "Duration: about 5 seconds" in system
+        assert "Compose for a portrait frame" in system and "Duration: about 5 seconds" in system
 
     def test_sound_needs_audio(self):
         settings = EnhanceSettings(sound=("effects",), parts="action")

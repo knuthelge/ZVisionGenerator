@@ -211,6 +211,13 @@ class TestRun:
         assert json.loads(result.prompt)["high_level_description"].startswith("A red fox")
         assert any(text.startswith("SUMMARY:") for text in streamed)
 
+    def test_prompt_is_labelled_as_text_to_rewrite(self) -> None:
+        enhancer = _FakeEnhancer(_REPLY)
+        enhance_caption(enhancer, "make a poster of a fox", EnhanceSettings(), seed=1, ceiling=300)
+        system, user = enhancer.messages[0]
+        assert user["content"] == "Prompt: make a poster of a fox"
+        assert "- The user gives a Prompt." in system["content"]
+
     def test_two_unusable_answers_raise(self) -> None:
         with pytest.raises(RuntimeError, match=re.escape(CAPTION_NO_USABLE_MESSAGE)):
             enhance_caption(_FakeEnhancer("", "nope"), "a red fox", EnhanceSettings(), seed=1, ceiling=300)

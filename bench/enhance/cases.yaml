@@ -25,49 +25,56 @@ cases:
     settings: {}
     context: {ratio: "1:1"}
     keep: [fox, snow]
+    forbid: [square frame, landscape frame, portrait frame]
   - id: short-longer
     tags: [short, image]
     prompt: a lighthouse at dusk
     settings: {length: longer}
     context: {ratio: "16:9"}
     keep: [lighthouse, dusk]
+    forbid: [square frame, landscape frame, portrait frame]
   - id: short-extra
     tags: [short, image]
     prompt: an old man reading
     settings: {length: extra}
     context: {ratio: "2:3"}
     keep: [old man|elderly man, read]
+    forbid: [square frame, landscape frame, portrait frame]
   - id: short-shorter-clamped
     tags: [short, image]
     prompt: red bicycle against a wall
     settings: {length: shorter}
     context: {ratio: "1:1"}
     keep: [red bicycle, wall]
+    forbid: [square frame, landscape frame, portrait frame]
   - id: short-photo
     tags: [short, image]
     prompt: a bowl of ramen
     settings: {style: photo}
     context: {ratio: "1:1"}
     keep: [ramen, bowl]
+    forbid: [square frame, landscape frame, portrait frame]
   - id: short-portrait-frame
     tags: [short, image]
     prompt: a woman in a yellow raincoat
     settings: {details: [subject, lighting]}
     context: {ratio: "9:16"}
     keep: [woman, yellow raincoat]
-    forbid: [child, dog, umbrella]
+    forbid: [child, dog, umbrella, square frame, landscape frame, portrait frame]
   - id: short-mood
     tags: [short, image, mood]
     prompt: a quiet harbor
     settings: {mood: melancholic}
     context: {ratio: "16:9"}
     keep: [harbor]
+    forbid: [square frame, landscape frame, portrait frame]
   - id: short-direction
     tags: [short, image, direction]
     prompt: a city street
     settings: {note: "at night, in heavy rain"}
     context: {ratio: "16:9"}
     keep: [street, rain, night]
+    forbid: [square frame, landscape frame, portrait frame]
 
   # --- Long image prompts ---------------------------------------------------------------------------------------
   - id: long-same

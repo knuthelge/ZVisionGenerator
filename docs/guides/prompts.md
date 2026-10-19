@@ -215,7 +215,7 @@ All built-in models are pinned to a revision. To use another chat model, set **P
 
 Mood sets the feeling of the scene. The enhancer conveys it through light, color, setting and expression instead of naming it. The **Color & mood** detail only adds more description of color and mood; it does not pick one.
 
-Length is a target, not a guarantee. Longer aims for at least 40 words and Extra long for at least 80, so short prompts still grow; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length. On short prompts, Same is approximate.
+Length is a target, not a guarantee. Same keeps a prompt's length but grows a short one to about 25 words, since the rewrite adds the details you picked. Longer aims for at least 40 words and Extra long for at least 80; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length.
 
 The enhancer keeps your subject and every detail you describe. It adds only things that can be seen, no smells or story, and never adds new people, animals, or major objects. Sound is the exception for video with audio on:
 
