@@ -26,14 +26,11 @@
     enhancePhaseMessage,
     canSubmitText,
     hasAudio,
-    autoSplitsPrompt,
     actionOnlyBlocked,
     isJsonCaption,
-    isNoOpSettings,
     prettyCaption,
     runParts,
     settingsPayload,
-    splitsPrompt,
     withRememberedParts,
     workflowMode,
   } from '$lib/state/promptEnhance';
@@ -97,8 +94,6 @@
   const tier = $derived(effectiveTier(draft.state, contract));
   const format = $derived(effectiveFormat(draft.state, jsonCapable));
   const caption = $derived(format === 'json');
-  const autoNoOp = $derived(isNoOpSettings(runSettings, mode, audio, autoSplitsPrompt(draft.state), caption));
-  const noOp = $derived(isNoOpSettings(runSettings, mode, audio, splitsPrompt(draft.state), caption));
   const available = $derived(contract.model !== null);
   const TIER_OPTIONS = $derived([
     { value: 'fast' as const, label: 'Fast', help: 'The default model.' },
@@ -116,13 +111,12 @@
 
   const downloadSize = $derived(downloadedTiers.has(tier) ? null : (tier === 'smart' ? contract.smart?.download_size_label : contract.download_size_label) ?? null);
   const fastUndownloaded = $derived(tier === 'fast' && !contract.downloaded && !downloadedTiers.has('fast'));
-  const enhanceDisabled = $derived(busy || jobsActive || enhancing || noOp || !available || !canSubmitText(draft.state) || sourceGuard.blocked);
+  const enhanceDisabled = $derived(busy || jobsActive || enhancing || !available || !canSubmitText(draft.state) || sourceGuard.blocked);
   const disabledHint = $derived(
     !available ? (contract.error ?? 'No prompt enhancer model is configured.')
       : jobsActive ? 'Available when all jobs have finished.'
       : busy ? 'Available once the job is submitted.'
       : sourceGuard.blocked ? extendEnhanceHint(sourceGuard)
-      : noOp ? 'Pick a style, a mood, a detail, a length, or write a direction.'
       : !canSubmitText(draft.state) ? (mode === 'video' ? 'Write a scene or an action first.' : 'Write a prompt first.')
       : null
   );
@@ -291,8 +285,6 @@
           <span class="ui-help">First use downloads the model.</span>
         {/if}
       </div>
-    {:else if draft.state.enhanceAuto && autoNoOp}
-      <p class="ui-help ui-help-warning" role="alert">Pick a style, a mood, a detail, a length, or write a direction.</p>
     {/if}
     {#if variant === 'file'}
       <p class="ui-help">Off: entries with their own <span class="font-mono">enhance:</span> setting (✨) are still enhanced.</p>

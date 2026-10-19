@@ -11,7 +11,7 @@ from zvisiongenerator.utils.prompt_enhance import ENHANCE_FORMATS, EnhanceSettin
 
 def add_enhance_arguments(parser: argparse.ArgumentParser, *, mode: str) -> None:
     """Register the prompt-enhancement flags on *parser*."""
-    video = ",motion=action+camera-move,sound=ambient+effects" if mode == "video" else ""
+    video = ",camera=orbit,pace=slow,motion=action+secondary,sound=ambient+effects" if mode == "video" else ""
     parts_help = " parts=action keeps the scene and rewrites only the action (parts=both is the default; with --extend and a scene, action)." if mode == "video" else ""
     parser.add_argument(
         "--enhance",
@@ -21,7 +21,8 @@ def add_enhance_arguments(parser: argparse.ArgumentParser, *, mode: str) -> None
         metavar="SPEC",
         help=(
             "Rewrite each prompt with a local LLM before the model loads. Optional SPEC sets the options, e.g. "
-            f"'style=cinematic,mood=dramatic,details=lighting+camera,length=longer{video}'. Applies to every prompt and overrides prompt-file 'enhance:' entries.{parts_help}"
+            f"'style=cinematic,mood=dramatic,theme=noir,details=lighting+camera,length=longer{video}'; with none, a general rewrite. "
+            f"Applies to every prompt and overrides prompt-file 'enhance:' entries.{parts_help}"
         ),
     )
     parser.add_argument(
@@ -48,13 +49,8 @@ def add_enhance_arguments(parser: argparse.ArgumentParser, *, mode: str) -> None
         )
 
 
-def parse_enhance_args(parser: argparse.ArgumentParser, args: argparse.Namespace, *, mode: str, split: bool = False) -> None:
-    """Replace ``args.enhance`` (raw SPEC plus ``--enhance-note``) with ``EnhanceSettings`` or ``None``; report errors via *parser*.
-
-    Args:
-        split: A video job whose prompts are split into scene and action (no scene given, or an extension), so
-            settings that keep everything still change the prompt and are not refused as a no-op.
-    """
+def parse_enhance_args(parser: argparse.ArgumentParser, args: argparse.Namespace, *, mode: str) -> None:
+    """Replace ``args.enhance`` (raw SPEC plus ``--enhance-note``) with ``EnhanceSettings`` or ``None``; report errors via *parser*."""
     spec = args.enhance
     note = getattr(args, "enhance_note", None)
     caption = getattr(args, "enhance_format", None) == "json"
@@ -69,7 +65,7 @@ def parse_enhance_args(parser: argparse.ArgumentParser, args: argparse.Namespace
         settings = parse_enhance_spec(spec, mode=mode)
         if note is not None:
             settings = replace(settings, note=settings_from_mapping({"note": note}, mode=mode).note)
-        validate_settings(settings, mode=mode, split=mode == "video" and split, caption=caption)
+        validate_settings(settings, mode=mode)
     except ValueError as exc:
         parser.error(f"--enhance: {exc}")
     args.enhance = settings

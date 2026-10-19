@@ -663,12 +663,12 @@ describe('WorkspacePage', () => {
     context.prompt_enhancer = {
       matrix: {
         axes: [
-          { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep' }, { slug: 'photo', label: 'Photographic' }], default: ['keep'] },
-          { key: 'details', label: 'Details', multi: true, video_only: false, audio_only: false, options: [{ slug: 'lighting', label: 'Lighting' }], default: ['lighting'] },
-          { key: 'length', label: 'Length', multi: false, video_only: false, audio_only: false, options: [{ slug: 'same', label: 'Same' }, { slug: 'longer', label: 'Longer' }], default: ['same'] },
-          { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action' }], default: ['action'] },
+          { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }, { slug: 'photo', label: 'Photographic', description: '', group: null }], default: ['keep'] },
+          { key: 'details', label: 'Details', multi: true, video_only: false, audio_only: false, options: [{ slug: 'lighting', label: 'Lighting', description: '', group: null }], default: ['lighting'] },
+          { key: 'length', label: 'Length', multi: false, video_only: false, audio_only: false, options: [{ slug: 'same', label: 'Same', description: '', group: null }, { slug: 'longer', label: 'Longer', description: '', group: null }], default: ['same'] },
+          { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action', description: '', group: null }], default: ['action'] },
         ],
-        defaults: { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' },
+        defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' },
       },
       model: 'owner/llm',
       revision: null,
@@ -1324,14 +1324,14 @@ describe('WorkspacePage', () => {
     draft.update('prompt', 'a fox');
     draft.update('enhancedPrompt', 'Ignored while auto-enhancing.');
     draft.update('enhanceAuto', true);
-    draft.update('enhanceSettings', { style: 'photo', mood: 'keep', details: [], length: 'longer', motion: ['action'], sound: [], note: '' });
+    draft.update('enhanceSettings', { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'longer', motion: ['action'], sound: [], note: '' });
     await mountWorkspace(withEnhancer(makeContext()));
 
     expect((target.querySelector('#ws-enhanced-prompt') as HTMLTextAreaElement).disabled).toBe(true);
     const submitted = await submitForm();
     expect(submitted.get('prompt')).toBe('a fox');
     expect(submitted.get('enhance_auto')).toBe('true');
-    expect(JSON.parse(String(submitted.get('enhance_settings')))).toEqual({ style: 'photo', mood: 'keep', details: [], length: 'longer' });
+    expect(JSON.parse(String(submitted.get('enhance_settings')))).toEqual({ style: 'photo', mood: 'keep', theme: 'keep', details: [], length: 'longer' });
   });
 
   it('copies the CLI command for what Generate would submit, without submitting', async () => {
@@ -1363,14 +1363,14 @@ describe('WorkspacePage', () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it('warns inline when auto-enhance would change nothing', async () => {
+  it('never warns that auto-enhance would change nothing: nothing picked is a general rewrite', async () => {
     draft.update('prompt', 'a fox');
     draft.update('enhanceAuto', true);
-    draft.update('enhanceSettings', { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' });
+    draft.update('enhanceSettings', { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' });
     await mountWorkspace(withEnhancer(makeContext()));
     await openEnhanceRun();
     // The enhancer popover is moved to <body>.
-    expect(document.querySelector('#ws-enhance-panel [role="alert"]')).not.toBeNull();
+    expect(document.querySelector('#ws-enhance-panel [role="alert"]')).toBeNull();
   });
 
   describe('scene and prompt pair (video)', () => {
@@ -1457,16 +1457,15 @@ describe('WorkspacePage', () => {
       expect((document.querySelector('#ws-enhance-run') as HTMLButtonElement).disabled).toBe(false);
     });
 
-    it('lets a video prompt without a scene be enhanced with the default settings, because the split is the change', async () => {
+    it('enhances a video with nothing picked, with or without a scene: a general rewrite', async () => {
       draft.update('workflow', 'txt2vid');
-      draft.patch({ prompt: 'a knight rides in', enhanceSettings: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } });
+      draft.patch({ prompt: 'a knight rides in', enhanceSettings: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } });
       await mountWorkspace(withVideoEnhancer(makeContext()));
       expect((await openEnhanceRun()).disabled).toBe(false);
 
-      // With a scene of its own the same settings change nothing.
       type('ws-scene', 'A castle at dusk.');
       await settle();
-      expect((document.querySelector('#ws-enhance-run') as HTMLButtonElement).disabled).toBe(true);
+      expect((document.querySelector('#ws-enhance-run') as HTMLButtonElement).disabled).toBe(false);
     });
 
     it('sends the scene to the enhancer, renders the streamed parts as they are, and keeps the finished pair', async () => {
@@ -1587,7 +1586,7 @@ describe('WorkspacePage', () => {
       it('disables Action only with the reason while the Scene is blank, and the run uses both', async () => {
         enhanceApiMocks.enhancePrompt.mockResolvedValue();
         draft.update('workflow', 'txt2vid');
-        draft.patch({ prompt: 'a knight rides in', enhanceSettings: { style: 'photo', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
+        draft.patch({ prompt: 'a knight rides in', enhanceSettings: { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
         await mountWorkspace(withVideoEnhancer(makeContext()));
         await openEnhanceRun();
 
@@ -1630,7 +1629,7 @@ describe('WorkspacePage', () => {
         await mountWorkspace(withVideoEnhancer(makeContext()));
         expect(JSON.parse(String((await submitForm()).get('enhance_settings'))).parts).toBe('both');
 
-        draft.patch({ enhanceSettings: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
+        draft.patch({ enhanceSettings: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
         await settle();
         expect(JSON.parse(String((await submitForm()).get('enhance_settings'))).parts).toBe('action');
       });
@@ -1752,7 +1751,7 @@ describe('WorkspacePage', () => {
         expect(field('ws-enhanced-prompt').placeholder).toBe('Enhanced when the job runs');
         expect(field('ws-enhanced-scene').disabled).toBe(true);
 
-        draft.patch({ enhanceSettings: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
+        draft.patch({ enhanceSettings: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', partsByWorkflow: { txt2vid: 'action' } } });
         await settle();
         expect(field('ws-enhanced-scene').placeholder).toBe('Not enhanced. Generate uses your scene.');
         expect(field('ws-enhanced-prompt').placeholder).toBe('Enhanced when the job runs');
@@ -1792,18 +1791,6 @@ describe('WorkspacePage', () => {
       pressKey('1', { altKey: true, code: 'Digit1' });
       await settle();
       expect(document.activeElement).toBe(field('ws-prompt'));
-    });
-
-    it('does not warn that auto-enhance changes nothing for a video with a blank scene, but does once a scene is set', async () => {
-      draft.update('workflow', 'txt2vid');
-      draft.patch({ prompt: 'a knight', enhanceAuto: true, enhanceSettings: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } });
-      await mountWorkspace(withVideoEnhancer(makeContext()));
-      await openEnhanceRun();
-      expect(document.querySelector('#ws-enhance-panel [role="alert"]')).toBeNull();
-
-      type('ws-scene', 'A castle.');
-      await settle();
-      expect(document.querySelector('#ws-enhance-panel [role="alert"]')).not.toBeNull();
     });
 
     describe('prompt-file mode', () => {
@@ -3867,10 +3854,10 @@ describe('WorkspacePage extend', () => {
   const ENHANCER: PromptEnhancerContract = {
     matrix: {
       axes: [
-        { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep' }], default: ['keep'] },
-        { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action' }], default: ['action'] },
+        { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }], default: ['keep'] },
+        { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action', description: '', group: null }], default: ['action'] },
       ],
-      defaults: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: ['action'], sound: [], note: '' },
+      defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: ['action'], sound: [], note: '' },
     },
     model: 'owner/llm',
     revision: null,

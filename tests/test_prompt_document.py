@@ -168,9 +168,7 @@ class TestRender:
 
     def test_new_entry_writes_only_needed_keys(self):
         document = load_prompt_document(SAMPLE)
-        new = DocumentEntry(
-            id="new-1", prompt=_text("fresh"), active=False, enhance={"style": "cinematic", "mood": "keep", "details": ["lighting", "composition"], "length": "same", "motion": ["action"]}
-        )
+        new = DocumentEntry(id="new-1", prompt=_text("fresh"), active=False, enhance={"style": "cinematic", "mood": "keep", "details": [], "length": "same", "motion": []})
         edited = replace(document, sets=(*document.sets, DocumentSet(id="new-2", name="extra", entries=(new,))))
 
         rendered = render_prompt_document(SAMPLE, edited)
@@ -300,13 +298,13 @@ class TestRender:
 
 class TestMinimalEnhance:
     def test_keeps_only_changed_axes(self):
-        assert minimal_enhance({"style": "photo", "mood": "keep", "details": ["composition", "lighting"], "length": "same", "motion": ["action"]}) == {"style": "photo"}
+        assert minimal_enhance({"style": "photo", "mood": "keep", "theme": "keep", "details": [], "length": "same", "camera": "keep", "motion": []}) == {"style": "photo"}
 
     def test_defaults_become_true(self):
-        assert minimal_enhance({"style": "keep", "details": ["lighting", "composition"]}) is True
+        assert minimal_enhance({"style": "keep", "details": []}) is True
 
-    def test_empty_details_are_written(self):
-        assert minimal_enhance({"style": "photo", "details": []}) == {"style": "photo", "details": []}
+    def test_picked_details_are_written(self):
+        assert minimal_enhance({"style": "photo", "details": ["lighting"]}) == {"style": "photo", "details": ["lighting"]}
 
 
 class TestOptionIdMap:

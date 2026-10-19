@@ -7,10 +7,10 @@ import type { EnhanceAxis, EnhanceSettings, EntryEnhance } from '$lib/types';
 import EnhanceChip from './EnhanceChip.svelte';
 
 const AXES: EnhanceAxis[] = [
-  { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep' }, { slug: 'cinematic', label: 'Cinematic' }], default: ['keep'] },
+  { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }, { slug: 'cinematic', label: 'Cinematic', description: '', group: null }], default: ['keep'] },
 ];
 // The backend sends `parts: null` in its defaults.
-const DEFAULTS = { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', parts: null } as unknown as EnhanceSettings;
+const DEFAULTS = { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '', parts: null } as unknown as EnhanceSettings;
 
 describe('EnhanceChip Rewrite choice', () => {
   let app: Record<string, unknown> | null = null;

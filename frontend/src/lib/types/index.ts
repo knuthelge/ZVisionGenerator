@@ -268,7 +268,7 @@ export interface WorkspaceContext {
 
 // ── Prompt enhancer ────────────────────────────────────────────────────────────
 
-export type EnhanceAxisKey = 'style' | 'mood' | 'details' | 'length' | 'motion' | 'sound';
+export type EnhanceAxisKey = 'style' | 'mood' | 'theme' | 'details' | 'camera' | 'pace' | 'length' | 'motion' | 'sound';
 
 /** Which parts of a video prompt an enhancement writes: the scene and the action, or only the action (the scene is kept as written). */
 export type EnhanceParts = 'both' | 'action';
@@ -276,8 +276,13 @@ export type EnhanceParts = 'both' | 'action';
 export interface EnhanceSettings {
   style: string;
   mood: string;
+  theme: string;
   details: string[];
   length: string;
+  /** Video only. */
+  camera: string;
+  /** Video only. */
+  pace: string;
   motion: string[];
   sound: string[];
   /** Free-text direction for the enhancer; empty for none. */
@@ -310,8 +315,18 @@ export interface EnhanceAxis {
   video_only: boolean;
   /** Shown only for video with audio on. */
   audio_only: boolean;
-  options: { slug: string; label: string }[];
+  options: EnhanceOptionInfo[];
   default: string[];
+}
+
+/** One option of an enhancement axis, as the Web UI lists it. */
+export interface EnhanceOptionInfo {
+  slug: string;
+  label: string;
+  /** One line on what the option asks the enhancer for. */
+  description: string;
+  /** The menu group it is listed under (Style: Photo or Art; Theme: its five groups), or null. */
+  group: string | null;
 }
 
 export interface PromptEnhancerContract {

@@ -97,8 +97,7 @@ def parse_case(entry: Any) -> Case:
     media = "video" if mode == "video" else "image"
     try:
         settings = settings_from_mapping(raw_settings, mode=media)
-        split = mode == "video" and (bool(context.get("extends")) or not scene.strip())
-        validate_settings(settings, mode=media, split=split, caption=mode == "caption")
+        validate_settings(settings, mode=media)
     except ValueError as exc:
         raise ValueError(f"Case '{case_id}': {exc}") from exc
     return Case(

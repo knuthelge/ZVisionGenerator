@@ -7,11 +7,13 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
+import yaml
 
 from bench.enhance import __main__ as bench_cli
 from bench.enhance.cases import case_seeds, load_cases, parse_case, select_cases
 from bench.enhance.checks import CHECK_NAMES, case_score, caption_format, count_kept, forbid_clear, keep_share, length_check, length_plan, quotes_kept
-from bench.enhance.report import check_rates, compare_runs, load_run
+from bench.enhance.report import Run, check_rates, compare_runs, load_run
+from bench.enhance.sheet import find_image, prompts_file_text, render_command, sheet_rows
 from bench.enhance.runner import META_FILE, RESULTS_FILE, RecordingEnhancer, rescore_run, run_bench, run_case
 from zvisiongenerator.utils.prompt_enhance import DEFAULT_LENGTH_CONFIG, LengthPlan
 
@@ -65,7 +67,7 @@ class TestCases:
             {"id": "x", "prompt": "", "settings": {}},
             {"id": "x", "prompt": "a", "colour": "red"},
             {"id": "x", "prompt": "a", "context": {"speed": 2}},
-            {"id": "x", "prompt": "a", "settings": {"details": []}},
+            {"id": "x", "prompt": "a", "settings": {"theme": "western"}},
         ],
     )
     def test_rejects_malformed_case(self, entry):
@@ -101,6 +103,7 @@ class TestChecks:
     def test_keep_share_allows_case_and_plurals(self):
         assert keep_share("Two Foxes rest in deep snow.", ("fox", "snow", "owl")) == pytest.approx(2 / 3, abs=0.001)
         assert keep_share("text", ()) is None
+        assert keep_share("Two friends at a café table.", ("cafe",)) == 1.0
 
     def test_keep_matches_stems_alternatives_and_inserted_words(self):
         assert keep_share("A walk along the riverbank.", ("river",)) == 1.0
@@ -241,3 +244,31 @@ class TestCompare:
     def test_load_run_requires_results(self, tmp_path):
         with pytest.raises(FileNotFoundError, match=RESULTS_FILE):
             load_run(tmp_path)
+
+
+class TestSheet:
+    def _run(self, tmp_path, label: str, reply: str) -> Run:
+        _write_run(tmp_path / label, reply)
+        return load_run(tmp_path / label)
+
+    def test_rows_hold_the_input_and_each_runs_first_rewrite(self, tmp_path):
+        base, new = self._run(tmp_path, "base", "A red fox in snow."), self._run(tmp_path, "new", "A red fox curls up in deep snow.")
+        rows = sheet_rows((base, new), ("c1", "missing"))
+        assert [row.case for row in rows] == ["c1"]
+        assert [(cell.column, cell.prompt) for cell in rows[0].cells] == [("Your prompt", "a fox in snow"), ("base", "A red fox in snow."), ("new", "A red fox curls up in deep snow.")]
+        assert len({cell.name for cell in rows[0].cells}) == 3
+
+    def test_prompts_file_has_one_set_per_cell(self, tmp_path):
+        rows = sheet_rows((self._run(tmp_path, "base", "A red fox in snow."),), ("c1",))
+        data = yaml.safe_load(prompts_file_text(rows))
+        assert data == {cell.name: [{"prompt": cell.prompt}] for cell in rows[0].cells}
+
+    def test_find_image_by_set_name(self, tmp_path):
+        (tmp_path / "s002_2026-10-19_12-00-00.png").write_bytes(b"")
+        assert find_image(tmp_path, "s002").name.startswith("s002_")
+        assert find_image(tmp_path, "s001") is None
+
+    def test_render_command_fixes_model_seed_and_turns_enhancement_off(self, tmp_path):
+        command = render_command(tmp_path / "p.yaml", tmp_path, model="zit", seed=73914826, ratio="2:3", size="s")
+        assert command[command.index("-m") + 1] == "zit" and command[command.index("--seed") + 1] == "73914826"
+        assert "--no-enhance" in command

@@ -62,8 +62,13 @@ class TestProblems:
         assert [(problem.target, problem.severity) for problem in problems] == [("e", "warning")]
         assert not has_errors(problems)
 
-    def test_no_op_enhance_is_a_warning(self):
+    def test_keep_everything_enhance_is_a_general_rewrite(self):
         entry = DocumentEntry(id="e", prompt=_text("a"), enhance={"style": "keep", "mood": "keep", "details": [], "length": "same", "motion": []})
+
+        assert _problems(_document(entry)) == []
+
+    def test_unknown_enhance_value_is_a_warning(self):
+        entry = DocumentEntry(id="e", prompt=_text("a"), enhance={"style": "vaporwave"})
 
         assert _problems(_document(entry)) == [("e", "warning")]
 

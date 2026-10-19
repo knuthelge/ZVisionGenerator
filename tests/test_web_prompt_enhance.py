@@ -198,8 +198,8 @@ class TestEnhanceEndpoint:
         keep_all = {"style": "keep", "mood": "keep", "details": [], "length": "same", "motion": [], "sound": [], "parts": "action"}
         job = web_server._validate_enhance_body({"scene": "A castle.", "prompt": "a knight", "mode": "video", "settings": keep_all})
         assert job["settings"].parts == "action"
-        with pytest.raises(ValueError, match="Nothing to enhance"):
-            web_server._validate_enhance_body({"scene": "A castle.", "prompt": "a knight", "mode": "video", "settings": {**keep_all, "parts": "both"}})
+        both = web_server._validate_enhance_body({"scene": "A castle.", "prompt": "a knight", "mode": "video", "settings": {**keep_all, "parts": "both"}})
+        assert both["settings"].parts == "both"  # nothing picked is a general rewrite, not a refusal
 
     def test_video_action_only_with_a_blank_scene_splits_into_both(self, monkeypatch, no_active_job):
         enhancer = _FakeEnhancer(["SCENE: A rainy street at night.\nACTION: A woman walks past a neon sign."])
@@ -279,8 +279,6 @@ class TestEnhanceEndpoint:
             ({"prompt": " ", "settings": {}}, "Enter a prompt"),
             ({"prompt": " ", "scene": " ", "mode": "video", "settings": {}}, "Enter a scene or a prompt"),
             ({"prompt": "a fox", "scene": 3, "mode": "video", "settings": {}}, "scene must be a string"),
-            ({"prompt": "", "scene": "A castle.", "mode": "video", "settings": {"style": "keep", "details": [], "length": "same", "motion": [], "sound": []}}, "Nothing to enhance"),
-            ({"prompt": "a fox", "settings": {"style": "keep", "details": [], "length": "same"}}, "Nothing to enhance"),
             ({"prompt": "a fox", "settings": {"style": "nope"}}, "Unknown style"),
             ({"prompt": "a fox", "mode": "audio"}, "mode must be"),
             ({"prompt": "a fox", "max_words": 0}, "max_words"),
@@ -375,25 +373,18 @@ class TestGenerateFields:
         web_server._apply_enhance_submission(args, {"enhance_auto": "on"}, mode="image", json_caption=True)
         assert args.enhance is None
 
-    @pytest.mark.parametrize(("raw", "message"), [("{bad", "JSON object"), ('{"style": "keep", "details": [], "length": "same", "motion": []}', "Nothing to enhance")])
+    @pytest.mark.parametrize(("raw", "message"), [("{bad", "JSON object"), ('{"style": "vaporwave"}', "Unknown style")])
     def test_invalid(self, raw, message):
         with pytest.raises(ValueError, match=message):
-            web_server._apply_enhance_submission(SimpleNamespace(), {"enhance_auto": "true", "enhance_settings": raw}, mode="video", json_caption=False, split=False)
+            web_server._apply_enhance_submission(SimpleNamespace(), {"enhance_auto": "true", "enhance_settings": raw}, mode="video", json_caption=False)
 
     _KEEP_ALL = json.dumps({"style": "keep", "details": [], "length": "same", "motion": []})
 
-    def test_keep_all_auto_enhance_is_valid_for_a_video_with_a_blank_scene(self):
+    @pytest.mark.parametrize("mode", ["image", "video"])
+    def test_keep_all_auto_enhance_is_a_general_rewrite(self, mode):
         args = SimpleNamespace()
-        web_server._apply_enhance_submission(args, {"enhance_auto": "true", "enhance_settings": self._KEEP_ALL}, mode="video", json_caption=False, split=True)
+        web_server._apply_enhance_submission(args, {"enhance_auto": "true", "enhance_settings": self._KEEP_ALL}, mode=mode, json_caption=False)
         assert args.enhance is not None
-
-    def test_keep_all_auto_enhance_is_rejected_when_a_scene_is_set(self):
-        with pytest.raises(ValueError, match="Nothing to enhance"):
-            web_server._apply_enhance_submission(SimpleNamespace(), {"enhance_auto": "true", "enhance_settings": self._KEEP_ALL}, mode="video", json_caption=False, split=False)
-
-    def test_split_never_relaxes_the_image_rule(self):
-        with pytest.raises(ValueError, match="Nothing to enhance"):
-            web_server._apply_enhance_submission(SimpleNamespace(), {"enhance_auto": "true", "enhance_settings": self._KEEP_ALL}, mode="image", json_caption=False, split=True)
 
     def test_image_submit_threads_settings_and_file_entries(self, monkeypatch, tmp_path):
         from test_web_server import _make_web_config, _patch_image_submit_dependencies

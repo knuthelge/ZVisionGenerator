@@ -29,6 +29,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     prompt_rule,
     strip_reasoning,
     system_message,
+    theme_rules,
     word_count,
 )
 from zvisiongenerator.utils.prompt_quotes import quoted_texts
@@ -45,7 +46,23 @@ _FLOOR_WORDS = {"shorter": 45, "same": 70, "longer": 110, "extra": 170}
 _OBJECT_LINES = (3, 8)
 _MAX_INVENTED_TEXTS = 3
 
-_ART_MEDIUM = {"illustration": "illustration", "anime": "illustration", "comic": "illustration", "3d": "3d_render", "painterly": "painting"}
+_ART_MEDIUM = {
+    "illustration": "illustration",
+    "anime": "illustration",
+    "comic": "illustration",
+    "sketch": "illustration",
+    "pixel": "illustration",
+    "concept": "illustration",
+    "ukiyo-e": "illustration",
+    "papercraft": "illustration",
+    "3d": "3d_render",
+    "isometric": "3d_render",
+    "claymation": "3d_render",
+    "painterly": "painting",
+    "watercolor": "painting",
+    "gouache": "painting",
+    "graphic": "graphic_design",
+}
 # Prompt words that point to an art medium when the style is kept, checked in order.
 # Words that are also everyday things ("olive oil", "a canvas tent", "a kitchen blender") count only in a medium phrase.
 _MEDIUM_WORDS = (
@@ -296,6 +313,7 @@ def _messages(prompt: str, settings: EnhanceSettings, *, lettering: _Lettering, 
     if settings.style == "bw":
         rules.append("COLORS: only black, white and greys.")
     rules.append(MOOD_AXIS.option(settings.mood).instruction + " Show it in AESTHETICS, LIGHTING and COLORS.")
+    rules.extend(f"{rule} Show it in AESTHETICS, COLORS and the OBJECT lines." for rule in theme_rules(settings))
     design = _design(prompt)
     if design and branch == "art":
         rules.append(

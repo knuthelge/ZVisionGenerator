@@ -319,9 +319,8 @@ class TestPromptFileEnhance:
     @pytest.mark.parametrize(
         ("value", "message"),
         [
-            ("{style: watercolor}", "entry 0 of prompt set 'a' in f.yaml"),
+            ("{style: vaporwave}", "entry 0 of prompt set 'a' in f.yaml"),
             ("'yes'", "expected true, false, or a mapping"),
-            ("{style: keep, details: [], length: same, motion: []}", "Nothing to enhance"),
         ],
     )
     def test_invalid_warns_and_keeps_file_usable(self, value, message):
@@ -350,7 +349,7 @@ class TestPromptFileEnhance:
 
         path = tmp_path / "p.yaml"
         path.write_text("a:\n  - prompt: x\n    enhance: {parts: action}\n", encoding="utf-8")
-        assert inspect_prompt_file(str(path), accepted_extensions=(".yaml",)).options[0]["enhance"].endswith(",parts=action")
+        assert inspect_prompt_file(str(path), accepted_extensions=(".yaml",)).options[0]["enhance"] == "parts=action"
 
     def test_web_preview_exposes_spec(self, tmp_path):
         from zvisiongenerator.web.prompt_files import inspect_prompt_file
@@ -358,7 +357,7 @@ class TestPromptFileEnhance:
         path = tmp_path / "p.yaml"
         path.write_text("a:\n  - prompt: x\n    enhance: {length: longer}\n  - prompt: y\n", encoding="utf-8")
         options = inspect_prompt_file(str(path), accepted_extensions=(".yaml",)).options
-        assert options[0]["enhance"] == "style=keep,mood=keep,details=lighting+composition,length=longer,motion=action"
+        assert options[0]["enhance"] == "length=longer"
         assert options[1]["enhance"] is None
 
 
@@ -426,7 +425,6 @@ class TestCliFlags:
             (["--enhance", "style=nope"], "image"),
             (["--enhance", "motion=action"], "image"),
             (["--enhance", "--no-enhance"], "image"),
-            (["--enhance", "details=,length=same"], "image"),
         ],
     )
     def test_errors_exit(self, argv, mode, capsys):

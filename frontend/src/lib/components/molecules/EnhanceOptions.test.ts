@@ -7,8 +7,8 @@ import type { EnhanceAxis, EnhanceSettings } from '$lib/types';
 import EnhanceOptions from './EnhanceOptions.svelte';
 
 const axes: EnhanceAxis[] = [
-  { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep' }, { slug: 'photo', label: 'Photo' }], default: ['keep'] },
-  { key: 'details', label: 'Details', multi: true, video_only: false, audio_only: false, options: [{ slug: 'lighting', label: 'Lighting' }, { slug: 'composition', label: 'Composition' }], default: [] },
+  { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }, { slug: 'photo', label: 'Photo', description: '', group: null }], default: ['keep'] },
+  { key: 'details', label: 'Details', multi: true, video_only: false, audio_only: false, options: [{ slug: 'lighting', label: 'Lighting', description: '', group: null }, { slug: 'composition', label: 'Composition', description: '', group: null }], default: [] },
 ];
 
 describe('EnhanceOptions', () => {
@@ -26,11 +26,11 @@ describe('EnhanceOptions', () => {
     return onchange;
   }
 
-  const BASE: EnhanceSettings = { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
+  const BASE: EnhanceSettings = { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
   const videoAxes: EnhanceAxis[] = [
     ...axes,
-    { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action' }], default: [] },
-    { key: 'sound', label: 'Sound', multi: true, video_only: true, audio_only: true, options: [{ slug: 'ambient', label: 'Ambience' }], default: [] },
+    { key: 'motion', label: 'Motion', multi: true, video_only: true, audio_only: false, options: [{ slug: 'action', label: 'Action', description: '', group: null }], default: [] },
+    { key: 'sound', label: 'Sound', multi: true, video_only: true, audio_only: true, options: [{ slug: 'ambient', label: 'Ambience', description: '', group: null }], default: [] },
   ];
 
   it.each([
@@ -53,7 +53,7 @@ describe('EnhanceOptions', () => {
   });
 
   it('offers select-all only on multi-pick axes and selects every option', () => {
-    const onchange = mountOptions({ style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: [], sound: [], note: '' });
+    const onchange = mountOptions({ style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting'], length: 'same', motion: [], sound: [], note: '' });
     expect(target.querySelector('[data-toggle-all="style"]')).toBeNull();
     const toggle = target.querySelector('[data-toggle-all="details"]') as HTMLButtonElement;
     expect(toggle.dataset.allSelected).toBe('false');
@@ -62,7 +62,7 @@ describe('EnhanceOptions', () => {
   });
 
   it('clears every option once all are selected', () => {
-    const onchange = mountOptions({ style: 'keep', mood: 'keep', details: ['lighting', 'composition'], length: 'same', motion: [], sound: [], note: '' });
+    const onchange = mountOptions({ style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting', 'composition'], length: 'same', motion: [], sound: [], note: '' });
     const toggle = target.querySelector('[data-toggle-all="details"]') as HTMLButtonElement;
     expect(toggle.dataset.allSelected).toBe('true');
     toggle.click();

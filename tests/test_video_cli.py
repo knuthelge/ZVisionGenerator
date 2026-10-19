@@ -765,10 +765,10 @@ class TestVideoCliExtend:
             self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--prompt", "a fox", "--enhance", "parts=scene"])
         assert "both, action" in capsys.readouterr().err
 
-    def test_keep_everything_is_refused_as_a_noop_with_a_scene(self, monkeypatch, tmp_path, capsys):
-        with pytest.raises(SystemExit, match="2"):
-            self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--scene", "A castle.", "--prompt", "a fox", "--enhance", self._KEEP_ALL])
-        assert "Nothing to enhance" in capsys.readouterr().err
+    def test_keep_everything_is_a_general_rewrite_with_a_scene(self, monkeypatch, tmp_path):
+        self._preflight_spy(monkeypatch)
+        args = self._main(monkeypatch, tmp_path, ["-m", "ltx-8", "--scene", "A castle.", "--prompt", "a fox", "--enhance", self._KEEP_ALL])["args"]
+        assert args.enhance is not None
 
     def test_keep_everything_runs_for_an_extension_even_with_a_scene(self, monkeypatch, tmp_path):
         self._preflight_spy(monkeypatch)

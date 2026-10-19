@@ -14,7 +14,7 @@ from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus
 from zvisiongenerator.core.video_types import ExtendSource
 from zvisiongenerator.preflight import _iteration_context, _job_context, plan_iterations, run_preflight
 from zvisiongenerator.utils.interactive import SkipSignal
-from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, enhance_by_set_for_mode, entry_scene
+from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, entry_scene
 from zvisiongenerator.utils.prompt_enhance_video import CONTINUE_NATURALLY
 
 
@@ -83,19 +83,14 @@ class TestPlanIterations:
         assert [(it.run_index, it.set_name, it.scene) for it in plan] == [(0, "a", None), (0, "b", "Scene B."), (1, "a", None), (1, "b", "Scene B.")]
 
     @pytest.mark.filterwarnings("ignore:.*not enhanced")
-    def test_whitespace_entry_scene_falls_back_to_the_job_scene_in_plan_and_noop_split(self):
-        """The plan and the no-op split read the same scene: a blank entry scene never hides the job scene."""
+    def test_whitespace_entry_scene_falls_back_to_the_job_scene_in_the_plan(self):
+        """A blank entry scene never hides the job scene."""
         scene_by_set = {"a": ["   ", None, "Own."]}
         data = {"a": [("x", None), ("y", None), ("z", None)]}
         keep = EnhanceSettings(details=(), motion=(), sound=())
         by_set = {"a": [keep, keep, keep]}
         plan = _plan(data, scene="Job", scene_by_set=scene_by_set, enhance_by_set=by_set)
         assert [it.scene for it in plan] == ["Job", "Job", "Own."]
-        # Every entry has a scene, so none splits; all-keep settings are no-ops and are dropped.
-        assert enhance_by_set_for_mode(by_set, mode="video", scene_by_set=scene_by_set, job_scene="Job") == {"a": [None, None, None]}
-        # Without a job scene the blank entry has none: it splits and stays enhanced, matching the plan.
-        kept = enhance_by_set_for_mode(by_set, mode="video", scene_by_set=scene_by_set, job_scene=None)
-        assert [entry is not None for entry in kept["a"]] == [True, True, False]
         assert [it.scene for it in _plan(data, scene_by_set=scene_by_set)] == [None, None, "Own."]
 
     @pytest.mark.parametrize(

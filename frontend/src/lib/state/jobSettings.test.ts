@@ -19,7 +19,7 @@ describe('jobSettingsPrefill', () => {
       referenceImageStrength: 0.6, quantize: 8, scheduler: null, firstSigma: null, jsonPromptEnabled: false,
       postprocessSharpenEnabled: true, postprocessSharpenAmount: 0.8, postprocessContrastEnabled: false, postprocessSaturationEnabled: true, postprocessSaturationAmount: 1.2,
       upscaleEnabled: true, upscaleFactor: 2, upscaleDenoise: null, upscaleSteps: 6, upscaleGuidance: null, upscaleSharpen: false,
-      enhanceAuto: true, enhanceSettings: { style: 'photo', mood: 'keep', details: ['lighting'], length: 'longer', motion: [] },
+      enhanceAuto: true, enhanceSettings: { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting'], length: 'longer', motion: [] },
     });
   });
 

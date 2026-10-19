@@ -17,12 +17,9 @@ import {
   enhancedPartUsed,
   hasAudio,
   isEnhancedStale,
-  isNoOpSettings,
   rememberedParts,
   runParts,
   settingsPayload,
-  autoSplitsPrompt,
-  splitsPrompt,
   submittedPair,
   submittedPrompt,
   withRememberedParts,
@@ -47,7 +44,7 @@ function state(overrides: Partial<DraftState> = {}): DraftState {
   } as DraftState;
 }
 
-const SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
+const SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' };
 
 describe('Fast/Smart and Text/JSON', () => {
   const contract = (smart: PromptEnhancerContract['smart']): PromptEnhancerContract =>
@@ -65,11 +62,6 @@ describe('Fast/Smart and Text/JSON', () => {
     expect(effectiveFormat(state({ enhanceFormat: 'json' }), true)).toBe('json');
     expect(effectiveFormat(state({ enhanceFormat: 'json' }), false)).toBe('text');
     expect(effectiveFormat(state({ enhanceFormat: 'json', workflow: 'txt2vid' }), true)).toBe('text');
-  });
-
-  it('a JSON caption is never a no-op', () => {
-    expect(isNoOpSettings(SETTINGS, 'image')).toBe(true);
-    expect(isNoOpSettings(SETTINGS, 'image', false, false, true)).toBe(false);
   });
 
   it('detects and lays out captions', () => {
@@ -121,14 +113,6 @@ describe('isEnhancedStale', () => {
 });
 
 describe('sound, direction and context', () => {
-  it('counts sound only for video with audio, and a direction everywhere', () => {
-    expect(isNoOpSettings({ ...SETTINGS, sound: ['ambient'] }, 'video', true)).toBe(false);
-    expect(isNoOpSettings({ ...SETTINGS, sound: ['ambient'] }, 'video', false)).toBe(true);
-    expect(isNoOpSettings({ ...SETTINGS, sound: ['ambient'] }, 'image', true)).toBe(true);
-    expect(isNoOpSettings({ ...SETTINGS, note: 'at night' }, 'image')).toBe(false);
-    expect(isNoOpSettings({ ...SETTINGS, note: '   ' }, 'image')).toBe(true);
-  });
-
   it('sends sound only for video with audio', () => {
     const settings = { ...SETTINGS, motion: ['action'], sound: ['music'], note: 'at dusk' };
     expect(settingsPayload(settings, 'video', true)).toMatchObject({ motion: ['action'], sound: ['music'], note: 'at dusk' });
@@ -138,7 +122,7 @@ describe('sound, direction and context', () => {
   });
 
   it('fills sound and note for settings saved before they existed', () => {
-    const saved = { style: 'anime', mood: 'keep', details: [], length: 'same', motion: [] } as unknown as EnhanceSettings;
+    const saved = { style: 'anime', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [] } as unknown as EnhanceSettings;
     const result = effectiveEnhanceSettings(state({ enhanceSettings: saved }), undefined);
     expect(result).toMatchObject({ style: 'anime', sound: [], note: '' });
   });
@@ -162,27 +146,14 @@ describe('sound, direction and context', () => {
 });
 
 describe('settings helpers', () => {
-  it('detects the no-op combination per mode', () => {
-    expect(isNoOpSettings(SETTINGS, 'image')).toBe(true);
-    expect(isNoOpSettings({ ...SETTINGS, motion: ['action'] }, 'image')).toBe(true);
-    expect(isNoOpSettings({ ...SETTINGS, motion: ['action'] }, 'video')).toBe(false);
-    expect(isNoOpSettings({ ...SETTINGS, length: 'longer' }, 'image')).toBe(false);
-    expect(isNoOpSettings({ ...SETTINGS, mood: 'eerie' }, 'image')).toBe(false);
-  });
-
-  it('treats an action-only video rewrite as a change, like the server', () => {
-    expect(isNoOpSettings({ ...SETTINGS, parts: 'action' }, 'video')).toBe(false);
-    expect(isNoOpSettings({ ...SETTINGS, parts: 'both' }, 'video')).toBe(true);
-    expect(isNoOpSettings({ ...SETTINGS, parts: 'action' }, 'image')).toBe(true);
-  });
-
   it('strips motion for images', () => {
-    expect(settingsPayload({ ...SETTINGS, motion: ['pacing'] }, 'image')).toEqual({ style: 'keep', mood: 'keep', details: [], length: 'same' });
+    expect(settingsPayload({ ...SETTINGS, motion: ['pacing'], camera: 'orbit' }, 'image')).toEqual({ style: 'keep', mood: 'keep', theme: 'keep', details: [], length: 'same' });
+    expect(settingsPayload({ ...SETTINGS, camera: 'orbit', pace: 'fast' }, 'video')).toMatchObject({ camera: 'orbit', pace: 'fast' });
     expect(settingsPayload({ ...SETTINGS, motion: ['pacing'] }, 'video').motion).toEqual(['pacing']);
   });
 
   it('falls back to contract defaults without sharing arrays', () => {
-    const contract = { matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' } } } as unknown as PromptEnhancerContract;
+    const contract = { matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' } } } as unknown as PromptEnhancerContract;
     const settings = effectiveEnhanceSettings(state(), contract);
     expect(settings.details).toEqual(['lighting']);
     expect(settings.details).not.toBe(contract.matrix.defaults.details);
@@ -190,9 +161,9 @@ describe('settings helpers', () => {
   });
 
   it('fills axes missing from saved settings with contract defaults', () => {
-    const contract = { matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' } } } as unknown as PromptEnhancerContract;
+    const contract = { matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' } } } as unknown as PromptEnhancerContract;
     const saved = { style: 'photo', details: [], length: 'longer', motion: [], sound: [], note: '' } as unknown as EnhanceSettings;
-    expect(effectiveEnhanceSettings(state({ enhanceSettings: saved }), contract)).toEqual({ ...saved, mood: 'keep' });
+    expect(effectiveEnhanceSettings(state({ enhanceSettings: saved }), contract)).toEqual({ ...saved, mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep' });
   });
 
   it('maps workflows to modes', () => {
@@ -242,28 +213,6 @@ describe('scene and prompt pair', () => {
     ['txt2img', '', 'a fox', true],
   ] as const)('%s with scene %j and prompt %j can run text: %s', (workflow, scene, prompt, expected) => {
     expect(canSubmitText(state({ workflow, scene, prompt }))).toBe(expected);
-  });
-
-  it('splits only a video prompt that has no scene', () => {
-    expect(splitsPrompt(video({ scene: '', prompt: 'a knight' }))).toBe(true);
-    expect(splitsPrompt(video({ scene: 'A castle.', prompt: 'a knight' }))).toBe(false);
-    expect(splitsPrompt(video({ scene: '', prompt: '' }))).toBe(false);
-    expect(splitsPrompt(state({ workflow: 'txt2img', scene: '', prompt: 'a fox' }))).toBe(false);
-  });
-
-  it('auto-enhance splits a video with a blank default scene whatever the prompt box holds, and any extension', () => {
-    expect(autoSplitsPrompt(video({ scene: '', prompt: '' }))).toBe(true);
-    expect(autoSplitsPrompt(video({ scene: '  ', prompt: 'a knight' }))).toBe(true);
-    expect(autoSplitsPrompt(video({ scene: 'A castle.', prompt: '' }))).toBe(false);
-    expect(autoSplitsPrompt(state({ workflow: 'txt2img', scene: '', prompt: 'a fox' }))).toBe(false);
-    expect(autoSplitsPrompt(state({ workflow: 'extend', scene: 'A street.', prompt: 'She waves.' }))).toBe(true);
-    expect(autoSplitsPrompt(state({ workflow: 'extend', scene: '', prompt: '' }))).toBe(true);
-  });
-
-  it('is never a no-op for a split video prompt, and unchanged for images', () => {
-    expect(isNoOpSettings(SETTINGS, 'video', false, true)).toBe(false);
-    expect(isNoOpSettings(SETTINGS, 'video', false, false)).toBe(true);
-    expect(isNoOpSettings(SETTINGS, 'image', false, true)).toBe(true);
   });
 
   it('uses the Enhanced text of each part whose Enhanced box has text', () => {
@@ -336,7 +285,7 @@ describe('scene and prompt pair', () => {
 
     it('is sent with a video payload and left out for images and for the browser-only memory', () => {
       const settings = { ...SETTINGS, parts: 'action' as const };
-      expect(settingsPayload(settings, 'video')).toEqual({ style: 'keep', mood: 'keep', details: [], length: 'same', parts: 'action', motion: [] });
+      expect(settingsPayload(settings, 'video')).toEqual({ style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', parts: 'action', motion: [] });
       expect(settingsPayload(SETTINGS, 'video')).not.toHaveProperty('parts');
     });
   });
@@ -386,11 +335,6 @@ describe('extend', () => {
     expect(canSubmitText(extending())).toBe(true);
     expect(canSubmitText(state({ workflow: 'txt2vid', prompt: '', scene: '' }))).toBe(false);
     expect(canSubmitText(state({ workflow: 'txt2img', prompt: ' ' }))).toBe(false);
-  });
-
-  it('is never a no-op, since an extension always writes a new action', () => {
-    expect(splitsPrompt(extending())).toBe(true);
-    expect(splitsPrompt(extending({ scene: 'A street.', prompt: 'She waves.' }))).toBe(true);
   });
 
   describe('staleness', () => {

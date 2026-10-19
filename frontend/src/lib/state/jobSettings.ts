@@ -1,3 +1,4 @@
+import { DEFAULT_ENHANCE_SETTINGS } from './promptEnhance';
 import type { DraftState, EnhanceParts, EnhanceSettings, JobSettings, PromptSource, Workflow } from '$lib/types';
 import { snapExtendFrames } from './videoDuration';
 
@@ -40,7 +41,8 @@ function enhanceSettings(value: string | undefined, workflow: Workflow | undefin
   if (!value) return null;
   try {
     const parsed = JSON.parse(value) as Partial<EnhanceSettings>;
-    const settings: EnhanceSettings = { style: parsed.style ?? 'keep', mood: parsed.mood ?? 'keep', details: parsed.details ?? [], length: parsed.length ?? 'same', motion: parsed.motion ?? [], sound: parsed.sound ?? [], note: parsed.note ?? '' };
+    const { parts: _parts, partsByWorkflow: _remembered, ...known } = parsed;
+    const settings: EnhanceSettings = { ...DEFAULT_ENHANCE_SETTINGS, ...known };
     const parts: EnhanceParts | undefined = parsed.parts === 'both' || parsed.parts === 'action' ? parsed.parts : undefined;
     return parts !== undefined && workflow !== undefined ? { ...settings, partsByWorkflow: { [workflow]: parts } } : settings;
   } catch {

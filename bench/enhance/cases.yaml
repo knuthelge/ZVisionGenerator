@@ -15,6 +15,7 @@ x-market: &market >-
   at the end of the street.
 x-market-keep: &market-keep [vendor, tomatoes, lemons, basil, elderly woman, basket, melon, cat, fountain, blue door]
 x-style-subject: &style-subject a woman walking a dog along a river
+x-realism-forbid: &realism-forbid [hyperrealistic, 8k, masterpiece, flawless, perfect skin, smooth skin, airbrushed]
 x-style-keep: &style-keep [woman|female, dog, river]
 
 cases:
@@ -210,19 +211,30 @@ cases:
     keep: [chalkboard|blackboard|slate, autumn]
 
   # --- Styles (one subject, every style) ------------------------------------------------------------------------
-  - {id: style-photo, tags: [style, image], prompt: *style-subject, settings: {style: photo}, context: {ratio: "3:2"}, keep: *style-keep}
-  - {id: style-candid, tags: [style, image], prompt: *style-subject, settings: {style: candid}, context: {ratio: "3:2"}, keep: *style-keep}
-  - {id: style-street, tags: [style, image], prompt: *style-subject, settings: {style: street}, context: {ratio: "3:2"}, keep: *style-keep}
-  - {id: style-film, tags: [style, image], prompt: *style-subject, settings: {style: film}, context: {ratio: "3:2"}, keep: *style-keep}
-  - {id: style-bw, tags: [style, image], prompt: *style-subject, settings: {style: bw}, context: {ratio: "3:2"}, keep: *style-keep}
-  - {id: style-portrait, tags: [style, image], prompt: *style-subject, settings: {style: portrait}, context: {ratio: "2:3"}, keep: *style-keep}
+  - {id: style-photo, tags: [style, image], prompt: *style-subject, settings: {style: photo}, context: {ratio: "3:2"}, keep: *style-keep, forbid: *realism-forbid}
+  - {id: style-candid, tags: [style, image], prompt: *style-subject, settings: {style: candid}, context: {ratio: "3:2"}, keep: *style-keep, forbid: *realism-forbid}
+  - {id: style-street, tags: [style, image], prompt: *style-subject, settings: {style: street}, context: {ratio: "3:2"}, keep: *style-keep, forbid: *realism-forbid}
+  - {id: style-film, tags: [style, image], prompt: *style-subject, settings: {style: film}, context: {ratio: "3:2"}, keep: *style-keep, forbid: *realism-forbid}
+  - {id: style-bw, tags: [style, image], prompt: *style-subject, settings: {style: bw}, context: {ratio: "3:2"}, keep: *style-keep, forbid: *realism-forbid}
+  - {id: style-portrait, tags: [style, image], prompt: *style-subject, settings: {style: portrait}, context: {ratio: "2:3"}, keep: *style-keep, forbid: *realism-forbid}
   - {id: style-product, tags: [style, image], prompt: a glass bottle of olive oil, settings: {style: product}, context: {ratio: "1:1"}, keep: [glass bottle, olive oil]}
-  - {id: style-cinematic, tags: [style, image], prompt: *style-subject, settings: {style: cinematic}, context: {ratio: "16:9"}, keep: *style-keep}
+  - {id: style-cinematic, tags: [style, image], prompt: *style-subject, settings: {style: cinematic}, context: {ratio: "16:9"}, keep: *style-keep, forbid: *realism-forbid}
   - {id: style-illustration, tags: [style, image], prompt: *style-subject, settings: {style: illustration}, context: {ratio: "3:2"}, keep: *style-keep}
   - {id: style-anime, tags: [style, image], prompt: *style-subject, settings: {style: anime}, context: {ratio: "3:2"}, keep: *style-keep}
   - {id: style-comic, tags: [style, image], prompt: *style-subject, settings: {style: comic}, context: {ratio: "3:2"}, keep: *style-keep}
   - {id: style-3d, tags: [style, image], prompt: *style-subject, settings: {style: 3d}, context: {ratio: "3:2"}, keep: *style-keep}
   - {id: style-painterly, tags: [style, image], prompt: *style-subject, settings: {style: painterly}, context: {ratio: "3:2"}, keep: *style-keep}
+
+  - {id: style-watercolor, tags: [style, image, new-style], prompt: *style-subject, settings: {style: watercolor}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-gouache, tags: [style, image, new-style], prompt: *style-subject, settings: {style: gouache}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-sketch, tags: [style, image, new-style], prompt: *style-subject, settings: {style: sketch}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-pixel, tags: [style, image, new-style], prompt: *style-subject, settings: {style: pixel}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-concept, tags: [style, image, new-style], prompt: *style-subject, settings: {style: concept}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-graphic, tags: [style, image, new-style], prompt: *style-subject, settings: {style: graphic}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-isometric, tags: [style, image, new-style], prompt: *style-subject, settings: {style: isometric}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-claymation, tags: [style, image, new-style], prompt: *style-subject, settings: {style: claymation}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-ukiyo-e, tags: [style, image, new-style], prompt: *style-subject, settings: {style: ukiyo-e}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-papercraft, tags: [style, image, new-style], prompt: *style-subject, settings: {style: papercraft}, context: {ratio: "3:2"}, keep: *style-keep}
 
   # --- Moods and Direction --------------------------------------------------------------------------------------
   - id: mood-eerie
@@ -256,6 +268,68 @@ cases:
     settings: {style: film, note: in thick fog}
     context: {ratio: "3:2"}
     keep: [fishing boat, harbor, fog]
+
+  # --- Themes, expression and photorealism ----------------------------------------------------------------------
+  - id: theme-zen
+    tags: [theme, image]
+    prompt: a tea house garden
+    settings: {theme: zen}
+    context: {ratio: "3:2"}
+    keep: [tea house, garden]
+  - id: theme-noir
+    tags: [theme, image]
+    prompt: a detective in his office at night
+    settings: {theme: noir, style: bw}
+    context: {ratio: "16:9"}
+    keep: [detective, office]
+    forbid: [woman]
+  - id: theme-sensual
+    tags: [theme, image]
+    prompt: a couple dancing close in a dim room
+    settings: {theme: sensual}
+    context: {ratio: "2:3"}
+    count: couple
+    keep: [dance, room]
+  - id: theme-cyberpunk
+    tags: [theme, image]
+    prompt: a street food stall in the rain
+    settings: {theme: cyberpunk}
+    context: {ratio: "16:9"}
+    keep: [food stall, rain]
+  - id: theme-fairytale
+    tags: [theme, image]
+    prompt: a cottage in the woods
+    settings: {theme: fairytale, style: watercolor}
+    context: {ratio: "3:2"}
+    keep: [cottage, wood|forest]
+    forbid: [witch, fairy, girl]
+  - id: expression-friends
+    tags: [expression, image]
+    prompt: two friends talking at a cafe table
+    settings: {details: [expression]}
+    context: {ratio: "16:9"}
+    count: two friends
+    keep: [cafe, table]
+  - id: expression-child
+    tags: [expression, image]
+    prompt: a child opening a present
+    settings: {details: [expression, subject], mood: joyful}
+    context: {ratio: "1:1"}
+    keep: [child, present|gift]
+  - id: realism-portrait
+    tags: [realism, image]
+    prompt: a close-up portrait of an old fisherman
+    settings: {style: portrait, details: [subject]}
+    context: {ratio: "2:3"}
+    keep: [fisherman]
+    forbid: *realism-forbid
+  - id: realism-candid
+    tags: [realism, image]
+    prompt: a woman laughing at a kitchen table
+    settings: {style: candid, details: [expression]}
+    context: {ratio: "3:2"}
+    keep: [woman, kitchen table]
+    forbid: *realism-forbid
 
   # --- Video: text to video -------------------------------------------------------------------------------------
   - id: t2v-split-audio
@@ -328,6 +402,29 @@ cases:
     settings: {parts: both, style: cinematic}
     context: {ratio: "16:9", frames: 97, fps: 24, audio: true, reference_image: true}
     keep: [train, station, smoke|steam]
+
+  - id: t2v-camera-orbit
+    tags: [video, t2v, camera]
+    mode: video
+    prompt: a dancer spins in an empty studio
+    settings: {camera: orbit, pace: slow}
+    context: {ratio: "16:9", frames: 97, fps: 24, audio: false}
+    keep: [dancer, studio]
+  - id: t2v-pace-fast
+    tags: [video, t2v, camera]
+    mode: video
+    prompt: a dog chases a frisbee on a beach
+    settings: {pace: fast, motion: [action, secondary]}
+    context: {ratio: "16:9", frames: 121, fps: 24, audio: true}
+    keep: [dog, frisbee, beach]
+  - id: i2v-camera-static
+    tags: [video, i2v, camera]
+    mode: video
+    scene: A lighthouse on a rocky coast at dusk.
+    prompt: the waves crash below and the light turns on
+    settings: {camera: static}
+    context: {ratio: "16:9", frames: 97, fps: 24, audio: true, reference_image: true}
+    keep: [waves, light]
 
   # --- Video: extend --------------------------------------------------------------------------------------------
   - id: extend-scene

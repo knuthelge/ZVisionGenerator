@@ -27,6 +27,16 @@ def _parser() -> argparse.ArgumentParser:
     rescore = commands.add_parser("rescore", help="Recompute the checks of stored runs from their outputs (after changing checks or expectations).")
     rescore.add_argument("labels", nargs="+", help="Labels (or folders) of the runs to rescore.")
     rescore.add_argument("--runs-dir", type=Path, default=RUNS_DIR, help=argparse.SUPPRESS)
+    sheet = commands.add_parser("sheet", help="Render the rewrites of image cases as images, side by side per run (loads an image model).")
+    sheet.add_argument("runs", nargs="+", help="Labels (or folders) of the runs, one column each after the user's prompt.")
+    sheet.add_argument("--label", required=True, help="Name of the sheet folder under runs/.")
+    sheet.add_argument("--tags", default=None, help="Comma-separated tags; only cases with any of them.")
+    sheet.add_argument("--cases", default=None, help="Comma-separated case ids.")
+    sheet.add_argument("--model", default="zit", help="Image model alias (default zit).")
+    sheet.add_argument("--seed", type=int, default=73914826, help="Seed for every image (default 73914826).")
+    sheet.add_argument("--ratio", default="2:3", help="Aspect ratio (default 2:3).")
+    sheet.add_argument("--size", default="s", help="Size preset (default s).")
+    sheet.add_argument("--runs-dir", type=Path, default=RUNS_DIR, help=argparse.SUPPRESS)
     compare = commands.add_parser("compare", help="Write a Markdown report comparing two runs.")
     compare.add_argument("base", help="Label (or folder) of the baseline run.")
     compare.add_argument("new", help="Label (or folder) of the run to compare.")
@@ -91,6 +101,18 @@ def _cmd_rescore(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_sheet(args: argparse.Namespace) -> int:
+    from bench.enhance.sheet import build_sheet
+
+    if not _LABEL_RE.match(args.label):
+        raise SystemExit(f"Invalid --label '{args.label}'.")
+    runs = tuple(load_run(_run_dir(args.runs_dir, name)) for name in args.runs)
+    cases = tuple(case.id for case in select_cases(load_cases(), tags=_split(args.tags), ids=_split(args.cases)))
+    sheet = build_sheet(runs, cases, args.runs_dir / args.label, model=args.model, seed=args.seed, ratio=args.ratio, size=args.size)
+    print(f"Wrote {sheet}")
+    return 0
+
+
 def _cmd_compare(args: argparse.Namespace) -> int:
     base, new = load_run(_run_dir(args.runs_dir, args.base)), load_run(_run_dir(args.runs_dir, args.new))
     out = args.out or args.runs_dir / f"compare-{base.label}-{new.label}.md"
@@ -103,7 +125,7 @@ def _cmd_compare(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Run the bench command line."""
     args = _parser().parse_args(argv)
-    commands = {"run": _cmd_run, "rescore": _cmd_rescore, "compare": _cmd_compare}
+    commands = {"run": _cmd_run, "rescore": _cmd_rescore, "sheet": _cmd_sheet, "compare": _cmd_compare}
     return commands[args.command](args)
 
 

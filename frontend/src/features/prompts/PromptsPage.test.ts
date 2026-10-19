@@ -41,7 +41,7 @@ function loaded(document: PromptDocument | null = sample(), extra: Partial<Promp
     revision: 'r1',
     raw_text: 'portrait: …',
     ...(document ? { document } : {}),
-    enhance_matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } },
+    enhance_matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } },
     ...extra,
   };
 }

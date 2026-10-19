@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from typing import Any
 
 from zvisiongenerator.utils.prompt_enhance import EnhanceContext, LengthPlan, plan_length, resolve_parts, word_count
@@ -117,7 +118,9 @@ def quotes_kept(source: str, output: str, *, lettering_only: bool = False) -> bo
 
 
 def _normalize(text: str) -> str:
-    return " ".join(_NON_WORD_RE.sub(" ", text.casefold()).split())
+    """Return *text* case-folded, accents removed ("café" → "cafe") and punctuation turned into spaces."""
+    folded = "".join(char for char in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(char))
+    return " ".join(_NON_WORD_RE.sub(" ", folded).split())
 
 
 def _phrase_found(phrase: str, text: str, *, stem: bool = False, gap: int = 0) -> bool:

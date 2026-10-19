@@ -31,7 +31,8 @@ export function workflowMode(workflow: Workflow): WorkflowMode {
   return workflow === 'txt2vid' || workflow === 'img2vid' || workflow === 'extend' ? 'video' : 'image';
 }
 
-const FALLBACK_SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', details: ['lighting', 'composition'], length: 'same', motion: ['action'], sound: [], note: '' };
+/** The enhance options when nothing is picked: Keep everywhere, Same length (the server's defaults). */
+export const DEFAULT_ENHANCE_SETTINGS: EnhanceSettings = { style: 'keep', mood: 'keep', theme: 'keep', details: [], length: 'same', camera: 'keep', pace: 'keep', motion: [], sound: [], note: '' };
 
 /**
  * What Rewrite starts as: an extension keeps its scene and writes the next action, and so does Image to Video, whose scene
@@ -67,7 +68,7 @@ export function runParts(state: DraftState, remembered: EnhanceParts = remembere
 
 /** The user's last-used options, with axes they never set (e.g. saved before an axis existed) taken from the backend matrix defaults. */
 export function effectiveEnhanceSettings(state: DraftState, contract: PromptEnhancerContract | undefined): EnhanceSettings {
-  const defaults = { ...FALLBACK_SETTINGS, ...contract?.matrix.defaults };
+  const defaults = { ...DEFAULT_ENHANCE_SETTINGS, ...contract?.matrix.defaults };
   const settings: EnhanceSettings = { ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...defaults.sound], ...state.enhanceSettings };
   delete settings.parts;
   return workflowMode(state.workflow) === 'video' ? { ...settings, parts: rememberedParts(state) } : settings;
@@ -84,34 +85,16 @@ export function hasAudio(state: DraftState, supported = true, sourceHasAudio: bo
 }
 
 /**
- * Whether *settings* would ask for no change at all (keep style and mood, no details, same length, no direction, no video motion or sound).
- *
- * A video that rewrites the action only (`parts` is `action`) always writes a new action, so it is never a no-op; pass the
- * parts the run uses (a blank scene means both), as `runParts` gives them.
- *
- * @param split The job is a video whose scene is blank and whose prompt is not, so the rewrite splits it.
- * @param caption The run writes a JSON caption, which is always a change.
- */
-export function isNoOpSettings(settings: EnhanceSettings, mode: WorkflowMode, audio = false, split = false, caption = false): boolean {
-  if (caption) return false;
-  // A video prompt written without a scene is split into scene and action, which is always a change.
-  if (mode === 'video' && split) return false;
-  if (mode === 'video' && settings.parts === 'action') return false;
-  const hasMotion = mode === 'video' && settings.motion.length > 0;
-  const hasSound = mode === 'video' && audio && settings.sound.length > 0;
-  return settings.style === 'keep' && settings.mood === 'keep' && settings.details.length === 0 && settings.length === 'same' && !settings.note.trim() && !hasMotion && !hasSound;
-}
-
-/**
- * Settings as sent to the backend; `motion` and `parts` only apply to video, `sound` only to video with audio, and a blank `note` is left out.
+ * Settings as sent to the backend; `camera`, `pace`, `motion` and `parts` only apply to video, `sound` only to video with audio,
+ * and a blank `note` is left out.
  *
  * The per-workflow Rewrite memory stays in the browser.
  */
 export function settingsPayload(settings: EnhanceSettings, mode: WorkflowMode, audio = false): Partial<EnhanceSettings> {
-  const { motion, sound, note, parts, partsByWorkflow: _remembered, ...rest } = settings;
+  const { camera, pace, motion, sound, note, parts, partsByWorkflow: _remembered, ...rest } = settings;
   const base: Partial<EnhanceSettings> = note.trim() ? { ...rest, note } : rest;
   if (mode !== 'video') return base;
-  const video = parts === undefined ? { ...base, motion } : { ...base, parts, motion };
+  const video = parts === undefined ? { ...base, camera, pace, motion } : { ...base, parts, camera, pace, motion };
   return audio ? { ...video, sound } : video;
 }
 
@@ -147,28 +130,6 @@ export function enhanceContext(state: DraftState, audioSupported = true, sourceH
     audio: hasAudio(state, audioSupported),
     reference_image: state.workflow === 'img2img' || state.workflow === 'img2vid',
   };
-}
-
-/**
- * Whether an enhancement of *state* always changes the text, so no setting makes it a no-op.
- *
- * True for a video prompt with no scene but with a prompt (split into scene and action), and for an extension,
- * which always writes a new action.
- */
-export function splitsPrompt(state: DraftState): boolean {
-  if (state.workflow === 'extend') return true;
-  return workflowMode(state.workflow) === 'video' && state.scene.trim() === '' && state.prompt.trim() !== '';
-}
-
-/**
- * Whether auto-enhance always changes the text of *state*'s job, so no setting makes it a no-op.
- *
- * Auto-enhance rewrites each prompt at submit time (also in file mode, where the prompt box is blank), so unlike
- * `splitsPrompt` it needs no prompt: a blank default scene is enough for a video, and an extension always writes a new action.
- */
-export function autoSplitsPrompt(state: DraftState): boolean {
-  if (state.workflow === 'extend') return true;
-  return workflowMode(state.workflow) === 'video' && state.scene.trim() === '';
 }
 
 /** Whether there is text to run: a scene or a prompt for video, a prompt for images. An extension may run with neither (it continues naturally). */

@@ -28,6 +28,7 @@ DEFAULT_MAX_NEW_TOKENS = 700
 DEFAULT_IDLE_RELEASE_SECONDS = 120.0
 TEXT_UPDATE_INTERVAL_SECONDS = 0.1
 
+_WORD_RE = re.compile(r"\w+")
 _THINK_RE = re.compile(r"<think>.*?(?:</think>|$)", re.S)
 _SPECIAL_TOKEN_RE = re.compile(r"<\|[^|>]*\|>")
 _LABEL_RE = re.compile(r"^\s*(?:rewritten prompt|enhanced prompt|prompt)\s*:\s*", re.I)
@@ -44,16 +45,25 @@ NO_USABLE_MESSAGE = "The enhancer returned no usable rewrite (empty, unchanged, 
 
 @dataclass(frozen=True)
 class EnhanceOption:
-    """One selectable value on an enhancement axis."""
+    """One selectable value on an enhancement axis.
+
+    Attributes:
+        description: One line for the Web UI menu: what the option asks the enhancer for.
+        group: The menu group it is listed under (Style: Photo or Art; Theme: its five groups), or None.
+        hidden: Accepted from prompt files and the CLI for compatibility but not offered in the Web UI.
+    """
 
     slug: str
     label: str
     instruction: str
+    description: str = ""
+    group: str | None = None
+    hidden: bool = False
 
 
 @dataclass(frozen=True)
 class EnhanceAxis:
-    """One axis of the enhancement option matrix."""
+    """One axis of the enhancement option matrix; a single-choice axis starts with its ``keep`` option where it has one."""
 
     key: str
     label: str
@@ -71,7 +81,31 @@ class EnhanceAxis:
         for option in self.options:
             if option.slug == slug:
                 return option
-        raise ValueError(f"Unknown {self.key} '{slug}'. Valid values: {', '.join(self.slugs())}.")
+        raise ValueError(f"Unknown {self.key} '{slug}'. Valid values: {', '.join(option.slug for option in self.options if not option.hidden)}.")
+
+
+KEEP = "keep"
+# Every Photo style asks for a real photograph: the camera, the light source and natural skin and surface texture, without
+# the words that push image models toward a glossy, waxy, rendered look. Listing pores, wear or dust as examples made the
+# enhancer age people and dirty scenes (bench picture sheet), so the rule names the look to avoid instead.
+PHOTO_REALISM = (
+    "Write it as a real photograph: say what camera or lens took it and where the light comes from. "
+    "Show skin and surfaces as a camera sees them: natural skin texture, not airbrushed or waxy; "
+    "never make people older, dirtier or more worn than the prompt says. "
+    'Use plain, specific words; never "hyperrealistic", "8k", "masterpiece", "flawless", "perfect" or "smooth skin".'
+)
+
+
+def _photo(slug: str, label: str, what: str, description: str) -> EnhanceOption:
+    return EnhanceOption(slug, label, f"Style: {what} {PHOTO_REALISM}", description, "Photo")
+
+
+def _art(slug: str, label: str, what: str, description: str) -> EnhanceOption:
+    return EnhanceOption(slug, label, f"Style: {what}", description, "Art")
+
+
+def _keep(axis: str) -> EnhanceOption:
+    return EnhanceOption(KEEP, "Keep", f"{axis}: keep the user's existing {axis.lower()}; do not impose a new one.", "Don't impose one; keep what your prompt says")
 
 
 STYLE_AXIS = EnhanceAxis(
@@ -80,78 +114,129 @@ STYLE_AXIS = EnhanceAxis(
     multi=False,
     video_only=False,
     options=(
-        EnhanceOption("keep", "Keep", "Style: keep the user's existing style; do not impose a new one."),
-        EnhanceOption("photo", "Photographic", "Style: photographic. Describe it as a photograph."),
-        EnhanceOption(
+        _keep("Style"),
+        _photo("photo", "Natural photo", "a natural photograph in real, natural light; nothing staged.", "A real photograph in natural light; real skin and surface texture"),
+        _photo(
             "candid",
             "Candid",
-            "Style: candid snapshot. Describe it as an unposed, casual phone photo in an everyday setting with natural available light; no studio lighting, retouching or cinematic color grading.",
+            "a candid snapshot: an unposed, casual phone photo of everyday life with available light or a phone flash and slightly imperfect framing; no studio lighting, retouching or color grading.",
+            "An unposed phone snapshot of everyday life",
         ),
-        EnhanceOption(
-            "street",
-            "Street photography",
-            "Style: street photography. Describe it as a documentary 35mm photograph of everyday public life, with passersby and available light.",
+        _photo("street", "Street", "street photography: a documentary 35mm photograph of public life, with available light and a moment caught in motion.", "A 35mm documentary photo of public life"),
+        _photo(
+            "film",
+            "Analog film",
+            "an analog film photograph: name the film stock (such as Portra 400 or Tri-X), its grain, color and slight softness.",
+            "A named film stock: its grain, color and softness",
         ),
-        EnhanceOption("film", "Analog film", "Style: analog film photograph. Name the film stock and its grain and color rendering."),
-        EnhanceOption(
-            "bw",
-            "Black & white",
-            "Style: black-and-white photograph. Describe the tonal range, contrast and light instead of colors.",
-        ),
-        EnhanceOption(
+        _photo("bw", "Black & white", "a black-and-white photograph: describe the tonal range, contrast and light instead of colors.", "Tones, contrast and light instead of color"),
+        _photo(
             "portrait",
             "Studio portrait",
-            "Style: studio portrait or fashion editorial photograph. Describe the lighting setup and backdrop.",
+            "a studio portrait or fashion editorial: describe the lighting setup (key, fill, rim), the backdrop, the lens and the pose.",
+            "Lighting setup, backdrop, lens and pose",
         ),
-        EnhanceOption(
-            "product",
-            "Product shot",
-            "Style: commercial product photograph. Describe the studio lighting, surface and backdrop.",
-        ),
-        EnhanceOption("cinematic", "Cinematic", "Style: cinematic. Describe it as a shot from a film."),
-        EnhanceOption("illustration", "Illustration", "Style: digital illustration. Name the style explicitly."),
-        EnhanceOption("anime", "Anime", "Style: anime illustration. Name the style explicitly."),
-        EnhanceOption("comic", "Comic", "Style: comic book art with inked line work. Name the style explicitly."),
-        EnhanceOption("3d", "3D render", "Style: 3D render. Name the style explicitly."),
-        EnhanceOption("painterly", "Painterly", "Style: classical oil painting. Name the medium explicitly."),
+        _photo("product", "Product", "a commercial product photograph: describe the studio lighting, the surface, the backdrop and the reflections.", "Studio light, surface, backdrop, reflections"),
+        _photo("cinematic", "Cinematic", "a still from a film: name the shot size, the lens look, the lighting setup and the color grade.", "A film still: shot size, lens look, lighting, grade"),
+        _art("illustration", "Illustration", "a digital illustration: name the technique, the line and edge quality and the palette.", "Digital illustration: technique, line, palette"),
+        _art("anime", "Anime", "anime art: name the line work, the cel shading, the palette and the background treatment.", "Line work, cel shading, palette, background"),
+        _art("comic", "Comic", "comic book art: inked line work, flat color or halftone, and panel-like framing.", "Inked lines, flat color or halftone"),
+        _art("3d", "3D render", "a 3D render: name the render style (stylized or realistic), the materials, the lighting and the camera.", "Render style, materials, lighting, camera"),
+        _art("painterly", "Oil painting", "a classical oil painting: name the brushwork, the palette and the light.", "Brushwork, palette and light"),
+        _art("watercolor", "Watercolor", "a watercolor painting: soft washes, colors bleeding at the edges, visible paper texture.", "Soft washes, bleeding edges, paper"),
+        _art("gouache", "Gouache", "a gouache painting: opaque matte paint and flat, layered shapes with soft edges.", "Opaque matte paint, flat layered shapes"),
+        _art("sketch", "Sketch", "a pencil or ink sketch: line weight, hatching and the paper, with little or no color.", "Pencil or ink: line weight, hatching"),
+        _art("pixel", "Pixel art", "pixel art: a low-resolution look, a limited palette and crisp, visible pixels.", "Limited palette, crisp pixels"),
+        _art("concept", "Concept art", "digital concept art: painterly forms, dramatic mood lighting and a sense of scale.", "Painterly forms, mood light, scale"),
+        _art("graphic", "Graphic design", "graphic design or a poster: a clear layout, flat shapes, areas for type and a limited palette.", "Layout, flat shapes, type"),
+        _art("isometric", "Isometric", "an isometric 3D diorama: a small, clean world seen from above at an angle, with neat edges.", "A small-world diorama seen at an angle"),
+        _art("claymation", "Claymation", "claymation: sculpted clay figures and sets with fingerprints and a stop-motion look.", "Clay figures, fingerprints, stop-motion"),
+        _art("ukiyo-e", "Ukiyo-e", "a ukiyo-e woodblock print: bold outlines, flat color areas and visible paper grain.", "Woodblock print: outlines, flat color"),
+        _art("papercraft", "Papercraft", "papercraft: layered cut paper with soft shadows between the layers.", "Layered cut paper, soft shadows"),
     ),
-    default=("keep",),
+    default=(KEEP,),
 )
+
+
+def _mood(slug: str, label: str, instruction: str, description: str) -> EnhanceOption:
+    return EnhanceOption(slug, label, instruction, description)
+
+
 MOOD_AXIS = EnhanceAxis(
     key="mood",
     label="Mood",
     multi=False,
     video_only=False,
     options=(
-        EnhanceOption("keep", "Keep", "Mood: keep the user's existing mood; do not impose a new one."),
-        EnhanceOption("serene", "Serene", "Mood: calm and serene. Convey stillness and peace through soft light, gentle color and quiet surroundings."),
-        EnhanceOption("joyful", "Joyful", "Mood: joyful and upbeat. Convey warmth and energy through bright light, lively color and open expressions."),
-        EnhanceOption("romantic", "Romantic", "Mood: romantic and intimate. Convey tenderness through warm, soft light and close, gentle framing."),
-        EnhanceOption("melancholic", "Melancholic", "Mood: melancholic and wistful. Convey solitude through muted color, subdued light and empty space."),
-        EnhanceOption("mysterious", "Mysterious", "Mood: mysterious. Convey intrigue through shadow, haze and partly hidden detail."),
-        EnhanceOption("eerie", "Eerie", "Mood: eerie and unsettling. Convey unease through cold tones, odd stillness and ominous shadow."),
-        EnhanceOption("dramatic", "Dramatic", "Mood: dramatic and tense. Convey intensity through hard contrast, charged light and a decisive moment."),
-        EnhanceOption("epic", "Epic", "Mood: epic and awe-inspiring. Convey grandeur through vast scale, sweeping depth and majestic light."),
-        EnhanceOption("whimsical", "Whimsical", "Mood: whimsical and playful. Convey a dreamlike lightness through gentle color and charming detail."),
-        EnhanceOption("nostalgic", "Nostalgic", "Mood: nostalgic. Convey a fond memory through warm, faded color and soft, golden light."),
+        _keep("Mood"),
+        _mood("serene", "Serene", "Mood: calm and serene. Convey stillness and peace through soft light, gentle color and quiet surroundings.", "Stillness, soft light, gentle color"),
+        _mood("cozy", "Cozy", "Mood: cozy and warm. Convey comfort through warm low light, soft textures and a sheltered, lived-in space.", "Warm low light, soft textures, enclosed"),
+        _mood("joyful", "Joyful", "Mood: joyful and upbeat. Convey warmth and energy through bright light, lively color and open expressions.", "Bright light, lively color, open faces"),
+        _mood("romantic", "Romantic", "Mood: romantic and intimate. Convey tenderness through warm, soft light and close, gentle framing.", "Warm soft light, close tender framing"),
+        _mood("whimsical", "Whimsical", "Mood: whimsical and playful. Convey a dreamlike lightness through gentle color and charming detail.", "Playful, dreamlike, charming detail"),
+        _mood("nostalgic", "Nostalgic", "Mood: nostalgic. Convey a fond memory through warm, faded color and soft, golden light.", "Warm faded color, golden light"),
+        _mood("melancholic", "Melancholic", "Mood: melancholic and wistful. Convey solitude through muted color, subdued light and empty space.", "Muted color, subdued light, empty space"),
+        _mood("mysterious", "Mysterious", "Mood: mysterious. Convey intrigue through shadow, haze and partly hidden detail.", "Shadow, haze, partly hidden detail"),
+        _mood("eerie", "Eerie", "Mood: eerie and unsettling. Convey unease through cold tones, odd stillness and ominous shadow.", "Cold tones, odd stillness, ominous shadow"),
+        _mood("dramatic", "Dramatic", "Mood: dramatic and tense. Convey intensity through hard contrast, charged light and a decisive moment.", "Hard contrast, charged light, a decisive moment"),
+        _mood("epic", "Epic", "Mood: epic and awe-inspiring. Convey grandeur through vast scale, sweeping depth and majestic light.", "Vast scale, sweeping depth, majestic light"),
     ),
-    default=("keep",),
+    default=(KEEP,),
+)
+
+
+def _theme(slug: str, label: str, cues: str, description: str, group: str) -> EnhanceOption:
+    instruction = f"Theme: {label.lower()}. Carry it through {cues}, in the styling, materials, color, composition and small details; never add people, animals or major objects for it."
+    return EnhanceOption(slug, label, instruction, description, group)
+
+
+THEME_AXIS = EnhanceAxis(
+    key="theme",
+    label="Theme",
+    multi=False,
+    video_only=False,
+    options=(
+        _keep("Theme"),
+        _theme("zen", "Zen", "stillness, simplicity, natural materials and balanced empty space", "Stillness, simplicity, natural materials, empty space", "Calm & sacred"),
+        _theme("spiritual", "Spiritual", "reverence, soft radiant light and sacred, ritual details", "Reverence, radiant light, sacred detail", "Calm & sacred"),
+        _theme("rustic", "Rustic", "worn wood, handmade things and earthy textures", "Worn wood, handmade things, earthy textures", "Calm & sacred"),
+        _theme("sensual", "Sensual", "intimacy and allure: pose, light on skin, soft fabrics and closeness", "Intimacy and allure: pose, light on skin, soft fabric", "Allure"),
+        _theme("glamorous", "Glamorous", "luxury: polished surfaces, fashion and elegant styling", "Luxury: polish, fashion, elegant styling", "Allure"),
+        _theme("gothic", "Gothic", "dark romance: ornate architecture, candles and deep shadow", "Dark romance: ornate, candles, deep shadow", "Dark"),
+        _theme("noir", "Noir", "hard shadows, smoke, rain-slick streets and a 1940s crime feel", "Hard shadows, smoke, 1940s crime", "Dark"),
+        _theme("horror", "Horror", "dread: unsettling details, a sense of wrongness and darkness at the edges", "Dread, wrongness, darkness at the edges", "Dark"),
+        _theme("dystopian", "Dystopian", "decay, control, brutal architecture and a broken future", "Decay, control, a broken future", "Dark"),
+        _theme("fairytale", "Fairytale", "enchantment, storybook charm and soft magic", "Enchantment, storybook charm", "Wonder"),
+        _theme("mythic", "Mythic", "legend: ancient grandeur, heroic scale and timeless symbols", "Legend: ancient grandeur, heroic scale", "Wonder"),
+        _theme("surreal", "Surreal", "dream logic: impossible scale and odd juxtapositions", "Dream logic, impossible juxtapositions", "Wonder"),
+        _theme("retro", "Retro", "a past era's design and faded palette (the era the prompt names, or mid-century)", "A past era's design and faded palette", "Era & tech"),
+        _theme("futuristic", "Futuristic", "sleek forms, advanced technology and clean light", "Sleek forms, advanced technology", "Era & tech"),
+        _theme("cyberpunk", "Cyberpunk", "neon tech-noir, a dense city, high tech and low life", "Neon tech-noir, dense city", "Era & tech"),
+        _theme("steampunk", "Steampunk", "brass, gears and Victorian machinery", "Brass, gears, Victorian machinery", "Era & tech"),
+    ),
+    default=(KEEP,),
 )
 DETAILS_AXIS = EnhanceAxis(
     key="details",
-    label="Details",
+    label="Focus on",
     multi=True,
     video_only=False,
     options=(
-        EnhanceOption("lighting", "Lighting", "lighting"),
-        EnhanceOption("composition", "Composition", "composition and framing"),
-        EnhanceOption("camera", "Camera & lens", "camera and lens"),
-        EnhanceOption("materials", "Materials & textures", "materials and textures"),
-        EnhanceOption("color", "Color & mood", "color and mood"),
-        EnhanceOption("environment", "Environment", "environment and background"),
-        EnhanceOption("subject", "Subject", "the subject's appearance, clothing and pose"),
+        EnhanceOption("lighting", "Lighting", "lighting", "The light: its source, direction, quality and color"),
+        EnhanceOption("composition", "Composition", "composition and framing", "Framing: what is where, foreground and background"),
+        EnhanceOption(
+            "camera",
+            "Camera & viewpoint",
+            "camera and viewpoint (for a photo the camera, lens, angle and depth of field; for art the viewpoint and framing)",
+            "Camera, lens and angle; viewpoint for art",
+        ),
+        EnhanceOption("materials", "Materials & textures", "materials and textures", "What things are made of and how they feel"),
+        EnhanceOption("color", "Color palette", "the color palette and where each color appears", "The palette and where each color appears"),
+        EnhanceOption("environment", "Environment", "environment and background", "The setting and background"),
+        EnhanceOption("subject", "Subject", "the subject's appearance, clothing and pose", "The main subject's looks, clothing and pose"),
+        EnhanceOption("expression", "Expression", "faces, gaze and body language: the emotion the people show", "Faces, gaze and body language"),
     ),
-    default=("lighting", "composition"),
+    default=(),
 )
 LENGTH_AXIS = EnhanceAxis(
     key="length",
@@ -159,44 +244,89 @@ LENGTH_AXIS = EnhanceAxis(
     multi=False,
     video_only=False,
     options=(
-        EnhanceOption("shorter", "Shorter", "shorter"),
-        EnhanceOption("same", "Same", "same"),
-        EnhanceOption("longer", "Longer", "longer"),
-        EnhanceOption("extra", "Extra long", "extra"),
+        EnhanceOption("shorter", "Shorter", "shorter", "About half, keeping every element you named"),
+        EnhanceOption("same", "Same", "same", "Your length; short prompts grow to about 25 words"),
+        EnhanceOption("longer", "Longer", "longer", "About double, at least 40 words"),
+        EnhanceOption("extra", "Extra long", "extra", "About triple, at least 80 words"),
     ),
     default=("same",),
 )
 MOTION_AXIS = EnhanceAxis(
     key="motion",
-    label="Motion",
+    label="Describe",
     multi=True,
     video_only=True,
     options=(
-        EnhanceOption("action", "Action / sequence", "the action as a clear sequence of events"),
-        EnhanceOption("camera-move", "Camera movement", "camera movement"),
-        EnhanceOption("pacing", "Pacing", "pacing and timing"),
+        EnhanceOption("action", "Action sequence", "the action as a clear sequence of events", "What happens, as clear beats in time order"),
+        EnhanceOption("secondary", "Secondary motion", "the secondary motion that moves along with it: hair, cloth, water, smoke, leaves or dust", "Hair, cloth, water, smoke, leaves, dust"),
+        # Older prompt files and CLI specs: the Camera and Pace choices replace these in the Web UI.
+        EnhanceOption("camera-move", "Camera movement", "camera movement", hidden=True),
+        EnhanceOption("pacing", "Pacing", "pacing and timing", hidden=True),
     ),
-    default=("action",),
+    default=(),
 )
+
+
+def _camera(slug: str, label: str, move: str, description: str) -> EnhanceOption:
+    return EnhanceOption(slug, label, move, description)
+
+
+CAMERA_AXIS = EnhanceAxis(
+    key="camera",
+    label="Camera",
+    multi=False,
+    video_only=True,
+    options=(
+        EnhanceOption(KEEP, "Keep", "", "Only what your prompt says; nothing added"),
+        _camera("auto", "Auto", "describe one camera movement that suits the action.", "The enhancer picks a move that suits the action"),
+        _camera("static", "Static", "a locked-off camera that does not move; only the subject moves.", "Locked off; only the subject moves"),
+        _camera("push-in", "Push in", "a slow dolly push in toward the subject.", "A slow dolly toward the subject"),
+        _camera("pull-back", "Pull back", "a slow dolly pulling back from the subject, revealing more of the scene.", "A slow dolly away, revealing more"),
+        _camera("pan", "Pan", "the camera pans sideways across the scene.", "The camera turns sideways"),
+        _camera("tilt", "Tilt", "the camera tilts up or down to reveal the scene.", "The camera turns up or down"),
+        _camera("tracking", "Tracking", "a tracking shot that follows the subject alongside.", "The camera follows alongside"),
+        _camera("orbit", "Orbit", "the camera orbits around the subject.", "The camera circles the subject"),
+        _camera("handheld", "Handheld", "a handheld camera, slightly shaky and close, documentary style.", "Slightly shaky, close, documentary"),
+        _camera("aerial", "Aerial", "an aerial drone shot moving over the scene from above.", "A drone shot moving over the scene"),
+    ),
+    default=(KEEP,),
+)
+PACE_AXIS = EnhanceAxis(
+    key="pace",
+    label="Pace",
+    multi=False,
+    video_only=True,
+    options=(
+        EnhanceOption(KEEP, "Keep", "", "Natural speed"),
+        EnhanceOption("slow-motion", "Slow motion", "slow motion; time is stretched so every movement and detail is visible.", "Time stretched; every detail visible"),
+        EnhanceOption("slow", "Slow", "slow, unhurried movement.", "Unhurried movement"),
+        EnhanceOption("brisk", "Brisk", "brisk, lively movement.", "Lively movement"),
+        EnhanceOption("fast", "Fast", "fast, quick action.", "Quick action, more beats in the clip"),
+    ),
+    default=(KEEP,),
+)
+# How much action fits a clip at each pace: the clip's seconds are scaled before they are turned into beats.
+_PACE_BEAT_SCALE = {KEEP: 1.0, "slow-motion": 0.5, "slow": 0.75, "brisk": 1.5, "fast": 2.0}
 SOUND_AXIS = EnhanceAxis(
     key="sound",
     label="Sound",
     multi=True,
     video_only=True,
     options=(
-        EnhanceOption("ambient", "Ambience", "the ambient soundscape of the setting"),
-        EnhanceOption("effects", "Sound effects", "sound effects synced to the visible action"),
+        EnhanceOption("ambient", "Ambience", "the ambient soundscape of the setting", "The setting's soundscape"),
+        EnhanceOption("effects", "Sound effects", "sound effects synced to the visible action", "Sounds synced to the action"),
         EnhanceOption(
             "dialogue",
             "Dialogue",
             "speech: keep any quoted lines word for word, or write short lines that fit the scene when there are none, and say who speaks and in what voice",
+            "Your quoted lines, or short lines that fit",
         ),
-        EnhanceOption("music", "Music", "music: whether it plays in the scene or as a score, its genre and tempo"),
+        EnhanceOption("music", "Music", "music: whether it plays in the scene or as a score, its genre and tempo", "In the scene or as a score: genre, tempo"),
     ),
     default=(),
 )
-# Display order in the Web UI: Length comes last, next to the Direction field.
-ENHANCE_AXES: tuple[EnhanceAxis, ...] = (STYLE_AXIS, MOOD_AXIS, DETAILS_AXIS, MOTION_AXIS, SOUND_AXIS, LENGTH_AXIS)
+# Display order in the Web UI: Look (Style, Mood, Theme), Focus on, Motion (Camera, Pace, Describe), Sound, then Length.
+ENHANCE_AXES: tuple[EnhanceAxis, ...] = (STYLE_AXIS, MOOD_AXIS, THEME_AXIS, DETAILS_AXIS, CAMERA_AXIS, PACE_AXIS, MOTION_AXIS, SOUND_AXIS, LENGTH_AXIS)
 _AXES_BY_KEY = {axis.key: axis for axis in ENHANCE_AXES}
 # Axes that only apply when the video has an audio track.
 AUDIO_AXES = frozenset({SOUND_AXIS.key})
@@ -207,6 +337,7 @@ NOTE_MAX_CHARS = 300
 PARTS_KEY = "parts"
 PARTS_OPTIONS = (("both", "Scene and action"), ("action", "Action only"))
 PARTS_VALUES = tuple(slug for slug, _label in PARTS_OPTIONS)
+PARTS_DESCRIPTIONS = {"both": "Rewrite both parts; a blank scene is written from your text", "action": "Keep your scene exactly; write the action to fit it"}
 _SETTING_KEYS = (*_AXES_BY_KEY, NOTE_KEY, PARTS_KEY)
 _DURATION_BEATS = ((5.0, "one continuous action"), (10.0, "two or three beats at most"))
 
@@ -223,8 +354,11 @@ class EnhanceSettings:
 
     style: str = STYLE_AXIS.default[0]
     mood: str = MOOD_AXIS.default[0]
+    theme: str = THEME_AXIS.default[0]
     details: tuple[str, ...] = DETAILS_AXIS.default
     length: str = LENGTH_AXIS.default[0]
+    camera: str = CAMERA_AXIS.default[0]
+    pace: str = PACE_AXIS.default[0]
     motion: tuple[str, ...] = MOTION_AXIS.default
     sound: tuple[str, ...] = SOUND_AXIS.default
     note: str = ""
@@ -283,7 +417,7 @@ def matrix_contract() -> dict[str, Any]:
             "key": PARTS_KEY,
             "label": "Rewrite",
             "video_only": True,
-            "options": [{"slug": slug, "label": label} for slug, label in PARTS_OPTIONS],
+            "options": [{"slug": slug, "label": label, "description": PARTS_DESCRIPTIONS[slug]} for slug, label in PARTS_OPTIONS],
             "default": None,
         },
         "axes": [
@@ -293,7 +427,7 @@ def matrix_contract() -> dict[str, Any]:
                 "multi": axis.multi,
                 "video_only": axis.video_only,
                 "audio_only": axis.key in AUDIO_AXES,
-                "options": [{"slug": option.slug, "label": option.label} for option in axis.options],
+                "options": [{"slug": option.slug, "label": option.label, "description": option.description, "group": option.group} for option in axis.options if not option.hidden],
                 "default": list(axis.default),
             }
             for axis in ENHANCE_AXES
@@ -307,8 +441,11 @@ def settings_to_mapping(settings: EnhanceSettings) -> dict[str, Any]:
     return {
         "style": settings.style,
         "mood": settings.mood,
+        "theme": settings.theme,
         "details": list(settings.details),
         "length": settings.length,
+        "camera": settings.camera,
+        "pace": settings.pace,
         "motion": list(settings.motion),
         "sound": list(settings.sound),
         "note": settings.note,
@@ -476,15 +613,21 @@ def parse_enhance_spec(spec: str | None, *, mode: str) -> EnhanceSettings:
 
 
 def format_enhance_spec(settings: EnhanceSettings, *, mode: str = "video") -> str:
-    """Serialize *settings* to the CLI spec grammar (``motion``, a non-empty ``sound`` and a set ``parts`` only for video; ``note`` is left out)."""
-    parts = [f"style={settings.style}", f"mood={settings.mood}", f"details={'+'.join(settings.details)}", f"length={settings.length}"]
-    if mode == "video":
-        parts.append(f"motion={'+'.join(settings.motion)}")
-        if settings.sound:
-            parts.append(f"sound={'+'.join(settings.sound)}")
-        if settings.parts is not None:
-            parts.append(f"{PARTS_KEY}={settings.parts}")
-    return ",".join(parts)
+    """Serialize *settings* to the CLI spec grammar, compactly: only the values that differ from the defaults.
+
+    Video-only values (``camera``, ``pace``, ``motion``, ``sound``, ``parts``) are written for video only and ``note`` never.
+    Settings that are all defaults give ``style=keep``, so the result is never empty.
+    """
+    current, defaults = settings_to_mapping(settings), settings_to_mapping(EnhanceSettings())
+    parts = []
+    for axis in ENHANCE_AXES:
+        if (axis.video_only and mode != "video") or current[axis.key] == defaults[axis.key]:
+            continue
+        value = current[axis.key]
+        parts.append(f"{axis.key}={'+'.join(value) if axis.multi else value}")
+    if mode == "video" and settings.parts is not None:
+        parts.append(f"{PARTS_KEY}={settings.parts}")
+    return ",".join(parts) or f"{STYLE_AXIS.key}={KEEP}"
 
 
 def parse_enhance_entry(value: Any, *, mode: str, where: str) -> EnhanceSettings | None:
@@ -505,28 +648,15 @@ def parse_enhance_entry(value: Any, *, mode: str, where: str) -> EnhanceSettings
     raise ValueError(f"Invalid 'enhance' in {where}: expected true, false, or a mapping, got {type(value).__name__}.")
 
 
-def validate_settings(settings: EnhanceSettings, *, mode: str, split: bool = False, caption: bool = False) -> None:
-    """Reject unknown slugs and the no-op combination (keep style and mood, no details, same length, no motion, sound or direction).
-
-    Args:
-        split: Whether a video prompt has no scene, so the rewrite splits it into scene and action (never a no-op).
-            ``parts="action"`` is never a no-op either.
-        caption: Whether the rewrite writes a JSON caption, which is never a no-op.
-    """
+def validate_settings(settings: EnhanceSettings, *, mode: str) -> None:
+    """Reject unknown slugs. Every combination is a rewrite: with nothing picked it is the general rewrite (see ``general_rule``)."""
     _check_mode(mode)
     if settings.parts is not None and settings.parts not in PARTS_VALUES:
         raise ValueError(f"Rewrite must be one of: {', '.join(PARTS_VALUES)}.")
-    STYLE_AXIS.option(settings.style)
-    MOOD_AXIS.option(settings.mood)
-    LENGTH_AXIS.option(settings.length)
-    for slug in settings.details:
-        DETAILS_AXIS.option(slug)
-    for slug in settings.motion:
-        MOTION_AXIS.option(slug)
-    for slug in settings.sound:
-        SOUND_AXIS.option(slug)
-    if not caption and is_noop(settings, mode=mode, split=split):
-        raise ValueError("Nothing to enhance: pick a style, a mood, a detail, a length, or write a direction.")
+    for axis in ENHANCE_AXES:
+        value = getattr(settings, axis.key)
+        for slug in value if axis.multi else (value,):
+            axis.option(slug)
 
 
 def resolve_enhance_ceiling(config: dict[str, Any], *, family: str | None, mode: str) -> int:
@@ -598,53 +728,6 @@ def resolve_parts(settings: EnhanceSettings, *, scene: str | None, extends: bool
     return "action" if wanted == "action" and has_scene else "both"
 
 
-def is_noop(settings: EnhanceSettings, *, mode: str, split: bool = False) -> bool:
-    """Return whether *settings* ask for no change in *mode* (keep style and mood, no details, same length, no direction, no video motion or sound).
-
-    A video prompt that *split* into scene and action (blank scene, non-blank prompt) is always a change, and so is
-    ``parts="action"``: the action is rewritten to fit the scene (or the text is split when there is no scene).
-    """
-    if mode == "video" and (split or settings.parts == "action"):
-        return False
-    has_video_axes = mode == "video" and bool(settings.motion or settings.sound)
-    return settings.style == "keep" and settings.mood == "keep" and not settings.details and settings.length == "same" and not settings.note and not has_video_axes
-
-
-def enhance_by_set_for_mode(
-    enhance_by_set: dict[str, list[EnhanceSettings | None]] | None,
-    *,
-    mode: str,
-    scene_by_set: dict[str, list[str | None]] | None = None,
-    job_scene: str | None = None,
-    caption: bool = False,
-) -> dict[str, list[EnhanceSettings | None]] | None:
-    """Drop prompt-file entries that change nothing in *mode* (e.g. motion-only entries in an image run), warning once.
-
-    Args:
-        scene_by_set: Each entry's scene, aligned with *enhance_by_set*; video entries without a scene split their prompt into scene and action.
-        job_scene: The scene used by entries that have none of their own.
-        caption: The job writes JSON captions, which always change the prompt, so nothing is dropped.
-    """
-    if not enhance_by_set or caption:
-        return enhance_by_set
-    dropped = 0
-    result: dict[str, list[EnhanceSettings | None]] = {}
-    for set_name, entries in enhance_by_set.items():
-        kept: list[EnhanceSettings | None] = []
-        for index, entry in enumerate(entries):
-            split = entry_scene(scene_by_set, set_name, index, job_scene) is None
-            if entry is not None and is_noop(entry, mode=mode, split=split):
-                dropped += 1
-                entry = None
-            kept.append(entry)
-        result[set_name] = kept
-    if dropped:
-        noun = "entry asks" if dropped == 1 else "entries ask"
-        media = "images" if mode == "image" else "videos"
-        warnings.warn(f"{dropped} prompt-file 'enhance:' {noun} for no change in {media} (keep style and mood, no details, same length, no direction); not enhanced.", stacklevel=2)
-    return result
-
-
 def enhancement_requested(*, disabled: bool, override: EnhanceSettings | None, enhance_by_set: dict[str, list[EnhanceSettings | None]] | None) -> bool:
     """Return whether any prompt in the job will be enhanced."""
     if disabled:
@@ -694,8 +777,12 @@ def strip_reasoning(text: str) -> str:
     return _THINK_RE.sub("", text)
 
 
-def duration_beats(seconds: float) -> str:
-    """Return how many beats of action fit *seconds*: one continuous action, two or three beats, or a short sequence."""
+def duration_beats(seconds: float, pace: str = KEEP) -> str:
+    """Return how many beats of action fit *seconds* at *pace*: one continuous action, two or three beats, or a short sequence.
+
+    A faster pace fits more action into the same time, slow motion less.
+    """
+    seconds *= _PACE_BEAT_SCALE.get(pace, 1.0)
     return next((text for limit, text in _DURATION_BEATS if seconds <= limit), "a short sequence of beats")
 
 
@@ -720,11 +807,16 @@ def normalize_text(text: str) -> str:
     return " ".join(text.lower().split())
 
 
+def _echo_key(text: str) -> str:
+    """Return the words of *text* in lower case, without punctuation, so a rewrite that only recases or repunctuates is an echo."""
+    return " ".join(_WORD_RE.findall(text.casefold()))
+
+
 def is_unusable(output: str, original: str) -> bool:
-    """Return whether *output* is empty, an echo of *original*, or starts with a refusal."""
+    """Return whether *output* is empty, an echo of *original* (case and punctuation aside), or starts with a refusal."""
     if not output.strip():
         return True
-    if normalize_text(output) == normalize_text(original):
+    if _echo_key(output) == _echo_key(original):
         return True
     return bool(_REFUSAL_RE.match(output))
 
@@ -761,8 +853,8 @@ def frame_rule(orientation: str) -> str:
     return f"Compose for a {orientation} frame; never mention the frame or its shape."
 
 
-def context_rules(mode: str, context: EnhanceContext) -> list[str]:
-    """Return the rules for the reference image, frame shape and clip length."""
+def context_rules(mode: str, context: EnhanceContext, *, pace: str = KEEP) -> list[str]:
+    """Return the rules for the reference image, frame shape and clip length (how much action fits depends on *pace*)."""
     rules: list[str] = []
     if context.reference_image:
         if mode == "video":
@@ -775,24 +867,53 @@ def context_rules(mode: str, context: EnhanceContext) -> list[str]:
     if context.orientation is not None:
         rules.append(frame_rule(context.orientation))
     if mode == "video" and context.seconds is not None:
-        beats = duration_beats(context.seconds)
+        beats = duration_beats(context.seconds, pace)
         rules.append(f"Duration: about {max(1, round(context.seconds))} seconds; fit the action to it: {beats}.")
     return rules
 
 
 def action_rules(settings: EnhanceSettings, context: EnhanceContext, *, for_pair: bool = False) -> list[str]:
-    """Return the motion and sound rules of a video rewrite; sound only when the job has an audio track.
+    """Return the camera, pace, motion and sound rules of a video rewrite; sound only when the job has an audio track.
 
-    They open with their own names ("Motion: describe ..."), or with "For the ACTION" in a scene-and-action rewrite.
+    They open with their own names ("Camera: ...", "Motion: describe ..."), or with "For the ACTION" in a scene-and-action rewrite.
     """
     motion_lead, sound_lead = ("For the ACTION", "For the ACTION") if for_pair else ("Motion", "Sound")
+    camera_lead, pace_lead = ("For the ACTION, camera", "For the ACTION, pace") if for_pair else ("Camera", "Pace")
     rules = []
+    if settings.camera != KEEP:
+        rules.append(f"{camera_lead}: {CAMERA_AXIS.option(settings.camera).instruction}")
+    if settings.pace != KEEP:
+        rules.append(f"{pace_lead}: {PACE_AXIS.option(settings.pace).instruction}")
     if settings.motion:
         rules.append(f"{motion_lead}: describe {', '.join(MOTION_AXIS.option(slug).instruction for slug in settings.motion)}.")
     if context.audio and settings.sound:
         sounds = "; ".join(SOUND_AXIS.option(slug).instruction for slug in settings.sound)
         rules.append(f"{sound_lead}: describe {sounds}. Put spoken lines in double quotes; only people already in the scene speak.")
     return rules
+
+
+def theme_rules(settings: EnhanceSettings, *, lead: str = "") -> list[str]:
+    """Return the Theme rule, or none when the theme is kept; *lead* ("For the SCENE: ") prefixes it."""
+    if settings.theme == KEEP:
+        return []
+    return [f"{lead}{THEME_AXIS.option(settings.theme).instruction}"]
+
+
+def detail_rules(settings: EnhanceSettings, *, shorter: bool, lead: str = "") -> list[str]:
+    """Return the Focus on rule: where to add detail (or what to keep while cutting), or a general rewrite when nothing is picked.
+
+    Args:
+        shorter: The rewrite cuts (Length Shorter, not clamped): picked aspects are kept, and nothing picked adds no rule.
+        lead: Prefixes the rule ("For the SCENE: "); without it the rule starts with a capital.
+    """
+    if settings.details:
+        aspects = ", ".join(DETAILS_AXIS.option(slug).instruction for slug in settings.details)
+        text = f"keep these aspects while cutting: {aspects}." if shorter else f"add detail on: {aspects}."
+    elif shorter:
+        return []
+    else:
+        text = "add concrete visual detail where the prompt is thin: the subject, the setting and the light."
+    return [f"{lead}{text}" if lead else text[0].upper() + text[1:]]
 
 
 def direction_rules(settings: EnhanceSettings, *, both_parts: bool = False) -> list[str]:
@@ -817,19 +938,18 @@ def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: L
         *PRESERVATION_RULES,
         *quote_rules(enforced_quotes(prompt, mode=mode, context=context)),
         perception_rule(mode, context),
-        *context_rules(mode, context),
+        *context_rules(mode, context, pace=settings.pace),
     ]
     rules.append(STYLE_AXIS.option(settings.style).instruction)
     rules.append(MOOD_AXIS.option(settings.mood).instruction)
-    if settings.details:
-        aspects = ", ".join(DETAILS_AXIS.option(slug).instruction for slug in settings.details)
-        rules.append(f"Keep these aspects while cutting: {aspects}." if plan.length == "shorter" and not plan.clamped else f"Add detail on: {aspects}.")
+    rules.extend(theme_rules(settings))
+    rules.extend(detail_rules(settings, shorter=plan.length == "shorter" and not plan.clamped))
     if mode == "video":
         rules.extend(action_rules(settings, context))
     rules.extend(direction_rules(settings))
     rules.append(length_instruction(plan))
     if plan.length == "same" or plan.clamped:
-        rules.append("Apply the style, mood and details; don't return the input unchanged.")
+        rules.append("Apply the options above; don't return the input unchanged.")
     system = system_message(f"You rewrite prompts for a {kind} model.", rules, "Output only the rewritten prompt as plain prose: no preamble, no headings, no quotes.")
     return [{"role": "system", "content": system}, {"role": "user", "content": labelled_prompt(prompt)}]
 

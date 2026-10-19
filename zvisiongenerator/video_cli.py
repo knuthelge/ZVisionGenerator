@@ -23,7 +23,6 @@ from zvisiongenerator.utils.model_files import find_local_model_dir
 from zvisiongenerator.utils.model_memory import clip_memory_fit
 from zvisiongenerator.utils.paths import resolve_lora_path, resolve_model_path
 from zvisiongenerator.utils.prompt_compose import is_original_prompt
-from zvisiongenerator.utils.prompt_enhance import enhance_by_set_for_mode
 from zvisiongenerator.utils.prompts import inspect_prompts_file
 from zvisiongenerator.utils.video_extend import DEFAULT_EXTEND_SECONDS, EXTEND_FRAME_STEP, apply_extend_args, load_extend_source, resolve_extend_frames
 from zvisiongenerator.utils.video_model_detect import detect_video_model
@@ -317,7 +316,7 @@ def main(*, prog: str = "ziv-video") -> None:
     if args.review and not stdin_is_interactive():
         parser.error("--review needs an interactive terminal to ask for each decision.")
     # A blank scene or an extension splits each prompt into scene and action, so even keep-everything settings change it.
-    parse_enhance_args(parser, args, mode="video", split=args.extend_path is not None or not (args.scene or "").strip())
+    parse_enhance_args(parser, args, mode="video")
     _check_extend_options(parser, args)
 
     # Expand ~ in filesystem-only path arguments. Model/LoRA tokens are resolved by shared helpers.
@@ -486,10 +485,7 @@ def main(*, prog: str = "ziv-video") -> None:
             parser.error(str(e))
         scene_by_set = inspection.scene_by_set
         prompts_data = inspection.prompts_data
-        # An extension writes a new action beside the kept scene, so no entry's settings are a no-op and none is dropped.
-        enhance_by_set = enhance_by_set_for_mode(
-            inspection.enhance_by_set, mode="video", scene_by_set=None if source is not None else scene_by_set, job_scene=None if source is not None else args.scene
-        )
+        enhance_by_set = inspection.enhance_by_set
     try:
         plan = run_preflight(prompts_data, config, args, mode="video", model_family=model_info.family, enhance_by_set=enhance_by_set, scene=args.scene, scene_by_set=scene_by_set)
     except (ValueError, RuntimeError) as e:

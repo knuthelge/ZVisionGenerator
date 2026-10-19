@@ -99,6 +99,17 @@ class TestMediumDetection:
         assert _caption(prompt, _REPLY)["style_description"]["medium"] == medium
 
 
+class TestOptionsInCaptions:
+    @pytest.mark.parametrize(("style", "medium"), [("watercolor", "painting"), ("claymation", "3d_render"), ("graphic", "graphic_design"), ("ukiyo-e", "illustration"), ("candid", "photograph")])
+    def test_every_style_has_a_medium(self, style: str, medium: str) -> None:
+        assert _caption("a fox in snow", _REPLY, settings=EnhanceSettings(style=style))["style_description"]["medium"] == medium
+
+    def test_theme_is_asked_for_in_the_caption(self) -> None:
+        enhancer = _FakeEnhancer(_REPLY)
+        enhance_caption(enhancer, "a fox in snow", EnhanceSettings(theme="noir"), seed=1, ceiling=300)
+        assert "Theme: noir." in enhancer.messages[0][0]["content"]
+
+
 class TestDesignDetection:
     @pytest.mark.parametrize(
         "prompt",

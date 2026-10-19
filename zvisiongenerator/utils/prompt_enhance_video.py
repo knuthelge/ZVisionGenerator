@@ -12,7 +12,6 @@ from zvisiongenerator.utils.prompt_compose import strip_quoted_lines
 from zvisiongenerator.utils.prompt_enhance import (
     DEFAULT_MAX_NEW_TOKENS,
     DEFAULT_TEMPERATURE,
-    DETAILS_AXIS,
     MOOD_AXIS,
     NO_USABLE_MESSAGE,
     PRESERVATION_RULES,
@@ -24,6 +23,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     action_rules,
     clean_output,
     context_rules,
+    detail_rules,
     direction_rules,
     duration_beats,
     enforced_quotes,
@@ -38,6 +38,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     resolve_parts,
     strip_reasoning,
     system_message,
+    theme_rules,
     validate_settings,
     word_count,
 )
@@ -174,16 +175,15 @@ def build_pair_messages(scene: str, prompt: str, settings: EnhanceSettings, *, p
         *PRESERVATION_RULES,
         *quote_rules(_pair_quotes(scene, prompt, context)),
         perception_rule("video", context),
-        *context_rules("video", replace(context, reference_image=False, seconds=None if context.extends else context.seconds)),
+        *context_rules("video", replace(context, reference_image=False, seconds=None if context.extends else context.seconds), pace=settings.pace),
         "SCENE: who and where, their look, the style and the camera setup. No events, no camera moves, no quoted speech.",
         action_role,
-        *(_extend_pair_rules(context, scene=scene) if context.extends else [_pair_workflow_rule(context)]),
+        *(_extend_pair_rules(context, scene=scene, pace=settings.pace) if context.extends else [_pair_workflow_rule(context)]),
         f"For the SCENE: {STYLE_AXIS.option(settings.style).instruction}",
         f"For the SCENE: {MOOD_AXIS.option(settings.mood).instruction}",
+        *theme_rules(settings, lead="For the SCENE: "),
+        *detail_rules(settings, shorter=shorter, lead="For the SCENE: "),
     ]
-    if settings.details:
-        aspects = ", ".join(DETAILS_AXIS.option(slug).instruction for slug in settings.details)
-        rules.append(f"For the SCENE: keep these aspects while cutting: {aspects}." if shorter else f"For the SCENE: add detail on: {aspects}.")
     rules.extend(action_rules(settings, context, for_pair=True))
     rules.extend(direction_rules(settings, both_parts=True))
     if not prompt.strip() and not context.extends:
@@ -191,7 +191,7 @@ def build_pair_messages(scene: str, prompt: str, settings: EnhanceSettings, *, p
     rules.append(length_instruction(plan.scene, "SCENE length"))
     rules.append(length_instruction(plan.action, "ACTION length"))
     if settings.length == "same" or plan.total.clamped:
-        rules.append("Apply the style, mood and details; don't return the input unchanged.")
+        rules.append("Apply the options above; don't return the input unchanged.")
     system = system_message(
         "You rewrite prompts for a text-to-video model. The user gives a Scene and a Prompt; you write a SCENE and an ACTION.",
         rules,
@@ -233,8 +233,8 @@ def _previous_rule(context: EnhanceContext) -> str | None:
     return f"What just happened (do not repeat its actions or quoted lines): {context.previous.strip()}"
 
 
-def _extend_rules(context: EnhanceContext) -> list[str]:
-    """Return the rules for writing the part that follows an existing clip."""
+def _extend_rules(context: EnhanceContext, *, pace: str = "keep") -> list[str]:
+    """Return the rules for writing the part that follows an existing clip (how much action fits depends on *pace*)."""
     rules = [
         "Start from where the clip ends: the people and objects are in their final positions and poses.",
         "The people in the scene are present; describe speakers as before.",
@@ -243,14 +243,14 @@ def _extend_rules(context: EnhanceContext) -> list[str]:
         rules.append(frame_rule(context.orientation))
     if context.new_seconds is not None:
         window = f" of a {max(1, round(context.seconds))} second window" if context.seconds is not None else ""
-        beats = duration_beats(context.new_seconds)
+        beats = duration_beats(context.new_seconds, pace)
         rules.append(f"Write the next action in time order, fitted to {max(1, round(context.new_seconds))} seconds{window}: {beats}.")
     else:
         rules.append("Write the next action in time order.")
     return rules
 
 
-def _extend_pair_rules(context: EnhanceContext, *, scene: str = "") -> list[str]:
+def _extend_pair_rules(context: EnhanceContext, *, scene: str = "", pace: str = "keep") -> list[str]:
     """Return the scene-and-action rules for an extension: the scene is the user's, or extracted from the earlier prompt when blank."""
     rules = []
     has_scene = bool(scene.strip())
@@ -264,7 +264,7 @@ def _extend_pair_rules(context: EnhanceContext, *, scene: str = "") -> list[str]
     previous = _previous_rule(context)
     if previous is not None and (has_scene or (context.previous or "").strip() != (context.extract_from or "").strip()):
         rules.append(previous)
-    return [*rules, *_extend_rules(context)]
+    return [*rules, *_extend_rules(context, pace=pace)]
 
 
 def _action_only_messages(
@@ -307,7 +307,7 @@ def build_extend_messages(scene: str, prompt: str, settings: EnhanceSettings, *,
     if previous is not None:
         preamble.append(previous)
     quotes = _action_quotes(prompt, context)
-    return _action_only_messages(preamble, _extend_rules(context), settings, plan, context, _extend_user_message(prompt, context), quotes=quotes)
+    return _action_only_messages(preamble, _extend_rules(context, pace=settings.pace), settings, plan, context, _extend_user_message(prompt, context), quotes=quotes)
 
 
 def build_action_messages(scene: str, prompt: str, settings: EnhanceSettings, *, plan: LengthPlan, context: EnhanceContext) -> list[dict[str, str]]:
@@ -322,7 +322,7 @@ def build_action_messages(scene: str, prompt: str, settings: EnhanceSettings, *,
         "You write only the action of a clip for a text-to-video model. The user tells you what happens.",
         f"The scene (kept exactly as written, do not restate or change it): {scene.strip()}",
     ]
-    situation = [*context_rules("video", context), "Write what happens in time order, fitted to the scene."]
+    situation = [*context_rules("video", context, pace=settings.pace), "Write what happens in time order, fitted to the scene."]
     user = prompt.strip() or "(none): write an action that suits the scene."
     return _action_only_messages(preamble, situation, settings, plan, context, user, quotes=_action_quotes(prompt, context))
 
@@ -490,7 +490,7 @@ def enhance_video_prompt(
     extends = context.extends
     if not extends and not scene and not prompt:
         raise ValueError("Enter a scene or a prompt to enhance.")
-    validate_settings(settings, mode="video", split=extends or not scene)
+    validate_settings(settings, mode="video")
     if resolve_parts(settings, scene=scene, extends=extends, reference_image=context.reference_image) == "action":
         return _enhance_action_only(
             enhancer, scene, prompt, settings, seed=seed, ceiling=ceiling, context=context, length_cfg=length_cfg, temperature=temperature, max_tokens=max_tokens, on_text=on_text, cancelled=cancelled

@@ -242,14 +242,6 @@ export function enhanceSettingsFor(enhance: EntryEnhance, axes: EnhanceAxis[], d
   return settings;
 }
 
-/** Whether `settings` ask for no change at all (the server refuses that). */
-export function isNoOpEnhance(settings: EnhanceSettings): boolean {
-  return (
-    settings.style === 'keep' && settings.mood === 'keep' && settings.details.length === 0 && settings.length === 'same'
-    && settings.motion.length === 0 && settings.sound.length === 0 && !settings.note.trim() && settings.parts !== 'action'
-  );
-}
-
 /** Every chosen enhance option in words, e.g. "Cinematic · Mysterious · +2 details". */
 export function enhanceSummary(enhance: EntryEnhance, axes: EnhanceAxis[]): string {
   if (enhance === null) return '';

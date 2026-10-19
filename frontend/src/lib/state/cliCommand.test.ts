@@ -100,7 +100,7 @@ describe('cliCommand', () => {
   });
 
   it('serializes auto-enhance options to the SPEC grammar, with motion only for video', () => {
-    const settings = { style: 'photo', mood: 'keep', details: ['lighting', 'camera'], length: 'longer', motion: ['action'] };
+    const settings = { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting', 'camera'], length: 'longer', motion: ['action'] };
 
     expect(cliCommand({ mode: 'image', prompt: 'a', enhance_auto: 'true', enhance_settings: JSON.stringify(settings) }).command)
       .toBe('ziv image --prompt a --enhance style=photo,mood=keep,details=lighting+camera,length=longer');
@@ -122,7 +122,7 @@ describe('cliCommand', () => {
   });
 
   it('spells out the Rewrite choice only where it is not the default of the workflow', () => {
-    const settings = (parts: string) => JSON.stringify({ style: 'keep', mood: 'keep', details: ['lighting'], length: 'same', motion: ['action'], parts });
+    const settings = (parts: string) => JSON.stringify({ style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting'], length: 'same', motion: ['action'], parts });
     const video = { mode: 'video', prompt: 'a', enhance_auto: 'true' };
     expect(cliCommand({ ...video, enhance_settings: settings('both') }).command).toBe('ziv video --prompt a --enhance style=keep,mood=keep,details=lighting,length=same,motion=action');
     expect(cliCommand({ ...video, enhance_settings: settings('action') }).command).toContain('--enhance parts=action,style=keep');

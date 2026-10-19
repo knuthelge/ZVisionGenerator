@@ -50,7 +50,7 @@ The Web UI's **Prompts** page (`G` then `P`) builds prompt files without typing 
 
 - **Snippets** (left) are listed with how often each is used; unused ones are dimmed. Click one to edit it, **＋** to add one, and drag one onto a prompt to add a `$reference`. Renaming a snippet updates every reference to it.
 - **Sets** (centre) are panels of prompts, one row each. Rename a set in place (the name starts the output filenames), add prompts with **＋**, and use a set's **⋯** menu to duplicate, move, turn all prompts on or off, or delete it.
-- **Entries** show `$snippets` as chips (red when undefined) and `{a|b}` choices as pills. Click the text, or press `↵` on it, to edit; typing `$` suggests snippet names. Click a pill to edit its options, one per line; an empty line is an empty option. While typing, put the caret in a choice and press `⌥↵` (or **Edit choice** under the text) to edit it the same way, select words and press `⌥↵` (**Make a random choice**) to turn them into a choice, or press `⌥↵` anywhere else (**New random choice**) to type the options of a new choice at the caret, one per line. The options box takes focus; `⌘↵` applies and `Esc` cancels, both returning you to the prompt. Each prompt has an **active** switch and **✨ Enhance**: off, the default options (`enhance: true`), or chosen style, mood, details, length and motion (motion applies to video only). Its popover also has the **Rewrite** choice (Scene and action, or Action only) for video entries, saved as `parts:`. Its **⋯** menu adds or removes a negative prompt, and duplicates, moves or deletes the prompt.
+- **Entries** show `$snippets` as chips (red when undefined) and `{a|b}` choices as pills. Click the text, or press `↵` on it, to edit; typing `$` suggests snippet names. Click a pill to edit its options, one per line; an empty line is an empty option. While typing, put the caret in a choice and press `⌥↵` (or **Edit choice** under the text) to edit it the same way, select words and press `⌥↵` (**Make a random choice**) to turn them into a choice, or press `⌥↵` anywhere else (**New random choice**) to type the options of a new choice at the caret, one per line. The options box takes focus; `⌘↵` applies and `Esc` cancels, both returning you to the prompt. Each prompt has an **active** switch and **✨ Enhance**: off, the default options (`enhance: true`, a general rewrite), or chosen style, mood, theme, focus, length, and camera, pace and motion (these apply to video only). Its popover also has the **Rewrite** choice (Scene and action, or Action only) for video entries, saved as `parts:`. Its **⋯** menu adds or removes a negative prompt, and duplicates, moves or deletes the prompt.
 - **Text / Fields** switches a prompt between plain text and named fields (a structured prompt). Switching to fields puts the text in one field for you to name; a field without a name is a problem until you name it. Lists and nested values that the builder can't edit are shown flattened and kept exactly as written; **Convert to text** replaces one with its flattened text.
 - **Drag** a set or an entry by its ⠿ grip to reorder it, with a mouse or a finger; drop an entry on another set's header to move it there. A snippet drags by its row with a mouse and by its grip with a finger. The list scrolls when you drag near its top or bottom edge, and the menus offer the same moves.
 - **Preview** (right) shows the selected entry as the model receives it, with snippets resolved and fields flattened, its prompt id, its enhancement and its problems. **🎲 Roll** picks one option of every choice, as a run would.
@@ -203,19 +203,32 @@ All built-in models are pinned to a revision. To use another chat model, set **P
 
 ### Options
 
-| Option | Choose | Values |
-|---|---|---|
-| Style | one | Keep, Photographic, Candid, Street photography, Analog film, Black & white, Studio portrait, Product shot, Cinematic, Illustration, Anime, Comic, 3D render, Painterly |
-| Mood | one | Keep, Serene, Joyful, Romantic, Melancholic, Mysterious, Eerie, Dramatic, Epic, Whimsical, Nostalgic |
-| Details | any | Lighting, Composition, Camera & lens, Materials & textures, Color & mood, Environment, Subject |
-| Motion (video only) | any | Action / sequence, Camera movement, Pacing |
-| Sound (video with audio on) | any | Ambience, Sound effects, Dialogue, Music |
-| Length | one | Shorter (≈50 %), Same, Longer (≈200 %), Extra long (≈300 %) |
-| Direction | free text | e.g. *at night, in the rain* or *focus on the dog* (up to 300 characters) |
+| Option | Choose | Values | CLI and prompt-file key |
+|---|---|---|---|
+| Style | one | Keep; **Photo:** Natural photo, Candid, Street, Analog film, Black & white, Studio portrait, Product, Cinematic; **Art:** Illustration, Anime, Comic, 3D render, Oil painting, Watercolor, Gouache, Sketch, Pixel art, Concept art, Graphic design, Isometric, Claymation, Ukiyo-e, Papercraft | `style` |
+| Mood | one | Keep, Serene, Cozy, Joyful, Romantic, Whimsical, Nostalgic, Melancholic, Mysterious, Eerie, Dramatic, Epic | `mood` |
+| Theme | one | Keep, Zen, Spiritual, Rustic, Sensual, Glamorous, Gothic, Noir, Horror, Dystopian, Fairytale, Mythic, Surreal, Retro, Futuristic, Cyberpunk, Steampunk | `theme` |
+| Focus on | any | Lighting, Composition, Camera & viewpoint, Materials & textures, Color palette, Environment, Subject, Expression | `details` |
+| Camera (video only) | one | Keep, Auto, Static, Push in, Pull back, Pan, Tilt, Tracking, Orbit, Handheld, Aerial | `camera` |
+| Pace (video only) | one | Keep, Slow motion, Slow, Brisk, Fast | `pace` |
+| Describe (video only) | any | Action sequence, Secondary motion | `motion` |
+| Sound (video with audio on) | any | Ambience, Sound effects, Dialogue, Music | `sound` |
+| Length | one | Shorter (≈50 %), Same, Longer (≈200 %), Extra long (≈300 %) | `length` |
+| Direction | free text | e.g. *focus on the dog, make her look surprised* (up to 300 characters) | `note` |
 
-Mood sets the feeling of the scene. The enhancer conveys it through light, color, setting and expression instead of naming it. The **Color & mood** detail only adds more description of color and mood; it does not pick one.
+In the Web UI the Enhance popover lists each option with a one-line description of what it asks for. The slugs used by `--enhance` and prompt files are lower case: `photo`, `bw`, `3d`, `painterly` (Oil painting), `ukiyo-e`, `slow-motion`, `push-in`, `pull-back`, `secondary` and the label in lower case otherwise.
 
-Length is a target, not a guarantee. Same keeps a prompt's length but grows a short one to about 25 words, since the rewrite adds the details you picked. Longer aims for at least 40 words and Extra long for at least 80; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length.
+**Nothing is picked by default.** With every choice at Keep and nothing under Focus on, Enhance still rewrites: it adds concrete visual detail where your prompt is thin. Picking options steers that rewrite.
+
+- **Style** sets the medium. The **Photo** styles all ask for a real photograph: the camera or lens, where the light comes from, and natural skin texture instead of airbrushed, waxy skin, without making people older or scenes dirtier than you wrote. They avoid words like "hyperrealistic", "8k" or "flawless", which push image models toward a glossy, rendered look.
+- **Mood** sets the feeling. The enhancer conveys it through light, color, setting and expression instead of naming it.
+- **Theme** sets the character the image carries, such as zen, noir or cyberpunk. It shows through styling, materials, color and small details, never by adding people, animals or objects. Time of day and weather are not a theme: write them in your prompt.
+- **Focus on** chooses where the rewrite spends its words. Each picked aspect is described more fully; with Length Shorter, the picked aspects are kept while the rest is cut.
+- **Camera** and **Pace** shape a video's action. **Auto** lets the enhancer pick a camera move that suits the action. A faster pace fits more action into the clip, slow motion less. **Secondary motion** describes what moves along with the action: hair, cloth, water, smoke, leaves or dust.
+
+Prompt files and `--enhance` specs written before these options keep working: `motion: camera-move` and `motion: pacing` are still accepted. Earlier versions picked Lighting, Composition and, for video, Action by default; now nothing is picked, so an older `enhance: true` gives the general rewrite.
+
+Length is a target, not a guarantee. Same keeps a prompt's length but grows a short one to about 25 words, since the rewrite adds detail. Longer aims for at least 40 words and Extra long for at least 80; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Shorter keeps every element you named, so a prompt full of named things shrinks only a little. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length.
 
 The enhancer keeps your subject and every detail you describe. It adds only things that can be seen, no smells or story, and never adds new people, animals, or major objects.
 
@@ -229,7 +242,7 @@ Sound is the exception for video with audio on:
 - **Dialogue** keeps your quoted lines. If you wrote none, it writes short lines that fit the scene. Only people already in the scene speak.
 - With audio off, and for images, the enhancer describes no sounds and Sound is ignored.
 
-**Direction** is a short instruction the enhancer follows, such as a time of day, weather, or what to focus on. A direction alone is enough to enhance, without picking other options.
+**Direction** is a short instruction the enhancer follows, such as what to focus on or how someone should look.
 
 The enhancer also knows the job's shape:
 
@@ -243,8 +256,8 @@ For video, one rewrite returns two parts: a **scene** and an **action** (see [Sc
 
 | Option | Shapes |
 |---|---|
-| Style, Mood, Details | mostly the scene |
-| Motion, Sound | the action |
+| Style, Mood, Theme, Focus on | mostly the scene |
+| Camera, Pace, Describe, Sound | the action |
 | Direction | both |
 
 - **Text to video** splits and expands, so it works when you wrote everything in the prompt or gave only a scene: the setting, look and camera setup go to the scene, and events in time order, camera moves, sound and quoted dialogue go to the action.
@@ -263,8 +276,7 @@ The **Rewrite** option (`parts` in the CLI and prompt files) chooses what the en
 | Action only | `action` | Your scene is kept exactly as written. The enhancer reads it and writes an action that fits it. |
 
 - The default depends on the workflow: **Extend Video** rewrites the action only when the clip has a scene, so a chain of extensions keeps its look, and **Image to Video** does the same when it has a scene, so the scene that describes the starting image is not restyled. **Text to Video** rewrites both.
-- Style, Mood and Details shape the scene, so they have no effect while Rewrite is Action only. Motion, Sound, Length and Direction still shape the action.
-- With Action only and a scene, Enhance always rewrites the action, even when every other option is left at "keep".
+- Style, Mood, Theme and Focus on shape the scene, so they have no effect while Rewrite is Action only. Camera, Pace, Describe, Sound, Length and Direction still shape the action.
 - **Action only needs a scene.** With a blank scene, Action only is unavailable in the Web UI, and the run rewrites both parts. On the command line it does the same and warns once.
 - Image workflows ignore Rewrite.
 
@@ -302,11 +314,12 @@ woman:
     enhance:
       style: cinematic
       mood: mysterious
+      theme: noir
       details: [lighting, camera]
       length: longer
       note: rain on the pavement
   - prompt: a quiet street at dawn
-    enhance: true        # default options
+    enhance: true        # a general rewrite: nothing picked
   - prompt: two friends talking at a cafe table
     enhance:
       sound: [ambient, dialogue]   # video with audio on
@@ -316,14 +329,12 @@ woman:
       parts: action                # video: keep the scene, rewrite only the action
 ```
 
-An entry's own `enhance:` that asks for no change at all (style and mood keep, no details, length same, no motion or sound, no direction) is refused when the file loads: a warning appears and that entry is not enhanced. To have the enhancer split a single prompt into scene and action, use `enhance: true` or set at least one option. Job-level `--enhance` and the Web UI accept keep-all settings when the prompt has no scene. `parts: action` counts as a change, so an entry with it is kept even when every other option keeps things as they are.
-
 From the command line, `--enhance` enhances every prompt and overrides entries' `enhance:` settings; `--no-enhance` turns all enhancement off:
 
 ```bash
 ziv-image -m klein9b --prompt "a fox in snow" --enhance
 ziv-image -m klein9b -p prompts.yaml --enhance style=photo,mood=serene,details=lighting+camera,length=longer
-ziv-video -m ltx-8 --prompt "a fox runs" --enhance style=cinematic,motion=action+camera-move,sound=ambient+effects
+ziv-video -m ltx-8 --prompt "a fox runs" --enhance style=cinematic,camera=tracking,pace=fast,motion=action+secondary,sound=ambient+effects
 ziv-video -m ltx-8 --scene "A fox in a snowy birch forest at dawn." --prompt "it runs" --enhance parts=action
 ziv-image -m klein9b --prompt "a lighthouse" --enhance-note "in a storm, at night"
 ziv-image -m klein9b --prompt "a fox in snow" --enhance --enhance-model smart

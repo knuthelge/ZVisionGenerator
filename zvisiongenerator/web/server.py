@@ -64,7 +64,6 @@ from zvisiongenerator.utils.prompt_enhance import (
     EnhanceContext,
     EnhanceResult,
     EnhanceSettings,
-    enhance_by_set_for_mode,
     enhance_context,
     enhance_options,
     enhance_prompt,
@@ -493,7 +492,7 @@ def _validate_enhance_body(body: Any) -> dict[str, Any]:
     tier = _body_choice(body, "enhance_model", ENHANCER_TIERS)
     caption = mode == "image" and _body_choice(body, "format", ENHANCE_FORMATS) == "json"
     # An extension always writes a new action, and so does ``parts="action"``, so neither is ever a no-op; nor is a JSON caption.
-    validate_settings(settings, mode=mode, split=context.extends or (mode == "video" and not scene.strip() and bool(prompt.strip())), caption=caption)
+    validate_settings(settings, mode=mode)
     app_config = load_config()
     options = enhance_options(app_config)
     max_words = body.get("max_words")
@@ -998,7 +997,6 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         enhance_by_set = None
     else:
         _prompt_source, prompt, negative_prompt, prompts_data, enhance_by_set, _scene_by_set = _resolve_prompt_submission_with_enhance(form)
-        enhance_by_set = enhance_by_set_for_mode(enhance_by_set, mode="image", caption=_optional_text(form, "enhance_format") == "json")
     _apply_enhance_submission(args, form, mode="image", json_caption=args.json_prompt_enabled)
     args.prompt_input = _optional_text(form, "prompt_input")
     args.enhance_record = _enhance_record_from_form(form, mode="image", app_config=app_config)
@@ -1124,7 +1122,6 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         scene = source.scene
     _prompt_source, prompt, _negative_prompt, prompts_data, enhance_by_set, scene_by_set = _resolve_prompt_submission_with_enhance(form, allow_empty_prompt=scene is not None or extend)
     # An extension always writes a new action beside the kept scene, so no prompt-file entry is a no-op: nothing is dropped.
-    enhance_by_set = enhance_by_set_for_mode(enhance_by_set, mode="video", scene_by_set=None if extend else scene_by_set, job_scene=None if extend else scene)
     upscale = None if extend else _optional_int(form, "upscale")
     args = argparse.Namespace(
         model=model_name,
@@ -1157,7 +1154,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     )
     if review_enabled(args) and not supports_video_upscale_review():
         raise HTTPException(status_code=400, detail="Review before upscaling is not available for video on this platform.")
-    _apply_enhance_submission(args, form, mode="video", json_caption=False, split=extend or not (scene or "").strip())
+    _apply_enhance_submission(args, form, mode="video", json_caption=False)
     args.enhance_record = _enhance_record_from_form(form, mode="video", app_config=app_config)
     if _WORKFLOW_DEFINITIONS[workflow]["requires_reference_image"] and image_path is None:
         raise ValueError("Image-to-video requires a reference image.")
@@ -1277,12 +1274,9 @@ def _resolve_prompt_submission_with_enhance(
     return prompt_source, prompt, negative_prompt, {"web": [(prompt, negative_prompt)]}, None, None
 
 
-def _apply_enhance_submission(args: argparse.Namespace, form: Any, *, mode: str, json_caption: bool, split: bool = False) -> None:
+def _apply_enhance_submission(args: argparse.Namespace, form: Any, *, mode: str, json_caption: bool) -> None:
     """Set ``args.enhance`` from the auto-enhance toggle (job-wide settings) or ``None``, plus the job's enhancer
     (``enhance_model``: fast or smart) and, for images, what it writes (``enhance_format``: text or json); never for JSON captions.
-
-    Args:
-        split: A video job whose default scene is blank, so prompts are split into scene and action (never a no-op).
     """
     args.no_enhance = False
     args.enhance = None
@@ -1296,7 +1290,7 @@ def _apply_enhance_submission(args: argparse.Namespace, form: Any, *, mode: str,
     except json.JSONDecodeError as exc:
         raise ValueError(f"enhance_settings must be a JSON object: {exc}") from exc
     settings = settings_from_mapping(data, mode=mode, motion_in_image="warn")
-    validate_settings(settings, mode=mode, split=mode == "video" and split, caption=args.enhance_format == "json")
+    validate_settings(settings, mode=mode)
     args.enhance = settings
 
 

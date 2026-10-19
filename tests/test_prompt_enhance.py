@@ -8,13 +8,13 @@ from zvisiongenerator.utils.prompt_enhance import (
     DEFAULT_LENGTH_CONFIG,
     EnhanceContext,
     EnhanceSettings,
+    action_rules,
     build_messages,
     clean_output,
-    enhance_by_set_for_mode,
+    duration_beats,
     enhance_context,
     enhance_prompt,
     format_enhance_spec,
-    is_noop,
     is_unusable,
     matrix_contract,
     parse_enhance_entry,
@@ -68,47 +68,57 @@ class _FakeEnhancer:
 class TestMatrix:
     def test_contract_lists_axes_and_defaults(self):
         contract = matrix_contract()
-        assert [axis["key"] for axis in contract["axes"]] == ["style", "mood", "details", "motion", "sound", "length"]
+        assert [axis["key"] for axis in contract["axes"]] == ["style", "mood", "theme", "details", "camera", "pace", "motion", "sound", "length"]
         assert contract["defaults"] == {
             "style": "keep",
             "mood": "keep",
-            "details": ["lighting", "composition"],
+            "theme": "keep",
+            "details": [],
             "length": "same",
-            "motion": ["action"],
+            "camera": "keep",
+            "pace": "keep",
+            "motion": [],
             "sound": [],
             "note": "",
             "parts": None,
         }
-        motion, sound, length = contract["axes"][3], contract["axes"][4], contract["axes"][5]
+        axes = {axis["key"]: axis for axis in contract["axes"]}
+        motion, sound, length = axes["motion"], axes["sound"], axes["length"]
         assert (motion["video_only"], motion["audio_only"]) == (True, False)
         assert (sound["video_only"], sound["audio_only"], sound["multi"]) == (True, True, True)
         assert [option["slug"] for option in sound["options"]] == ["ambient", "effects", "dialogue", "music"]
         assert [option["slug"] for option in length["options"]] == ["shorter", "same", "longer", "extra"]
 
+    def test_contract_options_carry_descriptions_and_groups(self):
+        axes = {axis["key"]: axis for axis in matrix_contract()["axes"]}
+        style = axes["style"]["options"]
+        assert style[0]["slug"] == "keep" and style[0]["group"] is None
+        assert {option["group"] for option in style[1:]} == {"Photo", "Art"}
+        assert all(option["description"] for axis in axes.values() for option in axis["options"])
+        assert {option["group"] for option in axes["theme"]["options"][1:]} == {"Calm & sacred", "Allure", "Dark", "Wonder", "Era & tech"}
+        assert (axes["camera"]["video_only"], axes["pace"]["video_only"], axes["theme"]["video_only"]) == (True, True, False)
+
+    def test_legacy_motion_slugs_parse_but_are_not_offered(self):
+        motion = {axis["key"]: axis for axis in matrix_contract()["axes"]}["motion"]
+        assert [option["slug"] for option in motion["options"]] == ["action", "secondary"]
+        assert parse_enhance_spec("motion=camera-move+pacing", mode="video").motion == ("camera-move", "pacing")
+
     def test_sound_alone_is_not_no_op_for_video(self):
         validate_settings(EnhanceSettings(details=(), motion=(), sound=("ambient",)), mode="video")
-
-    def test_sound_does_not_count_for_image(self):
-        with pytest.raises(ValueError, match="Nothing to enhance"):
-            validate_settings(EnhanceSettings(details=(), sound=("ambient",)), mode="image")
 
     @pytest.mark.parametrize("mode", ["image", "video"])
     def test_note_alone_is_not_no_op(self, mode):
         validate_settings(EnhanceSettings(details=(), motion=(), note="at night"), mode=mode)
 
-    def test_no_op_combination_rejected(self):
-        with pytest.raises(ValueError, match="Nothing to enhance"):
-            validate_settings(EnhanceSettings(style="keep", details=(), length="same", motion=()), mode="image")
+    def test_nothing_picked_is_a_general_rewrite(self):
+        validate_settings(EnhanceSettings(), mode="image")
+        validate_settings(EnhanceSettings(), mode="video")
 
     def test_mood_alone_is_not_no_op(self):
         validate_settings(EnhanceSettings(style="keep", mood="eerie", details=(), length="same", motion=()), mode="image")
 
     def test_motion_alone_is_not_no_op_for_video(self):
         validate_settings(EnhanceSettings(style="keep", details=(), length="same", motion=("action",)), mode="video")
-
-    def test_motion_does_not_count_for_image(self):
-        with pytest.raises(ValueError, match="Nothing to enhance"):
-            validate_settings(EnhanceSettings(style="keep", details=(), length="same", motion=("action",)), mode="image")
 
     def test_unknown_mode(self):
         with pytest.raises(ValueError, match="Unknown enhancement mode"):
@@ -127,7 +137,11 @@ class TestSpec:
     def test_partial_spec_keeps_defaults(self):
         settings = parse_enhance_spec("length=extra", mode="image")
         assert settings.length == "extra"
-        assert settings.details == ("lighting", "composition")
+        assert (settings.details, settings.theme) == ((), "keep")
+
+    def test_theme_camera_and_pace_parse(self):
+        settings = parse_enhance_spec("theme=noir,camera=orbit,pace=slow-motion", mode="video")
+        assert (settings.theme, settings.camera, settings.pace) == ("noir", "orbit", "slow-motion")
 
     def test_empty_multi_value(self):
         assert parse_enhance_spec("details=,style=anime", mode="image").details == ()
@@ -161,11 +175,12 @@ class TestSpec:
     @pytest.mark.parametrize(
         ("spec", "message"),
         [
-            ("style=watercolor", "keep, photo, candid, street, film, bw, portrait, product, cinematic, illustration, anime, comic, 3d, painterly"),
-            ("mood=angry", "keep, serene, joyful, romantic, melancholic, mysterious, eerie, dramatic, epic, whimsical, nostalgic"),
-            ("details=lighting+smell", "lighting, composition, camera, materials, color, environment, subject"),
+            ("style=vaporwave", "Unknown style 'vaporwave'"),
+            ("mood=angry", "Unknown mood 'angry'"),
+            ("theme=western", "Unknown theme 'western'"),
+            ("details=lighting+smell", "Unknown details 'smell'"),
             ("length=huge", "shorter, same, longer, extra"),
-            ("colour=red", "Valid keys: style, mood, details, motion, sound, length, note, parts"),
+            ("colour=red", "Unknown enhancement setting"),
             ("cinematic", "Use key=value"),
         ],
     )
@@ -331,11 +346,45 @@ class TestMessages:
         assert messages[0]["content"].splitlines()[2].startswith("- The user gives a Prompt.")
 
     def test_details_line(self):
-        assert "Add detail on: lighting, composition and framing." in _system(EnhanceSettings())
+        assert "Add detail on: lighting, composition and framing." in _system(EnhanceSettings(details=("lighting", "composition")))
+
+    def test_nothing_focused_asks_for_a_general_rewrite(self):
+        assert "Add concrete visual detail where the prompt is thin" in _system(EnhanceSettings())
+        assert "Add concrete visual detail" not in _system(EnhanceSettings(length="shorter"), in_words=40)
 
     def test_shorter_keeps_details(self):
-        assert "Keep these aspects while cutting: lighting" in _system(EnhanceSettings(length="shorter"), in_words=40)
+        assert "Keep these aspects while cutting: lighting" in _system(EnhanceSettings(length="shorter", details=("lighting",)), in_words=40)
         assert "Length: at most" in _system(EnhanceSettings(length="shorter"), in_words=40)
+
+    def test_photo_styles_share_the_realism_core_and_art_styles_do_not(self):
+        assert "natural skin texture, not airbrushed or waxy" in _system(EnhanceSettings(style="candid"))
+        assert '"hyperrealistic"' in _system(EnhanceSettings(style="cinematic"))
+        assert "natural skin texture" not in _system(EnhanceSettings(style="watercolor"))
+
+    def test_theme_line_only_when_picked(self):
+        assert "Theme: zen." in _system(EnhanceSettings(theme="zen"))
+        assert "Theme:" not in _system(EnhanceSettings())
+
+    def test_camera_and_pace_lead_the_action_rules(self):
+        settings = EnhanceSettings(camera="orbit", pace="slow-motion", motion=("secondary",))
+        rules = action_rules(settings, EnhanceContext())
+        assert rules[0] == "Camera: the camera orbits around the subject."
+        assert rules[1].startswith("Pace: slow motion")
+        assert rules[2].startswith("Motion: describe the secondary motion")
+        assert action_rules(EnhanceSettings(), EnhanceContext()) == []
+
+    def test_camera_and_pace_in_a_scene_and_action_rewrite(self):
+        rules = action_rules(EnhanceSettings(camera="aerial", pace="fast"), EnhanceContext(), for_pair=True)
+        assert rules[0].startswith("For the ACTION, camera: an aerial drone shot")
+        assert rules[1] == "For the ACTION, pace: fast, quick action."
+
+    @pytest.mark.parametrize(("pace", "beats"), [("keep", "one continuous action"), ("fast", "two or three beats at most"), ("slow-motion", "one continuous action")])
+    def test_pace_changes_how_much_action_fits(self, pace, beats):
+        assert duration_beats(4.0, pace) == beats
+
+    def test_echo_ignores_case_and_punctuation(self):
+        assert is_unusable("The cat knocks an apple off the counter.", "the cat knocks an apple off the counter")
+        assert not is_unusable("The cat swats the apple off the counter.", "the cat knocks an apple off the counter")
 
     def test_mood_line(self):
         assert "Mood: keep the user's existing mood" in _system(EnhanceSettings())
@@ -504,16 +553,6 @@ class TestReviewFixes:
     )
     def test_quotes_only_strip_a_wrapping_pair(self, raw, clean):
         assert clean_output(raw) == clean
-
-    def test_enhance_by_set_for_mode_drops_motion_only_entries_for_images(self):
-        from zvisiongenerator.utils.prompt_enhance import enhance_by_set_for_mode
-
-        motion_only = EnhanceSettings(style="keep", details=(), length="same", motion=("pacing",))
-        anime = EnhanceSettings(style="anime")
-        with pytest.warns(UserWarning, match="no change in images"):
-            assert enhance_by_set_for_mode({"a": [motion_only, anime, None]}, mode="image") == {"a": [None, anime, None]}
-        assert enhance_by_set_for_mode({"a": [motion_only]}, mode="video") == {"a": [motion_only]}
-        assert enhance_by_set_for_mode(None, mode="image") is None
 
     def test_hi_never_exceeds_ceiling(self):
         plan = plan_length(100, "extra", ceiling=180)
@@ -760,7 +799,7 @@ class TestEnhanceVideoPrompt:
 
     def test_streams_raw_text_and_ends_with_the_cleaned_output(self):
         seen: list[str] = []
-        text = "SCENE: A castle at dusk.\nACTION: A knight rides in."
+        text = "SCENE: A castle at dusk.\nACTION: A knight rides in at a gallop."
         _pair_run([text], on_text=seen.append)
         assert seen[0] == "" and seen[-1] == text
 
@@ -856,46 +895,13 @@ class TestEnhanceVideoPrompt:
         result, _ = _pair_run(["SCENE: A castle.\nACTION: A knight gallops in."], settings=_KEEP_ALL)
         assert result.prompt == "A knight gallops in."
 
-    def test_all_keep_settings_are_a_noop_with_a_scene(self):
-        with pytest.raises(ValueError, match="Nothing to enhance"):
-            _pair_run([], scene=_USER_SCENE, settings=_KEEP_ALL)
+    def test_all_keep_settings_still_rewrite_with_a_scene(self):
+        result, _enhancer = _pair_run(["SCENE: A castle at dusk, soft light.\nACTION: A knight rides in through the gate."], scene=_USER_SCENE, settings=_KEEP_ALL)
+        assert result.prompt == "A knight rides in through the gate."
 
     def test_image_to_video_context_reaches_the_prompt(self):
         _, enhancer = _pair_run(["SCENE: A castle.\nACTION: A knight gallops in."], context=EnhanceContext(reference_image=True))
         assert "Keep the SCENE short" in enhancer.calls[0]["messages"][0]["content"]
-
-
-class TestNoOpSplit:
-    def test_all_keep_video_with_a_split_is_a_change(self):
-        assert is_noop(_KEEP_ALL, mode="video") is True
-        assert is_noop(_KEEP_ALL, mode="video", split=True) is False
-
-    def test_images_ignore_split(self):
-        assert is_noop(_KEEP_ALL, mode="image", split=True) is True
-
-    def test_validate_settings_accepts_a_split_video(self):
-        validate_settings(_KEEP_ALL, mode="video", split=True)
-        with pytest.raises(ValueError, match="Nothing to enhance"):
-            validate_settings(_KEEP_ALL, mode="video")
-        with pytest.raises(ValueError, match="Nothing to enhance"):
-            validate_settings(_KEEP_ALL, mode="image", split=True)
-
-    def test_enhance_by_set_keeps_entries_without_a_scene(self):
-        with pytest.warns(UserWarning, match="no change in videos"):
-            result = enhance_by_set_for_mode({"a": [_KEEP_ALL, _KEEP_ALL, None]}, mode="video", scene_by_set={"a": [None, "A castle.", None]})
-        assert result == {"a": [_KEEP_ALL, None, None]}
-
-    def test_enhance_by_set_uses_the_job_scene_for_entries_without_one(self):
-        with pytest.warns(UserWarning, match="no change in videos"):
-            result = enhance_by_set_for_mode({"a": [_KEEP_ALL, _KEEP_ALL]}, mode="video", scene_by_set={"a": ["", "Own scene."]}, job_scene="Job scene.")
-        assert result == {"a": [None, None]}
-
-    def test_blank_job_scene_still_splits(self):
-        assert enhance_by_set_for_mode({"a": [_KEEP_ALL]}, mode="video", job_scene="  ") == {"a": [_KEEP_ALL]}
-
-    def test_images_drop_all_keep_entries_whatever_the_scene(self):
-        with pytest.warns(UserWarning, match="no change in images"):
-            assert enhance_by_set_for_mode({"a": [_KEEP_ALL]}, mode="image", scene_by_set={"a": [None]}) == {"a": [None]}
 
 
 # ── Extending a clip ────────────────────────────────────────────────────────
@@ -1213,8 +1219,8 @@ class TestPartsGrammar:
         assert parse_enhance_spec(format_enhance_spec(settings), mode="video") == settings
 
     def test_format_omits_the_default_and_writes_a_set_value_last(self):
-        assert "parts" not in format_enhance_spec(EnhanceSettings())
-        assert format_enhance_spec(EnhanceSettings(parts="action")).endswith(",parts=action")
+        assert format_enhance_spec(EnhanceSettings()) == "style=keep"
+        assert format_enhance_spec(EnhanceSettings(style="film", parts="action")) == "style=film,parts=action"
 
     def test_image_format_omits_parts(self):
         assert "parts" not in format_enhance_spec(EnhanceSettings(parts="action"), mode="image")
@@ -1269,27 +1275,6 @@ class TestResolveParts:
     )
     def test_rule(self, parts, scene, extends, reference_image, expected):
         assert resolve_parts(EnhanceSettings(parts=parts), scene=scene, extends=extends, reference_image=reference_image) == expected
-
-
-class TestPartsNoop:
-    def test_action_is_a_change_even_with_keep_all_settings(self):
-        keep = EnhanceSettings(details=(), motion=(), parts="action")
-        assert is_noop(keep, mode="video") is False
-        validate_settings(keep, mode="video")
-
-    def test_both_and_auto_keep_the_existing_rule(self):
-        for parts in (None, "both"):
-            assert is_noop(EnhanceSettings(details=(), motion=(), parts=parts), mode="video") is True
-
-    def test_images_ignore_parts(self):
-        assert is_noop(EnhanceSettings(details=(), motion=(), parts="action"), mode="image") is True
-
-    def test_a_keep_all_action_entry_with_its_own_scene_is_kept(self):
-        entry = EnhanceSettings(details=(), motion=(), parts="action")
-        plain = EnhanceSettings(details=(), motion=())
-        with pytest.warns(UserWarning, match="no change in videos"):
-            result = enhance_by_set_for_mode({"a": [entry, plain]}, mode="video", scene_by_set={"a": ["A castle.", "A castle."]})
-        assert result == {"a": [entry, None]}
 
 
 class TestActionOnlyWithoutExtending:

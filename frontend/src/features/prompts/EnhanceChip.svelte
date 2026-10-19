@@ -1,8 +1,9 @@
 <script lang="ts">
   import { popover } from '$lib/actions/popover';
+  import { DEFAULT_ENHANCE_SETTINGS } from '$lib/state/promptEnhance';
   import { EnhanceOptions, EnhanceRewrite } from '$lib/components/molecules';
   import type { EnhanceAxis, EnhanceSettings, EntryEnhance } from '$lib/types';
-  import { enhanceSettingsFor, enhanceShortLabel, enhanceSummary, isNoOpEnhance } from './document';
+  import { enhanceSettingsFor, enhanceShortLabel, enhanceSummary } from './document';
 
   interface Props {
     enhance: EntryEnhance;
@@ -17,9 +18,8 @@
   let open = $state(false);
   let anchor = $state<HTMLButtonElement | null>(null);
   let useDefaults = $state(false);
-  let settings = $state<EnhanceSettings>({ style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' });
+  let settings = $state<EnhanceSettings>({ ...DEFAULT_ENHANCE_SETTINGS });
 
-  const noop = $derived(!useDefaults && isNoOpEnhance(settings));
 
   function toggle(): void {
     if (open) {
@@ -69,14 +69,11 @@
       <EnhanceOptions {axes} {settings} mode="video" audio {idPrefix} onchange={(next) => { settings = next; }} />
       <p class="enhance-hint">Motion and Sound only apply to video (Sound only with audio on); image runs ignore them.</p>
     {/if}
-    {#if noop}
-      <p class="enhance-warning" role="status">Nothing to enhance: pick a style, a mood, a detail, a length or write a direction.</p>
-    {/if}
     <div class="enhance-actions">
       {#if enhance !== null}
         <button type="button" class="ui-btn" onclick={turnOff}>Turn off</button>
       {/if}
-      <button type="button" class="ui-btn ui-btn-primary" disabled={noop} onclick={apply}>{enhance === null ? 'Enhance' : 'Apply'}</button>
+      <button type="button" class="ui-btn ui-btn-primary" onclick={apply}>{enhance === null ? 'Enhance' : 'Apply'}</button>
     </div>
   </div>
 {/if}
@@ -89,6 +86,5 @@
   .enhance-mode { margin-bottom: 10px; }
   .enhance-rewrite { margin-bottom: 12px; }
   .enhance-hint { margin-top: 8px; font-size: var(--text-meta); color: var(--color-text-muted); }
-  .enhance-warning { margin-top: 8px; font-size: var(--text-meta); color: var(--color-warning); }
   .enhance-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }
 </style>

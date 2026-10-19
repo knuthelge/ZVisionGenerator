@@ -2900,14 +2900,13 @@ def test_extend_submission_never_treats_enhance_settings_as_a_no_op(monkeypatch,
     assert submitted[0]["args"].enhance is not None
 
 
-def test_video_submission_with_a_scene_still_refuses_no_op_enhance_settings(monkeypatch, tmp_path):
+def test_video_submission_with_a_scene_accepts_keep_everything_enhance_settings(monkeypatch, tmp_path):
     submitted = _stub_video_submission(monkeypatch, tmp_path)
 
     response = _post_video({"scene": "A night street.", **_NO_OP_ENHANCE})
 
-    assert response.status_code == 422
-    assert "Nothing to enhance" in response.json()["detail"]
-    assert submitted == []
+    assert response.status_code == 200
+    assert len(submitted) == 1
 
 
 def test_video_submission_accepts_action_only_settings_that_keep_everything(monkeypatch, tmp_path):

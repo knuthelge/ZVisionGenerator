@@ -1,3 +1,4 @@
+import { DEFAULT_ENHANCE_SETTINGS } from '$lib/state/promptEnhance';
 import type {
   DocumentEntry,
   DocumentProblem,
@@ -61,7 +62,7 @@ export class PromptBuilder {
   preview = $state<PromptDocumentPreview | null>(null);
   rolled = $state<{ entryId: string; base: string; prompt: string } | null>(null);
   axes = $state<EnhanceAxis[]>([]);
-  defaults = $state<EnhanceSettings>({ style: 'keep', mood: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' });
+  defaults = $state<EnhanceSettings>({ ...DEFAULT_ENHANCE_SETTINGS });
 
   readonly #history = new UndoHistory<string>(100);
   readonly #previewFn: PreviewFn;
