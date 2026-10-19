@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 - **Plain image upscale on Windows and Linux.** The viewer's **2×** and **4×** upscale with SeedVR2 now works with an NVIDIA GPU too, and **X** then **2** or **4** runs it there. The model streams from system memory, so the 7B model is used with about 22 GB of system memory and the 3B model below that; on a 10 GB GPU a 2× takes about half a minute, and a 4× of a 1 MP image is marked **high memory** because it only fits when nothing else uses the GPU. The first use downloads 9.0 GB (7B) or 3.9 GB (3B) into the models folder
+- **Gallery: see how a prompt was enhanced, and reuse it.** Images and videos now record the enhance options, the enhancer (Fast, Smart or your own model) and your own prompt. The viewer shows them as one line, and **Reuse settings** brings back your prompt, the rewrite and the options
 
 ### Fixed
 - **Web UI on a touch screen: buttons no longer stay lit after a tap,** and show a pressed state while the finger is down instead. Prompt rows show their actions without hover, a tap on a number or path field on a phone no longer zooms the page, a pull past the end of a list no longer reloads the page or bounces it, and buttons, rows and setting chips are a little larger to hit

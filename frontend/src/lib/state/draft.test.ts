@@ -691,6 +691,24 @@ describe('draft store – prompt enhancer fields', () => {
       expect(draft.state.enhancedFrom).toEqual({ scene: 'A castle.', prompt: 'a knight', mode: 'video' });
     });
 
+    it('restores how the reused rewrite was made: the options, the enhancer and the record kept with it', () => {
+      const enhance = JSON.stringify({ settings: { style: 'cinematic', camera: 'orbit', parts: 'action' }, model: 'org/smart', tier: 'smart', format: 'text' });
+      draft.update('enhanceSettings', { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' });
+      draft.loadFromUrl({ workflow: 'txt2vid', scene: 'A castle.', prompt: 'a knight', enhanced_prompt: 'A knight rides in.', enhance }, makeContext());
+      expect(draft.state.enhanceSettingsVideo).toMatchObject({ style: 'cinematic', camera: 'orbit', partsByWorkflow: { txt2vid: 'action' } });
+      expect(draft.state.enhanceSettings?.style).toBe('photo');
+      expect(draft.state.enhanceModel).toBe('smart');
+      expect(draft.state.enhancedFrom?.record).toEqual({ settings: { style: 'cinematic', camera: 'orbit', parts: 'action' }, model: 'org/smart', format: 'text' });
+    });
+
+    it('ignores an enhance record without Enhanced text, and a malformed one', () => {
+      draft.loadFromUrl({ workflow: 'txt2vid', scene: 'A castle.', prompt: 'a knight', enhance: '{"settings":{"style":"cinematic"},"model":"org/fast","tier":"fast"}' }, makeContext());
+      expect(draft.state.enhanceSettingsVideo).toBeNull();
+      draft.loadFromUrl({ workflow: 'txt2vid', scene: 'A castle.', prompt: 'a knight', enhanced_prompt: 'A knight rides in.', enhance: '{broken' }, makeContext());
+      expect(draft.state.enhanceSettingsVideo).toBeNull();
+      expect(draft.state.enhancedFrom?.record).toBeUndefined();
+    });
+
     it('fills an Enhanced box only from the enhanced parameter present, never from the plain text', () => {
       draft.loadFromUrl({ scene: 'A castle.', prompt: 'a knight', enhanced_prompt: 'A knight rides in.' }, makeContext());
       expect(draft.state).toMatchObject({ scene: 'A castle.', prompt: 'a knight', enhancedScene: '', enhancedPrompt: 'A knight rides in.' });

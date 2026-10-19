@@ -116,6 +116,19 @@ describe('AssetViewer', () => {
       expect(details.textContent?.match(/A castle at dusk\./g)).toHaveLength(1);
     });
 
+    it('shows how an enhanced prompt was made and the own prompt it came from', () => {
+      const enhance = { summary: 'Fast · Cinematic, Longer', tier: 'fast', model: 'org/fast', format: 'text', settings: { style: 'cinematic' }, prompt_input: 'a knight', scene_input: null } as const;
+      const details = openDetails(makeAsset({ prompt: 'A knight rides in at dusk.', enhance }));
+      const section = details.querySelector('[data-testid="viewer-enhance"]');
+      expect(section?.textContent).toContain('Fast · Cinematic, Longer');
+      expect(section?.textContent).toContain('a knight');
+    });
+
+    it('shows no enhance section for an asset that was not enhanced', () => {
+      const details = openDetails(makeAsset({ prompt: 'A fox.' }));
+      expect(details.querySelector('[data-testid="viewer-enhance"]')).toBeNull();
+    });
+
     it('shows no scene section for an asset without one', () => {
       const details = openDetails(makeAsset({ prompt: 'A fox.' }));
       expect(details.querySelector('[data-testid="viewer-scene"]')).toBeNull();

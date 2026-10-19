@@ -6,9 +6,9 @@ from typing import Any
 
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus, IterationPlan
 from zvisiongenerator.utils.config import enhancer_tier_models, model_reference, split_model_revision
-from zvisiongenerator.utils.prompt_enhance import ENHANCE_FORMATS, EnhanceSettings, settings_from_mapping, settings_to_mapping
+from zvisiongenerator.utils.prompt_enhance import ENHANCE_AXES, ENHANCE_FORMATS, EnhanceSettings, settings_from_mapping, settings_to_mapping
 
-__all__ = ["RECORD_TIERS", "build_enhance_record", "enhancer_tier", "parse_enhance_record", "planned_enhance_record"]
+__all__ = ["RECORD_TIERS", "build_enhance_record", "enhance_record_summary", "enhancer_tier", "parse_enhance_record", "planned_enhance_record"]
 
 # ``custom`` is a model set on the Config page or with --enhance-model REPO.
 RECORD_TIERS = ("fast", "smart", "custom")
@@ -47,6 +47,32 @@ def planned_enhance_record(iteration: IterationPlan, enhancer: EnhancerUsed | No
     if enhancer is None or iteration.enhance is None or iteration.enhance_status is not EnhanceStatus.ENHANCED:
         return None
     return build_enhance_record(iteration.enhance, mode=mode, repo=enhancer.repo, revision=enhancer.revision, tier=enhancer.tier, fmt=enhancer.format)
+
+
+_TIER_LABELS = {"fast": "Fast", "smart": "Smart", "custom": "Custom model"}
+
+
+def enhance_record_summary(record: dict[str, Any]) -> str:
+    """Return a one-line summary of how a prompt was enhanced: the enhancer, then every option that is not a default.
+
+    For example ``Fast · Cinematic, Melancholic, Orbit, Longer`` or ``Smart · JSON caption · Noir``; ``General rewrite``
+    stands in for options that are all defaults.
+    """
+    settings, defaults = record.get("settings") or {}, settings_to_mapping(EnhanceSettings())
+    picked: list[str] = []
+    for axis in ENHANCE_AXES:
+        value = settings.get(axis.key)
+        if value is None or value == defaults[axis.key]:
+            continue
+        slugs = value if isinstance(value, list) else [value]
+        picked.extend(axis.option(slug).label for slug in slugs if slug in axis.slugs())
+    if settings.get("note"):
+        picked.append(f'"{settings["note"]}"')
+    parts = [_TIER_LABELS.get(record.get("tier", ""), "Custom model")]
+    if record.get("format") == "json":
+        parts.append("JSON caption")
+    parts.append(", ".join(picked) if picked else "General rewrite")
+    return " · ".join(parts)
 
 
 def parse_enhance_record(raw: Any, *, mode: str, config: dict[str, Any] | None = None, platform_key: str | None = None) -> dict[str, Any] | None:

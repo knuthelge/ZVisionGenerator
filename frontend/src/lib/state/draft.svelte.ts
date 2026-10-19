@@ -1,6 +1,6 @@
 import { extendPrefillFor } from './extend';
 import { keepInstalledLoras } from './loras';
-import { isJsonCaption, prettyCaption, workflowMode } from './promptEnhance';
+import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
 import { alignFrameCount, defaultExtendFrames, snapExtendFrames } from './videoDuration';
 import type { DraftState, ExtendSourceInfo, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
@@ -387,6 +387,16 @@ export const draft = {
       // The reused Enhanced pair came from the reused inputs, so it is not out of date; with none, a stale Enhanced box would silently win.
       const enhanced = `${prefill.enhancedPrompt}${prefill.enhancedScene}`.trim() !== '';
       prefill.enhancedFrom = enhanced ? { prompt: prefill.prompt, scene: prefill.scene ?? '', mode: workflowMode(workflow) } : null;
+      // How the reused rewrite was made: its options, enhancer and format come back, and Generate records them again.
+      const reused = enhanced ? reusedEnhance(params.enhance, workflow) : null;
+      if (reused && prefill.enhancedFrom) {
+        prefill.enhancedFrom.record = reused.record;
+        const key = enhanceSettingsKey(workflow);
+        const remembered = key === 'enhanceSettingsVideo' ? _draft.enhanceSettingsVideo?.partsByWorkflow : undefined;
+        prefill[key] = remembered || reused.settings.partsByWorkflow ? { ...reused.settings, partsByWorkflow: { ...remembered, ...reused.settings.partsByWorkflow } } : reused.settings;
+        if (reused.tier) prefill.enhanceModel = reused.tier;
+        if (workflowMode(workflow) === 'image') prefill.enhanceFormat = reused.format;
+      }
       if (enhanced && prefill.enhancedFrom && workflow === 'extend') {
         prefill.enhancedFrom.sourceVideoPath = prefill.extendSourcePath !== undefined ? prefill.extendSourcePath : _draft.extendSourcePath;
         prefill.enhancedFrom.extendFrames = prefill.extendFrames !== undefined ? prefill.extendFrames : _draft.extendFrames;

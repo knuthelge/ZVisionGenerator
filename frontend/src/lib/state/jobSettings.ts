@@ -1,4 +1,4 @@
-import { DEFAULT_ENHANCE_SETTINGS, enhanceSettingsKey } from './promptEnhance';
+import { enhanceSettingsKey, restoredEnhanceSettings } from './promptEnhance';
 import type { DraftState, EnhanceParts, EnhanceSettings, JobSettings, PromptSource, Workflow } from '$lib/types';
 import { snapExtendFrames } from './videoDuration';
 
@@ -34,20 +34,6 @@ export function numberOrNull(value: string | undefined): number | null {
   if (value === undefined || value.trim() === '' || value === 'null') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-/** Restore the enhance options a job was submitted with; its Rewrite choice is remembered for the job's own workflow. */
-function enhanceSettings(value: string | undefined, workflow: Workflow | undefined): EnhanceSettings | null {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value) as Partial<EnhanceSettings>;
-    const { parts: _parts, partsByWorkflow: _remembered, ...known } = parsed;
-    const settings: EnhanceSettings = { ...DEFAULT_ENHANCE_SETTINGS, ...known };
-    const parts: EnhanceParts | undefined = parsed.parts === 'both' || parsed.parts === 'action' ? parsed.parts : undefined;
-    return parts !== undefined && workflow !== undefined ? { ...settings, partsByWorkflow: { [workflow]: parts } } : settings;
-  } catch {
-    return null;
-  }
 }
 
 /** Turn the form fields a job was submitted with back into workspace state, so the form can be refilled from it. */
@@ -108,7 +94,7 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
   if (settings.scheduler !== undefined) patch.scheduler = first(settings, 'scheduler') || null;
   if (settings.first_sigma !== undefined) patch.firstSigma = numberOrNull(first(settings, 'first_sigma'));
   if (settings.quantize !== undefined) patch.quantize = numberOrNull(first(settings, 'quantize'));
-  const enhance = enhanceSettings(first(settings, 'enhance_settings'), first(settings, 'workflow') as Workflow | undefined);
+  const enhance = restoredEnhanceSettings(first(settings, 'enhance_settings'), first(settings, 'workflow') as Workflow | undefined);
   if (enhance) patch[enhanceSettingsKey((first(settings, 'workflow') as Workflow | undefined) ?? 'txt2img')] = enhance;
 
   for (const [name, enabledKey, amountKey] of [

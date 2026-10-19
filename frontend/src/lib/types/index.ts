@@ -54,6 +54,8 @@ export interface GalleryAsset {
   media_type: 'image' | 'video';
   /** Recorded settings beyond the reuse fields, shown in the asset viewer. */
   details?: AssetDetails;
+  /** How the prompt was enhanced; null when it was not, or the file predates the record. */
+  enhance?: AssetEnhance | null;
   /** Upscale options for an image (null for videos and images of unknown size). */
   upscale?: AssetUpscale | null;
   /** Whether a video can be extended; null for images and where the platform cannot extend. */
@@ -62,6 +64,16 @@ export interface GalleryAsset {
   source_video?: string | null;
   /** The frames an extension added, as recorded; null for other assets. */
   extend_frames?: number | null;
+}
+
+/** How an asset's prompt was enhanced, as recorded in the file; the viewer shows the summary and the user's own text. */
+export interface AssetEnhance extends EnhanceRecord {
+  /** One line: the enhancer, then the options that are not defaults, e.g. "Fast · Cinematic, Melancholic, Longer". */
+  summary: string;
+  tier: 'fast' | 'smart' | 'custom';
+  /** The user's own prompt (and scene, for video) before the rewrite. */
+  prompt_input: string | null;
+  scene_input: string | null;
 }
 
 /** Whether a video can be extended, with the reason when it cannot. */

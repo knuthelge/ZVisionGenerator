@@ -595,6 +595,20 @@
             <h4 class="viewer-h ui-area-label">{sceneOnly ? 'Scene' : 'Prompt'}</h4>
             <p class="viewer-prompt">{asset.prompt || 'No prompt recorded.'}</p>
           </section>
+          {#if asset.enhance}
+            <section data-testid="viewer-enhance">
+              <h4 class="viewer-h ui-area-label">Enhanced with</h4>
+              <p class="viewer-enhance"><Icon name="sparkle" size={13} /><span>{asset.enhance.summary}</span></p>
+              {#if asset.enhance.scene_input && asset.enhance.scene_input !== asset.scene}
+                <h4 class="viewer-h viewer-h-sub ui-area-label">Your scene</h4>
+                <p class="viewer-prompt">{asset.enhance.scene_input}</p>
+              {/if}
+              {#if asset.enhance.prompt_input && asset.enhance.prompt_input !== asset.prompt}
+                <h4 class="viewer-h viewer-h-sub ui-area-label">Your prompt</h4>
+                <p class="viewer-prompt">{asset.enhance.prompt_input}</p>
+              {/if}
+            </section>
+          {/if}
           {#if sections?.negativePrompt}
             <section>
               <h4 class="viewer-h ui-area-label">Negative prompt</h4>
@@ -722,6 +736,9 @@
   .viewer-details { display: flex; flex: none; flex-direction: column; width: 340px; min-height: 0; background: var(--color-bg-surface); }
   .viewer-details-body { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 16px; overflow-y: auto; overscroll-behavior: contain; padding: 16px; }
   .viewer-h { margin: 0 0 6px; }
+  .viewer-h-sub { margin-top: 10px; }
+  .viewer-enhance { display: flex; align-items: baseline; gap: 6px; font-size: var(--text-ui); line-height: 1.45; color: var(--color-primary-main); }
+  .viewer-enhance :global(svg) { flex: none; transform: translateY(2px); }
   .viewer-prompt { padding: 8px 10px; border-radius: var(--radius-md); background: var(--color-bg-base); font-size: var(--text-content); line-height: 1.55; color: var(--color-text-secondary); white-space: pre-wrap; user-select: text; }
   .viewer-source { display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: var(--radius-md); background: var(--color-bg-base); font-size: var(--text-ui); color: var(--color-text-primary); text-align: left; }
   .viewer-source small { flex: none; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }

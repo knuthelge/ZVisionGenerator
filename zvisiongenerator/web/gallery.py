@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from PIL import Image, UnidentifiedImageError
 
 from zvisiongenerator.backends import supports_video_extend
 from zvisiongenerator.core.ideogram4 import is_json_caption
+from zvisiongenerator.utils.enhance_record import enhance_record_summary
 from zvisiongenerator.utils.provenance import image_prompt_text, optional_float, optional_int, optional_text, read_mp4_config, read_png_config, recorded_settings
 from zvisiongenerator.utils.config import model_capabilities
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label, seedvr2_tier_label
@@ -71,6 +73,8 @@ class GalleryAsset:
     scene: str | None = None
     scene_input: str | None = None
     prompt_input: str | None = None
+    # How the prompt was enhanced: ``{settings, model, tier, format}``; None when it was not, or the file predates it.
+    enhance: dict[str, Any] | None = None
     scheduler: str | None = None
     model_family: str | None = None
     image_strength: float | None = None
@@ -265,9 +269,17 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         },
         "reuse_workspace_url": f"#/workspace?{urlencode(reuse_params)}",
         "details": _asset_details_json(asset),
+        "enhance": _asset_enhance_json(asset),
         "upscale": _asset_upscale_json(asset, web_config, resolved_model) if asset.kind == "image" else None,
         "extend": _asset_extend_json(asset) if asset.kind == "video" and video_extend else None,
     }
+
+
+def _asset_enhance_json(asset: GalleryAsset) -> dict[str, Any] | None:
+    """Return how the asset's prompt was enhanced, for the viewer: the one-line summary and the user's own text; None when it was not."""
+    if asset.enhance is None:
+        return None
+    return {"summary": enhance_record_summary(asset.enhance), "prompt_input": asset.prompt_input, "scene_input": asset.scene_input, **asset.enhance}
 
 
 def _asset_extend_json(asset: GalleryAsset) -> dict[str, Any]:
@@ -321,6 +333,9 @@ def _reuse_text_params(asset: GalleryAsset, *, video: bool) -> dict[str, str]:
     enhanced action. Without recorded inputs (plain or older assets) the recorded text is what the user wrote.
     """
     if not video:
+        if asset.prompt_input and asset.prompt != asset.prompt_input:
+            # An enhanced image: the user's text in Your text and the rewrite (or caption) in Enhanced, with how it was made.
+            return {"prompt": asset.prompt_input, "enhanced_prompt": asset.prompt, **_reuse_enhance_params(asset)}
         # A structured caption reuses into the JSON box: as a text prompt its braces would read as {a|b} choices.
         return {"json_prompt": asset.prompt} if is_json_caption(asset.prompt) else {"prompt": asset.prompt}
     if asset.scene_input or asset.prompt_input:
@@ -332,7 +347,15 @@ def _reuse_text_params(asset: GalleryAsset, *, video: bool) -> dict[str, str]:
         }
     else:
         pairs = {"scene": asset.scene, "prompt": asset.prompt}
-    return {key: value for key, value in pairs.items() if value}
+    params = {key: value for key, value in pairs.items() if value}
+    if params.get("enhanced_scene") or params.get("enhanced_prompt"):
+        params.update(_reuse_enhance_params(asset))
+    return params
+
+
+def _reuse_enhance_params(asset: GalleryAsset) -> dict[str, str]:
+    """Return the ``enhance`` Reuse param: the recorded options, model, tier and format as JSON, when the asset has them."""
+    return {"enhance": json.dumps(asset.enhance, separators=(",", ":"))} if asset.enhance else {}
 
 
 def delete_gallery_assets(output_dir: str, selected_paths: list[str]) -> None:
@@ -411,6 +434,7 @@ def _build_gallery_asset(root: Path, candidate: Path) -> GalleryAsset | None:
         scene=metadata["scene"],
         scene_input=metadata["scene_input"],
         prompt_input=metadata["prompt_input"],
+        enhance=metadata["enhance"],
         scheduler=metadata["scheduler"],
         model_family=metadata["model_family"],
         image_strength=metadata["image_strength"],
@@ -462,6 +486,7 @@ def _read_asset_metadata(asset_path: Path, kind: str) -> dict[str, Any]:
         "scene": recorded.scene,
         "scene_input": recorded.scene_input,
         "prompt_input": recorded.prompt_input,
+        "enhance": recorded.enhance,
         "scheduler": recorded.scheduler,
         "model_family": recorded.model_family,
         "image_strength": recorded.image_strength,

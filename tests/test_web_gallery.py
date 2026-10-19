@@ -766,3 +766,39 @@ def test_a_video_that_cannot_be_extended_says_why(tmp_path, monkeypatch):
 
     assert all(info["available"] is False and info["reason"] for info in (upscaled, vanished, both))
     assert upscaled["reason"] == both["reason"] != vanished["reason"]  # an upscaled video gives that reason even when its file is gone too
+
+
+# ---------------------------------------------------------------------------
+# How a prompt was enhanced: the viewer summary and Reuse
+# ---------------------------------------------------------------------------
+
+_ENHANCE = {"settings": {"style": "cinematic", "mood": "melancholic", "details": [], "length": "longer"}, "model": "org/fast@r1", "tier": "fast", "format": "text"}
+
+
+def _image_reuse(tmp_path, config_overrides: dict) -> tuple[dict, dict[str, str]]:
+    config = {"schema": "zvisiongenerator.config.v1", "workflow": "txt2img", "model": "zit", "seed": 1, "steps": 8, "prompt": "A red fox curls up in deep snow.", **config_overrides}
+    _make_png_with_config(tmp_path / "fox.png", config)
+    payload = gallery_asset_to_json(_find_asset(list_gallery_assets(str(tmp_path)), "fox.png"), _reuse_web_config())
+    return payload, _reuse_params(payload)
+
+
+def test_an_enhanced_image_shows_how_and_reuses_both_texts_and_the_options(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
+    payload, params = _image_reuse(tmp_path, {"prompt_input": "a fox in snow", "enhance": _ENHANCE})
+    assert payload["enhance"]["summary"] == "Fast · Cinematic, Melancholic, Longer"
+    assert payload["enhance"]["prompt_input"] == "a fox in snow"
+    assert (params["prompt"], params["enhanced_prompt"]) == ("a fox in snow", "A red fox curls up in deep snow.")
+    assert json.loads(params["enhance"])["settings"]["style"] == "cinematic"
+
+
+def test_a_plain_image_has_no_enhance_record(tmp_path, monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
+    payload, params = _image_reuse(tmp_path, {})
+    assert payload["enhance"] is None
+    assert params["prompt"] == "A red fox curls up in deep snow." and "enhanced_prompt" not in params and "enhance" not in params
+
+
+def test_an_enhanced_video_reuses_its_options(tmp_path):
+    payload, params = _video_reuse(tmp_path, {"prompt": "A fox sprints.", "prompt_input": "a fox runs", "enhance": {**_ENHANCE, "settings": {"style": "cinematic", "camera": "orbit"}}})
+    assert payload["enhance"]["summary"] == "Fast · Cinematic, Orbit"
+    assert json.loads(params["enhance"])["settings"]["camera"] == "orbit"

@@ -1,4 +1,4 @@
-import type { DraftState, EnhanceContext, EnhancedSource, EnhanceFormat, EnhanceParts, EnhancerTier, EnhanceSettings, PromptEnhancerContract, Workflow, WorkflowMode } from '$lib/types';
+import type { DraftState, EnhanceRecord, EnhanceContext, EnhancedSource, EnhanceFormat, EnhanceParts, EnhancerTier, EnhanceSettings, PromptEnhancerContract, Workflow, WorkflowMode } from '$lib/types';
 
 /** The enhancer a run uses: Smart when chosen and available here, otherwise Fast. */
 export function effectiveTier(state: Pick<DraftState, 'enhanceModel'>, contract: PromptEnhancerContract | undefined | null): EnhancerTier {
@@ -57,6 +57,40 @@ export function isDefaultEnhanceSettings(settings: EnhanceSettings, defaults: Pa
     }
     return key === 'note' ? String(value ?? '').trim() === String(fallback ?? '').trim() : value === fallback;
   });
+}
+
+/** Restore enhance options from their JSON (a queued job's or an asset's); a Rewrite choice is remembered for *workflow*. */
+export function restoredEnhanceSettings(value: string | undefined, workflow: Workflow | undefined): EnhanceSettings | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Partial<EnhanceSettings>;
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const { parts: _parts, partsByWorkflow: _remembered, ...known } = parsed;
+    const settings: EnhanceSettings = { ...DEFAULT_ENHANCE_SETTINGS, ...known };
+    const parts: EnhanceParts | undefined = parsed.parts === 'both' || parsed.parts === 'action' ? parsed.parts : undefined;
+    return parts !== undefined && workflow !== undefined ? { ...settings, partsByWorkflow: { [workflow]: parts } } : settings;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What Reuse restores from an asset's `enhance` record (JSON): the options for *workflow*'s mode, the enhancer (Fast or
+ * Smart; a custom model leaves the choice alone), the format, and the record kept with the Enhanced text.
+ */
+export function reusedEnhance(value: string | undefined, workflow: Workflow): { settings: EnhanceSettings; tier: EnhancerTier | null; format: EnhanceFormat; record: EnhanceRecord } | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as { settings?: Partial<EnhanceSettings>; model?: unknown; tier?: unknown; format?: unknown };
+    if (typeof parsed?.model !== 'string' || !parsed.model) return null;
+    const settings = restoredEnhanceSettings(JSON.stringify(parsed.settings ?? {}), workflow);
+    if (!settings) return null;
+    const format: EnhanceFormat = parsed.format === 'json' ? 'json' : 'text';
+    const tier = parsed.tier === 'fast' || parsed.tier === 'smart' ? parsed.tier : null;
+    return { settings, tier, format, record: { settings: parsed.settings ?? {}, model: parsed.model, format } };
+  } catch {
+    return null;
+  }
 }
 
 /** The draft field that holds the enhance options of *workflow*'s mode: images and video remember theirs apart. */
