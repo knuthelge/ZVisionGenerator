@@ -22,6 +22,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     resolve_enhance_ceiling,
     resolve_parts,
     settings_from_mapping,
+    system_message,
     validate_settings,
 )
 from zvisiongenerator.utils.prompt_enhance_video import (
@@ -318,6 +319,9 @@ _AUDIO = EnhanceContext(audio=True)
 
 
 class TestMessages:
+    def test_system_message_lists_rules_between_intro_and_closing(self):
+        assert system_message("Intro.", ["one", "two"], "Closing.") == "Intro.\nRules:\n- one\n- two\nClosing."
+
     def test_user_message_is_prompt(self):
         plan = plan_length(3, "same", ceiling=300)
         messages = build_messages("a red fox", EnhanceSettings(), mode="image", plan=plan)

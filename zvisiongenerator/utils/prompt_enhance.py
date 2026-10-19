@@ -776,6 +776,11 @@ def direction_rules(settings: EnhanceSettings, *, both_parts: bool = False) -> l
     return [f"Direction from the user (follow it{' in both parts' if both_parts else ''}): {settings.note}"]
 
 
+def system_message(intro: str, rules: list[str], closing: str) -> str:
+    """Return a rewrite's system message: *intro*, the *rules* as a bulleted list, then *closing* (the output format)."""
+    return f"{intro}\nRules:\n" + "\n".join(f"- {rule}" for rule in rules) + f"\n{closing}"
+
+
 def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: LengthPlan, context: EnhanceContext | None = None) -> list[dict[str, str]]:
     """Build the system + user chat messages for one enhancement."""
     _check_mode(mode)
@@ -797,8 +802,7 @@ def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: L
     rules.append(length_instruction(plan))
     if plan.length == "same" or plan.clamped:
         rules.append("Apply the style, mood and details; don't return the input unchanged.")
-    system = f"You rewrite prompts for a {kind} model.\nRules:\n" + "\n".join(f"- {rule}" for rule in rules)
-    system += "\nOutput only the rewritten prompt as plain prose: no preamble, no headings, no quotes."
+    system = system_message(f"You rewrite prompts for a {kind} model.", rules, "Output only the rewritten prompt as plain prose: no preamble, no headings, no quotes.")
     return [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
 
 

@@ -26,6 +26,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     perception_rule,
     plan_length,
     strip_reasoning,
+    system_message,
     word_count,
 )
 
@@ -334,9 +335,9 @@ def _messages(prompt: str, settings: EnhanceSettings, *, lettering: _Lettering, 
     ]
     if lettering.mode != "none":
         format_lines.append('TEXT: "the exact words" | how the lettering looks and where it is')
-    system = "You turn prompts into structured captions for a text-to-image model.\nRules:\n" + "\n".join(f"- {rule}" for rule in rules)
-    system += "\nReply with these labelled lines in this order and nothing else (no JSON, no markdown, no preamble):\n" + "\n".join(format_lines)
-    system += "\n\nExample of the format for a different prompt (never copy its content):\n" + _EXAMPLE[branch]
+    closing = "Reply with these labelled lines in this order and nothing else (no JSON, no markdown, no preamble):\n" + "\n".join(format_lines)
+    closing += "\n\nExample of the format for a different prompt (never copy its content):\n" + _EXAMPLE[branch]
+    system = system_message("You turn prompts into structured captions for a text-to-image model.", rules, closing)
     return [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
 
 

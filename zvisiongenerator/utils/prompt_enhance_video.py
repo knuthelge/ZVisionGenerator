@@ -15,6 +15,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     DETAILS_AXIS,
     MOOD_AXIS,
     NO_USABLE_MESSAGE,
+    PRESERVATION_RULES,
     STYLE_AXIS,
     EnhanceContext,
     EnhanceSettings,
@@ -32,6 +33,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     plan_length,
     resolve_parts,
     strip_reasoning,
+    system_message,
     validate_settings,
     word_count,
 )
@@ -63,6 +65,8 @@ _PREVIOUS_CLOSENESS = 0.9
 # A quoted line of at least this many words also counts as repeated when a longer new line contains it.
 _MIN_CONTAINED_LINE_WORDS = 3
 
+# An action written beside a kept scene keeps the user's intent but not "every detail": the scene's details must not be repeated.
+ACTION_PRESERVATION_RULES = ("Keep the user's intent and every element they mention.", PRESERVATION_RULES[1])
 # Action-only rewrites see the scene as context; small models tend to repeat its details unless told exactly how to refer to it.
 _KEEP_SCENE_OUT_RULE = (
     'Refer to people and things already in the scene by a pronoun or a short reference ("she", "the dog"). Never repeat their clothing, appearance or the setting; the scene already says it.'
@@ -162,8 +166,7 @@ def build_pair_messages(scene: str, prompt: str, settings: EnhanceSettings, *, p
     action_role = "ACTION: what happens, in time order, with camera moves"
     action_role += ", sound and quoted dialogue." if context.audio else "."
     rules = [
-        "EVERY DETAIL IS IMPORTANT: keep the user's subject, intent and every element they mention.",
-        "Never add new people, animals, characters or major objects.",
+        *PRESERVATION_RULES,
         perception_rule("video", context),
         *context_rules("video", replace(context, reference_image=False, seconds=None if context.extends else context.seconds)),
         "SCENE: who and where, their look, the style and the camera setup. No events, no camera moves, no quoted speech.",
@@ -183,8 +186,11 @@ def build_pair_messages(scene: str, prompt: str, settings: EnhanceSettings, *, p
     rules.append(length_instruction(plan.action, "ACTION length"))
     if settings.length == "same" or plan.total.clamped:
         rules.append("Apply the style, mood and details; don't return the input unchanged.")
-    system = "You rewrite prompts for a text-to-video model. The user gives a Scene and a Prompt; you write a SCENE and an ACTION.\nRules:\n" + "\n".join(f"- {rule}" for rule in rules)
-    system += "\nReply with `SCENE:` then `ACTION:`, each followed by plain prose: no preamble, no headings, no quotes around a part."
+    system = system_message(
+        "You rewrite prompts for a text-to-video model. The user gives a Scene and a Prompt; you write a SCENE and an ACTION.",
+        rules,
+        "Reply with `SCENE:` then `ACTION:`, each followed by plain prose: no preamble, no headings, no quotes around a part.",
+    )
     if context.extends and scene.strip():
         user = f"Scene: {scene.strip()}\nWhat happens next: {_extend_user_message(prompt, context)}"
     elif context.extends:
@@ -254,8 +260,7 @@ def _action_only_messages(preamble: list[str], situation: list[str], settings: E
         user: The user message.
     """
     rules = [
-        "Keep the user's intent and every element they mention.",
-        "Never add new people, animals, characters or major objects.",
+        *ACTION_PRESERVATION_RULES,
         _KEEP_SCENE_OUT_RULE,
         perception_rule("video", context),
         *situation,
@@ -263,8 +268,7 @@ def _action_only_messages(preamble: list[str], situation: list[str], settings: E
         *direction_rules(settings),
         length_instruction(plan, "Length"),
     ]
-    system = "\n".join(preamble) + "\nRules:\n" + "\n".join(f"- {rule}" for rule in rules)
-    system += "\nOutput only the action as plain prose: no preamble, no headings, no scene description, no quotes around it."
+    system = system_message("\n".join(preamble), rules, "Output only the action as plain prose: no preamble, no headings, no scene description, no quotes around it.")
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
