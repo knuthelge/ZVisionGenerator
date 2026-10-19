@@ -45,3 +45,6 @@ zvisiongenerator/_version.py
 
 # MkDocs build output
 site/
+
+# Prompt-enhancer bench results (machine-specific)
+bench/enhance/runs/

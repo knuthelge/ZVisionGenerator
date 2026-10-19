@@ -32,6 +32,7 @@ make install
 | `make clean` | Remove build artifacts, caches, venv |
 | `make run` | Run `ziv-image` CLI (use `ARGS="..."`) |
 | `make model` | Run `ziv-model` CLI (use `ARGS="..."`) |
+| `make enhance-bench` | Run the [prompt-enhancer bench](#prompt-enhancer-bench) (use `ARGS="..."`; loads a real model, not part of `make check`) |
 
 `make check` covers the full verification gate: the Python test suite, frontend type checks and Vitest tests, the raw colour check, packaged SPA artifact drift detection, and a strict docs build. The narrower targets (`make frontend-test`, `make frontend-static-check`, `make docs-check`) are available for iterating on a single surface.
 
@@ -193,6 +194,8 @@ zvisiongenerator/
     └── video_stages.py            Video pipeline stage definitions, including extend_video and join_clips
 
 prompts.yaml                       Default prompt definitions
+
+bench/enhance/                     Prompt-enhancer bench (not packaged): cases, checks, runner and compare report
 ```
 
 ## Architecture Overview
@@ -326,6 +329,24 @@ The Web UI has one design system. Its tokens live in `@theme` in `frontend/src/a
 ### Test Strategy
 
 Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, upsampler weight download and loading, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.
+
+## Prompt-Enhancer Bench
+
+The unit tests mock the enhancer, so they cover how a rewrite is asked for and parsed, not what a real model writes. The bench in `bench/enhance/` runs the real enhancer over fixed cases and counts how well the rewrites follow the request. Run it before and after changing the enhancer's wording (rules, option instructions, length plans) or a pinned enhancer model, and put the compare summary in the commit body or PR.
+
+```bash
+make enhance-bench ARGS="run --label main-fast"                  # all cases, Fast, 3 seeds each
+make enhance-bench ARGS="run --label main-smart --model smart"
+make enhance-bench ARGS="run --label try --tags quotes,short --seeds 1"
+make enhance-bench ARGS="compare main-fast try"                  # writes bench/enhance/runs/compare-main-fast-try.md
+```
+
+- **Cases** live in `bench/enhance/cases.yaml`: a prompt (and a scene for video), the `enhance:` settings, the job context (ratio, frames, fps, audio, reference image, the extend source's prompt) and optional expectations (`keep`, `count`, `forbid`). Seeds come from the case id, so a run repeats with the same model, platform and settings.
+- **A run** loads the enhancer once and calls the same functions preflight uses (`enhance_prompt`, `enhance_video_prompt`, `enhance_caption`). It writes `results.jsonl` (one line per case and seed, with the system prompt, the output, every model call and the checks) and `meta.json` (commit, model, revision, temperature) to `bench/enhance/runs/<label>/`, which is ignored by version control.
+- **Checks:** usable, first try (no retry), format (scene and action pair, caption shape), length within the planned range, quoted text kept exactly, `keep`, `count`, `forbid`, and for extensions no repeat of the earlier prompt. A silent video skips the quoted-text check, since it drops quoted speech by design.
+- **Compare** reports each check overall and per tag, speed, and the ten cases that changed most, side by side with a diff of their system prompts.
+
+The bench loads one enhancer model and nothing else. `tests/test_enhance_bench.py` covers its checks and plumbing with a fake model.
 
 ## Vendored LTX
 

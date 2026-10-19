@@ -149,13 +149,16 @@ clean: ## Remove build artifacts, caches, and venv
 
 # ——— Run ——————————————————————————————————————————————————
 
-.PHONY: run model
+.PHONY: run model enhance-bench
 
 run: ## Run ziv-image CLI (use ARGS="..." for arguments)
 	uv run ziv-image $(ARGS)
 
 model: ## Run ziv-model CLI (use ARGS="..." for arguments)
 	uv run ziv-model $(ARGS)
+
+enhance-bench: ## Run the prompt-enhancer bench (loads a real model; use ARGS="run --label NAME" or ARGS="compare BASE NEW")
+	uv run python -m bench.enhance $(ARGS)
 
 # ——— E2E Image ————————————————————————————————————————————
 

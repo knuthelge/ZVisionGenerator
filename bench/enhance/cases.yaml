@@ -1,0 +1,404 @@
+# Prompt-enhancer bench cases. See proposals/prompt-enhancer-v3.md (phase 1) and docs/development.md.
+#
+# Each case: id, tags, mode (image | video | caption), prompt, scene (video only), settings (as a prompt file's
+# enhance: mapping; {} = the defaults), context (ratio, width, height, frames, fps, audio, reference_image, extends,
+# previous, extract_from, new_frames, prompt_is_original), family (for the word ceiling), and optional expectations:
+# keep (phrases that must survive), count ("three cats"), forbid (phrases that must not appear).
+# Seeds come from the case id, so renaming a case changes its seeds.
+
+x-market: &market >-
+  A crowded open-air market in a Mediterranean town on a summer morning. Stalls with striped awnings line a narrow
+  cobblestone street. A vendor in a white apron arranges ripe tomatoes, lemons and bunches of basil on a wooden table,
+  while an elderly woman with a wicker basket inspects a melon. Behind them, laundry hangs from iron balconies, a cat
+  sleeps on a sunlit step, and a blue door stands half open. Pigeons gather near a stone fountain in the small square
+  at the end of the street.
+x-market-keep: &market-keep [vendor, tomatoes, lemons, basil, elderly woman, basket, melon, cat, fountain, blue door]
+x-style-subject: &style-subject a woman walking a dog along a river
+x-style-keep: &style-keep [woman, dog, river]
+
+cases:
+  # --- Short image prompts --------------------------------------------------------------------------------------
+  - id: short-default
+    tags: [short, image]
+    prompt: a fox in snow
+    settings: {}
+    context: {ratio: "1:1"}
+    keep: [fox, snow]
+  - id: short-longer
+    tags: [short, image]
+    prompt: a lighthouse at dusk
+    settings: {length: longer}
+    context: {ratio: "16:9"}
+    keep: [lighthouse, dusk]
+  - id: short-extra
+    tags: [short, image]
+    prompt: an old man reading
+    settings: {length: extra}
+    context: {ratio: "2:3"}
+    keep: [old man, reading]
+  - id: short-shorter-clamped
+    tags: [short, image]
+    prompt: red bicycle against a wall
+    settings: {length: shorter}
+    context: {ratio: "1:1"}
+    keep: [red bicycle, wall]
+  - id: short-photo
+    tags: [short, image]
+    prompt: a bowl of ramen
+    settings: {style: photo}
+    context: {ratio: "1:1"}
+    keep: [ramen, bowl]
+  - id: short-portrait-frame
+    tags: [short, image]
+    prompt: a woman in a yellow raincoat
+    settings: {details: [subject, lighting]}
+    context: {ratio: "9:16"}
+    keep: [woman, yellow raincoat]
+    forbid: [child, dog, umbrella]
+  - id: short-mood
+    tags: [short, image, mood]
+    prompt: a quiet harbor
+    settings: {mood: melancholic}
+    context: {ratio: "16:9"}
+    keep: [harbor]
+  - id: short-direction
+    tags: [short, image, direction]
+    prompt: a city street
+    settings: {note: "at night, in heavy rain"}
+    context: {ratio: "16:9"}
+    keep: [street, rain, night]
+
+  # --- Long image prompts ---------------------------------------------------------------------------------------
+  - id: long-same
+    tags: [long, image]
+    prompt: *market
+    settings: {}
+    context: {ratio: "3:2"}
+    keep: *market-keep
+  - id: long-shorter
+    tags: [long, image]
+    prompt: *market
+    settings: {length: shorter}
+    context: {ratio: "3:2"}
+    keep: *market-keep
+  - id: long-flux1-extra
+    tags: [long, image, ceiling]
+    family: flux1
+    prompt: *market
+    settings: {length: extra}
+    context: {ratio: "3:2"}
+    keep: *market-keep
+  - id: long-extra
+    tags: [long, image]
+    prompt: >-
+      A lone hiker in an orange jacket stands on a rocky ridge above a valley filled with low clouds. Pine trees cling
+      to the slopes below, and a narrow trail winds down toward a small lake that reflects the pale morning sky. Far
+      away, snow-capped peaks catch the first light, and a hawk circles above the ridge.
+    settings: {length: extra}
+    context: {ratio: "16:9"}
+    keep: [hiker, orange jacket, lake, hawk, trail]
+
+  # --- Quoted text ----------------------------------------------------------------------------------------------
+  - id: quotes-sign
+    tags: [quotes, image]
+    prompt: a diner at night with a neon sign that says "OPEN 24 HOURS"
+    settings: {}
+    context: {ratio: "16:9"}
+    keep: [diner, neon sign]
+  - id: quotes-poster
+    tags: [quotes, image]
+    prompt: a vintage travel poster for Lisbon with the title "LISBOA" and the line "City of Light"
+    settings: {style: illustration}
+    context: {ratio: "2:3"}
+    keep: [poster, Lisbon]
+  - id: quotes-curly
+    tags: [quotes, image]
+    prompt: a coffee mug with “Best Dad Ever” printed on it
+    settings: {length: longer}
+    context: {ratio: "1:1"}
+    keep: [mug]
+  - id: quotes-punctuation
+    tags: [quotes, image]
+    prompt: a shop window with the words "Fresh Bread, Daily!" painted on the glass
+    settings: {style: photo}
+    context: {ratio: "4:3"}
+    keep: [shop window, glass]
+  - id: quotes-single
+    tags: [quotes, image]
+    prompt: a bookshop called 'The Quiet Page' on a rainy corner
+    settings: {length: longer}
+    context: {ratio: "3:2"}
+    keep: [bookshop, corner]
+  - id: quotes-several
+    tags: [quotes, image]
+    prompt: a narrow street with three signs reading "PHARMACY", "Café Nord" and "No Parking"
+    settings: {length: same}
+    context: {ratio: "16:9"}
+    count: three signs
+
+  # --- Counts and named subjects --------------------------------------------------------------------------------
+  - id: counts-cats
+    tags: [counts, image]
+    prompt: three cats sleeping on a windowsill
+    settings: {length: longer}
+    context: {ratio: "3:2"}
+    count: three cats
+    forbid: [dog]
+  - id: counts-people
+    tags: [counts, image]
+    prompt: two women playing chess in a park
+    settings: {}
+    context: {ratio: "16:9"}
+    count: two women
+    keep: [chess, park]
+    forbid: [man, child, dog]
+  - id: counts-objects
+    tags: [counts, image]
+    prompt: a desk with a laptop, a green lamp, a stack of books and a coffee mug
+    settings: {length: longer}
+    context: {ratio: "4:3"}
+    keep: [laptop, green lamp, books, coffee mug]
+  - id: counts-crows
+    tags: [counts, image]
+    prompt: five crows on a telephone wire
+    settings: {mood: eerie}
+    context: {ratio: "16:9"}
+    count: five crows
+  - id: counts-knight
+    tags: [counts, image]
+    prompt: a knight and a dragon facing each other on a cliff
+    settings: {style: painterly}
+    context: {ratio: "3:2"}
+    keep: [knight, dragon, cliff]
+    forbid: [princess, army]
+
+  # --- Prompts that read like requests --------------------------------------------------------------------------
+  - id: request-write
+    tags: [request, image]
+    prompt: write a sign that says "CLOSED" on a bakery door
+    settings: {}
+    context: {ratio: "2:3"}
+    keep: [bakery, door]
+    forbid: [here is, sure]
+  - id: request-question
+    tags: [request, image]
+    prompt: can you make a picture of a cabin in the woods at night?
+    settings: {length: longer}
+    context: {ratio: "16:9"}
+    keep: [cabin, woods]
+    forbid: [sure, here is, i can, i'll]
+  - id: request-imperative
+    tags: [request, image]
+    prompt: make it a sunny beach with palm trees
+    settings: {}
+    context: {ratio: "16:9"}
+    keep: [beach, palm trees]
+    forbid: [sure, here is]
+  - id: request-poem
+    tags: [request, image]
+    prompt: a poem about autumn written on a chalkboard
+    settings: {}
+    context: {ratio: "4:3"}
+    keep: [chalkboard, autumn]
+
+  # --- Styles (one subject, every style) ------------------------------------------------------------------------
+  - {id: style-photo, tags: [style, image], prompt: *style-subject, settings: {style: photo}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-candid, tags: [style, image], prompt: *style-subject, settings: {style: candid}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-street, tags: [style, image], prompt: *style-subject, settings: {style: street}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-film, tags: [style, image], prompt: *style-subject, settings: {style: film}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-bw, tags: [style, image], prompt: *style-subject, settings: {style: bw}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-portrait, tags: [style, image], prompt: *style-subject, settings: {style: portrait}, context: {ratio: "2:3"}, keep: *style-keep}
+  - {id: style-product, tags: [style, image], prompt: a glass bottle of olive oil, settings: {style: product}, context: {ratio: "1:1"}, keep: [glass bottle, olive oil]}
+  - {id: style-cinematic, tags: [style, image], prompt: *style-subject, settings: {style: cinematic}, context: {ratio: "16:9"}, keep: *style-keep}
+  - {id: style-illustration, tags: [style, image], prompt: *style-subject, settings: {style: illustration}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-anime, tags: [style, image], prompt: *style-subject, settings: {style: anime}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-comic, tags: [style, image], prompt: *style-subject, settings: {style: comic}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-3d, tags: [style, image], prompt: *style-subject, settings: {style: 3d}, context: {ratio: "3:2"}, keep: *style-keep}
+  - {id: style-painterly, tags: [style, image], prompt: *style-subject, settings: {style: painterly}, context: {ratio: "3:2"}, keep: *style-keep}
+
+  # --- Moods and Direction --------------------------------------------------------------------------------------
+  - id: mood-eerie
+    tags: [mood, image]
+    prompt: an empty playground
+    settings: {mood: eerie}
+    context: {ratio: "16:9"}
+    keep: [playground]
+    forbid: [child, children]
+  - id: mood-joyful
+    tags: [mood, image]
+    prompt: a family picnic in a meadow
+    settings: {mood: joyful}
+    context: {ratio: "16:9"}
+    keep: [family, picnic, meadow]
+  - id: mood-epic-cinematic
+    tags: [mood, image]
+    prompt: a mountain pass
+    settings: {mood: epic, style: cinematic, length: longer}
+    context: {ratio: "21:9"}
+    keep: [mountain pass]
+  - id: direction-only
+    tags: [direction, image]
+    prompt: a kitchen table with a loaf of bread
+    settings: {details: [], note: "morning light, focus on the bread"}
+    context: {ratio: "4:3"}
+    keep: [kitchen table, bread]
+  - id: direction-style
+    tags: [direction, image]
+    prompt: a fishing boat leaving the harbor
+    settings: {style: film, note: in thick fog}
+    context: {ratio: "3:2"}
+    keep: [fishing boat, harbor, fog]
+
+  # --- Video: text to video -------------------------------------------------------------------------------------
+  - id: t2v-split-audio
+    tags: [video, t2v]
+    mode: video
+    prompt: a chef flips a pancake in a busy kitchen and laughs
+    settings: {sound: [ambient, effects]}
+    context: {ratio: "16:9", frames: 97, fps: 24, audio: true}
+    keep: [chef, pancake, kitchen]
+  - id: t2v-scene-action
+    tags: [video, t2v]
+    mode: video
+    scene: A small wooden rowboat on a calm lake at dawn, mist drifting over the water.
+    prompt: an old fisherman casts a line
+    settings: {}
+    context: {ratio: "16:9", frames: 97, fps: 24, audio: true}
+    keep: [fisherman, rowboat, lake]
+  - id: t2v-silent
+    tags: [video, t2v]
+    mode: video
+    prompt: a red kite rises over a grassy hill
+    settings: {motion: [action, camera-move]}
+    context: {ratio: "16:9", frames: 97, fps: 24, audio: false}
+    keep: [red kite, hill]
+  - id: t2v-dialogue
+    tags: [video, t2v, quotes]
+    mode: video
+    prompt: 'two friends meet at a bus stop and one says "You made it!"'
+    settings: {sound: [dialogue]}
+    context: {ratio: "16:9", frames: 97, fps: 24, audio: true}
+    count: two friends
+    keep: [bus stop]
+  - id: t2v-long-clip
+    tags: [video, t2v]
+    mode: video
+    prompt: a skateboarder rides down a ramp, lands a kickflip and waves to the camera
+    settings: {motion: [action, pacing]}
+    context: {ratio: "16:9", frames: 241, fps: 24, audio: true}
+    keep: [skateboarder, ramp, kickflip]
+  - id: t2v-scene-only
+    tags: [video, t2v]
+    mode: video
+    scene: A neon-lit alley in the rain at night, puddles reflecting the signs.
+    prompt: ""
+    settings: {}
+    context: {ratio: "16:9", frames: 97, fps: 24, audio: true}
+    keep: [alley, rain]
+
+  # --- Video: image to video ------------------------------------------------------------------------------------
+  - id: i2v-action-only
+    tags: [video, i2v]
+    mode: video
+    scene: A woman in a red coat stands on a snowy bridge.
+    prompt: she turns and walks away
+    settings: {}
+    context: {ratio: "16:9", frames: 97, fps: 24, audio: true, reference_image: true}
+    keep: [walks]
+  - id: i2v-blank-scene
+    tags: [video, i2v]
+    mode: video
+    prompt: the waves crash against the rocks
+    settings: {}
+    context: {ratio: "16:9", frames: 97, fps: 24, audio: false, reference_image: true}
+    keep: [waves, rocks]
+  - id: i2v-both
+    tags: [video, i2v]
+    mode: video
+    scene: An old steam train waits at a mountain station.
+    prompt: the train pulls out of the station, puffing smoke
+    settings: {parts: both, style: cinematic}
+    context: {ratio: "16:9", frames: 97, fps: 24, audio: true, reference_image: true}
+    keep: [train, station, smoke]
+
+  # --- Video: extend --------------------------------------------------------------------------------------------
+  - id: extend-scene
+    tags: [video, extend]
+    mode: video
+    scene: A cat sits on a kitchen counter next to a bowl of fruit.
+    prompt: the cat knocks an apple off the counter
+    settings: {}
+    context: {ratio: "16:9", frames: 97, new_frames: 72, fps: 24, audio: true, extends: true, previous: the cat stares at the bowl and slowly reaches out a paw}
+    keep: [apple]
+  - id: extend-no-scene
+    tags: [video, extend]
+    mode: video
+    prompt: ""
+    settings: {}
+    context:
+      ratio: "16:9"
+      frames: 97
+      new_frames: 72
+      fps: 24
+      audio: true
+      extends: true
+      previous: 'A man in a grey suit stands on a train platform, checks his watch and says "Late again."'
+      extract_from: 'A man in a grey suit stands on a train platform, checks his watch and says "Late again."'
+    keep: [man]
+  - id: extend-continue
+    tags: [video, extend]
+    mode: video
+    scene: A sandy beach at sunset with gentle waves.
+    prompt: ""
+    settings: {}
+    context: {ratio: "16:9", frames: 97, new_frames: 72, fps: 24, audio: false, extends: true, previous: a dog runs along the waterline chasing a ball}
+
+  # --- Ideogram 4 JSON captions ---------------------------------------------------------------------------------
+  - id: caption-plain
+    tags: [caption]
+    mode: caption
+    family: ideogram4
+    prompt: a fox in a snowy birch forest at dawn
+    settings: {}
+    context: {ratio: "1:1"}
+    keep: [fox, birch]
+  - id: caption-poster
+    tags: [caption, quotes]
+    mode: caption
+    family: ideogram4
+    prompt: a vintage travel poster for Lisbon with the text "LISBOA"
+    settings: {}
+    context: {ratio: "2:3"}
+  - id: caption-card
+    tags: [caption, quotes]
+    mode: caption
+    family: ideogram4
+    prompt: a birthday card for Grandma with the words 'Happy 80th Birthday'
+    settings: {}
+    context: {ratio: "3:2"}
+  - id: caption-signs-japanese
+    tags: [caption]
+    mode: caption
+    family: ideogram4
+    prompt: a busy Tokyo street at night with neon signs in Japanese
+    settings: {}
+    context: {ratio: "16:9"}
+    keep: [street, neon]
+  - id: caption-counts
+    tags: [caption, counts]
+    mode: caption
+    family: ideogram4
+    prompt: three apples and a pear on a wooden table
+    settings: {}
+    context: {ratio: "4:3"}
+    count: three apples
+    keep: [pear, wooden table]
+    forbid: [banana]
+  - id: caption-style
+    tags: [caption]
+    mode: caption
+    family: ideogram4
+    prompt: a lighthouse on a cliff
+    settings: {style: illustration, mood: dramatic}
+    context: {ratio: "2:3"}
+    keep: [lighthouse, cliff]
