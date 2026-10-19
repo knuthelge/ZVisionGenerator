@@ -1,6 +1,6 @@
 # Prompt enhancer v3: a test bench, sharper rules, better options
 
-**Status:** In progress (2026-10-19). Phase 1 (the bench) is done; phases 2 and 3 are open.
+**Status:** In progress (2026-10-19). Phase 1 (the bench) is done; phase 2 is mostly done; phase 3's option set and popover design are agreed.
 
 Three phases, each shippable on its own:
 
@@ -173,6 +173,12 @@ What it showed, as input to phase 2:
 3. The `enhance` record and image `prompt_input`; then the viewer line and Reuse settings.
 4. Builder tidy-up, with any step.
 
+### Progress (2026-10-19)
+
+- **Done:** the builder tidy-up (`1337de1`, system prompts byte-identical); the Same floor of 25 words, the labelled prompt and a frame rule that is no longer echoed (`3d1647e`; Fast / Smart length in range 54 → 61% / 44 → 54%, frame echoes 17 → 2% on Fast); quoted text kept exactly (`36a57ad`; Fast 93 → 100%).
+- **Measured and dropped:** a firmer Shorter rule, and relaxing "every detail" while shortening. Neither shrank the dense 90-word case (53–86 words against 44); both models keep every named element instead, which is the right priority.
+- **Open:** the `enhance` record, image `prompt_input`, the viewer line and Reuse settings.
+
 ---
 
 ## Phase 3: Options, styles and model hints
@@ -194,57 +200,69 @@ What it showed, as input to phase 2:
 - `withRememberedParts` in `frontend/src/lib/state/promptEnhance.ts` is the per-workflow pattern already used for Rewrite.
 - `resolve_enhance_ceiling` reads `enhance_max_words` from the presets; a hints key reads the same way.
 
-### Proposed change
+### Agreed design (2026-10-19)
 
-**1. One shape for every style instruction.** Each style says what the image is, then names three or four things to state. Slugs stay. Drafts:
+Settled in a present-and-feedback review, section by section, then a clickable mockup (five rounds; the last one is the design below). Model hints and worked examples (items 5 and 6 above) are not part of it and stay open for later.
 
-| Slug | Instruction (draft) |
-|---|---|
-| `cinematic` | A still from a film: name the shot size, the lens look, the lighting setup and the color grade. |
-| `anime` | An anime illustration: name the line work, the cel shading, the palette and the background treatment. |
-| `illustration` | A digital illustration: name the technique, the line and edge quality, and the palette. |
-| `3d` | A 3D render: name the render style, the materials, the lighting and the camera. |
-| `painterly` | A classical oil painting: name the brushwork, the palette and the lighting. Label becomes **Oil painting**. |
+**Nothing is picked by default.** With every choice at Keep and nothing ticked, Enhance does a general rewrite: concrete visual detail where the prompt is thin. The "nothing to enhance" refusal goes away for text rewrites; `--enhance` alone and `enhance: true` give the general rewrite too.
 
-The full table is written during the step and checked on the bench and the picture sheet.
+**Style** (one; Keep, then two groups; old slugs keep working):
 
-**2. More styles.**
+- **Photo** (all share a realism core: say what camera or lens took it, where the light comes from, and real surface texture: skin with visible pores, fine lines and uneven tone, no airbrushing; fabric weave, wear, dust; plain specific words, never "hyperrealistic", "8k", "masterpiece", "flawless", "perfect" or "smooth skin"): Natural photo (`photo`, was Photographic), Candid, Street, Analog film, Black & white, Studio portrait, Product, Cinematic.
+- **Art**: Illustration, Anime, Comic, 3D render, Oil painting (`painterly`, was Painterly), and new Watercolor, Sketch, Pixel art, Concept art, Graphic design, Gouache, Isometric, Claymation, Ukiyo-e, Papercraft.
+- Every instruction has one shape: what the image is, then three or four concrete things to name.
 
-| Slug | Label | Caption medium |
-|---|---|---|
-| `watercolor` | Watercolor | `painting` |
-| `sketch` | Sketch / line art | `illustration` |
-| `pixel` | Pixel art | `illustration` |
-| `concept` | Concept art | `illustration` |
-| `graphic` | Graphic design | `graphic_design` |
+**Mood** (one; Keep plus 11, one list): Serene, Cozy (new), Joyful, Romantic, Whimsical, Nostalgic, Melancholic, Mysterious, Eerie, Dramatic, Epic. Instructions unchanged: show the feeling through light, color, setting and expression; never name it.
 
-The Style group shows two labelled rows, **Photo** and **Art**, with Keep first. A visual preview comes before building.
+**Theme** (new, one; Keep plus 16): the character the image carries, shown through styling, materials, color, composition and small details, never by adding people, animals or major objects. Grouped in the menu: Calm & sacred (Zen, Spiritual, Rustic), Allure (Sensual, Glamorous), Dark (Gothic, Noir, Horror, Dystopian), Wonder (Fairytale, Mythic, Surreal), Era & tech (Retro, Futuristic, Cyberpunk, Steampunk). Time of day and weather are not a theme: they belong in the prompt.
 
-**3. Rename Color & mood.** Slug `color` stays; the label becomes **Color palette**, with the instruction "the color palette and where each color appears". The explanatory docs paragraph goes away.
+**Focus on** (was Details; pick any; nothing by default): Lighting, Composition, Camera & viewpoint (was Camera & lens; viewpoint and framing for art styles), Materials & textures, Color palette (was Color & mood), Environment, Subject, Expression (new: faces, gaze, body language). Slugs unchanged.
 
-**4. Remember options per mode.** The draft keeps `enhanceSettingsByMode: {image, video}`; Rewrite stays per workflow. On first load the saved settings seed both. CLI and prompt files are unchanged.
+**Motion** (video), now three controls:
 
-**5. Model hints.** This reopens v2 item 4, so it is the maintainer's call.
-- An optional preset key, `enhance_hints`, holds a list of short rules appended for that model family.
-- A hint ships only where the model's own prompting guide gives it, with the source in a comment, and only if the bench shows it helps.
-- Candidates:
-  - LTX: one flowing paragraph in the present tense, starting with the main action.
-  - FLUX.1: natural sentences, most important subject first.
-  - Text-rendering models need no hint; phase 2's quoted-text rule covers them.
+- **Describe** (pick any; nothing by default): Action sequence, Secondary motion (new: hair, cloth, water, smoke).
+- **Camera** (one): Keep, Auto (the enhancer picks; today's Camera movement chip), Static, Push in, Pull back, Pan, Tilt, Tracking, Orbit, Handheld, Aerial.
+- **Pace** (one): Keep, Slow motion, Slow, Brisk, Fast; sets the speed and how many beats fit the clip.
+- Old prompt files: `motion: camera-move` reads as Camera Auto; `motion: pacing` keeps describing pacing.
 
-**6. One example per kind of rewrite.** A short worked example on a neutral subject for text, scene-and-action and action-only rewrites, marked "never copy its content", as captions do. It is kept only if the bench shows better format, length and first-try rates for a small speed cost.
+**Sound** (video with audio; pick any): unchanged. **Length**: unchanged (four values, Same by default, no word-count hint); the docs say Shorter shrinks dense prompts only a little. **Direction**: unchanged, with the placeholder "focus on the dog, make her look surprised". **Run choices** (Fast/Smart, Write as, Rewrite, Enhance each): unchanged in meaning.
+
+**Memory.** Image and video remember their options apart; Rewrite stays per workflow; Fast/Smart and Write as stay global.
+
+**The popover** (an inspector, like the Settings column):
+
+```
+Enhance                                         Reset
+LOOK
+  Style    [Natural photo               ✕]
+  Mood     [Keep                        ▾]
+  Theme    [Zen                         ✕]
+FOCUS ON · PICK ANY
+  [Lighting] [Composition] [Camera & viewpoint] [Materials & textures]
+  [Color palette] [Environment] [Subject] [Expression]
+MOTION                                          (video)
+  Camera   [Orbit                       ✕]
+  Pace     [Keep                        ▾]
+  DESCRIBE · PICK ANY  [Action sequence] [Secondary motion]
+SOUND · PICK ANY  [Ambience] [Sound effects] [Dialogue] [Music]   (video with audio)
+OUTPUT
+  Rewrite  [Scene and action | Action only]      (video) · Write as [Text | JSON] (Ideogram)
+  Length   [Same                        ▾]
+[ Direction (optional): focus on the dog, make her look surprised ]
+(○) Enhance each image when generating
+Enhancer [Fast | Smart]                [ Enhance prompt ]
+```
+
+- Small uppercase section titles, a label column, one control per row.
+- One-choice settings with more than two options open a menu where each option shows its name and a one-line description, grouped where it helps (Style: Photo / Art; Theme: its five groups). The selected option has a clear check icon. An unset picker reads a grey "Keep" with a caret; a set one turns teal with ✕ to clear it.
+- Two-option choices are segmented controls (Rewrite, Write as, Enhancer); the meaning is in the tooltip.
+- Pick-any settings are chips that turn teal when on; no checkmarks.
+- **Reset** in the header is always visible, dimmed when nothing is set.
+- About 460px tall for an image, 720px for a video with audio; on a phone it is the existing bottom sheet.
 
 **Related work in other proposals.**
 - **Alternatives.** Once [rewrite history](workspace-prompt-recents.md) lands, an **Alternatives** button can fill it with three rewrites (seeds s, s+1, s+2) from one model load.
 - **Presets.** [Named presets](settings-presets.md) asks whether a preset should store enhance options; the answer here is yes, as an optional block.
-
-### Steps
-
-1. Instructions in one shape (bench and picture sheet before and after).
-2. New styles and the Photo/Art rows (preview first).
-3. Color palette rename and per-mode options.
-4. Model hints, one family at a time.
-5. Examples.
 
 ---
 
@@ -252,7 +270,7 @@ The Style group shows two labelled rows, **Photo** and **Art**, with Keep first.
 
 - **Phase 1:** none for users. A section in `docs/development.md` on running the bench, and when: before changing enhancer wording or the pinned models.
 - **Phase 2:** CHANGELOG `[Unreleased]`: short prompts grow with Same; quoted text is kept exactly; outputs record the enhance options and model, and Reuse settings restores them. `docs/guides/prompts.md`: the Length and preservation paragraphs and the reuse note.
-- **Phase 3:** CHANGELOG: new styles; clearer style results; Color palette; per-mode options. `docs/guides/prompts.md` Options table; `docs/guides/model.md` for any hints that ship.
+- **Phase 3:** CHANGELOG: the new popover; new styles and a realism core for photos; Theme; Camera and Pace for video; Expression and Secondary motion; Focus on and Color palette renames; per-mode options; a general rewrite when nothing is picked. `docs/guides/prompts.md` Options section rewritten.
 
 ## Alternatives considered
 
@@ -265,9 +283,4 @@ The Style group shows two labelled rows, **Photo** and **Art**, with Keep first.
 
 ## Open questions
 
-- Where the bench lives: `bench/enhance/` at the root, or under `tests/` with a marker that `make check` skips.
-- Seeds per case. At 3 seeds, 60 cases take about 10 minutes on Fast; Smart on a Mac is slower.
-- The Same floor: 25 or 30 words.
-- Whether Reuse settings restores the rewrite, or only the user's text and options so the user enhances again.
-- The final style list (isometric or low-poly are other candidates).
 - Whether a hint may name the target model, or only describe the prose it wants.
