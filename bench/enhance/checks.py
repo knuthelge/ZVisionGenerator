@@ -7,7 +7,7 @@ import re
 from typing import Any
 
 from zvisiongenerator.utils.prompt_enhance import EnhanceContext, LengthPlan, plan_length, resolve_parts, word_count
-from zvisiongenerator.utils.prompt_enhance_caption import _quoted_texts
+from zvisiongenerator.utils.prompt_quotes import lettering_spans, missing_quotes, quoted_texts
 from zvisiongenerator.utils.prompt_enhance_video import _kept_scene_action_plan, _pair_word_counts, plan_pair_length, repeats_source
 
 from bench.enhance.cases import Case
@@ -29,7 +29,6 @@ _NUMBER_WORDS = {
     "twelve": 12,
 }
 _DIGIT_WORDS = {value: word for word, value in _NUMBER_WORDS.items()}
-_SPACE_RE = re.compile(r"\s+")
 _NON_WORD_RE = re.compile(r"[^\w\s]+")
 
 
@@ -105,13 +104,16 @@ def caption_format(output: str) -> bool:
     return bool(composition.get("background")) and _CAPTION_OBJECTS[0] <= objects <= _CAPTION_OBJECTS[1]
 
 
-def quotes_kept(source: str, output: str) -> bool | None:
-    """Return whether every quoted span of *source* appears in *output* (spacing ignored); None when *source* quotes nothing."""
-    spans = _quoted_texts(source, names=False)
+def quotes_kept(source: str, output: str, *, lettering_only: bool = False) -> bool | None:
+    """Return whether every quoted span of *source* appears in *output* (spacing ignored); None when *source* quotes nothing.
+
+    Args:
+        lettering_only: Check only lettering, not quoted speech (a silent video drops speech by design).
+    """
+    spans = lettering_spans(source) if lettering_only else quoted_texts(source)
     if not spans:
         return None
-    flat = _SPACE_RE.sub(" ", output)
-    return all(span in flat for span in spans)
+    return not missing_quotes(spans, output)
 
 
 def _normalize(text: str) -> str:
@@ -204,8 +206,8 @@ def score_output(
         "length_in_range": in_range,
         "length_ratio": ratio,
         "words": words,
-        # A silent video drops quoted speech by design, so its quotes are not checked.
-        "quotes_kept": None if silent_video else quotes_kept(f"{case.scene}\n{case.prompt}", text),
+        # A silent video drops quoted speech by design, so only its lettering is checked.
+        "quotes_kept": quotes_kept(f"{case.scene}\n{case.prompt}", text, lettering_only=silent_video),
         "keep": keep_share(text, case.keep),
         "count": count_kept(text, case.count),
         "forbid": forbid_clear(text, case.forbid),

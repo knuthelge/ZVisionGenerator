@@ -217,7 +217,11 @@ Mood sets the feeling of the scene. The enhancer conveys it through light, color
 
 Length is a target, not a guarantee. Same keeps a prompt's length but grows a short one to about 25 words, since the rewrite adds the details you picked. Longer aims for at least 40 words and Extra long for at least 80; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length.
 
-The enhancer keeps your subject and every detail you describe. It adds only things that can be seen, no smells or story, and never adds new people, animals, or major objects. Sound is the exception for video with audio on:
+The enhancer keeps your subject and every detail you describe. It adds only things that can be seen, no smells or story, and never adds new people, animals, or major objects.
+
+Text in quotes, such as a sign's `"OPEN 24 HOURS"` or a line of dialogue, is copied exactly, with its case and punctuation. If a rewrite changes it, the enhancer tries once more; if that also changes it, the rewrite is used with a note saying so, so you can fix it in the Enhanced text. In a video with audio off, quoted speech may be dropped, but quoted lettering is kept.
+
+Sound is the exception for video with audio on:
 
 - The enhancer keeps every sound and every quoted line of speech you wrote, word for word, whether or not a Sound option is picked.
 - With no Sound option picked, it adds no new sounds.

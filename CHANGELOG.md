@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 - **The prompt enhancer grows short prompts with Length Same.** Same now aims for at least 25 words, so "a fox in snow" gets the lighting and composition you asked for instead of being held to about four words; longer prompts keep their length. Rewrites also no longer start with "Square frame," or similar, and a prompt phrased as a request ("make it a sunny beach") is rewritten as a description
+- **The prompt enhancer keeps quoted text exactly.** A sign's `"OPEN 24 HOURS"` or a quoted line of dialogue comes back with the same words, case and punctuation; if a rewrite changes it, the enhancer tries once more and otherwise notes the change
 
 ## [0.13.0b24] - 2026-10-18
 

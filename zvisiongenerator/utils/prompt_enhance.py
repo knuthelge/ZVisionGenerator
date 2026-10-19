@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 
+from zvisiongenerator.utils.prompt_quotes import lettering_spans, missing_quotes, quoted_texts
+
 if TYPE_CHECKING:
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
 
@@ -36,6 +38,7 @@ PRESERVATION_RULES = (
     "EVERY DETAIL IS IMPORTANT: keep the user's subject, intent and every element they mention.",
     "Never add new people, animals, characters or major objects.",
 )
+QUOTES_CHANGED_WARNING = "A quoted text was changed in the rewrite."
 NO_USABLE_MESSAGE = "The enhancer returned no usable rewrite (empty, unchanged, or a refusal). Try different settings."
 
 
@@ -262,10 +265,11 @@ class LengthPlan:
 
 @dataclass(frozen=True)
 class EnhanceResult:
-    """The final enhanced prompt and whether its length request was clamped."""
+    """The final enhanced prompt, whether its length request was clamped, and an optional notice (a changed quote)."""
 
     prompt: str
     clamped: bool
+    warning: str | None = None
 
 
 def matrix_contract() -> dict[str, Any]:
@@ -739,6 +743,19 @@ def perception_rule(mode: str, context: EnhanceContext) -> str:
     return f"{visible}: no sounds, smells, temperatures felt, thoughts, backstory or narrative commentary."
 
 
+def enforced_quotes(text: str, *, mode: str, context: EnhanceContext) -> tuple[str, ...]:
+    """Return the quoted texts of *text* a rewrite must copy exactly; a silent video keeps lettering only, not speech."""
+    return lettering_spans(text) if mode == "video" and not context.audio else quoted_texts(text)
+
+
+def quote_rules(spans: tuple[str, ...]) -> list[str]:
+    """Return the rule that lists the quoted texts to copy exactly, or none when there are none."""
+    if not spans:
+        return []
+    listed = ", ".join(f'"{span}"' for span in spans)
+    return [f"Text in quotes is lettering or speech: copy it exactly, with its case, punctuation and quote marks: {listed}."]
+
+
 def frame_rule(orientation: str) -> str:
     """Return the rule that fits the composition to a ``portrait``, ``landscape`` or ``square`` frame without naming it."""
     return f"Compose for a {orientation} frame; never mention the frame or its shape."
@@ -798,6 +815,7 @@ def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: L
     rules = [
         prompt_rule("the clip" if mode == "video" else "the image"),
         *PRESERVATION_RULES,
+        *quote_rules(enforced_quotes(prompt, mode=mode, context=context)),
         perception_rule(mode, context),
         *context_rules(mode, context),
     ]
@@ -841,9 +859,10 @@ def enhance_prompt(
     on_text: Callable[[str], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
 ) -> EnhanceResult:
-    """Rewrite *prompt* with *enhancer*: generate, clean, and retry once if unusable.
+    """Rewrite *prompt* with *enhancer*: generate, clean, and retry once if unusable or a quoted text was changed.
 
-    Expand ``{a|b}`` choices before calling: the model rewrites one concrete prompt.
+    Expand ``{a|b}`` choices before calling: the model rewrites one concrete prompt. When no attempt keeps every quoted
+    text, the last usable one is returned with ``QUOTES_CHANGED_WARNING`` (also issued as a warning).
 
     Args:
         context: Job facts (audio track, clip length, frame shape, reference image).
@@ -860,14 +879,27 @@ def enhance_prompt(
     validate_settings(settings, mode=mode)
     plan = plan_length(word_count(prompt), settings.length, ceiling=ceiling, length_cfg=length_cfg)
     messages = build_messages(prompt, settings, mode=mode, plan=plan, context=context)
+    spans = enforced_quotes(prompt, mode=mode, context=context or EnhanceContext())
+    changed_quotes: str | None = None
     for attempt in range(2):
         raw = generate_raw(enhancer, messages, seed=seed + attempt, max_tokens=max_tokens, temperature=temperature, on_text=on_text, cancelled=cancelled)
         output = clean_output(raw)
-        if not is_unusable(output, prompt):
-            if on_text is not None:
-                on_text(output)
-            return EnhanceResult(prompt=output, clamped=plan.clamped)
-    raise RuntimeError(NO_USABLE_MESSAGE)
+        if is_unusable(output, prompt):
+            continue
+        if not missing_quotes(spans, output):
+            return _final(EnhanceResult(prompt=output, clamped=plan.clamped), on_text)
+        changed_quotes = output
+    if changed_quotes is None:
+        raise RuntimeError(NO_USABLE_MESSAGE)
+    warnings.warn(QUOTES_CHANGED_WARNING, stacklevel=2)
+    return _final(EnhanceResult(prompt=changed_quotes, clamped=plan.clamped, warning=QUOTES_CHANGED_WARNING), on_text)
+
+
+def _final(result: EnhanceResult, on_text: Callable[[str], None] | None) -> EnhanceResult:
+    """Report *result*'s prompt as the final text and return it."""
+    if on_text is not None:
+        on_text(result.prompt)
+    return result
 
 
 def generate_raw(

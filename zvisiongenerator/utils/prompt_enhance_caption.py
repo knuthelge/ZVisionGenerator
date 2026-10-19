@@ -31,6 +31,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     system_message,
     word_count,
 )
+from zvisiongenerator.utils.prompt_quotes import quoted_texts
 
 if TYPE_CHECKING:
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
@@ -79,15 +80,6 @@ _SCRIPTS = (
     ("greek", r"[Ͱ-Ͽ]"),
     ("thai", r"[฀-๿]"),
     ("hindi", r"[ऀ-ॿ]"),
-)
-# Quoted text: paired quotes, guillemets and CJK brackets anywhere; single quotes only around a phrase of two or more
-# characters, which may hold an apostrophe between letters ('Joe's Diner'), while an apostrophe on its own as in "Moe's" or
-# "rock 'n' roll" is not a quote; an all-caps phrase after "text", "reads" or "says", which may go on with numbers and
-# single letters (OPEN 24 HOURS, PLAN B).
-_QUOTE_RES = (
-    re.compile(r'"([^"\n]+)"|“([^”\n]+)”|«\s*([^»\n]+?)\s*»|「([^」\n]+)」|『([^』\n]+)』'),
-    re.compile(r"(?<![\w'‘])['‘]((?:[^'’\n]|(?<=\w)['’](?=\w)){2,})['’](?!\w)"),
-    re.compile(r"\b(?:text|word|words|reads|reading|says|saying|lettering)\s+([A-Z][A-Z0-9]+(?:\s(?:[A-Z][A-Z0-9]*|[0-9]+))*)\b"),
 )
 # A capitalized name after "called", "named" or "titled": lettering only on a design ("a logo for a shop called Moonbean"),
 # never in a scene ("a dog named Max").
@@ -230,16 +222,7 @@ def _target_words(prompt: str, settings: EnhanceSettings, ceiling: int, length_c
 
 def _quoted_texts(text: str, *, names: bool) -> tuple[str, ...]:
     """Return the texts the user quoted, plus called/named names when *names*, in order of appearance and without repeats."""
-    found: list[tuple[int, str]] = []
-    taken: list[range] = []
-    for pattern in (*_QUOTE_RES, _NAME_RE) if names else _QUOTE_RES:
-        for match in pattern.finditer(text):
-            group = next(index for index in range(1, (match.lastindex or 1) + 1) if match.group(index) is not None)
-            words = " ".join(match.group(group).split())
-            if words and not any(match.start(group) in span for span in taken):
-                found.append((match.start(group), words))
-                taken.append(range(match.start(group), match.end(group)))
-    return tuple(dict.fromkeys(words for _start, words in sorted(found)))
+    return quoted_texts(text, extra=(_NAME_RE,) if names else ())
 
 
 def _design(prompt: str) -> str | None:

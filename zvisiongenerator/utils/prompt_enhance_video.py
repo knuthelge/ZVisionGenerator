@@ -16,6 +16,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     MOOD_AXIS,
     NO_USABLE_MESSAGE,
     PRESERVATION_RULES,
+    QUOTES_CHANGED_WARNING,
     STYLE_AXIS,
     EnhanceContext,
     EnhanceSettings,
@@ -25,6 +26,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     context_rules,
     direction_rules,
     duration_beats,
+    enforced_quotes,
     frame_rule,
     generate_raw,
     is_unusable,
@@ -32,12 +34,14 @@ from zvisiongenerator.utils.prompt_enhance import (
     normalize_text,
     perception_rule,
     plan_length,
+    quote_rules,
     resolve_parts,
     strip_reasoning,
     system_message,
     validate_settings,
     word_count,
 )
+from zvisiongenerator.utils.prompt_quotes import missing_quotes
 
 if TYPE_CHECKING:
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
@@ -168,6 +172,7 @@ def build_pair_messages(scene: str, prompt: str, settings: EnhanceSettings, *, p
     action_role += ", sound and quoted dialogue." if context.audio else "."
     rules = [
         *PRESERVATION_RULES,
+        *quote_rules(_pair_quotes(scene, prompt, context)),
         perception_rule("video", context),
         *context_rules("video", replace(context, reference_image=False, seconds=None if context.extends else context.seconds)),
         "SCENE: who and where, their look, the style and the camera setup. No events, no camera moves, no quoted speech.",
@@ -199,6 +204,16 @@ def build_pair_messages(scene: str, prompt: str, settings: EnhanceSettings, *, p
     else:
         user = f"Scene: {scene.strip() or '(none)'}\nPrompt: {prompt.strip() or '(none)'}"
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def _own_prompt(prompt: str, context: EnhanceContext) -> str:
+    """Return the user's own new text: *prompt*, or ``""`` for an extension with no new direction (it may be the old prompt)."""
+    return "" if context.extends and _continues_naturally(prompt, context) else prompt
+
+
+def _pair_quotes(scene: str, prompt: str, context: EnhanceContext) -> tuple[str, ...]:
+    """Return the quoted texts of the user's scene and own prompt that a scene-and-action rewrite must copy exactly."""
+    return enforced_quotes(f"{scene}\n{_own_prompt(prompt, context)}", mode="video", context=context)
 
 
 def _continues_naturally(prompt: str, context: EnhanceContext) -> bool:
@@ -252,16 +267,20 @@ def _extend_pair_rules(context: EnhanceContext, *, scene: str = "") -> list[str]
     return [*rules, *_extend_rules(context)]
 
 
-def _action_only_messages(preamble: list[str], situation: list[str], settings: EnhanceSettings, plan: LengthPlan, context: EnhanceContext, user: str) -> list[dict[str, str]]:
+def _action_only_messages(
+    preamble: list[str], situation: list[str], settings: EnhanceSettings, plan: LengthPlan, context: EnhanceContext, user: str, *, quotes: tuple[str, ...] = ()
+) -> list[dict[str, str]]:
     """Build the system + user chat messages of a rewrite that writes only the action beside a kept scene.
 
     Args:
         preamble: The opening lines of the system message: the task and the kept scene.
         situation: The rules about the clip the action is written for, between the shared opening rules and the motion, sound and direction rules.
         user: The user message.
+        quotes: The quoted texts of the user's prompt that the action must copy exactly.
     """
     rules = [
         *ACTION_PRESERVATION_RULES,
+        *quote_rules(quotes),
         _KEEP_SCENE_OUT_RULE,
         perception_rule("video", context),
         *situation,
@@ -287,7 +306,8 @@ def build_extend_messages(scene: str, prompt: str, settings: EnhanceSettings, *,
     previous = _previous_rule(context)
     if previous is not None:
         preamble.append(previous)
-    return _action_only_messages(preamble, _extend_rules(context), settings, plan, context, _extend_user_message(prompt, context))
+    quotes = _action_quotes(prompt, context)
+    return _action_only_messages(preamble, _extend_rules(context), settings, plan, context, _extend_user_message(prompt, context), quotes=quotes)
 
 
 def build_action_messages(scene: str, prompt: str, settings: EnhanceSettings, *, plan: LengthPlan, context: EnhanceContext) -> list[dict[str, str]]:
@@ -303,7 +323,13 @@ def build_action_messages(scene: str, prompt: str, settings: EnhanceSettings, *,
         f"The scene (kept exactly as written, do not restate or change it): {scene.strip()}",
     ]
     situation = [*context_rules("video", context), "Write what happens in time order, fitted to the scene."]
-    return _action_only_messages(preamble, situation, settings, plan, context, prompt.strip() or "(none): write an action that suits the scene.")
+    user = prompt.strip() or "(none): write an action that suits the scene."
+    return _action_only_messages(preamble, situation, settings, plan, context, user, quotes=_action_quotes(prompt, context))
+
+
+def _action_quotes(prompt: str, context: EnhanceContext) -> tuple[str, ...]:
+    """Return the quoted texts of the user's own prompt that an action written beside a kept scene must copy exactly."""
+    return enforced_quotes(_own_prompt(prompt, context), mode="video", context=context)
 
 
 def _pair_workflow_rule(context: EnhanceContext) -> str:
@@ -476,20 +502,40 @@ def enhance_video_prompt(
         warnings.warn(warning, stacklevel=2)
     messages = build_pair_messages(scene, prompt, settings, plan=plan, context=context)
     # While an extension has no new direction, the prompt is not the user's text to echo (it may be the old prompt).
-    echo = "" if extends and _continues_naturally(prompt, context) else prompt
+    echo = _own_prompt(prompt, context)
     previous = (context.previous or context.extract_from) if extends else None
+    spans = _pair_quotes(scene, prompt, context)
     raw = ""
+    changed_quotes: tuple[str, tuple[str, str]] | None = None
     for attempt in range(2):
         raw = generate_raw(enhancer, messages, seed=seed + attempt, max_tokens=max_tokens, temperature=temperature, on_text=on_text, cancelled=cancelled)
         pair = _accept_pair(raw, scene, echo, previous=previous)
-        if on_text is not None and (pair is not None or attempt == 1):
-            on_text(clean_output(raw))
-        if pair is not None:
+        if pair is not None and not missing_quotes(spans, f"{pair[0]}\n{pair[1]}"):
+            _report(on_text, clean_output(raw))
             return EnhancePairResult(scene=pair[0], prompt=pair[1], clamped=plan.total.clamped, warning=warning)
+        if pair is not None:
+            changed_quotes = (raw, pair)
+    if changed_quotes is not None:
+        _report(on_text, clean_output(changed_quotes[0]))
+        warnings.warn(QUOTES_CHANGED_WARNING, stacklevel=2)
+        scene_out, action_out = changed_quotes[1]
+        return EnhancePairResult(scene=scene_out, prompt=action_out, clamped=plan.total.clamped, warning=_join(warning, QUOTES_CHANGED_WARNING))
+    _report(on_text, clean_output(raw))
     action = _fallback_action(raw)
     if is_unusable(action, echo) or _repeats(action, previous):
         raise RuntimeError(NO_USABLE_MESSAGE)
-    return EnhancePairResult(scene="", prompt=action, clamped=plan.total.clamped, warning=" ".join(part for part in (warning, PAIR_FALLBACK_WARNING) if part), format_fallback=True)
+    return EnhancePairResult(scene="", prompt=action, clamped=plan.total.clamped, warning=_join(warning, PAIR_FALLBACK_WARNING), format_fallback=True)
+
+
+def _join(*notices: str | None) -> str:
+    """Return the given notices as one sentence run, skipping empty ones."""
+    return " ".join(notice for notice in notices if notice)
+
+
+def _report(on_text: Callable[[str], None] | None, text: str) -> None:
+    """Send *text* to *on_text* as the final text, when there is a receiver."""
+    if on_text is not None:
+        on_text(text)
 
 
 def _pair_word_counts(scene: str, prompt: str, context: EnhanceContext) -> tuple[int, int]:
@@ -568,11 +614,19 @@ def _enhance_action_only(
         warnings.warn(warning, stacklevel=3)
     build = build_extend_messages if context.extends else build_action_messages
     messages = build(scene, prompt, settings, plan=plan, context=context)
+    spans = _action_quotes(prompt, context)
+    changed_quotes: str | None = None
     for attempt in range(2):
         raw = generate_raw(enhancer, messages, seed=seed + attempt, max_tokens=max_tokens, temperature=temperature, on_text=on_text, cancelled=cancelled)
         output = _action_only_output(raw)
-        if not (is_unusable(output, prompt) or _repeats(output, context.previous)):
-            if on_text is not None:
-                on_text(output)
+        if is_unusable(output, prompt) or _repeats(output, context.previous):
+            continue
+        if not missing_quotes(spans, output):
+            _report(on_text, output)
             return EnhancePairResult(scene="", prompt=output, clamped=plan.clamped, warning=warning)
-    raise RuntimeError(NO_USABLE_MESSAGE)
+        changed_quotes = output
+    if changed_quotes is None:
+        raise RuntimeError(NO_USABLE_MESSAGE)
+    _report(on_text, changed_quotes)
+    warnings.warn(QUOTES_CHANGED_WARNING, stacklevel=3)
+    return EnhancePairResult(scene="", prompt=changed_quotes, clamped=plan.clamped, warning=_join(warning, QUOTES_CHANGED_WARNING))

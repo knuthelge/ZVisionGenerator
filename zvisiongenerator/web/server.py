@@ -609,16 +609,16 @@ def _enhance_for_job(job: dict[str, Any], enhancer: Any, frames: queue.Queue[dic
 
 
 def _enhance_done_frame(mode: str, result: EnhanceResult | EnhancePairResult) -> dict[str, Any]:
-    """Return the terminal ``done`` frame: ``{prompt, clamped}`` for images, ``{scene, prompt, clamped, warning?}`` for video.
+    """Return the terminal ``done`` frame: ``{prompt, clamped, warning?}`` for images, ``{scene, prompt, clamped, warning?}`` for video.
 
     A video frame's ``scene`` is ``""`` when the scene was not rewritten (action only), so the client keeps the user's scene.
     """
+    frame: dict[str, Any] = {"type": "done", "prompt": result.prompt, "clamped": result.clamped}
     if isinstance(result, EnhancePairResult):
-        frame: dict[str, Any] = {"type": "done", "scene": result.scene, "prompt": result.prompt, "clamped": result.clamped}
-        if result.warning:
-            frame["warning"] = result.warning
-        return frame
-    return {"type": "done", "prompt": result.prompt, "clamped": result.clamped}
+        frame = {"type": "done", "scene": result.scene, **{key: frame[key] for key in ("prompt", "clamped")}}
+    if result.warning:
+        frame["warning"] = result.warning
+    return frame
 
 
 @app.post("/api/generate")

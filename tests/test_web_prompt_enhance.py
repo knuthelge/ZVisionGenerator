@@ -18,7 +18,7 @@ from conftest import _make_args, make_extend_source
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
-from zvisiongenerator.utils.prompt_enhance import EnhanceContext, EnhanceSettings
+from zvisiongenerator.utils.prompt_enhance import QUOTES_CHANGED_WARNING, EnhanceContext, EnhanceSettings
 from zvisiongenerator.utils.prompt_enhance_video import split_scene_action
 from zvisiongenerator.utils.video_extend import ExtendInspection, ExtendProblem
 from zvisiongenerator.web import extend_api as extend_api_module
@@ -102,6 +102,17 @@ class TestEnhanceEndpoint:
         assert frames[-1] == {"type": "done", "prompt": "A grey fox in deep snow, golden light.", "clamped": False}
         assert enhancer.messages[0][1]["content"] in ("Prompt: a red fox", "Prompt: a grey fox")  # choices are picked before the model sees the prompt
         assert session.acquired[0][2] == 120
+
+    def test_image_done_frame_carries_a_changed_quote_warning(self, monkeypatch, no_active_job):
+        enhancer = _FakeEnhancer(["A diner under an open 24 hours sign.", "A diner under a neon Open 24 Hours sign."])
+        monkeypatch.setattr(web_server, "get_prompt_enhancer_session", lambda: _FakeSession(enhancer))
+        body = {"prompt": 'a diner with a sign that says "OPEN 24 HOURS"', "mode": "image", "settings": {"style": "photo"}}
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/prompt/enhance", json=body)
+        done = _frames(response)[-1]
+        assert done["type"] == "done"
+        assert done["prompt"] == "A diner under a neon Open 24 Hours sign."
+        assert done["warning"] == QUOTES_CHANGED_WARNING
 
     def test_video_pair_frames(self, monkeypatch, no_active_job):
         enhancer = _FakeEnhancer(["SCENE: A castle at dusk.\nACTION: A knight rides in."])
