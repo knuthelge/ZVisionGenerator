@@ -18,6 +18,7 @@ import webbrowser
 
 from zvisiongenerator.utils.app_log import log_file_path, setup_logging, uvicorn_log_config
 from zvisiongenerator.utils.paths import get_ziv_data_dir
+from zvisiongenerator.utils.subprocess_env import utf8_child_env
 from zvisiongenerator.web.instances import UiInstance, instances_dir, list_instances, register_instance, stop_instances, unregister_instance
 
 
@@ -287,7 +288,7 @@ def _spawn_background_server(host: str, port: int, launch_id: str) -> subprocess
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        env={**os.environ, _LAUNCH_ID_ENV: launch_id, "PYTHONIOENCODING": "utf-8"},
+        env=utf8_child_env(**{_LAUNCH_ID_ENV: launch_id}),
         **_detach_options(),
     )
 

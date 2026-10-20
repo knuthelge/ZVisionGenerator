@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import functools
 from dataclasses import replace
 import io
 import json
 import os
+import subprocess
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -3231,3 +3233,30 @@ def test_a_mac_converts_ltx_at_q8_from_32_gb_of_unified_memory(monkeypatch, unif
     monkeypatch.setattr("zvisiongenerator.backends.accelerator_memory_budget_or_none", lambda: MemoryBudget(unified_gib * 1024**3 * 3 // 4, unified_bytes=unified_gib * 1024**3))
 
     assert ltx_conversion.recommended_ltx_quantize({}) == expected
+
+
+def test_converter_subprocesses_print_in_utf8(monkeypatch):
+    from zvisiongenerator.web import ltx_conversion
+
+    seen: list[dict] = []
+
+    class _Process:
+        stdout = iter([])
+
+        def wait(self):
+            return 0
+
+    def _popen(*_args, **kwargs):
+        seen.append(kwargs)
+        return _Process()
+
+    def _run(*_args, **kwargs):
+        seen.append(kwargs)
+        return subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(ltx_conversion.subprocess, "Popen", _popen)
+    monkeypatch.setattr(web_server.subprocess, "run", _run)
+    ltx_conversion._run(["model"], contextlib.nullcontext())
+    web_server._run_model_management_command(["model"])
+
+    assert [(kwargs["encoding"], kwargs["env"]["PYTHONIOENCODING"]) for kwargs in seen] == [("utf-8", "utf-8")] * 2

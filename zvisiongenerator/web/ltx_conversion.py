@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.converters.ltx_convert import PROGRESS_PREFIX, inspect_ltx
+from zvisiongenerator.utils.subprocess_env import utf8_child_env
 
 __all__ = ["conversion_status", "inspect_checkpoint_for_form", "recommended_ltx_quantize", "start_conversion"]
 
@@ -99,7 +100,10 @@ def _run(args: list[str], slot: AbstractContextManager[None]) -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             bufsize=1,
+            env=utf8_child_env(),
         )
         assert process.stdout is not None
         for line in process.stdout:

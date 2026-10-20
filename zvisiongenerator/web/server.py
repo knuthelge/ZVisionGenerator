@@ -55,6 +55,7 @@ from zvisiongenerator.utils.config import (
 )
 from zvisiongenerator.utils.enhance_record import parse_enhance_record
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
+from zvisiongenerator.utils.subprocess_env import utf8_child_env
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
@@ -1734,6 +1735,9 @@ def _run_model_management_command(args: list[str]) -> str:
         [sys.executable, "-m", "zvisiongenerator.converters.convert_checkpoint", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=utf8_child_env(),
         check=False,
     )
     output = (result.stdout or "").strip()
