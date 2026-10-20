@@ -13,7 +13,7 @@ torch = pytest.importorskip("torch")
 from safetensors.torch import load_file, save_file  # noqa: E402
 
 from zvisiongenerator.utils import safetensors_stream  # noqa: E402
-from zvisiongenerator.utils.safetensors_stream import ShardWriter, iter_tensors, shard_files  # noqa: E402
+from zvisiongenerator.utils.safetensors_stream import ShardWriter, SingleFileWriter, iter_tensors, read_metadata, shard_files  # noqa: E402
 
 
 def _tensors():
@@ -101,3 +101,46 @@ class TestShardWriter:
 
         assert read.keys() == tensors.keys()
         assert all(torch.equal(read[name].view(torch.uint8), tensor.view(torch.uint8)) for name, tensor in tensors.items())
+
+
+class TestSingleFileWriter:
+    def _entries(self):
+        return [("w", "BF16", [2, 3]), ("s", "F32", []), ("q", "U32", [2, 1])]
+
+    def test_the_header_matches_the_data_streamed_after_it(self, tmp_path):
+        path = tmp_path / "one.safetensors"
+        w, s, q = torch.randn(2, 3).to(torch.bfloat16), torch.tensor(1.5), torch.tensor([[7], [9]], dtype=torch.int32)
+        with SingleFileWriter(path, self._entries()) as writer:
+            writer.write("w", w.view(torch.uint8).numpy())
+            writer.write("s", s.reshape(1).view(torch.uint8).numpy())
+            writer.write("q", q.numpy())
+
+        read = load_file(str(path))
+        assert torch.equal(read["w"], w)
+        assert read["s"].item() == 1.5 and read["s"].shape == ()
+        assert read["q"].view(torch.int32).tolist() == [[7], [9]]
+
+    def test_tensors_must_come_in_the_declared_order_and_size(self, tmp_path):
+        writer = SingleFileWriter(tmp_path / "one.safetensors", self._entries())
+
+        with pytest.raises(ValueError, match="where w comes next"):
+            writer.write("s", bytes(4))
+        with pytest.raises(ValueError, match="its header says 12"):
+            writer.write("w", bytes(4))
+        with pytest.raises(ValueError, match="missing w"):
+            writer.close()
+
+    def test_closing_before_every_tensor_is_written_fails(self, tmp_path):
+        writer = SingleFileWriter(tmp_path / "one.safetensors", self._entries())
+        writer.write("w", bytes(12))
+
+        with pytest.raises(ValueError, match="missing s"):
+            writer.close()
+
+
+def test_metadata_reads_back_and_is_empty_when_absent(tmp_path):
+    save_file({"a": torch.zeros(1)}, str(tmp_path / "m.safetensors"), metadata={"config": "{}"})
+    save_file({"a": torch.zeros(1)}, str(tmp_path / "n.safetensors"))
+
+    assert read_metadata(tmp_path / "m.safetensors") == {"config": "{}"}
+    assert read_metadata(tmp_path / "n.safetensors") == {}

@@ -23,6 +23,8 @@ _PROGRESS_RE = re.compile(rf"^{re.escape(PROGRESS_PREFIX)}(?P<stage>.+?)(?: \((?
 # The q8 stock model's estimate decides the level a machine converts at.
 _REFERENCE_ALIAS = "ltx-8"
 _SYSTEM_FITS_RATIO = 0.8
+# Unified memory of the smallest Mac that runs ltx-8; a Mac sold as "32 GB" reports exactly 32 GiB.
+_UNIFIED_Q8_BYTES = 32 * 1024**3
 
 _lock = threading.Lock()
 _status: dict[str, Any] = {"state": "idle"}
@@ -46,12 +48,18 @@ def inspect_checkpoint_for_form(path: Path, config: dict[str, Any]) -> dict[str,
 
 
 def recommended_ltx_quantize(config: dict[str, Any]) -> int:
-    """Return 8 when this machine's system memory holds LTX at q8 comfortably, else 4 (also when that can't be estimated)."""
+    """Return 8 when this machine holds LTX at q8 comfortably, else 4 (also when that can't be estimated).
+
+    With unified memory (Apple Silicon) that is 32 GB or more, the smallest Mac that runs ``ltx-8``; with a
+    discrete GPU, the q8 stock model's system-memory estimate within 80% of the system memory.
+    """
     from zvisiongenerator.backends import accelerator_memory_budget_or_none
     from zvisiongenerator.utils.model_memory import ltx_cuda_system_memory
     from zvisiongenerator.utils.paths import resolve_model_path
 
     budget = accelerator_memory_budget_or_none()
+    if budget is not None and budget.unified_bytes:
+        return 8 if budget.unified_bytes >= _UNIFIED_Q8_BYTES else 4
     if budget is None or not budget.system_bytes:
         return 4
     try:

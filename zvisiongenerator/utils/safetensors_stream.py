@@ -4,7 +4,8 @@
 closes. A single checkpoint can be larger than system memory, and reclaiming that cache under load is the memory
 pressure that gets processes killed on Linux. :func:`iter_tensors` reads each tensor with plain file reads instead and
 drops its byte range from the cache right after; :class:`TensorFile` does the same for tensors read by name;
-:class:`ShardWriter` writes shards of bounded size and flushes each one out of the cache once written.
+:class:`ShardWriter` writes shards of bounded size and flushes each one out of the cache once written;
+:class:`SingleFileWriter` writes one file of any size, its header first and then each tensor as it comes.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 import struct
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
@@ -21,10 +22,14 @@ from zvisiongenerator.utils.page_cache import drop_cached_file
 if TYPE_CHECKING:
     import torch
 
-__all__ = ["ShardWriter", "TensorFile", "iter_tensors", "read_header", "shard_files"]
+__all__ = ["ShardWriter", "SingleFileWriter", "TensorFile", "iter_tensors", "read_header", "read_metadata", "shard_files"]
 
 _HEADER_LENGTH_BYTES = 8
 _DEFAULT_SHARD_BYTES = 2 * 1024**3
+# Bytes per element of each safetensors dtype the writer accepts.
+_DTYPE_BYTES = {"BF16": 2, "F16": 2, "F32": 4, "F64": 8, "U8": 1, "I8": 1, "I16": 2, "U32": 4, "I32": 4, "I64": 8}
+# The data that follows the header starts on a multiple of this.
+_HEADER_ALIGNMENT = 8
 
 
 def read_header(path: Path) -> tuple[int, dict[str, dict]]:
@@ -33,6 +38,23 @@ def read_header(path: Path) -> tuple[int, dict[str, dict]]:
     Raises:
         ValueError: If *path* is not a safetensors file.
     """
+    data_start, header = _raw_header(path)
+    header.pop("__metadata__", None)
+    return data_start, header
+
+
+def read_metadata(path: Path) -> dict[str, str]:
+    """Return the ``__metadata__`` entry of *path*'s header (string keys and values), empty when it has none.
+
+    Raises:
+        ValueError: If *path* is not a safetensors file.
+    """
+    metadata = _raw_header(path)[1].get("__metadata__")
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _raw_header(path: Path) -> tuple[int, dict]:
+    """Return the byte offset where *path*'s tensor data starts, and its whole header."""
     with open(path, "rb") as handle:
         prefix = handle.read(_HEADER_LENGTH_BYTES)
         if len(prefix) != _HEADER_LENGTH_BYTES:
@@ -42,7 +64,8 @@ def read_header(path: Path) -> tuple[int, dict[str, dict]]:
             header = json.loads(handle.read(length))
         except ValueError as exc:
             raise ValueError(f"{path} is not a safetensors file.") from exc
-    header.pop("__metadata__", None)
+    if not isinstance(header, dict):
+        raise ValueError(f"{path} is not a safetensors file.")
     return _HEADER_LENGTH_BYTES + length, header
 
 
@@ -206,3 +229,83 @@ class ShardWriter:
         self._total_bytes += self._pending_bytes
         self._pending = {}
         self._pending_bytes = 0
+
+
+class SingleFileWriter:
+    """Write one safetensors file whose tensors are all known up front, holding only the tensor being written.
+
+    The header, with every tensor's offsets, is written first; then each tensor's bytes are passed to
+    :meth:`write` in the declared order. Call :meth:`close` (or leave the ``with`` block) once all are written. A
+    file left incomplete by an error has a header promising data it lacks, so write it where it is discarded on
+    failure.
+    """
+
+    def __init__(self, path: Path, entries: Sequence[tuple[str, str, list[int]]]) -> None:
+        """Create *path* and write its header for *entries*: ``(name, safetensors dtype, shape)``, in the order they will be written.
+
+        Raises:
+            ValueError: If a dtype is not one the writer knows, or a name repeats.
+        """
+        self._path = path
+        self._sizes: list[tuple[str, int]] = []
+        header: dict[str, dict] = {}
+        offset = 0
+        for name, dtype, shape in entries:
+            if dtype not in _DTYPE_BYTES:
+                raise ValueError(f"Cannot write {name} as {dtype}.")
+            if name in header:
+                raise ValueError(f"{name} is listed twice.")
+            size = _numel(shape) * _DTYPE_BYTES[dtype]
+            header[name] = {"dtype": dtype, "shape": list(shape), "data_offsets": [offset, offset + size]}
+            self._sizes.append((name, size))
+            offset += size
+        encoded = json.dumps(header, separators=(",", ":")).encode("utf-8")
+        encoded += b" " * (-(_HEADER_LENGTH_BYTES + len(encoded)) % _HEADER_ALIGNMENT)
+        self._handle = open(path, "wb")
+        self._handle.write(struct.pack("<Q", len(encoded)) + encoded)
+        self._next = 0
+
+    def write(self, name: str, data: memoryview | bytes | bytearray | object) -> None:
+        """Write the bytes of tensor *name* (anything exposing the buffer protocol, e.g. a NumPy array), the next one declared.
+
+        Raises:
+            ValueError: If *name* is not the next tensor declared, or *data* is not its size.
+        """
+        if self._next >= len(self._sizes) or self._sizes[self._next][0] != name:
+            expected = self._sizes[self._next][0] if self._next < len(self._sizes) else "nothing"
+            raise ValueError(f"Wrote {name} where {expected} comes next.")
+        view = memoryview(data).cast("B")  # type: ignore[arg-type]
+        if view.nbytes != self._sizes[self._next][1]:
+            raise ValueError(f"{name} is {view.nbytes} bytes; its header says {self._sizes[self._next][1]}.")
+        self._handle.write(view)
+        self._next += 1
+
+    def close(self) -> None:
+        """Close the file, then flush it out of the page cache.
+
+        Raises:
+            ValueError: If a declared tensor was never written.
+        """
+        if self._handle.closed:
+            return
+        self._handle.close()
+        if self._next != len(self._sizes):
+            raise ValueError(f"{self._path.name} is missing {self._sizes[self._next][0]} and the tensors after it.")
+        drop_cached_file(self._path)
+
+    def __enter__(self) -> SingleFileWriter:
+        return self
+
+    def __exit__(self, exc_type: type[BaseException] | None, *_exc: object) -> None:
+        if exc_type is None:
+            self.close()
+        else:
+            self._handle.close()
+
+
+def _numel(shape: Sequence[int]) -> int:
+    """Return the element count of *shape* (1 for a scalar)."""
+    count = 1
+    for size in shape:
+        count *= size
+    return count

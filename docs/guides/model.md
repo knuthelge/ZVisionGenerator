@@ -27,7 +27,7 @@ ziv-model model -i checkpoint.safetensors --name my-model --copy
 # Also save a q8 copy (~/.ziv/models/my-model@q8/), used whenever my-model runs at -q 8 (macOS)
 ziv-model model -i checkpoint.safetensors --name my-model --quantize 8
 
-# Convert an LTX-2.3 video fine-tune at q4 (Windows/Linux), merging Lightricks' distilled LoRA
+# Convert an LTX-2.3 video fine-tune at q4, merging Lightricks' distilled LoRA
 ziv-model model -i ltx-finetune.safetensors --name my-video-model --model-type ltx-2.3 --quantize 4 --distill
 ```
 
@@ -50,15 +50,15 @@ Checkpoints can be bfloat16, float16, float32, or FP8. Scaled FP8 checkpoints (f
 
 ### LTX-2.3 video fine-tunes
 
-`ltx-2.3` converts a single-file LTX-2.3 checkpoint (a community fine-tune or merge) into a video model you pick by its name, like `ltx-4` and `ltx-8`. It runs on Windows and Linux with an NVIDIA GPU; macOS isn't supported yet.
+`ltx-2.3` converts a single-file LTX-2.3 checkpoint (a community fine-tune or merge) into a video model you pick by its name, like `ltx-4` and `ltx-8`. It runs on macOS (Apple Silicon) and on Windows and Linux with an NVIDIA GPU. The model is converted for the platform it is converted on, so convert the checkpoint again on each machine.
 
-- **One quantize level.** `--quantize 4` or `--quantize 8` is required, and that level is the model: no unquantized copy is kept. q4 needs the least memory (as `ltx-4`); q8 needs about 7 GB more system memory (as `ltx-8`). To have both, convert twice under two names.
-- **Inputs.** Lightricks' full checkpoint layout (with the bundled VAEs and vocoder, which are ignored) and transformer-only exports are accepted, in bfloat16 or mixed with scaled FP8. Checkpoints in diffusers' layout, and LTX-2.0 or LTX-2.5 checkpoints, are refused. A checkpoint whose text connectors differ from stock LTX-2.3's is refused too.
+- **One quantize level.** `--quantize 4` or `--quantize 8` is required, and that level is the model: no unquantized copy is kept. q4 needs the least memory (as `ltx-4`); q8 needs more (as `ltx-8`: about 7 GB more system memory on Windows/Linux, and a Mac with 32 GB or more). To have both, convert twice under two names.
+- **Inputs.** Lightricks' full checkpoint layout (with the bundled VAEs and vocoder, which are ignored) and transformer-only exports are accepted, in bfloat16 or mixed with scaled FP8. Checkpoints in diffusers' layout, and LTX-2.0 or LTX-2.5 checkpoints, are refused. A checkpoint whose text connectors differ from stock LTX-2.3's is converted with them on macOS, and refused on Windows and Linux.
 - **Dev or distilled.** The app runs LTX at 8 steps, which needs a step-distilled model. Many community merges are LTX-2.3 dev and expect Lightricks' distilled LoRA beside them; converted as they are, they render ghosted and noisy. The converter checks this offline and says what it found. For a plain-dev checkpoint, add `--distill`: it merges Lightricks' distilled LoRA (7.6 GB, downloaded once into the Hugging Face cache) into the weights before they are quantized. It is never merged without `--distill`.
 - **Names.** A name that already exists is refused (`--force` replaces that model once the new one is complete), and so are alias names such as `ltx-4`. The name doesn't need to contain `ltx`.
-- **Self-contained.** The model folder holds its own transformer and text encoder, and links the other components from `diffusers/LTX-2.3-Distilled-Diffusers`, so the checkpoint can be moved or deleted after converting. An interrupted conversion leaves nothing behind under the model's name.
+- **Self-contained.** On macOS the model folder holds its own transformer (and text connectors, when they differ from stock's), and links the VAEs, vocoder and upsamplers from `dgrauet/ltx-2.3-mlx-q4` or `-q8`, whichever matches its level. On Windows and Linux it holds its own transformer and text encoder, and links the other components from `diffusers/LTX-2.3-Distilled-Diffusers`. Either way the checkpoint can be moved or deleted after converting. An interrupted conversion leaves nothing behind under the model's name.
 
-Converting takes a few minutes and about 5 GB of system memory; the text encoder is shared with `ltx-4` / `ltx-8` when one of them has been used. On the Web UI's Models page, pick **LTX-2.3 (video)** as the model type: the form reads the checkpoint, preselects the level that fits this machine and, for a plain-dev checkpoint, **Distill**, and shows the conversion's progress.
+Converting takes a few minutes and holds one tensor at a time. On Windows and Linux it needs about 5 GB of system memory, and the text encoder is shared with `ltx-4` / `ltx-8` when one of them has been used. On macOS the components linked from the MLX folder are downloaded first if `ltx-4` / `ltx-8` hasn't been used at that level (about 10 GB). On the Web UI's Models page, pick **LTX-2.3 (video)** as the model type: the form reads the checkpoint, preselects the level that fits this machine and, for a plain-dev checkpoint, **Distill**, and shows the conversion's progress.
 
 > **Ideogram 4** is used via the `ideo` alias: the first job with it builds Ideogram 4 Instant in `~/.ziv/models/ideo` (see [Ideogram 4](image.md#ideogram-4)). It is not a `--model-type` option.
 

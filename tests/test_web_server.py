@@ -3221,3 +3221,13 @@ class TestLtxConversion:
             response = client.post("/api/models/convert/inspect", json={"input_path": str(checkpoint)})
 
         assert response.status_code == 400
+
+
+@pytest.mark.parametrize(("unified_gib", "expected"), [(32, 8), (64, 8), (24, 4)])
+def test_a_mac_converts_ltx_at_q8_from_32_gb_of_unified_memory(monkeypatch, unified_gib, expected):
+    from zvisiongenerator.utils.model_memory import MemoryBudget
+    from zvisiongenerator.web import ltx_conversion
+
+    monkeypatch.setattr("zvisiongenerator.backends.accelerator_memory_budget_or_none", lambda: MemoryBudget(unified_gib * 1024**3 * 3 // 4, unified_bytes=unified_gib * 1024**3))
+
+    assert ltx_conversion.recommended_ltx_quantize({}) == expected

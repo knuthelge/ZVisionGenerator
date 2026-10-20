@@ -15,7 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from functools import cache
 from importlib import resources
@@ -23,16 +23,20 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from zvisiongenerator.converters.convert_checkpoint import FP8_AUX_SUFFIXES, FP8_WEIGHT_SCALE_SUFFIXES
-from zvisiongenerator.utils.safetensors_stream import TensorFile, iter_tensors, read_header
+from zvisiongenerator.utils.safetensors_stream import TensorFile, iter_tensors, read_header, read_metadata
 
 if TYPE_CHECKING:
     import torch
 
 __all__ = [
+    "CHECKPOINT_PREFIX",
     "LtxCheckpoint",
     "check_lora",
+    "checkpoint_config",
+    "connector_tensors",
     "connectors_status",
     "distillation",
+    "file_order",
     "inspect_checkpoint",
     "transformer_tensors",
 ]
@@ -282,26 +286,59 @@ def transformer_tensors(
     Args:
         checkpoint: The checked checkpoint.
         lora: A LoRA file to merge in at strength 1.0, read one factor pair at a time.
-        merge_device: Where the merge's products are computed (a CUDA device is much faster); the CPU by default.
+        merge_device: Where the merge's products are computed (a GPU is much faster); the CPU by default.
         progress: Called with ``(tensors done, total)`` after each tensor.
     """
-    files = {name: normalized for normalized, name in checkpoint.transformer.items()}
-    scales = {checkpoint.scales[normalized]: normalized for normalized in checkpoint.scales if normalized in checkpoint.transformer}
-    scale_values = {scales[name]: tensor for name, tensor in iter_tensors(checkpoint.path, scales.__contains__)}
     lora_file = TensorFile(lora) if lora is not None else None
     pairs = _lora_pairs(lora_file.header) if lora_file is not None else {}
     try:
-        for done, (name, tensor) in enumerate(iter_tensors(checkpoint.path, files.__contains__), start=1):
-            normalized = files[name]
-            tensor = _dequantized(tensor, scale_values.get(normalized))
+        for done, (normalized, tensor) in enumerate(_tensors(checkpoint, checkpoint.transformer), start=1):
             if normalized in pairs and lora_file is not None:
                 tensor = _merged(tensor, lora_file, *pairs[normalized], merge_device)
             yield normalized, tensor
             if progress is not None:
-                progress(done, len(files))
+                progress(done, len(checkpoint.transformer))
     finally:
         if lora_file is not None:
             lora_file.close()
+
+
+def connector_tensors(checkpoint: LtxCheckpoint) -> Iterator[tuple[str, torch.Tensor]]:
+    """Yield the text connectors' and ``text_embedding_projection``'s tensors under their normalized names, in file order, FP8 dequantized.
+
+    Raises:
+        ValueError: When the checkpoint's connector tensors are not the ones stock has (by name).
+    """
+    if checkpoint.connectors.keys() != _pinned()["connectors"].keys():
+        raise ValueError(f"{checkpoint.path.name}'s text connectors have other tensors than LTX-2.3's; they can't be converted.")
+    yield from _tensors(checkpoint, checkpoint.connectors)
+
+
+def file_order(checkpoint: LtxCheckpoint, names: Iterable[str]) -> list[str]:
+    """Return the normalized *names* in the order the checkpoint stores their tensors, which is the order the tensor iterators yield them in."""
+    header = read_header(checkpoint.path)[1]
+    files = {**checkpoint.transformer, **checkpoint.connectors}
+    return sorted(names, key=lambda name: header[files[name]]["data_offsets"][0])
+
+
+def checkpoint_config(checkpoint: LtxCheckpoint) -> dict[str, Any] | None:
+    """Return the model config Lightricks' layout carries in the file's metadata (``config``), or ``None`` when there is none with a transformer section."""
+    raw = read_metadata(checkpoint.path).get("config")
+    try:
+        config = json.loads(raw) if isinstance(raw, str) else None
+    except ValueError:
+        return None
+    return config if isinstance(config, dict) and isinstance(config.get("transformer"), dict) else None
+
+
+def _tensors(checkpoint: LtxCheckpoint, wanted: dict[str, str]) -> Iterator[tuple[str, torch.Tensor]]:
+    """Yield the tensors of *wanted* (normalized name → name in the file) under their normalized names, in file order, FP8 dequantized."""
+    files = {name: normalized for normalized, name in wanted.items()}
+    scales = {checkpoint.scales[normalized]: normalized for normalized in checkpoint.scales if normalized in wanted}
+    scale_values = {scales[name]: tensor for name, tensor in iter_tensors(checkpoint.path, scales.__contains__)}
+    for name, tensor in iter_tensors(checkpoint.path, files.__contains__):
+        normalized = files[name]
+        yield normalized, _dequantized(tensor, scale_values.get(normalized))
 
 
 def _dequantized(tensor: torch.Tensor, scale: torch.Tensor | None) -> torch.Tensor:

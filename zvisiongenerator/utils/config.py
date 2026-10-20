@@ -492,6 +492,18 @@ def ltx_distilled_lora_source(config: dict[str, Any]) -> tuple[str, str] | None:
     return _ltx_hub_file(config, "distilled_lora", section="video_model_presets.ltx")
 
 
+def ltx_mlx_base_repo(config: dict[str, Any], bits: int) -> str:
+    """Return the MLX LTX repo a converted checkpoint at *bits* takes its other components from on macOS (``video_model_presets.ltx.mlx_base.q<bits>``).
+
+    Raises:
+        ValueError: If it is not set to a non-blank string.
+    """
+    repo = (((config.get("video_model_presets") or {}).get("ltx") or {}).get("mlx_base") or {}).get(f"q{bits}")
+    if not isinstance(repo, str) or not repo.strip():
+        raise ValueError(f"video_model_presets.ltx.mlx_base.q{bits} must be a non-blank string.")
+    return repo.strip()
+
+
 def ltx_diffusers_repo(config: dict[str, Any]) -> str:
     """Return the diffusers LTX repo of Windows/Linux (``video_model_presets.ltx.diffusers.default_repo``).
 

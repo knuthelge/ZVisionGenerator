@@ -101,6 +101,7 @@ def test_scaled_fp8_connectors_are_read_without_their_scales(tmp_path):
     checkpoint = inspect_checkpoint(path)
 
     assert set(checkpoint.connectors) == {f"{connector}.weight"}
+    assert dict(ltx_checkpoint._tensors(checkpoint, checkpoint.connectors))[f"{connector}.weight"].float().unique().tolist() == [1.0]
 
 
 def test_a_diffusers_layout_file_is_refused(tmp_path):

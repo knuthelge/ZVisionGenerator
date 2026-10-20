@@ -268,17 +268,23 @@ def convert_ltx_checkpoint(
 ) -> None:
     """Write this platform's converted LTX-2.3 model folder of *checkpoint* at *bits* into the new folder *target*.
 
-    Windows and Linux write a diffusers folder with an NF4 or FP8 transformer.
+    macOS writes an MLX folder with an MLX-quantized transformer; Windows and Linux write a diffusers folder with an
+    NF4 or FP8 transformer.
 
     Raises:
-        RuntimeError: On macOS, which has no LTX converter yet, or when the conversion fails.
+        RuntimeError: On another platform, or when the conversion fails.
     """
+    if sys.platform == "darwin":
+        from zvisiongenerator.backends.mac.ltx_converted import convert as convert_mlx
+
+        convert_mlx(checkpoint, target, bits, config=config, models_dir=models_dir, lora=lora, report=report)
+        return
     if sys.platform in ("win32", "linux"):
         from zvisiongenerator.backends.cuda.video.converted import convert
 
         convert(checkpoint, target, bits, config=config, models_dir=models_dir, lora=lora, report=report)
         return
-    raise RuntimeError("Converting LTX checkpoints is only available on Windows and Linux so far.")
+    raise RuntimeError(f"Unsupported platform: {sys.platform}. Converting LTX checkpoints supports macOS, Windows, and Linux.")
 
 
 # --- Prompt enhancer ---

@@ -4,7 +4,9 @@
 
 **Done: Windows and Linux.** `ziv model model --model-type ltx-2.3 --quantize 4|8 [--distill] [--force]` and the Models page's **LTX-2.3 (video)** convert a checkpoint as planned in §1, §3, the CUDA parts of §4 and §5: the shared checkpoint reader (`converters/ltx_checkpoint.py`, pinned hashes in `ltx23_hashes.json`), the CUDA folder writer and load check (`backends/cuda/video/converted.py`), detection by contents, estimates from the manifest, and the Web UI's inspect endpoint and background job. Checked on the test file: a q4 `--distill` conversion took 3:07 at a 4.5 GB peak, and the clip from it was sharp at 8 steps, 2:59 with a 20 GB peak.
 
-**Left:** the macOS side (§2, the Mac spike, and the macOS parts of §4 and §5: `convert_ltx_checkpoint` refuses on macOS until then), and marking an NF4 folder that a bitsandbytes update can't read on the Models page (today it refuses to load with the reconvert message).
+**Built, not yet run on a Mac: macOS.** §2 as planned (`backends/mac/ltx_converted.py`, the single-file `SingleFileWriter` in `utils/safetensors_stream`, `video_model_presets.ltx.mlx_base` in config), and the Models page preselects q8 from 32 GB of unified memory. Spike parts 1 and 2 were answered from the published headers, and part 3 and the converter itself were run on Linux with MLX's CPU build (results under "On the Mac"). Converting stock distilled 1.1 at q4 that way gave a file with dgrauet's exact header and unquantized tensors, which the vendored loader loads.
+
+**Left:** the macOS test plan below on a real Mac (with the spike's section 3 there, to see whether Metal's `mx.quantize` matches dgrauet's bit for bit), and marking an NF4 folder that a bitsandbytes update can't read on the Models page (today it refuses to load with the reconvert message).
 
 ## Problem
 
@@ -125,6 +127,15 @@ With a fine-tune test file: compare its header with the stock `ltx-2.3-22b-disti
   - **q8 tensors:** FP8 layers 2.4–3.1% from the dequantized source (bf16 layers 2.8–3.8%), 99.4–99.8% from the unscaled one.
 
 ### On the Mac
+
+**Results from Linux (2026-10-20).** Parts 1 and 2 need only file headers, and MLX's CPU build (`mlx[cpu]` 0.32.4) runs part 3 off a Mac:
+
+- **`embedded_config.json`** (both repos, identical) is the checkpoint's `config` metadata except for one value's spelling: `text_encoder_norm_type` is `per_token_rms` where the checkpoint has `PER_TOKEN_RMS`. The converter copies the checkpoint's config in stock's spelling, and uses stock's when the file has none.
+- **Connectors.** All 262 checkpoint tensors map one to one onto `connector.safetensors` as `connector.` + the name without `model.diffusion_model.`, same shapes, all bfloat16. So changed connectors are written from the checkpoint on macOS.
+- **Transformer layout.** All 4186 transformer tensors map onto dgrauet's 7450 with the renames in §2. Exactly the 1632 two-dimensional `.weight`s inside the blocks are quantized (`weight` U32, `scales` and `biases` bfloat16); the 290 `*scale_shift_table*`s are float32 and everything else bfloat16, as in the checkpoint. `quantize_config.json` is `bits` 4 or 8, `group_size` 64, `only_transformer_blocks`.
+- **Quantization (CPU).** `mx.quantize(group_size=64)` on the bfloat16 weights has the same maximum error as dgrauet's on all 18 sampled Linears at both levels, but isn't bit-identical: about 0.1–0.3% of scales differ by one bfloat16 step, and with them about 1% of packed words. From float32 input, scales come out in float32 and differ more. So the converter quantizes bfloat16. Metal may round like mlx-forge did; step 4 of the test plan shows it.
+- **The converter, run on CPU** on stock `ltx-2.3-22b-distilled-1.1` at q4: 7:41 including a 10.5 GB download of the base files, with a 5.0 GB peak. The output has dgrauet's header exactly (names, dtypes, shapes), its unquantized tensors are byte-identical to dgrauet's (all outside the blocks plus blocks 0 and 47), quantized layers agree as above, and `ltx_pipelines_mlx`'s `load_transformer` loads it.
+
 
 Needs: any Apple Silicon Mac with 16 GB or more (the script holds one sample at a time, at most about 0.4 GB with its f32 copy), the repo on this branch, `make install`, and network access to Hugging Face. Nothing is fully downloaded: the script reads the headers and the 18 sampled Linears with ranged requests, about 1.5 GB in all (the Lightricks samples once, plus the quantized ones from both MLX repos). Expect a few minutes on a fast connection, longer on a slow one.
 

@@ -266,6 +266,11 @@ video_model_presets:
     distilled_lora:
       repo: "Lightricks/LTX-2.3"
       filename: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors"
+    # macOS: the MLX folder a converted checkpoint takes its VAEs, vocoder, upsamplers and configs from, per
+    # quantize level (the ltx-4 and ltx-8 folders).
+    mlx_base:
+      q4: "dgrauet/ltx-2.3-mlx-q4"
+      q8: "dgrauet/ltx-2.3-mlx-q8"
 
 # --- Prompt enhancer (local LLM) ---
 
