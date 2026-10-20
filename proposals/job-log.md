@@ -21,19 +21,22 @@ When a job reaches a terminal state, `WebRunner` appends one JSON line to `<ZIV 
 
 ### 2. API
 
-`GET /api/jobs/history?page=1&status=failed|completed|cancelled&q=` returns the lines newest first, paged, with `total_count`. `DELETE /api/jobs/history` clears it.
+- `GET /api/jobs/history?page=1&status=failed|completed|cancelled` returns the lines newest first, paged, with `total_count`.
+- `DELETE /api/jobs/history/{job_id}` removes one entry by rewriting the file without its line, through `utils/atomic_write.py`. Unknown ids return 404.
+- `DELETE /api/jobs/history` clears the whole log.
 
 ### 3. Jobs drawer
 
-- A clock icon at the right of the top bar opens a right-hand drawer on any page, using the existing `Modal` for focus handling, as a side variant. The icon shows a red dot while there is an unseen failure.
+- A clock icon at the right of the top bar opens a right-hand drawer on any page, using the existing `Modal` for focus handling, as a side variant.
 - Each row: status icon, workflow and model, the prompt's first line, duration, and how long ago. A failed row expands to the full error text with a **Copy error** button.
-- Row actions: **Load settings** (refills the Workspace form and switches to it), **Show outputs** (opens the viewer on the outputs still present, or says they were deleted), and **Copy CLI command** once [Copy a CLI command from any asset](asset-cli-command.md) provides the builder, since a job's `settings` are the form fields it expects.
-- A filter row: All, Failed, Completed; and a search field over prompt and model.
+- Row actions: **Load settings** (refills the Workspace form and switches to it) and **Delete** (removes the entry).
+- A filter row: All, Failed, Completed.
+- **Clear log** at the foot of the drawer purges every entry after a confirm.
 - Keyboard: `G → J` opens the drawer, matching the other `G →` chords.
 
 ### Docs and changelog
 
-- CHANGELOG `[Unreleased]`: "A Jobs drawer lists past jobs with their duration, outputs and failure messages, kept across restarts."
+- CHANGELOG `[Unreleased]`: "A Jobs drawer lists past jobs with their duration and failure messages, kept across restarts; load a job's settings, delete an entry or clear the log."
 - The Web UI section of `docs/getting-started.md` gets a paragraph on the drawer; the Error Log section mentions `jobs.jsonl` and how to clear it.
 
 ## Alternatives considered

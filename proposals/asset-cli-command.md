@@ -17,7 +17,6 @@ The terminal button in the Settings header copies a `ziv image` or `ziv video` c
 - A pure `assetSettings(asset): JobSettings` in `lib/state/` maps an asset's reuse params and `details.generation` to the form field names, including `mode` from the workflow and the post-processing and upscale fields. It is the inverse of what provenance recorded, and a parity test asserts for each fixture asset that `cliCommand(assetSettings(asset))` equals `cliCommand(formSettings(form))` after Reuse settings, so the two paths cannot drift.
 - **Copy CLI command** in the tile menu and the viewer's action bar (a key chosen beside the viewer's copy-prompt key, listed in the shortcuts dialog). It copies `cliCommand(assetSettings(asset), {outputDir})` and shows the same caveat notes the Settings button shows.
 - Disabled with a reason when `has_reusable_config` is false ("No recorded settings") and for assets made by an upscale job of another asset ("Made by upscaling `name.png`; copy from the source"), since the CLI has no upscale-existing command; the viewer's source link leads to the right asset.
-- The Jobs drawer in [A log of past jobs](job-log.md) reuses the builder on a job's `settings`.
 
 ### Docs and changelog
 
