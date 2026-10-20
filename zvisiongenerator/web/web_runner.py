@@ -47,6 +47,7 @@ from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS, seedvr2_tier_label
 from zvisiongenerator.web.config import load_web_config
 from zvisiongenerator.web.gallery import gallery_asset_for_output_path, gallery_asset_to_json
+from zvisiongenerator.web.job_log import JobLog, build_job_log_entry, is_loggable
 from zvisiongenerator.web.job_contract import (
     CANCELLED_TERMINAL_EVENT,
     DOWNLOADING_EVENT,
@@ -221,6 +222,10 @@ class _JobRecord:
     last_eta_secs: float | None = None
     preview_jpeg: bytes | None = None
     preview_version: int = 0
+    # Generations that ended ``failed`` and the reason of the last one that said why; they survive a job that still ends
+    # ``completed`` or ``cancelled``, and feed the job log.
+    failed_runs: int = 0
+    last_failure: str | None = None
     lock: threading.RLock = field(default_factory=threading.RLock)
 
 
@@ -243,11 +248,13 @@ class WebRunner:
         terminal_retention_seconds: float = 300.0,
         max_terminal_jobs: int = 25,
         download_flights: DownloadFlights | None = None,
+        job_log: JobLog | None = None,
     ) -> None:
         """Create the thread-backed web runner facade.
 
         *download_flights* is the registry that lets jobs (and the server's download lane) share one download per
-        destination; it defaults to a registry of its own.
+        destination; it defaults to a registry of its own. A started image, video or upscale job is logged to *job_log*
+        when it ends.
         """
         self._download_flights = download_flights if download_flights is not None else DownloadFlights()
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ziv-web-runner")
@@ -255,6 +262,7 @@ class WebRunner:
         self._max_history_events = max(1, max_history_events)
         self._terminal_retention_seconds = max(0.0, terminal_retention_seconds)
         self._max_terminal_jobs = max(0, max_terminal_jobs)
+        self._job_log = job_log
         self._jobs: dict[str, _JobRecord] = {}
         # Final snapshot + terminal event of pruned jobs, so late clients (e.g. a laptop waking up) still learn the
         # real outcome instead of a 404. Bounded; only a server restart makes a job truly unknown.
@@ -1024,8 +1032,28 @@ class WebRunner:
             if record.status in self._TERMINAL_STATUSES:
                 record.paused = False
                 record.last_eta_secs = None
-            if record.status in self._TERMINAL_STATUSES and record.completed_at is None:
+            if enriched_event["type"] == "generation_finished" and enriched_event.get("status") == "failed":
+                record.failed_runs += 1
+                if enriched_event.get("message"):
+                    record.last_failure = str(enriched_event["message"])
+            first_terminal = record.status in self._TERMINAL_STATUSES and record.completed_at is None
+            if first_terminal:
                 record.completed_at = enriched_event["timestamp"]
+            log_args: dict[str, Any] | None = None
+            if first_terminal and self._job_log is not None and is_loggable(record.job_type, record.started_at):
+                # Plain copies only: the entry is built after every lock is released.
+                log_args = {
+                    "job_id": record.job_id,
+                    "job_type": record.job_type,
+                    "context": dict(record.context),
+                    "status": record.status,
+                    "created_at": record.created_at,
+                    "started_at": record.started_at,
+                    "completed_at": record.completed_at,
+                    "outputs": [dict(output) for output in record.outputs],
+                    "error": (enriched_event.get("message") if record.status == "failed" else None) or record.last_failure,
+                    "failed_runs": record.failed_runs,
+                }
             subscribers = list(record.subscribers)
 
         for subscriber in subscribers:
@@ -1036,6 +1064,21 @@ class WebRunner:
                 if self._claimed_job_id == job_id:
                     self._claimed_job_id = None
                 self._prune_terminal_jobs_locked(exclude_job_id=job_id)
+
+        self._write_job_log(log_args)
+
+    def _write_job_log(self, log_args: dict[str, Any] | None) -> None:
+        """Append the finished job to the log; any failure becomes a warning and never touches the job.
+
+        Runs last in ``_publish_event``, holding no lock, so a slow or failing write cannot delay the terminal event,
+        the release of the claim or the start of the next queued job.
+        """
+        if log_args is None or self._job_log is None:
+            return
+        try:
+            self._job_log.append(build_job_log_entry(**log_args))
+        except Exception as exc:  # noqa: BLE001 - best effort by design
+            warnings.warn(f"Could not write the job log: {exc}", stacklevel=2)
 
     @staticmethod
     def _review_after_event(current: dict[str, Any] | None, event: EventPayload) -> dict[str, Any] | None:

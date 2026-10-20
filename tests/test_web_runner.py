@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import queue
 import sys
 import threading
 import time
@@ -26,6 +27,7 @@ from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import web_runner as web_runner_module
+from zvisiongenerator.web.job_log import JobLog
 from zvisiongenerator.workflows import build_video_workflow
 
 
@@ -1793,3 +1795,238 @@ def test_a_video_review_over_http_serves_the_small_render_until_the_job_resumes(
         proceed[0].set()
         proceed[1].set()
         runner.shutdown()
+
+
+class TestJobLogHook:
+    """A started image, video or upscale job is logged once, when it first reaches a terminal status."""
+
+    LOG_KEYS = {
+        "job_id",
+        "job_type",
+        "workflow",
+        "model",
+        "prompt",
+        "settings",
+        "status",
+        "created_at",
+        "started_at",
+        "completed_at",
+        "duration_secs",
+        "outputs",
+        "error",
+        "failed_runs",
+    }
+
+    @pytest.fixture()
+    def log_path(self, tmp_path) -> Path:
+        return tmp_path / "jobs.jsonl"
+
+    @pytest.fixture()
+    def runner(self, log_path):
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01, job_log=JobLog(lambda: log_path))
+        yield runner
+        runner.shutdown()
+
+    @staticmethod
+    def _entries(log_path: Path) -> list[dict]:
+        if not log_path.exists():
+            return []
+        return [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+
+    @staticmethod
+    def _drain(runner: web_runner_module.WebRunner) -> None:
+        """Wait until the single worker has finished everything submitted so far."""
+        runner._executor.submit(lambda: None).result(timeout=2.0)
+
+    def _run(self, runner, events, *, job_type="image", context=None, exclusive=True) -> str:
+        """Run a job that publishes *events* (the worker adds the success terminal when none of them is terminal)."""
+
+        def _target(progress_callback):
+            for event in events:
+                progress_callback(event)
+
+        job_id = runner._submit_job(job_type=job_type, exclusive=exclusive, context=context, target_factory=_target)
+        self._drain(runner)
+        return job_id
+
+    @staticmethod
+    def _blocking(runner, *, job_type="image") -> tuple[str, threading.Event, threading.Event]:
+        started = threading.Event()
+        release = threading.Event()
+
+        def _target(_progress_callback):
+            started.set()
+            release.wait(timeout=2.0)
+
+        job_id = runner._submit_job(job_type=job_type, exclusive=True, target_factory=_target)
+        assert started.wait(timeout=1.0)
+        return job_id, started, release
+
+    def test_completed_job_is_logged_with_the_entry_keys(self, runner, log_path, monkeypatch):
+        monkeypatch.setattr(web_runner_module, "_output_asset_payload", lambda _context, _path: {"id": "img/1.png"})
+        context = {"prompt": "a lake", "model": "m1", "workflow": "txt2img", "settings": {"steps": 4}}
+
+        job_id = self._run(runner, [{"type": "generation_finished", "status": "success", "output_path": "/x/1.png"}], context=context)
+
+        (entry,) = self._entries(log_path)
+        assert set(entry) == self.LOG_KEYS
+        assert (entry["job_id"], entry["job_type"], entry["status"]) == (job_id, "image", "completed")
+        assert (entry["prompt"], entry["model"], entry["workflow"], entry["settings"]) == ("a lake", "m1", "txt2img", {"steps": 4})
+        assert entry["outputs"] == ["img/1.png"]
+        assert entry["error"] is None
+        assert entry["failed_runs"] == 0
+        assert isinstance(entry["created_at"], float)
+        assert entry["started_at"] <= entry["completed_at"]
+        assert entry["duration_secs"] >= 0
+
+    @pytest.mark.parametrize("job_type", ["image", "video", "upscale"])
+    def test_every_logged_job_type_writes_a_line(self, runner, log_path, job_type):
+        self._run(runner, [], job_type=job_type)
+
+        assert [entry["job_type"] for entry in self._entries(log_path)] == [job_type]
+
+    def test_failed_job_logs_the_terminal_message(self, runner, log_path):
+        self._run(runner, [{"type": "batch_failed", "mode": "image", "message": "CUDA out of memory"}])
+
+        (entry,) = self._entries(log_path)
+        assert entry["status"] == "failed"
+        assert entry["error"] == "CUDA out of memory"
+
+    def test_failed_job_without_a_message_falls_back_to_the_last_failed_generation(self, runner, log_path):
+        self._run(
+            runner,
+            [
+                {"type": "generation_finished", "status": "failed", "message": "first"},
+                {"type": "generation_finished", "status": "failed"},
+                {"type": "generation_finished", "status": "failed", "message": "second"},
+                {"type": "batch_failed", "mode": "image"},
+            ],
+        )
+
+        (entry,) = self._entries(log_path)
+        assert (entry["status"], entry["error"], entry["failed_runs"]) == ("failed", "second", 3)
+
+    def test_job_that_raises_logs_the_worker_message(self, runner, log_path):
+        def _boom(_progress_callback):
+            raise RuntimeError("worker broke")
+
+        runner._submit_job(job_type="image", exclusive=True, target_factory=_boom)
+        self._drain(runner)
+
+        (entry,) = self._entries(log_path)
+        assert (entry["status"], entry["error"]) == ("failed", "worker broke")
+
+    def test_partial_failure_keeps_the_completed_status(self, runner, log_path):
+        self._run(
+            runner,
+            [
+                {"type": "generation_finished", "status": "failed", "message": "run 1 failed"},
+                {"type": "generation_finished", "status": "success"},
+                {"type": "batch_completed", "mode": "image"},
+            ],
+        )
+
+        (entry,) = self._entries(log_path)
+        assert (entry["status"], entry["failed_runs"], entry["error"]) == ("completed", 1, "run 1 failed")
+
+    def test_cancel_after_start_is_logged_with_its_failed_runs(self, runner, log_path):
+        self._run(runner, [{"type": "generation_finished", "status": "failed", "message": "bad"}, {"type": "batch_cancelled", "mode": "image"}])
+
+        (entry,) = self._entries(log_path)
+        assert (entry["status"], entry["failed_runs"], entry["error"]) == ("cancelled", 1, "bad")
+
+    def test_one_line_per_started_job(self, runner, log_path):
+        ids = [
+            self._run(runner, []),
+            self._run(runner, [{"type": "batch_failed", "mode": "image", "message": "x"}]),
+            self._run(runner, [{"type": "batch_cancelled", "mode": "image"}]),
+            self._run(runner, [{"type": "generation_finished", "status": "failed"}, {"type": "batch_completed", "mode": "image"}]),
+        ]
+
+        entries = self._entries(log_path)
+        assert [entry["job_id"] for entry in entries] == ids
+        assert [entry["status"] for entry in entries] == ["completed", "failed", "cancelled", "completed"]
+
+    def test_a_second_terminal_event_does_not_write_a_second_line(self, runner, log_path):
+        job_id = self._run(runner, [{"type": "batch_cancelled", "mode": "image"}, {"type": "batch_failed", "mode": "image", "message": "late"}])
+
+        (entry,) = self._entries(log_path)
+        assert (entry["job_id"], entry["status"], entry["error"]) == (job_id, "cancelled", None)
+
+    def test_jobs_that_never_started_or_are_not_generation_jobs_are_not_logged(self, runner, log_path):
+        running, _started, release = self._blocking(runner)
+        queued = [runner._submit_job(job_type="image", exclusive=True, target_factory=lambda _cb: None) for _ in range(3)]
+
+        assert runner.cancel_queued(queued[0]) is True
+        assert runner.clear_queue() == queued[1:]
+        release.set()
+        self._drain(runner)
+        self._run(runner, [], job_type="dummy", exclusive=False)
+        self._run(runner, [], job_type="test")
+        self._drain(runner)
+
+        assert [entry["job_id"] for entry in self._entries(log_path)] == [running]
+
+    def test_shutdown_of_queued_jobs_writes_nothing(self, log_path):
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01, job_log=JobLog(lambda: log_path))
+        _running, _started, release = self._blocking(runner)
+        for _ in range(2):
+            runner._submit_job(job_type="video", exclusive=True, target_factory=lambda _cb: None)
+
+        runner.shutdown()
+
+        assert self._entries(log_path) == []
+        release.set()
+
+    def test_runner_without_a_job_log_writes_nothing(self, log_path, tmp_path):
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        try:
+            job_id = runner._submit_job(job_type="image", exclusive=True, target_factory=lambda _cb: None)
+            self._drain(runner)
+            assert runner.get_job_snapshot(job_id)["status"] == "completed"
+        finally:
+            runner.shutdown()
+
+        assert not log_path.exists()
+        assert list(tmp_path.glob("*.jsonl")) == []
+
+    def test_a_failing_store_warns_and_the_next_job_still_runs(self, tmp_path):
+        # The log "file" is a directory, so every read raises OSError.
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01, job_log=JobLog(lambda: tmp_path))
+        ran: list[str] = []
+        try:
+            with pytest.warns(UserWarning, match="Could not write the job log"):
+                first = self._run(runner, [])
+                second = runner._submit_job(job_type="image", exclusive=True, target_factory=lambda _cb: ran.append("second"))
+                self._drain(runner)
+            assert runner.get_job_snapshot(first)["status"] == "completed"
+            assert runner.get_job_snapshot(second)["status"] == "completed"
+            assert ran == ["second"]
+        finally:
+            runner.shutdown()
+
+    def test_a_failing_entry_builder_never_breaks_the_job(self, runner, log_path, monkeypatch):
+        def _raise(**_kwargs):
+            raise RuntimeError("builder broke")
+
+        monkeypatch.setattr(web_runner_module, "build_job_log_entry", _raise)
+        first, _started, release = self._blocking(runner)
+        record = runner._jobs[first]
+        subscriber: queue.Queue = queue.Queue()
+        record.subscribers.add(subscriber)
+        ran: list[str] = []
+        second = runner._submit_job(job_type="image", exclusive=True, target_factory=lambda _cb: ran.append("second"))
+
+        with pytest.warns(UserWarning, match="builder broke"):
+            release.set()
+            self._drain(runner)
+
+        types = []
+        while not subscriber.empty():
+            types.append(subscriber.get_nowait()["type"])
+        assert "job_completed" in types
+        assert runner.get_job_snapshot(first)["status"] == "completed"
+        assert runner.get_job_snapshot(second)["status"] == "completed"
+        assert ran == ["second"]
+        assert runner.list_jobs() == {"active_job": None, "queued_jobs": []}
+        assert self._entries(log_path) == []

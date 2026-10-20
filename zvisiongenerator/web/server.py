@@ -20,7 +20,7 @@ from contextlib import ExitStack, asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
@@ -100,6 +100,7 @@ from zvisiongenerator.web.gallery import (
     list_gallery_assets,
     resolve_output_asset_path,
 )
+from zvisiongenerator.web.job_log import JOB_LOG_PAGE_SIZE, JobLog, job_log_path
 from zvisiongenerator.web.json_fields import json_field
 from zvisiongenerator.web.model_download_plan import PlanUnchecked, plan_summary, row_plan
 from zvisiongenerator.web.path_browser import BrowsePlace, BrowsePurpose, DirectoryListing, browse_places, create_folder, default_place_dir, host_drives, list_directory, resolve_purpose
@@ -135,7 +136,8 @@ _WORKFLOW_DEFINITIONS = WORKFLOW_DEFINITIONS
 _PROMPT_FILE_EXTENSIONS = tuple(PROMPT_FILE_CONTRACT["accepted_extensions"])
 
 download_flights = DownloadFlights()
-web_runner = WebRunner(download_flights=download_flights)
+job_log = JobLog(job_log_path)
+web_runner = WebRunner(download_flights=download_flights, job_log=job_log)
 download_lane = DownloadLane(flights=download_flights)
 logger = logging.getLogger(__name__)
 _ENHANCE_TERMINAL_FRAMES = frozenset({"done", "error"})
@@ -2072,11 +2074,46 @@ def _ensure_not_downloading(*, repo_ids: tuple[str, ...] = (), paths: tuple[Path
         raise HTTPException(status_code=409, detail=f"Wait for the download of {repo} to finish, or cancel it, before deleting it.")
 
 
+def _job_log_unavailable(exc: OSError) -> HTTPException:
+    """Return the 500 for a job log file that could not be read or written."""
+    return HTTPException(status_code=500, detail=f"Could not read or write the job log: {exc.strerror or exc}")
+
+
 # Declared before the parameterised /api/jobs/{job_id} routes.
 @app.get("/api/jobs")
 def api_list_jobs() -> dict[str, Any]:
     """Return the active generation job and the queued ones, oldest first."""
     return web_runner.list_jobs()
+
+
+@app.get("/api/jobs/log")
+def api_job_log(page: int = Query(1, ge=1), status: Literal["all", "failed", "completed", "cancelled"] = "all") -> dict[str, Any]:
+    """Return one newest-first page of the finished-job log, filtered by outcome."""
+    try:
+        return job_log.page(status, page, JOB_LOG_PAGE_SIZE)
+    except OSError as exc:
+        raise _job_log_unavailable(exc) from exc
+
+
+@app.delete("/api/jobs/log/{job_id}")
+def api_delete_job_log_entry(job_id: str) -> dict[str, str]:
+    """Remove one entry from the job log; 404 when it is not there."""
+    try:
+        deleted = job_log.delete(job_id)
+    except OSError as exc:
+        raise _job_log_unavailable(exc) from exc
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Unknown log entry: {job_id}")
+    return {"deleted": job_id}
+
+
+@app.delete("/api/jobs/log")
+def api_clear_job_log() -> dict[str, int]:
+    """Remove every entry from the job log and return how many there were."""
+    try:
+        return {"deleted_count": job_log.clear()}
+    except OSError as exc:
+        raise _job_log_unavailable(exc) from exc
 
 
 @app.delete("/api/jobs/queue")

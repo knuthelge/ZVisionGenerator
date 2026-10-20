@@ -212,3 +212,11 @@ def fake_peft_no_match(monkeypatch):
 def _seedvr2_off_in_web_config(monkeypatch):
     """Keep SeedVR2 off in the Web UI config so tests behave the same on every platform; opt-in tests patch it back on."""
     monkeypatch.setattr("zvisiongenerator.web.config.supports_seedvr2", lambda: False)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_job_log(monkeypatch, tmp_path_factory):
+    """Point the job log at a throwaway data dir so no test writes ``jobs.jsonl`` under the real ZIV data dir."""
+    data_dir = tmp_path_factory.mktemp("ziv-data")
+    monkeypatch.setattr("zvisiongenerator.web.job_log.get_ziv_data_dir", lambda: data_dir)
+    return data_dir

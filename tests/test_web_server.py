@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import functools
 from dataclasses import replace
+import inspect
 import io
 import json
 import os
@@ -34,6 +35,7 @@ from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import video_clip as video_clip_module
 from zvisiongenerator.web import workspace_api as workspace_api_module
 from zvisiongenerator.web.gallery import list_gallery_assets
+from zvisiongenerator.web.job_log import JOB_LOG_STATUS_FILTERS, JobLog
 from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
@@ -3494,3 +3496,154 @@ class TestModelDownloadPlanRoute:
 
         assert response.status_code == 424
         assert "owner/vae" in response.json()["detail"]
+
+
+class TestJobLogRoutes:
+    """The job log routes: paging and filters, single delete, clear, and store failures."""
+
+    @pytest.fixture()
+    def path(self, tmp_path, monkeypatch) -> Path:
+        log_path = tmp_path / "jobs.jsonl"
+        monkeypatch.setattr(web_server, "job_log", JobLog(lambda: log_path))
+        return log_path
+
+    @staticmethod
+    def _seed(entries: list[dict]) -> None:
+        for entry in entries:
+            web_server.job_log.append(entry)
+
+    @staticmethod
+    def _entry(job_id: str, status: str = "completed", failed_runs: int = 0) -> dict:
+        return {"job_id": job_id, "status": status, "failed_runs": failed_runs}
+
+    def test_route_status_values_match_the_filter_constant(self):
+        schema = web_server.app.openapi()["paths"]["/api/jobs/log"]["get"]
+        status_schema = next(param["schema"] for param in schema["parameters"] if param["name"] == "status")
+
+        assert tuple(status_schema["enum"]) == JOB_LOG_STATUS_FILTERS
+
+    @pytest.mark.parametrize("route", [web_server.api_job_log, web_server.api_delete_job_log_entry, web_server.api_clear_job_log])
+    def test_log_routes_run_in_the_threadpool(self, route):
+        assert not inspect.iscoroutinefunction(route)
+
+    def test_listing_returns_the_page_keys_newest_first(self, path):
+        self._seed([self._entry("a"), self._entry("b"), self._entry("c")])
+
+        with TestClient(web_server.app) as client:
+            response = client.get("/api/jobs/log")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body) == {"entries", "page", "total_pages", "total_count", "page_size"}
+        assert [entry["job_id"] for entry in body["entries"]] == ["c", "b", "a"]
+        assert (body["page"], body["total_pages"], body["total_count"], body["page_size"]) == (1, 1, 3, 50)
+
+    def test_empty_log_is_one_empty_page(self, path):
+        with TestClient(web_server.app) as client:
+            body = client.get("/api/jobs/log").json()
+
+        assert body == {"entries": [], "page": 1, "total_pages": 1, "total_count": 0, "page_size": 50}
+
+    def test_paging_and_page_clamp(self, path):
+        self._seed([self._entry(f"j{i:03d}") for i in range(120)])
+
+        with TestClient(web_server.app) as client:
+            second = client.get("/api/jobs/log", params={"page": 2}).json()
+            clamped = client.get("/api/jobs/log", params={"page": 99}).json()
+
+        assert second["page"] == 2
+        assert second["total_pages"] == 3
+        assert [entry["job_id"] for entry in second["entries"]][0] == "j069"
+        assert len(second["entries"]) == 50
+        assert clamped["page"] == 3
+        assert [entry["job_id"] for entry in clamped["entries"]] == [f"j{i:03d}" for i in range(19, -1, -1)]
+
+    def test_status_filters_include_partial_failures(self, path):
+        self._seed(
+            [
+                self._entry("done"),
+                self._entry("failed", status="failed"),
+                self._entry("partial", failed_runs=2),
+                self._entry("cancelled", status="cancelled"),
+                self._entry("cancelled-partial", status="cancelled", failed_runs=1),
+            ]
+        )
+
+        with TestClient(web_server.app) as client:
+            ids = {status: [entry["job_id"] for entry in client.get("/api/jobs/log", params={"status": status}).json()["entries"]] for status in ("all", "failed", "completed", "cancelled")}
+            counted = client.get("/api/jobs/log", params={"status": "failed"}).json()
+
+        assert ids["failed"] == ["cancelled-partial", "partial", "failed"]
+        assert ids["completed"] == ["partial", "done"]
+        assert ids["cancelled"] == ["cancelled-partial", "cancelled"]
+        assert len(ids["all"]) == 5
+        assert counted["total_count"] == 3
+
+    @pytest.mark.parametrize("params", [{"status": "bogus"}, {"page": 0}, {"page": -1}, {"page": "x"}])
+    def test_invalid_query_is_422(self, path, params):
+        with TestClient(web_server.app) as client:
+            assert client.get("/api/jobs/log", params=params).status_code == 422
+
+    def test_delete_one_entry(self, path):
+        self._seed([self._entry("a"), self._entry("b")])
+
+        with TestClient(web_server.app) as client:
+            deleted = client.delete("/api/jobs/log/a")
+            again = client.delete("/api/jobs/log/a")
+            remaining = client.get("/api/jobs/log").json()
+
+        assert deleted.status_code == 200
+        assert deleted.json() == {"deleted": "a"}
+        assert again.status_code == 404
+        assert again.json()["detail"] == "Unknown log entry: a"
+        assert [entry["job_id"] for entry in remaining["entries"]] == ["b"]
+
+    def test_delete_on_a_missing_file_is_404(self, path):
+        with TestClient(web_server.app) as client:
+            assert client.delete("/api/jobs/log/nope").status_code == 404
+
+    def test_clear_returns_the_removed_count(self, path):
+        self._seed([self._entry("a"), self._entry("b")])
+
+        with TestClient(web_server.app) as client:
+            first = client.delete("/api/jobs/log")
+            second = client.delete("/api/jobs/log")
+
+        assert first.json() == {"deleted_count": 2}
+        assert second.json() == {"deleted_count": 0}
+
+    def test_clear_on_a_missing_file_is_zero(self, path):
+        with TestClient(web_server.app) as client:
+            response = client.delete("/api/jobs/log")
+
+        assert response.status_code == 200
+        assert response.json() == {"deleted_count": 0}
+        assert not path.exists()
+
+    def test_log_routes_are_not_swallowed_by_job_id_routes(self, path):
+        with TestClient(web_server.app) as client:
+            assert client.get("/api/jobs/log").json()["total_count"] == 0
+            assert client.get("/api/jobs").json() == {"active_job": None, "queued_jobs": []}
+
+    @pytest.mark.parametrize(("method", "url"), [("get", "/api/jobs/log"), ("delete", "/api/jobs/log/a"), ("delete", "/api/jobs/log")])
+    def test_store_os_errors_become_500_with_a_detail(self, monkeypatch, method, url):
+        def _broken(*_args, **_kwargs):
+            raise PermissionError(13, "Permission denied")
+
+        for name in ("page", "delete", "clear"):
+            monkeypatch.setattr(web_server.job_log, name, _broken)
+
+        with TestClient(web_server.app) as client:
+            response = getattr(client, method)(url)
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Could not read or write the job log: Permission denied"
+
+    def test_log_that_is_a_directory_is_500(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(web_server, "job_log", JobLog(lambda: tmp_path))
+
+        with TestClient(web_server.app) as client:
+            assert client.get("/api/jobs/log").status_code == 500
+
+    def test_the_server_runner_writes_to_the_server_job_log(self):
+        assert web_server.web_runner._job_log is web_server.job_log
