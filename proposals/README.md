@@ -38,6 +38,7 @@ These files are not part of the published docs site, and the docs don't link to 
 | [Merge the Models and Config pages](admin-page-merge.md) | Proposed | One Setup page with General, Models, LoRAs and Folders tabs, redirects for the old routes, one nav slot fewer |
 | [Copy a CLI command from any asset](asset-cli-command.md) | Proposed | Build the reproducing `ziv` command from an asset's recorded settings in the tile menu and viewer, with a parity test against Reuse settings |
 | [Prompt enhancer v3: a test bench, sharper rules, better options](prompt-enhancer-v3.md) | In progress | Done: the bench; a word floor for Same, a labelled prompt and quoted text kept exactly; the enhance options recorded on every output, shown in the viewer and restored by Reuse; the new option set (Theme, Camera and Pace, a realism core for photos, 15 art styles) in an inspector-style popover. Open: per-model hints, worked examples and the bench's local judge |
+| [Convert LTX-2.3 checkpoints](ltx-checkpoint-conversion.md) | Proposed | `ziv model model -i <file> --model-type ltx-2.3 --quantize 4\|8` for single-file fine-tunes (full or transformer-only, mixed scaled FP8), stored at that one level: an MLX folder on macOS, an NF4/FP8 folder on CUDA that loads without the source file; detects plain-dev merges and offers `--distill` to merge Lightricks' distilled LoRA. Spiked on CUDA with a community merge |
 
 ## Archive
 
