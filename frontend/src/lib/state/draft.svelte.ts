@@ -287,6 +287,113 @@ function _presetIsValid(ctx: WorkspaceContext, state: DraftState): boolean {
   return offeredSizes(ctx, state.workflow, state.model, state.ratio).includes(state.size);
 }
 
+const _SIZE_KEYS = ['ratio', 'size', 'dimensionMode', 'width', 'height'] as const;
+
+/**
+ * Return the settings of `current` that differ from `baseline` (compared with `Object.is`).
+ *
+ * The size settings (ratio, size, dimension mode, width, height) are kept or dropped as a whole,
+ * so a changed width never pairs with another model's height.
+ */
+export function changedSettings(current: SettingDefaults, baseline: SettingDefaults): Partial<SettingDefaults> {
+  const changed = Object.fromEntries(SETTING_KEYS.filter((key) => !Object.is(current[key], baseline[key])).map((key) => [key, current[key]])) as Partial<SettingDefaults>;
+  if (_SIZE_KEYS.some((key) => key in changed)) Object.assign(changed, Object.fromEntries(_SIZE_KEYS.map((key) => [key, current[key]])));
+  return changed;
+}
+
+/** The pixel limits of a model: its smallest side, its largest side (null when unbounded), and the grid sides snap to. */
+export interface DimensionLimits { min: number; max: number | null; step: number }
+
+/** Snap a side length to the nearest multiple of the step, within the smallest and largest multiples the limits allow. */
+export function snapDimension(value: number, limits: DimensionLimits): number {
+  const { min, max, step } = limits;
+  const lowest = Math.ceil(min / step) * step;
+  const highest = max === null ? Infinity : Math.floor(max / step) * step;
+  return Math.min(highest, Math.max(lowest, Math.round(value / step) * step));
+}
+
+/** Scale a custom size into a model's limits keeping its aspect ratio, then snap each side to the step. */
+export function fitDimensions(width: number, height: number, limits: DimensionLimits): { width: number; height: number } {
+  const larger = Math.max(width, height);
+  const smaller = Math.min(width, height);
+  let scale = 1;
+  if (limits.max !== null && larger > limits.max) scale = limits.max / larger;
+  else if (smaller < limits.min) scale = limits.min / smaller;
+  return { width: snapDimension(width * scale, limits), height: snapDimension(height * scale, limits) };
+}
+
+/** Return the preset of a ratio with the most pixels; presets without known pixel sizes lose to ones with, and the last listed wins a tie. */
+function _largestPreset(ctx: WorkspaceContext, workflow: Workflow, ratio: string, presets: string[]): string {
+  const dims = (_isVideoWorkflow(workflow) ? ctx.video_size_dimensions : ctx.image_size_dimensions)?.[ratio] ?? {};
+  const area = (size: string): number => (dims[size] ? dims[size][0] * dims[size][1] : 0);
+  return presets.reduce((best, size) => (area(size) >= area(best) ? size : best));
+}
+
+/** Fit the size of a state to its model: a preset the model does not offer becomes its largest one, a custom size is scaled into the model's limits. */
+function _fitSizeToModel(ctx: WorkspaceContext, state: DraftState, defaults: ImageModelDefaults | VideoModelDefaults): DraftState {
+  if (state.dimensionMode === 'custom') {
+    if (_isVideoWorkflow(state.workflow) || state.width <= 0 || state.height <= 0) return state;
+    const image = defaults as ImageModelDefaults;
+    return { ...state, ...fitDimensions(state.width, state.height, { min: image.dimension_min, max: image.dimension_max, step: image.dimension_step }) };
+  }
+  const offered = offeredSizes(ctx, state.workflow, state.model, state.ratio);
+  if (offered.includes(state.size)) return state;
+  if (offered.length > 0) return { ...state, size: _largestPreset(ctx, state.workflow, state.ratio, offered) };
+  return { ...state, ..._pickSizeSettings(defaults) };
+}
+
+function _pickSizeSettings(defaults: ImageModelDefaults | VideoModelDefaults): Pick<DraftState, (typeof _SIZE_KEYS)[number]> {
+  return { ratio: defaults.ratio, dimensionMode: 'ratio', size: defaults.size, width: defaults.width, height: defaults.height };
+}
+
+/** Return the settings of a draft that differ from its own model's (gated) defaults; none when those defaults are unknown. */
+function _changedSinceOldDefaults(ctx: WorkspaceContext, state: DraftState): Partial<SettingDefaults> {
+  if (!_modelDefaultsFor(ctx, state.workflow, state.model)) return {};
+  const baseline = _applyCapabilityGates(ctx, _withModelDefaults(ctx, { ...DEFAULT_DRAFT, workflow: state.workflow, model: state.model }));
+  return changedSettings(_pickSettings(state), _pickSettings(baseline));
+}
+
+/** Fit the kept settings of a state to its model: the size, and the steps of a video model with a step cap. */
+function _fitToModel(ctx: WorkspaceContext, state: DraftState): DraftState {
+  const defaults = _modelDefaultsFor(ctx, state.workflow, state.model);
+  if (!defaults) return state;
+  const fitted = _fitSizeToModel(ctx, state, defaults);
+  const maxSteps = _isVideoWorkflow(state.workflow) ? (defaults as VideoModelDefaults).max_steps : null;
+  return typeof maxSteps === 'number' ? { ...fitted, steps: Math.min(fitted.steps, maxSteps) } : fitted;
+}
+
+/** Clear what the state's model cannot use, and align the frame count to its grid. */
+function _applyCapabilityGates(ctx: WorkspaceContext, state: DraftState): DraftState {
+  const { workflow, model } = state;
+  const isVideoMode = _isVideoWorkflow(workflow);
+  const modelDefaults = _modelDefaultsFor(ctx, workflow, model);
+  let nextState = state;
+
+  // An Enhanced JSON caption only means something to a model that takes JSON captions.
+  const imageTakesJson = !isVideoMode && (modelDefaults as ImageModelDefaults | null)?.supports_json_prompt === true;
+  if (!imageTakesJson && isJsonCaption(nextState.enhancedPrompt)) nextState = { ...nextState, enhancedPrompt: '', enhancedFrom: null };
+  if (isVideoMode) {
+    nextState = { ...nextState, negativePrompt: '', quantize: null, jsonPromptEnabled: false, jsonPrompt: '', firstSigma: null };
+    // A kept or restored count may predate snapping; show the count the server will generate.
+    const timing = videoTimingFor(ctx, model, _sourceFps(workflow));
+    nextState.fps = timing.fps;
+    // An extension has no clip length of its own: its new frames (`extendFrames`) stay multiples of 8, not 8k+1.
+    if (workflow !== 'extend') nextState.frameCount = alignFrameCount(nextState.frameCount, timing.frameAlignment);
+  } else {
+    const imageDefaults = modelDefaults as ImageModelDefaults | null;
+    nextState = {
+      ...nextState,
+      negativePrompt: imageDefaults?.supports_negative_prompt ? nextState.negativePrompt : '',
+      quantize: imageDefaults?.supports_quantize ? nextState.quantize : null,
+      jsonPromptEnabled: imageDefaults?.supports_json_prompt ? nextState.jsonPromptEnabled : false,
+      jsonPrompt: imageDefaults?.supports_json_prompt ? nextState.jsonPrompt : '',
+      firstSigma: imageDefaults?.supports_first_sigma ? nextState.firstSigma : null,
+      scheduler: imageDefaults?.supports_scheduler === false ? null : nextState.scheduler,
+    };
+  }
+  return nextState;
+}
+
 /** Upgrade a saved draft from the previous schema; other versions pass through unchanged. */
 function _migrateDraft<T extends Partial<DraftState>>(saved: T): T {
   if (saved.version !== 2) return saved;
@@ -456,9 +563,11 @@ export const draft = {
    * If preferredModel is provided, it is used when it exists in the valid model
    * list for the current workflow; otherwise the context default is used.
    * With `keepSettings`, the settings and prompt source chosen for the same model are kept;
-   * otherwise the model's defaults apply.
+   * otherwise the model's defaults apply. With `keepChangedSettings`, a different model keeps
+   * the settings that differ from the old model's defaults (fitted to the new model's sizes and
+   * step cap) and takes its own defaults for the rest; the same model keeps everything.
    */
-  hydrateFromContext(ctx: WorkspaceContext, preferredModel: string | null = null, options: { keepSettings?: boolean } = {}): void {
+  hydrateFromContext(ctx: WorkspaceContext, preferredModel: string | null = null, options: { keepSettings?: boolean; keepChangedSettings?: boolean } = {}): void {
     const workflow = _draft.workflow;
     const isVideoMode = _isVideoWorkflow(workflow);
     const validModels = isVideoMode ? ctx.video_models : ctx.image_models;
@@ -470,41 +579,23 @@ export const draft = {
       ? candidate
       : ((isVideoMode ? ctx.current_video_model : ctx.current_image_model) ?? validModels[0]?.id ?? '');
 
-    const keepSettings = options.keepSettings === true && model === _draft.model;
-    const promptSource = keepSettings && ctx.prompt_sources.includes(_draft.promptSource) ? _draft.promptSource : ctx.default_prompt_source;
+    const sameModel = model === _draft.model;
+    const keepSettings = options.keepSettings === true && sameModel;
+    const keepChanged = options.keepChangedSettings === true;
+    const keepsPromptSource = (keepSettings || keepChanged) && ctx.prompt_sources.includes(_draft.promptSource);
+    const promptSource = keepsPromptSource ? _draft.promptSource : ctx.default_prompt_source;
     let nextState = _withModelDefaults(ctx, { ..._draft, workflow, model, promptSource, ..._swapFamilyLoras(ctx, _draft, _draft.model, model) });
-    if (keepSettings) {
+    if (keepSettings || (keepChanged && sameModel)) {
       // Same model: the user's settings win over its defaults. A preset that no longer exists falls back to the default size.
       const saved: Partial<DraftState> = _pickSettings(_draft);
       if (!_presetIsValid(ctx, _draft)) {
-        for (const key of ['ratio', 'size', 'dimensionMode', 'width', 'height'] as const) delete saved[key];
+        for (const key of _SIZE_KEYS) delete saved[key];
       }
       nextState = { ...nextState, ...saved };
+    } else if (keepChanged) {
+      nextState = _fitToModel(ctx, { ...nextState, ..._changedSinceOldDefaults(ctx, _draft) });
     }
-    const modelDefaults = _modelDefaultsFor(ctx, workflow, model);
-
-    // An Enhanced JSON caption only means something to a model that takes JSON captions.
-    const imageTakesJson = !isVideoMode && (modelDefaults as ImageModelDefaults | null)?.supports_json_prompt === true;
-    if (!imageTakesJson && isJsonCaption(nextState.enhancedPrompt)) nextState = { ...nextState, enhancedPrompt: '', enhancedFrom: null };
-    if (isVideoMode) {
-      nextState = { ...nextState, negativePrompt: '', quantize: null, jsonPromptEnabled: false, jsonPrompt: '', firstSigma: null };
-      // A kept or restored count may predate snapping; show the count the server will generate.
-      const timing = videoTimingFor(ctx, model, _sourceFps(workflow));
-      nextState.fps = timing.fps;
-      // An extension has no clip length of its own: its new frames (`extendFrames`) stay multiples of 8, not 8k+1.
-      if (workflow !== 'extend') nextState.frameCount = alignFrameCount(nextState.frameCount, timing.frameAlignment);
-    } else {
-      const imageDefaults = modelDefaults as ImageModelDefaults | null;
-      nextState = {
-        ...nextState,
-        negativePrompt: imageDefaults?.supports_negative_prompt ? nextState.negativePrompt : '',
-        quantize: imageDefaults?.supports_quantize ? nextState.quantize : null,
-        jsonPromptEnabled: imageDefaults?.supports_json_prompt ? nextState.jsonPromptEnabled : false,
-        jsonPrompt: imageDefaults?.supports_json_prompt ? nextState.jsonPrompt : '',
-        firstSigma: imageDefaults?.supports_first_sigma ? nextState.firstSigma : null,
-        scheduler: imageDefaults?.supports_scheduler === false ? null : nextState.scheduler,
-      };
-    }
+    nextState = _applyCapabilityGates(ctx, nextState);
 
     _draft = nextState;
     _authorityReady = true;

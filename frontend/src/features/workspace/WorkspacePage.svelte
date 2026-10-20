@@ -1025,15 +1025,17 @@
     }
   }
 
-  function onModelChange(e: Event): void {
-    const sel = e.currentTarget as HTMLSelectElement;
-    const newModel = sel.value;
-    // Re-hydrate defaults for the new model, preserving the current workflow.
+  /** Switch the model: settings the user changed stay, the rest take the new model's defaults. */
+  function switchModel(model: string): void {
     if (context) {
-      draft.hydrateFromContext(context, newModel);
+      draft.hydrateFromContext(context, model, { keepChangedSettings: true });
     } else {
-      draft.update('model', newModel);
+      draft.update('model', model);
     }
+  }
+
+  function onModelChange(e: Event): void {
+    switchModel((e.currentTarget as HTMLSelectElement).value);
   }
 </script>
 
@@ -1426,7 +1428,7 @@
               {referencePreviewUrl}
               lastSeed={historyStore.assets[0]?.seed ?? null}
               onImageFileChange={(f) => { imageFile = f; submitError = null; }}
-              onModelChange={(model) => draft.hydrateFromContext(context!, model)}
+              onModelChange={switchModel}
               onUseLatestAsReference={() => { const latest = historyStore.assets[0]; if (latest) useAsReference(latest, draft.state.workflow === 'img2vid' ? 'video' : 'image'); activeChip = null; }}
               onclose={() => { activeChip = null; }}
             />

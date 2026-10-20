@@ -1,0 +1,74 @@
+// @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
+import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/index-client.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { draft } from '$lib/state/draft.svelte';
+import type { ModelOption, WorkspaceContext } from '$lib/types';
+import SettingPopover from './SettingPopover.svelte';
+
+const models: ModelOption[] = [
+  { id: 'zit', label: 'Z-Image Turbo', type: 'image' },
+  { id: 'flux', label: 'FLUX', type: 'image' },
+];
+
+const context = {
+  workflow_contract: { values: ['txt2img'], definitions: { txt2img: { mode: 'image', visible_controls: [], clear_fields: [] } } },
+  image_model_defaults: {},
+  video_model_defaults: {},
+  defaults: null,
+  loras: [],
+  prompt_sources: [],
+  scheduler_options: [],
+} as unknown as WorkspaceContext;
+
+describe('SettingPopover model list', () => {
+  let target: HTMLDivElement;
+  let app: Record<string, unknown> | null = null;
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+    draft.update('model', 'zit');
+    // jsdom has no Web Animations API, which the popover's enter transition calls.
+    Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
+    target = document.createElement('div');
+    document.body.appendChild(target);
+  });
+
+  afterEach(async () => {
+    if (app) {
+      await unmount(app);
+      app = null;
+    }
+    target.remove();
+    delete (Element.prototype as Partial<Element>).animate;
+  });
+
+  function mountPopover(onModelChange: (model: string) => void): void {
+    app = flushSync(() => mount(SettingPopover, {
+      target,
+      props: {
+        key: 'model', context, busy: false, models, quantizeOptions: null, imageFile: null, referencePreviewUrl: null, lastSeed: null,
+        onImageFileChange: vi.fn(), onModelChange, onUseLatestAsReference: vi.fn(), onclose: vi.fn(),
+      },
+    }));
+  }
+
+  it('hands the chosen model to onModelChange', () => {
+    const onModelChange = vi.fn();
+    mountPopover(onModelChange);
+
+    (target.querySelector('[role="radio"][aria-checked="false"]') as HTMLButtonElement).click();
+
+    expect(onModelChange).toHaveBeenCalledExactlyOnceWith('flux');
+  });
+
+  it('does nothing when the current model is chosen again', () => {
+    const onModelChange = vi.fn();
+    mountPopover(onModelChange);
+
+    (target.querySelector('[role="radio"][aria-checked="true"]') as HTMLButtonElement).click();
+
+    expect(onModelChange).not.toHaveBeenCalled();
+  });
+});

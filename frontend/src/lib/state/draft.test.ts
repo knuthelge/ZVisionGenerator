@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
 import { anyEnhancedUsed } from './promptEnhance';
-import { draft, offeredSizes, settingDefaultsFor, videoTimingFor } from './draft.svelte';
+import { changedSettings, draft, fitDimensions, offeredSizes, settingDefaultsFor, snapDimension, videoTimingFor } from './draft.svelte';
 import type { WorkspaceContext, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1225,6 +1225,351 @@ describe('LoRAs remembered per model family', () => {
       draft.update('loraString', 'zi-style:0.8');
       draft.loadFromUrl({ workflow: 'txt2img', prompt: 'a cat' }, ctx);
       expect(draft.state.loraString).toBe('zi-style:0.8');
+    });
+  });
+});
+
+describe('changedSettings', () => {
+  const baseline = settingDefaultsFor(makeContext(), { workflow: 'txt2img', model: 'flux-dev' });
+
+  it('returns only the settings that differ from the baseline', () => {
+    expect(changedSettings({ ...baseline, steps: 4, runs: 3 }, baseline)).toEqual({ steps: 4, runs: 3 });
+  });
+
+  it('returns nothing when every setting is at the baseline', () => {
+    expect(changedSettings({ ...baseline }, baseline)).toEqual({});
+  });
+
+  it('keeps the size settings together when any one changed', () => {
+    const current = { ...baseline, width: 1000, dimensionMode: 'custom' as const };
+    const changed = changedSettings(current, baseline);
+    expect(changed).toMatchObject({ ratio: baseline.ratio, size: baseline.size, dimensionMode: 'custom', width: 1000, height: baseline.height });
+  });
+});
+
+describe('snapDimension', () => {
+  const limits = { min: 256, max: 2048, step: 16 };
+
+  it('rounds to the nearest multiple of the step', () => {
+    expect(snapDimension(1000, limits)).toBe(1008);
+    expect(snapDimension(1001, limits)).toBe(1008);
+    expect(snapDimension(1007, limits)).toBe(1008);
+  });
+
+  it('clamps to the smallest and largest multiples within the limits', () => {
+    expect(snapDimension(100, limits)).toBe(256);
+    expect(snapDimension(5000, limits)).toBe(2048);
+    expect(snapDimension(10, { min: 20, max: 100, step: 16 })).toBe(32);
+    expect(snapDimension(500, { min: 20, max: 100, step: 16 })).toBe(96);
+  });
+
+  it('has no upper bound without a maximum', () => {
+    expect(snapDimension(4000, { min: 16, max: null, step: 16 })).toBe(4000);
+  });
+});
+
+describe('fitDimensions', () => {
+  const limits = { min: 256, max: 2048, step: 16 };
+
+  it('scales a size above the maximum down keeping its aspect ratio', () => {
+    expect(fitDimensions(3072, 2048, limits)).toEqual({ width: 2048, height: 1360 });
+  });
+
+  it('scales a size below the minimum up keeping its aspect ratio', () => {
+    expect(fitDimensions(128, 200, limits)).toEqual({ width: 256, height: 400 });
+  });
+
+  it('only snaps a size already within the limits', () => {
+    expect(fitDimensions(1000, 1000, limits)).toEqual({ width: 1008, height: 1008 });
+  });
+
+  it('snaps without scaling when the model has no maximum', () => {
+    expect(fitDimensions(4000, 3000, { min: 16, max: null, step: 16 })).toEqual({ width: 4000, height: 3008 });
+  });
+});
+
+describe('hydrateFromContext – keepChangedSettings', () => {
+  const imageContext = (overrides: Partial<WorkspaceContext> = {}): WorkspaceContext => makeContext({
+    image_models: [{ id: 'flux-dev', label: 'FLUX Dev', type: 'image' }, { id: 'other', label: 'Other', type: 'image' }],
+    image_model_defaults: {
+      'flux-dev': makeImageDefaults({ steps: 10, guidance: 3.5, family: 'flux1' }),
+      other: makeImageDefaults({ steps: 30, guidance: 5, family: 'other' }),
+    },
+    ...overrides,
+  });
+  const switchTo = (ctx: WorkspaceContext, model: string): void => draft.hydrateFromContext(ctx, model, { keepChangedSettings: true });
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  it('keeps a changed setting and gives unchanged ones the new model defaults', () => {
+    const ctx = imageContext();
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    draft.update('steps', 4);
+
+    switchTo(ctx, 'other');
+
+    expect(draft.state).toMatchObject({ model: 'other', steps: 4, guidance: 5 });
+  });
+
+  it('treats a setting edited back to the old default as unchanged', () => {
+    const ctx = imageContext();
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    draft.update('steps', 4);
+    draft.update('steps', 10);
+
+    switchTo(ctx, 'other');
+
+    expect(draft.state.steps).toBe(30);
+  });
+
+  it('keeps the size together when only one part changed', () => {
+    const ctx = imageContext({ image_size_options: { '1:1': ['s', 'm', 'l'], '2:3': ['s', 'm', 'l'], '16:9': ['s', 'm', 'l'] } });
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    draft.patch({ ratio: '16:9' });
+
+    switchTo(ctx, 'other');
+
+    expect(draft.state).toMatchObject({ ratio: '16:9', size: 'm' });
+  });
+
+  it('keeps everything for the same model, like keepSettings', () => {
+    const ctx = imageContext();
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    draft.patch({ steps: 4, runs: 7 });
+
+    draft.hydrateFromContext(ctx, 'flux-dev', { keepChangedSettings: true });
+
+    expect(draft.state).toMatchObject({ steps: 4, runs: 7 });
+  });
+
+  it('leaves the seed and run count alone when the model changes', () => {
+    const ctx = imageContext();
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    draft.patch({ seed: 1234, runs: 5 });
+
+    switchTo(ctx, 'other');
+
+    expect(draft.state).toMatchObject({ model: 'other', seed: 1234, runs: 5 });
+  });
+
+  it('keeps nothing when the old model has no known defaults', () => {
+    const ctx = imageContext();
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    draft.patch({ model: 'removed-model', steps: 4 });
+
+    switchTo(ctx, 'other');
+
+    expect(draft.state.steps).toBe(30);
+  });
+
+  it('keeps the prompt source when the new context still offers it', () => {
+    const ctx = imageContext();
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    draft.update('promptSource', 'file');
+
+    switchTo(ctx, 'other');
+
+    expect(draft.state.promptSource).toBe('file');
+  });
+
+  it('does not change the settings, model or LoRAs when only the quantization changes', () => {
+    const ctx = imageContext();
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    draft.update('loraString', 'style:1');
+    const before = { ...draft.state };
+
+    draft.update('quantize', 8);
+
+    expect(draft.state).toEqual({ ...before, quantize: 8 });
+  });
+
+  it('still resets to the new model defaults without the option', () => {
+    const ctx = imageContext();
+    draft.hydrateFromContext(ctx, 'flux-dev');
+    draft.update('steps', 4);
+
+    draft.hydrateFromContext(ctx, 'other');
+
+    expect(draft.state.steps).toBe(30);
+  });
+
+  describe('size', () => {
+    const sizedContext = (): WorkspaceContext => imageContext({
+      image_model_defaults: {
+        'flux-dev': makeImageDefaults(),
+        other: makeImageDefaults({ dimension_max: 1024 }),
+      },
+      image_size_options: { '2:3': ['s', 'm', 'l', 'xl'] },
+      image_size_dimensions: { '2:3': { s: [512, 768], m: [832, 1216], l: [1024, 1536], xl: [1280, 1920] } },
+    });
+
+    it('picks the largest offered preset when the chosen one is not offered', () => {
+      const ctx = imageContext({
+        image_model_defaults: { 'flux-dev': makeImageDefaults(), other: makeImageDefaults({ dimension_max: 1100 }) },
+        image_size_options: { '2:3': ['s', 'm', 'l', 'xl'] },
+        image_size_dimensions: { '2:3': { s: [512, 768], m: [832, 1000], l: [1024, 1100], xl: [1280, 1920] } },
+      });
+      draft.hydrateFromContext(ctx, 'flux-dev');
+      draft.patch({ size: 'xl' });
+
+      switchTo(ctx, 'other');
+
+      expect(draft.state).toMatchObject({ ratio: '2:3', size: 'l' });
+    });
+
+    it('picks the last listed preset when no pixel sizes are known', () => {
+      const ctx = imageContext({ image_size_options: { '2:3': ['s', 'm', 'l'] } });
+      ctx.image_model_defaults!.other = makeImageDefaults({ dimension_max: 1024 });
+      draft.hydrateFromContext(ctx, 'flux-dev');
+      draft.patch({ size: 'xl' });
+
+      switchTo(ctx, 'other');
+
+      expect(draft.state.size).toBe('l');
+    });
+
+    it('takes the new model size when no preset of the chosen ratio is offered', () => {
+      const ctx = imageContext({
+        image_model_defaults: { 'flux-dev': makeImageDefaults(), other: makeImageDefaults({ ratio: '1:1', size: 's', width: 512, height: 512, dimension_max: 100 }) },
+        image_size_options: { '1:1': ['s'], '2:3': ['s', 'm'] },
+        image_size_dimensions: { '2:3': { s: [512, 768], m: [832, 1216] } },
+      });
+      draft.hydrateFromContext(ctx, 'flux-dev');
+      draft.patch({ size: 'm' });
+
+      switchTo(ctx, 'other');
+
+      expect(draft.state).toMatchObject({ ratio: '1:1', size: 's', dimensionMode: 'ratio', width: 512, height: 512 });
+    });
+
+    it('scales a custom size into the new model limits keeping its aspect ratio', () => {
+      const ctx = imageContext({
+        image_model_defaults: { 'flux-dev': makeImageDefaults(), other: makeIdeogramDefaults() },
+      });
+      draft.hydrateFromContext(ctx, 'flux-dev');
+      draft.patch({ dimensionMode: 'custom', width: 3072, height: 2048 });
+
+      switchTo(ctx, 'other');
+
+      expect(draft.state).toMatchObject({ dimensionMode: 'custom', width: 2048, height: 1360 });
+    });
+
+    it('keeps an offered preset', () => {
+      const ctx = sizedContext();
+      draft.hydrateFromContext(ctx, 'flux-dev');
+      draft.patch({ size: 's' });
+
+      switchTo(ctx, 'other');
+
+      expect(draft.state.size).toBe('s');
+    });
+  });
+
+  describe('capability gates', () => {
+    it('clears a negative prompt the new model cannot use', () => {
+      const ctx = imageContext({
+        image_model_defaults: {
+          'flux-dev': makeImageDefaults({ supports_negative_prompt: true }),
+          other: makeImageDefaults({ supports_negative_prompt: false }),
+        },
+      });
+      draft.hydrateFromContext(ctx, 'flux-dev');
+      draft.update('negativePrompt', 'blurry');
+
+      switchTo(ctx, 'other');
+
+      expect(draft.state.negativePrompt).toBe('');
+    });
+
+    it('gives the new model its default scheduler when the old one had none', () => {
+      const ctx = imageContext({
+        image_model_defaults: {
+          'flux-dev': makeImageDefaults({ supports_scheduler: false, scheduler: null }),
+          other: makeImageDefaults({ supports_scheduler: true, scheduler: 'euler' }),
+        },
+      });
+      draft.hydrateFromContext(ctx, 'flux-dev');
+      expect(draft.state.scheduler).toBeNull();
+
+      switchTo(ctx, 'other');
+
+      expect(draft.state.scheduler).toBe('euler');
+    });
+
+    it('keeps a changed scheduler the new model supports', () => {
+      const ctx = imageContext({
+        image_model_defaults: {
+          'flux-dev': makeImageDefaults({ scheduler: 'euler' }),
+          other: makeImageDefaults({ scheduler: 'dpm' }),
+        },
+      });
+      draft.hydrateFromContext(ctx, 'flux-dev');
+      draft.update('scheduler', 'beta');
+
+      switchTo(ctx, 'other');
+
+      expect(draft.state.scheduler).toBe('beta');
+    });
+  });
+
+  describe('LoRAs', () => {
+    it('follow the model family while settings are kept', () => {
+      const loras = [{ name: 'a', path: '/loras/a.safetensors' }, { name: 'b', path: '/loras/b.safetensors' }];
+      const ctx = imageContext({ loras });
+      draft.hydrateFromContext(ctx, 'flux-dev');
+      draft.patch({ loraString: 'a:1', steps: 4 });
+
+      switchTo(ctx, 'other');
+      expect(draft.state).toMatchObject({ loraString: '', steps: 4 });
+
+      switchTo(ctx, 'flux-dev');
+      expect(draft.state.loraString).toBe('a:1');
+    });
+  });
+
+  describe('video', () => {
+    const videoContext = (): WorkspaceContext => makeContext({
+      video_models: [{ id: 'ltx-v-0.9', label: 'LTX Video', type: 'video' }, { id: 'ltx-2', label: 'LTX 2', type: 'video' }],
+      video_model_defaults: {
+        'ltx-v-0.9': makeVideoDefaults({ steps: 30, max_steps: null }),
+        'ltx-2': makeVideoDefaults({ steps: 8, max_steps: 8, frame_alignment: 8 }),
+      },
+      current_video_model: 'ltx-v-0.9',
+    });
+
+    beforeEach(() => draft.update('workflow', 'txt2vid'));
+
+    it('caps the steps at the new model step limit', () => {
+      const ctx = videoContext();
+      draft.hydrateFromContext(ctx, 'ltx-v-0.9');
+      draft.update('steps', 20);
+
+      switchTo(ctx, 'ltx-2');
+
+      expect(draft.state.steps).toBe(8);
+    });
+
+    it('leaves steps below the limit alone', () => {
+      const ctx = videoContext();
+      draft.hydrateFromContext(ctx, 'ltx-v-0.9');
+      draft.update('steps', 5);
+
+      switchTo(ctx, 'ltx-2');
+
+      expect(draft.state.steps).toBe(5);
+    });
+
+    it('aligns a kept frame count to the new model grid', () => {
+      const ctx = videoContext();
+      draft.hydrateFromContext(ctx, 'ltx-v-0.9');
+      draft.update('frameCount', 50);
+
+      switchTo(ctx, 'ltx-2');
+
+      expect(draft.state.frameCount).toBe(49);
     });
   });
 });

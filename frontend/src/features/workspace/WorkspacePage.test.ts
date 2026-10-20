@@ -2168,6 +2168,30 @@ describe('WorkspacePage', () => {
     expect(fitBadge()).toBeNull();
   });
 
+  it('keeps a changed setting and applies the new model defaults to the rest when the toolbar model changes', async () => {
+    const context = makeContext({
+      image_models: [
+        { id: 'zit', label: 'zit', type: 'image' },
+        { id: 'flux-lite', label: 'flux-lite', type: 'image' },
+      ],
+      current_image_model: 'zit',
+      image_model_defaults: {
+        zit: makeImageDefaults({ steps: 8, guidance: 1 }),
+        'flux-lite': makeImageDefaults({ steps: 28, guidance: 3.5 }),
+      },
+    });
+    await mountWorkspace(context);
+    draft.update('steps', 5);
+    await settle();
+
+    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement;
+    modelSelect.value = 'flux-lite';
+    modelSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(draft.state).toMatchObject({ model: 'flux-lite', steps: 5, guidance: 3.5 });
+  });
+
   it('applies ideogram dimension bounds and filters xl presets only for constrained models', async () => {
     const ideogramDefaults = makeIdeogramDefaults();
     const permissiveDefaults = makeImageDefaults({
