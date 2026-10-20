@@ -95,7 +95,7 @@ The scoring functions are pure and get unit tests with canned outputs (`tests/te
 
 ### Shipped (step 1, 2026-10-19)
 
-Step 1 is done (`04db36f`, `be57156`): 63 cases, the runner, the checks, `rescore` (recompute checks from stored outputs, no model) and `compare`, under `make enhance-bench`. Steps 2 and 3 moved to phase 3, which is the first phase that needs them.
+Step 1 is done (`592935d`, `9241510`): 63 cases, the runner, the checks, `rescore` (recompute checks from stored outputs, no model) and `compare`, under `make enhance-bench`. Steps 2 and 3 moved to phase 3, which is the first phase that needs them.
 
 - **Decisions.** The length check stays strict (the planner's own range); the per-Length median ratio in the report shows how far off each choice is. Only one platform's baseline is needed: the bench is a harness for comparing changes, not a portable score.
 - **Tuned on the first runs.** `keep` matches word stems, up to two words apart, with `a|b` alternatives; `count` allows adjectives before the noun; the caption format check covers structure only, since a design caption moves its lettering lines into text elements.
@@ -175,9 +175,9 @@ What it showed, as input to phase 2:
 
 ### Shipped (2026-10-20)
 
-- **Done:** the builder tidy-up (`1337de1`, system prompts byte-identical); the Same floor of 25 words, the labelled prompt and a frame rule that is no longer echoed (`3d1647e`; Fast / Smart length in range 54 → 61% / 44 → 54%, frame echoes 17 → 2% on Fast); quoted text kept exactly (`36a57ad`; Fast 93 → 100%).
+- **Done:** the builder tidy-up (`09be4d3`, system prompts byte-identical); the Same floor of 25 words, the labelled prompt and a frame rule that is no longer echoed (`e32d4e0`; Fast / Smart length in range 54 → 61% / 44 → 54%, frame echoes 17 → 2% on Fast); quoted text kept exactly (`1f46153`; Fast 93 → 100%).
 - **Measured and dropped:** a firmer Shorter rule, and relaxing "every detail" while shortening. Neither shrank the dense 90-word case (53–86 words against 44); both models keep every named element instead, which is the right priority.
-- **Done:** the `enhance` record and image `prompt_input` on every asset (`5664d10`), shown in the viewer and restored by Reuse settings (`b926ca7`).
+- **Done:** the `enhance` record and image `prompt_input` on every asset (`44ef393`), shown in the viewer and restored by Reuse settings (`745d1b0`).
 
 ---
 
@@ -202,7 +202,7 @@ What it showed, as input to phase 2:
 
 ### Agreed design (2026-10-19), shipped 2026-10-20
 
-Settled in a present-and-feedback review, section by section, then a clickable mockup (five rounds; the last one is the design below). Shipped in `d043e3a` (options, realism core) and `5dc0dc3` (the popover), with review fixes in `51f7ffb` and after. Model hints and worked examples (items 5 and 6 above) are not part of it and stay open, as does the bench's local judge (phase 1, step 2).
+Settled in a present-and-feedback review, section by section, then a clickable mockup (five rounds; the last one is the design below). Shipped in `a463979` (options, realism core) and `7d2e2e4` (the popover), with review fixes in `aaf0056`. Model hints and worked examples (items 5 and 6 above) are not part of it and stay open, as does the bench's local judge (phase 1, step 2).
 
 - **Realism core, measured.** The first version listed "pores, fine lines, wear, dust" as examples; the bench's picture sheet showed it aged people and dirtied scenes. The shipped version names the look to avoid (airbrushed, waxy) and forbids making people older, dirtier or more worn than written.
 - **Changed after review.** An image run does not enhance a prompt-file entry that sets only video options (with a warning); `enhance: true` still gives the general rewrite.
