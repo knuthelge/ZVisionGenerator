@@ -6,6 +6,9 @@ import { checked } from './jobSettings';
 
 /** What the job card says about a job, derived from its state. Every function here is pure. */
 
+/** What the job card says when the server gave no reason for a failure. */
+export const GENERIC_FAILURE_MESSAGE = 'Job failed.';
+
 export type JobTone = 'queued' | 'preparing' | 'running' | 'paused' | 'stale' | 'completed' | 'failed' | 'stopped' | 'unknown';
 export type PhaseRowStatus = 'done' | 'current' | 'paused' | 'pending' | 'skipped' | 'failed' | 'stopped' | 'unknown';
 
@@ -531,4 +534,13 @@ export function formatClock(secs: number): string {
   const m = Math.floor((rounded % 3600) / 60);
   const s = rounded % 60;
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/** The failure toast: the server's reason when the job has one, else the plain text; notes that the next queued job starts. */
+export function failureToastText(reason: string | null | undefined, hasQueued: boolean): string {
+  const trimmed = reason?.trim() ?? '';
+  const text = trimmed && trimmed !== GENERIC_FAILURE_MESSAGE ? trimmed : '';
+  if (!text) return hasQueued ? 'Generation failed. Starting the next queued job.' : 'Generation failed';
+  if (!hasQueued) return `Generation failed: ${text}`;
+  return `Generation failed: ${text}${/[.!?…]$/.test(text) ? '' : '.'} Starting the next queued job.`;
 }

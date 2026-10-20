@@ -26,7 +26,7 @@
   } from '$lib/state/mascot';
   import { ActionMenu, AssetTile, AssetViewer, JobBar, JobCard, JobPreview, ModelStatusBadges, ReviewStage, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
   import { compactUi } from '$lib/state/compactUi.svelte';
-  import { isReviewing } from '$lib/state/jobView';
+  import { failureToastText, isReviewing } from '$lib/state/jobView';
   import { jobSettingsPrefill } from '$lib/state/jobSettings';
   import { cliCommand, formSettings, type CliCaveat, type CliCommand } from '$lib/state/cliCommand';
   import { extendGuard, finalizeSceneFields, type ExtendGuard } from '$lib/state/extend';
@@ -454,7 +454,7 @@
   function handleJobFailed(): void {
     react('sad');
     refreshModelStatus();
-    addToast(jobStore.queuedJobs.length > 0 ? 'Generation failed. Starting the next queued job.' : 'Generation failed', 'error');
+    addToast(failureToastText(jobStore.current?.message, jobStore.queuedJobs.length > 0), 'error');
   }
 
   async function handleJobLost(): Promise<void> {

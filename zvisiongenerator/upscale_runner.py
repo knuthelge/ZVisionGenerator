@@ -20,6 +20,8 @@ from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.provenance import RecordedSettings, image_prompt_text, read_png_config, recorded_settings
 
+_UPSCALE_FAILURE_MESSAGE = "Upscale failed."
+
 
 @dataclass(frozen=True)
 class UpscaleSource:
@@ -110,11 +112,12 @@ def run_upscale(
         filename=Path(artifacts.filepath).name if artifacts.filepath else None,
         generation_time=time.time() - started,
         output_path=artifacts.filepath if status == "success" else None,
+        message=_UPSCALE_FAILURE_MESSAGE if status == "failed" else None,
     )
     if status == "success":
         _emit_progress(progress_callback, "batch_completed", mode="image", completed_iterations=1, total_iterations=1)
     elif status == "skipped":
         _emit_progress(progress_callback, "batch_cancelled", mode="image", completed_iterations=0, total_iterations=1)
     else:
-        _emit_progress(progress_callback, "batch_failed", mode="image", completed_iterations=1, total_iterations=1)
+        _emit_progress(progress_callback, "batch_failed", mode="image", completed_iterations=1, total_iterations=1, message=_UPSCALE_FAILURE_MESSAGE)
     return outcome

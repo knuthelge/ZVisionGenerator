@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg, require_ffmpeg, tool_error
+from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg, require_ffmpeg, strip_ffmpeg_banner, tool_error
 
 
 class TestRequireFfmpeg:
@@ -229,6 +229,42 @@ class TestToolError:
     def test_keeps_only_the_last_characters(self):
         assert str(tool_error("ffmpeg failed", "x" * 10 + "tail", limit=4)) == "ffmpeg failed: tail"
 
+    def test_leaves_out_the_banner_and_ends_with_the_real_error(self):
+        banner = (
+            "ffmpeg version 7.1 Copyright (c) 2000-2024 the FFmpeg developers\n"
+            "  built with gcc 14 (GCC)\n"
+            "  configuration: " + "--enable-foo " * 80 + "\n"
+            "  libavutil      59. 39.100 / 59. 39.100\n"
+            "  libpostproc    57.  1.100 / 57.  1.100\n"
+        )
+
+        message = str(tool_error("ffmpeg failed", banner + "[mov @ 0x1] stuff\nout.mp4: Invalid data found\n"))
+
+        assert message == "ffmpeg failed: [mov @ 0x1] stuff\nout.mp4: Invalid data found"
+
+    def test_banner_only_stderr_is_kept(self):
+        assert str(tool_error("ffmpeg failed", "ffmpeg version 7.1")) == "ffmpeg failed: ffmpeg version 7.1"
+
     @pytest.mark.parametrize("stderr", [None, b""])
     def test_missing_stderr_gives_an_empty_tail(self, stderr):
         assert str(tool_error("ffmpeg failed", stderr)) == "ffmpeg failed: "
+
+
+class TestStripFfmpegBanner:
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "libavutil      59. 39.100 / 59. 39.100",
+            "libavcodec     61.  3.100 / 61.  3.100",
+            "libavformat    61.  1.100 / 61.  1.100",
+            "libswscale      8.  1.100 /  8.  1.100",
+            "libswresample   5.  1.100 /  5.  1.100",
+            "libpostproc    58.  1.100 / 58.  1.100",
+        ],
+    )
+    def test_library_version_lines_are_dropped(self, line):
+        assert strip_ffmpeg_banner(f"{line}\nreal error") == "real error"
+
+    @pytest.mark.parametrize("line", ["libavcodec: bad thing happened", "libpostproc: bad thing happened"])
+    def test_error_lines_naming_a_library_are_kept(self, line):
+        assert strip_ffmpeg_banner(f"ffmpeg version 7.1\n{line}") == line

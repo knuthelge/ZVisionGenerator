@@ -209,6 +209,14 @@ class TestJobLogStore:
         assert [json.loads(line)["job_id"] for line in lines] == ["a", "b"]
         assert "blå øyne" in lines[0]
 
+    def test_unicode_line_separators_in_an_entry_do_not_split_it(self, log):
+        prompt = "one\u2028two\u2029three\x85four"
+        log.append(_entry("a", prompt=prompt))
+        log.append(_entry("b"))
+
+        assert [e["job_id"] for e in log.page("all", 1, 50)["entries"]] == ["b", "a"]
+        assert log.page("all", 1, 50)["entries"][1]["prompt"] == prompt
+
     def test_values_that_are_not_json_are_written_as_text(self, log, path):
         log.append(_entry("a", settings={"path": Path("/x")}))
 

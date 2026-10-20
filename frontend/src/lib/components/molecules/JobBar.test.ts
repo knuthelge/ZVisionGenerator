@@ -60,6 +60,11 @@ describe('JobBar', () => {
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
+  it('keeps the whole estimate text available on hover while the first item is pending', () => {
+    app = flushSync(() => mount(JobBar, { target, props: { job: makeJob({ runs: 3, remaining: 0 }), ondetails: vi.fn() } }));
+    expect(target.querySelector('[title="Estimate after the first image"]')?.textContent).toBe('Estimate after the first image');
+  });
+
   it('draws one segment per image for a batch', () => {
     app = flushSync(() => mount(JobBar, { target, props: { job: makeJob({ runs: 4, batchIndex: 1 }), ondetails: vi.fn() } }));
     expect(target.querySelectorAll('.jb-segment')).toHaveLength(4);

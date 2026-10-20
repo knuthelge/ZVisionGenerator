@@ -103,7 +103,7 @@ class TestStripAudioUtility:
         strip_audio(video)
 
         mock_run.assert_called_once_with(
-            ["ffmpeg", "-y", "-i", str(video), "-an", "-c:v", "copy", str(expected_tmp)],
+            ["ffmpeg", "-y", "-v", "error", "-i", str(video), "-an", "-c:v", "copy", str(expected_tmp)],
             check=True,
             capture_output=True,
         )

@@ -27,6 +27,7 @@ from PIL import Image
 
 from zvisiongenerator.backends import get_backend, get_seedvr2_upscaler, get_video_backend, release_accelerator_memory
 from zvisiongenerator.core.image_types import ImageGenerationRequest
+from zvisiongenerator.core.progress_events import exception_message
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.downloads import DETACHED, STOPPED, DownloadFlights, DownloadReport, DownloadTarget, enhancer_plan, ensure_downloaded, image_plan, seedvr2_plan, video_plan
@@ -677,8 +678,9 @@ class WebRunner:
             with worker_runtime_context():
                 target()
         except (Exception, SystemExit) as exc:
-            failure_message = str(exc).strip() or f"{type(exc).__name__} stopped the generation worker."
-            logger.exception("Job %s failed: %s", job_id, failure_message)
+            full_text = str(exc).strip()
+            failure_message = exception_message(full_text) or f"{type(exc).__name__} stopped the generation worker."
+            logger.exception("Job %s failed: %s", job_id, full_text or failure_message)
 
         # Released outside the except block: the active traceback pins the worker frames (and the loaded model).
         # Only generation jobs hold models; skipping the rest avoids clearing caches under a running generation.

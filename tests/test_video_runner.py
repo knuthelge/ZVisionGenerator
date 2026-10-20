@@ -7,6 +7,8 @@ from conftest import _make_plan, make_extend_source
 from dataclasses import replace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from tests.conftest import _make_mock_video_backend, _make_video_args
 from zvisiongenerator.core.job_plan import EnhanceStatus, JobPlan
 from zvisiongenerator.core.types import StageOutcome
@@ -118,9 +120,11 @@ class TestRunVideoBatch:
                 "prompt": "fail prompt",
                 "seed": args.seed,
                 "status": "failed",
+                "message": "Video generation failed.",
             }
         ]
         assert len(batch_events) == 1
+        assert batch_events[0]["message"] == "Video generation failed."
         assert not [event for event in events if event["type"] == "batch_completed"]
         assert batch_events[0]["mode"] == "video"
         assert batch_events[0]["completed_iterations"] == 1
@@ -216,6 +220,97 @@ class TestRunVideoBatch:
         assert finished_events[0]["filename"] == "clip.mp4"
         assert finished_events[0]["output_path"] == "/tmp/clip.mp4"
         assert finished_events[0]["generation_time"] == 0.25
+
+
+@pytest.mark.filterwarnings("ignore:Video generation failed")
+class TestVideoFailureMessages:
+    """Failed generations and a failed batch carry a one-line reason."""
+
+    @staticmethod
+    def _run(workflow, *, runs=1, prompts=None):
+        events: list[dict[str, object]] = []
+        args = _make_video_args(runs=runs)
+        prompts = prompts or {"default": [("p", None)]}
+        config: dict = {}
+        run_video_batch(
+            _make_mock_video_backend(),
+            MagicMock(),
+            _ltx_model_info(),
+            workflow,
+            prompts,
+            config,
+            args,
+            progress_callback=events.append,
+            plan=_make_plan(prompts, args, config=config),
+        )
+        return events
+
+    def test_exception_message_is_one_line_on_finished_and_batch_failed(self):
+        workflow = MagicMock()
+        workflow.run.side_effect = RuntimeError("CUDA out of memory\n  while allocating\ttensor")
+
+        events = self._run(workflow)
+
+        (finished,) = [e for e in events if e["type"] == "generation_finished"]
+        (batch,) = [e for e in events if e["type"] == "batch_failed"]
+        assert finished["status"] == "failed"
+        assert finished["message"] == "CUDA out of memory while allocating tensor"
+        assert batch["message"] == finished["message"]
+
+    def test_exception_without_text_falls_back_to_its_type_name(self):
+        workflow = MagicMock()
+        workflow.run.side_effect = ValueError()
+
+        events = self._run(workflow)
+
+        (finished,) = [e for e in events if e["type"] == "generation_finished"]
+        assert finished["message"] == "ValueError"
+
+    def test_stage_failure_uses_the_message_the_stage_set(self):
+        def _fail(request, artifacts):
+            artifacts.failure_message = "Extend produced no video segment."
+            return StageOutcome.failed
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _fail
+
+        events = self._run(workflow)
+
+        (finished,) = [e for e in events if e["type"] == "generation_finished"]
+        (batch,) = [e for e in events if e["type"] == "batch_failed"]
+        assert finished["message"] == "Extend produced no video segment."
+        assert batch["message"] == "Extend produced no video segment."
+
+    def test_batch_failed_carries_the_last_failed_generations_message(self):
+        messages = iter(["first reason", "second reason"])
+
+        def _fail(request, artifacts):
+            artifacts.failure_message = next(messages)
+            return StageOutcome.failed
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _fail
+
+        events = self._run(workflow, runs=2)
+
+        finished = [e for e in events if e["type"] == "generation_finished"]
+        (batch,) = [e for e in events if e["type"] == "batch_failed"]
+        assert [e["message"] for e in finished] == ["first reason", "second reason"]
+        assert batch["message"] == "second reason"
+
+    def test_success_and_completed_batch_have_no_message(self):
+        def _succeed(request, artifacts):
+            artifacts.filename = "clip.mp4"
+            return StageOutcome.success
+
+        workflow = MagicMock()
+        workflow.run.side_effect = _succeed
+
+        events = self._run(workflow)
+
+        for event in events:
+            if event["type"] in {"generation_finished", "batch_completed"}:
+                assert "message" not in event
 
 
 class TestVideoSceneRequests:

@@ -6,7 +6,7 @@ import { cancelJob, clearQueue, getJobSnapshot, jobPreviewUrl, listJobs } from '
 import { clearActiveJobId, readActiveJobId, writeActiveJobId } from './activeJobStorage';
 import { downloadFromEvent, downloadStopFromEvent, initialPhase, trackJobEvent } from './jobPhases';
 import { downloadLine, partLabel } from './downloadProgress';
-import { isSteppedStage } from './jobView';
+import { GENERIC_FAILURE_MESSAGE, isSteppedStage } from './jobView';
 
 let _job = $state<ActiveJobState | null>(null);
 // Generation jobs waiting behind the active one, oldest first (from the server; shared by every tab).
@@ -262,7 +262,7 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
 
 /** The server's reason for a failure, from a `job_failed` event or snapshot; a generic line when it gave none. */
 function failureMessage(event: Record<string, unknown> | null | undefined): string {
-  return eventFieldString(event, 'message').trim() || 'Job failed.';
+  return eventFieldString(event, 'message').trim() || GENERIC_FAILURE_MESSAGE;
 }
 
 /** Apply the phase, timing and queued-control bookkeeping every event carries. */

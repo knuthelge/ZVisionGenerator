@@ -23,6 +23,7 @@ from zvisiongenerator.workflows.video_stages import (
     join_clips_stage,
     log_video_stage,
     resolve_prompt_stage,
+    strip_audio_stage,
     text_to_video_stage,
 )
 
@@ -277,6 +278,7 @@ class TestTextToVideoStage:
         outcome = text_to_video_stage(req, arts)
         assert outcome is StageOutcome.failed
         assert arts.video_path is None
+        assert arts.failure_message
 
     def test_uses_resolved_prompt(self):
         backend = MagicMock()
@@ -321,6 +323,7 @@ class TestImageToVideoStage:
 
         outcome = image_to_video_stage(req, arts)
         assert outcome is StageOutcome.failed
+        assert arts.failure_message
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +467,7 @@ class TestExtendVideoStage:
     def test_no_segment_fails_and_removes_the_directory(self, tmp_path):
         req, arts, _ = self._run(tmp_path, result=None)
         assert extend_video_stage(req, arts) is StageOutcome.failed
+        assert arts.failure_message
         assert self._leftovers(tmp_path) == []
         assert "extend_segment" not in arts.metadata and "extend_segment_dir" not in arts.metadata
 
@@ -542,8 +546,35 @@ class TestJoinClipsStage:
                 outcome = join_clips_stage(req, arts)
         assert outcome is StageOutcome.failed
         assert any("Joining the clips failed" in str(w.message) for w in caught)
+        assert arts.failure_message
+        assert "\n" not in arts.failure_message
         assert arts.video_path is None
         assert not segment_dir.exists()
+
+    def test_join_failure_message_carries_the_ffmpeg_detail(self, tmp_path):
+        req = _extend_req(output_dir=str(tmp_path))
+        arts, _, _ = self._arts(tmp_path)
+        error = subprocess.CalledProcessError(1, "ffmpeg", stderr=b"bad file\nsecond line")
+        with patch("zvisiongenerator.workflows.video_stages.splice_clips", side_effect=error):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                join_clips_stage(req, arts)
+        assert "bad file second line" in arts.failure_message
+
+    def test_join_failure_message_keeps_the_final_ffmpeg_error_after_a_long_banner(self, tmp_path):
+        req = _extend_req(output_dir=str(tmp_path))
+        arts, _, _ = self._arts(tmp_path)
+        stderr = ("ffmpeg version 7.1 Copyright\n  configuration: " + "--enable-foo " * 100 + "\n" + "frame noise\n" * 100 + "Error: moov atom not found\n").encode()
+        error = subprocess.CalledProcessError(1, "ffmpeg", stderr=stderr)
+        with patch("zvisiongenerator.workflows.video_stages.splice_clips", side_effect=error):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                join_clips_stage(req, arts)
+        assert arts.failure_message.startswith("Joining the clips failed: ")
+        assert "Error: moov atom not found" in arts.failure_message
+        assert "\n" not in arts.failure_message
+        assert len(arts.failure_message) <= 500
+        assert any("ffmpeg version" in str(w.message) for w in caught)
 
     def test_unexpected_error_still_removes_the_directory(self, tmp_path):
         req = _extend_req(output_dir=str(tmp_path))
@@ -556,3 +587,36 @@ class TestJoinClipsStage:
     def test_without_a_segment_it_is_a_value_error(self, tmp_path):
         with pytest.raises(ValueError, match="segment"):
             join_clips_stage(_extend_req(output_dir=str(tmp_path)), VideoWorkingArtifacts(filename="out.mp4"))
+
+
+# ---------------------------------------------------------------------------
+# strip_audio_stage
+# ---------------------------------------------------------------------------
+
+
+class TestStripAudioStageFailure:
+    def test_ffmpeg_failure_fails_with_the_stderr_as_one_line(self, tmp_path):
+        req = _req(no_audio=True)
+        arts = VideoWorkingArtifacts(video_path=tmp_path / "clip.mp4")
+        error = subprocess.CalledProcessError(1, "ffmpeg", stderr=b"no such stream\nexit 1")
+        with patch("zvisiongenerator.workflows.video_stages.strip_audio", side_effect=error):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                outcome = strip_audio_stage(req, arts)
+        assert outcome is StageOutcome.failed
+        assert "no such stream exit 1" in arts.failure_message
+
+    def test_failure_message_keeps_the_final_ffmpeg_error_after_a_long_banner(self, tmp_path):
+        req = _req(no_audio=True)
+        arts = VideoWorkingArtifacts(video_path=tmp_path / "clip.mp4")
+        stderr = ("ffmpeg version 7.1 Copyright\n  configuration: " + "--enable-foo " * 100 + "\n" + "frame noise\n" * 100 + "Error: permission denied\n").encode()
+        error = subprocess.CalledProcessError(1, "ffmpeg", stderr=stderr)
+        with patch("zvisiongenerator.workflows.video_stages.strip_audio", side_effect=error):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                strip_audio_stage(req, arts)
+        assert arts.failure_message.startswith("Removing the audio track failed: ")
+        assert "Error: permission denied" in arts.failure_message
+        assert "\n" not in arts.failure_message
+        assert len(arts.failure_message) <= 500
+        assert any("ffmpeg version" in str(w.message) for w in caught)

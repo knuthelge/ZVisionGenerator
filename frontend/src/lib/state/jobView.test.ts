@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ActiveJobState } from '$lib/types';
 import { downloadFromEvent } from './jobPhases';
 import {
-  activeDownload, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, finishingLabel, formatClock, headline, isReviewing, isSteppedStage, isVideo, itemActivity, itemFraction, iterations,
+  activeDownload, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, failureToastText, finishingLabel, formatClock, GENERIC_FAILURE_MESSAGE, headline, isReviewing, isSteppedStage, isVideo, itemActivity, itemFraction, iterations,
   jobBar, jobControls, jobTone, loadBody, outcome, phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine,
   reviewVideoUrl, stageBars, timeLeft
 } from './jobView';
@@ -407,5 +407,29 @@ describe('review before upscaling', () => {
       expect(headline(stopped)).not.toBe(headline(job({ status: 'cancelled', phase: 'load' })));
       expect(new Set([outcome(stopped)!.text, outcome(detached)!.text, outcome(job({ status: 'cancelled', message: 'Job stopped.' }))!.text]).size).toBe(3);
     });
+  });
+});
+
+describe('failureToastText', () => {
+  it('includes the reason the job failed with', () => {
+    expect(failureToastText('CUDA out of memory', false)).toContain('CUDA out of memory');
+    expect(failureToastText('CUDA out of memory', true)).toContain('CUDA out of memory');
+  });
+
+  it('never appends the generic job-card fallback to the toast', () => {
+    expect(failureToastText(GENERIC_FAILURE_MESSAGE, false)).not.toContain(GENERIC_FAILURE_MESSAGE);
+    expect(failureToastText(GENERIC_FAILURE_MESSAGE, false)).toBe('Generation failed');
+  });
+
+  it('falls back to the plain texts without a reason', () => {
+    for (const reason of ['', '   ', null, undefined]) {
+      expect(failureToastText(reason, false)).toBe('Generation failed');
+      expect(failureToastText(reason, true)).toBe('Generation failed. Starting the next queued job.');
+    }
+  });
+
+  it('still says the next queued job starts when a reason is shown', () => {
+    expect(failureToastText('Out of memory', true)).toMatch(/next queued job/);
+    expect(failureToastText('Out of memory.', true)).not.toContain('..');
   });
 });

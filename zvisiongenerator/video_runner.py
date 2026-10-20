@@ -15,6 +15,7 @@ from zvisiongenerator.core.progress_events import emit_generation_finished as _e
 from zvisiongenerator.core.progress_events import emit_progress as _emit_progress
 from zvisiongenerator.core.progress_events import make_prompt_enhanced_callback as _make_prompt_enhanced_callback
 from zvisiongenerator.core.progress_events import make_step_progress_callback as _make_step_progress_callback
+from zvisiongenerator.core.progress_events import exception_message as _exception_message
 from zvisiongenerator.core.progress_events import run_workflow_with_progress as _run_workflow_with_progress
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
@@ -162,6 +163,7 @@ def run_video_batch(
     batch_start = time.time()
     gen_times: list[float] = []
     failed_generations = 0
+    last_failure: str | None = None
     discarded_generations = 0
 
     print(f"Total video iterations to run: {total_iterations}\n")
@@ -329,6 +331,7 @@ def run_video_batch(
                 except Exception as exc:
                     logger.exception("Video generation failed")
                     warnings.warn(f"Video generation failed: {exc}", stacklevel=2)
+                    artifacts.failure_message = _exception_message(str(exc)) or type(exc).__name__
                     outcome = StageOutcome.failed
                 completed_iterations += 1
 
@@ -353,10 +356,12 @@ def run_video_batch(
                 elif outcome is StageOutcome.failed:
                     print("  Video generation failed.")
                     failed_generations += 1
+                    last_failure = artifacts.failure_message or "Video generation failed."
                     _emit_generation_finished(
                         progress_callback,
                         event_context=event_context,
                         status="failed",
+                        message=last_failure,
                         output_path=str(artifacts.video_path) if artifacts.video_path is not None else None,
                     )
 
@@ -364,14 +369,16 @@ def run_video_batch(
     generated = len(gen_times) - discarded_generations
     discarded_note = f", {discarded_generations} discarded" if discarded_generations else ""
     print(f"\nBatch complete: {generated}/{total_iterations} videos generated{discarded_note} in {total_time:.1f}s")
-    terminal_event = "batch_failed" if len(gen_times) == 0 and failed_generations > 0 else "batch_completed"
+    batch_failed = len(gen_times) == 0 and failed_generations > 0
+    terminal_extra = {"message": last_failure} if batch_failed and last_failure else {}
     _emit_progress(
         progress_callback,
-        terminal_event,
+        "batch_failed" if batch_failed else "batch_completed",
         mode="video",
         completed_iterations=completed_iterations,
         total_iterations=total_iterations,
         total_time=total_time,
+        **terminal_extra,
     )
 
 

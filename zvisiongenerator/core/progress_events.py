@@ -8,12 +8,70 @@ from dataclasses import replace
 from typing import Any
 
 from zvisiongenerator.core.types import StageOutcome
+from zvisiongenerator.utils.ffmpeg import strip_ffmpeg_banner
 
 
 type ProgressCallback = Callable[[dict[str, Any]], None]
 
 # Fractions of a denoising run at which a live preview is rendered.
 PREVIEW_STEP_FRACTIONS = (0.25, 0.5, 0.75)
+
+# Longest failure message, in characters, that a runner sends to clients.
+FAILURE_MESSAGE_LIMIT = 500
+
+# Longest "<head>" of an exception message whose head is kept when the message is shortened.
+_EXCEPTION_HEAD_MAX = 200
+
+
+def one_line_message(text: str, *, limit: int = FAILURE_MESSAGE_LIMIT) -> str:
+    """Collapse *text* to a single line of at most *limit* characters.
+
+    Whitespace runs become single spaces and the ends are stripped. Text longer
+    than *limit* is cut to ``limit - 1`` characters followed by an ellipsis.
+    """
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    return collapsed[: limit - 1] + "…"
+
+
+def failure_with_detail(prefix: str, detail: str, *, limit: int = FAILURE_MESSAGE_LIMIT) -> str:
+    """Return ``"<prefix>: <detail>"`` as one line of at most *limit* characters, keeping the end of *detail*.
+
+    Tool output states the cause last, so a *detail* that does not fit is cut from the front
+    and starts with an ellipsis. FFmpeg banner lines are dropped unless nothing else remains.
+    The *prefix* is always kept whole.
+    """
+    tail = " ".join(strip_ffmpeg_banner(detail).split())
+    head = one_line_message(prefix, limit=limit)
+    if not tail:
+        return head
+    room = limit - len(head) - 2
+    if room < 2:
+        return head
+    if len(tail) > room:
+        tail = "…" + tail[-(room - 1) :]
+    return f"{head}: {tail}"
+
+
+def exception_message(text: str, *, limit: int = FAILURE_MESSAGE_LIMIT) -> str:
+    """Shorten exception *text* to one line of at most *limit* characters, keeping its ending.
+
+    Text that fits is only collapsed to one line. Longer text shaped ``"<head>: <rest>"``
+    with a short first-line head keeps the head and the end of *rest*, since tool errors
+    state the cause last. The split is on the first ``": "`` (colon and space), so URL schemes
+    and Windows drive letters stay in the head. Any other long text keeps its beginning.
+    """
+    collapsed = " ".join(text.split())
+    if len(collapsed) <= limit:
+        return collapsed
+    first_line = text.strip().split("\n", 1)[0]
+    head, separator, _ = first_line[:_EXCEPTION_HEAD_MAX].partition(": ")
+    head = head.strip()
+    if separator and head:
+        rest = text.strip().partition(": ")[2]
+        return failure_with_detail(head, rest, limit=limit)
+    return one_line_message(text, limit=limit)
 
 
 def preview_milestone_steps(total_steps: int) -> frozenset[int]:
@@ -50,8 +108,12 @@ def emit_generation_finished(
     filename: str | None = None,
     generation_time: float | None = None,
     output_path: Any = None,
+    message: str | None = None,
 ) -> None:
-    """Emit the shared terminal payload for one generation attempt."""
+    """Emit the shared terminal payload for one generation attempt.
+
+    *message* is included only when it is a non-empty string.
+    """
     payload = {**event_context, "status": status}
     if filename is not None:
         payload["filename"] = filename
@@ -59,6 +121,8 @@ def emit_generation_finished(
         payload["generation_time"] = generation_time
     if output_path is not None:
         payload["output_path"] = output_path
+    if message:
+        payload["message"] = message
     emit_progress(
         progress_callback,
         "generation_finished",

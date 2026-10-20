@@ -138,6 +138,8 @@ class VideoWorkingArtifacts:
     review_wait: float = 0.0
     filename: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    # One-line reason set by a stage (or the runner) when the generation fails.
+    failure_message: str | None = None
 
 
 VideoStage = Callable[[VideoGenerationRequest, VideoWorkingArtifacts], StageOutcome]

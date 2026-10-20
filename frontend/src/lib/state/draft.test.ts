@@ -221,6 +221,44 @@ describe('draft store', () => {
     expect(draft.state.scheduler).not.toBe('beta');
   });
 
+  describe('loadFromUrl – reused quantization', () => {
+    function quantizeContext(): WorkspaceContext {
+      const ctx = makeContext();
+      ctx.workflow_contract.definitions.txt2img.visible_controls.push('quantize');
+      return ctx;
+    }
+
+    it('applies a level the model offers', () => {
+      draft.loadFromUrl({ workflow: 'txt2img', model: 'flux-dev', quantize: '8' }, quantizeContext());
+      expect(draft.state.quantize).toBe(8);
+    });
+
+    it('clears the level when the URL names it blank', () => {
+      draft.update('quantize', 4);
+      draft.loadFromUrl({ workflow: 'txt2img', model: 'flux-dev', quantize: '' }, quantizeContext());
+      expect(draft.state.quantize).toBeNull();
+    });
+
+    it('drops a level the context does not offer', () => {
+      draft.update('quantize', 4);
+      draft.loadFromUrl({ workflow: 'txt2img', model: 'flux-dev', quantize: '6' }, quantizeContext());
+      expect(draft.state.quantize).toBeNull();
+    });
+
+    it('drops the level for a model without quantization support', () => {
+      const ctx = quantizeContext();
+      ctx.image_model_defaults['flux-dev'] = { ...ctx.image_model_defaults['flux-dev'], supports_quantize: false };
+      draft.loadFromUrl({ workflow: 'txt2img', model: 'flux-dev', quantize: '8' }, ctx);
+      expect(draft.state.quantize).toBeNull();
+    });
+
+    it('keeps the current level when the URL does not name one', () => {
+      draft.update('quantize', 4);
+      draft.loadFromUrl({ workflow: 'txt2img', model: 'flux-dev' }, quantizeContext());
+      expect(draft.state.quantize).toBe(4);
+    });
+  });
+
   it('ignores invalid workflow in URL prefill', () => {
     draft.loadFromUrl({ workflow: 'invalid-workflow' }, makeContext());
     expect(draft.state.workflow).toBe('txt2img'); // unchanged

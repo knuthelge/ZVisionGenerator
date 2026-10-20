@@ -355,6 +355,7 @@ def test_run_upscale_emits_one_image_batch(tmp_path):
     finished = next(call.args[0] for call in callback.call_args_list if call.args[0]["type"] == "generation_finished")
     assert finished["status"] == "success"
     assert finished["output_path"] == str(output)
+    assert "message" not in finished
 
 
 def test_run_upscale_reports_stop_as_cancelled():
@@ -375,4 +376,9 @@ def test_run_upscale_reports_failed_stage():
 
     run_upscale(MagicMock(), MagicMock(), request, workflow, progress_callback=callback)
 
-    assert _event_types(callback)[-1] == "batch_failed"
+    events = [call.args[0] for call in callback.call_args_list]
+    finished = next(event for event in events if event["type"] == "generation_finished")
+    assert finished["status"] == "failed"
+    assert finished["message"]
+    assert events[-1]["type"] == "batch_failed"
+    assert events[-1]["message"] == finished["message"]

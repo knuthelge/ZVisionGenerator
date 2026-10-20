@@ -62,7 +62,7 @@
   <div class="jb-row">
     <span class="jb-status"><i class="jb-dot"></i><span class="ui-area-label jb-workflow">{workflowLabel(job.workflow)}</span></span>
     <span class="jb-headline">{headline(job)}</span>
-    {#if eta}<span class="jb-eta">{eta}</span>{/if}
+    {#if eta}<span class="jb-eta" title={eta}>{eta}</span>{/if}
     <span class="jb-controls">
       {#if active}
         {#if paused}
@@ -121,7 +121,7 @@
   .job-bar[data-tone='paused'] .jb-dot { animation: none; }
   @keyframes jb-pulse { 50% { opacity: 0.3; } }
   .jb-headline { min-width: 0; overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; color: var(--color-text-primary); }
-  .jb-eta { flex: none; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+  .jb-eta { flex: 0 1 auto; min-width: 0; max-width: 50%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
   .jb-controls { display: flex; flex: none; align-items: center; gap: 4px; margin-left: auto; }
   .jb-segments { display: flex; gap: 2px; height: 6px; }
   .jb-segment { position: relative; flex: 1; min-width: 0; overflow: hidden; border-radius: 1px; background: var(--color-zinc-700); }

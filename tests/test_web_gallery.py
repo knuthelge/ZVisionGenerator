@@ -791,6 +791,29 @@ def test_an_enhanced_image_shows_how_and_reuses_both_texts_and_the_options(tmp_p
     assert json.loads(params["enhance"])["settings"]["style"] == "cinematic"
 
 
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"generation": {"quantize": 8}}, "8"),
+        ({}, ""),
+        # A stored-quant id falls back to the default model, which the level was not recorded with.
+        ({"model": "zit@q4", "generation": {"quantize": 4}}, ""),
+    ],
+)
+def test_reuse_of_an_image_names_its_quantize_level_even_when_there_is_none(tmp_path, monkeypatch, overrides, expected):
+    """A blank ``quantize`` tells the Workspace to clear the level already chosen, so the reused job matches its source."""
+    monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
+    _payload, params = _image_reuse(tmp_path, overrides)
+
+    assert params["quantize"] == expected
+
+
+def test_reuse_of_a_video_leaves_quantize_to_the_model_alias(tmp_path):
+    _payload, params = _video_reuse(tmp_path, {"prompt": "A knight rides in.", "generation": {"quantize": 8}})
+
+    assert "quantize" not in params
+
+
 def test_a_plain_image_has_no_enhance_record(tmp_path, monkeypatch):
     monkeypatch.setattr("zvisiongenerator.web.gallery._asset_upscale_json", lambda *_args: None)
     payload, params = _image_reuse(tmp_path, {})
@@ -802,3 +825,11 @@ def test_an_enhanced_video_reuses_its_options(tmp_path):
     payload, params = _video_reuse(tmp_path, {"prompt": "A fox sprints.", "prompt_input": "a fox runs", "enhance": {**_ENHANCE, "settings": {"style": "cinematic", "camera": "orbit"}}})
     assert payload["enhance"]["summary"] == "Fast · Cinematic, Orbit"
     assert json.loads(params["enhance"])["settings"]["camera"] == "orbit"
+
+
+@pytest.mark.parametrize("workflow", ["txt2img", "img2img"])
+def test_image_workflows_show_the_quantize_control_the_reuse_param_is_gated_on(workflow):
+    """The Workspace applies a reused ``quantize`` only where this control is visible, so the real contract must list it."""
+    from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS
+
+    assert "quantize" in WORKFLOW_DEFINITIONS[workflow]["visible_controls"]

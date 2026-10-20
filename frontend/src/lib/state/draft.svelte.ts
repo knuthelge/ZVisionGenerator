@@ -97,6 +97,7 @@ const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
   height: 'custom_dimensions',
   frames: 'frame_count',
   lora: 'loras',
+  quantize: 'quantize',
   source_video: 'source_video',
   extend_frames: 'extend_length',
   image_path: 'reference_image_path',
@@ -261,13 +262,18 @@ function _withModelDefaults(ctx: WorkspaceContext, state: DraftState): DraftStat
     : _applyImageDefaults(cleared, modelDefaults as ImageModelDefaults);
 }
 
+/** Return a fresh draft for a workflow and model with that model's defaults applied. */
+function _defaultState(ctx: WorkspaceContext, workflow: Workflow, model: string): DraftState {
+  return _withModelDefaults(ctx, { ...DEFAULT_DRAFT, workflow, model });
+}
+
 /**
  * Return the default value of every setting for the state's workflow and model.
  *
  * Uses the same resolution as `resetSelections`, without touching the draft.
  */
 export function settingDefaultsFor(ctx: WorkspaceContext, state: Pick<DraftState, 'workflow' | 'model'>): SettingDefaults {
-  return _pickSettings(_withModelDefaults(ctx, { ...DEFAULT_DRAFT, workflow: state.workflow, model: state.model }));
+  return _pickSettings(_defaultState(ctx, state.workflow, state.model));
 }
 
 /** Return the size presets offered for a ratio; image presets beyond the model's dimension limit are left out. */
@@ -349,7 +355,7 @@ function _pickSizeSettings(defaults: ImageModelDefaults | VideoModelDefaults): P
 /** Return the settings of a draft that differ from its own model's (gated) defaults; none when those defaults are unknown. */
 function _changedSinceOldDefaults(ctx: WorkspaceContext, state: DraftState): Partial<SettingDefaults> {
   if (!_modelDefaultsFor(ctx, state.workflow, state.model)) return {};
-  const baseline = _applyCapabilityGates(ctx, _withModelDefaults(ctx, { ...DEFAULT_DRAFT, workflow: state.workflow, model: state.model }));
+  const baseline = _applyCapabilityGates(ctx, _defaultState(ctx, state.workflow, state.model));
   return changedSettings(_pickSettings(state), _pickSettings(baseline));
 }
 
@@ -531,6 +537,13 @@ export const draft = {
     }
     // A named but blank list clears the LoRAs: a reused job runs with exactly its source's.
     if (params.lora !== undefined && canApply('lora')) prefill.loraString = params.lora;
+    // A named but blank level clears the quantization, like the LoRAs: a reused image has exactly its source's level.
+    // A level the model does not offer is dropped rather than left for the server to reject.
+    if (params.quantize !== undefined && ctx && canApply('quantize')) {
+      const level = Number(params.quantize);
+      const supported = (_modelDefaultsFor(ctx, workflow, prefill.model ?? _draft.model) as ImageModelDefaults | null)?.supports_quantize === true;
+      prefill.quantize = supported && params.quantize !== '' && ctx.quantize_options.includes(level) ? level : null;
+    }
     if (params.image_path && canApply('image_path')) prefill.referenceImagePath = params.image_path;
     if (params.negative_prompt && canApply('negative_prompt')) prefill.negativePrompt = params.negative_prompt;
     if (params.scheduler && canApply('scheduler')) prefill.scheduler = params.scheduler;

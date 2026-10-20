@@ -16,6 +16,7 @@ import warnings
 from collections.abc import Callable
 from pathlib import Path
 
+from zvisiongenerator.core.progress_events import failure_with_detail
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.ffmpeg import strip_audio
@@ -139,6 +140,7 @@ def text_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorking
     )
     artifacts.generation_time = time.monotonic() - t0 - artifacts.review_wait
     if result is None:
+        artifacts.failure_message = "Text-to-video produced no video file."
         return StageOutcome.failed
     artifacts.video_path = result
     return StageOutcome.success
@@ -170,6 +172,7 @@ def image_to_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkin
     )
     artifacts.generation_time = time.monotonic() - t0 - artifacts.review_wait
     if result is None:
+        artifacts.failure_message = "Image-to-video produced no video file."
         return StageOutcome.failed
     artifacts.video_path = result
     return StageOutcome.success
@@ -216,6 +219,7 @@ def extend_video_stage(request: VideoGenerationRequest, artifacts: VideoWorkingA
     artifacts.generation_time = time.monotonic() - t0
     if segment is None:
         shutil.rmtree(segment_dir, ignore_errors=True)
+        artifacts.failure_message = "Extend produced no video segment."
         return StageOutcome.failed
     artifacts.metadata["extend_segment"] = segment
     artifacts.metadata["extend_segment_dir"] = segment_dir
@@ -242,6 +246,7 @@ def join_clips_stage(request: VideoGenerationRequest, artifacts: VideoWorkingArt
         except (subprocess.CalledProcessError, RuntimeError) as exc:
             detail = exc.stderr.decode("utf-8", "replace").strip() if isinstance(exc, subprocess.CalledProcessError) and exc.stderr else str(exc)
             warnings.warn(f"Joining the clips failed: {detail}", stacklevel=2)
+            artifacts.failure_message = failure_with_detail("Joining the clips failed", detail)
             return StageOutcome.failed
     finally:
         if segment_dir is not None:
@@ -280,5 +285,6 @@ def strip_audio_stage(request: VideoGenerationRequest, artifacts: VideoWorkingAr
     except subprocess.CalledProcessError as e:
         err_msg = e.stderr.decode("utf-8", "replace").strip() if e.stderr else str(e)
         warnings.warn(f"ffmpeg strip-audio failed: {err_msg}", stacklevel=2)
+        artifacts.failure_message = failure_with_detail("Removing the audio track failed", err_msg)
         return StageOutcome.failed
     return StageOutcome.success

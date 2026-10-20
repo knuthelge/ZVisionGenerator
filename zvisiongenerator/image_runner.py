@@ -167,6 +167,7 @@ def run_batch(
     image_times: list[float] = []
     successful_generations = 0
     failed_generations = 0
+    last_failure: str | None = None
 
     # Resolve sharpen override — only when user provided explicit float
     sharpen_amount_override = args.sharpen if isinstance(args.sharpen, float) else None
@@ -443,10 +444,12 @@ def run_batch(
                                 continue
                             break
                         elif outcome is StageOutcome.failed:
+                            last_failure = "Generation failed in workflow stage."
                             _emit_generation_finished(
                                 progress_callback,
                                 event_context=event_context,
                                 status="failed",
+                                message=last_failure,
                                 filename=artifacts.filename,
                                 generation_time=_active_seconds(_img_start, review_outcome),
                                 output_path=artifacts.filepath,
@@ -475,10 +478,12 @@ def run_batch(
                                 max_retries=max_retries,
                             )
                             if retries > max_retries:
+                                last_failure = f"Generation failed after {max_retries} retries."
                                 _emit_generation_finished(
                                     progress_callback,
                                     event_context=event_context,
                                     status="failed",
+                                    message=last_failure,
                                     filename=artifacts.filename,
                                     generation_time=_active_seconds(_img_start, review_outcome),
                                     output_path=artifacts.filepath,
@@ -524,7 +529,15 @@ def run_batch(
                             break
             print(f"\nCompleted run {run_idx + 1}/{args.runs}\n{'#' * 30}\n")
         print("\nAll runs completed!\n")
-        terminal_event = "batch_failed" if successful_generations == 0 and failed_generations > 0 else "batch_completed"
-        _emit_progress(progress_callback, terminal_event, mode="image", completed_iterations=len(image_times), total_iterations=total_iterations)
+        batch_failed = successful_generations == 0 and failed_generations > 0
+        terminal_extra = {"message": last_failure} if batch_failed and last_failure else {}
+        _emit_progress(
+            progress_callback,
+            "batch_failed" if batch_failed else "batch_completed",
+            mode="image",
+            completed_iterations=len(image_times),
+            total_iterations=total_iterations,
+            **terminal_extra,
+        )
     except _QuitBatch:
         pass

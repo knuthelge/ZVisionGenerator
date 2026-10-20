@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -23,10 +24,26 @@ def require_ffmpeg() -> None:
     raise RuntimeError("ffmpeg is required for video generation but was not found on PATH. Install ffmpeg from https://ffmpeg.org/download.html, ensure it is on PATH, then retry.")
 
 
+# Lines of the version and build banner that ffmpeg prints before any real message.
+_FFMPEG_BANNER_LINE = re.compile(r"^(ffmpeg version |built with |configuration:|lib(av\w+|sw\w+|postproc)\s+\d+\.|copyright )", re.IGNORECASE)
+
+
+def strip_ffmpeg_banner(text: str) -> str:
+    """Return *text* as stripped, non-blank lines without ffmpeg's version and build banner.
+
+    The banner lines are kept when nothing else remains, so banner-only output is still reported.
+    """
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return "\n".join([line for line in lines if not _FFMPEG_BANNER_LINE.match(line)] or lines)
+
+
 def tool_error(message: str, stderr: bytes | str | None, *, limit: int = 1500) -> RuntimeError:
-    """Return a ``RuntimeError`` that says *message* and ends with the last *limit* characters of a tool's stderr."""
+    """Return a ``RuntimeError`` that says *message* and ends with the last *limit* characters of a tool's stderr.
+
+    ffmpeg's version and build banner is left out of the stderr so the real error is what remains.
+    """
     text = stderr.decode(errors="replace") if isinstance(stderr, bytes) else (stderr or "")
-    return RuntimeError(f"{message}: {text.strip()[-limit:]}")
+    return RuntimeError(f"{message}: {strip_ffmpeg_banner(text)[-limit:]}")
 
 
 def strip_audio(video_path: Path) -> None:
@@ -38,7 +55,7 @@ def strip_audio(video_path: Path) -> None:
     tmp = video_path.with_suffix(".tmp.mp4")
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-i", str(video_path), "-an", "-c:v", "copy", str(tmp)],
+            ["ffmpeg", "-y", "-v", "error", "-i", str(video_path), "-an", "-c:v", "copy", str(tmp)],
             check=True,
             capture_output=True,
         )

@@ -198,6 +198,11 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
             reuse_params["model"] = resolved_model
         # Always named, even blank: a reused job runs with exactly the source's LoRAs, never the ones already chosen.
         reuse_params["lora"] = asset.lora or ""
+        if workflow_mode(resolved_workflow) == "image":
+            # Always named, even blank, like the LoRAs. A model that fell back to the default is not the one the level was
+            # recorded with (a stored-quant ``<name>@q<bits>`` id is such a case), so the level is not carried over.
+            level = asset.generation.get("quantize")
+            reuse_params["quantize"] = str(level) if level is not None and model_available else ""
         if asset.steps is not None:
             reuse_params["steps"] = str(asset.steps)
         if asset.guidance is not None and workflow_mode(resolved_workflow) == "image":

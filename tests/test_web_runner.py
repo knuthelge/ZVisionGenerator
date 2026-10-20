@@ -560,6 +560,70 @@ class TestWebRunner:
         finally:
             runner.shutdown()
 
+    @pytest.mark.filterwarnings("ignore:Video generation failed")
+    def test_video_backend_error_reaches_job_failed_and_the_snapshot(self, monkeypatch):
+        """A video workflow that raises ends the job with its one-line reason in job_failed and last_event."""
+        workflow = MagicMock(name="workflow")
+        workflow.run.side_effect = RuntimeError("CUDA out of memory")
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            job_id = _submit_video(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_video_args())
+            monkeypatch.setattr(web_runner_module, "build_video_workflow", lambda _args, **_kw: workflow)
+
+            snapshot = _wait_for_status(runner, job_id, "failed", timeout=5.0)
+
+            async def _read_history() -> list[dict[str, object]]:
+                return [_sse_payload(frame) async for frame in runner.stream_job_events(job_id)]
+
+            events = asyncio.run(_read_history())
+            failed = next(event for event in events if event["type"] == "job_failed")
+            assert failed["message"] == "CUDA out of memory"
+            assert snapshot["last_event"]["type"] == "job_failed"
+            assert snapshot["last_event"]["message"] == "CUDA out of memory"
+        finally:
+            runner.shutdown()
+
+    def test_runner_messages_pass_through_job_failed_unchanged(self, monkeypatch):
+        """The runner's batch_failed message is the job_failed message."""
+
+        def _fake_run_batch(backend, model, prompts_data, config, args, model_info, *, plan, progress_callback, skip_signal):
+            progress_callback({"type": "batch_started", "mode": "image", "total_iterations": 1, "total_runs": 1})
+            progress_callback({"type": "batch_failed", "mode": "image", "completed_iterations": 1, "total_iterations": 1, "message": "Generation failed in workflow stage."})
+
+        monkeypatch.setattr(web_runner_module, "run_batch", _fake_run_batch)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            job_id = _submit_image(monkeypatch, runner, prompts_data={"default": [("prompt", None)]}, config={}, args=_make_args())
+
+            snapshot = _wait_for_status(runner, job_id, "failed")
+            assert snapshot["last_event"]["message"] == "Generation failed in workflow stage."
+        finally:
+            runner.shutdown()
+
+    def test_multiline_worker_error_gives_a_one_line_capped_message_and_logs_the_full_text(self, caplog):
+        """job_failed carries a single bounded line, while the log keeps the whole multi-line error."""
+        full_text = "first line\n" + "\n".join(f"  detail {n} " + "x" * 40 for n in range(40))
+        assert len(full_text) > 500
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        def _fail(_progress_callback):
+            raise RuntimeError(full_text)
+
+        try:
+            with caplog.at_level("ERROR", logger=web_runner_module.logger.name):
+                job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=_fail)
+                snapshot = _wait_for_status(runner, job_id, "failed")
+
+            message = snapshot["last_event"]["message"]
+            assert "\n" not in message
+            assert message.startswith("first line detail 0")
+            assert len(message) <= 500
+            assert full_text.strip() in caplog.text
+        finally:
+            runner.shutdown()
+
     def test_job_history_is_bounded_but_event_count_tracks_total_events(self):
         """Retained history should be capped without losing total event count or last event."""
         runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01, max_history_events=3)
@@ -1908,13 +1972,13 @@ class TestJobLogHook:
 
     def test_job_that_raises_logs_the_worker_message(self, runner, log_path):
         def _boom(_progress_callback):
-            raise RuntimeError("worker broke")
+            raise RuntimeError("line one\nline two")
 
         runner._submit_job(job_type="image", exclusive=True, target_factory=_boom)
         self._drain(runner)
 
         (entry,) = self._entries(log_path)
-        assert (entry["status"], entry["error"]) == ("failed", "worker broke")
+        assert (entry["status"], entry["error"]) == ("failed", "line one line two")
 
     def test_partial_failure_keeps_the_completed_status(self, runner, log_path):
         self._run(

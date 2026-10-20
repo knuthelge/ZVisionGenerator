@@ -174,7 +174,9 @@ def page_entries(entries_oldest_first: list[JobLogEntry], *, status: str, page: 
 def _parse_lines(text: str) -> list[JobLogEntry]:
     """Return the entries in *text*, skipping lines that are blank, not JSON, not objects or without a ``job_id``."""
     entries: list[JobLogEntry] = []
-    for line in text.splitlines():
+    # Split on "\n" only: str.splitlines() also breaks on U+2028, U+0085 and others, which JSON output keeps raw.
+    for line in text.split("\n"):
+        line = line.removesuffix("\r")
         if not line.strip():
             continue
         try:

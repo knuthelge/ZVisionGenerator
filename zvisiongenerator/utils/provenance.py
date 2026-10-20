@@ -191,7 +191,7 @@ def embed_mp4_config(video_path: str | Path, payload: dict[str, Any]) -> None:
     value = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-i", str(video_path), "-c", "copy", "-movflags", "use_metadata_tags", "-metadata", f"{_MP4_CONFIG_KEY}={value}", str(tmp)],
+            ["ffmpeg", "-y", "-v", "error", "-i", str(video_path), "-c", "copy", "-movflags", "use_metadata_tags", "-metadata", f"{_MP4_CONFIG_KEY}={value}", str(tmp)],
             check=True,
             capture_output=True,
         )

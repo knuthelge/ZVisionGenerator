@@ -228,6 +228,7 @@ class TestRunnerOutcome:
         assert finished_events[0]["prompt"] == "a photo of a cat"
         assert finished_events[0]["seed"] == 42
         assert finished_events[0]["status"] == "failed"
+        assert finished_events[0]["message"] == "Generation failed in workflow stage."
         assert isinstance(finished_events[0]["filename"], str)
         assert isinstance(finished_events[0]["generation_time"], float)
         assert "output_path" not in finished_events[0]
@@ -238,6 +239,7 @@ class TestRunnerOutcome:
             "mode": "image",
             "completed_iterations": 1,
             "total_iterations": 1,
+            "message": "Generation failed in workflow stage.",
         }
 
     @patch("zvisiongenerator.image_runner.build_workflow")
@@ -291,6 +293,7 @@ class TestRunnerOutcome:
         assert wf.stages[0].call_count == 4
         assert len(finished_events) == 1
         assert finished_events[0]["status"] == "failed"
+        assert finished_events[0]["message"] == "Generation failed after 3 retries."
         # Retries draw a random seed even when the job's seed is fixed.
         assert finished_events[0]["seed"] == 30
         assert isinstance(finished_events[0]["filename"], str)
@@ -302,6 +305,7 @@ class TestRunnerOutcome:
             "mode": "image",
             "completed_iterations": 1,
             "total_iterations": 1,
+            "message": "Generation failed after 3 retries.",
         }
         assert not [event for event in events if event["type"] == "batch_completed"]
 
