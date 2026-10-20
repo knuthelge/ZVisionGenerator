@@ -119,7 +119,7 @@ We do not depend on the fork or add a diffusers-on-MPS path. Until mflux ships i
 
 ### 6. Measure before shipping
 
-On a 10 GB NVIDIA GPU with 32 GB of system memory, with each heavy job in its own systemd user unit:
+On a 10 GB NVIDIA GPU with 32 GB of system memory:
 
 1. **Load paths.** First-use download plus q4 and q8 stored-quant creation, from a pre-downloaded cache: peak RSS, peak VRAM, wall time. BF16 only if the q8 run shows the headroom.
 2. **Speed.** Seconds per step and per image at 1024² and 2 MP, for Turbo (4 and 6 steps) and SFT (50 steps), each at q4 and q8.
