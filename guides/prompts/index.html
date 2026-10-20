@@ -1341,9 +1341,9 @@ woman:
 <ul>
 <li><strong>Snippets</strong> (left) are listed with how often each is used; unused ones are dimmed. Click one to edit it, <strong>＋</strong> to add one, and drag one onto a prompt to add a <code>$reference</code>. Renaming a snippet updates every reference to it.</li>
 <li><strong>Sets</strong> (centre) are panels of prompts, one row each. Rename a set in place (the name starts the output filenames), add prompts with <strong>＋</strong>, and use a set's <strong>⋯</strong> menu to duplicate, move, turn all prompts on or off, or delete it.</li>
-<li><strong>Entries</strong> show <code>$snippets</code> as chips (red when undefined) and <code>{a|b}</code> choices as pills. Click the text, or press <code>↵</code> on it, to edit; typing <code>$</code> suggests snippet names. Click a pill to edit its options, one per line; an empty line is an empty option. While typing, put the caret in a choice and press <code>⌥↵</code> (or <strong>Edit choice</strong> under the text) to edit it the same way, select words and press <code>⌥↵</code> (<strong>Make a random choice</strong>) to turn them into a choice, or press <code>⌥↵</code> anywhere else (<strong>New random choice</strong>) to type the options of a new choice at the caret, one per line. The options box takes focus; <code>⌘↵</code> applies and <code>Esc</code> cancels, both returning you to the prompt. Each prompt has an <strong>active</strong> switch and <strong>✨ Enhance</strong>: off, the default options (<code>enhance: true</code>), or chosen style, mood, details, length and motion (motion applies to video only). Its popover also has the <strong>Rewrite</strong> choice (Scene and action, or Action only) for video entries, saved as <code>parts:</code>. Its <strong>⋯</strong> menu adds or removes a negative prompt, and duplicates, moves or deletes the prompt.</li>
+<li><strong>Entries</strong> show <code>$snippets</code> as chips (red when undefined) and <code>{a|b}</code> choices as pills. Click the text, or press <code>↵</code> on it, to edit; typing <code>$</code> suggests snippet names. Click a pill to edit its options, one per line; an empty line is an empty option. While typing, put the caret in a choice and press <code>⌥↵</code> (or <strong>Edit choice</strong> under the text) to edit it the same way, select words and press <code>⌥↵</code> (<strong>Make a random choice</strong>) to turn them into a choice, or press <code>⌥↵</code> anywhere else (<strong>New random choice</strong>) to type the options of a new choice at the caret, one per line. The options box takes focus; <code>⌘↵</code> applies and <code>Esc</code> cancels, both returning you to the prompt. Each prompt has an <strong>active</strong> switch and <strong>✨ Enhance</strong>: off, the default options (<code>enhance: true</code>, a general rewrite), or chosen style, mood, theme, focus, length, and camera, pace and motion (these apply to video only). Its popover also has the <strong>Rewrite</strong> choice (Scene and action, or Action only) for video entries, saved as <code>parts:</code>. Its <strong>⋯</strong> menu adds or removes a negative prompt, and duplicates, moves or deletes the prompt.</li>
 <li><strong>Text / Fields</strong> switches a prompt between plain text and named fields (a structured prompt). Switching to fields puts the text in one field for you to name; a field without a name is a problem until you name it. Lists and nested values that the builder can't edit are shown flattened and kept exactly as written; <strong>Convert to text</strong> replaces one with its flattened text.</li>
-<li><strong>Drag</strong> a set or an entry by its ⠿ grip to reorder it; drop an entry on another set's header to move it there. The menus offer the same moves.</li>
+<li><strong>Drag</strong> a set or an entry by its ⠿ grip to reorder it, with a mouse or a finger; drop an entry on another set's header to move it there. A snippet drags by its row with a mouse and by its grip with a finger. The list scrolls when you drag near its top or bottom edge, and the menus offer the same moves.</li>
 <li><strong>Preview</strong> (right) shows the selected entry as the model receives it, with snippets resolved and fields flattened, its prompt id, its enhancement and its problems. <strong>🎲 Roll</strong> picks one option of every choice, as a run would.</li>
 <li><strong>▶</strong> (Generate this one) saves the file, then queues that one prompt with the current Workspace settings. Your prompt selection in the Workspace doesn't change. <strong>Use in Workspace</strong> saves and selects the file there.</li>
 </ul>
@@ -1485,7 +1485,7 @@ castle:
 </tr>
 </tbody>
 </table>
-<p>Choose <strong>Fast</strong> or <strong>Smart</strong> under <strong>Enhancer</strong> in the Enhance popover, or pass <code>--enhance-model smart</code> on the command line. The choice applies to the whole job. On a machine where Smart does not fit (too little GPU memory, or no NVIDIA GPU on Windows or Linux), the popover shows why and Smart cannot be picked; on the command line a warning says so and Fast runs. Downloaded models stay in the Hugging Face cache; delete them there to free the disk space.</p>
+<p>Choose <strong>Fast</strong> or <strong>Smart</strong> next to <strong>Enhance prompt</strong> in the Enhance popover, or pass <code>--enhance-model smart</code> on the command line. The choice applies to the whole job. On a machine where Smart does not fit (too little GPU memory, or no NVIDIA GPU on Windows or Linux), the popover shows why and Smart cannot be picked; on the command line a warning says so and Fast runs. Downloaded models stay in the Hugging Face cache; delete them there to free the disk space.</p>
 <p>Without a CUDA GPU, Windows and Linux run the enhancer on the CPU: it works, but each rewrite can take a few minutes and about 10 GB of RAM. The status line says so when this happens. If the machine has an NVIDIA GPU, a warning also suggests updating its driver to 580 or newer, the usual reason CUDA is missing.</p>
 <p>All built-in models are pinned to a revision. To use another chat model, set <strong>Prompt Enhancer Model</strong> on the Config page to a Hugging Face <code>owner/name</code> (optionally <code>owner/name@revision</code>) or a local folder; it then replaces the Fast/Smart choice. <code>--enhance-model REPO[@REVISION]</code> does the same for one run. Thinking-tuned or heavily merged models are slower and follow the length and style options less reliably.</p>
 <h3 id="options">Options</h3>
@@ -1495,49 +1495,86 @@ castle:
 <th>Option</th>
 <th>Choose</th>
 <th>Values</th>
+<th>CLI and prompt-file key</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Style</td>
 <td>one</td>
-<td>Keep, Photographic, Candid, Street photography, Analog film, Black &amp; white, Studio portrait, Product shot, Cinematic, Illustration, Anime, Comic, 3D render, Painterly</td>
+<td>Keep; <strong>Photo:</strong> Natural photo, Candid, Street, Analog film, Black &amp; white, Studio portrait, Product, Cinematic; <strong>Art:</strong> Illustration, Anime, Comic, 3D render, Oil painting, Watercolor, Gouache, Sketch, Pixel art, Concept art, Graphic design, Isometric, Claymation, Ukiyo-e, Papercraft</td>
+<td><code>style</code></td>
 </tr>
 <tr>
 <td>Mood</td>
 <td>one</td>
-<td>Keep, Serene, Joyful, Romantic, Melancholic, Mysterious, Eerie, Dramatic, Epic, Whimsical, Nostalgic</td>
+<td>Keep, Serene, Cozy, Joyful, Romantic, Whimsical, Nostalgic, Melancholic, Mysterious, Eerie, Dramatic, Epic</td>
+<td><code>mood</code></td>
 </tr>
 <tr>
-<td>Details</td>
-<td>any</td>
-<td>Lighting, Composition, Camera &amp; lens, Materials &amp; textures, Color &amp; mood, Environment, Subject</td>
+<td>Theme</td>
+<td>one</td>
+<td>Keep, Zen, Spiritual, Rustic, Sensual, Glamorous, Gothic, Noir, Horror, Dystopian, Fairytale, Mythic, Surreal, Retro, Futuristic, Cyberpunk, Steampunk</td>
+<td><code>theme</code></td>
 </tr>
 <tr>
-<td>Motion (video only)</td>
+<td>Focus on</td>
 <td>any</td>
-<td>Action / sequence, Camera movement, Pacing</td>
+<td>Lighting, Composition, Camera &amp; viewpoint, Materials &amp; textures, Color palette, Environment, Subject, Expression</td>
+<td><code>details</code></td>
+</tr>
+<tr>
+<td>Camera (video only)</td>
+<td>one</td>
+<td>Keep, Auto, Static, Push in, Pull back, Pan, Tilt, Tracking, Orbit, Handheld, Aerial</td>
+<td><code>camera</code></td>
+</tr>
+<tr>
+<td>Pace (video only)</td>
+<td>one</td>
+<td>Keep, Slow motion, Slow, Brisk, Fast</td>
+<td><code>pace</code></td>
+</tr>
+<tr>
+<td>Describe (video only)</td>
+<td>any</td>
+<td>Action sequence, Secondary motion</td>
+<td><code>motion</code></td>
 </tr>
 <tr>
 <td>Sound (video with audio on)</td>
 <td>any</td>
 <td>Ambience, Sound effects, Dialogue, Music</td>
+<td><code>sound</code></td>
 </tr>
 <tr>
 <td>Length</td>
 <td>one</td>
 <td>Shorter (≈50 %), Same, Longer (≈200 %), Extra long (≈300 %)</td>
+<td><code>length</code></td>
 </tr>
 <tr>
 <td>Direction</td>
 <td>free text</td>
-<td>e.g. <em>at night, in the rain</em> or <em>focus on the dog</em> (up to 300 characters)</td>
+<td>e.g. <em>focus on the dog, make her look surprised</em> (up to 300 characters)</td>
+<td><code>note</code></td>
 </tr>
 </tbody>
 </table>
-<p>Mood sets the feeling of the scene. The enhancer conveys it through light, color, setting and expression instead of naming it. The <strong>Color &amp; mood</strong> detail only adds more description of color and mood; it does not pick one.</p>
-<p>Length is a target, not a guarantee. Longer aims for at least 40 words and Extra long for at least 80, so short prompts still grow; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length. On short prompts, Same is approximate.</p>
-<p>The enhancer keeps your subject and every detail you describe. It adds only things that can be seen, no smells or story, and never adds new people, animals, or major objects. Sound is the exception for video with audio on:</p>
+<p>In the Web UI the Enhance popover lists each option with a one-line description of what it asks for. The slugs used by <code>--enhance</code> and prompt files are lower case: <code>photo</code>, <code>bw</code>, <code>3d</code>, <code>painterly</code> (Oil painting), <code>ukiyo-e</code>, <code>slow-motion</code>, <code>push-in</code>, <code>pull-back</code>, <code>secondary</code> and the label in lower case otherwise.</p>
+<p><strong>Nothing is picked by default.</strong> With every choice at Keep and nothing under Focus on, Enhance still rewrites: it adds concrete visual detail where your prompt is thin. Picking options steers that rewrite.</p>
+<ul>
+<li><strong>Style</strong> sets the medium. The <strong>Photo</strong> styles all ask for a real photograph: the camera or lens, where the light comes from, and natural skin texture instead of airbrushed, waxy skin, without making people older or scenes dirtier than you wrote. They avoid words like "hyperrealistic", "8k" or "flawless", which push image models toward a glossy, rendered look.</li>
+<li><strong>Mood</strong> sets the feeling. The enhancer conveys it through light, color, setting and expression instead of naming it.</li>
+<li><strong>Theme</strong> sets the character the image carries, such as zen, noir or cyberpunk. It shows through styling, materials, color and small details, never by adding people, animals or objects. Time of day and weather are not a theme: write them in your prompt.</li>
+<li><strong>Focus on</strong> chooses where the rewrite spends its words. Each picked aspect is described more fully; with Length Shorter, the picked aspects are kept while the rest is cut.</li>
+<li><strong>Camera</strong> and <strong>Pace</strong> shape a video's action. <strong>Auto</strong> lets the enhancer pick a camera move that suits the action. A faster pace fits more action into the clip, slow motion less. <strong>Secondary motion</strong> describes what moves along with the action: hair, cloth, water, smoke, leaves or dust.</li>
+</ul>
+<p>Earlier versions picked Lighting, Composition and, for video, Action by default; now nothing is picked, so an older <code>enhance: true</code> gives the general rewrite. The motion values <code>camera-move</code> and <code>pacing</code> are gone: use <strong>Camera</strong> and <strong>Pace</strong> instead. An entry that still names them gets the usual warning for an invalid <code>enhance:</code> and is not enhanced.</p>
+<p>Length is a target, not a guarantee. Same keeps a prompt's length but grows a short one to about 25 words, since the rewrite adds detail. Longer aims for at least 40 words and Extra long for at least 80; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Shorter keeps every element you named, so a prompt full of named things shrinks only a little. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length.</p>
+<p>The enhancer keeps your subject and every detail you describe. It adds only things that can be seen, no smells or story, and never adds new people, animals, or major objects.</p>
+<p>Text in quotes, such as a sign's <code>"OPEN 24 HOURS"</code> or a line of dialogue, is copied exactly, with its case and punctuation. If a rewrite changes it, the enhancer tries once more; if that also changes it, the rewrite is used with a note saying so, so you can fix it in the Enhanced text. In a video with audio off, quoted speech may be dropped, but quoted lettering is kept.</p>
+<p>Sound is the exception for video with audio on:</p>
 <ul>
 <li>The enhancer keeps every sound and every quoted line of speech you wrote, word for word, whether or not a Sound option is picked.</li>
 <li>With no Sound option picked, it adds no new sounds.</li>
@@ -1545,7 +1582,7 @@ castle:
 <li><strong>Dialogue</strong> keeps your quoted lines. If you wrote none, it writes short lines that fit the scene. Only people already in the scene speak.</li>
 <li>With audio off, and for images, the enhancer describes no sounds and Sound is ignored.</li>
 </ul>
-<p><strong>Direction</strong> is a short instruction the enhancer follows, such as a time of day, weather, or what to focus on. A direction alone is enough to enhance, without picking other options.</p>
+<p><strong>Direction</strong> is a short instruction the enhancer follows, such as what to focus on or how someone should look.</p>
 <p>The enhancer also knows the job's shape:</p>
 <ul>
 <li><strong>Frame:</strong> portrait, landscape or square, from the ratio or size, so the composition fits the frame.</li>
@@ -1563,11 +1600,11 @@ castle:
 </thead>
 <tbody>
 <tr>
-<td>Style, Mood, Details</td>
+<td>Style, Mood, Theme, Focus on</td>
 <td>mostly the scene</td>
 </tr>
 <tr>
-<td>Motion, Sound</td>
+<td>Camera, Pace, Describe, Sound</td>
 <td>the action</td>
 </tr>
 <tr>
@@ -1608,15 +1645,14 @@ castle:
 </table>
 <ul>
 <li>The default depends on the workflow: <strong>Extend Video</strong> rewrites the action only when the clip has a scene, so a chain of extensions keeps its look, and <strong>Image to Video</strong> does the same when it has a scene, so the scene that describes the starting image is not restyled. <strong>Text to Video</strong> rewrites both.</li>
-<li>Style, Mood and Details shape the scene, so they have no effect while Rewrite is Action only. Motion, Sound, Length and Direction still shape the action.</li>
-<li>With Action only and a scene, Enhance always rewrites the action, even when every other option is left at "keep".</li>
+<li>Style, Mood, Theme and Focus on shape the scene, so they have no effect while Rewrite is Action only. Camera, Pace, Describe, Sound, Length and Direction still shape the action.</li>
 <li><strong>Action only needs a scene.</strong> With a blank scene, Action only is unavailable in the Web UI, and the run rewrites both parts. On the command line it does the same and warns once.</li>
 <li>Image workflows ignore Rewrite.</li>
 </ul>
 <h3 id="json-captions-ideogram-4">JSON Captions (Ideogram 4)</h3>
 <p>Ideogram 4 reads structured JSON captions (see <a href="../image/#ideogram-4">Ideogram 4</a>). With <code>ideo</code>, the Enhance popover has a <strong>Write as</strong> choice: <strong>Text</strong> rewrites your prompt as usual, <strong>JSON</strong> writes a full caption from it instead, with a summary, the look, lighting and colors, the background, one element per thing you named, and the lettering you asked for.</p>
 <ul>
-<li>The same options apply: Style decides photo or artwork, Mood shapes the look and colors, Details and Length decide how much is described, and Direction is followed.</li>
+<li>The same options apply: Style decides photo or artwork, Mood and Theme shape the look and colors, Focus on and Length decide how much is described, and Direction is followed.</li>
 <li>Quoted text (<code>"OPEN"</code>, <code>'LISBOA'</code>, <code>「パン屋」</code>) and names after <em>called</em> or <em>named</em> become text elements, copied exactly. On a card or logo, words you wrote without quotes are used too. Signs you mention without their words may get short words that fit, in the language you name.</li>
 <li>The caption appears in the <strong>Enhanced</strong> tab, laid out for reading, and Generate sends it as the structured caption. Edit it there like any Enhanced text.</li>
 <li>With <strong>Enhance each image when generating</strong>, every image gets its own caption.</li>
@@ -1627,7 +1663,8 @@ castle:
 <h3 id="in-the-web-ui">In the Web UI</h3>
 <ul>
 <li><strong>Enhance</strong>: click ✨ <strong>Enhance</strong> in the prompt box, pick options, and click <strong>Enhance prompt</strong>. The rewrite appears in the <strong>Enhanced</strong> tab. The button is unavailable while generation jobs are running or queued. Enhance again always starts from your text, and <strong>Clear</strong> empties the Enhanced text.</li>
-<li><strong>Video</strong> has a <strong>Rewrite</strong> choice first in the popover: <strong>Scene and action</strong> or <strong>Action only</strong> (see <a href="#rewrite-scene-and-action-or-action-only">Rewrite</a>). The tabs are <strong>Your text</strong> and <strong>Enhanced</strong>, and each holds a Scene and an <strong>Action</strong> box (the Prompt box of a video is called Action) that switch together. The Rewrite choice is remembered for each video workflow.</li>
+<li><strong>The popover</strong> groups the options as <strong>Look</strong> (Style, Mood, Theme), <strong>Focus on</strong>, <strong>Motion</strong> and <strong>Sound</strong> (video), and <strong>Output</strong> (Rewrite or Write as, and Length), then Direction. A one-choice option opens a menu that says what each choice asks for; a choice other than Keep turns teal and has ✕ to put it back. <strong>Reset</strong> puts every option back to its default. <strong>Enhancer</strong> (Fast or Smart) sits next to <strong>Enhance prompt</strong>. Images and video remember their own options.</li>
+<li><strong>Video</strong> has a <strong>Rewrite</strong> choice under Output: <strong>Scene and action</strong> or <strong>Action only</strong> (see <a href="#rewrite-scene-and-action-or-action-only">Rewrite</a>). The tabs are <strong>Your text</strong> and <strong>Enhanced</strong>, and each holds a Scene and an <strong>Action</strong> box (the Prompt box of a video is called Action) that switch together. The Rewrite choice is remembered for each video workflow.</li>
 <li><strong>Each part decides on its own.</strong> For the Scene and for the Action, Generate sends the Enhanced text when that part's Enhanced box has text, and your text otherwise. With Action only, the Enhanced Scene stays empty ("Not enhanced. Generate uses your scene.") and editing your Scene applies directly. Both Enhanced boxes are editable, and typing into an empty one makes that text the part's enhanced text.</li>
 <li>A part that sends its Enhanced text shows <strong>Uses enhanced</strong> beside its label in both tabs, with <strong>Use mine</strong>, which empties that Enhanced box so Generate uses your text again. The <strong>Enhanced</strong> tab shows <strong>used</strong> while either Enhanced box has text.</li>
 <li>If you change the scene or action, or switch workflows, afterwards, the Enhanced text is marked <strong>Out of date</strong>, and each part that uses enhanced text shows the badge too. It is still used until you choose <strong>Use mine</strong>, <strong>Re-enhance</strong> or <strong>Clear</strong>. Putting the text back, for example with <strong>Use the clip's scene</strong> when extending, clears the badge.</li>
@@ -1642,11 +1679,12 @@ castle:
     enhance:
       style: cinematic
       mood: mysterious
+      theme: noir
       details: [lighting, camera]
       length: longer
       note: rain on the pavement
   - prompt: a quiet street at dawn
-    enhance: true        # default options
+    enhance: true        # a general rewrite: nothing picked
   - prompt: two friends talking at a cafe table
     enhance:
       sound: [ambient, dialogue]   # video with audio on
@@ -1655,11 +1693,11 @@ castle:
     enhance:
       parts: action                # video: keep the scene, rewrite only the action
 </code></pre>
-<p>An entry's own <code>enhance:</code> that asks for no change at all (style and mood keep, no details, length same, no motion or sound, no direction) is refused when the file loads: a warning appears and that entry is not enhanced. To have the enhancer split a single prompt into scene and action, use <code>enhance: true</code> or set at least one option. Job-level <code>--enhance</code> and the Web UI accept keep-all settings when the prompt has no scene. <code>parts: action</code> counts as a change, so an entry with it is kept even when every other option keeps things as they are.</p>
+<p>In an image run, an entry whose <code>enhance:</code> sets only video options (<code>camera</code>, <code>pace</code>, <code>motion</code>, <code>sound</code> or <code>parts</code>) is not enhanced, and a warning says so; <code>enhance: true</code> still gives the general rewrite.</p>
 <p>From the command line, <code>--enhance</code> enhances every prompt and overrides entries' <code>enhance:</code> settings; <code>--no-enhance</code> turns all enhancement off:</p>
 <pre><code class="language-bash">ziv-image -m klein9b --prompt &quot;a fox in snow&quot; --enhance
 ziv-image -m klein9b -p prompts.yaml --enhance style=photo,mood=serene,details=lighting+camera,length=longer
-ziv-video -m ltx-8 --prompt &quot;a fox runs&quot; --enhance style=cinematic,motion=action+camera-move,sound=ambient+effects
+ziv-video -m ltx-8 --prompt &quot;a fox runs&quot; --enhance style=cinematic,camera=tracking,pace=fast,motion=action+secondary,sound=ambient+effects
 ziv-video -m ltx-8 --scene &quot;A fox in a snowy birch forest at dawn.&quot; --prompt &quot;it runs&quot; --enhance parts=action
 ziv-image -m klein9b --prompt &quot;a lighthouse&quot; --enhance-note &quot;in a storm, at night&quot;
 ziv-image -m klein9b --prompt &quot;a fox in snow&quot; --enhance --enhance-model smart
@@ -1668,7 +1706,7 @@ ziv-image -m klein9b -p prompts.yaml --no-enhance
 </code></pre>
 <p><code>--enhance-note</code> sets the direction and turns on enhancement by itself.</p>
 <p><code>motion</code> and <code>sound</code> only apply to video, and <code>sound</code> only with audio on. Prompt files shared between image and video may include them; images ignore them.</p>
-<p>The enhanced prompt is printed while prompts are enhanced and again before each generation, and stored in the image or video metadata, so Gallery shows and reuses the prompt that actually rendered.</p>
+<p>The enhanced prompt is printed while prompts are enhanced and again before each generation, and stored in the image or video metadata, so Gallery shows and reuses the prompt that actually rendered. The metadata also keeps your own prompt and how it was enhanced: the options, the enhancer model (Fast, Smart or your own) and Text or JSON. The viewer's details show it as one line (for example <em>Fast · Cinematic, Melancholic, Longer</em>) with your own prompt, and <strong>Reuse settings</strong> puts your prompt in <strong>Your text</strong>, the rewrite in <strong>Enhanced</strong>, and the enhance options back in the popover.</p>
 <h3 id="while-prompts-are-enhanced">While Prompts Are Enhanced</h3>
 <p>Jobs with auto enhancement rewrite every prompt before the model loads. In image jobs (Web UI controls or <code>ziv-image</code> keys):</p>
 <ul>

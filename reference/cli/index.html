@@ -1347,7 +1347,7 @@ ziv ui [options]       # Same as ziv-ui
 </table>
 <p>Run <code>ziv-image --help</code> for the full list.</p>
 <h3 id="-enhance-spec"><code>--enhance</code> spec</h3>
-<p>Comma-separated <code>key=value</code> pairs; join several values with <code>+</code>. Omitted keys use their defaults.</p>
+<p>Comma-separated <code>key=value</code> pairs; join several values with <code>+</code>. Omitted keys use their defaults. Nothing is picked by default: <code>--enhance</code> with no spec, or every key at its default, gives a general rewrite that adds detail where the prompt is thin.</p>
 <table>
 <thead>
 <tr>
@@ -1359,18 +1359,23 @@ ziv ui [options]       # Same as ziv-ui
 <tbody>
 <tr>
 <td><code>style</code></td>
-<td><code>keep</code>, <code>photo</code>, <code>candid</code>, <code>street</code>, <code>film</code>, <code>bw</code>, <code>portrait</code>, <code>product</code>, <code>cinematic</code>, <code>illustration</code>, <code>anime</code>, <code>comic</code>, <code>3d</code>, <code>painterly</code></td>
+<td><code>keep</code>; photo: <code>photo</code>, <code>candid</code>, <code>street</code>, <code>film</code>, <code>bw</code>, <code>portrait</code>, <code>product</code>, <code>cinematic</code>; art: <code>illustration</code>, <code>anime</code>, <code>comic</code>, <code>3d</code>, <code>painterly</code>, <code>watercolor</code>, <code>gouache</code>, <code>sketch</code>, <code>pixel</code>, <code>concept</code>, <code>graphic</code>, <code>isometric</code>, <code>claymation</code>, <code>ukiyo-e</code>, <code>papercraft</code></td>
 <td><code>keep</code></td>
 </tr>
 <tr>
 <td><code>mood</code></td>
-<td><code>keep</code>, <code>serene</code>, <code>joyful</code>, <code>romantic</code>, <code>melancholic</code>, <code>mysterious</code>, <code>eerie</code>, <code>dramatic</code>, <code>epic</code>, <code>whimsical</code>, <code>nostalgic</code></td>
+<td><code>keep</code>, <code>serene</code>, <code>cozy</code>, <code>joyful</code>, <code>romantic</code>, <code>whimsical</code>, <code>nostalgic</code>, <code>melancholic</code>, <code>mysterious</code>, <code>eerie</code>, <code>dramatic</code>, <code>epic</code></td>
 <td><code>keep</code></td>
 </tr>
 <tr>
-<td><code>details</code></td>
-<td><code>lighting</code>, <code>composition</code>, <code>camera</code>, <code>materials</code>, <code>color</code>, <code>environment</code>, <code>subject</code></td>
-<td><code>lighting+composition</code></td>
+<td><code>theme</code></td>
+<td><code>keep</code>, <code>zen</code>, <code>spiritual</code>, <code>rustic</code>, <code>sensual</code>, <code>glamorous</code>, <code>gothic</code>, <code>noir</code>, <code>horror</code>, <code>dystopian</code>, <code>fairytale</code>, <code>mythic</code>, <code>surreal</code>, <code>retro</code>, <code>futuristic</code>, <code>cyberpunk</code>, <code>steampunk</code></td>
+<td><code>keep</code></td>
+</tr>
+<tr>
+<td><code>details</code> (Focus on)</td>
+<td><code>lighting</code>, <code>composition</code>, <code>camera</code>, <code>materials</code>, <code>color</code>, <code>environment</code>, <code>subject</code>, <code>expression</code></td>
+<td>none</td>
 </tr>
 <tr>
 <td><code>length</code></td>
@@ -1378,9 +1383,19 @@ ziv ui [options]       # Same as ziv-ui
 <td><code>same</code></td>
 </tr>
 <tr>
+<td><code>camera</code> (<code>ziv-video</code> only)</td>
+<td><code>keep</code>, <code>auto</code>, <code>static</code>, <code>push-in</code>, <code>pull-back</code>, <code>pan</code>, <code>tilt</code>, <code>tracking</code>, <code>orbit</code>, <code>handheld</code>, <code>aerial</code></td>
+<td><code>keep</code></td>
+</tr>
+<tr>
+<td><code>pace</code> (<code>ziv-video</code> only)</td>
+<td><code>keep</code>, <code>slow-motion</code>, <code>slow</code>, <code>brisk</code>, <code>fast</code></td>
+<td><code>keep</code></td>
+</tr>
+<tr>
 <td><code>motion</code> (<code>ziv-video</code> only)</td>
-<td><code>action</code>, <code>camera-move</code>, <code>pacing</code></td>
-<td><code>action</code></td>
+<td><code>action</code>, <code>secondary</code></td>
+<td>none</td>
 </tr>
 <tr>
 <td><code>sound</code> (<code>ziv-video</code> only, used with audio on)</td>
@@ -1394,7 +1409,7 @@ ziv ui [options]       # Same as ziv-ui
 </tr>
 </tbody>
 </table>
-<p><code>parts=action</code> keeps the scene exactly as written and rewrites only the action, so <code>style</code>, <code>mood</code> and <code>details</code> have no effect. It needs a scene (from <code>--scene</code>, the entry's <code>scene:</code> or the extended clip); with none, the run uses <code>parts=both</code> and warns.</p>
+<p><code>parts=action</code> keeps the scene exactly as written and rewrites only the action, so <code>style</code>, <code>mood</code>, <code>theme</code> and <code>details</code> have no effect. It needs a scene (from <code>--scene</code>, the entry's <code>scene:</code> or the extended clip); with none, the run uses <code>parts=both</code> and warns.</p>
 <p>The free-text direction is not part of the spec; pass it with <code>--enhance-note</code>.</p>
 <p>See <a href="../../guides/prompts/#enhancing-prompts">Enhancing Prompts</a>.</p>
 <p>The <code>ideo</code> alias selects Ideogram 4 (<code>ideogram-ai/ideogram-4-fp8</code>), an image model on macOS (MLX), Windows and Linux (CUDA, using <code>unsloth/ideogram-4-nf4-diffusers</code>). Its width and height must be in the 256–2048 range and multiples of 16. Size presets that exceed this range — <code>--size xl</code> with <code>--ratio 16:9</code> or <code>--ratio 9:16</code> (2176 px) — are rejected before the model loads, as are <code>--image</code> and <code>--upscale</code> (both require img2img, which Ideogram 4 does not support).</p>
@@ -1592,7 +1607,7 @@ ziv-video --extend clip.mp4 --extend-frames 96 -p prompts.yaml
 <tr>
 <td><code>--model-type</code></td>
 <td><code>zimage</code></td>
-<td>Model type: <code>zimage</code>, <code>flux2-klein-4b</code>, <code>flux2-klein-9b</code>, <code>krea2-turbo</code></td>
+<td>Model type: <code>zimage</code>, <code>flux2-klein-4b</code>, <code>flux2-klein-9b</code>, <code>krea2-turbo</code>, <code>ltx-2.3</code></td>
 </tr>
 <tr>
 <td><code>--base-model</code></td>
@@ -1607,7 +1622,17 @@ ziv-video --extend clip.mp4 --extend-frames 96 -p prompts.yaml
 <tr>
 <td><code>--quantize</code></td>
 <td>off</td>
-<td>Also save a quantized copy as <code>&lt;name&gt;@q4</code> or <code>&lt;name&gt;@q8</code> (<code>4</code> or <code>8</code>)</td>
+<td>Also save a quantized copy as <code>&lt;name&gt;@q4</code> or <code>&lt;name&gt;@q8</code> (<code>4</code> or <code>8</code>). Required for <code>ltx-2.3</code>, where it is the only level stored</td>
+</tr>
+<tr>
+<td><code>--distill</code></td>
+<td>off</td>
+<td><code>ltx-2.3</code> only: merge Lightricks' distilled LoRA into a plain-dev checkpoint</td>
+</tr>
+<tr>
+<td><code>--force</code></td>
+<td>off</td>
+<td><code>ltx-2.3</code> only: replace an existing model of that name once the new one is complete</td>
 </tr>
 </tbody>
 </table>

@@ -949,10 +949,32 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#prompt-enhancer-bench" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt-Enhancer Bench
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#vendored-ltx" class="md-nav__link">
     <span class="md-ellipsis">
       
         Vendored LTX
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vendored-seedvr2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vendored SeedVR2
       
     </span>
   </a>
@@ -1220,10 +1242,32 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#prompt-enhancer-bench" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt-Enhancer Bench
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#vendored-ltx" class="md-nav__link">
     <span class="md-ellipsis">
       
         Vendored LTX
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#vendored-seedvr2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Vendored SeedVR2
       
     </span>
   </a>
@@ -1340,6 +1384,10 @@ make install
 <td>Re-vendor <code>ltx-core-mlx</code> and <code>ltx-pipelines-mlx</code> into <code>packages/</code></td>
 </tr>
 <tr>
+<td><code>make update-seedvr2</code></td>
+<td>Re-vendor the SeedVR2 PyTorch inference core into <code>packages/seedvr2_torch</code></td>
+</tr>
+<tr>
 <td><code>make build</code></td>
 <td>Build wheel and sdist</td>
 </tr>
@@ -1354,6 +1402,10 @@ make install
 <tr>
 <td><code>make model</code></td>
 <td>Run <code>ziv-model</code> CLI (use <code>ARGS="..."</code>)</td>
+</tr>
+<tr>
+<td><code>make enhance-bench</code></td>
+<td>Run the <a href="#prompt-enhancer-bench">prompt-enhancer bench</a> (use <code>ARGS="..."</code>; loads a real model, not part of <code>make check</code>)</td>
 </tr>
 </tbody>
 </table>
@@ -1395,7 +1447,7 @@ make install
 ├── image_runner.py                Image generation run orchestration
 ├── upscale_runner.py              Upscale one existing image: read its recorded settings, run the upscale workflow
 ├── review.py                      Shared wait for a review decision
-├── seedvr2_loader.py              SeedVR2 loading through its stored 8-bit copy (download, quantize, save, delete the download)
+├── seedvr2_loader.py              SeedVR2 loading from its weights folder: a stored 8-bit copy (macOS) or the downloaded FP8 files
 ├── video_runner.py                Video generation run orchestration
 ├── config.yaml                    Default configuration (sizes, model presets)
 ├── backends/                      Backend selection (__init__.py, the only place that picks a platform)
@@ -1407,6 +1459,7 @@ make install
 │   │   ├── memory.py              CUDA memory release after a job, and GPU and system memory sizes
 │   │   ├── prompt_enhancer.py     Prompt-enhancer LLM (transformers)
 │   │   ├── quant.py               NF4 (q4) and FP8 (q8) weights, at load and as stored quants
+│   │   ├── seedvr2.py             SeedVR2 upscaler (vendored PyTorch core, FP8 streamed from system memory)
 │   │   ├── image/
 │   │   │   ├── backend.py         Image backend
 │   │   │   ├── lokr.py            LyCORIS LoKr adapters (applied like mflux)
@@ -1476,7 +1529,7 @@ make install
 │   ├── prompts.py                 Prompt file loading
 │   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
 │   ├── safetensors_stream.py      Read and write safetensors one tensor at a time, keeping them out of the page cache
-│   ├── seedvr2.py                 SeedVR2 settings, memory estimate and per-Mac tier choice
+│   ├── seedvr2.py                 SeedVR2 weight layouts, settings, memory estimate and tier choice
 │   ├── stored_quant.py            Stored-quant naming, manifests and folder handling
 │   ├── upscale.py                 Upscale output sizes, size limits, SeedVR2 options and denoise defaults
 │   ├── video_extend.py            Extend: source checks and problem codes, loading the source, frame and audio-sample arithmetic of the window
@@ -1513,11 +1566,13 @@ make install
     └── video_stages.py            Video pipeline stage definitions, including extend_video and join_clips
 
 prompts.yaml                       Default prompt definitions
+
+bench/enhance/                     Prompt-enhancer bench (not packaged): cases, checks, runner and compare report
 </code></pre>
 <h2 id="architecture-overview">Architecture Overview</h2>
 <h3 id="backend-protocol">Backend Protocol</h3>
 <p>Platform backends live in <code>backends/mac/image.py</code> (mflux/MLX), <code>backends/cuda/image/backend.py</code> (Windows/Linux diffusers image), <code>backends/mac/video.py</code> (MLX video), and <code>backends/cuda/video/backend.py</code> (Windows/Linux diffusers video). Image backends implement the <code>ImageBackend</code> Protocol from <code>core/image_backend.py</code>; video backends implement the <code>VideoBackend</code> Protocol from <code>core/video_backend.py</code>. The prompt-enhancer LLM follows the same split: <code>backends/mac/prompt_enhancer.py</code> (mlx-lm) and <code>backends/cuda/prompt_enhancer.py</code> (transformers) implement the <code>PromptEnhancer</code> Protocol from <code>core/prompt_enhancer.py</code>. Backend and accelerator selection stays centralized in <code>backends/__init__.py</code> — never branch on <code>sys.platform</code> elsewhere to pick a backend. OS-level checks unrelated to backends (drive listings, ffmpeg install hints, terminal handling) are fine where they are needed.</p>
-<p>SeedVR2, the plain upscale of existing images, is macOS-only and has its own small Protocol, <code>SeedVR2Upscaler</code> in <code>core/seedvr2.py</code>, implemented by <code>backends/mac/seedvr2.py</code> (mflux). <code>supports_seedvr2()</code> and <code>get_seedvr2_upscaler()</code> in <code>backends/__init__.py</code> expose it, so other code asks for the capability instead of checking the platform. <code>seedvr2_loader.py</code> loads it through a stored 8-bit copy in the same way <code>image_model_loader.py</code> does for image models, and <code>tests/test_mflux_seedvr2_contract.py</code> records the mflux surface it relies on; re-run it on every mflux bump.</p>
+<p>SeedVR2, the plain upscale of existing images, has its own small Protocol, <code>SeedVR2Upscaler</code> in <code>core/seedvr2.py</code>, implemented by <code>backends/mac/seedvr2.py</code> (mflux) and <code>backends/cuda/seedvr2.py</code> (the vendored PyTorch core, see <a href="#vendored-seedvr2">Vendored SeedVR2</a>). <code>supports_seedvr2()</code> and <code>get_seedvr2_upscaler()</code> in <code>backends/__init__.py</code> expose it, so other code asks for the capability instead of checking the platform. Each engine's <code>weights</code> (<code>utils/seedvr2.SeedVR2Weights</code>) say which Hub files it reads (repo and file each), its precision label, which <code>seedvr2</code> config tier list prices it (<code>tiers</code> or <code>discrete_tiers</code>) and whether it keeps a stored copy. <code>seedvr2_loader.py</code> follows that, with one hidden weights folder per tier (<code>&lt;models&gt;/.seedvr2/&lt;model&gt;@&lt;precision&gt;</code>): on macOS it loads through a stored 8-bit copy in the same way <code>image_model_loader.py</code> does for image models; on CUDA the engine downloads the FP8 transformer and the VAE into the folder, because the vendored core reads both from one folder. The CUDA 7B tier uses the FP8 file whose last block is FP16 (<code>AInVFX/SeedVR2_comfyUI</code>), since the plain FP8 file draws streaks in flat areas. <code>tests/test_mflux_seedvr2_contract.py</code> records the mflux surface the macOS engine relies on; re-run it on every mflux bump.</p>
 <p>Backends are grouped by platform: <code>backends/cuda/</code> (Windows and Linux) and <code>backends/mac/</code>. A task with helpers of its own gets a folder (<code>cuda/image/</code>, <code>cuda/video/</code>); what two tasks share stays one level up. The platform folders never import from each other. Platform selection still happens only in <code>backends/__init__.py</code>.</p>
 <p>Windows and Linux video resolution is config-driven through <code>video_model_presets.ltx.diffusers</code>: <code>ltx-4</code> and <code>ltx-8</code> both resolve to <code>default_repo</code>, <code>quantize</code> maps each name to its level (there is no unquantized path), and <code>utils.config.ltx_load_options</code> turns the config into the backend's load arguments for both the CLI and the Web UI. Only distilled LTX-2.3 checkpoints are supported.</p>
 <p><code>cuda/video/backend.load_model</code> keeps LTX within the system memory of a 32 GB machine and the GPU memory of a 10 GB one. The rules a change must keep:</p>
@@ -1631,11 +1686,31 @@ prompts.yaml                       Default prompt definitions
 <li><strong>Reference pages:</strong> Config and Models centre their content at <code>max-w-page</code> (1200px), with the page bar lined up to it. Settings use label-left rows (<code>FormField layout="row"</code>), and tables use <code>ui-table-comfortable</code>.</li>
 <li><strong>Colour:</strong> neutrals are Graphite greys with no tint. Teal means on, selected or the main action; coral (<code>accent-coral</code>, Blob's beret) marks <code>$snippets</code> and amber <code>{a|b}</code> choices; red is for errors and destructive actions, which always show red text. Info messages stay teal, never coral. Text is at least 4.5:1 on every surface. Use tokens, never raw palette classes or colour literals; <code>make check</code> fails on them.</li>
 <li><strong>Focus:</strong> every control shows the same 2px teal outline with a 2px offset.</li>
-<li><strong>Touch is a layer, not a breakpoint:</strong> <code>@media (pointer: coarse)</code> in <code>global.css</code> raises the size tokens (controls 36px, small controls 28px, rows 40px, action bars 44px, the switch 40 × 24) at every width, so an iPad in the desktop layout gets finger-sized targets and a mouse keeps the desktop density. Build sizes on the tokens, never on literal pixels, so they follow. Numbers get − and + steppers (<code>InspectorNumber</code>, press and hold to repeat) because a label cannot be scrubbed when a drag scrolls; <code>InspectorRow</code> skips scrubbing on a coarse pointer. The <code>layout</code> store (<code>lib/state/layoutMode.svelte.ts</code>) tells components the composition (<code>compact | tall | wide</code>) and whether the pointer is coarse.</li>
-<li><strong>Three compositions of one Workspace:</strong> the same panes (<code>ComposePane</code>, <code>SettingsPane</code>, the toolbar, the stage, <code>HistoryStrip</code>) are arranged by <code>layout.mode</code>. <em>Wide</em> (1024px and up) is the sidebar beside the stage. <em>Tall</em> (640 to 1023px, a portrait tablet) puts the stage and strip over Compose and Settings side by side. <em>Compact</em> (under 640px, or under 500px tall) makes the stage the screen: a <code>TopStrip</code> and <code>NavDrawer</code> replace <code>TopNav</code>; a <code>SettingsStrip</code> of chips (<code>settingsChips.ts</code>) opens one <code>SettingPopover</code> at a time, All opens <code>SettingsPane</code> in a <code>BottomSheet</code>, and a composer at the foot hosts <code>ComposePane</code> folded or open. Everything stays inside the Workspace form, so every field submits in every composition. A running job shows <code>JobPreview</code> large with <code>JobCard</code> beside it on wide and tall and <code>JobBar</code> over it on compact; <code>ActionMenu</code> and <code>Modal</code> render as sheets on compact. Nothing is hidden behind a phone pattern on a wide screen.</li>
+<li><strong>Touch is a layer, not a breakpoint:</strong> <code>@media (pointer: coarse)</code> in <code>global.css</code> raises the size tokens (controls 40px, small controls 32px, rows and action bars 44px, the switch 40 × 24) at every width, so an iPad in the desktop layout gets finger-sized targets and a mouse keeps the desktop density. Build sizes on the tokens, never on literal pixels, so they follow. Numbers get − and + steppers (<code>InspectorNumber</code>, press and hold to repeat) because a label cannot be scrubbed when a drag scrolls; <code>InspectorRow</code> skips scrubbing on a coarse pointer. The <code>layout</code> store (<code>lib/state/layoutMode.svelte.ts</code>) tells components the composition (<code>compact | tall | wide</code>) and whether the pointer is coarse.</li>
+<li><strong>Hover only where there is hover:</strong> a touch screen keeps <code>:hover</code> on whatever was tapped last, so every <code>:hover</code> rule sits inside <code>@media (hover: hover)</code> (<code>make frontend-hover-check</code>, part of <code>make check</code>, fails on a bare one; Tailwind's <code>hover:</code> variant already does this). A finger gets an <code>:active</code> pressed state under <code>@media (hover: none)</code> instead, and anything a mouse reveals on hover is always shown under <code>(hover: none)</code>. On a phone, fields are at least 16px so focusing one does not zoom the page, and the page never scrolls or bounces (<code>overscroll-behavior: none</code> on <code>html</code> and <code>body</code>).</li>
+<li><strong>The visible viewport:</strong> <code>lib/state/viewport.ts</code> (started in <code>main.ts</code>) sets <code>--app-height</code> and <code>--app-top</code> from <code>window.visualViewport</code>, and puts a page the browser scrolled back at the top when no field is being edited. The app root and every full-screen layer use <code>.ui-viewport</code>, which is fixed to those values, so they sit above an on-screen keyboard (iOS ignores <code>interactive-widget</code>) and follow Safari's toolbar at once. Build full-screen layers on <code>.ui-viewport</code>, never on <code>inset: 0</code> or <code>100vh</code>.</li>
+<li><strong>Three compositions of one Workspace:</strong> the same panes (<code>ComposePane</code>, <code>SettingsPane</code>, the toolbar, the stage, <code>HistoryStrip</code>) are arranged by <code>layout.mode</code>. <em>Wide</em> (1024px and up) is the sidebar beside the stage. <em>Tall</em> (640 to 1023px, a portrait tablet) puts the stage and strip over Compose and Settings side by side. <em>Compact</em> (under 640px, or under 500px tall) makes the stage the screen: a <code>TopStrip</code> and <code>NavDrawer</code> replace <code>TopNav</code>; a <code>SettingsStrip</code> of chips (<code>settingsChips.ts</code>) opens one <code>SettingPopover</code> at a time, All opens <code>SettingsPane</code> in a <code>Sheet</code>, and a composer at the foot hosts <code>ComposePane</code> folded or open. Everything stays inside the Workspace form, so every field submits in every composition. A running job shows <code>JobPreview</code> large with <code>JobCard</code> beside it on wide and tall and <code>JobBar</code> over it on compact; <code>ActionMenu</code> and <code>Modal</code> render as a <code>Sheet</code> on compact. Nothing is hidden behind a phone pattern on a wide screen.</li>
+<li><strong>One sheet, and drags that follow the finger:</strong> every sheet on a phone is <code>molecules/Sheet.svelte</code> (the Job and All settings sheets, the enhancer, menus, dialogs): it slides in and out, is as tall as its content up to the screen under the top strip, and pulls down to close through <code>actions/sheetDrag.ts</code>. The grab bar and head carry <code>data-sheet-handle</code> and always pull; the body pulls once its content is at the top. The <code>SettingPopover</code> and the viewer's details use the same action. Drags are built on <code>actions/pan.ts</code>, which decides on the first movement whether a touch is the surface's (and then cancels every move, so the browser cannot start scrolling under it) or the page's; deciding later loses to native scrolling on iOS and Chrome. Its pure helpers (<code>lockAxis</code>, <code>releaseVelocity</code> from the last 80 ms, <code>rubberBand</code>, <code>canScrollToward</code>) carry the decisions and are unit-tested. A press and hold is <code>actions/hold.ts</code> (fingers and pens only; it marks the node <code>data-holding</code> with <code>--hold-ms</code> while held, so <code>.ui-holdable</code> fills a bar along its foot, and swallows the click and the browser's long-press menu once it fires): Generate's new-seed menu and the asset menu on every <code>AssetTile</code> use it. The <code>NavDrawer</code> swipes closed on the same tracker, and the Workspace stage uses it to follow the finger sideways through history and up to the Gallery (<code>features/workspace/stageSwipe.ts</code> decides the outcome, and a trackpad's sideways wheel steps once per gesture). The Prompts page arranges sets, entries and snippets with pointer events, not HTML drag and drop (which never fires for a finger): <code>reorderDrag</code> in <code>features/prompts/dragDrop.svelte.ts</code> starts at once from a grip for a finger and after a few pixels for a mouse, and <code>dropTargetAt</code> reads the drop zones from <code>data-dnd-entry</code>, <code>data-dnd-set</code> and <code>data-dnd-snippet</code> under the pointer.</li>
 </ul>
 <h3 id="test-strategy">Test Strategy</h3>
 <p>Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, upsampler weight download and loading, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.</p>
+<h2 id="prompt-enhancer-bench">Prompt-Enhancer Bench</h2>
+<p>The unit tests mock the enhancer, so they cover how a rewrite is asked for and parsed, not what a real model writes. The bench in <code>bench/enhance/</code> runs the real enhancer over fixed cases and counts how well the rewrites follow the request. Run it before and after changing the enhancer's wording (rules, option instructions, length plans) or a pinned enhancer model, and put the compare summary in the commit body or PR.</p>
+<pre><code class="language-bash">make enhance-bench ARGS=&quot;run --label main-fast&quot;                  # all cases, Fast, 3 seeds each
+make enhance-bench ARGS=&quot;run --label main-smart --model smart&quot;
+make enhance-bench ARGS=&quot;run --label try --tags quotes,short --seeds 1&quot;
+make enhance-bench ARGS=&quot;compare main-fast try&quot;                  # writes bench/enhance/runs/compare-main-fast-try.md
+make enhance-bench ARGS=&quot;rescore main-fast try&quot;                  # recompute checks from stored outputs, no model
+</code></pre>
+<ul>
+<li><strong>Cases</strong> live in <code>bench/enhance/cases.yaml</code>: a prompt (and a scene for video), the <code>enhance:</code> settings, the job context (ratio, frames, fps, audio, reference image, the extend source's prompt) and optional expectations (<code>keep</code>, <code>count</code>, <code>forbid</code>). Seeds come from the case id, so a run repeats with the same model, platform and settings.</li>
+<li><strong>A run</strong> loads the enhancer once and calls the same functions preflight uses (<code>enhance_prompt</code>, <code>enhance_video_prompt</code>, <code>enhance_caption</code>). It writes <code>results.jsonl</code> (one line per case and seed, with the system prompt, the output, every model call and the checks) and <code>meta.json</code> (commit, model, revision, temperature) to <code>bench/enhance/runs/&lt;label&gt;/</code>, which is ignored by version control.</li>
+<li><strong>Checks:</strong> usable, first try (no retry), format (scene and action pair, caption shape), length within the planned range, quoted text kept exactly, <code>keep</code>, <code>count</code>, <code>forbid</code>, and for extensions no repeat of the earlier prompt. A silent video checks only quoted lettering, since it drops quoted speech by design.</li>
+<li><strong><code>keep</code></strong> items match case-insensitively, each word as a stem ("river" finds "riverbank"), with up to two words in between ("green lamp" finds "green desk lamp"); <code>|</code> lists alternatives ("old man|elderly man"). <strong><code>count</code></strong> accepts a number word or digit with up to two words before the noun ("three fluffy cats").</li>
+<li><strong>Rescore</strong> recomputes the checks of stored runs from their outputs, after a check or a case's expectations change. A video's format result is kept, since the stored text can't show whether the pair needed the fallback.</li>
+<li><strong>Compare</strong> reports each check overall and per tag, speed, and the ten cases that changed most, side by side with a diff of their system prompts.</li>
+</ul>
+<p>The bench loads one enhancer model and nothing else. <code>tests/test_enhance_bench.py</code> covers its checks and plumbing with a fake model.</p>
 <h2 id="vendored-ltx">Vendored LTX</h2>
 <p><code>packages/ltx_core_mlx</code> and <code>packages/ltx_pipelines_mlx</code> are vendored from <a href="https://github.com/dgrauet/ltx-2-mlx"><code>dgrauet/ltx-2-mlx</code></a>. They are not published to PyPI, and PyPI rejects direct-URL dependencies, so they live in the repository. Never edit them by hand.</p>
 <ul>
@@ -1658,7 +1733,16 @@ prompts.yaml                       Default prompt definitions
 <li>Extending a clip: <code>ltx_core_mlx.utils.audio.load_audio</code> returns an <code>AudioData</code> whose <code>.waveform</code> and <code>.sample_rate</code> are passed to <code>encode_audio</code>, and <code>video_patchifier.patchify</code> and <code>audio_patchifier.patchify</code> return <code>(tokens, dims)</code> tuples, so the tokens are <code>patchify(...)[0]</code></li>
 </ul>
 </li>
+<li><strong>Converted folders.</strong> <code>backends/mac/ltx_converted.py</code> writes LTX checkpoints in the layout of dgrauet's MLX folders, which upstream loads: <code>transformer.</code>-prefixed names with the renames of <code>LTXV_LORA_COMFY_RENAMING_MAP</code>, the block Linears quantized at group size 64 (the bit width is read back from the shapes), <code>connector.</code>-prefixed connectors, and <code>embedded_config.json</code>. Re-check that layout against a published folder on every bump.</li>
 <li><strong>Cache limit.</strong> <code>low_ram_streaming</code> makes the pipeline set the MLX buffer-cache limit to 0 for the whole process. <code>backends/mac/memory.mlx_cache_limit</code> scopes that to model construction and each generation, then restores the previous limit.</li>
+</ul>
+<h2 id="vendored-seedvr2">Vendored SeedVR2</h2>
+<p><code>packages/seedvr2_torch</code> is the PyTorch SeedVR2 inference core from <a href="https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler"><code>numz/ComfyUI-SeedVR2_VideoUpscaler</code></a> (Apache-2.0), which the Windows and Linux plain upscale runs. Upstream is not a pip package, so it lives in the repository. Never edit it by hand.</p>
+<ul>
+<li><strong>Pin.</strong> <code>SEEDVR2_COMMIT</code> in the <code>Makefile</code> must be the commit of a release; the comment above it names the version.</li>
+<li><strong>Layout.</strong> <code>make update-seedvr2</code> copies upstream's <code>src/</code> without <code>src/interfaces/</code> (the ComfyUI nodes), the two model configs, the fixed text embeddings <code>pos_emb.pt</code> and <code>neg_emb.pt</code>, and the licence, and writes its own <code>__init__.py</code> in place of upstream's, which loads the nodes. Upstream's code imports itself relatively and finds its configs and embeddings three folders above <code>src/utils/constants.py</code>, so the copy keeps upstream's layout and is imported as <code>seedvr2_torch.src</code>.</li>
+<li><strong>Update.</strong> It does not carry dependencies: mirror upstream's <code>requirements.txt</code> into ours by hand, Windows and Linux only, leaving out <code>gguf</code> (only imported for GGUF weights) and <code>matplotlib</code> (debug output). <code>torchvision</code> comes from the same CUDA index as <code>torch</code>, and <code>opencv-python</code> is replaced by <code>opencv-python-headless</code>.</li>
+<li><strong>Internals we rely on.</strong> <code>tests/test_seedvr2_torch_contract.py</code> pins the entry points the upscaler calls, their keyword arguments and the bundled files.</li>
 </ul>
 <h2 id="releasing">Releasing</h2>
 <p>Pushing a <code>v*</code> tag runs the Release workflow, which builds the package, publishes it to PyPI and creates a GitHub Release. The package version comes from the tag (<code>hatch-vcs</code>), so the tag must be a valid PEP 440 version:</p>

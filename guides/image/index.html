@@ -692,10 +692,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#plain-upscale-macos" class="md-nav__link">
+  <a href="#plain-upscale" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Plain upscale (macOS)
+        Plain upscale
       
     </span>
   </a>
@@ -1232,10 +1232,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#plain-upscale-macos" class="md-nav__link">
+  <a href="#plain-upscale" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Plain upscale (macOS)
+        Plain upscale
       
     </span>
   </a>
@@ -1629,7 +1629,7 @@ ziv-image -m my-model --prompt &quot;a landscape&quot; --upscale 2 --no-upscale-
 <tbody>
 <tr>
 <td><strong>2×</strong>, <strong>4×</strong></td>
-<td>macOS</td>
+<td>all platforms</td>
 <td>A plain upscale with SeedVR2: one step, no prompt, no image model. It enlarges the image faithfully and adds fine detail without redrawing it.</td>
 </tr>
 <tr>
@@ -1639,24 +1639,28 @@ ziv-image -m my-model --prompt &quot;a landscape&quot; --upscale 2 --no-upscale-
 </tr>
 </tbody>
 </table>
-<p>On Windows and Linux the menu shows only the creative items, labelled "creative". In the viewer, press <strong>X</strong> then <strong>2</strong> or <strong>4</strong> to run the plain upscale on macOS, or the creative one on Windows and Linux. The creative items on macOS are in the menu only.</p>
-<h4 id="plain-upscale-macos">Plain upscale (macOS)</h4>
+<p>In the viewer, press <strong>X</strong> then <strong>2</strong> or <strong>4</strong> to run the plain upscale. The creative items are in the menu only.</p>
+<h4 id="plain-upscale">Plain upscale</h4>
 <p>The plain upscale works for any image: files without recorded settings, imported files and images from models that cannot upscale or refine images (e.g. Ideogram 4). No image model needs to be configured, and the job panel notes "original settings unknown" for a file without a record. The result is saved as is, without the sharpen, contrast and saturation passes. A source that has a record carries its prompt, model and LoRAs over for <strong>Reuse settings</strong>.</p>
 <ul>
-<li><strong>Model.</strong> The app picks one SeedVR2 model for your Mac from its memory: the 7B model where an output of 16 megapixels (a 4× upscale of a 1 MP image) fits in memory, otherwise the 3B model. Both run at 8-bit. To force a model, set <code>seedvr2.model</code> (below).</li>
-<li><strong>First use.</strong> The job downloads the model (about 17 GB for 7B, 7.3 GB for 3B) and the job panel shows this as its own step. It then stores an 8-bit copy in the models folder (<code>~/.ziv/models/</code>) and removes the downloaded files to save disk, so the model keeps roughly half of its download size on disk. Later upscales load the copy. The Models page lists the model your Mac uses as <code>seedvr2-7b@q8</code> (or <code>seedvr2-3b@q8</code>). Once the copy exists, the row shows its disk use and a delete button that removes it; the next plain upscale downloads the model again. That clean-up deletes the two downloaded files (the model's transformer and the shared VAE) from the shared Hugging Face cache, so they are removed even if another tool had cached them. If the chosen model changes (a <code>seedvr2.model</code> edit or a Mac with different memory), the previous model's copy stays in the hidden <code>.seedvr2</code> folder inside the models folder and is not shown on the Models page; delete that folder by hand to reclaim the space.</li>
-<li><strong>Memory.</strong> A size that may need more memory than your Mac's GPU memory budget stays available, marked <strong>· high memory</strong>, and its tooltip says so. The job runs, but it can be slow while macOS swaps, and a size well beyond the budget may fail. Time grows about linearly with the output size: on a 32 GB M5 a 16 MP result took about 6 minutes. The plain upscale has no megapixel limit.</li>
+<li><strong>Model.</strong> The app picks one SeedVR2 model for your machine, 7B or the smaller 3B, and always uses the same one. On a Mac it is the 7B model where an output of 16 megapixels (a 4× upscale of a 1 MP image) fits in memory. On Windows and Linux the model streams from system memory to the GPU, so the choice depends on system memory: 7B needs about 22 GB, otherwise 3B (about 12.5 GB). Both run at 8-bit (<code>q8</code> on a Mac, <code>fp8</code> on Windows and Linux). To force a model, set <code>seedvr2.model</code> (below).</li>
+<li><strong>First use on a Mac.</strong> The job downloads the model (about 17 GB for 7B, 7.3 GB for 3B) and the job panel shows this as its own step. It then stores an 8-bit copy in the models folder (<code>~/.ziv/models/</code>) and removes the downloaded files to save disk, so the model keeps roughly half of its download size on disk. Later upscales load the copy. The Models page lists the model your Mac uses as <code>seedvr2-7b@q8</code> (or <code>seedvr2-3b@q8</code>). Once the copy exists, the row shows its disk use and a delete button that removes it; the next plain upscale downloads the model again. That clean-up deletes the two downloaded files (the model's transformer and the shared VAE) from the shared Hugging Face cache, so they are removed even if another tool had cached them. If the chosen model changes (a <code>seedvr2.model</code> edit or a Mac with different memory), the previous model's copy stays in the hidden <code>.seedvr2</code> folder inside the models folder and is not shown on the Models page; delete that folder by hand to reclaim the space.</li>
+<li><strong>First use on Windows and Linux.</strong> The job downloads the model's 8-bit files (about 9.0 GB for 7B, 3.9 GB for 3B) into a hidden <code>.seedvr2</code> folder inside the models folder, and later upscales read them from there. For 7B this is the 8-bit file whose last block stays at 16-bit, which avoids streaks the plain 8-bit file draws in smooth areas. The Models page lists the model as <code>seedvr2-7b@fp8</code> (or <code>seedvr2-3b@fp8</code>) with its disk use and a delete button that removes its folder; the next plain upscale downloads it again. If the chosen model changes, the previous model's folder stays in <code>.seedvr2</code>; delete it by hand to reclaim the space.</li>
+<li><strong>Memory.</strong> A size that may need more GPU memory than your machine has stays available, marked <strong>· high memory</strong>, and its tooltip says so. The job runs, but on a Mac it can be slow while macOS swaps, and on Windows and Linux it may stop with an out-of-memory error. Time grows about linearly with the output size: on a 32 GB M5 a 16 MP result took about 6 minutes. On Windows and Linux the estimate leaves about 0.7 GB for the desktop and other apps on the GPU. On a 10 GB NVIDIA GPU a 2× takes about half a minute, and outputs up to about 16 MP fit (15 MP for 3B, which needs a little more GPU memory), so a 4× of a 1 MP image is marked <strong>high memory</strong>: it can work when nothing else uses the GPU (a 4× of 1344×768 took about a minute on 7B), but it fails when it doesn't fit. The plain upscale has no megapixel limit.</li>
 </ul>
 <p>The model choice and its defaults live in the <code>seedvr2</code> section of <code>~/.ziv/config.yaml</code>; the values below are the defaults:</p>
 <pre><code class="language-yaml">seedvr2:
   model: auto                  # auto, seedvr2-3b or seedvr2-7b
   softness: 0.75               # 0-1: pre-blur before upscaling; 0 = off
-  reference_megapixels: 16     # Output size the automatic choice must fit (a typical 4x)
-  tiers:                       # 8-bit, best first; the first that fits this Mac's memory at reference_megapixels is used
+  reference_megapixels: 16     # Output size the automatic choice must fit on a Mac (a typical 4x)
+  tiers:                       # macOS, 8-bit, best first; the first that fits this Mac's memory at reference_megapixels is used
     - {model: seedvr2-7b, weights_gb: 9.26, activation_floor_gb: 10.79, activation_base_gb: 1.88, activation_gb_per_mp: 0.83}
     - {model: seedvr2-3b, weights_gb: 4.72, activation_floor_gb: 10.79, activation_base_gb: 1.10, activation_gb_per_mp: 0.89}
+  discrete_tiers:              # Windows/Linux, FP8, best first; the first whose system_gb fits this machine's memory is used
+    - {model: seedvr2-7b, weights_gb: 1.6, activation_floor_gb: 5.0, activation_base_gb: 0.21, activation_gb_per_mp: 0.556, system_gb: 22}
+    - {model: seedvr2-3b, weights_gb: 1.6, activation_floor_gb: 5.0, activation_base_gb: 0.25, activation_gb_per_mp: 0.6, system_gb: 12.5}
 </code></pre>
-<p>With <code>model: auto</code> the first tier whose estimate fits at <code>reference_megapixels</code> wins, and the last one runs when none does or the memory is unknown. A tier's estimate is <code>weights_gb</code> plus the larger of <code>activation_floor_gb</code> and <code>activation_base_gb + activation_gb_per_mp × output megapixels</code>; the same estimate decides which sizes are marked <strong>high memory</strong>. Set <code>model</code> to <code>seedvr2-3b</code> or <code>seedvr2-7b</code> to use only that model. <code>softness</code> sets how much the image is softened before SeedVR2 enlarges it; <code>0</code> turns that off. Config precedence applies as everywhere else.</p>
+<p>With <code>model: auto</code> the first tier that fits wins, and the last one runs when none does or the memory is unknown. On a Mac a tier fits when its estimate at <code>reference_megapixels</code> is within the GPU memory budget; on Windows and Linux it fits when <code>system_gb</code> is within the system memory. A tier's estimate is <code>weights_gb</code> plus the larger of <code>activation_floor_gb</code> and <code>activation_base_gb + activation_gb_per_mp × output megapixels</code>, in GPU memory; the same estimate decides which sizes are marked <strong>high memory</strong>. Set <code>model</code> to <code>seedvr2-3b</code> or <code>seedvr2-7b</code> to use only that model. <code>softness</code> sets how much the image is softened before SeedVR2 enlarges it; <code>0</code> turns that off. Config precedence applies as everywhere else.</p>
 <h4 id="creative-upscale">Creative upscale</h4>
 <p>The image is resized, refined with img2img and sharpened, using the settings recorded in the file: prompt, model, seed, steps, guidance, scheduler, LoRAs, negative prompt and quantization. When the recorded model is not configured here, the default image model refines it with its own defaults. Images without recorded settings (imported or older files) are refined by the default image model with an empty prompt; the job panel notes this. The image is already sharpened, so by default the CAS pass before refinement is skipped (<code>sharpening.existing_pre_upscale: 0</code>); the final pass uses <code>sharpening.existing_upscaled</code>. Contrast and saturation are not applied again.</p>
 <p>Both kinds save the result next to the original as <code>&lt;name&gt;_2x.png</code> or <code>&lt;name&gt;_4x.png</code>, with a counter (<code>_2</code>) if that name exists. A creative option is disabled, with the reason in its tooltip, when the model cannot upscale or refine images (e.g. Ideogram 4), or when the output would exceed the model's maximum dimension or the megapixel limit. These settings live in the <code>upscale</code> section of <code>~/.ziv/config.yaml</code>:</p>
