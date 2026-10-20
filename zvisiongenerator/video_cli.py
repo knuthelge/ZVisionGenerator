@@ -315,7 +315,6 @@ def main(*, prog: str = "ziv-video") -> None:
         parser.error("--review is not supported by the video backend of this platform.")
     if args.review and not stdin_is_interactive():
         parser.error("--review needs an interactive terminal to ask for each decision.")
-    # A blank scene or an extension splits each prompt into scene and action, so even keep-everything settings change it.
     parse_enhance_args(parser, args, mode="video")
     _check_extend_options(parser, args)
 

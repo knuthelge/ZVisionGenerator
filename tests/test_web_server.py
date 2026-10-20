@@ -662,9 +662,12 @@ def test_submit_image_job_records_the_web_rewrite(monkeypatch, tmp_path):
     assert args.enhance_record["tier"] == "custom"  # worked out from the model, not taken from the browser
 
 
-def test_submit_image_job_rejects_a_malformed_enhance_record(monkeypatch, tmp_path):
-    with pytest.raises(ValueError, match="enhance"):
-        _submit_enhanced_image(monkeypatch, tmp_path, '{"settings": {"style": "nope"}, "model": "org/fast"}')
+@pytest.mark.parametrize("record", ['{"settings": {"style": "nope"}, "model": "org/fast"}', "{broken"])
+def test_submit_image_job_drops_an_invalid_enhance_record(monkeypatch, tmp_path, record):
+    with pytest.warns(UserWarning, match="enhance record"):
+        args = _submit_enhanced_image(monkeypatch, tmp_path, record)[0]["args"]
+    assert args.enhance_record is None
+    assert args.prompt_input == "a fox in snow"
 
 
 def test_submit_image_job_compacts_a_pretty_json_prompt(monkeypatch, tmp_path):

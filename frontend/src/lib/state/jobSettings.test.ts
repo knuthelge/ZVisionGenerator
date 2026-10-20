@@ -95,6 +95,34 @@ describe('jobSettingsPrefill', () => {
     expect(patch).toMatchObject({ enhancedScene: '', enhancedPrompt: '', enhancedFrom: null });
   });
 
+  it('restores the record of how the Enhanced text was made', () => {
+    const record = { settings: { style: 'cinematic' }, model: 'org/fast@r1', format: 'text' };
+    const { patch } = jobSettingsPrefill({
+      mode: 'video', workflow: 'txt2vid', scene: 'A castle at dusk.', prompt: 'A knight rides in.', scene_input: 'A castle.', prompt_input: 'a knight', enhance_record: JSON.stringify(record),
+    });
+
+    expect(patch.enhancedFrom?.record).toEqual(record);
+  });
+
+  it('restores an enhanced image job as the own prompt plus its Enhanced text', () => {
+    const { patch } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', prompt: 'A red fox curls up in deep snow.', prompt_input: 'a fox in snow' });
+
+    expect(patch).toMatchObject({ prompt: 'a fox in snow', enhancedPrompt: 'A red fox curls up in deep snow.', enhancedFrom: { prompt: 'a fox in snow', mode: 'image' } });
+  });
+
+  it('restores an Enhanced JSON caption into the Enhanced box, not the { } box', () => {
+    const { patch } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', json_prompt: '{"a":1}', prompt_input: 'a fox' });
+
+    expect(patch).toMatchObject({ prompt: 'a fox', enhancedPrompt: '{\n  "a": 1\n}', jsonPromptEnabled: false });
+    expect(patch.jsonPrompt).toBeUndefined();
+  });
+
+  it('keeps a caption typed in the { } box as the JSON prompt', () => {
+    const { patch } = jobSettingsPrefill({ mode: 'image', workflow: 'txt2img', json_prompt: '{"a":1}' });
+
+    expect(patch).toMatchObject({ jsonPromptEnabled: true, jsonPrompt: '{"a":1}', enhancedPrompt: '', enhancedFrom: null });
+  });
+
   it('remembers the Rewrite choice of a queued job for its own workflow', () => {
     const { patch } = jobSettingsPrefill({
       mode: 'video', workflow: 'extend', source_video: '/clips/walk.mp4', prompt: 'She waves.',
@@ -103,6 +131,15 @@ describe('jobSettingsPrefill', () => {
 
     expect(patch.enhanceSettingsVideo?.partsByWorkflow).toEqual({ extend: 'both' });
     expect(patch.enhanceSettings).toBeUndefined();
+  });
+
+  it('keeps the Rewrite choices the draft remembers for other video workflows', () => {
+    const { patch } = jobSettingsPrefill(
+      { mode: 'video', workflow: 'img2vid', prompt: 'She waves.', enhance_auto: 'true', enhance_settings: '{"parts":"both"}' },
+      { txt2vid: 'action', img2vid: 'action' },
+    );
+
+    expect(patch.enhanceSettingsVideo?.partsByWorkflow).toEqual({ txt2vid: 'action', img2vid: 'both' });
   });
 
   it('keeps a typed scene when an image job is loaded', () => {

@@ -103,10 +103,20 @@ describe('cliCommand', () => {
     const settings = { style: 'photo', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting', 'camera'], length: 'longer', motion: ['action'] };
 
     expect(cliCommand({ mode: 'image', prompt: 'a', enhance_auto: 'true', enhance_settings: JSON.stringify(settings) }).command)
-      .toBe('ziv image --prompt a --enhance style=photo,mood=keep,details=lighting+camera,length=longer');
+      .toBe('ziv image --prompt a --enhance style=photo,mood=keep,theme=keep,details=lighting+camera,length=longer');
     expect(cliCommand({ mode: 'video', prompt: 'a', enhance_auto: 'true', enhance_settings: JSON.stringify(settings) }).command)
-      .toBe('ziv video --prompt a --enhance style=photo,mood=keep,details=lighting+camera,length=longer,motion=action');
+      .toBe('ziv video --prompt a --enhance style=photo,mood=keep,theme=keep,details=lighting+camera,length=longer,camera=keep,pace=keep,motion=action');
     expect(cliCommand({ mode: 'image', prompt: 'a', enhance_auto: 'true' }).command).toBe('ziv image --prompt a --enhance');
+  });
+
+  it('writes the theme, camera, pace and sound, and the direction as --enhance-note', () => {
+    const settings = { style: 'cinematic', theme: 'noir', details: [], length: 'same', camera: 'orbit', pace: 'slow', motion: ['action'], sound: ['ambient'], note: 'in the rain' };
+    const { command } = cliCommand({ mode: 'video', prompt: 'a', enhance_auto: 'true', enhance_settings: JSON.stringify(settings) });
+    expect(command).toContain('--enhance style=cinematic,theme=noir,details=,length=same,camera=orbit,pace=slow,motion=action,sound=ambient');
+    expect(command).toContain('--enhance-note');
+    expect(command).toContain('in the rain');
+    const image = cliCommand({ mode: 'image', prompt: 'a', enhance_auto: 'true', enhance_settings: JSON.stringify(settings) }).command;
+    expect(image).not.toMatch(/camera=|pace=|motion=|sound=/);
   });
 
   it('names the Smart enhancer and JSON captions', () => {
@@ -124,7 +134,7 @@ describe('cliCommand', () => {
   it('spells out the Rewrite choice only where it is not the default of the workflow', () => {
     const settings = (parts: string) => JSON.stringify({ style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting'], length: 'same', motion: ['action'], parts });
     const video = { mode: 'video', prompt: 'a', enhance_auto: 'true' };
-    expect(cliCommand({ ...video, enhance_settings: settings('both') }).command).toBe('ziv video --prompt a --enhance style=keep,mood=keep,details=lighting,length=same,motion=action');
+    expect(cliCommand({ ...video, enhance_settings: settings('both') }).command).toBe('ziv video --prompt a --enhance style=keep,mood=keep,theme=keep,details=lighting,length=same,camera=keep,pace=keep,motion=action');
     expect(cliCommand({ ...video, enhance_settings: settings('action') }).command).toContain('--enhance parts=action,style=keep');
     const extend = { ...video, workflow: 'extend', source_video: '/clips/walk.mp4' };
     expect(cliCommand({ ...extend, enhance_settings: settings('action') }).command).not.toContain('parts=');

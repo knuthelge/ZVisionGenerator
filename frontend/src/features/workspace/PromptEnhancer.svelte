@@ -92,8 +92,6 @@
   const audio = $derived(hasAudio(draft.state, audioSupported, sourceHasAudio));
   // An extension needs a source it can read before any text can be written for it.
   const sourceGuard = $derived(extendGuard(draft.state, draft.extendSource, extendInspection.statusFor(draft.state.extendSourcePath)));
-  // A video prompt without a scene is split into scene and action, so it is never a no-op. On demand that needs a prompt;
-  // auto-enhance (also in file mode, where the prompt box is blank) only needs the default scene to be blank.
   const tier = $derived(effectiveTier(draft.state, contract));
   const format = $derived(effectiveFormat(draft.state, jsonCapable));
   const caption = $derived(format === 'json');

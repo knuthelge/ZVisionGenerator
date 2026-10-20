@@ -1,4 +1,4 @@
-import type { DraftState, EnhanceRecord, EnhanceContext, EnhancedSource, EnhanceFormat, EnhanceParts, EnhancerTier, EnhanceSettings, PromptEnhancerContract, Workflow, WorkflowMode } from '$lib/types';
+import type { DraftState, EnhanceRecord, EnhanceContext, EnhancedSource, EnhanceFormat, EnhanceParts, EnhancerTier, EnhanceSettings, PromptEnhancerContract, PromptFileOption, Workflow, WorkflowMode } from '$lib/types';
 
 /** The enhancer a run uses: Smart when chosen and available here, otherwise Fast. */
 export function effectiveTier(state: Pick<DraftState, 'enhanceModel'>, contract: PromptEnhancerContract | undefined | null): EnhancerTier {
@@ -24,6 +24,12 @@ export function isJsonCaption(text: string): boolean {
 /** A JSON caption laid out for reading and editing; other text is returned unchanged. */
 export function prettyCaption(text: string): string {
   return isJsonCaption(text) ? JSON.stringify(JSON.parse(text), null, 2) : text;
+}
+
+/** A prompt-file entry's `enhance:` spec as a run in *mode* applies it, or null when that run does not enhance the entry. */
+export function entryEnhanceSpec(option: Pick<PromptFileOption, 'enhance' | 'enhance_image' | 'enhance_caption'>, mode: WorkflowMode, caption: boolean): string | null {
+  if (mode === 'video') return option.enhance ?? null;
+  return (caption ? option.enhance_caption : option.enhance_image) ?? null;
 }
 
 /** Media mode of a canonical workflow. */
@@ -122,10 +128,24 @@ export function runParts(state: DraftState, remembered: EnhanceParts = remembere
   return remembered === 'action' && actionOnlyBlocked(state) ? 'both' : remembered;
 }
 
+/** *settings* with every option value the server no longer offers left out (a single choice falls back to its default). */
+function offeredOnly(settings: EnhanceSettings, contract: PromptEnhancerContract | undefined): EnhanceSettings {
+  if (!contract) return settings;
+  const next: EnhanceSettings = { ...settings };
+  for (const axis of contract.matrix.axes) {
+    const offered = new Set(axis.options.map((option) => option.slug));
+    const record = next as unknown as Record<string, string | string[]>;
+    const value = record[axis.key];
+    if (Array.isArray(value)) record[axis.key] = value.filter((slug) => offered.has(slug));
+    else if (typeof value === 'string' && !offered.has(value)) record[axis.key] = axis.default[0] ?? 'keep';
+  }
+  return next;
+}
+
 /** The user's last-used options, with axes they never set (e.g. saved before an axis existed) taken from the backend matrix defaults. */
 export function effectiveEnhanceSettings(state: DraftState, contract: PromptEnhancerContract | undefined): EnhanceSettings {
   const defaults = { ...DEFAULT_ENHANCE_SETTINGS, ...contract?.matrix.defaults };
-  const settings: EnhanceSettings = { ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...defaults.sound], ...state[enhanceSettingsKey(state.workflow)] };
+  const settings = offeredOnly({ ...defaults, details: [...defaults.details], motion: [...defaults.motion], sound: [...defaults.sound], ...state[enhanceSettingsKey(state.workflow)] }, contract);
   delete settings.parts;
   return workflowMode(state.workflow) === 'video' ? { ...settings, parts: rememberedParts(state) } : settings;
 }

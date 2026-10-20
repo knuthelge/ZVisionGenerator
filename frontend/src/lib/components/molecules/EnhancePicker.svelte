@@ -130,17 +130,19 @@
 <style>
   .picker-wrap { position: relative; display: flex; min-width: 0; flex: 1; }
   .picker { display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; cursor: pointer; color: var(--color-text-muted); }
-  .picker:hover:not(:disabled) { color: var(--color-text-secondary); }
+  @media (hover: hover) { .picker:hover:not(:disabled) { color: var(--color-text-secondary); } }
   .picker-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-primary); }
   .picker-value.keep { color: var(--color-text-muted); }
   .picker.set { background: color-mix(in srgb, var(--color-primary-main) 12%, var(--color-bg-base)); padding-right: 28px; }
   .picker.set .picker-value { color: var(--color-primary-main); font-weight: 600; }
   .picker-clear { position: absolute; top: 50%; right: 4px; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 4px; color: var(--color-text-muted); transform: translateY(-50%); }
-  .picker-clear:hover:not(:disabled) { background: var(--color-bg-surface); color: var(--color-text-primary); }
-  .picker-menu { z-index: 90; width: min(320px, calc(100vw - 16px)); max-height: min(420px, calc(100dvh - 16px)); overflow-y: auto; padding: 4px; }
+  @media (hover: hover) { .picker-clear:hover:not(:disabled) { background: var(--color-bg-surface); color: var(--color-text-primary); } }
+  /* Above the bottom sheet the options sit in on a phone. */
+  .picker-menu { z-index: var(--z-menu); width: min(320px, calc(100vw - 16px)); max-height: min(420px, calc(100dvh - 16px)); overflow-y: auto; padding: 4px; }
   .picker-group { margin: 0; padding: 8px 8px 4px; }
   .picker-option { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 8px; width: 100%; padding: 6px 8px; border-radius: var(--radius-sm); text-align: left; cursor: pointer; }
-  .picker-option:hover, .picker-option:focus-visible, .picker-option[aria-selected='true'] { background: var(--color-bg-surface-hover); outline: none; }
+  .picker-option:focus-visible, .picker-option[aria-selected='true'] { background: var(--color-bg-surface-hover); outline: none; }
+  @media (hover: hover) { .picker-option:hover { background: var(--color-bg-surface-hover); } }
   .picker-tick { display: grid; place-items: start center; padding-top: 2px; color: var(--color-primary-main); }
   .picker-name { font-size: var(--text-ui); font-weight: 600; line-height: 18px; color: var(--color-text-primary); }
   .picker-desc { grid-column: 2; font-size: var(--text-meta); line-height: 1.35; color: var(--color-text-muted); }

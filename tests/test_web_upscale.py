@@ -168,6 +168,15 @@ def test_plan_ignores_the_source_sharpen_amount(monkeypatch, tmp_path):
     assert plan.request.sharpen_amount_upscaled == 1.2
 
 
+def test_plan_keeps_how_an_enhanced_source_was_enhanced(monkeypatch, tmp_path):
+    _patch_model_resolution(monkeypatch)
+    record = {"settings": {"style": "film"}, "model": "org/fast", "tier": "fast", "format": "text"}
+
+    request = upscale_api.plan_upscale(_source(prompt_input="a barn", enhance=record), 2, _web_config(tmp_path), backend_name="mflux").request
+
+    assert (request.prompt_input, request.enhance_record) == ("a barn", record)
+
+
 def test_plan_does_not_sharpen_a_source_recorded_without_sharpening(monkeypatch, tmp_path):
     _patch_model_resolution(monkeypatch)
 

@@ -231,4 +231,14 @@ describe('enhance', () => {
     expect(enhanceShortLabel({ style: 'cinematic', mood: 'eerie' }, AXES)).toBe('Cinematic · Eerie');
     expect(enhanceShortLabel(true, AXES)).toBe('Default options');
   });
+
+  it('names the theme, camera and pace in the label', () => {
+    const axes: EnhanceAxis[] = [
+      { key: 'theme', label: 'Theme', multi: false, video_only: false, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }, { slug: 'noir', label: 'Noir', description: '', group: 'Dark' }], default: ['keep'] },
+      { key: 'camera', label: 'Camera', multi: false, video_only: true, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }, { slug: 'orbit', label: 'Orbit', description: '', group: null }], default: ['keep'] },
+      { key: 'pace', label: 'Pace', multi: false, video_only: true, audio_only: false, options: [{ slug: 'keep', label: 'Keep', description: '', group: null }, { slug: 'slow', label: 'Slow', description: '', group: null }], default: ['keep'] },
+    ];
+    expect(enhanceSummary({ theme: 'noir', camera: 'orbit', pace: 'slow' }, axes)).toBe('Noir · Orbit · Slow');
+    expect(enhanceSummary({ theme: 'keep' }, axes)).toBe('Custom options');
+  });
 });

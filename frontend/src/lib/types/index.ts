@@ -513,8 +513,12 @@ export interface PromptFileOption {
   scene_preview?: string | null;
   /** Whether the entry has its own `scene:`. */
   has_scene?: boolean;
-  /** Prompt-file `enhance:` settings as an `--enhance` spec, or null. */
+  /** Prompt-file `enhance:` settings as an `--enhance` spec (as a video run applies them), or null. */
   enhance?: string | null;
+  /** The same settings as a text image run applies them, or null when such a run does not enhance the entry. */
+  enhance_image?: string | null;
+  /** The same settings as a JSON-caption image run applies them (it enhances every entry with `enhance:`), or null. */
+  enhance_caption?: string | null;
 }
 
 export interface PromptFileInspection {

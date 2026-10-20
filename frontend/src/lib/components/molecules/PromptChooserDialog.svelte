@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Icon } from '$lib/components/atoms';
+  import { entryEnhanceSpec } from '$lib/state/promptEnhance';
   import type { PromptFileOption, WorkflowMode } from '$lib/types';
   import Modal from './Modal.svelte';
 
@@ -8,8 +9,10 @@
     /** File name shown in the title. */
     fileLabel: string;
     options: PromptFileOption[];
-    /** Image runs ignore an entry's `motion`, so it is left out of the tooltip. */
+    /** Image runs ignore an entry's video options, so they are left out of the tooltip. */
     workflowMode: WorkflowMode;
+    /** The run writes JSON captions, which enhance every entry with `enhance:`. */
+    captionRun?: boolean;
     selectedOptionIds: string[];
     /** Called with the confirmed selection, in file order. */
     onconfirm: (optionIds: string[]) => void;
@@ -17,10 +20,11 @@
     onedit?: () => void;
   }
 
-  let { open = $bindable(false), fileLabel, options, workflowMode, selectedOptionIds, onconfirm, onedit }: Props = $props();
+  let { open = $bindable(false), fileLabel, options, workflowMode, captionRun = false, selectedOptionIds, onconfirm, onedit }: Props = $props();
 
-  function enhanceSummary(spec: string): string {
-    return workflowMode === 'image' ? spec.replace(/,?motion=[^,]*/, '') : spec;
+  /** The entry's `enhance:` spec as this run applies it, or null when it is not enhanced. */
+  function enhanceSpec(option: PromptFileOption): string | null {
+    return entryEnhanceSpec(option, workflowMode, captionRun);
   }
 
   // Choices are a working copy until confirmed, so Cancel leaves the run untouched.
@@ -127,7 +131,7 @@
                 <span class="min-w-0 flex-1">
                   <span class="mr-1.5 font-mono text-meta text-text-muted">#{option.source_index + 1}</span>
                   {#if workflowMode === 'video' && option.has_scene}<span class="ui-badge mr-1.5" title={option.scene_preview ?? undefined}>scene</span>{/if}
-                  {#if option.enhance}<span class="mr-1.5 text-meta text-primary-main" title="Enhanced each image: {enhanceSummary(option.enhance)}">✨ enhanced</span>{/if}
+                  {#if enhanceSpec(option)}<span class="mr-1.5 text-meta text-primary-main" title="Enhanced each {workflowMode}: {enhanceSpec(option)}">✨ enhanced</span>{/if}
                   <span id="prompt-detail-{option.id}" class="whitespace-pre-wrap break-words text-content text-text-primary" class:line-clamp-2={!expanded} class:block={expanded}>{option.prompt_preview}</span>
                   {#if expanded && workflowMode === 'video' && option.scene_preview}
                     <span class="mt-2 block border-t border-border-subtle pt-2 text-ui text-text-secondary"><span class="font-medium">Scene:</span> {option.scene_preview}</span>

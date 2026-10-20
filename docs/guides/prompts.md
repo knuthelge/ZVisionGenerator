@@ -226,7 +226,7 @@ In the Web UI the Enhance popover lists each option with a one-line description 
 - **Focus on** chooses where the rewrite spends its words. Each picked aspect is described more fully; with Length Shorter, the picked aspects are kept while the rest is cut.
 - **Camera** and **Pace** shape a video's action. **Auto** lets the enhancer pick a camera move that suits the action. A faster pace fits more action into the clip, slow motion less. **Secondary motion** describes what moves along with the action: hair, cloth, water, smoke, leaves or dust.
 
-Prompt files and `--enhance` specs written before these options keep working: `motion: camera-move` and `motion: pacing` are still accepted. Earlier versions picked Lighting, Composition and, for video, Action by default; now nothing is picked, so an older `enhance: true` gives the general rewrite.
+Earlier versions picked Lighting, Composition and, for video, Action by default; now nothing is picked, so an older `enhance: true` gives the general rewrite. The motion values `camera-move` and `pacing` are gone: use **Camera** and **Pace** instead. An entry that still names them gets the usual warning for an invalid `enhance:` and is not enhanced.
 
 Length is a target, not a guarantee. Same keeps a prompt's length but grows a short one to about 25 words, since the rewrite adds detail. Longer aims for at least 40 words and Extra long for at least 80; Shorter never aims below 12 words, so a prompt of 12 words or fewer keeps about the same length. Shorter keeps every element you named, so a prompt full of named things shrinks only a little. Results are capped at 300 words (180 for FLUX.1, whose text encoder reads fewer tokens); when a prompt is already at the cap, it keeps about the same length.
 
@@ -284,7 +284,7 @@ The **Rewrite** option (`parts` in the CLI and prompt files) chooses what the en
 
 Ideogram 4 reads structured JSON captions (see [Ideogram 4](image.md#ideogram-4)). With `ideo`, the Enhance popover has a **Write as** choice: **Text** rewrites your prompt as usual, **JSON** writes a full caption from it instead, with a summary, the look, lighting and colors, the background, one element per thing you named, and the lettering you asked for.
 
-- The same options apply: Style decides photo or artwork, Mood shapes the look and colors, Details and Length decide how much is described, and Direction is followed.
+- The same options apply: Style decides photo or artwork, Mood and Theme shape the look and colors, Focus on and Length decide how much is described, and Direction is followed.
 - Quoted text (`"OPEN"`, `'LISBOA'`, `「パン屋」`) and names after *called* or *named* become text elements, copied exactly. On a card or logo, words you wrote without quotes are used too. Signs you mention without their words may get short words that fit, in the language you name.
 - The caption appears in the **Enhanced** tab, laid out for reading, and Generate sends it as the structured caption. Edit it there like any Enhanced text.
 - With **Enhance each image when generating**, every image gets its own caption.
@@ -329,6 +329,8 @@ woman:
     enhance:
       parts: action                # video: keep the scene, rewrite only the action
 ```
+
+In an image run, an entry whose `enhance:` sets only video options (`camera`, `pace`, `motion`, `sound` or `parts`) is not enhanced, and a warning says so; `enhance: true` still gives the general rewrite.
 
 From the command line, `--enhance` enhances every prompt and overrides entries' `enhance:` settings; `--no-enhance` turns all enhancement off:
 

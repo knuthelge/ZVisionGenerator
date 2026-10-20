@@ -1,5 +1,5 @@
-import { enhanceSettingsKey, restoredEnhanceSettings } from './promptEnhance';
-import type { DraftState, EnhanceParts, EnhanceSettings, JobSettings, PromptSource, Workflow } from '$lib/types';
+import { enhanceSettingsKey, prettyCaption, restoredEnhanceSettings, reusedEnhance, workflowMode } from './promptEnhance';
+import type { DraftState, EnhancedSource, EnhanceParts, EnhanceSettings, JobSettings, PromptSource, Workflow } from '$lib/types';
 import { snapExtendFrames } from './videoDuration';
 
 /** Fields the workspace prefill path applies on top of the model's defaults (the same keys as a reuse URL). */
@@ -36,8 +36,18 @@ export function numberOrNull(value: string | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-/** Turn the form fields a job was submitted with back into workspace state, so the form can be refilled from it. */
-export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
+/** The `record` of the Enhanced text from the job's `enhance_record` field, or nothing when it has none (or a broken one). */
+function enhanceRecord(value: string | undefined, workflow: Workflow): Pick<EnhancedSource, 'record'> {
+  const reused = reusedEnhance(value, workflow);
+  return reused ? { record: reused.record } : {};
+}
+
+/**
+ * Turn the form fields a job was submitted with back into workspace state, so the form can be refilled from it.
+ *
+ * @param rememberedParts The Rewrite choice the draft remembers for each video workflow; the job's own workflow takes the job's.
+ */
+export function jobSettingsPrefill(settings: JobSettings, rememberedParts?: EnhanceSettings['partsByWorkflow']): JobSettingsPrefill {
   const params: Record<string, string> = {};
   for (const key of PREFILL_KEYS) {
     const value = first(settings, key);
@@ -47,13 +57,17 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
 
   const promptSource = (first(settings, 'prompt_source') ?? 'inline') as PromptSource;
   const isVideo = first(settings, 'mode') === 'video';
-  const jsonPrompt = first(settings, 'json_prompt');
-  // A video run that used Enhanced text also recorded the user's own text; it becomes the boxes, and each part that differs fills its Enhanced box.
-  const ranEnhanced = isVideo && (settings.scene_input !== undefined || settings.prompt_input !== undefined);
+  const workflow = (first(settings, 'workflow') as Workflow | undefined) ?? (isVideo ? 'txt2vid' : 'txt2img');
+  const promptInput = first(settings, 'prompt_input');
+  // An image run of an Enhanced JSON caption sent it as `json_prompt` beside the user's own prompt; a caption typed in the { } box has no own prompt.
+  const ranCaption = !isVideo && settings.json_prompt !== undefined && promptInput !== undefined;
+  const jsonPrompt = ranCaption ? undefined : first(settings, 'json_prompt');
+  // A run that used Enhanced text also recorded the user's own text; it becomes the boxes, and each part that differs fills its Enhanced box.
+  const ranEnhanced = settings.scene_input !== undefined || promptInput !== undefined;
   const ranScene = first(settings, 'scene') ?? '';
-  const ranPrompt = first(settings, 'prompt') ?? '';
+  const ranPrompt = ranCaption ? prettyCaption(first(settings, 'json_prompt') ?? '') : first(settings, 'prompt') ?? '';
   const ownScene = ranEnhanced ? first(settings, 'scene_input') ?? '' : ranScene;
-  const ownPrompt = ranEnhanced ? first(settings, 'prompt_input') ?? '' : ranPrompt;
+  const ownPrompt = ranEnhanced ? promptInput ?? '' : ranPrompt;
   // A part that ran as written is not Enhanced text: only a part that differs from its recorded input fills its Enhanced box.
   const enhancedPrompt = ranEnhanced && ranPrompt !== ownPrompt ? ranPrompt : '';
   const enhancedScene = ranEnhanced && ranScene !== ownScene ? ranScene : '';
@@ -64,7 +78,7 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
     prompt: ownPrompt,
     enhancedPrompt,
     enhancedScene,
-    enhancedFrom: hasEnhanced ? { prompt: ownPrompt, scene: ownScene, mode: 'video' } : null,
+    enhancedFrom: hasEnhanced ? { prompt: ownPrompt, scene: ownScene, mode: workflowMode(workflow), ...enhanceRecord(first(settings, 'enhance_record'), workflow) } : null,
     jsonPromptEnabled: jsonPrompt !== undefined,
     negativePrompt: first(settings, 'negative_prompt') ?? '',
     seed: numberOrNull(first(settings, 'seed')),
@@ -75,7 +89,7 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
   };
   if (isVideo) patch.scene = ownScene;
   // An extension's boxes are the job's own text, blank scene included; the source's recorded text must not replace them.
-  if (isVideo && first(settings, 'workflow') === 'extend') {
+  if (isVideo && workflow === 'extend') {
     const source = first(settings, 'source_video') ?? null;
     const frames = numberOrNull(first(settings, 'extend_frames'));
     patch.extendPrefill = { path: source ?? '', scene: '', prompt: '' };
@@ -95,7 +109,10 @@ export function jobSettingsPrefill(settings: JobSettings): JobSettingsPrefill {
   if (settings.first_sigma !== undefined) patch.firstSigma = numberOrNull(first(settings, 'first_sigma'));
   if (settings.quantize !== undefined) patch.quantize = numberOrNull(first(settings, 'quantize'));
   const enhance = restoredEnhanceSettings(first(settings, 'enhance_settings'), first(settings, 'workflow') as Workflow | undefined);
-  if (enhance) patch[enhanceSettingsKey((first(settings, 'workflow') as Workflow | undefined) ?? 'txt2img')] = enhance;
+  if (enhance) {
+    const key = enhanceSettingsKey(workflow);
+    patch[key] = key === 'enhanceSettingsVideo' && rememberedParts ? { ...enhance, partsByWorkflow: { ...rememberedParts, ...enhance.partsByWorkflow } } : enhance;
+  }
 
   for (const [name, enabledKey, amountKey] of [
     ['sharpen', 'postprocessSharpenEnabled', 'postprocessSharpenAmount'],

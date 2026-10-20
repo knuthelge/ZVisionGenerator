@@ -168,6 +168,9 @@ def _source_request_fields(source: UpscaleSource, recorded: RecordedSettings) ->
         "image_strength": recorded.image_strength if recorded.image_strength is not None else ImageGenerationRequest.image_strength,
         "output_dir": str(Path(source.path).parent),
         "upscale_source": source.path,
+        # An enhanced source keeps the user's own prompt and how it was enhanced, so the upscale still shows and reuses them.
+        "prompt_input": recorded.prompt_input,
+        "enhance_record": recorded.enhance,
     }
 
 

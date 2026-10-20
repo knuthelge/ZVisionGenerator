@@ -6,23 +6,28 @@ from typing import Any
 
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus, IterationPlan
 from zvisiongenerator.utils.config import enhancer_tier_models, model_reference, split_model_revision
+from zvisiongenerator.utils.paths import collapse_home, expand_home
 from zvisiongenerator.utils.prompt_enhance import ENHANCE_AXES, ENHANCE_FORMATS, EnhanceSettings, settings_from_mapping, settings_to_mapping
 
 __all__ = ["RECORD_TIERS", "build_enhance_record", "enhance_record_summary", "enhancer_tier", "parse_enhance_record", "planned_enhance_record"]
 
 # ``custom`` is a model set on the Config page or with --enhance-model REPO.
 RECORD_TIERS = ("fast", "smart", "custom")
-_VIDEO_ONLY_KEYS = ("motion", "sound", "parts")
+# Every video-only option axis (camera, pace, motion, sound) plus the Rewrite choice.
+_VIDEO_ONLY_KEYS = (*(axis.key for axis in ENHANCE_AXES if axis.video_only), "parts")
 
 
 def enhancer_tier(config: dict[str, Any], *, platform_key: str, model: str) -> str:
-    """Return which enhancer tier *model* (``REPO[@REVISION]``) is: ``fast``, ``smart``, or ``custom`` for any other model."""
+    """Return which enhancer tier *model* (``REPO[@REVISION]``) is: ``fast``, ``smart``, or ``custom`` for any other model.
+
+    A local folder matches however its home directory is written (``~`` or in full), in *model* and in the config.
+    """
     try:
-        key = split_model_revision(model)
+        repo, revision = split_model_revision(expand_home(model))
     except ValueError:
         return "custom"
-    for tier, reference in enhancer_tier_models(config, platform_key=platform_key).items():
-        if reference == key:
+    for tier, (tier_repo, tier_revision) in enhancer_tier_models(config, platform_key=platform_key).items():
+        if (expand_home(tier_repo), tier_revision) == (repo, revision):
             return tier
     return "custom"
 
@@ -30,7 +35,8 @@ def enhancer_tier(config: dict[str, Any], *, platform_key: str, model: str) -> s
 def build_enhance_record(settings: EnhanceSettings, *, mode: str, repo: str, revision: str | None, tier: str, fmt: str) -> dict[str, Any]:
     """Return the ``enhance`` block an asset records: the options used, the model, its tier and the output format.
 
-    Image records leave out the video-only options; an empty direction is left out.
+    Image records leave out the video-only options; an empty direction is left out. A local model folder is written
+    with the home directory as ``~``, so shared files do not reveal the username.
     """
     options = settings_to_mapping(settings)
     if mode != "video":
@@ -39,7 +45,7 @@ def build_enhance_record(settings: EnhanceSettings, *, mode: str, repo: str, rev
         options.pop("note", None)
     if options.get("parts") is None:
         options.pop("parts", None)
-    return {"settings": options, "model": model_reference(repo, revision), "tier": tier, "format": fmt}
+    return {"settings": options, "model": collapse_home(model_reference(repo, revision)), "tier": tier, "format": fmt}
 
 
 def planned_enhance_record(iteration: IterationPlan, enhancer: EnhancerUsed | None, *, mode: str) -> dict[str, Any] | None:

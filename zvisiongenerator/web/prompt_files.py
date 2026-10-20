@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from zvisiongenerator.utils.atomic_write import write_text_atomic
-from zvisiongenerator.utils.prompt_enhance import format_enhance_spec
+from zvisiongenerator.utils.prompt_enhance import EnhanceSettings, format_enhance_spec, only_video_options
 from zvisiongenerator.utils.prompts import PromptFileInspection, PromptFileOption, inspect_prompts_file, inspect_prompts_text
 
 
@@ -82,6 +82,13 @@ def _find_option(inspection: PromptFileInspection, option_id: str) -> PromptFile
     raise ValueError(f"Prompt option '{option_id}' is missing or inactive.")
 
 
+def _image_enhance_spec(settings: EnhanceSettings | None) -> str | None:
+    """Return the entry's ``enhance:`` spec as a text image run applies it, or None when such a run does not enhance it."""
+    if settings is None or only_video_options(settings):
+        return None
+    return format_enhance_spec(settings, mode="image")
+
+
 def _serialize_options(options: list[PromptFileOption]) -> list[dict[str, str | int | bool | None]]:
     """Serialize active prompt options for the Web UI chooser."""
     return [
@@ -95,6 +102,8 @@ def _serialize_options(options: list[PromptFileOption]) -> list[dict[str, str | 
             "scene_preview": option.scene,
             "has_scene": option.scene is not None,
             "enhance": format_enhance_spec(option.enhance) if option.enhance is not None else None,
+            "enhance_image": _image_enhance_spec(option.enhance),
+            "enhance_caption": format_enhance_spec(option.enhance, mode="image") if option.enhance is not None else None,
         }
         for option in options
     ]

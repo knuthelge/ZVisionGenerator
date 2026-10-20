@@ -351,7 +351,7 @@ cases:
     tags: [video, t2v]
     mode: video
     prompt: a red kite rises over a grassy hill
-    settings: {motion: [action, camera-move]}
+    settings: {motion: [action], camera: auto}
     context: {ratio: "16:9", frames: 97, fps: 24, audio: false}
     keep: [red kite, hill]
   - id: t2v-dialogue
@@ -366,7 +366,7 @@ cases:
     tags: [video, t2v]
     mode: video
     prompt: a skateboarder rides down a ramp, lands a kickflip and waves to the camera
-    settings: {motion: [action, pacing]}
+    settings: {motion: [action]}
     context: {ratio: "16:9", frames: 241, fps: 24, audio: true}
     keep: [skateboarder, ramp, kickflip]
   - id: t2v-scene-only

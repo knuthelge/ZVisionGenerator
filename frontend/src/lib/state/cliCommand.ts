@@ -51,24 +51,31 @@ function text(settings: JobSettings, key: string): string | undefined {
   return value ? value : undefined;
 }
 
-/** Serialize submitted enhancement options to the `--enhance` SPEC grammar (`parts` and `motion` only for video). */
-function enhanceSpec(raw: string | undefined, isVideo: boolean, isExtend: boolean): string {
-  if (!raw) return '';
+// The `--enhance` SPEC keys in the server's order; the video-only ones are written for video jobs only.
+const ENHANCE_SPEC_KEYS = ['style', 'mood', 'theme', 'details', 'length'];
+const VIDEO_ENHANCE_SPEC_KEYS = ['camera', 'pace', 'motion', 'sound'];
+
+/**
+ * Serialize submitted enhancement options to the `--enhance` SPEC grammar (`parts`, `camera`, `pace`, `motion` and
+ * `sound` only for video), with the direction apart: the SPEC cannot hold it, `--enhance-note` does.
+ */
+function enhanceSpec(raw: string | undefined, isVideo: boolean, isExtend: boolean): { spec: string; note: string } {
+  if (!raw) return { spec: '', note: '' };
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(raw) as Record<string, unknown>;
   } catch {
-    return '';
+    return { spec: '', note: '' };
   }
   const parts: string[] = [];
   // The CLI rewrites an extension's action only and any other video's scene and action unless told otherwise, so only the other choice is spelled out.
   if (isVideo && parsed.parts !== undefined && parsed.parts !== (isExtend ? 'action' : 'both')) parts.push(`parts=${String(parsed.parts)}`);
-  for (const key of ['style', 'mood', 'details', 'length', ...(isVideo ? ['motion'] : [])]) {
+  for (const key of [...ENHANCE_SPEC_KEYS, ...(isVideo ? VIDEO_ENHANCE_SPEC_KEYS : [])]) {
     const value = parsed[key];
     if (value === undefined || value === null) continue;
     parts.push(`${key}=${Array.isArray(value) ? value.join('+') : String(value)}`);
   }
-  return parts.join(',');
+  return { spec: parts.join(','), note: typeof parsed.note === 'string' ? parsed.note.trim() : '' };
 }
 
 /** Append the flags for an optional-amount toggle (`--sharpen [X]` / `--no-sharpen`) relative to its CLI default. */
@@ -188,9 +195,10 @@ export function cliCommand(settings: JobSettings, options: CliCommandOptions = {
 
   // Auto-enhance rewrites every prompt before the model loads; JSON captions are never enhanced.
   if (!isJson && checked(settings, 'enhance_auto')) {
-    const spec = enhanceSpec(first(settings, 'enhance_settings'), isVideo, isExtend);
+    const { spec, note } = enhanceSpec(first(settings, 'enhance_settings'), isVideo, isExtend);
     args.push('--enhance');
     if (spec) args.push(spec);
+    if (note) args.push('--enhance-note', note);
   }
   // The enhancer and format are sent only when the job enhances (auto-enhance or prompt-file entries) and differ from the defaults.
   if (!isJson && text(settings, 'enhance_model') === 'smart') args.push('--enhance-model', 'smart');

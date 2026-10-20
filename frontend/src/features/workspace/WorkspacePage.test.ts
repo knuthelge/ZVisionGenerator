@@ -1559,6 +1559,31 @@ describe('WorkspacePage', () => {
       expect(JSON.parse(String(submitted.get('enhance_record')))).toEqual(record);
     });
 
+    it('records the text an out-of-date rewrite was made from, not the changed Your text', async () => {
+      const record = { settings: { style: 'photo' }, model: 'org/fast@r1', format: 'text' as const };
+      draft.patch({ prompt: 'a wolf in rain', enhancedPrompt: 'A red fox curls up in deep snow.', enhancedFrom: { prompt: 'a fox in snow', mode: 'image', record } });
+      await mountWorkspace(withEnhancer(makeContext()));
+
+      const submitted = await submitForm();
+      expect(submitted.get('prompt')).toBe('A red fox curls up in deep snow.');
+      expect(submitted.get('prompt_input')).toBe('a fox in snow');
+    });
+
+    it('sends no enhance record once the Enhanced text is edited by hand', async () => {
+      const record = { settings: { style: 'photo' }, model: 'org/fast@r1', format: 'text' as const };
+      draft.patch({ prompt: 'a fox in snow', enhancedPrompt: 'A red fox curls up in deep snow.', enhancedFrom: { prompt: 'a fox in snow', mode: 'image', record } });
+      await mountWorkspace(withEnhancer(makeContext()));
+      const enhanced = target.querySelector('#ws-enhanced-prompt') as HTMLTextAreaElement;
+      enhanced.value = 'A red fox curls up in deep snow, my own words.';
+      enhanced.dispatchEvent(new Event('input', { bubbles: true }));
+      await settle();
+
+      const submitted = await submitForm();
+      expect(submitted.get('prompt')).toBe('A red fox curls up in deep snow, my own words.');
+      expect(submitted.get('prompt_input')).toBe('a fox in snow');
+      expect(submitted.has('enhance_record')).toBe(false);
+    });
+
     it('sends no enhance record without Enhanced text', async () => {
       draft.patch({ prompt: 'a fox in snow', enhancedPrompt: '', enhancedFrom: null });
       await mountWorkspace(withEnhancer(makeContext()));

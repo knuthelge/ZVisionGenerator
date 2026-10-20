@@ -23,6 +23,7 @@ from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import resolve_lora_references
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.prompts import inspect_prompts_file
+from zvisiongenerator.utils.prompt_enhance import image_enhance_entries
 
 logger = logging.getLogger(__name__)
 
@@ -256,7 +257,7 @@ def main(*, prog: str = "ziv-image") -> None:
             inspection = inspect_prompts_file(args.prompts_file)
         except (FileNotFoundError, ValueError) as e:
             parser.error(str(e))
-        prompts_data, enhance_by_set = inspection.prompts_data, inspection.enhance_by_set
+        prompts_data, enhance_by_set = inspection.prompts_data, image_enhance_entries(inspection.enhance_by_set, caption=args.enhance_format == "json")
         defer_format_to_entries(args, enhance_by_set)
     model_suffix = f" ({model_info.size or 'unknown size'})" if model_info.family == "flux2_klein" else ""
     print(f"Model type: {model_info.family}{model_suffix}")

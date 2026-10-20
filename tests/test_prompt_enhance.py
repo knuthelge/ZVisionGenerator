@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import pytest
 
 from zvisiongenerator.utils.prompt_enhance import (
@@ -15,6 +17,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     enhance_context,
     enhance_prompt,
     format_enhance_spec,
+    image_enhance_entries,
     is_unusable,
     matrix_contract,
     parse_enhance_entry,
@@ -98,10 +101,11 @@ class TestMatrix:
         assert {option["group"] for option in axes["theme"]["options"][1:]} == {"Calm & sacred", "Allure", "Dark", "Wonder", "Era & tech"}
         assert (axes["camera"]["video_only"], axes["pace"]["video_only"], axes["theme"]["video_only"]) == (True, True, False)
 
-    def test_legacy_motion_slugs_parse_but_are_not_offered(self):
+    def test_removed_motion_values_are_rejected(self):
         motion = {axis["key"]: axis for axis in matrix_contract()["axes"]}["motion"]
         assert [option["slug"] for option in motion["options"]] == ["action", "secondary"]
-        assert parse_enhance_spec("motion=camera-move+pacing", mode="video").motion == ("camera-move", "pacing")
+        with pytest.raises(ValueError, match="Unknown motion 'camera-move'"):
+            parse_enhance_spec("motion=camera-move", mode="video")
 
     def test_sound_alone_is_not_no_op_for_video(self):
         validate_settings(EnhanceSettings(details=(), motion=(), sound=("ambient",)), mode="video")
@@ -131,8 +135,8 @@ class TestSpec:
         assert parse_enhance_spec("  ", mode="image") == EnhanceSettings()
 
     def test_full_spec(self):
-        settings = parse_enhance_spec("style=cinematic,mood=dramatic,details=lighting+camera,length=longer,motion=action+camera-move", mode="video")
-        assert settings == EnhanceSettings(style="cinematic", mood="dramatic", details=("lighting", "camera"), length="longer", motion=("action", "camera-move"))
+        settings = parse_enhance_spec("style=cinematic,mood=dramatic,details=lighting+camera,length=longer,motion=action+secondary", mode="video")
+        assert settings == EnhanceSettings(style="cinematic", mood="dramatic", details=("lighting", "camera"), length="longer", motion=("action", "secondary"))
 
     def test_partial_spec_keeps_defaults(self):
         settings = parse_enhance_spec("length=extra", mode="image")
@@ -150,7 +154,7 @@ class TestSpec:
         "settings",
         [
             EnhanceSettings(),
-            EnhanceSettings(style="3d", mood="nostalgic", details=(), length="shorter", motion=("pacing",)),
+            EnhanceSettings(style="3d", mood="nostalgic", details=(), length="shorter", motion=("secondary",)),
             EnhanceSettings(sound=("ambient", "dialogue")),
         ],
     )
@@ -210,7 +214,7 @@ class TestEntry:
 
     def test_motion_in_image_yaml_warns_and_is_ignored(self):
         with pytest.warns(UserWarning, match="only applies to video"):
-            settings = parse_enhance_entry({"style": "photo", "motion": ["pacing"]}, mode="image", where="x")
+            settings = parse_enhance_entry({"style": "photo", "motion": ["secondary"]}, mode="image", where="x")
         assert settings.motion == EnhanceSettings().motion
 
     def test_invalid_names_location(self):
@@ -335,6 +339,28 @@ def _rule(system: str, prefix: str) -> str | None:
 _AUDIO = EnhanceContext(audio=True)
 
 
+class TestImageEntries:
+    def test_entries_with_only_video_options_are_not_enhanced_in_an_image_run(self):
+        camera_only = EnhanceSettings(camera="orbit", motion=("action",))
+        styled = EnhanceSettings(style="film", camera="orbit")
+        general = EnhanceSettings()
+        with pytest.warns(UserWarning, match="only video options"):
+            assert image_enhance_entries({"a": [camera_only, styled, general, None]}) == {"a": [None, styled, general, None]}
+
+    def test_nothing_to_drop_warns_nothing(self):
+        entries = {"a": [EnhanceSettings(style="film"), EnhanceSettings()]}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert image_enhance_entries(entries) == entries
+        assert image_enhance_entries(None) is None
+
+    def test_a_caption_run_enhances_every_entry(self):
+        entries = {"a": [EnhanceSettings(camera="orbit"), None]}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert image_enhance_entries(entries, caption=True) == entries
+
+
 class TestMessages:
     def test_system_message_lists_rules_between_intro_and_closing(self):
         assert system_message("Intro.", ["one", "two"], "Closing.") == "Intro.\nRules:\n- one\n- two\nClosing."
@@ -402,10 +428,10 @@ class TestMessages:
         assert "never an element the user named" in _system(EnhanceSettings(length="shorter"), in_words=40)
 
     def test_video_mode_lines(self):
-        system = _system(EnhanceSettings(motion=("action", "camera-move")), mode="video")
+        system = _system(EnhanceSettings(motion=("action", "secondary")), mode="video")
         assert "text-to-video" in system
         assert "visible motion and camera movement" in system
-        assert "Motion: describe the action as a clear sequence of events, camera movement." in system
+        assert "Motion: describe the action as a clear sequence of events, the secondary motion that moves along with it: hair, cloth, water, smoke, leaves or dust." in system
 
     def test_image_mode_has_no_motion(self):
         assert "Motion:" not in _system(EnhanceSettings(motion=("action",)))
@@ -658,8 +684,8 @@ class TestPairMessages:
         assert _rule(system, "For the ACTION: Style") is None
 
     def test_option_mapping_motion_and_sound_go_to_the_action(self):
-        system = _pair_system(EnhanceSettings(motion=("camera-move",), sound=("dialogue",)), context=_AUDIO)
-        assert _rule(system, "For the ACTION: describe camera movement") is not None
+        system = _pair_system(EnhanceSettings(motion=("secondary",), sound=("dialogue",)), context=_AUDIO)
+        assert _rule(system, "For the ACTION: describe the secondary motion") is not None
         assert _rule(system, "For the ACTION: describe speech") is not None
         assert _rule(system, "For the SCENE: describe") is None
 
@@ -826,6 +852,21 @@ class TestEnhanceVideoPrompt:
         scene = 'A man says "Hi there" at a door.'
         result, enhancer = _pair_run(['SCENE: A man says "hi  there" at an old door.\nACTION: He steps inside.'], scene=scene)
         assert result.scene == 'A man says "hi  there" at an old door.' and len(enhancer.calls) == 1
+
+    def test_a_quote_is_not_known_from_a_longer_word_in_the_users_scene(self):
+        result, enhancer = _pair_run(['SCENE: A man says "Hi" on a trail.\nACTION: A knight gallops in.', "SCENE: Hikers on a trail.\nACTION: A knight gallops in."], scene="Hikers on a trail.")
+        assert result.scene == "Hikers on a trail." and len(enhancer.calls) == 2
+
+    def test_lettering_from_the_prompt_may_move_into_the_scene(self):
+        prompt = 'a diner with a neon sign that reads "OPEN 24 HOURS", a waitress steps out'
+        result, enhancer = _pair_run(['SCENE: A diner under a neon sign reading "OPEN 24 HOURS".\nACTION: A waitress steps out.'], prompt=prompt)
+        assert result.scene == 'A diner under a neon sign reading "OPEN 24 HOURS".' and len(enhancer.calls) == 1
+        assert result.warning is None
+
+    @pytest.mark.parametrize("prompt", ['a diner with a neon sign that says "OPEN", a waitress steps out', 'a diner called "OPEN", a waitress steps out'])
+    def test_a_users_quote_is_kept_in_the_scene_however_it_is_worded(self, prompt):
+        result, enhancer = _pair_run(['SCENE: A diner under a neon sign reading "OPEN".\nACTION: A waitress steps out.'], prompt=prompt)
+        assert result.scene == 'A diner under a neon sign reading "OPEN".' and len(enhancer.calls) == 1
 
     def test_quotes_in_the_action_are_always_fine(self):
         result, _ = _pair_run(['SCENE: A castle.\nACTION: The knight shouts "Charge!" and rides in.'])
@@ -1049,10 +1090,10 @@ class TestExtendWithScene:
         assert "first frame is supplied" not in system and "Style:" not in system and "Mood:" not in system and "Add detail on" not in system
 
     def test_motion_sound_and_direction_apply(self):
-        settings = EnhanceSettings(motion=("camera-move",), sound=("dialogue",), note="Keep it quiet.")
+        settings = EnhanceSettings(motion=("secondary",), sound=("dialogue",), note="Keep it quiet.")
         _, enhancer = _extend_run(["She walks away slowly."], context=_extend_context(audio=True), settings=settings)
         system = _sent_system(enhancer)
-        assert "Motion: describe camera movement." in system and "Sound: describe speech" in system
+        assert "Motion: describe the secondary motion that moves along with it: hair, cloth, water, smoke, leaves or dust." in system and "Sound: describe speech" in system
         assert "Direction from the user (follow it): Keep it quiet." in system
 
     def test_sound_is_left_out_without_audio(self):
@@ -1291,11 +1332,13 @@ class TestActionOnlyWithoutExtending:
         assert "SCENE:" not in system and _KEPT_SCENE not in user and user == "he draws his sword"
 
     def test_style_mood_and_details_belong_to_the_scene_and_are_left_out(self):
-        settings = EnhanceSettings(style="anime", mood="eerie", details=("lighting",), motion=("camera-move",), note="Keep it quiet.", parts="action")
+        settings = EnhanceSettings(style="anime", mood="eerie", details=("lighting",), motion=("secondary",), note="Keep it quiet.", parts="action")
         _, enhancer = _action_run(["The knight draws his sword."], settings=settings)
         system = _sent_system(enhancer)
         assert "Style:" not in system and "Mood:" not in system and "Add detail on" not in system
-        assert "Motion: describe camera movement." in system and "Direction from the user (follow it): Keep it quiet." in system
+        assert (
+            "Motion: describe the secondary motion that moves along with it: hair, cloth, water, smoke, leaves or dust." in system and "Direction from the user (follow it): Keep it quiet." in system
+        )
 
     def test_a_blank_prompt_asks_for_an_action_that_suits_the_scene(self):
         result, enhancer = _action_run(["The knight walks across the courtyard."], prompt="")

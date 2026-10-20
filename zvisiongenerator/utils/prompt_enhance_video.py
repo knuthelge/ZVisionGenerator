@@ -42,7 +42,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     validate_settings,
     word_count,
 )
-from zvisiongenerator.utils.prompt_quotes import missing_quotes
+from zvisiongenerator.utils.prompt_quotes import contains_text, missing_quotes, quoted_texts
 
 if TYPE_CHECKING:
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
@@ -397,23 +397,27 @@ def _hold_back_partial_marker(text: str, words: tuple[str, ...]) -> str:
     return text[: match.start()] if letters or stars else text
 
 
-def _quotes_known(scene: str, user_scene: str) -> bool:
-    """Return whether every quoted span in *scene* already appears in *user_scene*."""
-    known = normalize_text(user_scene)
-    return all(normalize_text(straight or curly) in known for straight, curly in _QUOTED_RE.findall(scene))
+def _quotes_known(scene: str, user_scene: str, prompt: str) -> bool:
+    """Return whether every quoted span in *scene* is in *user_scene* or quoted in *prompt*, i.e. the model invented none.
+
+    Any of the user's quotes may move into the scene: the video model reads the scene and action as one prompt, so where
+    a quote lands only changes the split, and telling lettering from speech by its wording is a guess.
+    """
+    known = normalize_text("\n".join((user_scene, *quoted_texts(prompt))))
+    return all(contains_text(known, normalize_text(straight or curly)) for straight, curly in _QUOTED_RE.findall(scene))
 
 
 def _accept_pair(raw: str, user_scene: str, prompt: str, *, previous: str | None = None) -> tuple[str, str] | None:
     """Return the parsed scene and action of *raw* when they pass validation, else None.
 
     An echoed scene is fine; the action must not echo *prompt*, refuse, or repeat *previous* (see ``repeats_source``);
-    the scene may only quote what the user's scene already quotes.
+    the scene may only quote what the user wrote (see ``_quotes_known``).
     """
     parsed = parse_scene_action(raw)
     if parsed is None:
         return None
     scene, action = parsed
-    if is_unusable(action, prompt) or _repeats(action, previous) or not _quotes_known(scene, user_scene):
+    if is_unusable(action, prompt) or _repeats(action, previous) or not _quotes_known(scene, user_scene, prompt):
         return None
     return parsed
 

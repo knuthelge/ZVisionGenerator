@@ -32,7 +32,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     theme_rules,
     word_count,
 )
-from zvisiongenerator.utils.prompt_quotes import quoted_texts
+from zvisiongenerator.utils.prompt_quotes import find_text, quoted_texts
 
 if TYPE_CHECKING:
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
@@ -154,6 +154,7 @@ _DETAIL_ROUTES = {
     "color": "COLORS: 4 to 6 colors, and name the main colors in each OBJECT line.",
     "environment": "BACKGROUND: describe the setting in depth: the place, surfaces, distance and weather.",
     "subject": "In the main subject's OBJECT line describe its appearance, clothing and pose.",
+    "expression": "In each person's OBJECT line describe their facial expression, gaze and body language.",
 }
 _EXAMPLE_HEAD = "SUMMARY: A white lighthouse stands on a rocky headland above a stormy sea at dusk.\nAESTHETICS: moody, windswept, coastal\nLIGHTING: low dusk light from the left under heavy clouds, the lamp glowing warm\n"
 _EXAMPLE_TAIL = (
@@ -458,7 +459,7 @@ def _lettering_only(desc: str, quotes: tuple[str, ...]) -> bool:
     A line naming a thing that carries the text ('A white mug with the text "BEST DAD"') is an object and is kept.
     """
     folded = desc.casefold()
-    starts = [folded.find(words.casefold()) for words in quotes if words.casefold() in folded]
+    starts = [start for words in quotes if (start := find_text(folded, words.casefold())) >= 0]
     if not starts:
         return False
     head = desc[: min(starts)]

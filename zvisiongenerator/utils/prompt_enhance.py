@@ -50,7 +50,6 @@ class EnhanceOption:
     Attributes:
         description: One line for the Web UI menu: what the option asks the enhancer for.
         group: The menu group it is listed under (Style: Photo or Art; Theme: its five groups), or None.
-        hidden: Accepted from prompt files and the CLI for compatibility but not offered in the Web UI.
     """
 
     slug: str
@@ -58,7 +57,6 @@ class EnhanceOption:
     instruction: str
     description: str = ""
     group: str | None = None
-    hidden: bool = False
 
 
 @dataclass(frozen=True)
@@ -81,7 +79,7 @@ class EnhanceAxis:
         for option in self.options:
             if option.slug == slug:
                 return option
-        raise ValueError(f"Unknown {self.key} '{slug}'. Valid values: {', '.join(option.slug for option in self.options if not option.hidden)}.")
+        raise ValueError(f"Unknown {self.key} '{slug}'. Valid values: {', '.join(self.slugs())}.")
 
 
 KEEP = "keep"
@@ -259,9 +257,6 @@ MOTION_AXIS = EnhanceAxis(
     options=(
         EnhanceOption("action", "Action sequence", "the action as a clear sequence of events", "What happens, as clear beats in time order"),
         EnhanceOption("secondary", "Secondary motion", "the secondary motion that moves along with it: hair, cloth, water, smoke, leaves or dust", "Hair, cloth, water, smoke, leaves, dust"),
-        # Older prompt files and CLI specs: the Camera and Pace choices replace these in the Web UI.
-        EnhanceOption("camera-move", "Camera movement", "camera movement", hidden=True),
-        EnhanceOption("pacing", "Pacing", "pacing and timing", hidden=True),
     ),
     default=(),
 )
@@ -427,7 +422,7 @@ def matrix_contract() -> dict[str, Any]:
                 "multi": axis.multi,
                 "video_only": axis.video_only,
                 "audio_only": axis.key in AUDIO_AXES,
-                "options": [{"slug": option.slug, "label": option.label, "description": option.description, "group": option.group} for option in axis.options if not option.hidden],
+                "options": [{"slug": option.slug, "label": option.label, "description": option.description, "group": option.group} for option in axis.options],
                 "default": list(axis.default),
             }
             for axis in ENHANCE_AXES
@@ -561,9 +556,9 @@ def settings_from_mapping(data: dict[str, Any], *, mode: str, motion_in_image: s
     """Build settings from a mapping; omitted keys keep their defaults.
 
     Args:
-        data: Mapping with any of ``style``, ``mood``, ``details``, ``length``, ``motion``, ``sound``, ``note``, ``parts``.
+        data: Mapping with any of ``style``, ``mood``, ``theme``, ``details``, ``length``, ``camera``, ``pace``, ``motion``, ``sound``, ``note``, ``parts``.
         mode: ``"image"`` or ``"video"``.
-        motion_in_image: ``"error"`` to reject the video-only keys (``motion``, ``sound``, ``parts``) in image mode,
+        motion_in_image: ``"error"`` to reject the video-only keys (``camera``, ``pace``, ``motion``, ``sound``, ``parts``) in image mode,
             ``"warn"`` to warn and ignore them.
 
     Raises:
@@ -649,7 +644,7 @@ def parse_enhance_entry(value: Any, *, mode: str, where: str) -> EnhanceSettings
 
 
 def validate_settings(settings: EnhanceSettings, *, mode: str) -> None:
-    """Reject unknown slugs. Every combination is a rewrite: with nothing picked it is the general rewrite (see ``general_rule``)."""
+    """Reject unknown slugs. Every combination is a rewrite: with nothing picked it is the general rewrite (see ``detail_rules``)."""
     _check_mode(mode)
     if settings.parts is not None and settings.parts not in PARTS_VALUES:
         raise ValueError(f"Rewrite must be one of: {', '.join(PARTS_VALUES)}.")
@@ -726,6 +721,33 @@ def resolve_parts(settings: EnhanceSettings, *, scene: str | None, extends: bool
     has_scene = bool((scene or "").strip())
     wanted = settings.parts if settings.parts is not None else ("action" if extends or reference_image else "both")
     return "action" if wanted == "action" and has_scene else "both"
+
+
+def only_video_options(settings: EnhanceSettings) -> bool:
+    """Return whether *settings* change only video options (camera, pace, motion, sound, Rewrite) and leave every other at its default."""
+    current, defaults = settings_to_mapping(settings), settings_to_mapping(EnhanceSettings())
+    video_keys = {axis.key for axis in ENHANCE_AXES if axis.video_only} | {PARTS_KEY}
+    changed = {key for key in current if current[key] != defaults[key]}
+    return bool(changed) and changed <= video_keys
+
+
+def image_enhance_entries(enhance_by_set: dict[str, list[EnhanceSettings | None]] | None, *, caption: bool = False) -> dict[str, list[EnhanceSettings | None]] | None:
+    """Return the prompt-file ``enhance:`` entries of an image run: entries that set only video options are not enhanced, with one warning.
+
+    Such an entry asks for a video rewrite; in an image run its options do nothing, and enhancing it anyway would give a
+    general rewrite nobody asked for. ``enhance: true`` (nothing set) still gives the general rewrite.
+
+    Args:
+        caption: The run writes JSON captions. Every entry is then enhanced: its prompt becomes a caption either way.
+    """
+    if not enhance_by_set or caption:
+        return enhance_by_set
+    dropped = sum(1 for entries in enhance_by_set.values() for entry in entries if entry is not None and only_video_options(entry))
+    if not dropped:
+        return enhance_by_set
+    noun = "entry sets" if dropped == 1 else "entries set"
+    warnings.warn(f"{dropped} prompt-file 'enhance:' {noun} only video options (camera, pace, motion, sound or parts); not enhanced in this image run.", stacklevel=2)
+    return {name: [None if entry is not None and only_video_options(entry) else entry for entry in entries] for name, entries in enhance_by_set.items()}
 
 
 def enhancement_requested(*, disabled: bool, override: EnhanceSettings | None, enhance_by_set: dict[str, list[EnhanceSettings | None]] | None) -> bool:
@@ -950,7 +972,7 @@ def build_messages(prompt: str, settings: EnhanceSettings, *, mode: str, plan: L
     rules.append(length_instruction(plan))
     if plan.length == "same" or plan.clamped:
         rules.append("Apply the options above; don't return the input unchanged.")
-    system = system_message(f"You rewrite prompts for a {kind} model.", rules, "Output only the rewritten prompt as plain prose: no preamble, no headings, no quotes.")
+    system = system_message(f"You rewrite prompts for a {kind} model.", rules, "Output only the rewritten prompt as plain prose: no preamble, no headings, no quotes around it.")
     return [{"role": "system", "content": system}, {"role": "user", "content": labelled_prompt(prompt)}]
 
 

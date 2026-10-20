@@ -2,7 +2,7 @@
   import { onMount, tick, untrack } from 'svelte';
   import { api, errorText } from '$lib/api/client';
   import { draft, videoTimingFor } from '$lib/state/draft.svelte';
-  import { anyEnhancedUsed, submittedCaption, submittedPair } from '$lib/state/promptEnhance';
+  import { anyEnhancedUsed, enhancedPartUsed, submittedCaption, submittedPair } from '$lib/state/promptEnhance';
   import { jobStore } from '$lib/state/job.svelte';
   import { historyStore } from '$lib/state/history.svelte';
   import { router } from '$lib/state/router.svelte';
@@ -495,7 +495,7 @@
 
   /** Refill the form from the settings a queued job was submitted with. */
   function loadQueuedSettings(job: JobSnapshot): void {
-    const { params, patch } = jobSettingsPrefill(job.settings ?? {});
+    const { params, patch } = jobSettingsPrefill(job.settings ?? {}, draft.state.enhanceSettingsVideo?.partsByWorkflow);
     applyPrefill(params);
     draft.patch(patch);
     imageFile = null;
@@ -886,10 +886,7 @@
       // The Enhanced parts run; the user's own text is recorded beside them so Reuse can offer either.
       const pair = submittedPair(draft.state);
       formData.set('prompt', pair.prompt);
-      if (formData.has('scene')) {
-        formData.set('scene_input', draft.state.scene);
-        formData.set('scene', pair.scene);
-      }
+      if (formData.has('scene')) formData.set('scene', pair.scene);
       recordEnhancedText(formData);
     }
     // Outside an extension a blank scene is no scene: today's form data, without the field. An extension always sends it.
@@ -899,9 +896,12 @@
 
   /** Record the user's own prompt and how the Enhanced text was made, so the asset keeps both. */
   function recordEnhancedText(formData: FormData): void {
-    formData.set('prompt_input', draft.state.prompt);
-    const record = draft.state.enhancedFrom?.record;
-    if (record) formData.set('enhance_record', JSON.stringify(record));
+    // A part that runs enhanced records the text its rewrite was made from, even when Your text changed since (out of date).
+    const from = draft.state.enhancedFrom;
+    const input = (part: 'scene' | 'action', current: string, source: string | undefined): string => (enhancedPartUsed(draft.state, part) && source !== undefined ? source : current);
+    formData.set('prompt_input', input('action', draft.state.prompt, from?.prompt));
+    if (formData.has('scene')) formData.set('scene_input', input('scene', draft.state.scene, from?.scene));
+    if (from?.record) formData.set('enhance_record', JSON.stringify(from.record));
   }
 
   /** Whether an extension may start now; any other workflow always may. */

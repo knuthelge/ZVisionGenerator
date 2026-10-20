@@ -1,6 +1,6 @@
 # Prompt enhancer v3: a test bench, sharper rules, better options
 
-**Status:** In progress (2026-10-19). Phase 1 (the bench) is done; phase 2 is mostly done; phase 3's option set and popover design are agreed.
+**Status:** In progress (2026-10-20). Phases 1 and 2 are done, and phase 3's option set and popover have shipped (unreleased). Open: per-model hints, worked examples and the bench's local judge.
 
 Three phases, each shippable on its own:
 
@@ -173,11 +173,11 @@ What it showed, as input to phase 2:
 3. The `enhance` record and image `prompt_input`; then the viewer line and Reuse settings.
 4. Builder tidy-up, with any step.
 
-### Progress (2026-10-19)
+### Shipped (2026-10-20)
 
 - **Done:** the builder tidy-up (`1337de1`, system prompts byte-identical); the Same floor of 25 words, the labelled prompt and a frame rule that is no longer echoed (`3d1647e`; Fast / Smart length in range 54 → 61% / 44 → 54%, frame echoes 17 → 2% on Fast); quoted text kept exactly (`36a57ad`; Fast 93 → 100%).
 - **Measured and dropped:** a firmer Shorter rule, and relaxing "every detail" while shortening. Neither shrank the dense 90-word case (53–86 words against 44); both models keep every named element instead, which is the right priority.
-- **Open:** the `enhance` record, image `prompt_input`, the viewer line and Reuse settings.
+- **Done:** the `enhance` record and image `prompt_input` on every asset (`5664d10`), shown in the viewer and restored by Reuse settings (`b926ca7`).
 
 ---
 
@@ -200,9 +200,12 @@ What it showed, as input to phase 2:
 - `withRememberedParts` in `frontend/src/lib/state/promptEnhance.ts` is the per-workflow pattern already used for Rewrite.
 - `resolve_enhance_ceiling` reads `enhance_max_words` from the presets; a hints key reads the same way.
 
-### Agreed design (2026-10-19)
+### Agreed design (2026-10-19), shipped 2026-10-20
 
-Settled in a present-and-feedback review, section by section, then a clickable mockup (five rounds; the last one is the design below). Model hints and worked examples (items 5 and 6 above) are not part of it and stay open for later.
+Settled in a present-and-feedback review, section by section, then a clickable mockup (five rounds; the last one is the design below). Shipped in `d043e3a` (options, realism core) and `5dc0dc3` (the popover), with review fixes in `51f7ffb` and after. Model hints and worked examples (items 5 and 6 above) are not part of it and stay open, as does the bench's local judge (phase 1, step 2).
+
+- **Realism core, measured.** The first version listed "pores, fine lines, wear, dust" as examples; the bench's picture sheet showed it aged people and dirtied scenes. The shipped version names the look to avoid (airbrushed, waxy) and forbids making people older, dirtier or more worn than written.
+- **Changed after review.** An image run does not enhance a prompt-file entry that sets only video options (with a warning); `enhance: true` still gives the general rewrite.
 
 **Nothing is picked by default.** With every choice at Keep and nothing ticked, Enhance does a general rewrite: concrete visual detail where the prompt is thin. The "nothing to enhance" refusal goes away for text rewrites; `--enhance` alone and `enhance: true` give the general rewrite too.
 

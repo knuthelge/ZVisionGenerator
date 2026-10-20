@@ -3,6 +3,7 @@ import {
   canSubmitText,
   clampedNote,
   effectiveEnhanceSettings,
+  entryEnhanceSpec,
   enhanceContext,
   enhancedSourceFor,
   enhancePhaseMessage,
@@ -148,11 +149,22 @@ describe('sound, direction and context', () => {
   });
 });
 
+describe('entryEnhanceSpec', () => {
+  const cameraOnly = { enhance: 'camera=orbit', enhance_image: null, enhance_caption: 'style=keep' };
+
+  it('applies a prompt-file entry as the run does', () => {
+    expect(entryEnhanceSpec(cameraOnly, 'video', false)).toBe('camera=orbit');
+    expect(entryEnhanceSpec(cameraOnly, 'image', false)).toBeNull();
+    expect(entryEnhanceSpec(cameraOnly, 'image', true)).toBe('style=keep');
+    expect(entryEnhanceSpec({ enhance: null, enhance_image: null, enhance_caption: null }, 'image', true)).toBeNull();
+  });
+});
+
 describe('settings helpers', () => {
   it('strips motion for images', () => {
-    expect(settingsPayload({ ...SETTINGS, motion: ['pacing'], camera: 'orbit' }, 'image')).toEqual({ style: 'keep', mood: 'keep', theme: 'keep', details: [], length: 'same' });
+    expect(settingsPayload({ ...SETTINGS, motion: ['secondary'], camera: 'orbit' }, 'image')).toEqual({ style: 'keep', mood: 'keep', theme: 'keep', details: [], length: 'same' });
     expect(settingsPayload({ ...SETTINGS, camera: 'orbit', pace: 'fast' }, 'video')).toMatchObject({ camera: 'orbit', pace: 'fast' });
-    expect(settingsPayload({ ...SETTINGS, motion: ['pacing'] }, 'video').motion).toEqual(['pacing']);
+    expect(settingsPayload({ ...SETTINGS, motion: ['secondary'] }, 'video').motion).toEqual(['secondary']);
   });
 
   it('falls back to contract defaults without sharing arrays', () => {
@@ -167,6 +179,19 @@ describe('settings helpers', () => {
     const contract = { matrix: { axes: [], defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: ['lighting'], length: 'same', motion: ['action'], sound: [], note: '' } } } as unknown as PromptEnhancerContract;
     const saved = { style: 'photo', details: [], length: 'longer', motion: [], sound: [], note: '' } as unknown as EnhanceSettings;
     expect(effectiveEnhanceSettings(state({ enhanceSettings: saved }), contract)).toEqual({ ...saved, mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep' });
+  });
+
+  it('drops saved values the server no longer offers', () => {
+    const option = (slug: string) => ({ slug, label: slug, description: '', group: null });
+    const axes = [
+      { key: 'style', label: 'Style', multi: false, video_only: false, audio_only: false, options: [option('keep'), option('photo')], default: ['keep'] },
+      { key: 'motion', label: 'Describe', multi: true, video_only: true, audio_only: false, options: [option('action'), option('secondary')], default: [] },
+    ];
+    const contract = { matrix: { axes, defaults: { style: 'keep', mood: 'keep', theme: 'keep', camera: 'keep', pace: 'keep', details: [], length: 'same', motion: [], sound: [], note: '' } } } as unknown as PromptEnhancerContract;
+    const saved = { ...SETTINGS, style: 'gone', motion: ['action', 'pacing'] };
+    const settings = effectiveEnhanceSettings(state({ workflow: 'txt2vid', enhanceSettingsVideo: saved }), contract);
+    expect(settings.style).toBe('keep');
+    expect(settings.motion).toEqual(['action']);
   });
 
   it('maps workflows to modes', () => {

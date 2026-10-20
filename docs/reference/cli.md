@@ -84,19 +84,22 @@ Run `ziv-image --help` for the full list.
 
 ### `--enhance` spec
 
-Comma-separated `key=value` pairs; join several values with `+`. Omitted keys use their defaults.
+Comma-separated `key=value` pairs; join several values with `+`. Omitted keys use their defaults. Nothing is picked by default: `--enhance` with no spec, or every key at its default, gives a general rewrite that adds detail where the prompt is thin.
 
 | Key | Values | Default |
 |---|---|---|
-| `style` | `keep`, `photo`, `candid`, `street`, `film`, `bw`, `portrait`, `product`, `cinematic`, `illustration`, `anime`, `comic`, `3d`, `painterly` | `keep` |
-| `mood` | `keep`, `serene`, `joyful`, `romantic`, `melancholic`, `mysterious`, `eerie`, `dramatic`, `epic`, `whimsical`, `nostalgic` | `keep` |
-| `details` | `lighting`, `composition`, `camera`, `materials`, `color`, `environment`, `subject` | `lighting+composition` |
+| `style` | `keep`; photo: `photo`, `candid`, `street`, `film`, `bw`, `portrait`, `product`, `cinematic`; art: `illustration`, `anime`, `comic`, `3d`, `painterly`, `watercolor`, `gouache`, `sketch`, `pixel`, `concept`, `graphic`, `isometric`, `claymation`, `ukiyo-e`, `papercraft` | `keep` |
+| `mood` | `keep`, `serene`, `cozy`, `joyful`, `romantic`, `whimsical`, `nostalgic`, `melancholic`, `mysterious`, `eerie`, `dramatic`, `epic` | `keep` |
+| `theme` | `keep`, `zen`, `spiritual`, `rustic`, `sensual`, `glamorous`, `gothic`, `noir`, `horror`, `dystopian`, `fairytale`, `mythic`, `surreal`, `retro`, `futuristic`, `cyberpunk`, `steampunk` | `keep` |
+| `details` (Focus on) | `lighting`, `composition`, `camera`, `materials`, `color`, `environment`, `subject`, `expression` | none |
 | `length` | `shorter`, `same`, `longer`, `extra` | `same` |
-| `motion` (`ziv-video` only) | `action`, `camera-move`, `pacing` | `action` |
+| `camera` (`ziv-video` only) | `keep`, `auto`, `static`, `push-in`, `pull-back`, `pan`, `tilt`, `tracking`, `orbit`, `handheld`, `aerial` | `keep` |
+| `pace` (`ziv-video` only) | `keep`, `slow-motion`, `slow`, `brisk`, `fast` | `keep` |
+| `motion` (`ziv-video` only) | `action`, `secondary` | none |
 | `sound` (`ziv-video` only, used with audio on) | `ambient`, `effects`, `dialogue`, `music` | none |
 | `parts` (`ziv-video` only) | `both`, `action` | `action` with `--extend` when the source has a scene, otherwise `both` |
 
-`parts=action` keeps the scene exactly as written and rewrites only the action, so `style`, `mood` and `details` have no effect. It needs a scene (from `--scene`, the entry's `scene:` or the extended clip); with none, the run uses `parts=both` and warns.
+`parts=action` keeps the scene exactly as written and rewrites only the action, so `style`, `mood`, `theme` and `details` have no effect. It needs a scene (from `--scene`, the entry's `scene:` or the extended clip); with none, the run uses `parts=both` and warns.
 
 The free-text direction is not part of the spec; pass it with `--enhance-note`.
 

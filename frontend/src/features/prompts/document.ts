@@ -262,9 +262,11 @@ function enhanceParts(enhance: Exclude<EntryEnhance, null | true>, axes: Enhance
     axes.find((axis) => axis.key === key)?.options.find((option) => option.slug === slug)?.label ?? String(slug);
   const parts: string[] = [];
   if (enhance.parts === 'action') parts.push('Action only');
-  if (enhance.style && enhance.style !== 'keep') parts.push(label('style', enhance.style));
-  if (enhance.mood && enhance.mood !== 'keep') parts.push(label('mood', enhance.mood));
-  if (enhance.length && enhance.length !== 'same') parts.push(label('length', enhance.length));
+  // Every one-choice option that is not its default, in the matrix order (style, mood, theme, camera, pace, length).
+  for (const axis of axes) {
+    const value = enhance[axis.key];
+    if (!axis.multi && typeof value === 'string' && value && value !== (axis.default[0] ?? 'keep')) parts.push(label(axis.key, value));
+  }
   const details = Array.isArray(enhance.details) ? enhance.details.length : 0;
   if (details) parts.push(`+${details} detail${details > 1 ? 's' : ''}`);
   const motion = Array.isArray(enhance.motion) ? enhance.motion.length : 0;

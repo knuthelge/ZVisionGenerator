@@ -60,11 +60,15 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
     node.style.left = `${left}px`;
   }
 
+  /** Whether *target* is inside a popover opened from this one (a menu in a panel), which lives in <body> too. */
+  function inNested(target: Node): boolean {
+    const nested = (target instanceof Element ? target : target.parentElement)?.closest('[data-popover-nested]');
+    return Boolean(nested) && nested !== node;
+  }
+
   function onPointerDown(event: PointerEvent): void {
     const target = event.target as Node;
-    // A popover opened from inside this one (a menu in a panel) lives in <body> too; using it is not an outside click.
-    const nested = (target instanceof Element ? target : target.parentElement)?.closest('[data-popover-nested]');
-    if (nested && nested !== node) return;
+    if (inNested(target)) return;
     if (!node.contains(target) && !options.anchor?.contains(target)) options.onclose();
   }
 
@@ -75,7 +79,8 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
   }
 
   function onViewportChange(event: Event): void {
-    if (event.type === 'scroll' && node.contains(event.target as Node)) return;
+    // Scrolling inside this popover, or inside a menu opened from it, moves nothing it is anchored to.
+    if (event.type === 'scroll' && (node.contains(event.target as Node) || inNested(event.target as Node))) return;
     options.onclose();
   }
 

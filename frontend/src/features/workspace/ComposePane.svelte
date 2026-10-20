@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { draft } from '$lib/state/draft.svelte';
-  import { anyEnhancedUsed, canSubmitText, enhancedPartUsed, isEnhancedStale, isJsonCaption, runParts } from '$lib/state/promptEnhance';
+  import { anyEnhancedUsed, canSubmitText, effectiveFormat, enhancedPartUsed, isEnhancedStale, isJsonCaption, runParts } from '$lib/state/promptEnhance';
   import { isOriginalLegacyPrompt, normalizePromptText } from '$lib/state/extend';
   import { autogrow } from '$lib/actions/autogrow';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
@@ -122,11 +122,20 @@
     draft.update('enhancedPrompt', value);
     // Hand-typed text (no source) is never "out of date"; edits to a generated rewrite keep its source.
     if (value.trim() === '' && (!pairMode || s.enhancedScene.trim() === '')) draft.update('enhancedFrom', null);
+    else forgetEnhanceRecord();
   }
 
   function onEnhancedSceneInput(value: string): void {
     draft.update('enhancedScene', value);
     if (value.trim() === '' && s.enhancedPrompt.trim() === '') draft.update('enhancedFrom', null);
+    else forgetEnhanceRecord();
+  }
+
+  /** Text edited by hand is no longer what the enhancer wrote: the asset must not record the enhancer's options and model for it. */
+  function forgetEnhanceRecord(): void {
+    if (!s.enhancedFrom?.record) return;
+    const { record: _record, ...source } = s.enhancedFrom;
+    draft.update('enhancedFrom', source);
   }
 
   // An empty prompt can fail validation while the Enhanced tab hides it; bring it forward so the message shows.
@@ -474,6 +483,7 @@
       path={s.promptFilePath}
       selectedOptionIds={s.promptFileOptionIds}
       workflowMode={caps.isImageMode ? 'image' : 'video'}
+      captionRun={Boolean(caps.showEnhanceAuto && caps.enhancer) && effectiveFormat(s, caps.supportsJsonPrompt) === 'json'}
       negativePromptSupported={caps.supportsNegativePrompt}
       disabled={busy}
       onPathChange={(path) => draft.update('promptFilePath', path)}

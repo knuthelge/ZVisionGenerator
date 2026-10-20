@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import pytest
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
@@ -25,13 +27,31 @@ class TestTier:
     def test_tier_comes_from_the_configured_models(self, model, tier):
         assert enhancer_tier(_CONFIG, platform_key="linux", model=model) == tier
 
+    @pytest.mark.parametrize("configured", ["~/models/fast", "{home}/models/fast"])
+    @pytest.mark.parametrize("recorded", ["~/models/fast", "{home}/models/fast"])
+    def test_a_local_tier_folder_matches_however_home_is_written(self, tmp_path, monkeypatch, configured, recorded):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        (tmp_path / "models" / "fast").mkdir(parents=True)
+        config = {"prompt_enhancer": {"model": {"linux": configured.format(home=tmp_path)}}}
+        assert enhancer_tier(config, platform_key="linux", model=recorded.format(home=tmp_path)) == "fast"
+
 
 class TestBuild:
+    def test_a_local_model_folder_is_recorded_under_home_as_tilde(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        folder = tmp_path / "models" / "enhancer"
+        folder.mkdir(parents=True)
+        record = build_enhance_record(EnhanceSettings(), mode="image", repo=str(folder), revision=None, tier="custom", fmt="text")
+        assert record["model"] == "~/models/enhancer"
+        config = {"prompt_enhancer": {"user_model": str(folder)}}
+        parsed = parse_enhance_record(record, mode="image", config=config, platform_key="linux")
+        assert (parsed["model"], parsed["tier"]) == ("~/models/enhancer", "custom")
+
     def test_image_record_leaves_out_video_options_and_an_empty_direction(self):
         record = build_enhance_record(EnhanceSettings(style="photo"), mode="image", repo="org/fast", revision="r1", tier="fast", fmt="text")
         assert record["model"] == "org/fast@r1" and record["tier"] == "fast" and record["format"] == "text"
         assert record["settings"]["style"] == "photo"
-        assert not {"motion", "sound", "parts", "note"} & set(record["settings"])
+        assert not {"camera", "pace", "motion", "sound", "parts", "note"} & set(record["settings"])
 
     def test_video_record_keeps_motion_sound_and_parts(self):
         settings = EnhanceSettings(motion=("action",), sound=("ambient",), parts="action", note="at dusk")
@@ -48,6 +68,14 @@ class TestBuild:
         assert planned_enhance_record(enhanced, used, mode="image")["format"] == "json"
         assert planned_enhance_record(failed, used, mode="image") is None
         assert planned_enhance_record(enhanced, None, mode="image") is None
+
+
+class TestReadBack:
+    def test_an_image_record_reads_back_without_warnings(self):
+        record = build_enhance_record(EnhanceSettings(style="film"), mode="image", repo="org/fast", revision=None, tier="fast", fmt="text")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert parse_enhance_record(record, mode="image")["settings"]["style"] == "film"
 
 
 class TestParse:

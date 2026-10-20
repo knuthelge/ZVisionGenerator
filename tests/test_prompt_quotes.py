@@ -8,7 +8,7 @@ import pytest
 
 from zvisiongenerator.utils.prompt_enhance import QUOTES_CHANGED_WARNING, EnhanceContext, EnhanceSettings, enforced_quotes, enhance_prompt
 from zvisiongenerator.utils.prompt_enhance_video import enhance_video_prompt
-from zvisiongenerator.utils.prompt_quotes import lettering_spans, missing_quotes, quoted_texts
+from zvisiongenerator.utils.prompt_quotes import find_text, lettering_spans, missing_quotes, quoted_texts
 
 
 class _FakeEnhancer:
@@ -47,6 +47,37 @@ class TestQuotedTexts:
     def test_lettering_leaves_out_speech(self):
         text = 'a cafe sign reading "Café Nord"; a man says "Late again." and she asks: "Coming?"'
         assert lettering_spans(text) == ("Café Nord",)
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ('Hikers pass; a man says "Hi"', ()),
+            ('she says "Hi" under a sign reading "Hi"', ("Hi",)),
+            ('A hello there sign; she says "hello there"', ()),
+            ('a sign reading "EXIT" and he shouts "EXIT"', ("EXIT",)),
+            ('he says   \n  "Run!" past a sign reading "Run"', ("Run",)),
+        ],
+    )
+    def test_speech_is_judged_where_each_quote_stands(self, text, expected):
+        assert lettering_spans(text) == expected
+
+    @pytest.mark.parametrize(
+        ("spans", "output", "missing"),
+        [
+            (("OPEN",), "A sign reading OPENING SOON.", ("OPEN",)),
+            (("OPEN",), 'A sign reading "OPEN", lit red.', ()),
+            (("Hi",), "Hikers pass by.", ("Hi",)),
+            (("Café Nord",), "Café Nord's awning.", ()),
+            (("营业中",), "门上写着营业中三个字。", ()),
+            (("24",), "Open 24/7.", ()),
+        ],
+    )
+    def test_a_quote_inside_a_longer_word_is_not_kept(self, spans, output, missing):
+        assert missing_quotes(spans, output) == missing
+
+    def test_find_text_skips_a_match_inside_a_longer_word(self):
+        assert find_text('Hikers pass a sign reading "Hi".', "Hi") == 28
+        assert find_text("Hikers pass.", "Hi") == -1
 
     def test_missing_quotes_needs_exact_case_and_ignores_spacing(self):
         spans = ("OPEN 24 HOURS", "Café Nord")

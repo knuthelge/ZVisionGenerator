@@ -310,10 +310,10 @@ class TestVideoRunner:
 class TestPromptFileEnhance:
     def test_entries_parsed_and_aligned(self):
         inspection = inspect_prompts_text(
-            "a:\n  - prompt: x\n    enhance: {style: anime, motion: [pacing]}\n  - prompt: y\n    active: false\n    enhance: true\n  - prompt: z\n",
+            "a:\n  - prompt: x\n    enhance: {style: anime, motion: [secondary]}\n  - prompt: y\n    active: false\n    enhance: true\n  - prompt: z\n",
             source_name="f.yaml",
         )
-        assert inspection.enhance_by_set == {"a": [EnhanceSettings(style="anime", motion=("pacing",)), None]}
+        assert inspection.enhance_by_set == {"a": [EnhanceSettings(style="anime", motion=("secondary",)), None]}
         assert inspection.options[0].enhance.style == "anime"
 
     @pytest.mark.parametrize(
@@ -359,6 +359,16 @@ class TestPromptFileEnhance:
         options = inspect_prompt_file(str(path), accepted_extensions=(".yaml",)).options
         assert options[0]["enhance"] == "length=longer"
         assert options[1]["enhance"] is None
+
+    def test_web_preview_gives_the_image_run_spec(self, tmp_path):
+        from zvisiongenerator.web.prompt_files import inspect_prompt_file
+
+        path = tmp_path / "p.yaml"
+        path.write_text("a:\n  - prompt: x\n    enhance: {style: anime, camera: orbit}\n  - prompt: y\n    enhance: {camera: orbit}\n  - prompt: z\n    enhance: true\n", encoding="utf-8")
+        options = inspect_prompt_file(str(path), accepted_extensions=(".yaml",)).options
+        assert [option["enhance"] for option in options] == ["style=anime,camera=orbit", "camera=orbit", "style=keep"]
+        assert [option["enhance_image"] for option in options] == ["style=anime", None, "style=keep"]
+        assert [option["enhance_caption"] for option in options] == ["style=anime", "style=keep", "style=keep"]
 
 
 # ── CLI flags ───────────────────────────────────────────────────────────────
@@ -432,7 +442,7 @@ class TestCliFlags:
             _cli(argv, mode=mode)
 
     def test_video_motion(self):
-        assert _cli(["--enhance", "motion=pacing"], mode="video").enhance.motion == ("pacing",)
+        assert _cli(["--enhance", "motion=secondary"], mode="video").enhance.motion == ("secondary",)
 
     def test_video_sound(self):
         assert _cli(["--enhance", "sound=ambient+dialogue"], mode="video").enhance.sound == ("ambient", "dialogue")

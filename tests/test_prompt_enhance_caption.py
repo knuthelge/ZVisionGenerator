@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from zvisiongenerator.utils.prompt_enhance import STYLE_AXIS, EnhanceSettings
+from zvisiongenerator.utils.prompt_enhance import DETAILS_AXIS, STYLE_AXIS, EnhanceSettings
 from zvisiongenerator.utils.prompt_enhance_caption import CAPTION_NO_USABLE_MESSAGE, enhance_caption
 
 _PHOTO_KEYS = ["aesthetics", "lighting", "photo", "medium", "color_palette"]
@@ -103,6 +103,14 @@ class TestOptionsInCaptions:
     @pytest.mark.parametrize(("style", "medium"), [("watercolor", "painting"), ("claymation", "3d_render"), ("graphic", "graphic_design"), ("ukiyo-e", "illustration"), ("candid", "photograph")])
     def test_every_style_has_a_medium(self, style: str, medium: str) -> None:
         assert _caption("a fox in snow", _REPLY, settings=EnhanceSettings(style=style))["style_description"]["medium"] == medium
+
+    def test_every_focus_option_works_in_a_caption(self) -> None:
+        enhancer = _FakeEnhancer(_REPLY)
+        enhance_caption(enhancer, "a woman smiling", EnhanceSettings(details=DETAILS_AXIS.slugs()), seed=1, ceiling=300)
+        assert "facial expression" in enhancer.messages[0][0]["content"]
+
+    def test_an_entry_with_only_video_options_still_gets_a_caption(self) -> None:
+        assert _caption("a fox in snow", _REPLY, settings=EnhanceSettings(camera="orbit", motion=("action",)))["high_level_description"]
 
     def test_theme_is_asked_for_in_the_caption(self) -> None:
         enhancer = _FakeEnhancer(_REPLY)

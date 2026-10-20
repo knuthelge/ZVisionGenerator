@@ -3,6 +3,7 @@
   import { inspectPromptFile } from '$lib/api/promptFiles';
   import { untrack, type Snippet } from 'svelte';
   import { Icon } from '$lib/components/atoms';
+  import { entryEnhanceSpec } from '$lib/state/promptEnhance';
   import { router } from '$lib/state/router.svelte';
   import type { PromptFileContract, PromptFileInspection, PromptFileOption, PromptSource, WorkflowMode } from '$lib/types';
   import PathField from './PathField.svelte';
@@ -14,6 +15,8 @@
     path: string | null;
     selectedOptionIds: string[];
     workflowMode: WorkflowMode;
+    /** The run writes JSON captions, which enhance every entry with `enhance:`. */
+    captionRun?: boolean;
     negativePromptSupported: boolean;
     disabled?: boolean;
     onPathChange: (path: string | null) => void;
@@ -30,6 +33,7 @@
     path,
     selectedOptionIds,
     workflowMode,
+    captionRun = false,
     negativePromptSupported,
     disabled = false,
     onPathChange,
@@ -51,7 +55,7 @@
   const selectedOptions = $derived(
     options.filter((option) => selectedOptionIds.includes(option.id))
   );
-  const selfEnhancingCount = $derived(selectedOptions.filter((option) => option.enhance).length);
+  const selfEnhancingCount = $derived(selectedOptions.filter((option) => entryEnhanceSpec(option, workflowMode, captionRun)).length);
   const summaryCount = $derived(
     `${selectedOptions.length} of ${options.length} prompts${selfEnhancingCount > 0 ? ` · ✨ ${selfEnhancingCount} enhance themselves` : ''}`
   );
@@ -230,6 +234,7 @@
     {fileLabel}
     {options}
     {workflowMode}
+    {captionRun}
     {selectedOptionIds}
     onconfirm={onOptionChange}
     onedit={path && !disabled ? openBuilder : undefined}

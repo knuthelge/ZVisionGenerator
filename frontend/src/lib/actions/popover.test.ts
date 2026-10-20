@@ -25,7 +25,7 @@ describe('placePopover', () => {
 });
 
 describe('popover', () => {
-  it('closes on a click outside, but not on a click inside a nested popover', () => {
+  it('closes on a click outside, but not on a click or scroll inside a nested popover', () => {
     const anchor = document.createElement('button');
     const panel = document.createElement('div');
     const menu = document.createElement('div');
@@ -37,6 +37,7 @@ describe('popover', () => {
     const handle = popover(panel, { anchor, onclose });
 
     item.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    menu.dispatchEvent(new Event('scroll'));
     expect(onclose).not.toHaveBeenCalled();
     document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     expect(onclose).toHaveBeenCalledTimes(1);

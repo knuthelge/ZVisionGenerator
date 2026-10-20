@@ -14,6 +14,7 @@ import subprocess
 import threading
 import sys
 import uuid
+import warnings
 from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
@@ -66,6 +67,7 @@ from zvisiongenerator.utils.prompt_enhance import (
     EnhanceSettings,
     enhance_context,
     enhance_options,
+    image_enhance_entries,
     enhance_prompt,
     resolve_parts,
     settings_from_mapping,
@@ -491,7 +493,6 @@ def _validate_enhance_body(body: Any) -> dict[str, Any]:
     settings = settings_from_mapping(body.get("settings") or {}, mode=mode, motion_in_image="warn")
     tier = _body_choice(body, "enhance_model", ENHANCER_TIERS)
     caption = mode == "image" and _body_choice(body, "format", ENHANCE_FORMATS) == "json"
-    # An extension always writes a new action, and so does ``parts="action"``, so neither is ever a no-op; nor is a JSON caption.
     validate_settings(settings, mode=mode)
     app_config = load_config()
     options = enhance_options(app_config)
@@ -997,6 +998,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         enhance_by_set = None
     else:
         _prompt_source, prompt, negative_prompt, prompts_data, enhance_by_set, _scene_by_set = _resolve_prompt_submission_with_enhance(form)
+        enhance_by_set = image_enhance_entries(enhance_by_set, caption=_optional_text(form, "enhance_format") == "json")
     _apply_enhance_submission(args, form, mode="image", json_caption=args.json_prompt_enabled)
     args.prompt_input = _optional_text(form, "prompt_input")
     args.enhance_record = _enhance_record_from_form(form, mode="image", app_config=app_config)
@@ -1121,7 +1123,6 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     if source is not None and "scene" not in form:
         scene = source.scene
     _prompt_source, prompt, _negative_prompt, prompts_data, enhance_by_set, scene_by_set = _resolve_prompt_submission_with_enhance(form, allow_empty_prompt=scene is not None or extend)
-    # An extension always writes a new action beside the kept scene, so no prompt-file entry is a no-op: nothing is dropped.
     upscale = None if extend else _optional_int(form, "upscale")
     args = argparse.Namespace(
         model=model_name,
@@ -1297,19 +1298,17 @@ def _apply_enhance_submission(args: argparse.Namespace, form: Any, *, mode: str,
 def _enhance_record_from_form(form: Any, *, mode: str, app_config: dict[str, Any]) -> dict[str, Any] | None:
     """Return the ``enhance_record`` sent with Enhanced text (how the Web UI rewrite was made), validated; None when absent.
 
-    The tier is worked out from the model, not taken from the browser.
+    The tier is worked out from the model, not taken from the browser. The record only describes how the text was made,
+    so an invalid one (e.g. naming an option that has since been removed) is dropped with a warning instead of failing the job.
     """
     raw = _optional_text(form, "enhance_record")
     if raw is None:
         return None
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"enhance_record must be a JSON object: {exc}") from exc
-    try:
-        return parse_enhance_record(data, mode=mode, config=app_config, platform_key=sys.platform)
-    except ValueError as exc:
-        raise ValueError(f"enhance_record: {exc}") from exc
+        return parse_enhance_record(json.loads(raw), mode=mode, config=app_config, platform_key=sys.platform)
+    except ValueError as exc:  # json.JSONDecodeError is a ValueError
+        warnings.warn(f"Ignoring the enhance record sent with the prompt: {exc}", stacklevel=2)
+        return None
 
 
 def _form_choice(form: Any, key: str, allowed: tuple[str, ...]) -> str | None:
