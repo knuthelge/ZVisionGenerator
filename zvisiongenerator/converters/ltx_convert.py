@@ -18,7 +18,7 @@ from zvisiongenerator.converters.ltx_checkpoint import LtxCheckpoint, check_lora
 from zvisiongenerator.utils.config import ltx_distilled_lora_source
 from zvisiongenerator.utils.stored_quant import discard_partial, partial_dir, promote_partial, sweep_stale_partials
 
-__all__ = ["LtxInspection", "convert_ltx", "inspect_ltx", "progress_line"]
+__all__ = ["LtxInspection", "convert_ltx", "distill_advice", "inspect_ltx", "progress_line"]
 
 PROGRESS_PREFIX = "Converting: "
 _STAGES = {
@@ -30,10 +30,11 @@ _STAGES = {
 }
 # Print a counted stage at most this many times.
 _PROGRESS_STEPS = 50
+# {distill} is how the reader turns the merge on: the CLI flag, or the Web UI's checkbox.
 _ADVICE = {
-    "dev": "This is plain LTX-2.3 dev, which renders broken at the 8 steps the app runs LTX at. Convert it with --distill to merge Lightricks' distilled LoRA.",
+    "dev": "This is plain LTX-2.3 dev, which renders broken at the 8 steps the app runs LTX at. Convert it with {distill} to merge Lightricks' distilled LoRA.",
     "distilled": "This checkpoint carries Lightricks' step distillation, so it runs at 8 steps as it is.",
-    "unknown": "Couldn't tell whether this checkpoint is step-distilled. If its model page says to use it with Lightricks' distilled LoRA, convert it with --distill.",
+    "unknown": "Couldn't tell whether this checkpoint is step-distilled. If its model page says to use it with Lightricks' distilled LoRA, convert it with {distill}.",
 }
 
 
@@ -65,7 +66,12 @@ def inspect_ltx(path: Path) -> LtxInspection:
     """
     checkpoint = inspect_checkpoint(path)
     found = distillation(checkpoint)
-    return LtxInspection(checkpoint=checkpoint, distillation=found, advice=_ADVICE[found])
+    return LtxInspection(checkpoint=checkpoint, distillation=found, advice=distill_advice(found, "--distill"))
+
+
+def distill_advice(found: str, distill: str) -> str:
+    """Return what the distillation *found* (``dev``, ``distilled`` or ``unknown``) means for converting, naming the merge's switch as *distill*."""
+    return _ADVICE[found].format(distill=distill)
 
 
 def convert_ltx(input_path: Path, models_dir: Path, name: str, bits: int, *, distill: bool, force: bool, config: dict[str, Any]) -> Path:

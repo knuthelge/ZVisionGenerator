@@ -1124,6 +1124,8 @@ export interface VideoModelEntry extends ModelStatusFields {
   family: string;
   supports_i2v: boolean;
   size_label?: string;
+  /** The quantize level a converted LTX checkpoint is stored at (its only level); `null` for other video models. */
+  converted_bits?: number | null;
   delete?: ModelDeleteInfo | null;
   /** Disk use of the model's files, as on image rows. */
   disk_size_label?: string | null;

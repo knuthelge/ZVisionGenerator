@@ -14,6 +14,7 @@ from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
 from zvisiongenerator.utils.config import enhancer_tier_models, ltx_companion_repos, resolve_defaults, resolve_enhancer_model, resolve_video_defaults, smart_enhancer_model, smart_unavailable
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
+from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.hf_cache import CachedRepo, cached_model_repos, repo_disk_bytes, stranded_shared_files
 from zvisiongenerator.utils.model_files import (
     directory_bytes,
@@ -246,6 +247,7 @@ def build_models_response(
                 "family": entry.family,
                 "supports_i2v": entry.supports_i2v,
                 "source": entry.source,
+                "converted_bits": _converted_bits(entry),
                 **status(entry, "video"),
                 "delete": delete_info(entry),
                 "disk_size_label": disk_size(entry),
@@ -350,6 +352,14 @@ def _stored_quant_payload(entry: ImageInventoryEntry) -> dict[str, Any] | None:
     """Describe an installed stored quant (its base model and bits), or ``None`` for other models."""
     stored = stored_quant_of(entry)
     return None if stored is None else {"base_model": stored[0], "bits": stored[1]}
+
+
+def _converted_bits(entry: VideoInventoryEntry) -> int | None:
+    """Return the quantize level a converted LTX checkpoint was stored at, or ``None`` for other video models."""
+    if entry.source != "installed":
+        return None
+    manifest = read_converted_ltx(Path(entry.resolved_path))
+    return None if manifest is None else manifest["bits"]
 
 
 def _status_resolver(

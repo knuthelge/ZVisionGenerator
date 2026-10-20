@@ -32,6 +32,7 @@ from zvisiongenerator.web.gallery import list_gallery_assets
 from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
+from zvisiongenerator.utils.ltx_converted import write_converted_ltx
 from zvisiongenerator.utils import video_extend as video_extend_module
 from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
@@ -1332,8 +1333,11 @@ def test_models_route_uses_shared_alias_inventory(monkeypatch, tmp_path):
     monkeypatch.setattr(
         model_inventory_module,
         "list_video_models",
-        lambda _data_dir: [SimpleNamespace(name="local-video", family="ltx", supports_i2v=True)],
+        lambda _data_dir: [SimpleNamespace(name="local-video", family="ltx", supports_i2v=True), SimpleNamespace(name="converted-video", family="ltx", supports_i2v=True)],
     )
+    converted = tmp_path / "models" / "converted-video"
+    converted.mkdir(parents=True)
+    write_converted_ltx(converted, {"bits": 8, "storage": "mlx-affine-g64", "block_matrices": 1, "transformer_rest": 1})
     monkeypatch.setattr(
         model_inventory_module,
         "resolve_model_path",
@@ -1376,6 +1380,9 @@ def test_models_route_uses_shared_alias_inventory(monkeypatch, tmp_path):
     assert image_models["local-image@q8"]["stored_quant"] == {"base_model": "local-image", "bits": 8}
     assert image_models["local-image"]["stored_quant"] is None
     assert image_models["alias-image"]["stored_quant"] is None
+    assert video_models["converted-video"]["converted_bits"] == 8
+    assert video_models["local-video"]["converted_bits"] is None
+    assert video_models["alias-video"]["converted_bits"] is None
     assert isinstance(payload["stored_quants_supported"], bool)
 
 
@@ -3201,7 +3208,7 @@ class TestLtxConversion:
         assert ltx_conversion._failure_message([*progress, "RuntimeError: CUDA error"], 1) == "RuntimeError: CUDA error"
 
     def test_inspect_returns_what_the_form_preselects(self, monkeypatch, tmp_path):
-        from zvisiongenerator.converters.ltx_convert import LtxInspection
+        from zvisiongenerator.converters.ltx_convert import LtxInspection, distill_advice
 
         checkpoint = tmp_path / "ft.safetensors"
         checkpoint.write_bytes(b"x")
@@ -3213,7 +3220,7 @@ class TestLtxConversion:
             response = client.post("/api/models/convert/inspect", json={"input_path": str(checkpoint)})
 
         assert response.status_code == 200
-        assert response.json() == {"layout": "full", "fp8_weights": 440, "distillation": "dev", "advice": "Use --distill.", "recommend_distill": True, "recommended_quantize": 8}
+        assert response.json() == {"layout": "full", "fp8_weights": 440, "distillation": "dev", "advice": distill_advice("dev", "Distill on"), "recommend_distill": True, "recommended_quantize": 8}
 
     def test_inspect_refuses_a_file_that_is_not_ltx(self, monkeypatch, tmp_path):
         checkpoint = tmp_path / "ft.safetensors"

@@ -332,6 +332,23 @@ describe('ModelsPage Browse buttons', () => {
     expect(markers[0].closest('tr')?.querySelector('[data-testid="model-name"]')?.textContent).toBe('atlas@q8');
   });
 
+  it('marks converted LTX models with their stored level', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({
+      ...makeInventory(),
+      video_models: [
+        { name: 'ltx-8', family: 'ltx', supports_i2v: true, converted_bits: null },
+        { name: 'my-finetune', family: 'ltx', supports_i2v: true, converted_bits: 8 },
+      ],
+    });
+
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    const markers = target.querySelectorAll('[data-testid="converted-level"]');
+    expect(markers).toHaveLength(1);
+    expect(markers[0].closest('tr')?.querySelector('[data-testid="model-name"]')?.textContent).toBe('my-finetune');
+  });
+
   it('offers a quantized copy on conversion only where stored quants are supported', async () => {
     modelApiMocks.getModelInventory.mockResolvedValue({ ...makeInventory(), stored_quants_supported: false });
     app = flushSync(() => mount(ModelsPage, { target }));

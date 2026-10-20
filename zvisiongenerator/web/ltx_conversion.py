@@ -15,7 +15,7 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.converters.ltx_convert import PROGRESS_PREFIX, inspect_ltx
+from zvisiongenerator.converters.ltx_convert import PROGRESS_PREFIX, distill_advice, inspect_ltx
 from zvisiongenerator.utils.subprocess_env import utf8_child_env
 
 __all__ = ["conversion_status", "inspect_checkpoint_for_form", "recommended_ltx_quantize", "start_conversion"]
@@ -42,7 +42,7 @@ def inspect_checkpoint_for_form(path: Path, config: dict[str, Any]) -> dict[str,
         "layout": inspection.layout,
         "fp8_weights": inspection.checkpoint.fp8_weights,
         "distillation": inspection.distillation,
-        "advice": inspection.advice,
+        "advice": distill_advice(inspection.distillation, "Distill on"),
         "recommend_distill": inspection.distillation == "dev",
         "recommended_quantize": recommended_ltx_quantize(config),
     }

@@ -4,9 +4,9 @@
 
 **Done: Windows and Linux.** `ziv model model --model-type ltx-2.3 --quantize 4|8 [--distill] [--force]` and the Models page's **LTX-2.3 (video)** convert a checkpoint as planned in §1, §3, the CUDA parts of §4 and §5: the shared checkpoint reader (`converters/ltx_checkpoint.py`, pinned hashes in `ltx23_hashes.json`), the CUDA folder writer and load check (`backends/cuda/video/converted.py`), detection by contents, estimates from the manifest, and the Web UI's inspect endpoint and background job. Checked on the test file: a q4 `--distill` conversion took 3:07 at a 4.5 GB peak, and the clip from it was sharp at 8 steps, 2:59 with a 20 GB peak.
 
-**Built, not yet run on a Mac: macOS.** §2 as planned (`backends/mac/ltx_converted.py`, the single-file `SingleFileWriter` in `utils/safetensors_stream`, `video_model_presets.ltx.mlx_base` in config), and the Models page preselects q8 from 32 GB of unified memory. Spike parts 1 and 2 were answered from the published headers, and part 3 and the converter itself were run on Linux with MLX's CPU build (results under "On the Mac"). Converting stock distilled 1.1 at q4 that way gave a file with dgrauet's exact header and unquantized tensors, which the vendored loader loads.
+**Done: macOS.** §2 as planned (`backends/mac/ltx_converted.py`, the single-file `SingleFileWriter` in `utils/safetensors_stream`, `video_model_presets.ltx.mlx_base` in config), and the Models page preselects q8 from 32 GB of unified memory and shows each converted model's level. The macOS test plan passed on a 32 GB M5 MacBook Air (results under "macOS test plan"): Metal's `mx.quantize` reproduces dgrauet's q4 and q8 transformers bit for bit, and clips from them are identical to `ltx-4` / `ltx-8`.
 
-**Left:** the macOS test plan below on a real Mac (with the spike's section 3 there, to see whether Metal's `mx.quantize` matches dgrauet's bit for bit), and marking an NF4 folder that a bitsandbytes update can't read on the Models page (today it refuses to load with the reconvert message).
+**Left:** marking an NF4 folder that a bitsandbytes update can't read on the Models page (Windows/Linux; today it refuses to load with the reconvert message).
 
 ## Problem
 
@@ -388,6 +388,15 @@ Step 8 converts the stock checkpoint again, so keep it until step 8 is done. Del
 7. **Stored level.** The Models page shows `ltx-stock-q8` at q8, with a fit badge based on its size on disk. The folder holds exactly one `transformer*` file.
 8. **q4 and a fine-tune.** Repeat steps 2, 4 and 6 at `--quantize 4` against `dgrauet/ltx-2.3-mlx-q4` (and `ltx-4`). Then convert one real community fine-tune at the level that fits. Pass `--distill` when the converter recommends it (plain-dev merges render broken at 8 steps without it, as the spike showed); note what it reported. Run a t2v, an i2v, an extend and a LoRA clip with it, at the default 8 steps.
 9. **Web UI convert.** Convert the fine-tune again from the Models page under a new name. After picking the file and LTX-2.3, the form preselects the level that fits (q8 on a 32 GB Mac) and, for a plain-dev file, Distill. The conversion shows progress while it runs.
+
+**Results (2026-10-20), 32 GB M5 MacBook Air.** The reference clips used a folder of links to dgrauet's files (the transformer plus the components `ltx-8` loads), since running the `ltx-8` alias downloads the whole repo (about 86 GB).
+
+- **Stock at q8:** converted in 58 s with a 6.1 GB peak (base files already cached). All 7450 tensors equal dgrauet's `transformer-distilled-1.1.safetensors`, and the kite clip is identical to the reference in video and audio (same decoded MD5s). Rendering took 92 s with a 13.8 GB peak.
+- **Stock at q4:** converted in 22 s with a 5.9 GB peak. All 7450 tensors are equal, and the clip is identical.
+- **Refusals:** no `--quantize`, an existing name (the folder was left unchanged), and `--name ltx-8` were all refused. `--force` replaced the folder and left no partial folder behind.
+- **Listing:** listed as a video model by `ziv model list` and on the Models page, also after renaming it to a name without `ltx`. Its fit badge said it fits at about 21 GB.
+- **Community fine-tune (34 GB, 440 FP8 tensors):** reported as plain dev. At q8 with `--distill` it converted in 2:35, including the 7.6 GB LoRA download, with a 9.5 GB peak. The t2v, i2v, extend (49 to 97 frames) and LoRA clips at 8 steps were all sharp and well formed.
+- **Web UI:** with the same file and LTX-2.3 chosen, the form preselected q8 and Distill and showed progress while it converted, and the new row read "Converted at q8".
 
 `compare_ltx.py`, saved outside the repo:
 

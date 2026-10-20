@@ -418,7 +418,12 @@
                   <tbody>
                     {#each inventory.video_models as m}
                       <tr>
-                        <td>{@render modelName(m)}</td>
+                        <td>
+                          {@render modelName(m)}
+                          {#if m.converted_bits}
+                            <span class="ui-help block font-normal" data-testid="converted-level" title="Converted from a checkpoint; stored at this level only">Converted at q{m.converted_bits}</span>
+                          {/if}
+                        </td>
                         <td class="font-mono">{m.family}</td>
                         <td>{m.supports_i2v ? 'Yes' : '—'}</td>
                         <td>{@render diskSizeCell(m.disk_size_label)}</td>
