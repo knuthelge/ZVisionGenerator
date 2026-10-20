@@ -17,6 +17,7 @@ These files are not part of the published docs site, and the docs don't link to 
 | Proposal | Status | Summary |
 |---|---|---|
 | [Replace Ideogram 4 with Ideogram 4 Instant](ideogram-instant.md) | In progress | `ideo` becomes fal's 8-step distilled Instant (one transformer, no CFG), converted locally on first use from an ungated, tensor-checked copy; FP8 for mflux and NF4/FP8 stored quants on CUDA |
+| [MOSS-Image on Windows/Linux, with a 4-step Turbo](moss-image.md) | Proposed | A `moss` family on CUDA from a vendored, pinned pipeline file; Turbo (SFT + unmerged FP32 4-step LoRA) by default and full SFT as a variant, q4/q8 stored quants; macOS waits for official mflux support |
 | [Controls for Web UI video jobs](video-job-controls.md) | In progress | Quit has shipped; Next and Pause for video jobs remain |
 | [First and last frame for image-to-video](video-first-last-frame.md) | Proposed | An optional end image for `img2vid`: macOS first (MLX keyframe on the true last frame), then CUDA via `LTX2ConditionPipeline.from_pipe` with generate-and-trim once a spike confirms it; Last frame picker, `--end-image`, recorded settings and a two-frame enhancer rule |
 | [Upscale existing videos 2× on macOS](video-upscale-existing.md) | Proposed | Generate at `s`, extend, then upscale the finished video 2× from the viewer with LTX's own upsampler and a 1–3 step distilled refine, tiled over time for long clips; original audio kept. Replaces a SeedVR2 plan that won't fit a 32 GB Mac; a half-day spike sets steps and tiling |
