@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     import torch
 
 __all__ = [
-    "NF4_LAYOUT",
     "PREPARED_BITS",
     "component_elements",
     "count_transformer_elements",
@@ -39,7 +38,6 @@ __all__ = [
     "ensure_prepared",
     "load_text_encoder",
     "load_transformer",
-    "nf4_sample",
     "prepared_text_encoders",
     "text_encoder_bytes",
     "text_encoder_sources",
@@ -63,11 +61,6 @@ _BLOCKS_PREFIX = "transformer_blocks."
 _NF4_BLOCKSIZE = 64
 # What one saved NF4 weight consists of, by name suffix: the packed data and its double-quantized state.
 _NF4_PARTS = frozenset({"", "absmax", "quant_map", "nested_absmax", "nested_quant_map", "quant_state.bitsandbytes__nf4"})
-# How NF4 weights are serialized, recorded with a stored copy that has no source to rebuild from.
-NF4_LAYOUT = {"parts": sorted(_NF4_PARTS), "blocksize": _NF4_BLOCKSIZE, "quant_type": "nf4", "quant_storage": "uint8", "double_quant": True}
-# The weight, and how many values of its first row, dequantized to check that a bitsandbytes update still reads NF4 the same.
-_NF4_SAMPLE_WEIGHT = "transformer_blocks.0.attn1.to_q.weight"
-_NF4_SAMPLE_VALUES = 64
 # LTX-2.3's prompt modulation layers, which diffusers 0.41's single-file conversion leaves under their checkpoint names.
 _LTX23_RENAMES = (("prompt_adaln_single.", "prompt_adaln."), ("audio_prompt_adaln_single.", "audio_prompt_adaln."))
 # The diffusers text-encoder checkpoint uses transformers' older Gemma 3 names.
@@ -277,17 +270,6 @@ def write_transformer_tensors(tensors: Iterable[tuple[str, torch.Tensor]], confi
     _require_coverage(storage.keys() - written, label)
     writer.close()
     (target / _CONFIG_NAME).write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-
-
-def nf4_sample(prepared: Path, device: Any) -> tuple[str, list[float]]:
-    """Return the name of the sample NF4 weight of the prepared transformer copy *prepared*, and the start of its first row dequantized on *device*."""
-    from bitsandbytes.functional import QuantState, dequantize_4bit
-
-    key = _NF4_SAMPLE_WEIGHT
-    parts = {name[len(key) :].lstrip("."): tensor for path in shard_files(prepared, _INDEX_NAME) for name, tensor in iter_tensors(path, lambda name: name == key or name.startswith(f"{key}."))}
-    data = parts.pop("")
-    state = QuantState.from_dict(parts, device=device)
-    return key, dequantize_4bit(data.to(device), state)[0, :_NF4_SAMPLE_VALUES].float().cpu().tolist()
 
 
 def prepared_text_encoders(models_dir: Path) -> list[Path]:

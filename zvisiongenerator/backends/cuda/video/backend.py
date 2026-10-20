@@ -287,7 +287,7 @@ def _load_generation_pipeline(
     from zvisiongenerator.backends.cuda.memory import release_memory
 
     if converted is not None:
-        repo_dir, prepared_transformer, prepared_text_encoder, fits_together = _converted_weights(Path(model_path).expanduser(), converted, runtime.torch.device("cuda"))
+        repo_dir, prepared_transformer, prepared_text_encoder, fits_together = _converted_weights(Path(model_path).expanduser(), converted)
     else:
         repo_dir, prepared_transformer, prepared_text_encoder, fits_together = _stock_weights(model_path, model_name, transformer_source, quantize, runtime.torch.device("cuda"))
     connectors = _load_connectors(repo_dir, torch_dtype)
@@ -403,17 +403,14 @@ def _stock_weights(model_path: str, model_name: str | None, transformer_source: 
     return repo_dir, prepared_transformer, prepared_text_encoder, fits_together
 
 
-def _converted_weights(model_dir: Path, manifest: dict[str, Any], device: Any) -> tuple[Path, Path, Path, bool]:
+def _converted_weights(model_dir: Path, manifest: dict[str, Any]) -> tuple[Path, Path, Path, bool]:
     """Return the converted folder *model_dir*, its stored transformer and text encoder, and whether they fit together.
 
     Nothing is read from the source checkpoint, the configured transformer or the alias table.
     """
-
-    from zvisiongenerator.backends.cuda.video.converted import check_converted
     from zvisiongenerator.backends.cuda.video.memory_estimate import converted_ltx_system_estimate
 
     fits_together = _check_system_memory(converted_ltx_system_estimate(model_dir, manifest), manifest["bits"], converted=True)
-    check_converted(model_dir, manifest, device)
     return model_dir, model_dir / "transformer", model_dir / "text_encoder", fits_together
 
 

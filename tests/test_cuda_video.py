@@ -1990,22 +1990,20 @@ class TestUpscaleReview:
 # ── Converted LTX folders (ziv model model --model-type ltx-2.3) ─────────────
 
 
-def _converted_folder(tmp_path: Path, bits: int = 8, **extra) -> Path:
+def _converted_folder(tmp_path: Path, bits: int = 8) -> Path:
     from zvisiongenerator.utils.ltx_converted import write_converted_ltx
 
     folder = tmp_path / "myft"
     (folder / "transformer").mkdir(parents=True)
     (folder / "model_index.json").write_text(json.dumps({"_class_name": "LTX2Pipeline"}))
-    write_converted_ltx(folder, {"bits": bits, "storage": {4: "nf4", 8: "fp8-e4m3"}[bits], "block_matrices": 10 * 1024**3, "transformer_rest": 0, **extra})
+    write_converted_ltx(folder, {"bits": bits, "storage": {4: "nf4", 8: "fp8-e4m3"}[bits], "block_matrices": 10 * 1024**3, "transformer_rest": 0})
     return folder
 
 
 def test_a_converted_folder_loads_its_own_weights_and_level(monkeypatch, fake_weights, tmp_path):
     _patch_runtime(monkeypatch, _make_runtime())
     folder = _converted_folder(tmp_path, bits=8)
-    checked: list[Path] = []
     monkeypatch.setattr("zvisiongenerator.backends.cuda.video.memory_estimate.converted_ltx_system_estimate", lambda model_dir, manifest: ("estimate", model_dir, manifest["bits"]))
-    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.converted.check_converted", lambda model_dir, manifest, device: checked.append(model_dir))
     monkeypatch.setattr(video_diffusers_module, "_download_hub_file", lambda *a: pytest.fail("a converted folder never reads the configured transformer"))
 
     # The alias table has no level for this name, and the configured transformer is ignored.
@@ -2015,7 +2013,6 @@ def test_a_converted_folder_loads_its_own_weights_and_level(monkeypatch, fake_we
     assert fake_weights.transformers == [{"prepared": folder / "transformer", "bits": 8}]
     assert model.text_encoder.prepared == folder / "text_encoder"
     assert fake_weights.memory_checks == [(folder, 8)]
-    assert checked == [folder]
 
 
 def test_a_converted_q8_folder_that_does_not_fit_advises_converting_again_at_q4(monkeypatch, tmp_path):
@@ -2038,49 +2035,6 @@ def test_a_stock_converted_folder_is_estimated_like_the_alias(monkeypatch, tmp_p
     converted = converted_ltx_system_estimate(tmp_path, {"bits": 4, "block_matrices": 123, "transformer_rest": 45})
 
     assert converted == stock
-
-
-class TestConvertedNf4Check:
-    def _manifest(self, sample, checked="0.50.2"):
-        from zvisiongenerator.backends.cuda.video.weights import NF4_LAYOUT
-
-        return {
-            "kind": "ltx-2.3",
-            "layout": 1,
-            "bits": 4,
-            "storage": "nf4",
-            "block_matrices": 1,
-            "transformer_rest": 1,
-            "nf4": {**NF4_LAYOUT, "sample": sample, "bitsandbytes": "0.50.2", "checked_bitsandbytes": checked},
-        }
-
-    def _check(self, monkeypatch, tmp_path, manifest, *, installed, now):
-        from zvisiongenerator.backends.cuda.video import converted
-
-        monkeypatch.setattr(converted.importlib.metadata, "version", lambda _name: installed)
-        monkeypatch.setattr(converted, "nf4_sample", lambda folder, device: ("w", now))
-        converted.check_converted(tmp_path, manifest, "cuda")
-
-    def test_the_same_version_is_not_checked_again(self, monkeypatch, tmp_path):
-        self._check(monkeypatch, tmp_path, self._manifest([1.0]), installed="0.50.2", now=[99.0])
-
-    def test_a_new_version_that_reads_the_same_passes_and_is_recorded(self, monkeypatch, tmp_path):
-        from zvisiongenerator.utils.ltx_converted import read_converted_ltx
-
-        self._check(monkeypatch, tmp_path, self._manifest([1.0, -0.5]), installed="0.51.0", now=[1.001, -0.5])
-
-        assert read_converted_ltx(tmp_path)["nf4"]["checked_bitsandbytes"] == "0.51.0"
-
-    def test_a_new_version_that_reads_differently_refuses_to_load(self, monkeypatch, tmp_path):
-        with pytest.raises(RuntimeError, match="Convert the original checkpoint again"):
-            self._check(monkeypatch, tmp_path, self._manifest([1.0, -0.5]), installed="0.51.0", now=[0.2, 0.7])
-
-    def test_another_nf4_layout_refuses_to_load(self, monkeypatch, tmp_path):
-        manifest = self._manifest([1.0])
-        manifest["nf4"]["blocksize"] = 128
-
-        with pytest.raises(RuntimeError, match="another layout"):
-            self._check(monkeypatch, tmp_path, manifest, installed="0.50.2", now=[1.0])
 
 
 def test_text_encoder_copies_are_reused_from_converted_folders_and_aliases(tmp_path):

@@ -1,4 +1,4 @@
-"""Converted LTX-2.3 folders on Windows/Linux: write one from a single-file checkpoint, and check one before it loads.
+"""Converted LTX-2.3 folders on Windows/Linux: write one from a single-file checkpoint.
 
 A converted folder is a diffusers LTX-2 folder that holds its own quantized weights:
 
@@ -8,13 +8,11 @@ A converted folder is a diffusers LTX-2 folder that holds its own quantized weig
 - the diffusers repo's index and other components (connectors, VAEs, vocoder, tokenizer, scheduler), hard-linked.
 - the folder manifest (:mod:`zvisiongenerator.utils.ltx_converted`), written last.
 
-It loads without the source checkpoint. NF4 copies record how bitsandbytes serialized them and a dequantized
-sample, so a bitsandbytes update that reads them differently refuses the folder instead of loading noise.
+It loads without the source checkpoint.
 """
 
 from __future__ import annotations
 
-import importlib.metadata
 import json
 import shutil
 from collections.abc import Callable
@@ -22,10 +20,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends.cuda.video.weights import (
-    NF4_LAYOUT,
     count_transformer_elements,
     ensure_prepared,
-    nf4_sample,
     prepared_text_encoders,
     text_encoder_sources,
     transformer_name_map,
@@ -39,13 +35,11 @@ from zvisiongenerator.utils.ltx_converted import write_converted_ltx
 if TYPE_CHECKING:
     from zvisiongenerator.converters.ltx_checkpoint import LtxCheckpoint
 
-__all__ = ["check_converted", "convert", "write_converted"]
+__all__ = ["convert", "write_converted"]
 
 # Components written here rather than linked from the diffusers repo.
 _OWN_COMPONENTS = ("transformer", "text_encoder")
 _STORAGE = {4: "nf4", 8: "fp8-e4m3"}
-# A bitsandbytes update may round differently; anything beyond this share of the sample's largest value is a changed format.
-_NF4_SAMPLE_TOLERANCE = 0.01
 
 Report = Callable[[str, int, int], None]
 
@@ -108,7 +102,7 @@ def write_converted(
     report("components", 0, 1)
     _link_components(repo_dir, target)
     block_matrices, transformer_rest = count_transformer_elements((names[name], checkpoint.shapes[name]) for name in checkpoint.transformer if name in names)
-    manifest: dict[str, Any] = {
+    manifest = {
         "bits": bits,
         "storage": _STORAGE[bits],
         "block_matrices": block_matrices,
@@ -116,44 +110,7 @@ def write_converted(
         "source": checkpoint.path.name,
         "distilled_lora": lora.name if lora is not None else None,
     }
-    if bits == 4:
-        version = importlib.metadata.version("bitsandbytes")
-        weight, sample = nf4_sample(target / "transformer", device)
-        manifest["nf4"] = {**NF4_LAYOUT, "sample_weight": weight, "sample": sample, "bitsandbytes": version, "checked_bitsandbytes": version}
     write_converted_ltx(target, manifest)
-
-
-def check_converted(model_dir: Path, manifest: dict[str, Any], device: Any) -> None:
-    """Check that the converted folder *model_dir* can be read by the installed libraries before it loads.
-
-    An NF4 copy saved in another layout is refused. After a bitsandbytes update, its sample weight is dequantized
-    again and compared with the recorded values; when they match, the new version is recorded so the check runs
-    once per version.
-
-    Raises:
-        RuntimeError: When the folder can't be read as it was written; it has to be converted again.
-    """
-    if manifest.get("storage") != _STORAGE[manifest["bits"]]:
-        raise _reconvert(model_dir, "it was stored in another format")
-    if manifest["bits"] != 4:
-        return
-    nf4 = manifest.get("nf4") or {}
-    if {key: nf4.get(key) for key in NF4_LAYOUT} != NF4_LAYOUT:
-        raise _reconvert(model_dir, "its NF4 weights were saved in another layout")
-    version = importlib.metadata.version("bitsandbytes")
-    if nf4.get("checked_bitsandbytes") == version:
-        return
-    _weight, sample = nf4_sample(model_dir / "transformer", device)
-    recorded = nf4.get("sample") or []
-    limit = _NF4_SAMPLE_TOLERANCE * max((abs(value) for value in recorded), default=0.0)
-    if len(sample) != len(recorded) or any(abs(a - b) > limit for a, b in zip(sample, recorded, strict=True)):
-        raise _reconvert(model_dir, f"bitsandbytes {version} reads its NF4 weights differently from {nf4.get('bitsandbytes')}, which wrote them")
-    write_converted_ltx(model_dir, {key: value for key, value in manifest.items() if key not in ("kind", "layout")} | {"nf4": {**nf4, "checked_bitsandbytes": version}})
-
-
-def _reconvert(model_dir: Path, reason: str) -> RuntimeError:
-    """Return the error for a converted folder that can't load: *reason*, and what to do."""
-    return RuntimeError(f"The converted LTX model {model_dir.name} can't be loaded: {reason}. Convert the original checkpoint again with 'ziv model model --model-type ltx-2.3'.")
 
 
 def _link_components(repo_dir: Path, target: Path) -> None:

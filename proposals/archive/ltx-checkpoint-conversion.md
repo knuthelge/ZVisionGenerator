@@ -1,12 +1,12 @@
 # Convert LTX-2.3 checkpoints
 
-**Status:** In progress (2026-10-20)
+**Status:** Done (unreleased, 2026-10-20). Shipped in `60e7e46` (Windows/Linux), `aa0ea3a` (macOS) and the macOS check that followed.
 
 **Done: Windows and Linux.** `ziv model model --model-type ltx-2.3 --quantize 4|8 [--distill] [--force]` and the Models page's **LTX-2.3 (video)** convert a checkpoint as planned in §1, §3, the CUDA parts of §4 and §5: the shared checkpoint reader (`converters/ltx_checkpoint.py`, pinned hashes in `ltx23_hashes.json`), the CUDA folder writer and load check (`backends/cuda/video/converted.py`), detection by contents, estimates from the manifest, and the Web UI's inspect endpoint and background job. Checked on the test file: a q4 `--distill` conversion took 3:07 at a 4.5 GB peak, and the clip from it was sharp at 8 steps, 2:59 with a 20 GB peak.
 
 **Done: macOS.** §2 as planned (`backends/mac/ltx_converted.py`, the single-file `SingleFileWriter` in `utils/safetensors_stream`, `video_model_presets.ltx.mlx_base` in config), and the Models page preselects q8 from 32 GB of unified memory and shows each converted model's level. The macOS test plan passed on a 32 GB M5 MacBook Air (results under "macOS test plan"): Metal's `mx.quantize` reproduces dgrauet's q4 and q8 transformers bit for bit, and clips from them are identical to `ltx-4` / `ltx-8`.
 
-**Left:** marking an NF4 folder that a bitsandbytes update can't read on the Models page (Windows/Linux; today it refuses to load with the reconvert message).
+**Dropped: the NF4 check after a bitsandbytes update** (§3's layout record and dequantized sample, rechecked on the first load with each new bitsandbytes version, and the Models-page mark planned for it). It guarded against an unlikely format change at the cost of a load-time check that rewrote the manifest. The remedy, converting again, is the same either way, so a q4 folder now loads as stored. The stored level is still in the manifest.
 
 ## Problem
 
