@@ -8,7 +8,7 @@ export { default as AssetViewer } from './AssetViewer.svelte';
 export { default as Toast } from './Toast.svelte';
 export { default as ToastContainer } from './ToastContainer.svelte';
 export { default as Modal } from './Modal.svelte';
-export { default as BottomSheet } from './BottomSheet.svelte';
+export { default as Sheet } from './Sheet.svelte';
 export { default as JobCard } from './JobCard.svelte';
 export { default as JobPreview } from './JobPreview.svelte';
 export { default as JobBar } from './JobBar.svelte';

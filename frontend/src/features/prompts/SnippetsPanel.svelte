@@ -4,7 +4,7 @@
   import type { DocumentSnippet } from '$lib/types';
   import type { PromptBuilder } from './builder.svelte';
   import { findSnippet, flattenValue, valueAsText, valueData } from './document';
-  import type { DragDrop } from './dragDrop.svelte';
+  import { reorderDrag, type DragDrop } from './dragDrop.svelte';
   import PromptText from './PromptText.svelte';
 
   interface Props {
@@ -80,11 +80,8 @@
       class:snippet-unused={count === 0 && !open}
       class:snippet-dragging={dnd.dragging?.id === snippet.id}
       data-drop={mark}
-      draggable={!open}
-      ondragstart={(event) => dnd.start(event, 'snippet', snippet.id, event.currentTarget)}
-      ondragend={() => dnd.end()}
-      ondragover={(event) => dnd.overSnippet(event, snippet.id, event.currentTarget)}
-      ondrop={(event) => dnd.drop(event)}
+      data-dnd-snippet={snippet.id}
+      use:reorderDrag={{ dnd, kind: 'snippet', id: snippet.id, handle: '.grip', enabled: !open }}
     >
       {#if open}
         <input
@@ -142,8 +139,9 @@
   .snippets { overflow: hidden; border-radius: var(--radius-md); background: var(--color-bg-surface); }
   .snippet { position: relative; padding: 5px 8px 6px; cursor: grab; }
   .snippet + .snippet { border-top: 1px solid var(--color-border-subtle); }
-  .snippet:hover { background: var(--color-bg-surface-hover); }
-  .snippet-open, .snippet-open:hover { background: var(--color-bg-raised); cursor: default; }
+  @media (hover: hover) { .snippet:hover { background: var(--color-bg-surface-hover); } }
+  .snippet-open { background: var(--color-bg-raised); cursor: default; }
+  @media (hover: hover) { .snippet-open:hover { background: var(--color-bg-raised); cursor: default; } }
   .snippet-unused { opacity: 0.55; }
   .snippet-dragging { opacity: 0.35; }
   .snippet[data-drop='before']::before, .snippet[data-drop='after']::after { content: ''; position: absolute; left: 0; right: 0; height: 2px; background: var(--color-primary-main); pointer-events: none; }
@@ -151,7 +149,11 @@
   .snippet[data-drop='after']::after { bottom: -1px; }
   .snippet-row { display: flex; width: 100%; align-items: center; gap: 4px; text-align: left; cursor: inherit; }
   .grip { width: 10px; font-size: var(--text-ui); color: var(--color-text-muted); opacity: 0; }
-  .snippet:hover .grip { opacity: 0.6; }
+  @media (hover: hover) { .snippet:hover .grip { opacity: 0.6; } }
+  /* A finger drags by the grip, so it is always there on a touch screen, finger-sized, and never scrolls the page. */
+  .grip { touch-action: none; }
+  @media (hover: none) { .grip { opacity: 0.6; } }
+  @media (pointer: coarse) { .grip { width: 24px; font-size: 16px; text-align: center; } }
   .snippet-name { font-family: var(--font-mono); font-size: var(--text-ui); font-weight: 500; color: var(--color-accent-coral); }
   .snippet-uses { margin-left: auto; font-size: var(--text-meta); color: var(--color-text-muted); }
   .snippet-preview { overflow: hidden; padding-left: 14px; font-size: var(--text-ui); line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-secondary); }

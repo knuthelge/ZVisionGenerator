@@ -5,8 +5,6 @@
   import { etaLabel, headline, isActive, isPaused, itemNoun, iterations, jobBar, jobControls, jobPhase, stageBars } from '$lib/state/jobView';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { ActiveJobState, JobControlAction } from '$lib/types';
-  import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
-  import { requestConfirm } from './confirm.svelte';
 
   type ControlCallback = (jobId: string) => void | Promise<unknown>;
 
@@ -14,16 +12,13 @@
     job: ActiveJobState;
     /** Jobs waiting behind this one. */
     queuedCount?: number;
-    oncancel?: ControlCallback;
     onpause?: ControlCallback;
     onresume?: ControlCallback;
-    onnext?: ControlCallback;
-    onrepeat?: ControlCallback;
-    /** Open the full card (phases, timings, the queue). */
+    /** Open the full card: phases, timings, Skip, Repeat, Cancel and the queue. */
     ondetails: () => void;
   }
 
-  let { job, queuedCount = 0, oncancel, onpause, onresume, onnext, onrepeat, ondetails }: Props = $props();
+  let { job, queuedCount = 0, onpause, onresume, ondetails }: Props = $props();
 
   const active = $derived(isActive(job));
   const paused = $derived(isPaused(job));
@@ -48,8 +43,6 @@
   });
 
   let sending = $state(false);
-  let moreOpen = $state(false);
-  let moreButton = $state<HTMLButtonElement | null>(null);
 
   async function send(action: JobControlAction, callback: ControlCallback | undefined): Promise<void> {
     if (!callback || !available.has(action) || offline || sending) return;
@@ -62,27 +55,9 @@
       sending = false;
     }
   }
-
-  async function cancel(): Promise<void> {
-    const approved = await requestConfirm({
-      question: 'Cancel this job?',
-      info: `The ${noun}s already saved are kept.`,
-      confirmLabel: 'Cancel job',
-      cancelLabel: 'Keep running',
-    });
-    if (approved) await send('quit', oncancel);
-  }
-
-  const moreItems = $derived<ActionMenuEntry[]>([
-    { kind: 'item', id: 'details', label: 'Job details', onselect: ondetails },
-    ...(available.has('next') ? [{ kind: 'item' as const, id: 'next', label: phase === 'enhance' ? 'Skip this rewrite' : `Skip to the next ${noun}`, onselect: () => void send('next', onnext) }] : []),
-    ...(available.has('repeat') ? [{ kind: 'item' as const, id: 'repeat', label: `Repeat this ${noun}`, onselect: () => void send('repeat', onrepeat) }] : []),
-    ...(queuedCount > 0 ? [{ kind: 'item' as const, id: 'queue', label: `Queue · ${queuedCount} waiting`, onselect: ondetails }] : []),
-    ...(available.has('quit') ? [{ kind: 'separator' as const }, { kind: 'item' as const, id: 'quit', label: 'Cancel job', danger: true, onselect: () => void cancel() }] : []),
-  ]);
 </script>
 
-<!-- The compact job card: one row of facts, the progress, the prompt. The full card is a tap away under ⋯. -->
+<!-- The compact job card: one row of facts, the progress, the prompt. ⋯ opens the full card as the Job sheet. -->
 <div class="job-bar ui-overlay" data-tone={paused ? 'paused' : 'running'} data-testid="job-bar" aria-label="Running job">
   <div class="jb-row">
     <span class="jb-status"><i class="jb-dot"></i><span class="ui-area-label jb-workflow">{workflowLabel(job.workflow)}</span></span>
@@ -96,8 +71,7 @@
           <button type="button" class="ui-btn ui-btn-sm" disabled={!available.has('pause') || offline || sending || pending === 'pause'} onclick={() => void send('pause', onpause)}><Icon name="pause" size={12} />{pending === 'pause' ? 'Pausing' : 'Pause'}</button>
         {/if}
       {/if}
-      <button type="button" bind:this={moreButton} class="ui-btn ui-btn-sm ui-btn-icon" aria-label="More job controls" aria-haspopup="menu" aria-expanded={moreOpen} onclick={() => { moreOpen = !moreOpen; }}><Icon name="more" size={14} /></button>
-      <ActionMenu open={moreOpen} anchor={moreButton} items={moreItems} label="Job" onclose={() => { moreOpen = false; }} />
+      <button type="button" class="ui-btn ui-btn-sm ui-btn-icon" aria-label="Job details" aria-haspopup="dialog" onclick={ondetails}><Icon name="more" size={14} /></button>
     </span>
   </div>
   {#if bar.kind === 'segments'}

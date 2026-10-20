@@ -15,7 +15,7 @@
   import { Icon, Toggle } from '$lib/components/atoms';
   import { popover } from '$lib/actions/popover';
   import { layout } from '$lib/state/layoutMode.svelte';
-  import BottomSheet from '$lib/components/molecules/BottomSheet.svelte';
+  import Sheet from '$lib/components/molecules/Sheet.svelte';
   import {
     clampedNote,
     effectiveEnhanceSettings,
@@ -298,11 +298,11 @@
     {/if}
 {/snippet}
 
-{#if panelOpen && layout.compact}
+{#if layout.compact}
   <!-- A phone: the options as a sheet, like every menu there. -->
-  <BottomSheet open={true} title="Prompt enhancer" onclose={() => { panelOpen = false; }}>
+  <Sheet bind:open={panelOpen} title="Prompt enhancer">
     <div id="ws-enhance-panel" class="enhance-sheet space-y-3">{@render panel()}</div>
-  </BottomSheet>
+  </Sheet>
 {:else if panelOpen}
   <div
     use:popover={{ anchor: toggleEl, align: 'start', onclose: () => { panelOpen = false; } }}

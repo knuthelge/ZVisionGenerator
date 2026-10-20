@@ -98,7 +98,7 @@
   .toast-icon { color: var(--toast-tone); }
   .toast-pending { padding: 1px 6px; border-radius: 999px; background: var(--color-bg-surface-hover); }
   .toast-action { height: var(--spacing-control-sm); padding: 0 8px; border-radius: var(--radius-sm); font-size: var(--text-ui); font-weight: 700; color: var(--toast-tone); }
-  .toast-action:hover { background: color-mix(in srgb, var(--toast-tone) 18%, transparent); }
+  @media (hover: hover) { .toast-action:hover { background: color-mix(in srgb, var(--toast-tone) 18%, transparent); } }
   .toast-dismiss { display: grid; place-items: center; width: var(--spacing-control-sm); height: var(--spacing-control-sm); border-radius: var(--radius-sm); transition: color 0.12s ease; }
-  .toast-dismiss:hover { color: var(--color-text-primary); }
+  @media (hover: hover) { .toast-dismiss:hover { color: var(--color-text-primary); } }
 </style>

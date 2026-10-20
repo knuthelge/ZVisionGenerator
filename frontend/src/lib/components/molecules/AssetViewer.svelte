@@ -405,7 +405,7 @@
 
 {#if open && asset}
   <div
-    class="asset-viewer"
+    class="asset-viewer ui-viewport"
     role="dialog"
     aria-modal="true"
     aria-labelledby="asset-viewer-title"
@@ -576,8 +576,8 @@
       {#if detailsOpen}
         <aside id="asset-viewer-details" class="viewer-details" class:ui-sheet={compact} aria-label="Asset details" use:sheetDrag={{ enabled: compact, onclose: () => { if (detailsOpen) toggleDetails(); } }}>
           {#if compact}
-            <div class="ui-sheet-grab" aria-hidden="true"></div>
-            <div class="ui-sheet-head">
+            <div class="ui-sheet-grab" data-sheet-handle aria-hidden="true"></div>
+            <div class="ui-sheet-head" data-sheet-handle>
               <h2 class="ui-area-label">Details</h2>
               <span class="ui-sheet-end">
                 <button type="button" class="ui-btn ui-btn-icon" aria-label="Close details" onclick={toggleDetails}><Icon name="close" size={16} /></button>
@@ -698,7 +698,7 @@
 {/snippet}
 
 <style>
-  .asset-viewer { position: fixed; inset: 0; z-index: var(--z-viewer); display: flex; flex-direction: column; background: color-mix(in srgb, var(--color-bg-base) 70%, black); }
+  .asset-viewer { z-index: var(--z-viewer); display: flex; flex-direction: column; background: color-mix(in srgb, var(--color-bg-base) 70%, black); }
   .viewer-bar { display: flex; flex: none; align-items: center; gap: 6px; min-height: 44px; padding: 6px 12px 6px 16px; background: var(--color-bg-surface); }
   .viewer-title { display: flex; flex: 1 1 auto; min-width: 7rem; flex-direction: column; }
   .viewer-title b { font-size: var(--text-content); font-weight: 600; }
@@ -725,7 +725,7 @@
   .viewer-prompt { padding: 8px 10px; border-radius: var(--radius-md); background: var(--color-bg-base); font-size: var(--text-content); line-height: 1.55; color: var(--color-text-secondary); white-space: pre-wrap; user-select: text; }
   .viewer-source { display: flex; width: 100%; align-items: baseline; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: var(--radius-md); background: var(--color-bg-base); font-size: var(--text-ui); color: var(--color-text-primary); text-align: left; }
   .viewer-source small { flex: none; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
-  button.viewer-source:hover { background: var(--color-bg-surface-hover); }
+  @media (hover: hover) { button.viewer-source:hover { background: var(--color-bg-surface-hover); } }
   button.viewer-source:focus-visible, .viewer-film button:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
   .viewer-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
   .viewer-facts div { min-width: 0; padding: 6px 8px; border-radius: var(--radius-sm); background: var(--color-bg-base); }
@@ -737,7 +737,7 @@
   .viewer-film > :first-child { margin-left: auto; }
   .viewer-film > :last-child { margin-right: auto; }
   .viewer-film button { flex: none; width: 44px; height: 44px; overflow: hidden; padding: 0; border: 2px solid transparent; border-radius: var(--radius-sm); opacity: 0.55; transition: opacity 0.12s ease; }
-  .viewer-film button:hover { opacity: 0.9; }
+  @media (hover: hover) { .viewer-film button:hover { opacity: 0.9; } }
   .viewer-film button[aria-current='true'] { border-color: var(--color-primary-main); opacity: 1; }
   .film-video-placeholder { display: grid; width: 100%; height: 100%; place-items: center; background: var(--color-bg-surface); font-size: var(--text-ui); color: var(--color-text-muted); }
   .viewer-film img, .viewer-film video { display: block; width: 100%; height: 100%; object-fit: cover; }

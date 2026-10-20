@@ -106,7 +106,7 @@
   .field-changed { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--color-primary-main); }
   .field-reset { display: inline-grid; flex-shrink: 0; place-items: center; width: 20px; height: 20px; border-radius: var(--radius-xs); color: var(--color-text-muted); visibility: hidden; }
   .field-reset-shown { visibility: visible; }
-  .field-reset:hover { background: var(--color-bg-surface-hover); color: var(--color-primary-main); }
+  @media (hover: hover) { .field-reset:hover { background: var(--color-bg-surface-hover); color: var(--color-primary-main); } }
 
   /* Row layout: label column, then the control (up to 480px) with its reset, then help under the control. */
   .field-row { display: grid; grid-template-columns: 200px minmax(0, 480px); column-gap: 24px; row-gap: 4px; align-items: start; padding: 12px 0; border-top: 1px solid var(--color-border-subtle); }

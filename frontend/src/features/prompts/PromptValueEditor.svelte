@@ -59,7 +59,7 @@
     {#each value.fields as field, index (index)}
       {@const fieldKey = `${baseKey}:${index}`}
       <input
-        class="field-key"
+        class="field-key ui-label-input"
         aria-label="{label} field name"
         placeholder="name"
         value={field.key}
@@ -95,13 +95,23 @@
   .fields { display: grid; grid-template-columns: max-content minmax(0, 1fr) auto; gap: 0 8px; align-items: start; }
   .field-key { min-width: 6ch; max-width: 18ch; field-sizing: content; height: 22px; margin-top: 2px; padding: 0 4px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
   .field-key::placeholder { color: var(--color-error); opacity: 0.7; }
-  .field-key:hover { background: var(--color-bg-surface-hover); }
+  @media (hover: hover) { .field-key:hover { background: var(--color-bg-surface-hover); } }
   .field-key:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-base); color: var(--color-text-primary); }
   .field-remove { opacity: 0; }
-  .fields:hover .field-remove, .field-remove:focus-visible { opacity: 1; }
+  .field-remove:focus-visible { opacity: 1; }
+  @media (hover: hover) { .fields:hover .field-remove { opacity: 1; } }
+  @media (hover: none) { .field-remove { opacity: 1; } }
   .add-field { grid-column: 1 / -1; justify-self: start; height: 22px; padding: 0 4px; font-size: var(--text-meta); }
-  .add-field:hover { color: var(--color-primary-main); }
+  @media (hover: hover) { .add-field:hover { color: var(--color-primary-main); } }
   .structured { padding: 2px 0; }
+  /* A narrow column (a phone): a field's name and × share a row and its value takes the full width under them;
+     dense flow lifts the × into the row beside the name. */
+  @container prompt-sets (max-width: 560px) {
+    .fields { grid-template-columns: minmax(0, 1fr) auto; grid-auto-flow: row dense; gap: 0 8px; }
+    .field-key { grid-column: 1; align-self: center; justify-self: start; height: 26px; }
+    .field-remove { grid-column: 2; align-self: center; width: 32px; height: 32px; }
+    .fields > :global(:not(.field-key, .field-remove, .add-field)) { grid-column: 1 / -1; margin: 0 0 8px 4px; }
+  }
   .structured-text { white-space: pre-wrap; font-size: var(--text-content); line-height: 1.6; color: var(--color-text-secondary); }
   .structured-note { margin-top: 2px; font-size: var(--text-meta); color: var(--color-text-muted); }
 </style>

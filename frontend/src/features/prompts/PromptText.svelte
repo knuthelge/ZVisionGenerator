@@ -325,7 +325,7 @@
     color: var(--color-text-primary);
     cursor: text;
   }
-  .prompt-text-display:hover { background: var(--color-bg-raised); }
+  @media (hover: hover) { .prompt-text-display:hover { background: var(--color-bg-raised); } }
   .prompt-text-display:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
   .prompt-text-empty { color: var(--color-text-muted); font-style: italic; }
   .prompt-text-edit { position: relative; }
@@ -371,7 +371,7 @@
     font: inherit;
     line-height: 1.45;
   }
-  .tok-choice:hover { background: color-mix(in srgb, var(--color-accent-amber) 20%, transparent); }
+  @media (hover: hover) { .tok-choice:hover { background: color-mix(in srgb, var(--color-accent-amber) 20%, transparent); } }
   .tok-choice:focus-visible { outline: 2px solid var(--color-accent-amber); outline-offset: 2px; }
   .tok-option { padding: 0 4px; color: var(--color-accent-amber); }
   .tok-option + .tok-option { border-left: 1px solid color-mix(in srgb, var(--color-accent-amber) 30%, transparent); }
@@ -381,7 +381,8 @@
   .choice-bar-button kbd { font-family: var(--font-mono); font-size: var(--text-meta); opacity: 0.7; }
   .snippet-suggestions { z-index: 60; min-width: 220px; max-width: 360px; padding: 4px; }
   .suggestion { display: flex; width: 100%; align-items: baseline; gap: 10px; padding: 5px 8px; border-radius: var(--radius-sm); text-align: left; }
-  .suggestion-on, .suggestion:hover { background: var(--color-bg-surface-hover); }
+  .suggestion-on { background: var(--color-bg-surface-hover); }
+  @media (hover: hover) { .suggestion:hover { background: var(--color-bg-surface-hover); } }
   .suggestion-name { font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-accent-coral); }
   .suggestion-value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-meta); color: var(--color-text-muted); }
   .choice-editor { z-index: 60; width: 300px; padding: 10px; }

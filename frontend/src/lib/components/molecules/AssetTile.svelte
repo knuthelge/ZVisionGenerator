@@ -2,6 +2,7 @@
   import { Icon } from '$lib/components/atoms';
   import type { AssetActionHandlers, ReferenceTarget } from '$lib/state/assetActions';
   import type { GalleryAsset } from '$lib/types';
+  import { hold } from '$lib/actions/hold';
   import ActionMenu from './ActionMenu.svelte';
   import { assetMenuEntries } from './assetMenu';
 
@@ -54,9 +55,12 @@
   }
 </script>
 
+<!-- A finger's long press opens the same menu as ⋯. -->
 <article
+  use:hold={{ onhold: () => { menuOpen = true; }, ignore: '.asset-tile-actions, .asset-tile-check, video' }}
   class="asset-tile {extraClass}"
   data-density={density}
+  data-video={isVideo}
   data-selected={selected}
   data-menu-open={menuOpen}
   aria-busy={deleting}
@@ -109,7 +113,7 @@
     {#if onpreview}
       <button
         type="button"
-        class="asset-tile-action ui-media-action"
+        class="asset-tile-action asset-tile-expand ui-media-action"
         title="View fullscreen"
         aria-label="View {asset.filename} fullscreen"
         onclick={(event) => preview(event.currentTarget)}
@@ -164,10 +168,15 @@
     background: var(--color-bg-surface);
     transition: background-color 0.12s ease;
   }
-  .asset-tile:hover, .asset-tile:focus-within { background: var(--color-bg-surface-hover); }
+  .asset-tile:focus-within { background: var(--color-bg-surface-hover); }
+  @media (hover: hover) { .asset-tile:hover { background: var(--color-bg-surface-hover); } }
   /* The selected tile keeps an outline: it carries meaning. */
   .asset-tile[data-selected='true'] { box-shadow: 0 0 0 2px var(--color-primary-main); }
   .asset-tile[aria-busy='true'] { opacity: 0.6; }
+  /* A long press sinks the tile as it fills; no callout or selection on the image meanwhile. */
+  .asset-tile { -webkit-touch-callout: none; transition: background-color 0.12s ease, scale 0.2s ease; }
+  .asset-tile:global([data-holding]) { scale: 0.96; transition: scale var(--hold-ms, 480ms) ease-out; }
+  .asset-tile-img { -webkit-user-select: none; user-select: none; }
   .asset-tile[data-density='stage'] { background: transparent; }
 
   .asset-tile-media { position: relative; display: block; flex: 1; min-height: 0; width: 100%; padding: 0; cursor: zoom-in; }
@@ -201,16 +210,17 @@
     pointer-events: none;
     transition: opacity 0.12s ease;
   }
-  .asset-tile:hover .asset-tile-actions,
-  .asset-tile:focus-within .asset-tile-actions,
-  .asset-tile[data-menu-open='true'] .asset-tile-actions { opacity: 1; pointer-events: auto; }
-  .asset-tile:hover::after,
-  .asset-tile:focus-within::after,
-  .asset-tile[data-menu-open='true']::after { opacity: 1; }
+  .asset-tile:focus-within .asset-tile-actions, .asset-tile[data-menu-open='true'] .asset-tile-actions { opacity: 1; pointer-events: auto; }
+  @media (hover: hover) { .asset-tile:hover .asset-tile-actions { opacity: 1; pointer-events: auto; } }
+  .asset-tile:focus-within::after, .asset-tile[data-menu-open='true']::after { opacity: 1; }
+  @media (hover: hover) { .asset-tile:hover::after { opacity: 1; } }
   @media (hover: none) {
     .asset-tile-actions { opacity: 1; pointer-events: auto; }
     /* A small tile has room for one button under a finger: ⋯ stays, and a tap on the tile opens it fullscreen. */
     .asset-tile[data-density='compact'] .asset-tile-action:not(:last-child) { display: none; }
+    .asset-tile[data-density='stage'][data-video='false'] .asset-tile-expand { display: none; }
+    .asset-tile[data-density='stage'] .asset-tile-actions { top: 8px; right: 8px; gap: 6px; }
+    .asset-tile[data-density='stage'] .asset-tile-action { width: 36px; height: 36px; box-shadow: 0 1px 6px var(--color-scrim); }
   }
 
   .asset-tile-action { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-sm); }

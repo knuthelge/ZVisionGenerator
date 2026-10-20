@@ -109,9 +109,9 @@
     .workspace-left.collapsed .sidebar-strip { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: space-between; padding: 8px 0 12px; }
   }
   .strip-expand { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-sm); color: var(--color-text-secondary); }
-  .strip-expand:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
+  @media (hover: hover) { .strip-expand:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); } }
   .strip-generate { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--radius-sm); background: var(--color-primary-main); color: var(--color-primary-ink); }
-  .strip-generate:hover { background: var(--color-primary-hover); }
+  @media (hover: hover) { .strip-generate:hover { background: var(--color-primary-hover); } }
   .strip-generate:disabled { background: var(--color-bg-surface-hover); color: var(--color-text-muted); cursor: not-allowed; }
   .strip-generate-wrap { position: relative; }
   .strip-badge { position: absolute; top: -6px; right: -6px; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border: 2px solid var(--color-bg-base); border-radius: var(--radius-xs); background: var(--color-primary-main); color: var(--color-primary-ink); font-size: var(--text-meta); font-weight: 700; }

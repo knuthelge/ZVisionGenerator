@@ -42,7 +42,7 @@ test: ## Run tests with pytest
 docs-check: ## Build documentation strictly with MkDocs
 	uv run --frozen mkdocs build --strict
 
-check: lint format-check test frontend-test frontend-palette-check frontend-static-check docs-check ## Run lint + format-check + pytest + frontend checks + docs build + packaged SPA static gate (full CI gate)
+check: lint format-check test frontend-test frontend-palette-check frontend-hover-check frontend-static-check docs-check ## Run lint + format-check + pytest + frontend checks + docs build + packaged SPA static gate (full CI gate)
 
 # ——— Vendored Dependencies ————————————————————————————————
 
@@ -84,7 +84,7 @@ update-seedvr2: ## Update vendored SeedVR2 PyTorch inference core (Windows/Linux
 
 # ——— Frontend ————————————————————————————————————————————
 
-.PHONY: frontend-install frontend-build frontend-static-check frontend-palette-check frontend-test frontend-dev
+.PHONY: frontend-install frontend-build frontend-static-check frontend-palette-check frontend-hover-check frontend-test frontend-dev
 
 frontend-install: ## Install frontend pnpm dependencies
 	pnpm --dir frontend install --frozen-lockfile
@@ -124,6 +124,9 @@ frontend-palette-check: ## Report raw colour classes and literals in Svelte file
 		printf '%s\n' "$$hits" | head -20; \
 		if [ "$(PALETTE_STRICT)" = "1" ]; then exit 1; fi; \
 	fi
+
+frontend-hover-check: ## Fail on :hover styles a touch screen would keep after a tap
+	node frontend/scripts/check-hover.mjs
 
 frontend-test: ## TypeScript check + vitest tests
 	pnpm --dir frontend run check

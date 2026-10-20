@@ -6,6 +6,9 @@
   import { jobStore } from '$lib/state/job.svelte';
   import { historyStore } from '$lib/state/history.svelte';
   import { router } from '$lib/state/router.svelte';
+  import { hold } from '$lib/actions/hold';
+  import { canScrollToward, OWN_DRAG, pan, rubberBand, type PanEnd, type PanMove, type PanStart } from '$lib/actions/pan';
+  import { GALLERY_PULL_PX, galleryPullReady, stageSwipeOutcome, wheelStep, type StageMoves } from './stageSwipe';
   import { addToast } from '$lib/state/toasts.svelte';
   import { getWorkspaceCoreContext, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
   import { deleteAsset } from '$lib/api/gallery';
@@ -40,7 +43,7 @@
   import SettingsStrip from './SettingsStrip.svelte';
   import SettingPopover from './SettingPopover.svelte';
   import { settingsChips, type ChipKey } from './settingsChips';
-  import { BottomSheet } from '$lib/components/molecules';
+  import { Sheet } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { settingDefaultsFor } from '$lib/state/draft.svelte';
   import { framesToSeconds, roundSeconds } from '$lib/state/videoDuration';
@@ -188,30 +191,73 @@
     if (jobStore.isRunning) viewedId = null;
   });
 
-  // A finger swipes the stage sideways to step through history (a mouse has ← → and the arrows).
-  const SWIPE_MIN_PX = 48;
-  const SWIPE_MAX_MS = 600;
-  let swipeStart: { x: number; y: number; at: number } | null = null;
+  // A finger drags the stage: sideways through history (a mouse has ← → and the arrows, a trackpad swipes), and up,
+  // on a phone, to the Gallery, whatever the stage shows. It follows the finger, then commits or springs back.
+  let stageEl = $state<HTMLDivElement | null>(null);
+  let stageDrag = $state<PanMove | null>(null);
+  // After the finger lifts, what the stage shows slides back into place for a moment before the drag lets go of it.
+  let stageSettling = $state(false);
+  let settleTimer: ReturnType<typeof setTimeout> | undefined;
+  const stageMoves = $derived<StageMoves>({
+    older: canStepStage && previewView !== 'empty' && (viewedIndex < historyStore.assets.length - 1 || historyStore.hasMore || previewView === 'outputs'),
+    newer: canStepStage && previewView === 'latest' && !atLatest,
+    gallery: compact && previewView !== 'error',
+  });
+  const stageDragOffset = $derived.by(() => {
+    if (!stageDrag) return { x: 0, y: 0 };
+    const { axis, offset } = stageDrag;
+    if (axis === 'y') return { x: 0, y: rubberBand(offset, 120) };
+    const open = offset < 0 ? stageMoves.older : stageMoves.newer;
+    return { x: open ? offset : rubberBand(offset, 40), y: 0 };
+  });
 
-  function onStageTouchStart(event: TouchEvent): void {
-    const touch = event.touches[0];
-    // A video's own controls take the finger: scrubbing must not step to another output.
-    const onVideo = (event.target as Element).closest('video') !== null;
-    swipeStart = touch && !onVideo && event.touches.length === 1 ? { x: touch.clientX, y: touch.clientY, at: Date.now() } : null;
+  function claimStageDrag({ axis, dx, dy, target }: PanStart): boolean {
+    if (!stageEl || target.closest(OWN_DRAG)) return false;
+    if (axis === 'x') return (stageMoves.older || stageMoves.newer) && !canScrollToward(target, stageEl, 'x', dx > 0 ? 1 : -1);
+    return stageMoves.gallery && dy < 0 && !canScrollToward(target, stageEl, 'y', -1);
   }
 
-  function onStageTouchEnd(event: TouchEvent): void {
-    const start = swipeStart;
-    swipeStart = null;
-    const touch = event.changedTouches[0];
-    if (!start || !touch || Date.now() - start.at > SWIPE_MAX_MS || !canStepStage) return;
-    const dx = touch.clientX - start.x;
-    const dy = touch.clientY - start.y;
-    if (Math.abs(dx) >= SWIPE_MIN_PX && Math.abs(dx) > Math.abs(dy) * 1.5) stepStage(dx < 0 ? 1 : -1);
-    // Up, on a phone, opens the Gallery: the stage is the newest of it.
-    else if (compact && dy <= -SWIPE_UP_MIN_PX && Math.abs(dy) > Math.abs(dx) * 1.5) router.navigate('gallery');
+  function releaseStageDrag(): void {
+    stageDrag = null;
+    stageSettling = true;
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => { stageSettling = false; }, STAGE_SETTLE_MS);
   }
-  const SWIPE_UP_MIN_PX = 70;
+  const STAGE_SETTLE_MS = 260;
+
+  function onStageDragEnd(end: PanEnd): void {
+    const outcome = stageSwipeOutcome(end, stageMoves);
+    if (outcome === 'older' || outcome === 'newer') {
+      // The next output comes in from the side the finger pushed toward, then settles.
+      stepStage(outcome === 'older' ? 1 : -1);
+      stageDrag = { axis: 'x', offset: outcome === 'older' ? 48 : -48 };
+      requestAnimationFrame(() => requestAnimationFrame(releaseStageDrag));
+      return;
+    }
+    releaseStageDrag();
+    if (outcome === 'gallery') router.navigate('gallery');
+  }
+
+  // A trackpad's sideways two-finger swipe steps once per gesture; the gesture ends when the wheel stops for a moment.
+  function stageWheel(node: HTMLElement): { destroy: () => void } {
+    let total = 0;
+    let stepped = false;
+    let idle: ReturnType<typeof setTimeout> | undefined;
+    function onWheel(event: WheelEvent): void {
+      if (Math.abs(event.deltaX) <= Math.abs(event.deltaY) || !(stageMoves.older || stageMoves.newer)) return;
+      event.preventDefault();
+      clearTimeout(idle);
+      idle = setTimeout(() => { total = 0; stepped = false; }, 200);
+      if (stepped) return;
+      total += event.deltaX;
+      const step = wheelStep(total);
+      if (step === 0) return;
+      stepped = true;
+      if (step > 0 ? stageMoves.older : stageMoves.newer) stepStage(step);
+    }
+    node.addEventListener('wheel', onWheel, { passive: false });
+    return { destroy: () => { clearTimeout(idle); node.removeEventListener('wheel', onWheel); } };
+  }
   // A reference path that points at a known asset can show that asset as its thumbnail.
   const referencePreviewUrl = $derived(
     draft.state.referenceImagePath
@@ -319,7 +365,7 @@
   // What the folded composer reads: the prompt file and its count, the Enhanced text, or the prompt.
   const composerSummary = $derived.by(() => {
     const s = draft.state;
-    if (s.promptSource === 'file') return { label: 'Prompt file', text: s.promptFilePath ? `${fileName(s.promptFilePath)} · ${s.promptFileOptionIds.length} prompts` : 'Choose a prompt file', empty: !s.promptFilePath };
+    if (s.promptSource === 'file') return { label: 'Prompt file', text: s.promptFilePath ? `${fileName(s.promptFilePath)} · ${s.promptFileOptionIds.length} ${s.promptFileOptionIds.length === 1 ? 'prompt' : 'prompts'}` : 'Choose a prompt file', empty: !s.promptFilePath };
     const video = s.workflow === 'img2vid' || s.workflow === 'txt2vid' || s.workflow === 'extend';
     const enhanced = anyEnhancedUsed(s);
     const text = enhanced ? s.enhancedPrompt || s.enhancedScene : s.prompt || s.scene;
@@ -335,33 +381,12 @@
     document.querySelector<HTMLElement>('.composer-pane #ws-prompt:not([hidden]), .composer-pane textarea:not([hidden]):not([disabled])')?.focus();
   }
 
-  // Press and hold Generate on a phone for the run ⌘⇧↵ gives a keyboard: a new seed first.
+  // Press and hold Generate on a phone, or tap the chevron beside it, for the run ⌘⇧↵ gives a keyboard: a new seed first.
   let generateMenuOpen = $state(false);
   let generateButton = $state<HTMLButtonElement | null>(null);
-  let holdTimer: ReturnType<typeof setTimeout> | undefined;
-  let heldOpen = false;
-  const HOLD_MS = 480;
   const generateMenuItems = $derived<ActionMenuEntry[]>([
     { kind: 'item', id: 'generate-new-seed', label: 'Generate with a new seed', onselect: () => { if (draft.state.seed !== null) draft.update('seed', randomSeed()); void tick().then(() => formEl?.requestSubmit()); } },
   ]);
-
-  function onGeneratePointerDown(): void {
-    heldOpen = false;
-    clearTimeout(holdTimer);
-    holdTimer = setTimeout(() => { heldOpen = true; generateMenuOpen = true; }, HOLD_MS);
-  }
-
-  function onGeneratePointerUp(): void {
-    clearTimeout(holdTimer);
-  }
-
-  // A press that opened the menu must not also submit when it lifts.
-  function onGenerateClick(event: MouseEvent): void {
-    if (heldOpen) {
-      event.preventDefault();
-      heldOpen = false;
-    }
-  }
 
   let loraPopoverOpen = $state(false);
   let loraButtonEl = $state<HTMLButtonElement | null>(null);
@@ -822,7 +847,7 @@
     const field = event.target as HTMLInputElement;
     let reveal: (() => void) | null = null;
     if (field.closest?.('.composer-pane') && !composerOpen) reveal = () => { composerOpen = true; };
-    else if (field.closest?.('[data-testid="bottom-sheet"]') && !sheetOpen) reveal = () => { sheetOpen = true; };
+    else if (field.closest?.('[data-testid="sheet"]') && !sheetOpen) reveal = () => { sheetOpen = true; };
     else if (draft.state.sidebarCollapsed && field.closest?.('#ws-controls-sidebar')) reveal = () => draft.update('sidebarCollapsed', false);
     if (!reveal) return;
     event.preventDefault();
@@ -1009,7 +1034,7 @@
     <span class="truncate" title={asset.prompt}>{asset.prompt || asset.filename}</span>
     {#if asset.model}<b>{asset.model}</b>{/if}
     {#if asset.width && asset.height}<b>{asset.width}×{asset.height}</b>{/if}
-    {#if asset.seed != null}<b>seed {asset.seed}</b>{/if}
+    {#if asset.seed != null}<b class="latest-seed">seed {asset.seed}</b>{/if}
   </p>
 {/snippet}
 
@@ -1158,10 +1183,10 @@
 
   {#snippet stage()}
     <section class="workspace-preview relative z-0 flex min-h-0 min-w-0 flex-col bg-bg-base">
-      <!-- On a phone the strip already says what the stage shows; the header appears only when stepped back in history. -->
-      <div class="ui-pane-header flex h-10 shrink-0 items-center justify-between px-3" hidden={compact && !(previewView === 'latest' && !atLatest)}>
+      <!-- On a phone the stage starts under the top strip; stepped back in history, a pill over it says where. -->
+      <div class="ui-pane-header flex h-10 shrink-0 items-center justify-between px-3" hidden={compact}>
         <h2 class="ui-area-label">Preview</h2>
-        {#if previewView === 'latest' && !atLatest}
+        {#if !compact && previewView === 'latest' && !atLatest}
           <span class="flex items-center gap-2 text-meta text-text-muted" data-testid="stage-position">
             Earlier output · <b class="font-mono font-medium text-text-secondary">{viewedIndex + 1}</b> of {historyTotal}
             <button type="button" class="ui-btn ui-btn-sm" onclick={showLatest}>Latest</button>
@@ -1170,12 +1195,30 @@
           <span class="text-meta text-text-muted">{reviewing ? 'Review' : jobStore.isRunning ? 'Generating…' : hasCompletedOutputs || historyStore.assets.length ? 'Latest output' : 'Ready'}</span>
         {/if}
       </div>
-      <!-- svelte-ignore a11y_no_static_element_interactions because the swipe is a shortcut for the arrows and keys beside it -->
+      {#if compact && previewView === 'latest' && !atLatest}
+        <div class="stage-position-pill" data-testid="stage-position">
+          <span><b>{viewedIndex + 1}</b> of {historyTotal}</span>
+          <button type="button" onclick={showLatest}>Latest<Icon name="chevright" size={12} /></button>
+        </div>
+      {/if}
+      <!-- The drags and the trackpad swipe are shortcuts for the arrows, the keys and the Gallery button beside them. -->
       <div
+        bind:this={stageEl}
         class="stage-body relative flex min-h-0 flex-1 items-center justify-center overflow-hidden"
-        ontouchstart={onStageTouchStart}
-        ontouchend={onStageTouchEnd}
+        class:dragging={stageDrag !== null}
+        class:moved={stageDrag !== null || stageSettling}
+        style:--stage-dx="{stageDragOffset.x}px"
+        style:--stage-dy="{stageDragOffset.y}px"
+        use:pan={{ axes: ['x', 'y'], claim: claimStageDrag, onmove: (move) => { stageDrag = move; }, onend: onStageDragEnd, oncancel: releaseStageDrag }}
+        use:stageWheel
       >
+        {#if stageDrag?.axis === 'y'}
+          <span class="gallery-pull" class:ready={galleryPullReady(stageDrag.offset)} style:opacity={Math.min(1, -stageDrag.offset / GALLERY_PULL_PX)} aria-hidden="true">
+            <Icon name="grid" size={14} />{galleryPullReady(stageDrag.offset) ? 'Release for the Gallery' : 'Gallery'}
+          </span>
+        {:else if stageDrag?.axis === 'x' && historyStore.assets.length > 0}
+          <span class="gallery-pull" aria-hidden="true">{viewedIndex + 1} of {historyTotal}</span>
+        {/if}
         {#if loadError}
           <div class="flex flex-col items-center gap-3 text-center p-8">
             <MascotSpot mood={mascotMood} tool={mascotTool} size={112} />
@@ -1253,11 +1296,8 @@
               <JobBar
                 job={jobStore.current!}
                 queuedCount={jobStore.queuedJobs.length}
-                oncancel={sendControl('quit')}
                 onpause={sendControl('pause')}
                 onresume={sendControl('resume')}
-                onnext={sendControl('next')}
-                onrepeat={sendControl('repeat')}
                 ondetails={() => { jobSheetOpen = true; }}
               />
             {:else}
@@ -1285,7 +1325,7 @@
             <Icon name="chevright" size={16} />
           </button>
           <!-- Side padding keeps wide media clear of the docked mascot. -->
-          <div class="latest-region flex h-full w-full flex-col px-20 py-4">
+          <div class="latest-region flex h-full w-full flex-col px-20 py-4" class:fit={latest.width && latest.height} style:--ar={latest.width && latest.height ? latest.width / latest.height : null} style:--natural-w={latest.width ? `${latest.width}px` : null}>
             <AssetTile
               asset={latest}
               density="stage"
@@ -1391,23 +1431,29 @@
                 <span class="ui-area-label composer-label">{composerSummary.label}</span>
                 <span class="composer-line" class:placeholder={composerSummary.empty}>{composerSummary.text}</span>
               </button>
-              <button
-                id="ws-submit-compact"
-                bind:this={generateButton}
-                type="submit"
-                class="composer-generate ui-btn ui-btn-primary"
-                disabled={compactSubmitDisabled}
-                title="Hold for more"
-                onpointerdown={onGeneratePointerDown}
-                onpointerup={onGeneratePointerUp}
-                onpointercancel={onGeneratePointerUp}
-                onpointerleave={onGeneratePointerUp}
-                onclick={onGenerateClick}
-                oncontextmenu={(event) => event.preventDefault()}
-              >
-                <Icon name="bolt" size={16} />{busy ? 'Submitting…' : jobStore.jobsActive ? 'Queue' : 'Generate'}
-                {#if jobStore.jobsActive && jobStore.queuedJobs.length > 0}<span class="composer-q">+{jobStore.queuedJobs.length}</span>{/if}
-              </button>
+              <span class="composer-split">
+                <button
+                  id="ws-submit-compact"
+                  type="submit"
+                  class="composer-generate ui-btn ui-btn-primary ui-holdable"
+                  disabled={compactSubmitDisabled}
+                  title="Hold for more"
+                  use:hold={{ onhold: () => { generateMenuOpen = true; } }}
+                >
+                  <Icon name="bolt" size={16} />{busy ? 'Submitting…' : jobStore.jobsActive ? 'Queue' : 'Generate'}
+                  {#if jobStore.jobsActive && jobStore.queuedJobs.length > 0}<span class="composer-q">+{jobStore.queuedJobs.length}</span>{/if}
+                </button>
+                <button
+                  bind:this={generateButton}
+                  type="button"
+                  class="composer-more ui-btn ui-btn-primary"
+                  aria-label="More ways to generate"
+                  aria-haspopup="menu"
+                  aria-expanded={generateMenuOpen}
+                  disabled={compactSubmitDisabled}
+                  onclick={() => { generateMenuOpen = true; }}
+                ><Icon name="chevdown" size={14} /></button>
+              </span>
               <ActionMenu open={generateMenuOpen} anchor={generateButton} label="Generate" items={generateMenuItems} onclose={() => { generateMenuOpen = false; }} />
             </div>
             <div class="composer-pane" hidden={!composerOpen}>
@@ -1420,7 +1466,7 @@
           </div>
         </div>
       {/if}
-      <BottomSheet bind:open={jobSheetOpen} title="Job" tall>
+      <Sheet bind:open={jobSheetOpen} title="Job">
         <div class="job-sheet">
           {#if jobStore.current}
             <JobCard
@@ -1435,8 +1481,8 @@
           {/if}
           <QueuePanel jobs={jobStore.queuedJobs} onremove={removeQueuedJob} onload={loadQueuedSettings} onclear={clearQueuedJobs} />
         </div>
-      </BottomSheet>
-      <BottomSheet bind:open={sheetOpen} title="All settings" meta={changedCount ? `${changedCount} changed` : undefined} keepMounted tall>
+      </Sheet>
+      <Sheet bind:open={sheetOpen} title="All settings" meta={changedCount ? `${changedCount} changed` : undefined} keepMounted>
         {#snippet headActions()}
           <button type="button" class="ui-btn ui-btn-sm ui-btn-icon" title="Copy these settings as a ziv CLI command" aria-label="Copy CLI command" onclick={copyCliCommand}><Icon name="terminal" size={14} /></button>
         {/snippet}
@@ -1455,7 +1501,7 @@
           lastSeed={historyStore.assets[0]?.seed ?? null}
           onImageFileChange={(f) => { imageFile = f; submitError = null; }}
         />
-      </BottomSheet>
+      </Sheet>
     </div>
   {:else}
     {@render toolbar(false)}
@@ -1506,7 +1552,7 @@
   .lora-weight::-webkit-inner-spin-button, .lora-weight::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
   .lora-weight:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 2px; }
   .lora-remove { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: -3px; border-radius: var(--radius-xs); color: var(--color-text-muted); }
-  .lora-remove:hover { background: var(--color-error-surface); color: var(--color-error); }
+  @media (hover: hover) { .lora-remove:hover { background: var(--color-error-surface); color: var(--color-error); } }
   .workspace-layout { display: grid; grid-template-columns: 360px minmax(0, 1fr); }
   .workspace-layout.sidebar-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
   /* Portrait tablet: one column, the stage on top with the strip, the two panes under it at 46% of the height. */
@@ -1527,7 +1573,18 @@
   .compact-workspace > :global(.workspace-preview) { flex: 1; min-height: 0; }
   .compact-workspace :global(.latest-region) { padding: 8px 12px; }
   .compact-workspace :global(.mascot-dock) { display: none; }
-  .compact-workspace :global(.latest-meta span) { max-width: 60vw; }
+  .compact-workspace :global(.latest-meta span) { max-width: none; flex: 1 1 auto; }
+  .compact-workspace :global(.latest-meta) { justify-content: flex-start; gap: 10px; }
+  .compact-workspace :global(.latest-seed) { display: none; }
+  /* The image and its caption are one block, centred: the tile takes the image's shape, as large as fits above the caption. */
+  .compact-workspace :global(.latest-region.fit) { container-type: size; align-items: center; justify-content: center; }
+  .compact-workspace :global(.latest-region.fit > *) { --fit-w: min(100cqw, calc((100cqh - 36px) * var(--ar)), var(--natural-w, 100cqw)); width: var(--fit-w); }
+  .compact-workspace :global(.latest-region.fit .latest-media) { flex: none; aspect-ratio: var(--ar); }
+  .compact-workspace :global(.latest-region.fit .latest-media .asset-tile-img) { object-fit: contain; }
+  .stage-position-pill { position: absolute; top: 10px; left: 50%; z-index: 4; display: flex; align-items: center; gap: 2px; padding: 3px 3px 3px 12px; translate: -50% 0; border-radius: 999px; background: color-mix(in srgb, var(--color-bg-overlay) 88%, transparent); box-shadow: 0 2px 10px var(--color-scrim); font-size: var(--text-meta); color: var(--color-text-muted); white-space: nowrap; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  .stage-position-pill b { font-family: var(--font-mono); font-weight: 500; color: var(--color-text-primary); }
+  .stage-position-pill button { display: inline-flex; align-items: center; gap: 2px; height: 30px; margin-left: 8px; padding: 0 8px 0 12px; border-radius: 999px; background: var(--color-bg-surface); font-weight: 600; color: var(--color-text-primary); }
+  @media (hover: none) { .stage-position-pill button:active { background: var(--color-bg-surface-hover); } }
   /* Phone: the preview takes the stage with the bar over its foot. */
   .job-view-compact { position: relative; padding: 12px 12px 12px; }
   .job-view-compact .job-view-preview { padding-bottom: 104px; }
@@ -1547,7 +1604,9 @@
   .composer-label { font-size: 10px; line-height: 12px; }
   .composer-line { overflow: hidden; font-size: 15px; line-height: 20px; white-space: nowrap; text-overflow: ellipsis; }
   .composer-line.placeholder { color: var(--color-zinc-600); }
-  .composer-generate { flex: none; height: 44px; padding: 0 16px; border-radius: var(--radius-md); font-size: 14px; }
+  .composer-split { display: flex; flex: none; gap: 1px; }
+  .composer-generate { flex: none; height: 44px; padding: 0 14px 0 16px; border-radius: var(--radius-md) 0 0 var(--radius-md); font-size: 14px; }
+  .composer-more { flex: none; width: 32px; height: 44px; padding: 0; border-radius: 0 var(--radius-md) var(--radius-md) 0; }
   .composer-q { font-family: var(--font-mono); font-size: var(--text-ui); font-weight: 500; opacity: 0.85; }
   .composer-pane[hidden] { display: none; }
   .composer-pane :global(.compose-pane) { max-height: 56dvh; padding: 4px 0 0; border-bottom: 0; }
@@ -1558,15 +1617,24 @@
   .sheet-model :global(.toolbar-stacked) { background: transparent; }
   .sheet-model :global(.toolbar-stacked .ui-select-shell) { height: 40px; font-size: 14px; }
   /* A running job: the preview fills the height on the left, the card is a column that scrolls on its own. */
-  .job-view { display: flex; width: 100%; height: 100%; align-items: stretch; gap: 16px; padding: 16px; }
-  .job-view-preview { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; }
+  /* The view may shrink below its content's width: a centred flex item otherwise grows to the preview and spills both
+     edges (and the phone's job bar) off the screen. The preview is a size container that the live image fits. */
+  .job-view { display: flex; width: 100%; min-width: 0; height: 100%; align-items: stretch; gap: 16px; padding: 16px; }
+  .job-view-preview { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; container-type: size; }
   .job-view :global(.job-view-mascot) { position: absolute; top: 0; left: 0; pointer-events: none; }
   .job-view-card { display: flex; flex: none; width: 400px; max-width: 46%; flex-direction: column; gap: 12px; overflow-y: auto; }
+  /* A drag moves what the stage shows with the finger, and lets it settle back or away when it lifts. */
+  .stage-body > :global(:not(.gallery-pull)) { transition: translate 260ms cubic-bezier(0.32, 0.72, 0, 1); }
+  .stage-body.moved > :global(:not(.gallery-pull)) { translate: var(--stage-dx, 0px) var(--stage-dy, 0px); }
+  .stage-body.dragging > :global(:not(.gallery-pull)) { transition: none; }
+  .gallery-pull { position: absolute; bottom: 16px; left: 50%; z-index: 4; display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 16px; translate: -50% 0; background: color-mix(in srgb, var(--color-bg-overlay) 85%, transparent); font-size: var(--text-ui); font-weight: 600; white-space: nowrap; color: var(--color-text-secondary); pointer-events: none; }
+  .gallery-pull.ready { background: var(--color-primary-main); color: var(--color-primary-ink); }
   /* The in-place history arrows: visible while the pointer is over the stage, never for a finger (it swipes). */
   .stage-nav { position: absolute; top: 50%; z-index: 3; transform: translateY(-50%); opacity: 0; transition: opacity 0.12s ease; }
   .stage-nav.prev { left: 12px; }
   .stage-nav.next { right: 12px; }
-  .stage-body:hover .stage-nav:not(:disabled), .stage-nav:focus-visible { opacity: 1; }
+  .stage-nav:focus-visible { opacity: 1; }
+  @media (hover: hover) { .stage-body:hover .stage-nav:not(:disabled) { opacity: 1; } }
   @media (pointer: coarse) { .stage-nav { display: none; } }
   .latest-region :global(.latest-media) { opacity: 0; transition: opacity 250ms ease; }
   .latest-region :global(.latest-media.loaded) { opacity: 1; }

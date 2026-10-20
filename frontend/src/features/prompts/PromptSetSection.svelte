@@ -5,7 +5,7 @@
   import { addToast } from '$lib/state/toasts.svelte';
   import type { DocumentSet } from '$lib/types';
   import type { PromptBuilder } from './builder.svelte';
-  import type { DragDrop } from './dragDrop.svelte';
+  import { reorderDrag, type DragDrop } from './dragDrop.svelte';
   import PromptEntryCard from './PromptEntryCard.svelte';
 
   interface Props {
@@ -75,20 +75,18 @@
   class="set"
   class:set-dragging={dnd.dragging?.id === set.id}
   data-drop={mark}
+  data-dnd-set={set.id}
+  data-dnd-empty={set.entries.length === 0 || collapsed}
   aria-label="Set {set.name}"
-  ondragover={(event) => sectionEl && dnd.overSet(event, set.id, sectionEl, (event.target as HTMLElement).closest('.set-head') !== null, set.entries.length === 0 || collapsed)}
-  ondrop={(event) => dnd.drop(event)}
 >
   <header class="set-head">
     <span
       class="grip"
-      draggable="true"
+      use:reorderDrag={{ dnd, kind: 'set', id: set.id }}
       role="button"
       tabindex="-1"
       aria-label="Drag to reorder sets"
       title="Drag to reorder sets"
-      ondragstart={(event) => dnd.start(event, 'set', set.id, sectionEl)}
-      ondragend={() => dnd.end()}
     >⠿</span>
     <button type="button" class="caret" class:caret-closed={collapsed} aria-expanded={!collapsed} aria-label={collapsed ? 'Expand set' : 'Collapse set'} onclick={() => { collapsed = !collapsed; }}><Icon name="chevdown" size={14} /></button>
     <input
@@ -128,17 +126,21 @@
   .set[data-drop='into'] > .set-head { background: var(--color-primary-subtle); box-shadow: inset 0 0 0 1px var(--color-primary-main); }
   .set-head { display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 6px 0 4px; background: var(--color-bg-raised); }
   .grip { width: 10px; cursor: grab; font-size: var(--text-ui); line-height: 1; color: var(--color-text-muted); opacity: 0; user-select: none; }
-  .set-head:hover .grip { opacity: 0.6; }
+  @media (hover: hover) { .set-head:hover .grip { opacity: 0.6; } }
+  /* A finger drags by the grip, so it is always there on a touch screen, finger-sized, and never scrolls the page. */
+  .grip { touch-action: none; }
+  @media (hover: none) { .grip { opacity: 0.6; } }
+  @media (pointer: coarse) { .grip { width: 24px; font-size: 16px; text-align: center; } }
   .caret { display: grid; place-items: center; width: 20px; height: 20px; border-radius: var(--radius-xs); color: var(--color-text-muted); transition: transform 120ms; }
-  .caret:hover { color: var(--color-text-primary); }
+  @media (hover: hover) { .caret:hover { color: var(--color-text-primary); } }
   .caret-closed { transform: rotate(-90deg); }
   .set-name { min-width: 4ch; max-width: 100%; field-sizing: content; height: 26px; padding: 0 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: none; font-family: var(--font-heading); font-size: var(--text-content); font-weight: 800; color: var(--color-text-primary); }
-  .set-name:hover { background: var(--color-bg-surface-hover); }
+  @media (hover: hover) { .set-name:hover { background: var(--color-bg-surface-hover); } }
   .set-name:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-base); }
   .count { font-size: var(--text-meta); color: var(--color-text-muted); white-space: nowrap; }
   .spacer { flex: 1; }
   .set-problem { padding: 4px 10px; border-bottom: 1px solid var(--color-border-subtle); font-size: var(--text-meta); color: var(--color-error); }
   .entries { display: flex; flex-direction: column; }
   .add-entry { align-self: flex-start; margin: 4px 6px 6px 22px; }
-  .add-entry:hover { color: var(--color-primary-main); }
+  @media (hover: hover) { .add-entry:hover { color: var(--color-primary-main); } }
 </style>

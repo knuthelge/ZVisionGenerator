@@ -261,7 +261,8 @@
 <style>
   .completions { z-index: 220; max-width: min(560px, calc(100vw - 16px)); max-height: min(50vh, 20rem); overflow-y: auto; padding: 4px; }
   .completion { display: flex; align-items: center; gap: 8px; height: var(--spacing-row); padding: 0 8px; border-radius: var(--radius-sm); font-size: var(--text-ui); color: var(--color-text-secondary); cursor: pointer; }
-  .completion:hover, .completion-active { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
+  .completion-active { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
+  @media (hover: hover) { .completion:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); } }
   .label { font-family: var(--font-mono); white-space: nowrap; }
   .detail { margin-left: auto; padding-left: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
   .hint { padding: 6px 8px 2px; font-size: var(--text-meta); color: var(--color-text-muted); }

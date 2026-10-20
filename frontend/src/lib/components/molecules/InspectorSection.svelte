@@ -79,7 +79,7 @@
     color: var(--color-text-muted);
     transition: color 0.12s ease, background-color 0.12s ease;
   }
-  .inspector-head:hover { background: color-mix(in srgb, var(--color-bg-raised) 70%, var(--color-bg-surface-hover)); color: var(--color-text-primary); }
+  @media (hover: hover) { .inspector-head:hover { background: color-mix(in srgb, var(--color-bg-raised) 70%, var(--color-bg-surface-hover)); color: var(--color-text-primary); } }
   .inspector-head:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: -2px; }
   .inspector-head :global(.inspector-chev) { transition: transform 0.12s ease; }
   .inspector-head[aria-expanded='true'] :global(.inspector-chev) { transform: rotate(90deg); }

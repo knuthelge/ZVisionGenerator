@@ -241,7 +241,7 @@
   .prompt-file-path { padding: 8px 10px; }
   .prompt-file-note { padding: 4px 10px 8px; font-size: var(--text-ui); color: var(--color-text-muted); }
   .prompt-file-summary { display: flex; width: 100%; flex-direction: column; gap: 4px; padding: 8px 10px; border-top: 1px solid var(--color-border-subtle); text-align: left; }
-  .prompt-file-summary:hover:not(:disabled) { background: color-mix(in srgb, var(--color-bg-surface) 60%, transparent); }
+  @media (hover: hover) { .prompt-file-summary:hover:not(:disabled) { background: color-mix(in srgb, var(--color-bg-surface) 60%, transparent); } }
   .prompt-file-summary:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: -2px; }
   .prompt-file-count { font-size: var(--text-meta); font-weight: 600; color: var(--color-text-secondary); }
   .prompt-file-line { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; font-size: var(--text-ui); line-height: 1.45; color: var(--color-text-secondary); }

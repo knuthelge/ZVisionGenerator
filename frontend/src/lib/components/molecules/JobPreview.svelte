@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Badge, Icon } from '$lib/components/atoms';
+  import { Icon } from '$lib/components/atoms';
   import { isPaused, isVideo, itemActivity, jobPhase, stepFraction } from '$lib/state/jobView';
   import type { ActiveJobState } from '$lib/types';
 
@@ -39,7 +39,7 @@
 </script>
 
 <!-- The forming image, as large as the stage allows; the job's facts sit in the card beside it. -->
-<figure class="job-preview {extraClass}" class:empty={!shown} style:aspect-ratio={aspect} data-testid="job-preview">
+<figure class="job-preview {extraClass}" class:empty={!shown} style:aspect-ratio={aspect} style:--ar={aspect} data-testid="job-preview">
   {#if shown && src}
     <img
       {src}
@@ -48,16 +48,19 @@
     >
     <figcaption class="job-preview-tag">{tag}</figcaption>
   {:else}
-    <figcaption class="job-preview-note">
-      <Badge>{#if isVideo(job)}<Icon name="film" size={12} />{/if}{note}</Badge>
-    </figcaption>
+    <figcaption class="job-preview-note">{#if isVideo(job)}<Icon name="film" size={14} />{/if}{note}</figcaption>
   {/if}
 </figure>
 
 <style>
-  .job-preview { position: relative; margin: 0; max-width: 100%; max-height: 100%; height: 100%; overflow: hidden; border-radius: var(--radius-xs); background: var(--color-bg-surface); }
+  /* As large as the stage allows at the output's shape: the width that fits both ways in the size container around it
+     (a portrait phone fits a landscape job by width, a desktop stage a portrait one by height). */
+  .job-preview { position: relative; flex: none; margin: 0; width: min(100cqw, 100cqh * var(--ar, 1)); max-width: 100%; max-height: 100%; overflow: hidden; border-radius: var(--radius-xs); background: var(--color-bg-surface); }
   .job-preview img { display: block; width: 100%; height: 100%; object-fit: cover; }
-  .job-preview.empty { display: grid; place-items: center; box-shadow: inset 0 0 0 1px var(--color-border-subtle); }
+  /* Until a preview arrives, a slow sheen crosses the output's shape, so the slot reads as working rather than empty. */
+  .job-preview.empty { display: grid; place-items: center; background: linear-gradient(105deg, transparent 30%, color-mix(in srgb, var(--color-text-primary) 5%, transparent) 50%, transparent 70%) var(--color-bg-surface) no-repeat; background-size: 250% 100%; animation: job-preview-sheen 2.4s ease-in-out infinite; }
+  @keyframes job-preview-sheen { from { background-position: 100% 0; } to { background-position: -150% 0; } }
+  @media (prefers-reduced-motion: reduce) { .job-preview.empty { animation: none; } }
   .job-preview-tag { position: absolute; top: 8px; left: 8px; height: 20px; padding: 0 6px; border-radius: var(--radius-xs); background: color-mix(in srgb, var(--color-bg-overlay) 70%, transparent); font-family: var(--font-mono); font-size: 10px; line-height: 20px; color: var(--color-text-primary); }
-  .job-preview-note { padding: 8px; text-align: center; }
+  .job-preview-note { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; text-align: center; font-size: var(--text-content); font-weight: 600; color: var(--color-text-secondary); }
 </style>

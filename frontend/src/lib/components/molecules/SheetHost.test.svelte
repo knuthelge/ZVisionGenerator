@@ -1,5 +1,5 @@
 <script lang="ts">
-  import BottomSheet from './BottomSheet.svelte';
+  import Sheet from './Sheet.svelte';
 
   interface Props {
     open?: boolean;
@@ -11,6 +11,6 @@
 </script>
 
 <button type="button" data-testid="open" onclick={() => { open = true; }}>Open</button>
-<BottomSheet bind:open title="All settings" {keepMounted} {onclose}>
+<Sheet bind:open title="All settings" {keepMounted} {onclose}>
   <input name="steps" value="32">
-</BottomSheet>
+</Sheet>

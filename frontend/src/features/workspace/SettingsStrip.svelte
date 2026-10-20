@@ -60,9 +60,10 @@
 
 <style>
   .settings-strip { display: flex; flex: none; align-items: center; padding: 8px max(12px, env(safe-area-inset-right, 0px)) 8px 0; background: var(--color-bg-base); border-top: 1px solid var(--color-border-subtle); }
-  .strip-chips { display: flex; flex: 1; min-width: 0; gap: 6px; overflow-x: auto; padding: 0 12px 0 max(12px, env(safe-area-inset-left, 0px)); scrollbar-width: none; mask-image: linear-gradient(to right, black calc(100% - 16px), transparent); -webkit-mask-image: linear-gradient(to right, black calc(100% - 16px), transparent); }
+  .strip-chips { display: flex; flex: 1; min-width: 0; gap: 6px; overflow-x: auto; padding: 0 12px 0 max(12px, env(safe-area-inset-left, 0px)); scrollbar-width: none; mask-image: linear-gradient(to right, black calc(100% - 36px), transparent); -webkit-mask-image: linear-gradient(to right, black calc(100% - 36px), transparent); }
   .strip-chips::-webkit-scrollbar { display: none; }
-  .setchip { position: relative; display: inline-flex; flex: none; align-items: center; gap: 6px; height: 32px; padding: 0 10px; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); font-size: var(--text-ui); font-weight: 600; white-space: nowrap; color: var(--color-text-primary); transition: background-color 0.12s ease, color 0.12s ease; }
+  .setchip { position: relative; display: inline-flex; flex: none; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); font-size: var(--text-ui); font-weight: 600; white-space: nowrap; color: var(--color-text-primary); transition: background-color 0.12s ease, color 0.12s ease; }
+  .setchip:active { background: var(--color-bg-control-hover); }
   .setchip-k { color: var(--color-text-muted); font-weight: 500; }
   .setchip-v { max-width: 36vw; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-weight: 500; }
   .setchip-v.on { color: var(--color-primary-main); }

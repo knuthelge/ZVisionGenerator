@@ -4,7 +4,7 @@
   import type { ActionMenuEntry } from '$lib/components/molecules/ActionMenu.svelte';
   import type { DocumentEntry, DocumentSet } from '$lib/types';
   import type { PromptBuilder } from './builder.svelte';
-  import type { DragDrop } from './dragDrop.svelte';
+  import { reorderDrag, type DragDrop } from './dragDrop.svelte';
   import EnhanceChip from './EnhanceChip.svelte';
   import PromptValueEditor from './PromptValueEditor.svelte';
 
@@ -31,6 +31,8 @@
   const menuItems = $derived<ActionMenuEntry[]>([
     { kind: 'item', id: 'scene', label: entry.scene ? 'Remove scene' : 'Add scene', onselect: () => builder.setScene(entry.id, !entry.scene) },
     { kind: 'item', id: 'negative', label: entry.negative ? 'Remove negative prompt' : 'Add negative prompt', onselect: () => builder.setNegative(entry.id, entry.negative === null) },
+    // The Text and Fields switch, for a narrow column where it does not fit on the row.
+    ...(mode === 'structured' ? [] : [{ kind: 'item', id: 'layout', label: mode === 'text' ? 'Write as fields' : 'Write as text', onselect: () => builder.setValueMode(entry.id, 'prompt', mode === 'text' ? 'fields' : 'text') } as const]),
     { kind: 'separator' },
     { kind: 'item', id: 'duplicate', label: 'Duplicate', onselect: () => builder.duplicateEntry(entry.id) },
     { kind: 'item', id: 'up', label: 'Move up', disabled: index === 0, onselect: () => builder.moveEntry(entry.id, set.id, set.entries[index - 1]?.id ?? null, 'before') },
@@ -65,22 +67,20 @@
   class:entry-dragging={dnd.dragging?.id === entry.id}
   data-drop={mark}
   data-entry-id={entry.id}
+  data-dnd-entry={entry.id}
+  data-dnd-set={set.id}
   aria-label="{set.name} #{index + 1}"
   onclick={onRowClick}
   onfocusin={() => builder.select(entry.id)}
-  ondragover={(event) => rowEl && dnd.overEntry(event, set.id, entry.id, rowEl)}
-  ondrop={(event) => dnd.drop(event)}
 >
   <div class="gutter">
     <span
       class="grip"
-      draggable="true"
+      use:reorderDrag={{ dnd, kind: 'entry', id: entry.id }}
       role="button"
       tabindex="-1"
       aria-label="Drag to reorder or move to another set"
       title="Drag to reorder or move to another set"
-      ondragstart={(event) => dnd.start(event, 'entry', entry.id, rowEl)}
-      ondragend={() => dnd.end()}
     >⠿</span>
     <span class="ordinal">{index + 1}</span>
     <Toggle
@@ -139,8 +139,9 @@
 
 <style>
   .entry { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 8px 14px; padding: 8px 8px 8px 4px; border-bottom: 1px solid var(--color-border-subtle); }
-  .entry:hover { background: color-mix(in srgb, var(--color-bg-surface-hover) 50%, transparent); }
-  .entry-selected, .entry-selected:hover { background: color-mix(in srgb, var(--color-primary-main) 7%, var(--color-bg-surface)); box-shadow: inset 2px 0 0 var(--color-primary-main); }
+  @media (hover: hover) { .entry:hover { background: color-mix(in srgb, var(--color-bg-surface-hover) 50%, transparent); } }
+  .entry-selected { background: color-mix(in srgb, var(--color-primary-main) 7%, var(--color-bg-surface)); box-shadow: inset 2px 0 0 var(--color-primary-main); }
+  @media (hover: hover) { .entry-selected:hover { background: color-mix(in srgb, var(--color-primary-main) 7%, var(--color-bg-surface)); box-shadow: inset 2px 0 0 var(--color-primary-main); } }
   .entry-inactive .main { color: var(--color-text-muted); }
   .entry-inactive .main :global(.prompt-text-display) { color: var(--color-text-muted); }
   .entry-dragging { opacity: 0.35; }
@@ -151,7 +152,11 @@
 
   .gutter { display: flex; align-items: center; gap: 6px; height: 26px; }
   .grip { width: 10px; cursor: grab; font-size: var(--text-ui); line-height: 1; color: var(--color-text-muted); opacity: 0; user-select: none; }
-  .entry:hover .grip { opacity: 0.6; }
+  @media (hover: hover) { .entry:hover .grip { opacity: 0.6; } }
+  /* A finger drags by the grip, so it is always there on a touch screen, finger-sized, and never scrolls the page. */
+  .grip { touch-action: none; }
+  @media (hover: none) { .grip { opacity: 0.6; } }
+  @media (pointer: coarse) { .grip { width: 24px; font-size: 16px; text-align: center; } }
   .ordinal { width: 14px; text-align: right; font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 700; color: var(--color-text-muted); }
 
   .main { min-width: 0; padding-top: 1px; }
@@ -164,6 +169,18 @@
 
   .actions { display: flex; align-items: center; gap: 6px; }
   .on-hover { opacity: 0; transition: opacity 120ms; }
-  .entry:hover .on-hover, .entry-selected .on-hover, .entry:focus-within .on-hover, .on-hover[aria-expanded='true'] { opacity: 1; }
+  .entry-selected .on-hover, .entry:focus-within .on-hover, .on-hover[aria-expanded='true'] { opacity: 1; }
+  @media (hover: hover) { .entry:hover .on-hover { opacity: 1; } }
+  /* No hover on a touch screen: the row's actions are always there. */
+  @media (hover: none) { .on-hover { opacity: 1; } }
   .generate:not(:disabled) { color: var(--color-primary-main); }
+  /* A narrow column (a phone) has no room for the actions beside the text: they share the top row with the toggle,
+     and the text takes the full width under them. */
+  @container prompt-sets (max-width: 560px) {
+    .entry { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: 'gutter actions' 'main main'; gap: 6px 8px; }
+    .gutter { grid-area: gutter; height: 32px; }
+    .actions { grid-area: actions; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+    .actions > .ui-segmented { display: none; }
+    .main { grid-area: main; padding-left: 6px; }
+  }
 </style>

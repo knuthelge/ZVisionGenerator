@@ -58,18 +58,18 @@
   @media (pointer: coarse) {
     .inspector-reset { width: 32px; height: 32px; }
   }
-  .inspector-row:hover { background: color-mix(in srgb, var(--color-bg-surface) 60%, transparent); }
+  @media (hover: hover) { .inspector-row:hover { background: color-mix(in srgb, var(--color-bg-surface) 60%, transparent); } }
   .inspector-label { display: flex; align-items: center; gap: 5px; overflow: hidden; font-size: var(--text-ui); color: var(--color-text-secondary); white-space: nowrap; user-select: none; }
   .inspector-row.sub .inspector-label { padding-left: 12px; }
   .inspector-row[data-changed='true'] .inspector-label { color: var(--color-text-primary); }
   .inspector-label.scrubbable { cursor: ew-resize; touch-action: none; }
-  .inspector-label.scrubbable:hover .inspector-label-text { text-decoration: underline dotted; text-underline-offset: 3px; }
+  @media (hover: hover) { .inspector-label.scrubbable:hover .inspector-label-text { text-decoration: underline dotted; text-underline-offset: 3px; } }
   .inspector-label-text { overflow: hidden; text-overflow: ellipsis; }
   .inspector-changed { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--color-primary-main); }
   .inspector-value { display: flex; min-width: 0; align-items: center; gap: 4px; }
   /* The reset slot is always reserved so values never shift when it appears. */
   .inspector-reset { display: inline-grid; flex: none; place-items: center; width: 20px; height: 20px; margin-left: auto; border-radius: 4px; color: var(--color-text-muted); visibility: hidden; }
   .inspector-row[data-changed='true'] .inspector-reset { visibility: visible; }
-  .inspector-reset:hover { background: var(--color-bg-surface); color: var(--color-primary-main); }
+  @media (hover: hover) { .inspector-reset:hover { background: var(--color-bg-surface); color: var(--color-primary-main); } }
   .inspector-reset:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: 1px; }
 </style>

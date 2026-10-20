@@ -416,11 +416,11 @@
 </Modal>
 
 <style>
-  .browser { display: flex; flex-direction: column; height: min(560px, calc(100vh - 6rem)); min-height: 0; }
+  .browser { display: flex; flex-direction: column; height: min(560px, calc(100dvh - 6rem)); min-height: 0; }
   .toolbar { display: flex; align-items: center; gap: 6px; padding: 10px 16px; border-bottom: 1px solid var(--color-border-subtle); }
   .crumbs { display: flex; flex: 1; min-width: 0; align-items: center; gap: 2px; height: var(--spacing-control); padding: 0 4px; overflow: hidden; border-radius: var(--radius-sm); background: var(--color-bg-base); }
   .crumb { flex: none; height: 22px; padding: 0 6px; border-radius: var(--radius-xs); font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-secondary); white-space: nowrap; }
-  .crumb:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
+  @media (hover: hover) { .crumb:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); } }
   .crumb-last { color: var(--color-text-primary); }
   .crumb-sep { color: var(--color-text-muted); font-size: var(--text-meta); }
   .path-edit { flex: 1; min-width: 0; font-family: var(--font-mono); }
@@ -434,7 +434,7 @@
   .places { display: flex; flex-direction: column; gap: 2px; width: 188px; flex: none; padding: 6px 8px; overflow-y: auto; border-right: 1px solid var(--color-border-subtle); }
   .place-heading { padding: 8px 8px 4px; }
   .place { display: flex; align-items: center; gap: 8px; height: var(--spacing-row); padding: 0 8px; border-radius: var(--radius-sm); color: var(--color-text-secondary); font-size: var(--text-ui); text-align: left; }
-  .place:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
+  @media (hover: hover) { .place:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); } }
   .place-on { background: var(--color-primary-surface); color: var(--color-text-primary); }
   .place-on :global(svg) { color: var(--color-primary-main); }
   .list { flex: 1; min-width: 0; overflow-y: auto; padding-bottom: 4px; }
@@ -442,7 +442,7 @@
   .row { display: grid; grid-template-columns: minmax(0, 1fr) 84px 96px; align-items: center; gap: 12px; padding: 0 12px; }
   .head { position: sticky; top: 0; z-index: 1; height: 28px; padding: 0 16px; background: var(--color-bg-overlay); border-bottom: 1px solid var(--color-border-subtle); }
   .entry { height: var(--spacing-row); margin: 1px 4px; border-radius: var(--radius-sm); color: var(--color-text-primary); font-size: var(--text-ui); cursor: default; }
-  .entry:hover { background: var(--color-bg-surface-hover); }
+  @media (hover: hover) { .entry:hover { background: var(--color-bg-surface-hover); } }
   .entry-active { background: var(--color-primary-surface); box-shadow: inset 0 0 0 1px var(--color-primary-border); }
   .list:focus-visible .entry-active { box-shadow: inset 0 0 0 2px var(--color-primary-main); }
   .entry-dim { color: var(--color-text-muted); }

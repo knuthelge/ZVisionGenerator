@@ -3,13 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <!-- viewport-fit=cover lets the bars run under a phone's notch and home indicator (they pad for the insets);
+         maximum-scale=1 stops iOS zooming into a small field when it takes focus (the app does not pinch-zoom either);
          interactive-widget=resizes-content shrinks the page for the keyboard instead of covering the prompt. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content, maximum-scale=1" />
     <meta name="theme-color" content="#0b0c0d" />
-    <!-- Added to a home screen, the app opens without the browser chrome; no service worker, so nothing is cached. -->
+    <!-- Added to a home screen, the app opens without the browser chrome; no service worker, so nothing is cached.
+         The status bar is opaque, with the app under it: since iOS 26 a translucent one makes the app a status bar
+         shorter than the screen, leaving a band at the bottom no page can draw in, and gets a dark scrim drawn over it.
+         iOS reads this when the app is added, so a change needs the app removed and added again. -->
     <link rel="manifest" href="/app-static/manifest.webmanifest" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <meta name="apple-mobile-web-app-title" content="ziv" />
     <link rel="icon" type="image/svg+xml" href="/app-static/ziv-icon.svg" />
     <link rel="icon" type="image/png" href="/app-static/ziv-icon.png" />

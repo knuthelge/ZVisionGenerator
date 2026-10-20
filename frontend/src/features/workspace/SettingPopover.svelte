@@ -18,6 +18,7 @@
   import SourceVideoFeedback from './SourceVideoFeedback.svelte';
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
   import { sheetDrag } from '$lib/actions/sheetDrag';
+  import { fly } from 'svelte/transition';
 
   interface Props {
     key: ChipKey;
@@ -173,9 +174,9 @@
   const selectedModel = $derived(models.find((model) => model.id === s.model) ?? null);
 </script>
 
-<div class="setting-popover ui-sheet" use:sheetDrag={{ onclose }} role="dialog" aria-label={TITLES[key]} data-testid="setting-popover" data-key={key}>
-  <div class="ui-sheet-grab" aria-hidden="true"></div>
-  <div class="ui-sheet-head">
+<div class="setting-popover ui-sheet" use:sheetDrag={{ onclose }} in:fly={{ y: 24, duration: 180 }} role="dialog" aria-label={TITLES[key]} data-testid="setting-popover" data-key={key}>
+  <div class="ui-sheet-grab" data-sheet-handle aria-hidden="true"></div>
+  <div class="ui-sheet-head" data-sheet-handle>
     <h3 class="ui-area-label">{TITLES[key]}</h3>
     <span class="ui-sheet-end">
       {#if resetKeys.length}

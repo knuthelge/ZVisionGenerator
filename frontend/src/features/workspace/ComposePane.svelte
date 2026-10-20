@@ -510,14 +510,14 @@
   .compose-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   .compose-title { display: flex; align-items: center; gap: 6px; }
   .collapse-toggle { display: grid; place-items: center; width: 24px; height: 24px; margin-left: -4px; border-radius: 4px; color: var(--color-text-muted); }
-  .collapse-toggle:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); }
+  @media (hover: hover) { .collapse-toggle:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); } }
   /* Below the phone breakpoint the sidebar stacks above the preview and always shows. */
   @media (max-width: 639px) {
     .collapse-toggle { display: none; }
   }
   .prompt-tabs { display: flex; align-items: center; gap: 2px; padding: 4px 4px 0; border-bottom: 1px solid var(--color-border-subtle); }
   .prompt-tab { position: relative; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px 6px; border-radius: 6px 6px 0 0; font-size: var(--text-ui); font-weight: 600; color: var(--color-text-muted); }
-  .prompt-tab:hover { color: var(--color-text-primary); }
+  @media (hover: hover) { .prompt-tab:hover { color: var(--color-text-primary); } }
   .prompt-tab:focus-visible { outline: 2px solid var(--color-primary-main); outline-offset: -2px; }
   .prompt-tab[aria-selected='true'] { color: var(--color-text-primary); }
   .prompt-tab[aria-selected='true']::after { content: ''; position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; border-radius: 2px; background: var(--color-primary-main); }
@@ -543,7 +543,7 @@
   .original-warning { display: flex; align-items: flex-start; gap: 4px; }
   .original-warning :global(svg) { margin-top: 2px; }
   .prompt-link { font-size: var(--text-meta); font-weight: 600; color: var(--color-text-muted); }
-  .prompt-link:hover { color: var(--color-text-primary); }
+  @media (hover: hover) { .prompt-link:hover { color: var(--color-text-primary); } }
   .prompt-link:disabled { opacity: 0.5; }
   .prompt-status { font-size: var(--text-meta); color: var(--color-text-muted); }
   .word-count { margin-left: auto; padding-right: 4px; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }

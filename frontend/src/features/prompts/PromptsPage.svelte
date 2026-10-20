@@ -340,14 +340,14 @@
 <style>
   .prompts-page { display: flex; flex: 1; flex-direction: column; min-height: 0; }
   .file-bar { flex-wrap: nowrap; gap: 6px; padding-inline: 12px; }
-  .file-button { flex-shrink: 1; min-width: 0; gap: 6px; color: var(--color-text-primary); }
+  .file-button { flex-shrink: 1; min-width: 0; gap: 6px; overflow: hidden; color: var(--color-text-primary); }
   .dirty-dot { display: none; width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--color-warning); }
   .file-dirty .dirty-dot { display: inline-block; }
   .file-folder { overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-size: var(--text-ui); font-weight: 400; color: var(--color-text-muted); direction: rtl; }
-  .file-name { font-weight: 700; }
+  .file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
   .file-button :global(.file-caret) { color: var(--color-text-muted); }
   .spacer { flex: 1; }
-  .save-status { margin-right: 2px; font-size: var(--text-ui); color: var(--color-text-muted); white-space: nowrap; }
+  .save-status { flex-shrink: 4; min-width: 0; margin-right: 2px; overflow: hidden; text-overflow: ellipsis; font-size: var(--text-ui); color: var(--color-text-muted); white-space: nowrap; }
   .restore-bar { display: flex; flex-shrink: 0; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--color-warning-border); background: var(--color-warning-surface); font-size: var(--text-ui); color: var(--color-warning); }
   .restore-bar span { margin-right: 4px; }
   .builder { display: grid; flex: 1; grid-template-columns: 250px minmax(0, 1fr) 310px; min-height: 0; }
@@ -359,7 +359,8 @@
   .sets-hint { overflow: hidden; font-size: var(--text-meta); text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); }
   .hint-snippet { color: var(--color-accent-coral); font-family: var(--font-mono); font-weight: 500; }
   .hint-choice { color: var(--color-accent-amber); font-family: var(--font-mono); font-weight: 500; }
-  .sets { display: flex; flex-direction: column; gap: 10px; }
+  /* A query container, so a prompt card can stack its parts when the column is narrow. */
+  .sets { display: flex; flex-direction: column; gap: 10px; container: prompt-sets / inline-size; }
   .sets-empty { font-size: var(--text-ui); color: var(--color-text-muted); }
   .new-set { align-self: flex-start; }
   .page-loading { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 48px 16px; font-size: var(--text-ui); color: var(--color-text-muted); }

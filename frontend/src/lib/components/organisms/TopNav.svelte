@@ -86,7 +86,7 @@
   .main-tabs { flex-shrink: 0; }
   .brand { color: var(--color-text-primary); font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; letter-spacing: -0.01em; }
   .nav-tab { display: flex; align-items: center; gap: 6px; padding: 0 10px; border-bottom: 2px solid transparent; white-space: nowrap; font-size: var(--text-ui); font-weight: 600; color: var(--color-text-muted); transition: color 0.12s ease, border-color 0.12s ease; }
-  .nav-tab:hover { color: var(--color-text-primary); }
+  @media (hover: hover) { .nav-tab:hover { color: var(--color-text-primary); } }
   .nav-tab:focus-visible { outline-offset: -2px; }
   .nav-tab.active { border-color: var(--color-primary-main); color: var(--color-text-primary); }
   @media (max-width: 1000px) {

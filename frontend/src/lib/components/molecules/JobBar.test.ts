@@ -50,21 +50,14 @@ describe('JobBar', () => {
     expect(Array.from(target.querySelectorAll('button')).some((button) => button.textContent?.includes('Resume'))).toBe(true);
   });
 
-  it('puts Job details, Skip, Repeat and Cancel under the more menu', () => {
+  it('opens the job details straight from ⋯, where Skip, Repeat, Cancel and the queue are', () => {
     const ondetails = vi.fn();
     app = flushSync(() => mount(JobBar, { target, props: { job: makeJob({ runs: 3 }), queuedCount: 2, ondetails } }));
 
-    (target.querySelector('button[aria-label="More job controls"]') as HTMLButtonElement).click();
+    (target.querySelector('button[aria-label="Job details"]') as HTMLButtonElement).click();
     flushSync();
-    const labels = Array.from(document.querySelectorAll('[role="menuitem"]')).map((item) => item.textContent?.trim());
-    expect(labels).toContain('Job details');
-    expect(labels.some((label) => label?.startsWith('Skip'))).toBe(true);
-    expect(labels.some((label) => label?.startsWith('Repeat'))).toBe(true);
-    expect(labels).toContain('Queue · 2 waiting');
-    expect(labels).toContain('Cancel job');
-
-    (Array.from(document.querySelectorAll('[role="menuitem"]')).find((item) => item.textContent?.trim() === 'Job details') as HTMLButtonElement).click();
     expect(ondetails).toHaveBeenCalledOnce();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 
   it('draws one segment per image for a batch', () => {

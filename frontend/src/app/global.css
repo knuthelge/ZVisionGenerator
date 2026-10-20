@@ -146,6 +146,25 @@
     cursor: pointer;
   }
 
+  /* The page itself never scrolls or bounces: the app is one screen and its panes scroll inside. A pull that runs past
+     a pane's end stops there instead of reaching pull-to-refresh or the rubber band, and the browser's grey tap flash
+     is off because a finger gets its own pressed state (`:active` under hover: none, in the components layer). */
+  html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+  html { -webkit-tap-highlight-color: transparent; }
+  /* A pinch or a double tap does not zoom the app like a web page; the viewer zooms an image with its own pinch.
+     Fields are 16px on a phone, so nothing needs zooming in to read or type. */
+  html { touch-action: pan-x pan-y; }
+  /* An app added before the status bar turned opaque still has iOS's undrawable band under it; it shows the page's
+     background, so make that the composer's and the band reads as part of it. */
+  @media (display-mode: standalone) { html, body { background-color: var(--color-bg-overlay); } }
+
+  /* A phone zooms the page into any field under 16px when it takes focus, and does not zoom back; text you type is 16px
+     on a phone anyway, for reading. A field styled as a small label (`.ui-label-input`) keeps its size: the viewport's
+     maximum-scale=1 stops that zoom. */
+  @media (pointer: coarse) and (max-width: 639px), (pointer: coarse) and (max-height: 499px) {
+    input:not([type='checkbox'], [type='radio'], [type='range'], .ui-label-input), textarea, select { font-size: 16px !important; }
+  }
+
   :root {
     color-scheme: dark;
     font-synthesis: none;
@@ -162,9 +181,9 @@
      density. Numbers get − and + steppers (InspectorNumber) because a label cannot be scrubbed when a drag scrolls. */
   @media (pointer: coarse) {
     :root {
-      --spacing-control: 36px;
-      --spacing-control-sm: 28px;
-      --spacing-row: 40px;
+      --spacing-control: 40px;
+      --spacing-control-sm: 32px;
+      --spacing-row: 44px;
       --spacing-bar: 44px;
       --toggle-track-w: 40px;
       --toggle-track-h: 24px;
@@ -244,9 +263,9 @@
     transition: color 0.12s ease;
   }
 
-  .ui-link:hover {
+  @media (hover: hover) { .ui-link:hover {
     color: var(--color-text-primary);
-  }
+  } }
 
 
   .ui-media-foot {
@@ -260,10 +279,10 @@
     transition: background-color 0.12s ease, color 0.12s ease;
   }
 
-  .ui-media-action:hover {
+  @media (hover: hover) { .ui-media-action:hover {
     background-color: var(--color-bg-surface-hover);
     color: var(--color-text-primary);
-  }
+  } }
 
   /* Dark ink on teal: white on teal fails contrast (3:1). */
   .ui-media-action-primary {
@@ -271,9 +290,9 @@
     color: var(--color-primary-ink);
   }
 
-  .ui-media-action-primary:hover {
+  @media (hover: hover) { .ui-media-action-primary:hover {
     background-color: var(--color-primary-hover);
-  }
+  } }
 
 
 
@@ -302,10 +321,10 @@
     color: var(--color-text-primary);
     transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
   }
-  .ui-btn:hover:not(:disabled) { background: var(--color-bg-control-hover); color: var(--color-text-primary); }
+  @media (hover: hover) { .ui-btn:hover:not(:disabled) { background: var(--color-bg-control-hover); color: var(--color-text-primary); } }
   .ui-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .ui-btn[aria-pressed='true'], .ui-btn[aria-expanded='true'], .ui-btn-on,
-  .ui-btn[aria-pressed='true']:hover:not(:disabled), .ui-btn[aria-expanded='true']:hover:not(:disabled), .ui-btn-on:hover:not(:disabled) { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); }
+  .ui-btn[aria-pressed='true'], .ui-btn[aria-expanded='true'], .ui-btn-on { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); }
+  @media (hover: hover) { .ui-btn[aria-pressed='true']:hover:not(:disabled), .ui-btn[aria-expanded='true']:hover:not(:disabled), .ui-btn-on:hover:not(:disabled) { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); } }
   .ui-btn kbd { font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 400; opacity: 0.7; }
   /* A key chip, in text or on a button. */
   .ui-kbd { display: inline-block; min-width: 16px; padding: 0 4px; border-radius: var(--radius-xs); background: var(--color-bg-surface-hover); font-family: var(--font-mono); font-size: var(--text-meta); font-weight: 400; line-height: 16px; text-align: center; color: var(--color-text-muted); }
@@ -313,31 +332,49 @@
   .ui-btn-primary .ui-kbd { background: color-mix(in srgb, var(--color-primary-ink) 18%, transparent); color: var(--color-primary-ink); }
   /* The main action of a section (a bar, panel, form, dialog or popover): at most one per section. */
   .ui-btn-primary { background: var(--color-primary-main); color: var(--color-primary-ink); font-family: var(--font-heading); font-weight: 800; }
-  .ui-btn-primary:hover:not(:disabled) { background: var(--color-primary-hover); color: var(--color-primary-ink); }
+  @media (hover: hover) { .ui-btn-primary:hover:not(:disabled) { background: var(--color-primary-hover); color: var(--color-primary-ink); } }
   .ui-btn-primary:disabled { opacity: 1; background: var(--color-bg-surface-hover); color: var(--color-text-muted); }
   .ui-btn-quiet { background: transparent; color: var(--color-text-muted); }
   .ui-btn-danger { background: color-mix(in srgb, var(--color-error) 14%, transparent); color: var(--color-error); }
-  .ui-btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--color-error) 22%, transparent); color: var(--color-error); }
+  @media (hover: hover) { .ui-btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--color-error) 22%, transparent); color: var(--color-error); } }
   .ui-btn-add { border-style: dashed; border-color: var(--color-border-strong); background: transparent; color: var(--color-text-secondary); }
-  .ui-btn-add:hover:not(:disabled) { border-color: var(--color-primary-main); background: transparent; color: var(--color-primary-main); }
+  @media (hover: hover) { .ui-btn-add:hover:not(:disabled) { border-color: var(--color-primary-main); background: transparent; color: var(--color-primary-main); } }
   .ui-btn-sm { height: var(--spacing-control-sm); padding: 0 7px; gap: 4px; }
   .ui-btn-icon { width: var(--spacing-control); padding: 0; }
   .ui-btn-sm.ui-btn-icon { width: var(--spacing-control-sm); }
   /* Icon actions inside rows and tables stay quiet; destructive ones turn red on hover. */
   .ui-btn-row { width: 24px; height: 24px; padding: 0; background: transparent; border-radius: var(--radius-xs); color: var(--color-text-muted); }
-  .ui-btn-row:hover:not(:disabled) { background: var(--color-bg-surface-hover); color: var(--color-primary-main); }
-  .ui-btn-row.ui-btn-danger:hover:not(:disabled) { background: var(--color-error-surface); color: var(--color-error); }
+  @media (hover: hover) { .ui-btn-row:hover:not(:disabled) { background: var(--color-bg-surface-hover); color: var(--color-primary-main); } }
+  @media (hover: hover) { .ui-btn-row.ui-btn-danger:hover:not(:disabled) { background: var(--color-error-surface); color: var(--color-error); } }
   /* Touch: row actions, path boxes, checkboxes and slider thumbs grow to a finger's size. */
   @media (pointer: coarse) {
-    .ui-btn-row { width: 32px; height: 32px; }
-    .inspector-text { height: 32px; padding: 0 8px; background: var(--color-bg-surface-hover); }
+    .ui-btn-row { width: 36px; height: 36px; }
+    .inspector-text { height: 36px; padding: 0 8px; background: var(--color-bg-surface-hover); }
     .ui-checkbox { width: 20px; height: 20px; background-size: 14px 14px; }
     .ui-range { height: 28px; }
     .ui-range::-webkit-slider-thumb { width: 20px; height: 20px; margin-top: -8px; }
     .ui-range::-moz-range-thumb { width: 20px; height: 20px; }
-    /* A finger rarely has a keyboard: buttons drop their shortcut hints, but a key that is the button's only content stays. */
-    .ui-btn kbd:not(:only-child), .ui-btn .ui-kbd:not(:only-child) { display: none; }
+    /* A finger rarely has a keyboard: buttons drop their shortcut hints, but an icon button whose glyph is a key keeps it. */
+    .ui-btn:not(.ui-btn-icon) kbd { display: none; }
   }
+  /* A finger has no hover, so a press shows itself while the finger is down and clears when it lifts (iOS needs a
+     touchstart listener on the document for :active, which main.ts adds). */
+  @media (hover: none) {
+    .ui-btn:active:not(:disabled), .ui-btn-row:active:not(:disabled) { background: var(--color-bg-control-hover); color: var(--color-text-primary); }
+    .ui-btn-primary:active:not(:disabled) { background: var(--color-primary-hover); color: var(--color-primary-ink); }
+    .ui-btn-danger:active:not(:disabled) { background: color-mix(in srgb, var(--color-error) 22%, transparent); color: var(--color-error); }
+    .ui-segmented > button:active:not(:disabled), button.ui-chip:active:not(:disabled) { color: var(--color-text-primary); }
+    .ui-media-action:active { background-color: var(--color-bg-surface-hover); }
+  }
+  /* Something a finger can press and hold (lib/actions/hold.ts): no text selection or callout during the hold, and
+     the hold fills along its foot while it lasts. */
+  .ui-holdable { position: relative; overflow: hidden; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .ui-holdable[data-holding]::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: currentColor; opacity: 0.55; transform-origin: left; animation: ui-hold-fill var(--hold-ms, 480ms) linear forwards; pointer-events: none; }
+  @keyframes ui-hold-fill { from { transform: scaleX(0); } }
+  /* Full-screen layers (the app, sheets, dialogs, the drawer, the viewer) cover the visible area that
+     lib/state/viewport.ts measures, not the layout viewport: above an on-screen keyboard, and in step with a browser
+     toolbar that comes and goes. Before the first measure, and without visualViewport, they fill 100dvh. */
+  .ui-viewport { position: fixed; left: 0; right: 0; top: var(--app-top, 0px); height: var(--app-height, 100dvh); }
   .ui-action-bar { display: flex; align-items: center; gap: 8px; }
   .ui-action-bar .ui-btn { height: var(--spacing-bar); padding: 0 14px; font-size: var(--text-content); }
   .ui-action-bar .ui-btn-icon { width: var(--spacing-bar); padding: 0; }
@@ -349,7 +386,10 @@
     background: var(--color-bg-surface);
     box-shadow: 0 -1px 0 color-mix(in srgb, var(--color-text-primary) 8%, transparent), 0 -12px 32px var(--color-scrim);
   }
-  .ui-sheet-grab { display: flex; flex: none; justify-content: center; padding: 8px 0 2px; }
+  .ui-sheet-grab { display: flex; flex: none; justify-content: center; padding: 10px 0 6px; }
+  /* A sheet's handle (lib/actions/sheetDrag.ts) takes every drag from the first pixel; the browser must not start a
+     scroll or a zoom there. */
+  .ui-sheet [data-sheet-handle] { touch-action: none; }
   .ui-sheet-grab::before { content: ''; width: 36px; height: 4px; border-radius: 2px; background: var(--color-border-strong); }
   .ui-sheet-head {
     display: flex;
@@ -389,7 +429,7 @@
   .ui-field[aria-invalid='true'] { box-shadow: inset 0 0 0 1px var(--color-error); }
   /* A path box inside a workspace inspector row (the PathInput there): no fill until hovered. */
   .inspector-text { width: 100%; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-family: var(--font-mono); font-size: var(--text-ui); color: var(--color-text-primary); }
-  .inspector-text:hover { background: var(--color-bg-surface-hover); }
+  @media (hover: hover) { .inspector-text:hover { background: var(--color-bg-surface-hover); } }
   .inspector-text:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-surface); }
   .inspector-text[aria-invalid='true'] { box-shadow: inset 0 0 0 1px var(--color-error); }
 
@@ -405,11 +445,15 @@
     cursor: pointer;
     transition: background-color 0.12s ease;
   }
-  .ui-checkbox:hover:not(:disabled) { background-color: color-mix(in srgb, var(--color-text-primary) 18%, var(--color-zinc-700)); }
-  .ui-checkbox:checked, .ui-checkbox:checked:hover:not(:disabled) {
+  @media (hover: hover) { .ui-checkbox:hover:not(:disabled) { background-color: color-mix(in srgb, var(--color-text-primary) 18%, var(--color-zinc-700)); } }
+  .ui-checkbox:checked {
     background-color: var(--color-primary-main);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230b3b37' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E");
   }
+  @media (hover: hover) { .ui-checkbox:checked:hover:not(:disabled) {
+    background-color: var(--color-primary-main);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230b3b37' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E");
+  } }
   .ui-checkbox:disabled { opacity: 0.4; cursor: not-allowed; }
 
   /* Range sliders: a filled track with no outline; the part up to the thumb is teal (set --fill to the percentage). */
@@ -423,8 +467,8 @@
   .ui-range::-moz-range-progress { height: 4px; border-radius: 9999px; background: var(--color-primary-main); }
   .ui-range::-webkit-slider-thumb { width: 12px; height: 12px; margin-top: -4px; appearance: none; border: 0; border-radius: 50%; background: var(--color-primary-main); }
   .ui-range::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-radius: 50%; background: var(--color-primary-main); }
-  .ui-range:hover::-webkit-slider-thumb { background: var(--color-primary-hover); }
-  .ui-range:hover::-moz-range-thumb { background: var(--color-primary-hover); }
+  @media (hover: hover) { .ui-range:hover::-webkit-slider-thumb { background: var(--color-primary-hover); } }
+  @media (hover: hover) { .ui-range:hover::-moz-range-thumb { background: var(--color-primary-hover); } }
 
   /* The custom select (ToolbarSelectShell) follows the field fills. */
   .ui-select-shell { border: 1px solid transparent; background: var(--color-bg-surface-hover); }
@@ -454,7 +498,7 @@
     color: var(--color-text-muted);
     transition: background-color 0.12s ease, color 0.12s ease;
   }
-  .ui-segmented > button:hover:not(:disabled) { color: var(--color-text-secondary); }
+  @media (hover: hover) { .ui-segmented > button:hover:not(:disabled) { color: var(--color-text-secondary); } }
   .ui-segmented > button:disabled { opacity: 0.4; cursor: not-allowed; }
   .ui-segmented > button[aria-checked='true'], .ui-segmented > button[aria-pressed='true'], .ui-segmented > button[aria-selected='true'] { background: color-mix(in srgb, var(--color-text-primary) 24%, var(--color-bg-surface)); color: var(--color-text-primary); }
   .ui-segmented-sm > button { height: calc(var(--spacing-control-sm) - 4px); padding: 0 6px; }
@@ -474,7 +518,7 @@
     white-space: nowrap;
     color: var(--color-text-secondary);
   }
-  button.ui-chip:hover:not(:disabled) { color: var(--color-text-primary); }
+  @media (hover: hover) { button.ui-chip:hover:not(:disabled) { color: var(--color-text-primary); } }
   .ui-chip[aria-pressed='true'] { background: color-mix(in srgb, var(--color-primary-main) 16%, transparent); color: var(--color-primary-main); }
 
   /* Badges are tinted fills; neutral ones use secondary text so they read on every shade. */
@@ -508,7 +552,7 @@
   .ui-table th { padding: 6px 8px; border-bottom: 1px solid var(--color-border-strong); text-align: left; white-space: nowrap; font-family: var(--font-heading); font-size: var(--text-meta); font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; color: var(--color-text-muted); }
   .ui-table td { padding: 6px 8px; border-bottom: 1px solid var(--color-border-subtle); color: var(--color-text-secondary); }
   .ui-table td:first-child { font-weight: 600; color: var(--color-text-primary); }
-  .ui-table tbody tr:hover td { background: color-mix(in srgb, var(--color-bg-surface-hover) 50%, transparent); }
+  @media (hover: hover) { .ui-table tbody tr:hover td { background: color-mix(in srgb, var(--color-bg-surface-hover) 50%, transparent); } }
   /* Reference pages read tables rather than scan them: content-size text and taller rows. */
   .ui-table-comfortable { font-size: var(--text-content); }
   .ui-table-comfortable td { padding: 9px 10px; }

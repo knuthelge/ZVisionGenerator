@@ -10,6 +10,7 @@
   import { portal } from '$lib/actions/portal';
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
   import { layout } from '$lib/state/layoutMode.svelte';
+  import Sheet from './Sheet.svelte';
 
   interface Props {
     open?: boolean;
@@ -64,7 +65,9 @@
     '[tabindex]:not([tabindex="-1"])',
   ].join(', ');
 
+  // On a phone the dialog is a Sheet, which moves focus and answers Escape itself.
   $effect(() => {
+    if (layout.compact) return;
     if (open) {
       previouslyFocused = document.activeElement;
       dialogEl?.focus();
@@ -78,7 +81,7 @@
   // run time, avoiding any stale-closure issue that arises when onMount captures
   // $state signals before the dialog element exists in the DOM.
   $effect(() => {
-    if (!open) return;
+    if (!open || layout.compact) return;
 
     // Capture the current element reference for this effect run.
     const el = dialogEl;
@@ -135,9 +138,18 @@
   });
 </script>
 
-{#if open}
+{#if layout.compact}
+  <!-- On a phone every dialog is a sheet from the bottom edge: it pulls down to close, like every sheet there. -->
+  <Sheet bind:open title={title ?? ''} {labelledby} {describedby} {role} layer={elevated ? 'modal-top' : 'modal'} {fill} bare={fill} onclose={() => onclose?.()} {footer}>
+    {#if fill}
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden text-content text-text-secondary">{@render children?.()}</div>
+    {:else}
+      <div class="px-4 py-3 text-content text-text-secondary">{@render children?.()}</div>
+    {/if}
+  </Sheet>
+{:else if open}
   <!-- Outer container: its own stacking context, moved to <body> so the opener's cannot trap it. -->
-  <div use:portal class="modal-root fixed inset-0" class:elevated>
+  <div use:portal class="modal-root ui-viewport" class:elevated>
     <!-- Backdrop (native button so click-to-dismiss requires no role suppression) -->
     <button
       type="button"
@@ -146,8 +158,8 @@
       aria-label="Close dialog"
       tabindex="-1"
     ></button>
-    <!-- Flex centering layer. On a phone every dialog is a sheet from the bottom edge, clear of the home indicator. -->
-    <div class="flex h-full pointer-events-none {layout.compact ? 'items-end justify-stretch p-0' : 'items-center justify-center p-4'} {fill ? 'max-sm:p-0' : ''}">
+    <!-- Flex centering layer. -->
+    <div class="flex h-full pointer-events-none items-center justify-center p-4 {fill ? 'max-sm:p-0' : ''}">
       <!-- Dialog -->
       <div
         bind:this={dialogEl}
@@ -157,7 +169,7 @@
         aria-labelledby={labelledby}
         aria-describedby={describedby}
         tabindex="-1"
-        class="ui-overlay relative flex max-h-full w-full flex-col focus:outline-none pointer-events-auto {layout.compact ? `modal-sheet ${fill ? 'h-full' : ''}` : `${SIZE_CLASSES[size]} ${fill ? 'max-sm:h-full max-sm:max-w-none max-sm:rounded-none' : ''}`}"
+        class="modal-dialog ui-overlay relative flex max-h-full w-full flex-col focus:outline-none pointer-events-auto {SIZE_CLASSES[size]} {fill ? 'max-sm:h-full max-sm:max-w-none max-sm:rounded-none' : ''}"
       >
       {#if title}
         <div class="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-2.5">
@@ -188,7 +200,9 @@
 <style>
   .modal-root { z-index: var(--z-modal); }
   .modal-root.elevated { z-index: var(--z-modal-top); }
-  /* A phone's dialog: full width, rounded at the top, its foot padded for the home indicator, at most 86% tall. */
-  .modal-sheet { max-width: none; max-height: min(86%, 86dvh); border-radius: 14px 14px 0 0; padding-bottom: env(safe-area-inset-bottom, 0px); }
-  .modal-sheet.h-full { max-height: none; height: calc(100% - 44px - env(safe-area-inset-top, 0px)); }
+  /* The dialog settles in rather than appearing at once, as a phone's sheet slides up. */
+  .modal-root { animation: modal-fade 140ms ease-out; }
+  .modal-dialog { animation: modal-rise 180ms cubic-bezier(0.32, 0.72, 0, 1); }
+  @keyframes modal-fade { from { opacity: 0; } }
+  @keyframes modal-rise { from { opacity: 0; translate: 0 8px; scale: 0.98; } }
 </style>

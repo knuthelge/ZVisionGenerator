@@ -11,4 +11,9 @@ describe('index.html', () => {
     expect(blocking[0]).toContain('media="print"');
     expect(blocking[0]).toContain(`onload="this.media='all'"`);
   });
+
+  it('keeps a home-screen app under an opaque status bar, so iOS gives it the whole screen below it', () => {
+    const html = readFileSync('index.html', 'utf8');
+    expect(html).toMatch(/<meta name="apple-mobile-web-app-status-bar-style" content="black" \/>/);
+  });
 });

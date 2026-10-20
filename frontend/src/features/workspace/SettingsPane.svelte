@@ -669,7 +669,7 @@
 
   .inspector-select { width: 100%; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: var(--text-ui); color: var(--color-text-primary); }
   .inspector-select.factor { flex: none; width: 70px; }
-  .inspector-select:hover { background: var(--color-bg-surface-hover); }
+  @media (hover: hover) { .inspector-select:hover { background: var(--color-bg-surface-hover); } }
   .inspector-select:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-surface); }
   .inspector-select option { background: var(--color-bg-surface); }
   .row-hint { padding: 0 12px 6px 116px; font-size: var(--text-meta); color: var(--color-text-muted); }
