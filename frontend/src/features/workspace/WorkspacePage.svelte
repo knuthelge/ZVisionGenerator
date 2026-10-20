@@ -53,8 +53,9 @@
   import { acceptsPageShortcut, hasOpenModal, isCommandKey } from '$lib/keyboard';
   import { layout } from '$lib/state/layoutMode.svelte';
   import { startUpscale } from '$lib/state/upscale';
+  import { hasPendingJobSettings, takeJobSettings } from '$lib/state/pendingJobSettings.svelte';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
-  import type { DraftState, GalleryAsset, JobControlAction, JobSnapshot, UpscaleFactor, UpscaleMethod, WorkspaceContext, Workflow } from '$lib/types';
+  import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, UpscaleFactor, UpscaleMethod, WorkspaceContext, Workflow } from '$lib/types';
 
   interface Props {
     /** The workflows the server offers, once its context has loaded; the top bar shows a tab for each. */
@@ -493,14 +494,25 @@
     draft.saveDraft();
   }
 
-  /** Refill the form from the settings a queued job was submitted with. */
-  function loadQueuedSettings(job: JobSnapshot): void {
-    const { params, patch } = jobSettingsPrefill(job.settings ?? {}, draft.state.enhanceSettingsVideo?.partsByWorkflow);
+  /** Refill the form from the settings a job was submitted with. */
+  function loadJobSettings(settings: JobSettings, message: string): void {
+    const { params, patch } = jobSettingsPrefill(settings, draft.state.enhanceSettingsVideo?.partsByWorkflow);
     applyPrefill(params);
     draft.patch(patch);
     imageFile = null;
-    addToast('Loaded the queued job\'s settings', 'success');
+    addToast(message, 'success');
   }
+
+  function loadQueuedSettings(job: JobSnapshot): void {
+    loadJobSettings(job.settings ?? {}, 'Loaded the queued job\'s settings');
+  }
+
+  // Settings the Job log asked for wait until the context has loaded, because loading the draft would overwrite an early patch.
+  $effect(() => {
+    if (context === null || !hasPendingJobSettings()) return;
+    const settings = takeJobSettings();
+    if (settings) untrack(() => loadJobSettings(settings, 'Loaded the job\'s settings'));
+  });
 
   async function removeQueuedJob(job: JobSnapshot): Promise<void> {
     try {

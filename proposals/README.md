@@ -28,7 +28,6 @@ These files are not part of the published docs site, and the docs don't link to 
 | [Variations and sweeps from the Workspace](seed-variations-and-sweeps.md) | Proposed | "Variations" on any output queues N new-seed runs of its settings; a Sweep section expands one or two settings over a list of values into queued jobs, with the axis values recorded on each output |
 | [Recent prompts, rewrite history and "save to a prompt file"](workspace-prompt-recents.md) | Proposed | A recents list of submitted prompts, the last five enhancer rewrites with a stepper, and saving a Workspace prompt into a prompt file |
 | [Know when a job is done](job-notifications.md) | Proposed | Progress and the result in the tab title and favicon, an optional sound, and browser notifications where the page is a secure context |
-| [A log of past jobs](job-log.md) | Proposed | One JSON line per finished job on disk and a Jobs drawer on every page with duration, failure text, Load settings, delete and clear |
 | [Named presets, and what a LoRA is for](settings-presets.md) | Proposed | Server-side presets of settings, LoRAs and style text applied from the Settings header or `--preset`; LoRA trigger words and previews read from the file and sidecars |
 | [Grab a frame from a video](video-frame-grab.md) | Proposed | Frame stepping in the viewer and a Grab frame action that writes a PNG with provenance and can make it the reference for the next image or clip |
 | [One Gallery](one-gallery.md) | Proposed | Call the Workspace strip Gallery, share one store and one endpoint between the strip and the page |
@@ -40,6 +39,7 @@ These files are not part of the published docs site, and the docs don't link to 
 
 | Proposal | Status | Summary |
 |---|---|---|
+| [A log of past jobs](archive/job-log.md) | Done (unreleased) | One JSON line per finished job in `jobs.jsonl` and a Job log drawer on every page (clock button, `G` then `J`) with duration, failure text, Load settings, Copy error, Delete and Clear log; the routes are `/api/jobs/log` |
 | [Show model download progress in Web UI jobs](archive/model-download-progress.md) | Done (unreleased) | A missing model downloads as its own step before loading, with size, speed, time left and parts on the job card, and Stop that ends a child process (no cache polling, resume per file); includes the Models-page Download lane. On-demand Enhance and LoRA import progress not done |
 | [Replace Ideogram 4 with Ideogram 4 Instant](archive/ideogram-instant.md) | Done (unreleased) | `ideo` becomes fal's 8-step distilled Instant (one transformer, no CFG), converted locally on first use from an ungated, tensor-checked copy; FP8 for mflux and NF4/FP8 stored quants on CUDA |
 | [A phone layout and an installable app](archive/phone-layout.md) | Done (unreleased) | One Workspace in three compositions (wide, tall, compact) with a touch layer keyed to the pointer; on a phone the preview is the screen, with a settings strip of chips and a composer under it; the job's live preview fills the stage everywhere (the Playwright phone-viewport check was dropped) |

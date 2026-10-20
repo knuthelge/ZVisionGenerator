@@ -5,16 +5,20 @@
   import EmptyState from '$lib/components/molecules/EmptyState.svelte';
   import Modal from '$lib/components/molecules/Modal.svelte';
   import Segmented from '$lib/components/molecules/Segmented.svelte';
-  import { errorText, isRetryable } from '$lib/api/client';
-  import { getJobLog } from '$lib/api/jobLog';
-  import type { JobLogFilter, JobLogPage } from '$lib/types';
+  import { requestConfirm } from '$lib/components/molecules/confirm.svelte';
+  import { ApiError, errorText, isRetryable } from '$lib/api/client';
+  import { clearJobLog, deleteJobLogEntry, getJobLog } from '$lib/api/jobLog';
+  import { addToast } from '$lib/state/toasts.svelte';
+  import type { JobLogEntry, JobLogFilter, JobLogPage } from '$lib/types';
   import JobLogRow from './JobLogRow.svelte';
 
   interface Props {
     open?: boolean;
+    /** Refill the Workspace form from an entry's settings; the owner closes the drawer. */
+    onloadsettings?: (entry: JobLogEntry) => void;
   }
 
-  let { open = $bindable(false) }: Props = $props();
+  let { open = $bindable(false), onloadsettings }: Props = $props();
 
   const FILTERS: { value: JobLogFilter; label: string }[] = [
     { value: 'all', label: 'All' },
@@ -80,9 +84,52 @@
     page = next;
     void load();
   }
+
+  async function deleteEntry(entry: JobLogEntry): Promise<void> {
+    try {
+      await deleteJobLogEntry(entry.job_id);
+    } catch (err) {
+      addToast(errorText(err, 'Could not delete the job from the log.'), 'error');
+      // Gone already (another tab): the list is stale, so show the real one.
+      if (err instanceof ApiError && err.status === 404) await load();
+      return;
+    }
+    // The server clamps a page that deletes emptied.
+    await load();
+  }
+
+  async function clearLog(): Promise<void> {
+    const count = data?.total_count ?? 0;
+    const approved = await requestConfirm({
+      question: 'Clear the whole job log?',
+      info: `All ${count} ${count === 1 ? 'entry is' : 'entries are'} removed, not just the ones shown.`,
+      confirmLabel: 'Clear log',
+      cancelLabel: 'Keep',
+      danger: true
+    });
+    if (!approved) return;
+    try {
+      await clearJobLog();
+    } catch (err) {
+      addToast(errorText(err, 'Could not clear the job log.'), 'error');
+      return;
+    }
+    page = 1;
+    await load();
+    addToast('Job log cleared', 'success');
+  }
 </script>
 
 <Modal bind:open title="Job log" placement="side" size="md" fill>
+  {#snippet footer()}
+    <Button
+      size="sm"
+      variant="danger"
+      disabled={filter !== 'all' || !data || data.total_count === 0}
+      title={filter === 'all' ? 'Remove every entry from the job log' : 'Switch to All to clear the whole log'}
+      onclick={clearLog}
+    >Clear log</Button>
+  {/snippet}
   <div class="flex shrink-0 items-center border-b border-border-subtle px-4 py-2">
     <Segmented options={FILTERS} value={filter} label="Show jobs" size="sm" testId="job-log-filter" onchange={setFilter} />
   </div>
@@ -101,7 +148,7 @@
     {:else}
       <ul aria-label="Finished jobs" aria-busy={loading}>
         {#each data.entries as entry (entry.job_id)}
-          <JobLogRow {entry} {now} />
+          <JobLogRow {entry} {now} onloadsettings={(picked) => onloadsettings?.(picked)} ondelete={deleteEntry} />
         {/each}
       </ul>
     {/if}

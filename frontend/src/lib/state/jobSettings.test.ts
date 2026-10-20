@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { jobSettingsPrefill } from './jobSettings';
+import { hasJobSettings, jobSettingsPrefill } from './jobSettings';
 
 describe('jobSettingsPrefill', () => {
   it('splits an inline image job into prefill params and the remaining settings', () => {
@@ -183,5 +183,14 @@ describe('jobSettingsPrefill', () => {
     const { patch } = jobSettingsPrefill({ mode: 'video', workflow: 'extend', source_video: '/clips/walk.mp4', scene: '', prompt: '' });
 
     expect(patch).toMatchObject({ scene: '', prompt: '' });
+  });
+});
+
+describe('hasJobSettings', () => {
+  it('is false for no settings and true once any field was submitted', () => {
+    expect(hasJobSettings({})).toBe(false);
+    expect(hasJobSettings(undefined)).toBe(false);
+    expect(hasJobSettings(null)).toBe(false);
+    expect(hasJobSettings({ model: 'zit' })).toBe(true);
   });
 });

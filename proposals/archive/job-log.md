@@ -1,6 +1,6 @@
 # A log of past jobs
 
-**Status:** Proposed (2026-10-17)
+**Status:** Done (unreleased, 2026-10-20). Shipped from `c80daa0` (the log and its API) on, in the next release. The routes are `/api/jobs/log` rather than `/api/jobs/history`, and the drawer is titled Job log.
 
 ## Problem
 
@@ -43,7 +43,7 @@ When a job reaches a terminal state, `WebRunner` appends one JSON line to `<ZIV 
 
 - **Keep more jobs in memory.** No restart survival and no bound on memory for settings and outputs. Rejected.
 - **Store full event histories per job.** Up to 200 events a job, most of them step ticks; the summary line is what the drawer shows, and the outputs already embed the settings. Rejected.
-- **A page instead of a drawer.** A page would need a nav slot, which [Merge the admin pages](admin-page-merge.md) is trying to free; the drawer is reachable from anywhere, which matters for "the job failed while I was on the Prompts page".
+- **A page instead of a drawer.** A page would need a nav slot, which [Merge the admin pages](../admin-page-merge.md) is trying to free; the drawer is reachable from anywhere, which matters for "the job failed while I was on the Prompts page".
 
 ## Open questions
 

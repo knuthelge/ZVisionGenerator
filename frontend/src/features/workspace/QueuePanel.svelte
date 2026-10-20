@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Icon } from '$lib/components/atoms';
+  import { hasJobSettings } from '$lib/state/jobSettings';
   import type { JobSnapshot } from '$lib/types';
 
   interface Props {
@@ -11,11 +12,6 @@
   }
 
   let { jobs, onremove, onload, onclear }: Props = $props();
-
-  /** Whether the job was submitted from the form, so its settings can be loaded back (an upscale was not). */
-  function hasSettings(job: JobSnapshot): boolean {
-    return Object.keys(job.settings ?? {}).length > 0;
-  }
 
   function details(job: JobSnapshot): string {
     const runs = `${job.runs} ${job.runs === 1 ? 'run' : 'runs'}`;
@@ -38,7 +34,7 @@
             <span class="queue-meta">{details(job)}</span>
           </div>
           {#if index === 0}<span class="ui-badge ui-badge-info queue-tag">Starts next</span>{/if}
-          {#if hasSettings(job)}
+          {#if hasJobSettings(job.settings)}
             <button type="button" class="ui-btn ui-btn-sm queue-action" title="Copy this job's settings into the form" onclick={() => onload(job)}>
               <Icon name="reuse" size={14} />Load settings
             </button>

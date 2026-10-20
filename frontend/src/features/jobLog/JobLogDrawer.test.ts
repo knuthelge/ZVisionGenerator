@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { JobLogEntry, JobLogPage } from '$lib/types';
 
+import { toasts } from '$lib/state/toasts.svelte';
 import { reactiveProps } from '../../test-utils/reactiveProps.svelte';
 import JobLogDrawer from './JobLogDrawer.svelte';
 
@@ -215,5 +216,146 @@ describe('JobLogDrawer', () => {
     const url = requestedUrls().at(-1)!;
     expect(url.searchParams.get('status')).toBe('all');
     expect(url.searchParams.get('page')).toBe('1');
+  });
+
+  describe('row actions', () => {
+    const notFound = { ok: false, status: 404, statusText: 'Not Found', text: async () => '{"detail":"No such job."}' };
+    const rowButton = (row: HTMLElement, name: string): HTMLButtonElement | undefined =>
+      Array.from(row.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.trim() === name);
+    const methodCalls = (method: string) => fetchMock.mock.calls.filter((call) => (call[1] as RequestInit | undefined)?.method === method);
+
+    beforeEach(() => {
+      toasts.splice(0, toasts.length);
+    });
+
+    afterEach(() => {
+      Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    });
+
+    it('hands the entry to the owner on Load settings and hides it for an entry without settings', async () => {
+      const withSettings = entry({ job_id: 'job-s', settings: { model: 'zit', steps: '9' } });
+      fetchMock.mockResolvedValue(okResponse(pageOf([withSettings, entry({ job_id: 'job-up', workflow: 'upscale', settings: {} })])));
+      const onloadsettings = vi.fn();
+      const props = reactiveProps<{ open: boolean; onloadsettings: (e: JobLogEntry) => void }>({ open: false, onloadsettings });
+      app = flushSync(() => mount(JobLogDrawer, { target, props }));
+      flushSync(() => { props.open = true; });
+      await settle();
+
+      expect(rowButton(rows()[1], 'Load settings')).toBeUndefined();
+      rowButton(rows()[0], 'Load settings')!.click();
+      expect(onloadsettings).toHaveBeenCalledOnce();
+      expect(onloadsettings.mock.calls[0][0]).toMatchObject({ job_id: 'job-s' });
+    });
+
+    it('deletes one entry without asking and refetches the page', async () => {
+      fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => (init?.method === 'DELETE' ? okResponse({ deleted: 'job-2' }) : okResponse(pageOf([entry({ job_id: 'job-2' })], { page: 2, total_pages: 2, total_count: 51 }))));
+      await openDrawer();
+      button('Older').click();
+      await settle();
+      const before = fetchMock.mock.calls.length;
+
+      rowButton(rows()[0], 'Delete')!.click();
+      await settle();
+
+      expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+      const deletes = methodCalls('DELETE');
+      expect(deletes).toHaveLength(1);
+      expect(String(deletes[0][0])).toBe('/api/jobs/log/job-2');
+      const refetch = new URL(String(fetchMock.mock.calls[before + 1][0]), 'http://localhost');
+      expect(refetch.pathname).toBe('/api/jobs/log');
+      expect(refetch.searchParams.get('page')).toBe('2');
+    });
+
+    it('reports a failed delete, and refetches when the entry was already gone', async () => {
+      fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => (init?.method === 'DELETE' ? notFound : okResponse(pageOf([entry()]))));
+      await openDrawer();
+      const before = fetchMock.mock.calls.length;
+
+      rowButton(rows()[0], 'Delete')!.click();
+      await settle();
+
+      expect(toasts.map((toast) => [toast.type, toast.message])).toContainEqual(['error', 'No such job.']);
+      expect(fetchMock.mock.calls.length).toBe(before + 2);
+    });
+
+    it('copies the error of a failed row and says so once', async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal('isSecureContext', true);
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+      fetchMock.mockResolvedValue(okResponse(pageOf([entry({ status: 'failed', error: 'CUDA out of memory' }), entry({ job_id: 'job-ok' })])));
+      await openDrawer();
+
+      expect(rowButton(rows()[1], 'Copy error')).toBeUndefined();
+      rowButton(rows()[0], 'Copy error')!.click();
+      await settle();
+
+      expect(writeText).toHaveBeenCalledWith('CUDA out of memory');
+      expect(toasts.map((toast) => toast.type)).toEqual(['success']);
+    });
+
+    it('selects the error instead when the clipboard is unavailable', async () => {
+      vi.stubGlobal('isSecureContext', false);
+      fetchMock.mockResolvedValue(okResponse(pageOf([entry({ status: 'failed', error: 'CUDA out of memory' })])));
+      await openDrawer();
+
+      rowButton(rows()[0], 'Copy error')!.click();
+      await settle();
+
+      expect(window.getSelection()?.toString()).toBe('CUDA out of memory');
+      expect(toasts.map((toast) => toast.type)).toEqual(['info']);
+    });
+
+    const clearButton = (): HTMLButtonElement => button('Clear log');
+    const dialogButton = (action: string): HTMLButtonElement => document.querySelector(`[role="alertdialog"] [data-action="${action}"]`)!;
+
+    it('clears nothing when the confirmation is cancelled', async () => {
+      fetchMock.mockResolvedValue(okResponse(pageOf([entry(), entry({ job_id: 'job-2' })])));
+      await openDrawer();
+
+      clearButton().click();
+      await settle();
+      expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('Clear the whole job log?');
+      expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain('2');
+      dialogButton('cancel').click();
+      await settle();
+
+      expect(methodCalls('DELETE')).toHaveLength(0);
+    });
+
+    it('clears the log after confirmation and shows the first page again', async () => {
+      let cleared = false;
+      fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+        if (init?.method === 'DELETE') { cleared = true; return okResponse({ deleted_count: 2 }); }
+        return okResponse(cleared ? pageOf([]) : pageOf([entry(), entry({ job_id: 'job-2' })]));
+      });
+      await openDrawer();
+
+      clearButton().click();
+      await settle();
+      dialogButton('confirm').click();
+      await settle();
+
+      const deletes = methodCalls('DELETE');
+      expect(deletes).toHaveLength(1);
+      expect(String(deletes[0][0])).toBe('/api/jobs/log');
+      expect(rows()).toHaveLength(0);
+      expect(requestedUrls().at(-1)!.searchParams.get('page')).toBe('1');
+      expect(toasts.map((toast) => toast.type)).toEqual(['success']);
+    });
+
+    it('enables Clear log only on the All filter and when there are entries', async () => {
+      fetchMock.mockResolvedValue(okResponse(pageOf([entry()])));
+      await openDrawer();
+      expect(clearButton().disabled).toBe(false);
+
+      button('Failed').click();
+      await settle();
+      expect(clearButton().disabled).toBe(true);
+
+      fetchMock.mockResolvedValue(okResponse(pageOf([])));
+      button('All').click();
+      await settle();
+      expect(clearButton().disabled).toBe(true);
+    });
   });
 });

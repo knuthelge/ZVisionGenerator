@@ -1,6 +1,10 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { Icon } from '$lib/components/atoms';
+  import { copyText, selectElementText } from '$lib/clipboard';
   import { workflowLabel } from '$lib/state/assetActions';
+  import { addToast } from '$lib/state/toasts.svelte';
+  import { hasJobSettings } from '$lib/state/jobSettings';
   import type { JobLogEntry } from '$lib/types';
   import { hasErrorDetail, jobLogDuration, jobLogTime, jobLogTone, jobLogToneLabel, promptFirstLine, timeAgo, type JobLogTone } from './jobLogView';
 
@@ -8,9 +12,13 @@
     entry: JobLogEntry;
     /** The moment the relative time is counted from, in epoch milliseconds. */
     now: number;
+    /** Refill the Workspace form from this entry's settings. */
+    onloadsettings: (entry: JobLogEntry) => void;
+    /** Remove this entry from the log; the row stays disabled until it settles. */
+    ondelete: (entry: JobLogEntry) => Promise<void>;
   }
 
-  let { entry, now }: Props = $props();
+  let { entry, now, onloadsettings, ondelete }: Props = $props();
 
   const uid = $props.id();
 
@@ -23,6 +31,8 @@
   };
 
   let expanded = $state(false);
+  let deleting = $state(false);
+  let errorElement = $state<HTMLElement | null>(null);
 
   const tone = $derived(jobLogTone(entry));
   const prompt = $derived(promptFirstLine(entry.prompt));
@@ -30,6 +40,28 @@
   const finishedAt = $derived(jobLogTime(entry));
   const detailed = $derived(hasErrorDetail(entry));
   const errorText = $derived(entry.error?.trim() ?? '');
+  const loadable = $derived(hasJobSettings(entry.settings));
+
+  /** Copy the error; without a clipboard, select it so the keyboard shortcut can. */
+  async function copyError(): Promise<void> {
+    if (await copyText(errorText)) {
+      addToast('Error copied', 'success');
+      return;
+    }
+    expanded = true;
+    await tick();
+    if (errorElement) selectElementText(errorElement);
+    addToast('The error is selected. Press Ctrl+C or \u2318C to copy it.', 'info');
+  }
+
+  async function remove(): Promise<void> {
+    deleting = true;
+    try {
+      await ondelete(entry);
+    } finally {
+      deleting = false;
+    }
+  }
 </script>
 
 <li class="job-log-row" data-testid="job-log-row" data-tone={tone} style:--row-tone={TONE_COLORS[tone]}>
@@ -62,9 +94,24 @@
       </button>
     {/if}
   </div>
+  <div class="row-actions" role="group" aria-label="Job actions">
+    {#if loadable}
+      <button type="button" class="ui-btn ui-btn-sm" title="Copy this job's settings into the form" onclick={() => onloadsettings(entry)}>
+        <Icon name="reuse" size={14} />Load settings
+      </button>
+    {/if}
+    {#if errorText}
+      <button type="button" class="ui-btn ui-btn-sm" onclick={copyError}>
+        <Icon name="copy" size={14} />Copy error
+      </button>
+    {/if}
+    <button type="button" class="ui-btn ui-btn-sm ui-btn-danger" disabled={deleting} title="Remove this job from the log" onclick={remove}>
+      <Icon name="trash" size={14} />Delete
+    </button>
+  </div>
   {#if detailed && expanded}
     <div class="row-detail" id="{uid}-detail" data-testid="job-log-detail">
-      {#if errorText}<p class="row-error">{errorText}</p>{/if}
+      {#if errorText}<p class="row-error" bind:this={errorElement}>{errorText}</p>{/if}
       {#if entry.failed_runs > 0}
         <p class="row-runs">{entry.failed_runs} {entry.failed_runs === 1 ? 'run' : 'runs'} failed</p>
       {/if}
@@ -83,6 +130,7 @@
   .row-prompt-empty { color: var(--color-text-muted); }
   .row-meta { display: flex; gap: 8px; margin-top: 2px; font-size: var(--text-meta); color: var(--color-text-muted); }
   .row-meta > span + span::before { content: '\00b7'; margin-right: 8px; }
+  .row-actions { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 0 32px; }
   .row-detail { margin: 8px 0 0 32px; padding: 8px 10px; max-height: 12rem; overflow-y: auto; border-radius: var(--radius-sm); background: var(--color-bg-base); font-size: var(--text-ui); }
   .row-error { color: var(--color-text-secondary); font-family: var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
   .row-runs { color: var(--row-tone); }

@@ -5,7 +5,8 @@
   import { shouldApplyStartupView } from './startupRouting';
   import { jobStore } from '$lib/state/job.svelte';
   import { documentTitle, isReviewing } from '$lib/state/jobView';
-  import type { PageId, Workflow } from '$lib/types';
+  import { requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
+  import type { JobLogEntry, PageId, Workflow } from '$lib/types';
   import Spinner from '$lib/components/atoms/Spinner.svelte';
   import TopNav from '$lib/components/organisms/TopNav.svelte';
   import TopStrip from '$lib/components/organisms/TopStrip.svelte';
@@ -29,6 +30,13 @@
   // Phones: the pages live in a drawer behind the strip's menu button.
   let drawerOpen = $state(false);
   let jobLogOpen = $state(false);
+
+  /** Hand a logged job's settings to the Workspace, which applies them once it has loaded. */
+  function loadJobLogSettings(entry: JobLogEntry): void {
+    requestJobSettings(entry.settings);
+    jobLogOpen = false;
+    router.navigate('workspace');
+  }
 
   const baseTitle = document.title;
   $effect(() => {
@@ -75,7 +83,7 @@
     </div>
     <ToastContainer />
     <ShortcutsDialog currentPage={router.page} onnavigate={(page) => router.navigate(page)} onopenjoblog={() => { jobLogOpen = true; }} />
-    <JobLogDrawer bind:open={jobLogOpen} />
+    <JobLogDrawer bind:open={jobLogOpen} onloadsettings={loadJobLogSettings} />
   </div>
 {:else}
   <div class="flex min-h-screen items-center justify-center bg-bg-base text-primary-main">

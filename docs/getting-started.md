@@ -96,6 +96,8 @@ While a generation is running, the Web UI keeps the active job attached to the c
 
 You can keep working while a job runs: change the settings and press **Add to queue** (the Generate button while jobs are active, or `⌘/Ctrl+↵`). Queued jobs run one after another, in order, and use the settings they had when you added them. They are listed under the job card as **Up next**, where each one can be removed or its settings copied back into the form with **Load settings**; **Clear queue** removes them all (after asking) and never stops the running job. If a job fails, the next one starts anyway. The queue is shared by every open tab and is kept in the server's memory, so stopping the server clears it. While jobs are running or queued, the manual **Enhance prompt** button is unavailable, because the enhancer would need the same memory; auto enhancement still runs inside each job.
 
+The **Job log** lists the jobs that have finished, with the newest first. Open it with the clock button in the top bar, or press `G` then `J`. Each row shows the workflow, the model, the first line of the prompt, how long the job took and how long ago it ended, and marks it as completed, failed, partly failed or cancelled; a failed row expands to show why. The **All**, **Failed** and **Completed** filter narrows the list (a job that finished with some runs failed counts as failed), and older jobs are on further pages. On a row, **Load settings** takes you to the Workspace and fills the form with the settings that job used, with the model's defaults applied around them; it is not offered for an upscale. **Copy error** puts the failure text on the clipboard; a page opened over plain `http` from another computer has no clipboard access, so the text is selected instead and you copy it yourself. **Delete** removes one entry, and **Clear log** removes the whole log after asking. The log is kept on disk, so it survives a restart. Jobs that were removed from the queue before they started are not recorded.
+
 The **Prompts** page builds prompt files visually: snippets, sets of prompts, and per-prompt enhancement. See [Prompt Builder](guides/prompts.md#prompt-builder-web-ui).
 
 Workspace settings are remembered in the browser between visits and restarts, as long as the Web UI starts on the same port. Choosing a different model keeps the settings you changed and gives the rest the new model's defaults. A size the new model doesn't offer becomes its largest preset, a custom width and height is scaled to fit the model's limits keeping its shape, and video steps are capped at the model's limit. Changing the quantization changes nothing else. **Reset**, **Reuse settings**, **Load settings** and **Extend** apply the model's defaults instead. LoRAs are remembered per model family: switching to a model of another family brings back the LoRAs you last used with that family (or none), and switching between models of the same family keeps them. **Reuse settings**, **Load settings** on a queued job and **Extend** use exactly the LoRAs the source was made with, so a source made without LoRAs clears them.
@@ -140,6 +142,7 @@ Anywhere:
 |-----|--------|
 | `?` | Show all keyboard shortcuts |
 | `G` then `W` / `P` / `G` / `M` / `C` | Go to Workspace / Prompts / Gallery / Models / Config |
+| `G` then `J` | Open the job log |
 
 Workspace:
 
@@ -252,6 +255,8 @@ ziv-image -m my-model --prompt "a landscape"
 ### Error Log
 
 Each command records warnings and errors, with full tracebacks, in `~/.ziv/logs/<command>.log` (`ui.log`, `image.log`, `video.log` or `model.log`). The file is cleared every time the command starts, so it only covers the latest run, and stays empty when nothing goes wrong. If the logs folder cannot be written, the log goes to the system temp folder instead; `ziv ui` prints the file's location at startup. Set `ZIV_LOG=off` to turn the log off.
+
+The Web UI also keeps a record of finished jobs, with the reason each failed, in `jobs.jsonl` in the data folder (`~/.ziv/` unless `ZIV_DATA_DIR` is set). Unlike the error log it is kept across restarts. Once it holds more than 2000 jobs, only the newest 1500 are kept. Clear it with **Clear log** in the Web UI's Job log, or delete the file while the server is stopped.
 
 ## Troubleshooting
 

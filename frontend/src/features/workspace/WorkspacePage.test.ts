@@ -11,6 +11,7 @@ import { extendInspection } from '$lib/state/extendInspection.svelte';
 import { legacySource, sceneSource, sourceInfo } from '$lib/state/extend.fixtures';
 import { historyStore } from '$lib/state/history.svelte';
 import { jobStore } from '$lib/state/job.svelte';
+import { hasPendingJobSettings, requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { router } from '$lib/state/router.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
@@ -866,6 +867,43 @@ describe('WorkspacePage', () => {
       const submitted = new FormData(target.querySelector('form')!);
       expect(submitted.get('prompt')).toBe('from the queue');
       expect(submitted.get('steps')).toBe('7');
+    });
+
+    describe('settings handed over by the Job log', () => {
+      const logged = { mode: 'image', workflow: 'txt2img', model: 'zit', prompt_source: 'inline', prompt: 'from the job log', steps: '7', runs: '3', seed: '99' };
+      const prompt = () => (target.querySelector('#ws-prompt') as HTMLTextAreaElement).value;
+
+      it('applies settings requested before the page mounted once its context has loaded', async () => {
+        draft.update('prompt', 'a saved draft');
+        requestJobSettings(logged);
+        await mountWorkspace(makeContext());
+
+        expect(prompt()).toBe('from the job log');
+        expect(draft.state).toMatchObject({ steps: 7, runs: 3, seed: 99 });
+        expect(hasPendingJobSettings()).toBe(false);
+        expect(toasts.map((toast) => toast.message)).toContain('Loaded the job\'s settings');
+      });
+
+      it('applies settings requested while the page is already mounted', async () => {
+        await mountWorkspace(makeContext());
+        expect(prompt()).not.toBe('from the job log');
+
+        requestJobSettings(logged);
+        await settle();
+
+        expect(prompt()).toBe('from the job log');
+        expect(draft.state).toMatchObject({ steps: 7, runs: 3, seed: 99 });
+      });
+
+      it('applies a request only once', async () => {
+        requestJobSettings(logged);
+        await mountWorkspace(makeContext());
+        draft.update('prompt', 'typed afterwards');
+        await settle();
+
+        expect(prompt()).toBe('typed afterwards');
+        expect(toasts.filter((toast) => toast.message === 'Loaded the job\'s settings')).toHaveLength(1);
+      });
     });
 
     it('shows the queue count on the collapsed strip', async () => {

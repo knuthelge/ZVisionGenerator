@@ -12,6 +12,11 @@ export interface JobSettingsPrefill {
   patch: Partial<DraftState>;
 }
 
+/** Whether a job was submitted from the form, so its settings can be loaded back (an upscale was not). */
+export function hasJobSettings(settings: JobSettings | null | undefined): boolean {
+  return Object.keys(settings ?? {}).length > 0;
+}
+
 /** Return every value submitted for a field. */
 export function values(settings: JobSettings, key: string): string[] {
   const value = settings[key];

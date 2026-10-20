@@ -46,4 +46,4 @@ Do this before or together with the search proposal, so search is built once, on
 
 ## Out of scope
 
-- The Jobs drawer in [A log of past jobs](job-log.md), which is where "history" in the time sense belongs.
+- The Jobs drawer in [A log of past jobs](archive/job-log.md), which is where "history" in the time sense belongs.
