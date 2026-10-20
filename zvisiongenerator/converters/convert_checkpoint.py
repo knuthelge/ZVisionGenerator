@@ -9,6 +9,7 @@ Supported model types:
   - flux2-klein-4b : FLUX.2 Klein 4B (manual key remapping)
   - flux2-klein-9b : FLUX.2 Klein 9B (manual key remapping)
   - krea2-turbo    : Krea 2 Turbo fine-tunes (manual key remapping)
+  - ltx-2.3        : LTX-2.3 video fine-tunes, stored at one quantize level (see ltx_convert)
 
 Only the transformer weights are converted from the checkpoint.
 Text encoder, VAE, tokenizer, and scheduler are downloaded from the
@@ -42,8 +43,11 @@ KREA2_REPOS = {
     "krea2-turbo": "unsloth/Krea-2-Turbo",
 }
 
+# LTX-2.3 video checkpoints (converters/ltx_convert.py).
+LTX_MODEL_TYPE = "ltx-2.3"
+
 # Every --model-type the converter accepts (the CLI and the Web UI converter share this list).
-MODEL_TYPES = ("zimage", *FLUX2_KLEIN_REPOS, *KREA2_REPOS)
+MODEL_TYPES = ("zimage", *FLUX2_KLEIN_REPOS, *KREA2_REPOS, LTX_MODEL_TYPE)
 
 
 # ── Transformer key conversion ──────────────────────────────────────────────
@@ -548,6 +552,12 @@ def _cmd_model(args):
     if parse_stored_quant_name(model_name) is not None:
         print(f"Error: Model name '{model_name}' is reserved for stored quants (<name>@q4 / <name>@q8). Choose another name.", file=sys.stderr)
         sys.exit(1)
+    if args.model_type == LTX_MODEL_TYPE:
+        _cmd_ltx(args, input_path, output_dir, model_name)
+        return
+    if args.distill or args.force:
+        print("Error: --distill and --force are for --model-type ltx-2.3 only.", file=sys.stderr)
+        sys.exit(1)
     output_dir = output_dir / model_name
 
     # Create output directory
@@ -619,6 +629,22 @@ def _cmd_model(args):
         except RuntimeError as e:
             print(f"Error: Converted the model, but could not save the q{args.quantize} copy: {e}", file=sys.stderr)
             sys.exit(1)
+
+
+def _cmd_ltx(args, input_path: Path, models_dir: Path, model_name: str) -> None:
+    """Convert an LTX-2.3 checkpoint: ``--quantize`` is required and is the only level stored (no extra copy)."""
+    from zvisiongenerator.converters.ltx_convert import convert_ltx
+    from zvisiongenerator.utils.config import load_config
+
+    if args.quantize is None:
+        print("Error: --model-type ltx-2.3 needs --quantize 4 or 8: that level is the only one stored.", file=sys.stderr)
+        sys.exit(1)
+    try:
+        target = convert_ltx(input_path, models_dir, model_name, args.quantize, distill=args.distill, force=args.force, config=load_config())
+    except (ValueError, FileExistsError, RuntimeError) as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"\nConversion complete! Output directory: {target}")
 
 
 def _store_quantized_copy(model_dir: Path, bits: int) -> Path:
@@ -712,8 +738,10 @@ def _build_model_parser(*, prog: str = "ziv-model") -> argparse.ArgumentParser:
         type=int,
         choices=[4, 8],
         default=None,
-        help="Also save a quantized copy as <name>@q4 or <name>@q8, used when that quantize level is selected",
+        help="Also save a quantized copy as <name>@q4 or <name>@q8, used when that quantize level is selected. For ltx-2.3 it is required and is the only level stored",
     )
+    model_parser.add_argument("--distill", action="store_true", help="ltx-2.3 only: merge Lightricks' distilled LoRA into a plain-dev checkpoint so it runs at 8 steps")
+    model_parser.add_argument("--force", action="store_true", help="ltx-2.3 only: replace an existing model of that name once the new one is complete")
 
     # lora subcommand
     lora_parser = subparsers.add_parser("lora", help="Import a LoRA file")

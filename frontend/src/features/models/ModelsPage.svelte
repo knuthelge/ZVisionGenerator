@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { errorText } from '$lib/api/client';
-  import { getModelInventory, convertCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
+  import { getModelInventory, convertCheckpoint, getConversionStatus, inspectLtxCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
   import { addToast } from '$lib/state/toasts.svelte';
-  import type { EnhancerModelEntry, ModelDeleteInfo, ModelInventory, ModelOperationResult, ModelStatusFields } from '$lib/types';
-  import { Button, Icon, Input, Select, Tooltip } from '$lib/components/atoms';
+  import type { ConversionStatus, EnhancerModelEntry, LtxCheckpointInspection, ModelDeleteInfo, ModelInventory, ModelOperationResult, ModelStatusFields } from '$lib/types';
+  import { Button, Icon, Input, Select, StepProgress, Tooltip } from '$lib/components/atoms';
   import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField } from '$lib/components/molecules';
   import { DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
@@ -22,12 +22,82 @@
   let deleteOpen = $state(false);
   let deleting = $state(false);
 
+  const LTX_TYPE = 'ltx-2.3';
+  const CONVERSION_POLL_MS = 2000;
+  const INSPECT_DELAY_MS = 400;
+  let convertType = $state('');
+  let ltxQuantize = $state('4');
+  let ltxDistill = $state(false);
+  let ltxInspection = $state<LtxCheckpointInspection | null>(null);
+  let ltxInspectError = $state<string | null>(null);
+  let conversion = $state<ConversionStatus | null>(null);
+  let conversionTimer: ReturnType<typeof setTimeout> | null = null;
+  let destroyed = false;
+  let inspectTimer: ReturnType<typeof setTimeout> | null = null;
+  let inspectRequest = 0;
+  const isLtx = $derived(convertType === LTX_TYPE);
+  const converting = $derived(conversion?.state === 'running');
+
   const ENHANCER_TIER_LABELS: Record<EnhancerModelEntry['tier'], string> = { fast: 'Fast', smart: 'Smart', custom: 'Custom' };
 
 
   onMount(async () => {
     await loadInventory();
+    await pollConversion(false);
   });
+
+  onDestroy(() => {
+    destroyed = true;
+    if (conversionTimer) clearTimeout(conversionTimer);
+    if (inspectTimer) clearTimeout(inspectTimer);
+  });
+
+  /** Read the LTX conversion's status; while it runs (or the read failed), read it again shortly. A finished one is reported when *report* is set. */
+  async function pollConversion(report: boolean): Promise<void> {
+    try {
+      conversion = await getConversionStatus();
+    } catch {
+      // A missed read (a dropped connection) says nothing about the conversion: try again while one may be running.
+      if (!destroyed && conversion?.state === 'running') conversionTimer = setTimeout(() => void pollConversion(report), CONVERSION_POLL_MS);
+      return;
+    }
+    if (destroyed) return;
+    if (conversion.state === 'running') {
+      conversionTimer = setTimeout(() => void pollConversion(true), CONVERSION_POLL_MS);
+      return;
+    }
+    if (!report) return;
+    if (conversion.state === 'done') {
+      notice = { tone: 'success', message: conversion.message || 'Checkpoint converted.' };
+      addToast('Conversion finished', 'success');
+      await loadInventory();
+    } else if (conversion.state === 'failed') {
+      notice = { tone: 'error', message: conversion.message || 'Conversion failed.' };
+      addToast('Conversion failed', 'error');
+    }
+  }
+
+  /** Inspect the chosen LTX checkpoint shortly after the path or type last changed, preselecting the level and Distill. */
+  function scheduleInspect(): void {
+    if (inspectTimer) clearTimeout(inspectTimer);
+    // A new path makes any answer still on its way for the old one stale.
+    const request = ++inspectRequest;
+    ltxInspection = null;
+    ltxInspectError = null;
+    const path = checkpointPath.trim();
+    if (!isLtx || !path) return;
+    inspectTimer = setTimeout(async () => {
+      try {
+        const found = await inspectLtxCheckpoint(path);
+        if (request !== inspectRequest) return;
+        ltxInspection = found;
+        ltxQuantize = String(found.recommended_quantize);
+        ltxDistill = found.recommend_distill;
+      } catch (err) {
+        if (request === inspectRequest) ltxInspectError = errorText(err, 'Could not read this checkpoint.');
+      }
+    }, INSPECT_DELAY_MS);
+  }
 
   async function loadInventory(): Promise<void> {
     loading = true;
@@ -41,6 +111,12 @@
     }
   }
 
+  /** The converted model's name, as the server picks it: the name given, else the checkpoint's file name without its extension. */
+  function convertedName(name: string, inputPath: string): string {
+    const file = inputPath.trim().split(/[\\/]/).pop() ?? '';
+    return name.trim() || file.replace(/\.[^.]+$/, '');
+  }
+
   async function handleConvertCheckpoint(e: Event): Promise<void> {
     e.preventDefault();
     const form = e.currentTarget as HTMLFormElement;
@@ -51,13 +127,20 @@
       model_type: (fd.get('model_type') as string) ?? '',
       base_model: (fd.get('base_model') as string) ?? '',
       copy: fd.get('copy') === 'on',
-      quantize: (fd.get('quantize') as string) ?? ''
+      quantize: (fd.get('quantize') as string) ?? '',
+      distill: fd.get('distill') === 'on'
     };
     formsBusy = true;
     notice = null;
     try {
       const result = await convertCheckpoint(data);
-      if (result.tone === 'success') {
+      if (result.tone === 'success' && result.background) {
+        notice = { tone: 'success', message: result.message };
+        addToast('Conversion started', 'success');
+        // The server has started it, so it is running until a read says otherwise.
+        conversion = { state: 'running', name: convertedName(data.name, data.input_path), stage: 'Starting', done: 0, total: 0 };
+        await pollConversion(true);
+      } else if (result.tone === 'success') {
         notice = { tone: 'success', message: result.message || 'Checkpoint converted successfully.' };
         checkpointPath = '';
         checkpointPathReset += 1;
@@ -247,9 +330,9 @@
   <span class="font-mono text-meta text-text-muted">{n}</span>
 {/snippet}
 
-{#snippet submitRow(label: string)}
+{#snippet submitRow(label: string, blocked: boolean)}
   <div class="flex justify-end">
-    <Button variant="primary" type="submit" disabled={formsBusy} loading={formsBusy}>{label}</Button>
+    <Button variant="primary" type="submit" disabled={formsBusy || blocked} loading={formsBusy}>{label}</Button>
   </div>
 {/snippet}
 
@@ -482,7 +565,10 @@
               purpose="checkpoint_file"
               required
               onresolve={async (candidate) => candidate}
-              onvaluechange={(value) => (checkpointPath = value)}
+              onvaluechange={(value) => {
+                checkpointPath = value;
+                scheduleInspect();
+              }}
             />
           {/key}
 
@@ -495,16 +581,46 @@
               id="convert-model-type"
               name="model_type"
               required
+              bind:value={convertType}
+              onchange={scheduleInspect}
               options={[
                 { value: '', label: 'Choose a type', disabled: true },
                 { value: 'zimage', label: 'zimage' },
                 { value: 'flux2-klein-4b', label: 'flux2-klein-4b' },
                 { value: 'flux2-klein-9b', label: 'flux2-klein-9b' },
-                { value: 'krea2-turbo', label: 'krea2-turbo' }
+                { value: 'krea2-turbo', label: 'krea2-turbo' },
+                { value: LTX_TYPE, label: 'LTX-2.3 (video)' }
               ]}
             />
           </FormField>
 
+          {#if isLtx}
+            {#if ltxInspection}
+              <Alert tone={ltxInspection.distillation === 'distilled' ? 'success' : 'warning'}>{ltxInspection.advice}</Alert>
+            {:else if ltxInspectError}
+              <Alert tone="error">{ltxInspectError}</Alert>
+            {/if}
+
+            <FormField label="Quantize level" for="convert-ltx-quantize" required helper="The only level stored. q8 needs about 10 GB more memory than q4.">
+              <Select
+                id="convert-ltx-quantize"
+                name="quantize"
+                required
+                bind:value={ltxQuantize}
+                options={[
+                  { value: '4', label: 'q4' },
+                  { value: '8', label: 'q8' }
+                ]}
+              />
+            </FormField>
+
+            <FormField label="Distillation" helper="Merges Lightricks' distilled LoRA (7.6 GB, downloaded once). Plain-dev checkpoints need it to run at 8 steps.">
+              <label class="flex min-h-control cursor-pointer items-center gap-2 text-ui text-text-secondary" for="convert-distill">
+                <input type="checkbox" name="distill" id="convert-distill" class="ui-checkbox" bind:checked={ltxDistill} />
+                Distill
+              </label>
+            </FormField>
+          {:else}
           <FormField label="Base model (optional)" for="convert-base-model" helper="Base model ID or path">
             <Input id="convert-base-model" type="text" name="base_model" placeholder="base model id or path" />
           </FormField>
@@ -529,8 +645,23 @@
               Copy instead of moving
             </label>
           </FormField>
+          {/if}
 
-          {@render submitRow('Convert checkpoint')}
+          {#if converting && conversion}
+            <StepProgress
+              value={conversion.done ?? 0}
+              max={conversion.total || 1}
+              live
+              busy={!conversion.total}
+              label="Conversion progress"
+              valuetext={conversion.stage}
+            />
+            <p class="text-ui text-text-secondary">
+              Converting {conversion.name}: {conversion.stage}{conversion.total ? ` (${conversion.done}/${conversion.total})` : ''}
+            </p>
+          {/if}
+
+          {@render submitRow('Convert checkpoint', converting)}
         </div>
       </Panel>
 
@@ -555,7 +686,7 @@
             <Input id="import-local-name" type="text" name="name" placeholder="my-lora" />
           </FormField>
 
-          {@render submitRow('Import LoRA')}
+          {@render submitRow('Import LoRA', false)}
         </div>
       </Panel>
 
@@ -577,7 +708,7 @@
             <Alert tone="warning">Set <span class="font-mono">HF_TOKEN</span> for gated model downloads.</Alert>
           {/if}
 
-          {@render submitRow('Download LoRA')}
+          {@render submitRow('Download LoRA', false)}
         </div>
       </Panel>
       </div>

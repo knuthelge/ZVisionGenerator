@@ -16,7 +16,7 @@ import sys
 import uuid
 import warnings
 from collections.abc import Iterator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import ExitStack, asynccontextmanager, contextmanager
 from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
@@ -37,7 +37,7 @@ from zvisiongenerator.backends import (
     supports_video_upscale_review,
 )
 from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu, smart_budget_bytes
-from zvisiongenerator.converters.convert_checkpoint import MODEL_TYPES
+from zvisiongenerator.converters.convert_checkpoint import LTX_MODEL_TYPE, MODEL_TYPES
 from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_local
 from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
@@ -1652,6 +1652,8 @@ def _convert_model_from_form(form: Any) -> dict[str, str]:
     model_name = _optional_text(form, "name")
     if model_name:
         args.extend(["--name", model_name])
+    if model_type == LTX_MODEL_TYPE:
+        return _start_ltx_conversion(form, args, model_name or Path(input_path).stem)
     if model_type == "zimage":
         args.extend(["--base-model", _optional_text(form, "base_model") or "Tongyi-MAI/Z-Image-Turbo"])
     if _checkbox(form, "copy"):
@@ -1673,6 +1675,30 @@ def _convert_model_from_form(form: Any) -> dict[str, str]:
         "message": "Converted the checkpoint into an installed model directory." if quantize is None else f"Converted the checkpoint and saved a q{quantize} copy.",
         "detail": detail,
     }
+
+
+def _start_ltx_conversion(form: Any, args: list[str], name: str) -> dict[str, str]:
+    """Start an LTX conversion as a background job (see :mod:`zvisiongenerator.web.ltx_conversion`); it holds the quantize slot until it ends.
+
+    Raises:
+        ValueError: Without a quantize level of 4 or 8 (the only level an LTX conversion stores).
+        HTTPException: 409 while a generation job runs or another conversion holds the slot.
+    """
+    from zvisiongenerator.web.ltx_conversion import start_conversion
+
+    quantize = _optional_int(form, "quantize")
+    if quantize not in (4, 8):
+        raise ValueError("Converting an LTX-2.3 checkpoint needs a quantize level of 4 or 8: that level is the only one stored.")
+    args.extend(["--quantize", str(quantize)])
+    if _checkbox(form, "distill"):
+        args.append("--distill")
+    slot = ExitStack()
+    try:
+        slot.enter_context(_claim_quantize_slot())
+    except JobConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    start_conversion(args, name, slot)
+    return {"tone": "success", "message": f"Converting the checkpoint into '{name}' at q{quantize}. This takes several minutes.", "detail": "", "background": "1"}
 
 
 def _import_local_lora_from_form(form: Any) -> dict[str, str]:
@@ -1817,7 +1843,28 @@ async def api_models_convert(request: Request) -> dict[str, Any]:
         notice = await run_in_threadpool(_convert_model_from_form, payload)
     except (ValueError, FileNotFoundError, FileExistsError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"status": "ok", "tone": notice["tone"], "message": notice["message"]}
+    return {"status": "ok", "tone": notice["tone"], "message": notice["message"], "background": bool(notice.get("background"))}
+
+
+@app.post("/api/models/convert/inspect")
+async def api_models_convert_inspect(request: Request) -> dict[str, Any]:
+    """Inspect an LTX checkpoint before converting it: its layout, whether it needs --distill, and the level that fits."""
+    from zvisiongenerator.web.ltx_conversion import inspect_checkpoint_for_form
+
+    payload = await request.json()
+    try:
+        path = Path(_required_path(payload, "input_path")).expanduser()
+        return await run_in_threadpool(inspect_checkpoint_for_form, path, load_web_config().app_config)
+    except (ValueError, FileNotFoundError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/models/convert/status")
+def api_models_convert_status() -> dict[str, Any]:
+    """Return the state and progress of the current or last LTX conversion."""
+    from zvisiongenerator.web.ltx_conversion import conversion_status
+
+    return conversion_status()
 
 
 @app.post("/api/models/import-lora/local")

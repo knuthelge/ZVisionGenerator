@@ -11,12 +11,14 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
+    from zvisiongenerator.converters.ltx_checkpoint import LtxCheckpoint
     from zvisiongenerator.core.image_backend import ImageBackend
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
     from zvisiongenerator.core.seedvr2 import SeedVR2Upscaler
     from zvisiongenerator.utils.model_memory import LtxCudaMemoryEstimate, MemoryBudget
 
 __all__ = [
+    "convert_ltx_checkpoint",
     "create_prompt_enhancer",
     "accelerator_memory_budget_or_none",
     "estimate_ltx_system_memory",
@@ -252,6 +254,31 @@ def estimate_ltx_system_memory(config: dict[str, Any], resolved_model: str, quan
     from zvisiongenerator.backends.cuda.video.memory_estimate import cached_ltx_system_estimate
 
     return cached_ltx_system_estimate(config, resolved_model, quantize, find_local_dir=find_local_dir)
+
+
+def convert_ltx_checkpoint(
+    checkpoint: "LtxCheckpoint",
+    target: "Path",
+    bits: int,
+    *,
+    config: dict[str, Any],
+    models_dir: "Path",
+    lora: "Path | None",
+    report: Callable[[str, int, int], None],
+) -> None:
+    """Write this platform's converted LTX-2.3 model folder of *checkpoint* at *bits* into the new folder *target*.
+
+    Windows and Linux write a diffusers folder with an NF4 or FP8 transformer.
+
+    Raises:
+        RuntimeError: On macOS, which has no LTX converter yet, or when the conversion fails.
+    """
+    if sys.platform in ("win32", "linux"):
+        from zvisiongenerator.backends.cuda.video.converted import convert
+
+        convert(checkpoint, target, bits, config=config, models_dir=models_dir, lora=lora, report=report)
+        return
+    raise RuntimeError("Converting LTX checkpoints is only available on Windows and Linux so far.")
 
 
 # --- Prompt enhancer ---

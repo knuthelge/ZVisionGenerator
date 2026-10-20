@@ -31,12 +31,16 @@ if TYPE_CHECKING:
     import torch
 
 __all__ = [
+    "NF4_LAYOUT",
     "PREPARED_BITS",
     "component_elements",
+    "count_transformer_elements",
     "load_connectors",
     "ensure_prepared",
     "load_text_encoder",
     "load_transformer",
+    "nf4_sample",
+    "prepared_text_encoders",
     "text_encoder_bytes",
     "text_encoder_sources",
     "transformer_elements",
@@ -44,6 +48,7 @@ __all__ = [
     "transformer_sources",
     "write_text_encoder",
     "write_transformer",
+    "write_transformer_tensors",
 ]
 
 PREPARED_BITS = (4, 8)
@@ -58,6 +63,11 @@ _BLOCKS_PREFIX = "transformer_blocks."
 _NF4_BLOCKSIZE = 64
 # What one saved NF4 weight consists of, by name suffix: the packed data and its double-quantized state.
 _NF4_PARTS = frozenset({"", "absmax", "quant_map", "nested_absmax", "nested_quant_map", "quant_state.bitsandbytes__nf4"})
+# How NF4 weights are serialized, recorded with a stored copy that has no source to rebuild from.
+NF4_LAYOUT = {"parts": sorted(_NF4_PARTS), "blocksize": _NF4_BLOCKSIZE, "quant_type": "nf4", "quant_storage": "uint8", "double_quant": True}
+# The weight, and how many values of its first row, dequantized to check that a bitsandbytes update still reads NF4 the same.
+_NF4_SAMPLE_WEIGHT = "transformer_blocks.0.attn1.to_q.weight"
+_NF4_SAMPLE_VALUES = 64
 # LTX-2.3's prompt modulation layers, which diffusers 0.41's single-file conversion leaves under their checkpoint names.
 _LTX23_RENAMES = (("prompt_adaln_single.", "prompt_adaln."), ("audio_prompt_adaln_single.", "audio_prompt_adaln."))
 # The diffusers text-encoder checkpoint uses transformers' older Gemma 3 names.
@@ -100,8 +110,13 @@ def text_encoder_sources(repo_dir: Path) -> list[Path]:
 
 def transformer_elements(source: Path) -> tuple[int, int]:
     """Count the transformer's elements at *source* from the file headers: ``(2-D weights in its blocks, the rest)``."""
+    return count_transformer_elements(_transformer_shapes(source))
+
+
+def count_transformer_elements(shapes: Iterable[tuple[str, list[int]]]) -> tuple[int, int]:
+    """Count the elements of the transformer tensors ``(diffusers name, shape)`` in *shapes*: ``(2-D weights in its blocks, the rest)``."""
     blocks = rest = 0
-    for name, shape in _transformer_shapes(source):
+    for name, shape in shapes:
         count = _numel(shape)
         if name.startswith(_BLOCKS_PREFIX) and len(shape) == 2:
             blocks += count
@@ -230,6 +245,23 @@ def write_transformer(source: Path, config: dict[str, Any], target: Path, bits: 
     Raises:
         RuntimeError: When the checkpoint does not cover the transformer.
     """
+    write_transformer_tensors(_transformer_tensors(source), config, target, bits, device, label=str(source))
+
+
+def write_transformer_tensors(tensors: Iterable[tuple[str, torch.Tensor]], config: dict[str, Any], target: Path, bits: int, device: Any, *, label: str) -> None:
+    """Write the transformer from *tensors* (``(diffusers name, tensor)``, real values) to *target* at *bits*, one tensor at a time.
+
+    Args:
+        tensors: The transformer's tensors; names the model does not have are skipped.
+        config: The diffusers transformer config.
+        target: The new folder to write.
+        bits: 4 (NF4 block linears, the rest in bfloat16) or 8 (FP8 layer weights).
+        device: The CUDA device bitsandbytes packs NF4 weights on.
+        label: What the tensors come from, for the error message.
+
+    Raises:
+        RuntimeError: When *tensors* do not cover the transformer.
+    """
     import torch
 
     model = _empty_transformer(config, bits, torch.bfloat16)
@@ -237,14 +269,30 @@ def write_transformer(source: Path, config: dict[str, Any], target: Path, bits: 
     nf4_weights = {f"{name}.weight" for name in _block_linear_names(model)} if bits == 4 else set()
     writer = ShardWriter(target, _SHARD_PREFIX, _INDEX_NAME)
     written: set[str] = set()
-    for key, tensor in _transformer_tensors(source):
+    for key, tensor in tensors:
         if key not in storage:
             continue
         writer.add(_pack_nf4(key, tensor, device) if key in nf4_weights else {key: tensor.to(storage[key])})
         written.add(key)
-    _require_coverage(storage.keys() - written, str(source))
+    _require_coverage(storage.keys() - written, label)
     writer.close()
     (target / _CONFIG_NAME).write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+
+
+def nf4_sample(prepared: Path, device: Any) -> tuple[str, list[float]]:
+    """Return the name of the sample NF4 weight of the prepared transformer copy *prepared*, and the start of its first row dequantized on *device*."""
+    from bitsandbytes.functional import QuantState, dequantize_4bit
+
+    key = _NF4_SAMPLE_WEIGHT
+    parts = {name[len(key) :].lstrip("."): tensor for path in shard_files(prepared, _INDEX_NAME) for name, tensor in iter_tensors(path, lambda name: name == key or name.startswith(f"{key}."))}
+    data = parts.pop("")
+    state = QuantState.from_dict(parts, device=device)
+    return key, dequantize_4bit(data.to(device), state)[0, :_NF4_SAMPLE_VALUES].float().cpu().tolist()
+
+
+def prepared_text_encoders(models_dir: Path) -> list[Path]:
+    """Return the prepared text-encoder copies in *models_dir* (``<models>/<name>/text_encoder`` with a manifest), for reuse."""
+    return sorted(path for path in models_dir.glob("*/text_encoder") if not path.parent.name.startswith(".") and (path / MANIFEST_NAME).is_file())
 
 
 def load_transformer(config: dict[str, Any], *, prepared: Path, bits: int, compute_dtype: torch.dtype) -> Any:

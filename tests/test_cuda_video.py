@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -33,6 +34,7 @@ from zvisiongenerator.backends.cuda.video.backend import (
 
 # The originals, which the fake_weights fixture replaces on the module.
 from zvisiongenerator.backends.cuda.video.backend import _check_system_memory as real_check_system_memory
+from zvisiongenerator.backends.cuda.video.memory_estimate import ltx_system_estimate as real_ltx_system_estimate
 from zvisiongenerator.backends.cuda.video.backend import _download_hub_file as real_download_hub_file
 from zvisiongenerator.backends.cuda.video.backend import _encode_prompt as real_encode_prompt
 from zvisiongenerator.backends.cuda.video.backend import _place_components as real_place_components
@@ -401,8 +403,8 @@ def fake_weights(monkeypatch):
         calls.repo_dirs.append(with_transformer)
         return Path("/fake/repo")
 
-    def _check_memory(repo_dir, source, quantize):
-        calls.memory_checks.append((source, quantize))
+    def _check_memory(estimate, quantize, *, converted):
+        calls.memory_checks.append((estimate[1], quantize))
         return calls.fits_together
 
     def _load_transformer(config, *, prepared, bits, compute_dtype):
@@ -423,6 +425,7 @@ def fake_weights(monkeypatch):
     monkeypatch.setattr(video_diffusers_module, "_download_hub_file", lambda repo, filename, label: Path(f"/fake/hub/{filename}"))
     monkeypatch.setattr(video_diffusers_module, "_repo_dir", _repo_dir)
     monkeypatch.setattr(video_diffusers_module, "_check_system_memory", _check_memory)
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.memory_estimate.ltx_system_estimate", lambda repo_dir, source, quantize: ("estimate", source, quantize))
     monkeypatch.setattr(video_diffusers_module, "_prepared_weights", _prepared)
     monkeypatch.setattr(video_diffusers_module, "_transformer_config", lambda repo_dir: {})
     monkeypatch.setattr(video_diffusers_module, "_load_connectors", lambda repo_dir, dtype: "connectors")
@@ -631,7 +634,7 @@ def test_without_a_checkpoint_the_repos_own_transformer_is_prepared(monkeypatch,
 def test_load_model_checks_system_memory_before_loading_weights(monkeypatch, fake_weights):
     _patch_runtime(monkeypatch, _make_runtime())
 
-    def _refuse(repo_dir, source, quantize):
+    def _refuse(estimate, quantize, *, converted):
         raise RuntimeError("needs more memory")
 
     monkeypatch.setattr(video_diffusers_module, "_check_system_memory", _refuse)
@@ -920,18 +923,22 @@ def _patch_memory(monkeypatch, *, total_gib, block_matrices=10 * 1024**3, rest=0
     monkeypatch.setattr("zvisiongenerator.backends.cuda.video.weights.text_encoder_bytes", lambda path: text_encoder)
 
 
+def _check_stock_memory(quantize):
+    return real_check_system_memory(real_ltx_system_estimate(Path("/fake/repo"), Path("/fake/ckpt"), quantize), quantize, converted=False)
+
+
 def test_a_load_larger_than_system_memory_is_refused_and_names_the_smaller_level(monkeypatch):
     _patch_memory(monkeypatch, total_gib=12)  # 10 G block weights at q8 and the runtime: 16 GB
 
     with pytest.raises(RuntimeError, match="ltx-4"):
-        real_check_system_memory(Path("/fake/repo"), Path("/fake/ckpt"), 8)
+        _check_stock_memory(8)
 
 
 def test_a_tight_load_warns(monkeypatch):
     _patch_memory(monkeypatch, total_gib=19)  # 10 G block weights at q8 and the runtime: 16 GB, more than 80% of 19
 
     with pytest.warns(UserWarning, match="ltx-4"):
-        real_check_system_memory(Path("/fake/repo"), Path("/fake/ckpt"), 8)
+        _check_stock_memory(8)
 
 
 @pytest.mark.parametrize(("total_gib", "together"), [(64, True), (24, False)])
@@ -939,7 +946,7 @@ def test_the_check_says_whether_text_encoder_and_transformer_fit_together(monkey
     # 10 G block weights and a 10 G text encoder at q8: 10 GB each, 22.5 GB together with the runtime.
     _patch_memory(monkeypatch, total_gib=total_gib, text_encoder=10 * 1024**3)
 
-    assert real_check_system_memory(Path("/fake/repo"), Path("/fake/ckpt"), 8) is together
+    assert _check_stock_memory(8) is together
 
 
 def test_text_to_video_exports_path_and_reports_progress(monkeypatch, tmp_path):
@@ -1978,3 +1985,110 @@ class TestUpscaleReview:
         DiffusersVideoBackend().text_to_video(model=model, stage1_steps=4, **_text_to_video_args(tmp_path))
 
         assert encoded == [tmp_path / "upscaled.mp4"]
+
+
+# ── Converted LTX folders (ziv model model --model-type ltx-2.3) ─────────────
+
+
+def _converted_folder(tmp_path: Path, bits: int = 8, **extra) -> Path:
+    from zvisiongenerator.utils.ltx_converted import write_converted_ltx
+
+    folder = tmp_path / "myft"
+    (folder / "transformer").mkdir(parents=True)
+    (folder / "model_index.json").write_text(json.dumps({"_class_name": "LTX2Pipeline"}))
+    write_converted_ltx(folder, {"bits": bits, "storage": {4: "nf4", 8: "fp8-e4m3"}[bits], "block_matrices": 10 * 1024**3, "transformer_rest": 0, **extra})
+    return folder
+
+
+def test_a_converted_folder_loads_its_own_weights_and_level(monkeypatch, fake_weights, tmp_path):
+    _patch_runtime(monkeypatch, _make_runtime())
+    folder = _converted_folder(tmp_path, bits=8)
+    checked: list[Path] = []
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.memory_estimate.converted_ltx_system_estimate", lambda model_dir, manifest: ("estimate", model_dir, manifest["bits"]))
+    monkeypatch.setattr("zvisiongenerator.backends.cuda.video.converted.check_converted", lambda model_dir, manifest, device: checked.append(model_dir))
+    monkeypatch.setattr(video_diffusers_module, "_download_hub_file", lambda *a: pytest.fail("a converted folder never reads the configured transformer"))
+
+    # The alias table has no level for this name, and the configured transformer is ignored.
+    model, _ = DiffusersVideoBackend().load_model(str(folder), mode="t2v", quantize=None, transformer_source=("org/ltx", "stock.safetensors"), model_name="myft")
+
+    assert fake_weights.prepared == []  # no <name>@q<bits> copy is written
+    assert fake_weights.transformers == [{"prepared": folder / "transformer", "bits": 8}]
+    assert model.text_encoder.prepared == folder / "text_encoder"
+    assert fake_weights.memory_checks == [(folder, 8)]
+    assert checked == [folder]
+
+
+def test_a_converted_q8_folder_that_does_not_fit_advises_converting_again_at_q4(monkeypatch, tmp_path):
+    from zvisiongenerator.backends.cuda.video.memory_estimate import converted_ltx_system_estimate
+
+    _patch_memory(monkeypatch, total_gib=12)
+    estimate = converted_ltx_system_estimate(_converted_folder(tmp_path, bits=8), {"bits": 8, "block_matrices": 10 * 1024**3, "transformer_rest": 0})
+
+    with pytest.raises(RuntimeError, match="--quantize 4") as raised:
+        real_check_system_memory(estimate, 8, converted=True)
+    assert "ltx-4" not in str(raised.value)
+
+
+def test_a_stock_converted_folder_is_estimated_like_the_alias(monkeypatch, tmp_path):
+    from zvisiongenerator.backends.cuda.video.memory_estimate import converted_ltx_system_estimate
+
+    _patch_memory(monkeypatch, total_gib=64, block_matrices=123, rest=45, connectors=6, text_encoder=7)
+
+    stock = real_ltx_system_estimate(Path("/fake/repo"), Path("/fake/ckpt"), 4)
+    converted = converted_ltx_system_estimate(tmp_path, {"bits": 4, "block_matrices": 123, "transformer_rest": 45})
+
+    assert converted == stock
+
+
+class TestConvertedNf4Check:
+    def _manifest(self, sample, checked="0.50.2"):
+        from zvisiongenerator.backends.cuda.video.weights import NF4_LAYOUT
+
+        return {
+            "kind": "ltx-2.3",
+            "layout": 1,
+            "bits": 4,
+            "storage": "nf4",
+            "block_matrices": 1,
+            "transformer_rest": 1,
+            "nf4": {**NF4_LAYOUT, "sample": sample, "bitsandbytes": "0.50.2", "checked_bitsandbytes": checked},
+        }
+
+    def _check(self, monkeypatch, tmp_path, manifest, *, installed, now):
+        from zvisiongenerator.backends.cuda.video import converted
+
+        monkeypatch.setattr(converted.importlib.metadata, "version", lambda _name: installed)
+        monkeypatch.setattr(converted, "nf4_sample", lambda folder, device: ("w", now))
+        converted.check_converted(tmp_path, manifest, "cuda")
+
+    def test_the_same_version_is_not_checked_again(self, monkeypatch, tmp_path):
+        self._check(monkeypatch, tmp_path, self._manifest([1.0]), installed="0.50.2", now=[99.0])
+
+    def test_a_new_version_that_reads_the_same_passes_and_is_recorded(self, monkeypatch, tmp_path):
+        from zvisiongenerator.utils.ltx_converted import read_converted_ltx
+
+        self._check(monkeypatch, tmp_path, self._manifest([1.0, -0.5]), installed="0.51.0", now=[1.001, -0.5])
+
+        assert read_converted_ltx(tmp_path)["nf4"]["checked_bitsandbytes"] == "0.51.0"
+
+    def test_a_new_version_that_reads_differently_refuses_to_load(self, monkeypatch, tmp_path):
+        with pytest.raises(RuntimeError, match="Convert the original checkpoint again"):
+            self._check(monkeypatch, tmp_path, self._manifest([1.0, -0.5]), installed="0.51.0", now=[0.2, 0.7])
+
+    def test_another_nf4_layout_refuses_to_load(self, monkeypatch, tmp_path):
+        manifest = self._manifest([1.0])
+        manifest["nf4"]["blocksize"] = 128
+
+        with pytest.raises(RuntimeError, match="another layout"):
+            self._check(monkeypatch, tmp_path, manifest, installed="0.50.2", now=[1.0])
+
+
+def test_text_encoder_copies_are_reused_from_converted_folders_and_aliases(tmp_path):
+    from zvisiongenerator.backends.cuda.video.weights import prepared_text_encoders
+
+    for name in ("ltx-4@q4", "myft", ".myft.1234.partial", "zit"):
+        (tmp_path / name / "text_encoder").mkdir(parents=True)
+    for name in ("ltx-4@q4", "myft", ".myft.1234.partial"):
+        (tmp_path / name / "text_encoder" / "ziv-quant.json").write_text("{}")
+
+    assert prepared_text_encoders(tmp_path) == [tmp_path / "ltx-4@q4" / "text_encoder", tmp_path / "myft" / "text_encoder"]

@@ -481,13 +481,36 @@ def ltx_companion_repos(config: dict[str, Any], repo_id: str) -> tuple[str, ...]
     return tuple(dict.fromkeys(source[0] for source in sources if source is not None and source[0] != repo_id))
 
 
-def _ltx_hub_file(config: dict[str, Any], name: str) -> tuple[str, str] | None:
-    """Return ``video_model_presets.ltx.diffusers.<name>`` as ``(repo_id, filename)``, or ``None`` when not set.
+def ltx_distilled_lora_source(config: dict[str, Any]) -> tuple[str, str] | None:
+    """Return Lightricks' distilled LoRA (``video_model_presets.ltx.distilled_lora``) as ``(repo_id, filename)``, or ``None`` when not configured.
+
+    LTX checkpoint conversion merges it into plain-dev checkpoints with ``--distill``.
+
+    Raises:
+        ValueError: If the entry is set but is not a mapping with non-blank string ``repo`` and ``filename``.
+    """
+    return _ltx_hub_file(config, "distilled_lora", section="video_model_presets.ltx")
+
+
+def ltx_diffusers_repo(config: dict[str, Any]) -> str:
+    """Return the diffusers LTX repo of Windows/Linux (``video_model_presets.ltx.diffusers.default_repo``).
+
+    Raises:
+        ValueError: If it is not set to a non-blank string.
+    """
+    repo = (((config.get("video_model_presets") or {}).get("ltx") or {}).get("diffusers") or {}).get("default_repo")
+    if not isinstance(repo, str) or not repo.strip():
+        raise ValueError("video_model_presets.ltx.diffusers.default_repo must be a non-blank string.")
+    return repo.strip()
+
+
+def _ltx_hub_file(config: dict[str, Any], name: str, *, section: str = "video_model_presets.ltx.diffusers") -> tuple[str, str] | None:
+    """Return ``<section>.<name>`` as ``(repo_id, filename)``, or ``None`` when not set.
 
     Raises:
         ValueError: If the entry is not a mapping with non-blank string ``repo`` and ``filename``.
     """
-    key = f"video_model_presets.ltx.diffusers.{name}"
+    key = f"{section}.{name}"
     node: Any = config
     for part in key.split("."):
         if not isinstance(node, dict) or part not in node:

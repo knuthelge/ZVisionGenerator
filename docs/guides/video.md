@@ -238,6 +238,7 @@ The estimate grows with the number of frames and the pixels per frame. On macOS 
 - **Aliases** — `ltx-4` and `ltx-8`
 - **Supported repo IDs** — known LTX prefixes such as `dgrauet/ltx*` and `Lightricks/LTX-Video*`
 - **Local paths** — local paths containing `ltx` are treated as LTX candidates, including Windows-style path strings on any host
+- **Converted models** — LTX folders are also recognised by their contents, so a fine-tune converted with `ziv-model model --model-type ltx-2.3` (see [LTX-2.3 video fine-tunes](model.md#ltx-23-video-fine-tunes)) runs by its name, whatever it is called
 
 Arbitrary HuggingFace repositories are not accepted solely because their names contain `ltx`.
 
@@ -248,7 +249,7 @@ Runtime `--lora` values must be local LoRA files or bare LoRA names that resolve
 - `LTX at q8 needs about 27 GB of system memory; this machine has 16 GB. Use ltx-4 instead.` (Windows/Linux): pick the level the message names; `ltx-4` needs the least memory.
 - `LTX on Windows/Linux runs 4-bit or 8-bit...`: the diffusers backend only loads LTX at a quantize level; use `ltx-4` or `ltx-8` instead of the repository ID.
 - `CUDA is not available...`: the diffusers video backend requires an NVIDIA CUDA device on Windows and Linux. When the message says to update the driver, install NVIDIA driver 580 or newer.
-- `Could not detect video model family...`: use an alias (`ltx-4` or `ltx-8`), a known/configured LTX repo ID, or a local path containing `ltx`.
+- `Could not detect video model family...`: use an alias (`ltx-4` or `ltx-8`), a converted LTX model, a known/configured LTX repo ID, or a local path containing `ltx`.
 
 ## Related Guides
 

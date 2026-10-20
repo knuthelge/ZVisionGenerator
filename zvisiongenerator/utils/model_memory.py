@@ -436,15 +436,21 @@ def ltx_cuda_system_memory(
 ) -> LtxCudaMemoryEstimate | None:
     """Return the system memory of the LTX model picked as *model_name* on a CUDA machine, or ``None`` when its level or files are unknown.
 
-    The level comes from the config (``ltx-4`` is 4). Nothing is downloaded: the files must already be on disk.
+    The level comes from the config (``ltx-4`` is 4), or from a converted folder's manifest. Nothing is downloaded:
+    the files must already be on disk.
     """
     from zvisiongenerator.backends import estimate_ltx_system_memory
     from zvisiongenerator.utils.config import ltx_diffusers_quantize
+    from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 
     config = app_config or {}
     quantize = ltx_diffusers_quantize(config, model_name)
     if quantize is None:
-        return None
+        # A converted folder (always a local folder) carries its own level.
+        converted = read_converted_ltx(Path(resolved_model).expanduser())
+        if converted is None:
+            return None
+        quantize = converted["bits"]
     return estimate_ltx_system_memory(config, resolved_model, quantize, find_local_dir=find_local_dir)
 
 

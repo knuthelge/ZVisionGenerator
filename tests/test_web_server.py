@@ -3111,3 +3111,113 @@ def test_memory_fit_route_refuses_a_size_that_is_too_small(clip_fit, monkeypatch
     monkeypatch.setattr(video_clip_module, "resolve_video_defaults", lambda *_args: {"steps": 8, "width": 16, "height": 448, "num_frames": 49})
 
     assert _memory_fit({}).status_code == 422
+
+
+class TestLtxConversion:
+    """LTX checkpoints convert as a background job that holds the quantize slot until it ends."""
+
+    def _hold(self, monkeypatch):
+        """Record the job instead of running it; return the started (args, slot) pairs."""
+        started: list[tuple[list[str], object]] = []
+        monkeypatch.setattr("zvisiongenerator.web.ltx_conversion.start_conversion", lambda args, name, slot: started.append((args, slot)))
+        monkeypatch.setattr(web_server, "_run_model_management_command", lambda args: pytest.fail("LTX never runs as a blocking convert"))
+        return started
+
+    def test_the_conversion_starts_in_the_background_with_its_level_and_distill(self, monkeypatch, tmp_path):
+        checkpoint = tmp_path / "ft.safetensors"
+        checkpoint.write_bytes(b"x")
+        started = self._hold(monkeypatch)
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/models/convert", json={"input_path": str(checkpoint), "model_type": "ltx-2.3", "name": "myft", "quantize": "8", "distill": True})
+
+        assert response.status_code == 200
+        assert response.json()["background"] is True
+        assert started[0][0] == ["model", "--input", str(checkpoint.resolve()), "--model-type", "ltx-2.3", "--name", "myft", "--quantize", "8", "--distill"]
+        with pytest.raises(web_server.JobConflictError):
+            web_server._reject_while_busy()  # the slot stays held while the job runs
+        started[0][1].close()
+        web_server._reject_while_busy()
+
+    def test_a_quantize_level_is_required(self, monkeypatch, tmp_path):
+        checkpoint = tmp_path / "ft.safetensors"
+        checkpoint.write_bytes(b"x")
+        started = self._hold(monkeypatch)
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/models/convert", json={"input_path": str(checkpoint), "model_type": "ltx-2.3", "quantize": ""})
+
+        assert response.status_code == 400
+        assert started == []
+
+    def test_it_waits_for_running_jobs(self, monkeypatch, tmp_path):
+        checkpoint = tmp_path / "ft.safetensors"
+        checkpoint.write_bytes(b"x")
+        started = self._hold(monkeypatch)
+        monkeypatch.setattr(web_server.web_runner, "_find_active_exclusive_job_id", lambda: "busy")
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/models/convert", json={"input_path": str(checkpoint), "model_type": "ltx-2.3", "quantize": "4"})
+
+        assert response.status_code == 409
+        assert started == []
+
+    def test_the_job_releases_the_slot_and_reports_the_converters_error(self, monkeypatch):
+        from contextlib import ExitStack
+
+        from zvisiongenerator.web import ltx_conversion
+
+        class _Process:
+            stdout = iter(["Converting: Writing the transformer (3/10)\n", "Error: A model named 'myft' already exists.\n"])
+
+            def wait(self):
+                return 1
+
+        monkeypatch.setattr(ltx_conversion.subprocess, "Popen", lambda *a, **k: _Process())
+        released: list[bool] = []
+        slot = ExitStack()
+        slot.callback(lambda: released.append(True))
+
+        ltx_conversion.start_conversion(["model"], "myft", slot)
+        for _ in range(100):
+            if released:
+                break
+            threading.Event().wait(0.01)
+
+        status = ltx_conversion.conversion_status()
+        assert released == [True]
+        assert status["state"] == "failed"
+        assert status["message"] == "A model named 'myft' already exists."
+        assert (status["stage"], status["done"], status["total"]) == ("Writing the transformer", 3, 10)
+
+    def test_a_killed_conversion_says_how_it_stopped_not_its_last_progress_line(self):
+        from zvisiongenerator.web import ltx_conversion
+
+        progress = ["Converting: Writing the transformer (1200/4186)"]
+
+        assert "signal 9" in ltx_conversion._failure_message(progress, -9)
+        assert ltx_conversion._failure_message([*progress, "RuntimeError: CUDA error"], 1) == "RuntimeError: CUDA error"
+
+    def test_inspect_returns_what_the_form_preselects(self, monkeypatch, tmp_path):
+        from zvisiongenerator.converters.ltx_convert import LtxInspection
+
+        checkpoint = tmp_path / "ft.safetensors"
+        checkpoint.write_bytes(b"x")
+        found = LtxInspection(checkpoint=SimpleNamespace(fp8_weights=440, bundles_components=True), distillation="dev", advice="Use --distill.")
+        monkeypatch.setattr("zvisiongenerator.web.ltx_conversion.inspect_ltx", lambda path: found)
+        monkeypatch.setattr("zvisiongenerator.web.ltx_conversion.recommended_ltx_quantize", lambda config: 8)
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/models/convert/inspect", json={"input_path": str(checkpoint)})
+
+        assert response.status_code == 200
+        assert response.json() == {"layout": "full", "fp8_weights": 440, "distillation": "dev", "advice": "Use --distill.", "recommend_distill": True, "recommended_quantize": 8}
+
+    def test_inspect_refuses_a_file_that_is_not_ltx(self, monkeypatch, tmp_path):
+        checkpoint = tmp_path / "ft.safetensors"
+        checkpoint.write_bytes(b"x")
+
+        with TestClient(web_server.app) as client:
+            response = client.post("/api/models/convert/inspect", json={"input_path": str(checkpoint)})
+
+        assert response.status_code == 400

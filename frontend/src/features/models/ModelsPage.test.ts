@@ -7,6 +7,8 @@ import type { ModelInventory } from '$lib/types';
 const modelApiMocks = vi.hoisted(() => ({
   getModelInventory: vi.fn<() => Promise<ModelInventory>>(),
   convertCheckpoint: vi.fn(),
+  inspectLtxCheckpoint: vi.fn(),
+  getConversionStatus: vi.fn(),
   importLoraLocal: vi.fn(),
   importLoraHF: vi.fn(),
   deleteModel: vi.fn(),
@@ -25,6 +27,8 @@ const browseApiMocks = vi.hoisted(() => ({
 vi.mock('$lib/api/models', () => ({
   getModelInventory: modelApiMocks.getModelInventory,
   convertCheckpoint: modelApiMocks.convertCheckpoint,
+  inspectLtxCheckpoint: modelApiMocks.inspectLtxCheckpoint,
+  getConversionStatus: modelApiMocks.getConversionStatus,
   importLoraLocal: modelApiMocks.importLoraLocal,
   importLoraHF: modelApiMocks.importLoraHF,
   deleteModel: modelApiMocks.deleteModel,
@@ -88,6 +92,9 @@ describe('ModelsPage Browse buttons', () => {
   beforeEach(() => {
     modelApiMocks.getModelInventory.mockReset();
     modelApiMocks.convertCheckpoint.mockReset();
+    modelApiMocks.inspectLtxCheckpoint.mockReset();
+    modelApiMocks.getConversionStatus.mockReset();
+    modelApiMocks.getConversionStatus.mockResolvedValue({ state: 'idle' });
     modelApiMocks.importLoraLocal.mockReset();
     modelApiMocks.importLoraHF.mockReset();
     modelApiMocks.deleteModel.mockReset();
@@ -349,6 +356,82 @@ describe('ModelsPage Browse buttons', () => {
     await settle();
 
     expect(modelApiMocks.convertCheckpoint).toHaveBeenCalledWith(expect.objectContaining({ quantize: '8' }));
+  });
+
+  it('converts an LTX checkpoint at the inspected level, with Distill preselected for plain dev, as a background job', async () => {
+    modelApiMocks.inspectLtxCheckpoint.mockResolvedValue({
+      layout: 'full', fp8_weights: 440, distillation: 'dev', advice: 'Convert it with Distill.', recommend_distill: true, recommended_quantize: 8,
+    });
+    modelApiMocks.convertCheckpoint.mockResolvedValue({ tone: 'success', message: 'Converting.', detail: '', background: true });
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    const { input, form } = pathAndForm(target, 'convert-input-path');
+    typePath(input, '/models/ltx-finetune.safetensors');
+    const modelType = target.querySelector('#convert-model-type') as HTMLSelectElement;
+    modelType.value = 'ltx-2.3';
+    modelType.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    await settle();
+
+    expect(modelApiMocks.inspectLtxCheckpoint).toHaveBeenCalledWith('/models/ltx-finetune.safetensors');
+    expect(target.querySelector('#convert-base-model')).toBeNull();
+    expect((target.querySelector('#convert-ltx-quantize') as HTMLSelectElement).value).toBe('8');
+    expect((target.querySelector('#convert-distill') as HTMLInputElement).checked).toBe(true);
+
+    let answerStatus: (value: unknown) => void = () => {};
+    modelApiMocks.getConversionStatus.mockImplementationOnce(() => new Promise((resolve) => { answerStatus = resolve; }));
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+
+    // Before the first status read, the progress line already names the model being converted.
+    expect(target.textContent).toContain('Converting ltx-finetune: Starting');
+    answerStatus({ state: 'running', name: 'ltx-finetune', stage: 'Writing the transformer', done: 3, total: 10 });
+    await settle();
+
+    expect(modelApiMocks.convertCheckpoint).toHaveBeenCalledWith(expect.objectContaining({ model_type: 'ltx-2.3', quantize: '8', distill: true }));
+    expect(target.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('3');
+  });
+
+  it('ignores an inspect answer that arrives after the path changed', async () => {
+    let answerFirst: (value: unknown) => void = () => {};
+    modelApiMocks.inspectLtxCheckpoint
+      .mockImplementationOnce(() => new Promise((resolve) => { answerFirst = resolve; }))
+      .mockRejectedValueOnce(new Error('not an LTX checkpoint'));
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    const { input } = pathAndForm(target, 'convert-input-path');
+    const modelType = target.querySelector('#convert-model-type') as HTMLSelectElement;
+    modelType.value = 'ltx-2.3';
+    modelType.dispatchEvent(new Event('change', { bubbles: true }));
+    typePath(input, '/models/dev.safetensors');
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    typePath(input, '/models/other.safetensors');
+    answerFirst({ layout: 'full', fp8_weights: 0, distillation: 'dev', advice: 'Convert it with Distill.', recommend_distill: true, recommended_quantize: 4 });
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    await settle();
+
+    expect((target.querySelector('#convert-distill') as HTMLInputElement).checked).toBe(false);
+    expect(target.textContent).not.toContain('Convert it with Distill.');
+  });
+
+  it('keeps reading the conversion status after a missed read', async () => {
+    modelApiMocks.getConversionStatus
+      .mockResolvedValueOnce({ state: 'running', name: 'ft', stage: 'Writing the transformer', done: 1, total: 10 })
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({ state: 'done', name: 'ft', message: 'Converted.' });
+    vi.useFakeTimers();
+    try {
+      app = flushSync(() => mount(ModelsPage, { target }));
+      await vi.advanceTimersByTimeAsync(10_000);
+    } finally {
+      vi.useRealTimers();
+    }
+    await settle();
+
+    expect(modelApiMocks.getConversionStatus.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(target.textContent).toContain('Converted.');
   });
 
   it('shows the disk use of image and video models, and a dash when nothing is on disk', async () => {

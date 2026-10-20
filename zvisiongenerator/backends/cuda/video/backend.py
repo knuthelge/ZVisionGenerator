@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Final
 from zvisiongenerator.backends.cuda.driver import require_cuda
 from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, warn_unmatched_lora
 from zvisiongenerator.core.video_types import ExtendSegment
+from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE, CARRY_FRAMES, EXTEND_FRAME_STEP, audio_lead_samples, cut_window_audio, window_audio_cut, window_frames
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 
@@ -271,11 +272,13 @@ def _load_generation_pipeline(
     transformer_source: tuple[str, str] | None,
     loras: list[tuple[str, float]],
     model_name: str | None,
+    converted: dict[str, Any] | None = None,
 ) -> tuple[Any, _TextEncoderSource, _TransformerSource]:
     """Load the generation pipeline without its text encoder, placed for the memory mode.
 
     The transformer (at *quantize*, with *loras*) is attached now when it fits in system memory beside the text
-    encoder, and otherwise only once the first prompt is encoded.
+    encoder, and otherwise only once the first prompt is encoded. A converted folder (*converted* is its manifest)
+    loads its own stored weights; otherwise they are the prepared copies of the picked alias.
 
     Returns:
         The pipeline, and where its text encoder and transformer load from.
@@ -283,11 +286,10 @@ def _load_generation_pipeline(
 
     from zvisiongenerator.backends.cuda.memory import release_memory
 
-    checkpoint = _download_hub_file(*transformer_source, "LTX transformer") if transformer_source else None
-    repo_dir = _repo_dir(model_path, with_transformer=checkpoint is None)
-    transformer_input = checkpoint or repo_dir / "transformer"
-    fits_together = _check_system_memory(repo_dir, transformer_input, quantize)
-    prepared_transformer, prepared_text_encoder = _prepared_weights(model_name, model_path, repo_dir, transformer_input, quantize, runtime.torch.device("cuda"))
+    if converted is not None:
+        repo_dir, prepared_transformer, prepared_text_encoder, fits_together = _converted_weights(Path(model_path).expanduser(), converted, runtime.torch.device("cuda"))
+    else:
+        repo_dir, prepared_transformer, prepared_text_encoder, fits_together = _stock_weights(model_path, model_name, transformer_source, quantize, runtime.torch.device("cuda"))
     connectors = _load_connectors(repo_dir, torch_dtype)
     try:
         pipeline = pipeline_class.from_pretrained(str(repo_dir), transformer=None, connectors=connectors, text_encoder=None, torch_dtype=torch_dtype)
@@ -388,8 +390,40 @@ def _resolve_upsampler_weights(repo_id: str, filename: str) -> str:
     return str(_download_hub_file(repo_id, filename, "LTX latent upsampler"))
 
 
-def _check_system_memory(repo_dir: Path, transformer_input: Path, quantize: int) -> bool:
+def _stock_weights(model_path: str, model_name: str | None, transformer_source: tuple[str, str] | None, quantize: int, device: Any) -> tuple[Path, Path, Path, bool]:
+    """Return the repo folder, the prepared transformer and text encoder at *quantize*, and whether they fit together, for a stock model."""
+
+    from zvisiongenerator.backends.cuda.video.memory_estimate import ltx_system_estimate
+
+    checkpoint = _download_hub_file(*transformer_source, "LTX transformer") if transformer_source else None
+    repo_dir = _repo_dir(model_path, with_transformer=checkpoint is None)
+    transformer_input = checkpoint or repo_dir / "transformer"
+    fits_together = _check_system_memory(ltx_system_estimate(repo_dir, transformer_input, quantize), quantize, converted=False)
+    prepared_transformer, prepared_text_encoder = _prepared_weights(model_name, model_path, repo_dir, transformer_input, quantize, device)
+    return repo_dir, prepared_transformer, prepared_text_encoder, fits_together
+
+
+def _converted_weights(model_dir: Path, manifest: dict[str, Any], device: Any) -> tuple[Path, Path, Path, bool]:
+    """Return the converted folder *model_dir*, its stored transformer and text encoder, and whether they fit together.
+
+    Nothing is read from the source checkpoint, the configured transformer or the alias table.
+    """
+
+    from zvisiongenerator.backends.cuda.video.converted import check_converted
+    from zvisiongenerator.backends.cuda.video.memory_estimate import converted_ltx_system_estimate
+
+    fits_together = _check_system_memory(converted_ltx_system_estimate(model_dir, manifest), manifest["bits"], converted=True)
+    check_converted(model_dir, manifest, device)
+    return model_dir, model_dir / "transformer", model_dir / "text_encoder", fits_together
+
+
+def _check_system_memory(estimate: Any, quantize: int, *, converted: bool) -> bool:
     """Refuse a load that cannot fit in system memory, and warn when it leaves little to the rest of the machine.
+
+    Args:
+        estimate: The model's :class:`LtxCudaMemoryEstimate`.
+        quantize: Its level.
+        converted: Whether it is a converted folder, which gets smaller by converting it again rather than by picking ``ltx-4``.
 
     Returns:
         Whether the transformer and the text encoder fit in system memory together; otherwise they take turns.
@@ -400,20 +434,19 @@ def _check_system_memory(repo_dir: Path, transformer_input: Path, quantize: int)
 
     import psutil
 
-    from zvisiongenerator.backends.cuda.video.memory_estimate import ltx_system_estimate
-
-    estimate = ltx_system_estimate(repo_dir, transformer_input, quantize)
     total = int(psutil.virtual_memory().total)
     need = estimate.taking_turns
     level = f"q{quantize}"
-    smaller = "ltx-4" if quantize == 8 else None
+    smaller = None
+    if quantize == 8:
+        smaller = "convert the checkpoint again with --quantize 4 under a new name" if converted else "use ltx-4"
     if need > total:
-        advice = f" Use {smaller} instead." if smaller else ""
+        advice = f" {smaller[0].upper()}{smaller[1:]} instead." if smaller else ""
         raise RuntimeError(f"LTX at {level} needs about {need / 1024**3:.0f} GB of system memory; this machine has {total / 1024**3:.0f} GB.{advice}")
     limit = total * _SYSTEM_MEMORY_TIGHT_RATIO
     if need > limit:
-        advice = f" If it is stopped for lack of memory, use {smaller}." if smaller else ""
-        warnings.warn(f"LTX at {level} needs about {need / 1024**3:.0f} GB of this machine's {total / 1024**3:.0f} GB of system memory, leaving little for other apps.{advice}", stacklevel=3)
+        advice = f" If it is stopped for lack of memory, {smaller}." if smaller else ""
+        warnings.warn(f"LTX at {level} needs about {need / 1024**3:.0f} GB of this machine's {total / 1024**3:.0f} GB of system memory, leaving little for other apps.{advice}", stacklevel=4)
     return estimate.together <= limit
 
 
@@ -426,7 +459,7 @@ def _prepared_weights(model_name: str | None, model_path: str, repo_dir: Path, t
     Writing reads the source weights once (tens of gigabytes) and can take several minutes.
     """
 
-    from zvisiongenerator.backends.cuda.video.weights import ensure_prepared, text_encoder_sources, transformer_sources, write_text_encoder, write_transformer
+    from zvisiongenerator.backends.cuda.video.weights import ensure_prepared, prepared_text_encoders, text_encoder_sources, transformer_sources, write_text_encoder, write_transformer
     from zvisiongenerator.utils.paths import get_ziv_data_dir
     from zvisiongenerator.utils.stored_quant import stored_quant_name
 
@@ -437,8 +470,7 @@ def _prepared_weights(model_name: str | None, model_path: str, repo_dir: Path, t
     if not (transformer.is_dir() and text_encoder.is_dir()):
         logger.info("Preparing the q%d LTX weights in %s once; this reads the full weights and can take several minutes.", quantize, copy)
     ensure_prepared(transformer, transformer_sources(transformer_input), quantize, lambda folder: write_transformer(transformer_input, config, folder, quantize, device))
-    other_text_encoders = sorted(models_dir.glob("*@q*/text_encoder"))
-    ensure_prepared(text_encoder, text_encoder_sources(repo_dir), 8, lambda folder: write_text_encoder(repo_dir, folder), reuse=other_text_encoders)
+    ensure_prepared(text_encoder, text_encoder_sources(repo_dir), 8, lambda folder: write_text_encoder(repo_dir, folder), reuse=prepared_text_encoders(models_dir))
     return transformer, text_encoder
 
 
@@ -1136,6 +1168,9 @@ class DiffusersVideoBackend:
             quantize: 4 (NF4 transformer) or 8 (FP8 transformer); both levels use an FP8 text encoder and connectors.
             transformer_source: ``(repo_id, filename)`` of a single-file transformer checkpoint that replaces the repo's own.
             model_name: The name the model was picked by (``ltx-4``); its prepared copy is ``<models>/<name>@q<bits>``.
+
+        A converted folder (``ziv model model --model-type ltx-2.3``) ignores ``quantize``, ``transformer_source``
+        and ``model_name``: it loads the weights and level stored in it.
         """
 
         mode = kwargs.get("mode", "t2v")
@@ -1146,7 +1181,9 @@ class DiffusersVideoBackend:
         if mode not in _PIPELINES_BY_MODE:
             raise ValueError(f"Unsupported video generation mode: {mode}")
 
-        quantize = kwargs.get("quantize")
+        # A converted folder carries its own level; the alias table's (``quantize``) is for stock models only.
+        converted = read_converted_ltx(Path(model_path).expanduser())
+        quantize = converted["bits"] if converted is not None else kwargs.get("quantize")
         if quantize not in (4, 8):
             raise ValueError(f"LTX on Windows/Linux runs 4-bit or 8-bit: use the model 'ltx-4' or 'ltx-8' (got quantize level {quantize!r}).")
 
@@ -1178,6 +1215,7 @@ class DiffusersVideoBackend:
             transformer_source=kwargs.get("transformer_source"),
             loras=loras,
             model_name=kwargs.get("model_name"),
+            converted=converted,
         )
 
         upsample_pipeline = None

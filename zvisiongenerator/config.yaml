@@ -261,6 +261,11 @@ video_model_presets:
         filename: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"
     upscale:
       default_upscale_steps: 8
+    # Lightricks' distilled LoRA: `ziv model model --model-type ltx-2.3 --distill` merges it into a plain-dev
+    # checkpoint, which otherwise renders broken at the 8 steps the app runs LTX at.
+    distilled_lora:
+      repo: "Lightricks/LTX-2.3"
+      filename: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors"
 
 # --- Prompt enhancer (local LLM) ---
 

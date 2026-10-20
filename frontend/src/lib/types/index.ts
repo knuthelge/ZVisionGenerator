@@ -1049,6 +1049,28 @@ export interface ModelOperationResult {
   tone: 'success' | 'error' | 'info';
   message: string;
   detail: string;
+  /** True when the operation continues in the background (an LTX conversion); poll its status. */
+  background?: boolean;
+}
+
+/** What the converter found in an LTX-2.3 checkpoint before converting it. */
+export interface LtxCheckpointInspection {
+  layout: 'full' | 'transformer';
+  fp8_weights: number;
+  distillation: 'dev' | 'distilled' | 'unknown';
+  advice: string;
+  recommend_distill: boolean;
+  recommended_quantize: 4 | 8;
+}
+
+/** The current or last LTX conversion. */
+export interface ConversionStatus {
+  state: 'idle' | 'running' | 'done' | 'failed';
+  name?: string;
+  stage?: string;
+  done?: number;
+  total?: number;
+  message?: string | null;
 }
 
 // ── Page/navigation types ──────────────────────────────────────────────────────

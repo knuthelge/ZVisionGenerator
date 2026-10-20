@@ -1,13 +1,15 @@
 """Video model type detection.
 
 Detects video model family (LTX) from model path or HuggingFace
-repo ID using prefix matching.
+repo ID using prefix matching, and local folders by their contents.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
+from zvisiongenerator.utils.model_files import is_ltx_model_dir
 from zvisiongenerator.utils.paths import is_explicit_local_path, parse_huggingface_repo_reference
 
 
@@ -96,7 +98,8 @@ def detect_video_model(model_path: str) -> VideoModelInfo:
     if repo_reference is not None and configured_default and repo_reference.repo_id.lower() == configured_default.strip().lower():
         return VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
 
-    if _looks_like_local_model_path(normalized_model_path) and "ltx" in normalized_lower:
+    # A local folder counts as LTX when its path says so, or by its contents (e.g. a converted fine-tune).
+    if _looks_like_local_model_path(normalized_model_path) and ("ltx" in normalized_lower or is_ltx_model_dir(Path(normalized_model_path).expanduser())):
         return VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
 
     return VideoModelInfo(

@@ -54,6 +54,14 @@ def is_ltx_mlx_layout(model_dir: Path) -> bool:
     return (model_dir / _LTX_MLX_MARKER).is_file()
 
 
+def is_ltx_model_dir(model_dir: Path) -> bool:
+    """Return whether the folder *model_dir* holds an LTX model by its contents: the MLX layout, or an LTX-2 diffusers index."""
+    if is_ltx_mlx_layout(model_dir):
+        return True
+    index = _read_model_index(model_dir)
+    return index is not None and index.get("_class_name") in _SEPARATE_TRANSFORMER_PIPELINES
+
+
 def ltx_mlx_transformer_file(model_dir: Path) -> Path | None:
     """Return the transformer file ltx-pipelines-mlx loads from *model_dir*, if present.
 

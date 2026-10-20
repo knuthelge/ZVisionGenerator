@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { ModelInventory, ModelOperationResult } from '$lib/types';
+import type { ConversionStatus, LtxCheckpointInspection, ModelInventory, ModelOperationResult } from '$lib/types';
 
 export function getModelInventory(): Promise<ModelInventory> {
   return api.get<ModelInventory>('/api/models');
@@ -11,10 +11,22 @@ export function convertCheckpoint(data: {
   model_type: string;
   base_model?: string;
   copy?: boolean;
-  /** '4' or '8' also saves a quantized copy; empty for none. */
+  /** '4' or '8' also saves a quantized copy; empty for none. For ltx-2.3 it is required and is the only level stored. */
   quantize?: string;
+  /** ltx-2.3 only: merge Lightricks' distilled LoRA into a plain-dev checkpoint. */
+  distill?: boolean;
 }): Promise<ModelOperationResult> {
   return api.post<ModelOperationResult>('/api/models/convert', data);
+}
+
+/** Inspect an LTX-2.3 checkpoint before converting it (nothing is downloaded). */
+export function inspectLtxCheckpoint(inputPath: string): Promise<LtxCheckpointInspection> {
+  return api.post<LtxCheckpointInspection>('/api/models/convert/inspect', { input_path: inputPath });
+}
+
+/** The state and progress of the current or last LTX conversion. */
+export function getConversionStatus(): Promise<ConversionStatus> {
+  return api.get<ConversionStatus>('/api/models/convert/status');
 }
 
 export function importLoraLocal(data: {

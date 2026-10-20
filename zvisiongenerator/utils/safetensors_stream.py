@@ -3,8 +3,8 @@
 ``safetensors.safe_open`` maps the whole file, and the kernel keeps every page it touched cached until the handle
 closes. A single checkpoint can be larger than system memory, and reclaiming that cache under load is the memory
 pressure that gets processes killed on Linux. :func:`iter_tensors` reads each tensor with plain file reads instead and
-drops its byte range from the cache right after; :class:`ShardWriter` writes shards of bounded size and flushes
-each one out of the cache once written.
+drops its byte range from the cache right after; :class:`TensorFile` does the same for tensors read by name;
+:class:`ShardWriter` writes shards of bounded size and flushes each one out of the cache once written.
 """
 
 from __future__ import annotations
@@ -14,14 +14,14 @@ import os
 import struct
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING
 
 from zvisiongenerator.utils.page_cache import drop_cached_file
 
 if TYPE_CHECKING:
     import torch
 
-__all__ = ["ShardWriter", "iter_tensors", "read_header", "shard_files"]
+__all__ = ["ShardWriter", "TensorFile", "iter_tensors", "read_header", "shard_files"]
 
 _HEADER_LENGTH_BYTES = 8
 _DEFAULT_SHARD_BYTES = 2 * 1024**3
@@ -55,24 +55,58 @@ def iter_tensors(path: Path, wanted: Callable[[str], bool] | None = None) -> Ite
     Raises:
         ValueError: If the file holds a dtype this reader does not know.
     """
-    import torch
-
     data_start, header = read_header(path)
     entries = sorted(header.items(), key=lambda item: item[1]["data_offsets"][0])
     with open(path, "rb") as handle:
-        fd = handle.fileno()
         for name, info in entries:
             if wanted is not None and not wanted(name):
                 continue
-            begin, end = info["data_offsets"]
-            dtype = _dtype(info["dtype"], path)
-            buffer = bytearray(end - begin)
-            handle.seek(data_start + begin)
-            if handle.readinto(buffer) != len(buffer):
-                raise ValueError(f"{path} ended inside tensor {name}.")
-            _drop_range(fd, data_start + begin, end - begin)
-            tensor = torch.frombuffer(buffer, dtype=dtype) if buffer else torch.empty(0, dtype=dtype)
-            yield name, tensor.reshape(info["shape"])
+            yield name, _read_tensor(handle, path, data_start, name, info)
+
+
+class TensorFile:
+    """Read single tensors of one safetensors file by name, in any order, keeping them out of the page cache.
+
+    Use it as a context manager, or call :meth:`close`.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._data_start, self.header = read_header(path)
+        self._handle = open(path, "rb")
+
+    def read(self, name: str) -> torch.Tensor:
+        """Return the tensor *name* in memory of its own.
+
+        Raises:
+            KeyError: If the file has no tensor *name*.
+        """
+        return _read_tensor(self._handle, self._path, self._data_start, name, self.header[name])
+
+    def close(self) -> None:
+        """Close the file."""
+        self._handle.close()
+
+    def __enter__(self) -> TensorFile:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+
+def _read_tensor(handle: IO[bytes], path: Path, data_start: int, name: str, info: dict) -> torch.Tensor:
+    """Read the tensor *name* described by its header entry *info* from the open file *handle*, then drop its bytes from the page cache."""
+    import torch
+
+    begin, end = info["data_offsets"]
+    dtype = _dtype(info["dtype"], path)
+    buffer = bytearray(end - begin)
+    handle.seek(data_start + begin)
+    if handle.readinto(buffer) != len(buffer):
+        raise ValueError(f"{path} ended inside tensor {name}.")
+    _drop_range(handle.fileno(), data_start + begin, end - begin)
+    tensor = torch.frombuffer(buffer, dtype=dtype) if buffer else torch.empty(0, dtype=dtype)
+    return tensor.reshape(info["shape"])
 
 
 def shard_files(directory: Path, index_name: str) -> list[Path]:
