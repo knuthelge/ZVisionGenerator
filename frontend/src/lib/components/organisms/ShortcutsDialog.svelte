@@ -8,15 +8,17 @@
   interface Props {
     currentPage: PageId;
     onnavigate: (page: PageId) => void;
+    /** Open the job log drawer (`G` then `J`). */
+    onopenjoblog?: () => void;
   }
 
-  let { currentPage, onnavigate }: Props = $props();
+  let { currentPage, onnavigate, onopenjoblog }: Props = $props();
 
   const GROUPS: readonly ShortcutGroup[] = [...APP_SHORTCUTS, { title: 'Asset viewer', entries: VIEWER_SHORTCUTS }];
 
   let open = $state(false);
 
-  // `?` opens this list; `G` then a page key navigates. Both stay out of fields and open dialogs.
+  // `?` opens this list; `G` then a page key navigates (or `J` opens the job log). Both stay out of fields and open dialogs.
   $effect(() => {
     let waitingSince: number | null = null;
     function handleKeydown(event: KeyboardEvent): void {
@@ -33,9 +35,10 @@
       const step = stepGoChord(waitingSince, event.key, Date.now());
       const started = step.waitingSince !== null && waitingSince === null;
       waitingSince = step.waitingSince;
-      if (step.page) {
+      if (step.target) {
         event.preventDefault();
-        if (step.page !== currentPage) onnavigate(step.page);
+        if (step.target === 'job-log') onopenjoblog?.();
+        else if (step.target !== currentPage) onnavigate(step.target);
       } else if (started) {
         event.preventDefault();
       }

@@ -3,15 +3,17 @@
   import { draft } from '$lib/state/draft.svelte';
   import { jobStore } from '$lib/state/job.svelte';
   import { isReviewing } from '$lib/state/jobView';
-  import { Badge } from '$lib/components/atoms';
+  import { Badge, Icon } from '$lib/components/atoms';
   import type { PageId, Workflow } from '$lib/types';
 
   interface Props {
     currentPage: PageId;
     /** The workflows the server offers (the contract's values); null until the Workspace has loaded them. */
     workflows?: readonly Workflow[] | null;
+    /** Open the job log drawer. */
+    onjoblog?: () => void;
   }
-  let { currentPage, workflows = null }: Props = $props();
+  let { currentPage, workflows = null, onjoblog }: Props = $props();
 
   const navItems: { id: PageId; label: string }[] = [
     { id: 'workspace', label: 'Workspace' },
@@ -60,6 +62,7 @@
     {/if}
   </div>
 
+  <div class="nav-end">
   <nav class="main-tabs" aria-label="Main navigation">
     {#each navItems as item}
       <button
@@ -74,6 +77,8 @@
       </button>
     {/each}
   </nav>
+  <button type="button" class="nav-tab nav-icon" aria-label="Job log" title="Job log" onclick={onjoblog}><Icon name="clock" size={16} /></button>
+  </div>
 </header>
 
 <style>
@@ -84,6 +89,8 @@
   .workflow-tabs, .main-tabs { display: flex; align-items: stretch; gap: 2px; }
   .workflow-tabs { overflow-x: auto; }
   .main-tabs { flex-shrink: 0; }
+  .nav-end { display: flex; align-items: stretch; flex-shrink: 0; gap: 2px; }
+  .nav-icon { padding: 0 12px; }
   .brand { color: var(--color-text-primary); font-family: var(--font-heading); font-size: var(--text-title); font-weight: 800; letter-spacing: -0.01em; }
   .nav-tab { display: flex; align-items: center; gap: 6px; padding: 0 10px; border-bottom: 2px solid transparent; white-space: nowrap; font-size: var(--text-ui); font-weight: 600; color: var(--color-text-muted); transition: color 0.12s ease, border-color 0.12s ease; }
   @media (hover: hover) { .nav-tab:hover { color: var(--color-text-primary); } }

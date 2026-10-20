@@ -217,4 +217,27 @@ describe('Modal', () => {
 
     background.remove();
   });
+
+  it('docks a side dialog to the right edge and still closes from the backdrop and Escape', async () => {
+    const onclose = vi.fn();
+    app = flushSync(() => mount(Modal, {
+      target,
+      props: { open: true, title: 'Job log', placement: 'side', onclose },
+    }));
+    await settle();
+
+    const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement;
+    expect(dialog.dataset.placement).toBe('side');
+
+    (document.body.querySelector('button[aria-label="Close dialog"]') as HTMLButtonElement).click();
+    await settle();
+    expect(onclose).toHaveBeenCalledTimes(1);
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('centres the dialog by default', async () => {
+    app = flushSync(() => mount(Modal, { target, props: { open: true, title: 'Preview asset' } }));
+    await settle();
+    expect((document.body.querySelector('[role="dialog"]') as HTMLElement).dataset.placement).toBe('center');
+  });
 });

@@ -14,9 +14,11 @@
     onmenu: () => void;
     /** The job state was tapped (the queue panel opens when jobs wait). */
     onstatus?: () => void;
+    /** Open the job log drawer. */
+    onjoblog?: () => void;
   }
 
-  let { currentPage, workflows = null, onmenu, onstatus }: Props = $props();
+  let { currentPage, workflows = null, onmenu, onstatus, onjoblog }: Props = $props();
 
   const PAGE_TITLES: Record<PageId, string> = { workspace: 'Workspace', prompts: 'Prompts', gallery: 'Gallery', models: 'Models', config: 'Config' };
   const WORKFLOW_LABELS: { id: Workflow; label: string }[] = [
@@ -35,7 +37,7 @@
 </script>
 
 <!-- The phone's top strip: the menu on every page; on the Workspace the workflow, the job state and the Gallery;
-     elsewhere an arrow back to the Workspace and the page's name. It pads for the status bar in a standalone app. -->
+     elsewhere an arrow back to the Workspace and the page's name; the job log button ends the strip. It pads for the status bar in a standalone app. -->
 <header class="top-strip" data-testid="top-strip">
   <button type="button" class="strip-btn" aria-label="Menu" onclick={onmenu}><Icon name="menu" size={20} /></button>
   {#if onWorkspace}
@@ -62,6 +64,7 @@
       </button>
     {/if}
   {/if}
+  <button type="button" class="strip-btn" aria-label="Job log" onclick={onjoblog}><Icon name="clock" size={20} /></button>
 </header>
 
 <style>

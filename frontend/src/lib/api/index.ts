@@ -8,3 +8,4 @@ export * from './promptFiles';
 export * from './extend';
 export * from './videoMemory';
 export * from './browse';
+export * from './jobLog';

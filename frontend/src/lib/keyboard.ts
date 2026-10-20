@@ -32,13 +32,17 @@ export function acceptsPageShortcut(event: KeyboardEvent): boolean {
   return !event.defaultPrevented && isPlainKey(event) && !isTyping(event.target) && !hasOpenModal();
 }
 
-/** Pages reached by pressing `G` then the page's key. */
-export const GO_TO_KEYS: Readonly<Record<string, PageId>> = {
+/** Where `G` then a key goes: a page, or the job log drawer. */
+export type GoTarget = PageId | 'job-log';
+
+/** Destinations reached by pressing `G` then the destination's key. */
+export const GO_TO_KEYS: Readonly<Record<string, GoTarget>> = {
   w: 'workspace',
   p: 'prompts',
   g: 'gallery',
   m: 'models',
   c: 'config',
+  j: 'job-log',
 };
 
 /** How long `G` waits for the second key, in milliseconds. */
@@ -47,8 +51,8 @@ export const CHORD_TIMEOUT_MS = 1500;
 export interface GoChordStep {
   /** When `G` started waiting for its second key, or null when nothing is pending. */
   waitingSince: number | null;
-  /** The page the completed chord opens. */
-  page: PageId | null;
+  /** The destination the completed chord opens. */
+  target: GoTarget | null;
 }
 
 export interface ChordStep<T> {
@@ -71,10 +75,10 @@ export function stepChord<T>(startKey: string, values: Readonly<Record<string, T
   return { waitingSince: starts ? now : null, value: null, consumed: starts };
 }
 
-/** Advance the `G` → page chord by one key press made at `now`. */
+/** Advance the `G` → destination chord by one key press made at `now`. */
 export function stepGoChord(waitingSince: number | null, key: string, now: number): GoChordStep {
   const step = stepChord('g', GO_TO_KEYS, waitingSince, key, now);
-  return { waitingSince: step.waitingSince, page: step.value };
+  return { waitingSince: step.waitingSince, target: step.value };
 }
 
 export interface ShortcutEntry {
@@ -99,6 +103,7 @@ export const APP_SHORTCUTS: readonly ShortcutGroup[] = [
       { keys: ['G → G'], label: 'Go to Gallery' },
       { keys: ['G → M'], label: 'Go to Models' },
       { keys: ['G → C'], label: 'Go to Config' },
+      { keys: ['G → J'], label: 'Open the job log' },
     ],
   },
   {

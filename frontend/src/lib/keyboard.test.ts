@@ -39,18 +39,22 @@ describe('keyboard', () => {
   describe('stepGoChord', () => {
     it('opens a page when G is followed by its key in time', () => {
       const first = stepGoChord(null, 'g', 1000);
-      expect(first).toEqual({ waitingSince: 1000, page: null });
-      expect(stepGoChord(first.waitingSince, 'm', 1500)).toEqual({ waitingSince: null, page: 'models' });
-      expect(stepGoChord(first.waitingSince, 'G', 1500).page).toBe('gallery');
+      expect(first).toEqual({ waitingSince: 1000, target: null });
+      expect(stepGoChord(first.waitingSince, 'm', 1500)).toEqual({ waitingSince: null, target: 'models' });
+      expect(stepGoChord(first.waitingSince, 'G', 1500).target).toBe('gallery');
+    });
+
+    it('opens the job log when G is followed by J', () => {
+      expect(stepGoChord(1000, 'j', 1500)).toEqual({ waitingSince: null, target: 'job-log' });
     });
 
     it('drops an unknown second key and a late one', () => {
-      expect(stepGoChord(1000, 'z', 1100)).toEqual({ waitingSince: null, page: null });
-      expect(stepGoChord(1000, 'w', 1000 + CHORD_TIMEOUT_MS + 1)).toEqual({ waitingSince: null, page: null });
+      expect(stepGoChord(1000, 'z', 1100)).toEqual({ waitingSince: null, target: null });
+      expect(stepGoChord(1000, 'w', 1000 + CHORD_TIMEOUT_MS + 1)).toEqual({ waitingSince: null, target: null });
     });
 
     it('ignores keys other than G when nothing is pending', () => {
-      expect(stepGoChord(null, 'w', 1000)).toEqual({ waitingSince: null, page: null });
+      expect(stepGoChord(null, 'w', 1000)).toEqual({ waitingSince: null, target: null });
     });
   });
 });
@@ -72,5 +76,10 @@ describe('stepChord', () => {
   it('lists Y and N for a review in the Workspace shortcuts', () => {
     const keys = APP_SHORTCUTS.find((group) => group.title === 'Workspace')!.entries.flatMap((entry) => entry.keys);
     expect(keys).toEqual(expect.arrayContaining(['Y', 'N']));
+  });
+
+  it('lists the job log chord among the shortcuts that work anywhere', () => {
+    const keys = APP_SHORTCUTS.flatMap((group) => group.entries).flatMap((entry) => entry.keys);
+    expect(keys).toContain('G → J');
   });
 });

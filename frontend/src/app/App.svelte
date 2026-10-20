@@ -14,6 +14,7 @@
   import { compactUi } from '$lib/state/compactUi.svelte';
   import ToastContainer from '$lib/components/molecules/ToastContainer.svelte';
   import ShortcutsDialog from '$lib/components/organisms/ShortcutsDialog.svelte';
+  import JobLogDrawer from '$features/jobLog/JobLogDrawer.svelte';
   import WorkspacePage from '$features/workspace/WorkspacePage.svelte';
   import GalleryPage from '$features/gallery/GalleryPage.svelte';
   import PromptsPage from '$features/prompts/PromptsPage.svelte';
@@ -27,6 +28,7 @@
   let workflows = $state<Workflow[] | null>(null);
   // Phones: the pages live in a drawer behind the strip's menu button.
   let drawerOpen = $state(false);
+  let jobLogOpen = $state(false);
 
   const baseTitle = document.title;
   $effect(() => {
@@ -53,10 +55,10 @@
 {#if ready}
   <div class="ui-viewport flex flex-col overflow-hidden bg-bg-base text-text-primary font-sans" data-layout={layout.mode}>
     {#if layout.compact}
-      <TopStrip currentPage={router.page} {workflows} onmenu={() => { drawerOpen = true; }} onstatus={() => compactUi.requestJobSheet()} />
+      <TopStrip currentPage={router.page} {workflows} onmenu={() => { drawerOpen = true; }} onstatus={() => compactUi.requestJobSheet()} onjoblog={() => { jobLogOpen = true; }} />
       <NavDrawer open={drawerOpen} currentPage={router.page} onnavigate={(page) => router.navigate(page)} onclose={() => { drawerOpen = false; }} />
     {:else}
-      <TopNav currentPage={router.page} {workflows} />
+      <TopNav currentPage={router.page} {workflows} onjoblog={() => { jobLogOpen = true; }} />
     {/if}
     <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
       {#if router.page === 'workspace'}
@@ -72,7 +74,8 @@
       {/if}
     </div>
     <ToastContainer />
-    <ShortcutsDialog currentPage={router.page} onnavigate={(page) => router.navigate(page)} />
+    <ShortcutsDialog currentPage={router.page} onnavigate={(page) => router.navigate(page)} onopenjoblog={() => { jobLogOpen = true; }} />
+    <JobLogDrawer bind:open={jobLogOpen} />
   </div>
 {:else}
   <div class="flex min-h-screen items-center justify-center bg-bg-base text-primary-main">

@@ -1,6 +1,6 @@
 // @ts-expect-error Internal Svelte client helpers are the stable mount API in this jsdom test harness.
 import { flushSync, mount, unmount } from '../../../../node_modules/svelte/src/index-client.js';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { draft } from '$lib/state/draft.svelte';
 import { jobStore } from '$lib/state/job.svelte';
@@ -121,5 +121,28 @@ describe('TopNav workflow tabs', () => {
   it('shows no workflow tabs outside the Workspace', () => {
     mountNav({ currentPage: 'gallery', workflows: [...BASE, 'extend'] });
     expect(target.querySelector('nav[aria-label="Workflow"]')).toBeNull();
+  });
+});
+
+describe('TopNav job log button', () => {
+  let target: HTMLDivElement;
+  let app: Record<string, unknown> | null = null;
+
+  beforeEach(() => {
+    target = document.createElement('div');
+    document.body.appendChild(target);
+  });
+
+  afterEach(async () => {
+    if (app) { await unmount(app); app = null; }
+    target.remove();
+    document.body.innerHTML = '';
+  });
+
+  it('opens the job log', () => {
+    const onjoblog = vi.fn();
+    app = flushSync(() => mount(TopNav, { target, props: { currentPage: 'gallery', onjoblog } }));
+    (target.querySelector('button[aria-label="Job log"]') as HTMLButtonElement).click();
+    expect(onjoblog).toHaveBeenCalledOnce();
   });
 });

@@ -54,6 +54,13 @@ describe('TopStrip', () => {
     navigate.mockRestore();
   });
 
+  it.each(['workspace', 'gallery'] as const)('opens the job log from the strip on %s', (currentPage) => {
+    const onjoblog = vi.fn();
+    app = flushSync(() => mount(TopStrip, { target, props: { currentPage, onmenu: vi.fn(), onjoblog } }));
+    (target.querySelector('button[aria-label="Job log"]') as HTMLButtonElement).click();
+    expect(onjoblog).toHaveBeenCalledOnce();
+  });
+
   it('lists four workflows until the contract is known', () => {
     app = flushSync(() => mount(TopStrip, { target, props: { currentPage: 'workspace', workflows: null, onmenu: vi.fn() } }));
     const select = target.querySelector('select[aria-label="Workflow"]') as HTMLSelectElement;

@@ -1071,6 +1071,41 @@ export interface GalleryPage {
   total_count: number;
 }
 
+// ── Job log types ──────────────────────────────────────────────────────────────
+
+/** How a logged job ended. */
+export type JobLogStatus = 'completed' | 'failed' | 'cancelled';
+
+/** The outcome filters the job log offers. */
+export type JobLogFilter = 'all' | 'failed' | 'completed';
+
+/** One finished job as the server's job log records it; times are epoch seconds. */
+export interface JobLogEntry {
+  job_id: string;
+  job_type: string;
+  workflow: string;
+  model: string;
+  prompt: string;
+  settings: JobSettings;
+  status: JobLogStatus;
+  created_at: number | null;
+  started_at: number | null;
+  completed_at: number | null;
+  duration_secs: number;
+  outputs: string[];
+  error: string | null;
+  /** How many runs of the job failed; a completed or cancelled job can carry some. */
+  failed_runs: number;
+}
+
+export interface JobLogPage {
+  entries: JobLogEntry[];
+  page: number;
+  total_pages: number;
+  total_count: number;
+  page_size: number;
+}
+
 // ── Config types ───────────────────────────────────────────────────────────────
 
 export interface AppConfig {

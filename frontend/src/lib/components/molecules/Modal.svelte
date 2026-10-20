@@ -27,6 +27,8 @@
     elevated?: boolean;
     /** Fill the screen below 640 px and lay the body out edge to edge, for browsers and editors that scroll inside. */
     fill?: boolean;
+    /** `side` docks the dialog to the right edge at full height, as a drawer; a phone still gets its bottom sheet. */
+    placement?: 'center' | 'side';
     onclose?: () => void;
     children?: Snippet;
     footer?: Snippet;
@@ -41,12 +43,15 @@
     describedby,
     elevated = false,
     fill = false,
+    placement = 'center',
     onclose,
     children,
     footer
   }: Props = $props();
 
   const SIZE_CLASSES = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-3xl' } as const;
+
+  const side = $derived(placement === 'side');
 
   let dialogEl = $state<HTMLDivElement | null>(null);
   let previouslyFocused: Element | null = null;
@@ -158,8 +163,8 @@
       aria-label="Close dialog"
       tabindex="-1"
     ></button>
-    <!-- Flex centering layer. -->
-    <div class="flex h-full pointer-events-none items-center justify-center p-4 {fill ? 'max-sm:p-0' : ''}">
+    <!-- Flex layer: centres the dialog, or docks it to the right edge for the side placement. -->
+    <div class="flex h-full pointer-events-none {side ? 'items-stretch justify-end p-0' : `items-center justify-center p-4 ${fill ? 'max-sm:p-0' : ''}`}">
       <!-- Dialog -->
       <div
         bind:this={dialogEl}
@@ -169,7 +174,8 @@
         aria-labelledby={labelledby}
         aria-describedby={describedby}
         tabindex="-1"
-        class="modal-dialog ui-overlay relative flex max-h-full w-full flex-col focus:outline-none pointer-events-auto {SIZE_CLASSES[size]} {fill ? 'max-sm:h-full max-sm:max-w-none max-sm:rounded-none' : ''}"
+        data-placement={placement}
+        class="modal-dialog ui-overlay relative flex max-h-full w-full flex-col focus:outline-none pointer-events-auto {SIZE_CLASSES[size]} {side ? 'h-full rounded-none border-l border-border-subtle' : fill ? 'max-sm:h-full max-sm:max-w-none max-sm:rounded-none' : ''}"
       >
       {#if title}
         <div class="flex items-center justify-between gap-3 border-b border-border-subtle px-4 py-2.5">
@@ -203,6 +209,8 @@
   /* The dialog settles in rather than appearing at once, as a phone's sheet slides up. */
   .modal-root { animation: modal-fade 140ms ease-out; }
   .modal-dialog { animation: modal-rise 180ms cubic-bezier(0.32, 0.72, 0, 1); }
+  .modal-dialog[data-placement='side'] { animation: modal-slide 200ms cubic-bezier(0.32, 0.72, 0, 1); }
   @keyframes modal-fade { from { opacity: 0; } }
   @keyframes modal-rise { from { opacity: 0; translate: 0 8px; scale: 0.98; } }
+  @keyframes modal-slide { from { translate: 100% 0; } }
 </style>
