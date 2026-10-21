@@ -295,21 +295,20 @@
   .fr-feat-size { font-family: var(--font-mono); font-size: var(--text-content); color: var(--color-text-secondary); }
 
   .fr-menu-title { margin-bottom: 2px; }
-  .fr-menu { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; }
+  .fr-menu { display: grid; grid-template-columns: 1fr 1fr; column-gap: 28px; row-gap: 2px; }
   .fr.compact .fr-menu { grid-template-columns: 1fr; }
   .fr-row {
     display: flex;
     align-items: baseline;
     gap: 10px;
     min-width: 0;
-    padding: 13px 4px;
-    border-bottom: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    padding: 12px 6px;
+    border-radius: var(--radius-sm);
     font-size: var(--text-content);
     cursor: pointer;
     transition: background-color 0.12s ease;
   }
-  .fr.compact .fr-row { padding: 11px 2px; min-height: var(--spacing-row); font-size: 15px; }
+  .fr.compact .fr-row { padding: 11px 6px; min-height: var(--spacing-row); font-size: 15px; }
   .fr-row > .fr-tick { align-self: center; }
   .fr-row-name { min-width: 0; overflow: hidden; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; color: var(--color-text-primary); }
   .fr-row.selected .fr-row-name { color: var(--color-primary-main); }
