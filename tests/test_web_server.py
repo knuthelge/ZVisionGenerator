@@ -1448,13 +1448,14 @@ def test_models_route_uses_shared_alias_inventory(monkeypatch, tmp_path):
 _SEEDVR2_7B = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=10.79, activation_base_gb=1.88, activation_gb_per_mp=0.83)
 
 
-def _models_route_with_seedvr2(monkeypatch, tmp_path, *, copy_files: dict[str, bytes] | None):
-    """Serve ``GET /api/models`` with SeedVR2 on, its 7B copy holding *copy_files* (or absent when ``None``)."""
+def _models_route_with_seedvr2(monkeypatch, tmp_path, *, copy_files: dict[str, int] | None):
+    """Serve ``GET /api/models`` with SeedVR2 on, its 7B copy holding sparse *copy_files* of the given sizes (or absent when ``None``)."""
     copy = seedvr2_weights_dir("seedvr2-7b", tmp_path / "models", MLX_WEIGHTS)
     if copy_files is not None:
-        for name, content in copy_files.items():
+        for name, size in copy_files.items():
             (copy / name).parent.mkdir(parents=True, exist_ok=True)
-            (copy / name).write_bytes(content)
+            (copy / name).touch()
+            os.truncate(copy / name, size)
     settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(_SEEDVR2_7B,))
     web_config = _make_web_config()
     web_config.data_dir = str(tmp_path)
@@ -1466,7 +1467,7 @@ def _models_route_with_seedvr2(monkeypatch, tmp_path, *, copy_files: dict[str, b
 
 
 def test_models_route_lists_the_downloaded_seedvr2_tier_with_its_disk_use(monkeypatch, tmp_path):
-    _models_route_with_seedvr2(monkeypatch, tmp_path, copy_files={"transformer/w.safetensors": b"x" * 2_000_000_000, "vae/v.safetensors": b"y" * 500_000_000})
+    _models_route_with_seedvr2(monkeypatch, tmp_path, copy_files={"transformer/w.safetensors": 2_000_000_000, "vae/v.safetensors": 500_000_000})
 
     with TestClient(web_server.app) as client:
         rows = client.get("/api/models").json()["image_models"]
@@ -1493,7 +1494,8 @@ def test_models_route_lists_the_fp8_tier_with_its_folder_disk_use(monkeypatch, t
     web_config = _models_route_with_seedvr2(monkeypatch, tmp_path, copy_files=None)
     folder = seedvr2_weights_dir("seedvr2-7b", tmp_path / "models", FP8_WEIGHTS)
     folder.mkdir(parents=True)
-    (folder / "ema_vae_fp16.safetensors").write_bytes(b"x" * 1_500_000_000)
+    (folder / "ema_vae_fp16.safetensors").touch()
+    os.truncate(folder / "ema_vae_fp16.safetensors", 1_500_000_000)
     web_config.seedvr2 = replace(web_config.seedvr2, downloaded=True, weights=FP8_WEIGHTS)
 
     with TestClient(web_server.app) as client:
@@ -1547,7 +1549,7 @@ def test_models_route_reads_not_downloaded_after_the_copy_is_deleted(monkeypatch
 
 
 def test_models_route_has_no_seedvr2_row_where_seedvr2_is_off(monkeypatch, tmp_path):
-    web_config = _models_route_with_seedvr2(monkeypatch, tmp_path, copy_files={"w.safetensors": b"x"})
+    web_config = _models_route_with_seedvr2(monkeypatch, tmp_path, copy_files={"w.safetensors": 1})
     web_config.seedvr2 = None
 
     with TestClient(web_server.app) as client:
