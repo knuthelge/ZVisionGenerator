@@ -1,8 +1,8 @@
 # Replace Ideogram 4 with Ideogram 4 Instant
 
-**Status:** In progress (2026-10-18). Built on Windows/Linux and measured on a 10 GB NVIDIA GPU; the macOS test plan (step 5) passed on a 32 GB M5 (both below).
+**Status:** Done (2026-10-21, unreleased). Built on Windows/Linux and measured on a 10 GB NVIDIA GPU; the macOS test plan (step 5) passed on a 32 GB M5 (both below).
 
-### Shipped so far
+### Shipped
 
 - `ideo` names the models-folder entry `ideo`, built on first use by `ideogram4_instant_builder.py` from the pinned sources in the `ideogram4_instant` config block, with Ideogram's `LICENSE.md` and `NOTICE`. The folder is named after the alias, so its stored quants are `ideo@q4` / `ideo@q8`.
 - CUDA: one transformer at BF16, NF4 (q4) or FP8 (q8) through the stored-quant flow, with a zero stand-in for the unconditional branch. The q4 copy saves only the NF4 transformer and hard-links the rest: transformers cannot re-save the already-NF4 text encoder (`revert_weight_conversion` raises `NotImplementedError`).
@@ -35,7 +35,7 @@ Every step of the macOS test plan (step 5) passed. Peaks are the process's physi
 | q4 from `ideo@q4` | 15.5 s | 2:22 | 19 GB (15 GB while denoising, the rest in the VAE decode) | 10.6 GB, fits |
 
 - **Build.** The components took about 2.5 minutes and the 18.6 GB transformer about 4.5 minutes to download; the FP8 conversion took a few seconds, with the process footprint near 3.5 GB. The build passes every check of test step 1.
-- **Speed.** At 1024² the three levels run at the same speed, so q4/q8 save memory and disk, not time. At `-s xs` (400×608, the size of the base model's ~10 s per step in [macos-speed.md](macos-speed.md)) Instant takes 3.6 s per step unquantized and 2.3 s at q4, so an image is about 6–8× faster than on the base model.
+- **Speed.** At 1024² the three levels run at the same speed, so q4/q8 save memory and disk, not time. At `-s xs` (400×608, the size of the base model's ~10 s per step in [macos-speed.md](../macos-speed.md)) Instant takes 3.6 s per step unquantized and 2.3 s at q4, so an image is about 6–8× faster than on the base model.
 - **Stored quants.** The second q8 and q4 runs give the same pixels as the first.
 - **Memory estimates.** MLX's own peak (`mx.get_peak_memory`, which also catches the short VAE decode the footprint samples missed) is 32.8 GiB unquantized, 33.1 GiB at q8 and 25.3 GiB at q4: 15.6–16.2 GiB above the weights, which the estimates count correctly. Denoising alone needs 4–5 GiB of that. The estimates allowed 1.5 GiB, so `estimate_image_memory` now adds 16 GiB for Ideogram 4 (33.1, 33.6 and 25.1 GiB: **Tight** unquantized and at q8, **Fits** at q4 on a 32 GB Mac). Other families also spike at the decode (Z-Image q8 +13 GiB, Krea 2 q8 +9.6 GiB at 1024²) and keep the 1.5 GiB margin for now.
 - **LoRAs.** A LyCORIS LoKr and `ostris/ideogram_4_turbotime_lora`, both made for the base model, load unquantized and at q4 and visibly change the image. At q4 mflux re-quantizes the 204 LoRA-touched layers at q8. A LoRA adds about 2.5 s per step at 1024².
@@ -47,7 +47,7 @@ Still open from step 4: the blocked-frame rate on a fixed prompt set, and an int
 
 ## Problem
 
-`ideo` is the base Ideogram 4 model. It is the slowest image model we ship by a wide margin: 20 steps, and two 9.3B transformers per step (a conditional one and an unconditional one for its asymmetric guidance). On a 32 GB Apple Silicon Mac it takes about 10 s per step against 1–2.4 s for the other families ([macos-speed.md](macos-speed.md)), and it holds 27.5 GB of weights on a 32 GB Mac. On Windows and Linux both NF4 transformers stream from system memory on every step.
+`ideo` is the base Ideogram 4 model. It is the slowest image model we ship by a wide margin: 20 steps, and two 9.3B transformers per step (a conditional one and an unconditional one for its asymmetric guidance). On a 32 GB Apple Silicon Mac it takes about 10 s per step against 1–2.4 s for the other families ([macos-speed.md](../macos-speed.md)), and it holds 27.5 GB of weights on a 32 GB Mac. On Windows and Linux both NF4 transformers stream from system memory on every step.
 
 fal has released a distilled Ideogram 4, **Instant**: 8 steps, guidance folded into the conditional transformer, no unconditional pass. That is about 2.5× fewer steps and half the transformer work per step, so roughly 5× fewer transformer forwards per image, and a whole 9.3B transformer less in memory. This proposal replaces the base model with Instant on both platforms, with stored q4/q8 quants.
 
@@ -83,9 +83,9 @@ Both fal repos are gated, and their example loads the text encoder, VAE, tokeniz
 - The other 136 are named differently. fal stores attention as `to_q`/`to_k`/`to_v`/`to_out.0` (diffusers 0.41 naming). Hippotes fuses them into `qkv` (q, k, v stacked by rows) and `o`, the naming of the base FP8 repo and of mflux. Sliced by rows, all 136 match fal's tensors.
 - fal's `transformer/config.json` is the base model's (`num_layers` 34, 18 heads × 256, `adaln_dim` 512, `llm_features_dim` 53248).
 
-So the Hippotes file is fal's Instant transformer, repackaged. The source is pinned to commit `9fcb42c…`, the same way the CUDA alias pins Unsloth's mirror ([platform-parity.md](archive/platform-parity.md) step 13).
+So the Hippotes file is fal's Instant transformer, repackaged. The source is pinned to commit `9fcb42c…`, the same way the CUDA alias pins Unsloth's mirror ([platform-parity.md](platform-parity.md) step 13).
 
-The shared components (text encoder, VAE, tokenizer, scheduler) are the base model's and keep coming from Unsloth's byte-checked mirrors: `unsloth/ideogram-4-nf4-diffusers@cb5b5dd…` on CUDA, `unsloth/ideogram-4-fp8@518e05e…` on macOS. That also removes the last gated default on macOS (see [first-run.md](first-run.md)).
+The shared components (text encoder, VAE, tokenizer, scheduler) are the base model's and keep coming from Unsloth's byte-checked mirrors: `unsloth/ideogram-4-nf4-diffusers@cb5b5dd…` on CUDA, `unsloth/ideogram-4-fp8@518e05e…` on macOS. That also removes the last gated default on macOS (see [first-run.md](../first-run.md)).
 
 ### What our stack supports
 
@@ -102,7 +102,7 @@ A new converter model type, `ideogram4-instant`, builds a local model folder nam
 - **Download.** The pinned Hippotes file goes to a partial folder inside the models directory, not the Hugging Face cache, and is deleted once the conversion succeeds. This frees 18.6 GB at the end of the conversion. The components come from the platform's Unsloth mirror at its pinned revision, through the normal cache.
 - **CUDA transformer.** Split each `layers.N.attention.qkv.weight` by rows into `to_q`/`to_k`/`to_v`, rename `o` to `to_out.0`, keep BF16, and write `transformer/` (config plus sharded safetensors) and the NF4 `text_encoder/`, `vae/`, `tokenizer/`, `scheduler/`, `model_index.json`.
 - **macOS transformer.** Keep the fused names and convert each linear weight to `float8_e4m3fn` with a per-row `weight_scale` (row absmax / 448). The bias, norm and embedding tensors stay BF16, exactly like `unsloth/ideogram-4-fp8/transformer`. The other components are the FP8 mirror's, including the text encoder flag that `_validate_fp8_layout` checks. The result is a 9.3 GB transformer that mflux loads like the base model, and from which `to_quantized` builds q4/q8.
-- **Streaming.** Both conversions read and write one tensor at a time, so peak memory stays near one tensor and never holds the 18.6 GB model. This follows the FP8 lesson in [cuda-quant-parity.md](archive/cuda-quant-parity.md).
+- **Streaming.** Both conversions read and write one tensor at a time, so peak memory stays near one tensor and never holds the 18.6 GB model. This follows the FP8 lesson in [cuda-quant-parity.md](cuda-quant-parity.md).
 - **Recorded source.** The folder records the source repo and revision, so a later pin change can tell the copy is stale and rebuild it.
 
 `model_aliases.ideo` resolves to this folder on every platform. A job that selects `ideo` while the folder is missing runs the conversion first, as a reported `building` phase (**Build model** in the Web UI), before the stored-quant flow. There is no separate `ziv model` command for it.
@@ -116,7 +116,7 @@ A new converter model type, `ideogram4-instant`, builds a local model folder nam
 
 - `model_presets.ideogram4`: `default_steps: 8`, `default_guidance: 1.0`, `supports_quantize: true`. Guidance stays locked at 1.0: with a zero unconditional branch any other value only scales the velocity. The Web UI and CLI treat it like a model without guidance (a warning on `--guidance`), and the steps setting stays free.
 - `core/ideogram4.py`: the default sampler becomes 8 steps with constant guidance 1.0 and the same `mu`/`std`. The 7.0/3.0 polish schedule and the base-model wording go.
-- **Stored quants.** `ideo@q4` and `ideo@q8` come from the existing stored-quant flow. There is no per-model default level: on CUDA the docs recommend q4 or q8, since unquantized BF16 streams 18.6 GB per step, as unquantized Krea 2 did. On macOS the default stays unquantized (the FP8 copy), and q4/q8 are offered. This absorbs item 1 of [macos-speed.md](macos-speed.md).
+- **Stored quants.** `ideo@q4` and `ideo@q8` come from the existing stored-quant flow. There is no per-model default level: on CUDA the docs recommend q4 or q8, since unquantized BF16 streams 18.6 GB per step, as unquantized Krea 2 did. On macOS the default stays unquantized (the FP8 copy), and q4/q8 are offered. This absorbs item 1 of [macos-speed.md](../macos-speed.md).
 - **First-step sigma.** `IDEOGRAM4_INITIAL_SIGMA = 1.004` was tuned on the base model to dodge false safety-filter frames. Keep the setting, re-test it on Instant (step 4 below), and set the default to `None` if it makes no difference.
 
 ### 4. Measure before shipping

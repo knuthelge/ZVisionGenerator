@@ -55,7 +55,7 @@ A short chime on completion and a lower one on failure, off by default, toggled 
 - **Notifications only.** Simplest, but unavailable over plain http from another machine. Rejected as the sole channel.
 - **Serve the UI over https** so notifications work on the LAN. Self-signed certificates need a browser exception on every device and a `--tls` option in `ziv ui`. Not rejected, but a separate decision; see open questions.
 - **Server-side notifications** (a desktop notification on the machine running `ziv ui`, or a webhook). Useful for unattended batches, but a different feature.
-- **App badge** (`navigator.setAppBadge`). Only works for an installed web app; it belongs with [Phone layout](phone-layout.md), which adds the manifest.
+- **App badge** (`navigator.setAppBadge`). Only works for an installed web app; it belongs with [Phone layout](archive/phone-layout.md), which adds the manifest.
 
 ## Open questions
 

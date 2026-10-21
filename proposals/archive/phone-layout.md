@@ -1,6 +1,6 @@
 # A phone layout and an installable app
 
-**Status:** In progress (2026-10-18)
+**Status:** Done (2026-10-21, unreleased). The Playwright phone-viewport check was dropped.
 
 ## Problem
 
@@ -48,7 +48,7 @@ Chosen from a design study of four directions, prototyped in HTML (not committed
 
 ## Stages
 
-Each stage is one commit that rebuilds the SPA, passes `make check` and keeps every existing feature reachable. Stages 1 to 10 shipped on 2026-10-18 (unreleased); the Playwright check under Tests is still to do.
+Each stage is one commit that rebuilds the SPA, passes `make check` and keeps every existing feature reachable. Stages 1 to 10 shipped on 2026-10-18 (unreleased). The Playwright check under Tests was dropped (2026-10-21).
 
 1. Touch layer: pointer-coarse size tokens, the switch from tokens, steppers in `InspectorNumber` with hold-to-repeat (off for W × H and Seed), no scrubbing on coarse pointers, a `layout` store (`compact | tall | wide`, `coarse`).
 2. Stage stepping through history: a view index on the Workspace, ← → and hover arrows, the indicator and Latest in the preview header, swipe on touch.
@@ -64,7 +64,7 @@ Each stage is one commit that rebuilds the SPA, passes `make check` and keeps ev
 ### Tests
 
 - Vitest: the layout store, the stepper contract, the view index rules, the chip derivation per workflow and model, the sheet's open and close contract.
-- One Playwright run at an iPhone-sized viewport checks that the stage is visible on load, a chip opens its popover, and Generate shows the job in the stage. It runs in `make check` only when Chromium is present, as the frontend tests already gate on their tools.
+- *Dropped (2026-10-21):* one Playwright run at an iPhone-sized viewport checks that the stage is visible on load, a chip opens its popover, and Generate shows the job in the stage. It runs in `make check` only when Chromium is present, as the frontend tests already gate on their tools.
 
 ### Docs and changelog
 
@@ -81,7 +81,7 @@ Each stage is one commit that rebuilds the SPA, passes `make check` and keeps ev
 
 ## Open questions
 
-- Does https matter here? An installed app on a LAN address is still plain http; it works, but notifications stay unavailable ([Job notifications](job-notifications.md)).
+- Does https matter here? An installed app on a LAN address is still plain http; it works, but notifications stay unavailable ([Job notifications](../job-notifications.md)).
 - Live preview cadence: with the preview filling the stage, previews more often than 25, 50 and 75 % may be worth their cost. A backend change, measured first.
 
 ## Out of scope

@@ -28,7 +28,7 @@ Tested as a home-screen app on iOS 26. Sheets, the stage, the drawer, holds, reo
 
 ## Problem
 
-[A phone layout](../phone-layout.md) fixed the *composition*: on a phone the stage is the screen, settings are chips and the prompt is a composer. What it did not fix is the *interaction layer* under it. Sheets that should pull down sometimes don't, a tap leaves buttons looking pressed, a tap on a number zooms the page, a swipe on the stage either does nothing visible or jumps to the Gallery, and some actions only exist on hover. The layout looks like a phone app; the gestures still behave like a desktop page with touch events bolted on.
+[A phone layout](phone-layout.md) fixed the *composition*: on a phone the stage is the screen, settings are chips and the prompt is a composer. What it did not fix is the *interaction layer* under it. Sheets that should pull down sometimes don't, a tap leaves buttons looking pressed, a tap on a number zooms the page, a swipe on the stage either does nothing visible or jumps to the Gallery, and some actions only exist on hover. The layout looks like a phone app; the gestures still behave like a desktop page with touch events bolted on.
 
 The same gaps reach past the phone: an iPad in the wide layout has the hover-only actions and the drag-and-drop that a finger cannot use, and a touchscreen laptop gets whichever half of the behaviour its media queries pick.
 
