@@ -1,93 +1,83 @@
 # First run: pick a model, download it, and no gated defaults
 
-**Status:** In progress (2026-10-21). §3 has shipped except the terminal command, the slim bar and the Welcome-panel hookup; §1, §2 and §4 are open.
+**Status:** In progress (2026-10-21). Explicit downloads with progress have shipped (see [Done so far](#done-so-far)). Still open: an ungated `klein9b`, gated errors that say what to do, downloads kept in sync across pages, and a first-run dialog that picks a model.
+
+## Done so far
+
+- **Downloads with progress** (v0.13.0b25), designed in [Show model download progress in Web UI jobs](archive/model-download-progress.md): a Download button on each Models-page row, a download lane beside the job queue that runs one download at a time, and byte progress on the job card instead of "Loading model…".
+- **No gated Ideogram** (v0.13.0b24), from [Replace Ideogram 4 with Ideogram 4 Instant](archive/ideogram-instant.md): `ideo` is built on first use from ungated, pinned sources.
+- **Job failures say why** (v0.13.0b25): a failed job's card and toast show a one-line reason.
 
 ## Problem
 
-A new user runs `ziv ui`, types a prompt and presses **Generate**. With the shipped defaults, one of two things happens:
+A new user runs `ziv ui`, types a prompt and presses **Generate**. With the shipped defaults:
 
-1. **It fails.** The default image model, `klein9b`, resolves to `black-forest-labs/FLUX.2-klein-9B`, which is gated: you have to accept its license on Hugging Face and have a token. Nothing catches `GatedRepoError` or a 401, so the job fails with a library error. The macOS `ideo` alias (`ideogram-ai/ideogram-4-fp8`) is gated too, and so are the base repos the checkpoint converter downloads (`converters/convert_checkpoint.py:35`).
-2. **It looks stuck.** With a token, the job card shows "Loading model…" while about 35 GB downloads, with no size, progress or time estimate. On a 16 GB Mac, the model it is downloading won't even fit (the memory badge only works for downloaded models).
-
-The token check (`web/config_api.huggingface_token_env_var`) only reads `HF_TOKEN`, `HF_HUB_TOKEN` and `HUGGINGFACE_HUB_TOKEN`. A token saved by `hf auth login`, the usual way, is reported as not configured.
-
-The README promises "hassle-free". The first few minutes are currently the hardest part.
+1. **It fails.** The default image model, `klein9b`, resolves to `black-forest-labs/FLUX.2-klein-9B`, which is gated: you have to accept its license on Hugging Face and have a token. The job or the Models-page download plan (`downloads/check.py`) fails with the Hub's raw 401 text. The converter's Klein 9B base (`converters/convert_checkpoint.py:37`) is the same gated repo.
+2. **Nothing helps them choose.** On a 16 GB Mac, the default is a 35 GB download that won't fit.
+3. **A saved token is reported missing.** `web/config_api.huggingface_token_env_var` only reads environment variables, so a token saved by `hf auth login` shows as not configured.
+4. **Downloads are only visible on the Models page.** The lane's state lives in `ModelsPage.svelte`, which polls it while open. Start a download there and go to the Workspace, and the model picker still says "(not downloaded)".
 
 ## Evidence
 
-Diffusers-layout download size of each shipped image alias, read from the Hugging Face API on 2026-10-09:
+Every repo a shipped alias downloads by default, checked against the Hugging Face API on 2026-10-21. Sizes and the mirror's file hashes were read on 2026-10-09.
 
-| Alias | Repo today | Gated | Download | Ungated mirror |
-|---|---|---|---|---|
-| `klein9b` | `black-forest-labs/FLUX.2-klein-9B` | yes | 34.7 GB | `unsloth/FLUX.2-klein-9B`: all 8 weight files byte-identical (LFS sha256) |
-| `klein4b` | `black-forest-labs/FLUX.2-klein-4B` | no | 16.0 GB | `unsloth/FLUX.2-klein-4B`: identical |
-| `zit` | `Tongyi-MAI/Z-Image-Turbo` | no | 32.8 GB | `unsloth/Z-Image-Turbo`: identical |
-| `krea2` | `unsloth/Krea-2-Turbo` | no | 35.7 GB | — |
-| `ideo` (macOS) | `ideogram-ai/ideogram-4-fp8` | yes | 27.5 GB | `unsloth/ideogram-4-fp8`: all 4 weight files identical |
+| Alias | Repo | Gated | Download |
+|---|---|---|---|
+| `klein9b` | `black-forest-labs/FLUX.2-klein-9B` | **yes** | 34.7 GB |
+| `klein4b` | `black-forest-labs/FLUX.2-klein-4B` | no | 16.0 GB |
+| `zit` | `Tongyi-MAI/Z-Image-Turbo` | no | 32.8 GB |
+| `krea2` | `unsloth/Krea-2-Turbo` | no | 35.7 GB |
+| `ideo` | `Hippotes/Ideogram4-Fal-ComfyUI` + `unsloth/ideogram-4-*` | no | — |
+| `ltx-4`, `ltx-8` | `dgrauet/ltx-2.3-mlx-*` (macOS), `diffusers/LTX-2.3-Distilled-Diffusers` + `Lightricks/LTX-2.3` (CUDA) | no | — |
 
-The mirrors keep the upstream licenses (`flux-non-commercial-license`, `ideogram-4-non-commercial`). They only remove the click-through gate. The backends already pass `model_path` through to mflux and diffusers, and Klein's size detection reads `9B`/`4B` from the repo name, so a mirror works exactly as `unsloth/Krea-2-Turbo` does today.
+`klein9b` is the only gated default left. `unsloth/FLUX.2-klein-9B` is ungated, and on 2026-10-09 its 8 weight files matched upstream's LFS sha256 byte for byte. The backends pass `model_path` through to mflux and diffusers, and Klein's size detection reads `9B` from the repo name, so the mirror loads exactly as `unsloth/Krea-2-Turbo` does today.
 
 ## Proposed change
 
-### 1. Ungated mirrors for the shipped aliases
+Each part ships as its own commit, in this order.
 
-- `klein9b` → `unsloth/FLUX.2-klein-9B`, `ideo` → `unsloth/ideogram-4-fp8`, and the converter's Klein base repos → `unsloth/FLUX.2-klein-4B` / `unsloth/FLUX.2-klein-9B`.
-- `klein4b` and `zit` are already ungated and stay on their upstream repos (no gain from changing). This is the rule for future aliases too: use the upstream repo when it is ungated, and an identical unsloth mirror when it isn't.
-- **Existing downloads aren't wasted.** An alias value may be a list of candidates, e.g. `klein9b: [unsloth/FLUX.2-klein-9B, black-forest-labs/FLUX.2-klein-9B]`. Resolution picks the first one that is fully downloaded, and otherwise the first. Someone who already has the 35 GB upstream copy keeps using it and doesn't download it again. Stored quants are keyed by alias name (`klein9b@q8`) and the weights are identical, so they stay valid.
-- **License shown, not hidden.** Each alias gets a `license: {name, url}` entry in `config.yaml`. The model picker, Models page and first-run screen show it, e.g. "Non-commercial license" with a link.
+### 1. Ungated `klein9b`
 
-### 2. A first-run screen
+- `klein9b` and the converter's `flux2-klein-9b` base point at `unsloth/FLUX.2-klein-9B`.
+- No fallback to the old repo: an existing upstream download is fetched again from the mirror.
+- The rule for future aliases: use the upstream repo when it is ungated, otherwise an identical mirror checked by hash.
 
-When no image model is downloaded and none is installed in `~/.ziv/models`, the Workspace preview area shows a **Welcome** panel instead of the empty preview, with Blob (`MascotSpot`). The panel isn't a modal or a wizard, so the rest of the app stays usable around it.
+### 2. Gated errors that say what to do
 
-- **Starter models** for this platform, as cards. Each shows the name, a one-line summary, the download size, the memory fit at the quant it would use, the license, and speed (steps). The data comes from a new `starter` block per alias in `config.yaml` (order, summary, suggested quant per memory tier), so changing the list doesn't need code.
-- **One recommended card**, chosen by memory: the best model that **Fits** at its suggested quant. With today's list that is `klein9b` q8 at 32 GB and above, and `klein4b` below. On CUDA the budget is the GPU's total VRAM, using the same Fits/Tight/Too large rule.
-- **Memory before download.** `HfApi.get_safetensors_metadata` reads the safetensors headers with range requests, without downloading the weights. That feeds the same `WeightTotals` that `utils/model_memory.estimate_image_memory` builds from local files today, so the Workspace picker and Models page also show **Fits/Tight/Too large** for models that aren't downloaded yet. It is cached per repo revision.
-- **Download & set as default** downloads with progress through the download lane (§3) and sets `ui.default_models.image` in the user config. A **Skip** link closes the panel for good (stored in the user config, not just the browser), and the panel shows again only when no model is downloaded.
-- The same panel offers the video model (`ltx-4`/`ltx-8` or `ltx-2.3`) as an optional second step, since it is another 60+ GB.
+- One helper in `downloads/` turns `GatedRepoError`, `RepositoryNotFoundError` and Hub 401/403 errors into one line: "`<repo>` needs a Hugging Face token: accept its license at `<link>`, then run `hf auth login`." The download plan, the download child process and model loads all use it, so the Models page, the job card and the CLI say the same thing.
+- Token detection uses `huggingface_hub.get_token()`, which also finds the token `hf auth login` saves.
 
-### 3. Explicit downloads with progress
+### 3. Downloads in sync across pages
 
-Downloads become something you can see and control, not a side effect of the first generation.
+- The download lane's state moves out of `ModelsPage.svelte` into one shared frontend store, polled while any download is queued or running.
+- The Models-page rows, the Workspace model picker ("Downloading 42%" instead of "(not downloaded)") and the job card read from it. When a download finishes, the model lists refresh everywhere.
+- No new bars, banners or other page-wide elements.
 
-**Shipped (unreleased)**, designed in [Show model download progress in Web UI jobs](archive/model-download-progress.md):
+### 4. A first-run dialog
 
-- `POST /api/models/download {kind, name}` queues a download of a Models-page row with the allow-patterns the backend needs (no top-level single-file checkpoints). `GET /api/models/download/plan` returns the parts, sizes and free space first.
-- Progress comes from `tqdm_class` byte counts in a child process; the cache is not polled. The Models page shows Download, Queued and Cancel on each row, and a job that needs a model shows the same progress on its card instead of "Loading model…".
-- A lane beside the job queue runs downloads one at a time, so you can download one model while generating with another. Cancel keeps the finished files.
-- Free disk space is a confirmation, not a refusal: the confirmation shows the size and the free space on the download's drive (an estimate), with **Download anyway** when it looks short.
-
-**Remaining:**
-
-- `ziv-model download <alias>` does the same from the terminal with a tqdm bar.
-- A slim bar under the top nav shows the lane's running download on every page (today it appears on the Models page rows and on the job card).
-- The Welcome panel's **Download & set as default** uses the lane.
-
-### 4. Hugging Face token in the Web UI
-
-- Token detection uses `huggingface_hub.get_token()`, which covers the environment variables and the token file `hf auth login` writes. Config shows where the token comes from ("from `hf auth login`" or "from `HF_TOKEN`").
-- **Add token** on the Config page's Hugging Face access row: a password field that saves through `huggingface_hub.login(token, add_to_git_credential=False)`, the same file `hf auth login` writes. Before saving, it checks the token with `whoami()` and shows the account name. **Remove** calls `logout()`. The API never sends the token back.
-- The token endpoints accept requests only from loopback addresses, whatever `--host` is set to. They are also covered by the existing `request_guard`.
-- **Gated errors become instructions.** `GatedRepoError`, `RepositoryNotFoundError` and 401/403 from a load or download are mapped to one job error: the repo, its license page link, "Accept the license on Hugging Face, then add a token", and a button that opens the token field. User-supplied gated repos (e.g. `-m black-forest-labs/…` or a Krea Raw fine-tune) still work this way.
+- When no image model is downloaded (in the Hugging Face cache or `~/.ziv/models`) and the dialog hasn't been skipped, a modal covers the Workspace and asks you to pick a model.
+- It lists the image models for this platform with their download size. One is preselected from the machine's memory: `klein9b` at 32 GB and above, `klein4b` below. The threshold is one value in `config.yaml`. On CUDA, memory means total VRAM.
+- **Download** sets the choice as `ui.default_models.image` in the user config, queues it in the download lane and closes the dialog. Progress then shows in the model picker (§3).
+- **Skip** closes the dialog, and it doesn't show again (saved in the user config).
 
 ### Docs
 
-- Getting Started opens with "Start the Web UI and pick a model", followed by the CLI.
-- The Model guide gets a table of starter models (size, license, memory), generated from the same `starter` config so the two can't drift apart.
+- Getting Started opens with starting the Web UI and picking a model in the first-run dialog, then the CLI.
+- The Hugging Face token section mentions `hf auth login`.
 
 ## Alternatives considered
 
-- **Switch the default to `klein4b` with no picker.** Rejected: 4B is visibly weaker, and machines with 32 GB or more should get 9B. The picker gives each machine a sensible choice.
-- **A modal wizard on first launch.** Rejected: it blocks the app, and people who already have models in the cache would have to click through it. The Welcome panel sits in the empty preview and goes away as soon as a model exists.
-- **Detect-only tokens with a docs link.** Rejected in favour of pasting the token in the UI, since it uses the same storage as the official CLI.
-- **Ship the starter sizes as fixed numbers.** Rejected: repos change. The sizes come from the API (cached) and fall back to config labels offline.
-- **Downloads in the generation queue.** Rejected: a 35 GB download would block every queued generation behind it, even ones using models already downloaded.
+- **Switch the default to `klein4b` with no choice.** Rejected: 4B is visibly weaker, and machines with 32 GB or more should get 9B.
+- **A fallback list of repos per alias, so existing upstream downloads are kept.** Rejected as a legacy workaround that adds resolution logic for a one-time 35 GB download.
+- **A download bar under the top nav on every page.** Rejected: it adds a page-wide element. Downloads show where the model already appears instead.
+- **Downloads in the generation queue.** Rejected: a 35 GB download would block every queued generation behind it.
+
+## Later, not in this proposal
+
+- Memory fit (Fits/Tight/Too large) for models that aren't downloaded yet, from `HfApi.get_safetensors_metadata`.
+- Adding and removing the Hugging Face token in the Web UI.
+- `ziv-model download <alias>` in the terminal.
 
 ## Open questions
 
-- Whether `ziv-image` without `-m` should use `ui.default_models.image` too, so the CLI and the Web UI share one default. Today the CLI requires `-m`.
-
-## Out of scope
-
-- A searchable Hugging Face model browser. Converting arbitrary checkpoints stays on the Models page.
-- Bundled sample prompt files and a "try these prompts" gallery. This would be a good follow-up for the Welcome panel.
+- Whether `ziv-image` without `-m` should use `ui.default_models.image`, so the CLI and the Web UI share one default. Today it errors (`image_cli.py:186`).
