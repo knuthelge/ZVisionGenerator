@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from zvisiongenerator.downloads.hub_access import describe_refusal
 from zvisiongenerator.downloads.target import DownloadTarget, TargetCheck
 
 
@@ -18,7 +19,8 @@ def check_target(target: DownloadTarget, *, snapshot_download: Callable[..., obj
         The missing counts, or ``None`` when offline or unreachable.
 
     Raises:
-        RuntimeError: The Hub refused the request (gated, missing repo or revision, server error).
+        RuntimeError: The Hub refused the request (gated, missing repo or revision, server error); a gated or
+            unauthorized refusal is one line saying what to do.
     """
     from huggingface_hub.errors import DryRunError, HfHubHTTPError
 
@@ -38,10 +40,10 @@ def check_target(target: DownloadTarget, *, snapshot_download: Callable[..., obj
         if cause is None or _is_unreachable(cause):
             return None
         if isinstance(cause, HfHubHTTPError):
-            raise RuntimeError(f"Could not download {target.repo_id}: {cause}") from cause
+            raise RuntimeError(_refusal_text(cause, target)) from cause
         raise
     except HfHubHTTPError as exc:
-        raise RuntimeError(f"Could not download {target.repo_id}: {exc}") from exc
+        raise RuntimeError(_refusal_text(exc, target)) from exc
     except Exception as exc:
         if _is_unreachable(exc):
             return None
@@ -49,6 +51,11 @@ def check_target(target: DownloadTarget, *, snapshot_download: Callable[..., obj
     missing = [info for info in infos if info.will_download]
     sizes = [info.file_size for info in missing]
     return TargetCheck(missing_files=len(missing), missing_bytes=None if any(size is None for size in sizes) else sum(sizes))
+
+
+def _refusal_text(exc: BaseException, target: DownloadTarget) -> str:
+    """Return the actionable line for a Hub refusal of *target*, or the plain failure text for any other Hub error."""
+    return describe_refusal(exc, target.repo_id) or f"Could not download {target.repo_id}: {exc}"
 
 
 def _is_unreachable(exc: BaseException) -> bool:

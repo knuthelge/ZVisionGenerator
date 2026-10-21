@@ -64,7 +64,7 @@ function makeConfig(): AppConfig {
       model_cache_dir: '/cache/models',
       loras_dir: '/tmp/loras',
       huggingface_token_configured: false,
-      huggingface_token_env_var: 'HF_TOKEN',
+      huggingface_token_source: null,
       default_image_size: 'm',
     },
     writable_config: {
@@ -135,6 +135,20 @@ describe('ConfigPage', () => {
     }
     target.remove();
     document.body.innerHTML = '';
+  });
+
+  it('names where a configured Hugging Face token comes from', async () => {
+    const config = makeConfig();
+    config.ui.huggingface_token_configured = true;
+    config.ui.huggingface_token_source = 'hf auth login';
+    configApiMocks.getConfig.mockResolvedValue(config);
+
+    app = flushSync(() => mount(ConfigPage, { target }));
+    await settle();
+
+    const text = target.textContent ?? '';
+    expect(text).toContain('Available');
+    expect(text).toContain('hf auth login');
   });
 
   it('renders editable controls only for backend-declared writable schema fields', async () => {

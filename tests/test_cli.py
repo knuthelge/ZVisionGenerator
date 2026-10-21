@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import patch
 
+import httpx
 import pytest
+from huggingface_hub.errors import GatedRepoError
 
+import zvisiongenerator.image_cli as image_cli
+from tests.test_lora_unification import _patch_image_main_dependencies
 from zvisiongenerator.cli import main
 from zvisiongenerator.web import main as web_main
 
@@ -193,3 +198,40 @@ class TestWebCli:
 
         assert exc_info.value.code == 2
         run_server.assert_not_called()
+
+
+def _gated() -> GatedRepoError:
+    return GatedRepoError("boom", response=httpx.Response(403, request=httpx.Request("GET", "https://huggingface.co/api/models/owner/model")))
+
+
+class TestImageCliHubRefusals:
+    """A Hub refusal ends ziv-image with a usage error that says what to do, not a traceback."""
+
+    @pytest.mark.parametrize("stage", ["detect", "load"])
+    def test_gated_model_exits_2_with_the_next_step(self, monkeypatch, capsys, stage):
+        backend = _patch_image_main_dependencies(monkeypatch)
+        if stage == "detect":
+            monkeypatch.setattr(image_cli, "detect_image_model", lambda _model: (_ for _ in ()).throw(_gated()))
+        else:
+            backend.load_model.side_effect = _gated()
+        monkeypatch.setattr(sys, "argv", ["ziv-image", "-m", "owner/model", "--prompt", "a cat"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            image_cli.main()
+
+        error = capsys.readouterr().err.strip().splitlines()[-1]
+        assert exc_info.value.code == 2
+        assert "hf auth login" in error
+        assert "https://huggingface.co" in error
+        assert "Traceback" not in error
+
+    def test_other_load_errors_keep_their_text(self, monkeypatch, capsys):
+        backend = _patch_image_main_dependencies(monkeypatch)
+        backend.load_model.side_effect = RuntimeError("out of memory")
+        monkeypatch.setattr(sys, "argv", ["ziv-image", "-m", "owner/model", "--prompt", "a cat"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            image_cli.main()
+
+        assert exc_info.value.code == 2
+        assert "out of memory" in capsys.readouterr().err

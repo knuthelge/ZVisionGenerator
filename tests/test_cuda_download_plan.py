@@ -8,7 +8,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+from huggingface_hub.errors import GatedRepoError
 from huggingface_hub.utils import filter_repo_objects
 
 from zvisiongenerator.backends.cuda.download_plan import (
@@ -117,6 +119,27 @@ def test_image_plan_passes_revision_to_the_index_reader() -> None:
 def test_image_plan_unreadable_index_raises_lookup_error() -> None:
     def reader(repo_id: str, revision: str | None) -> dict[str, Any]:
         raise OSError("offline")
+
+    with pytest.raises(LookupError, match="owner/repo"):
+        image_download_plan("owner/repo", family="zimage", read_index=reader)
+
+
+def test_image_plan_hub_refusal_raises_runtime_error_with_the_next_step() -> None:
+    def reader(repo_id: str, revision: str | None) -> dict[str, Any]:
+        raise GatedRepoError("boom", response=httpx.Response(403, request=httpx.Request("GET", "https://huggingface.co/api/models/owner/repo")))
+
+    with pytest.raises(RuntimeError) as raised:
+        image_download_plan("owner/repo", family="zimage", read_index=reader)
+
+    message = str(raised.value)
+    assert "\n" not in message
+    assert "https://huggingface.co/owner/repo" in message
+    assert "hf auth login" in message
+
+
+def test_image_plan_unreachable_hub_stays_a_lookup_error() -> None:
+    def reader(repo_id: str, revision: str | None) -> dict[str, Any]:
+        raise httpx.ConnectError("offline")
 
     with pytest.raises(LookupError, match="owner/repo"):
         image_download_plan("owner/repo", family="zimage", read_index=reader)

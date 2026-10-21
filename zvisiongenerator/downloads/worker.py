@@ -5,7 +5,7 @@ Run as ``python -m zvisiongenerator.downloads.worker '<target json>'``. Every pr
 
 - ``{"wire": n, "written": m}``: counts so far, at most every 0.5 s while they change.
 - ``{"done": true, "wire": n, "written": m}``: the download finished (exit code 0).
-- ``{"error": "<Type>: <message>"}``: the download failed (exit code 1).
+- ``{"error": "<Type>: <message>"}``: the download failed (exit code 1); a Hub refusal is one line saying what to do instead.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import os
 import sys
 import threading
 
+from zvisiongenerator.downloads.hub_access import describe_refusal
 from zvisiongenerator.downloads.progress import ByteCounts, make_byte_sink
 from zvisiongenerator.downloads.protocol import PROTOCOL_PREFIX
 from zvisiongenerator.downloads.target import DownloadTarget
@@ -68,6 +69,7 @@ def main(argv: list[str] | None = None, *, start_lifeline: bool = False) -> int:
     stop = threading.Event()
     reporter = threading.Thread(target=_report_counts, args=(counts, stop, lock), name="ziv-download-report", daemon=True)
     reporter.start()
+    target: DownloadTarget | None = None
     try:
         if len(args) != 1:
             raise ValueError("expected one argument: the download target as JSON")
@@ -83,7 +85,7 @@ def main(argv: list[str] | None = None, *, start_lifeline: bool = False) -> int:
             tqdm_class=make_byte_sink(counts),
         )
     except Exception as exc:  # noqa: BLE001 - every failure is reported to the parent as a protocol line
-        failure: dict[str, object] | None = {"error": f"{type(exc).__name__}: {exc}"}
+        failure: dict[str, object] | None = {"error": describe_refusal(exc, None if target is None else target.repo_id) or f"{type(exc).__name__}: {exc}"}
     else:
         failure = None
     stop.set()

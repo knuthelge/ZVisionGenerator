@@ -118,7 +118,7 @@ Rows whose files are not fully downloaded have a **Download** button, so a model
 - **One at a time, beside your jobs.** Downloads run one after another and don't take a place in the job queue, so generation jobs start while a download runs. Later downloads wait as **Queued**; **Cancel** on a row stops a running download or removes a queued one. Cancelling keeps the finished files and removes the half-written one, so the next Download continues with the rest.
 - **Jobs share the download.** A job that needs a model being downloaded waits for it and shows its progress on the job card. Cancelling that job leaves the download running.
 - **Ideogram 4 Instant and SeedVR2.** The **Download** button for `ideo` fetches its source files; the first job then prepares the model folder from them (see [Ideogram 4 Instant](image.md#ideogram-4)). On a Mac, the SeedVR2 row downloads the model, and the first plain upscale makes its 8-bit copy and removes the download.
-- **No connection.** If Hugging Face can't be reached, the size can't be read and the download can't start. A gated or missing repository shows Hugging Face's reason.
+- **No connection.** If Hugging Face can't be reached, the size can't be read and the download can't start. A gated or missing repository shows one line saying what to do: the model's page to accept its license on, and `hf auth login` when no [Hugging Face token](../getting-started.md#hugging-face-token) is found.
 
 Each row also has a delete button, which asks for confirmation first and is unavailable while generation jobs are running or queued, or while the row's model is downloading (wait for the download or cancel it):
 

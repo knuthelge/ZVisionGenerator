@@ -208,14 +208,14 @@ def _gpu_budget_bytes() -> int | None:
 def build_models_response(
     web_config: WebUiConfig,
     *,
-    token_var: str | None,
+    token_source: str | None,
     image_defaults_for: Callable[[str, WebUiConfig], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the models inventory payload from the inventory discovered with the Web UI config.
 
     Args:
         web_config: The Web UI config, including its discovered model inventory.
-        token_var: The HuggingFace token environment variable in use, if any.
+        token_source: Where the Hugging Face token comes from (an environment variable name or ``hf auth login``), if any.
         image_defaults_for: Resolves one image model's bootstrap defaults; only its ``supports_quantize`` is used.
     """
     data_dir = Path(web_config.data_dir)
@@ -266,8 +266,8 @@ def build_models_response(
         "other_downloads": _other_downloads_payload(web_config),
         "loras": loras,
         "stored_quants_supported": supports_stored_quants(),
-        "huggingface_configured": token_var is not None,
-        "huggingface_token_env_var": token_var,
+        "huggingface_configured": token_source is not None,
+        "huggingface_token_source": token_source,
     }
 
 

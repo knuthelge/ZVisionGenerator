@@ -43,6 +43,7 @@ from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.downloads.flights import DownloadFlights
+from zvisiongenerator.downloads.hub_access import token_source as hub_token_source
 from zvisiongenerator.utils.config import (
     ENHANCER_TIERS,
     enhancer_tier_models,
@@ -86,7 +87,7 @@ from zvisiongenerator.utils.video_extend import apply_extend_args
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_upscale_workflow
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
-from zvisiongenerator.web.config_api import build_api_config_response, huggingface_token_env_var
+from zvisiongenerator.web.config_api import build_api_config_response
 from zvisiongenerator.web.config_contract import persist_writable_config_patch, resolve_output_dir as resolve_config_output_dir
 from zvisiongenerator.web.download_lane import DownloadLane
 from zvisiongenerator.web.defaults import default_image_size_for_ratio, default_video_size_for_ratio
@@ -891,9 +892,9 @@ def _build_workspace_response(web_config: WebUiConfig, history_assets: list[dict
     )
 
 
-def _build_models_response(web_config: WebUiConfig, *, token_var: str | None) -> dict[str, Any]:
+def _build_models_response(web_config: WebUiConfig, *, token_source: str | None) -> dict[str, Any]:
     """Build the models payload from shared backend inventory helpers."""
-    return build_models_response(web_config, token_var=token_var)
+    return build_models_response(web_config, token_source=token_source)
 
 
 def _resolve_docs_asset_path(asset_name: str) -> Path | None:
@@ -1845,8 +1846,7 @@ async def api_save_config(request: Request) -> dict[str, Any]:
 def api_models() -> dict[str, Any]:
     """Return installed model inventory as JSON for the Svelte SPA."""
     web_config = load_web_config()
-    token_var = huggingface_token_env_var()
-    return _build_models_response(web_config, token_var=token_var)
+    return _build_models_response(web_config, token_source=hub_token_source())
 
 
 @app.post("/api/models/convert")
@@ -1918,6 +1918,8 @@ async def api_models_download_plan(kind: str, name: str) -> dict[str, Any]:
         plan = await run_in_threadpool(row_plan, kind, name, web_config)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=424, detail=str(exc)) from exc
     try:
         return await run_in_threadpool(plan_summary, plan)
     except PlanUnchecked as exc:
@@ -1938,6 +1940,8 @@ async def api_models_download(request: Request) -> dict[str, Any]:
         plan = await run_in_threadpool(lambda: row_plan(kind, name, load_web_config()))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=424, detail=str(exc)) from exc
     try:
         return download_lane.submit(kind=kind, name=name, label=plan.label, plan=lambda: row_plan(kind, name, load_web_config()).targets)
     except RuntimeError as exc:

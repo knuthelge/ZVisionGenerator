@@ -243,6 +243,17 @@ export HF_XET_HIGH_PERFORMANCE=1
 ziv-image -m my-model --prompt "a landscape"
 ```
 
+### Hugging Face token
+
+The built-in models download without an account. A gated model, one whose page on Hugging Face asks you to accept a license, needs a Hugging Face token from an account that accepted it:
+
+1. Accept the license on the model's page on Hugging Face, signed in to your account.
+2. Save a token on this computer with `hf auth login`, or set the `HF_TOKEN` environment variable before starting the program.
+
+A token saved by `hf auth login` is found automatically. The Web UI's Config page and Models page show whether a token is found and where it comes from (`HF_TOKEN` or `hf auth login`).
+
+When Hugging Face refuses a download, the Web UI (on the Models page, the job card and the download list) and `ziv-image` / `ziv-video` give a one-line reason that names the model, links to its page, and says whether to run `hf auth login`. A message that your token was rejected or has no access means the token is set but its account has not accepted the license, or the token is no longer valid. A gated alias of your own is not listed in the Web UI; `ziv-image -m <alias>` says why.
+
 ### `ZIV_DATA_DIR` Override
 
 Set the `ZIV_DATA_DIR` environment variable to use a custom location instead of `~/.ziv/`:

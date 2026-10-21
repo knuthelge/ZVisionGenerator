@@ -21,6 +21,7 @@ from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import parse_lora_arg, resolve_lora_references
 from zvisiongenerator.utils.model_files import find_local_model_dir
 from zvisiongenerator.utils.model_memory import clip_memory_fit
+from zvisiongenerator.downloads import describe_refusal
 from zvisiongenerator.utils.paths import resolve_lora_path, resolve_model_path
 from zvisiongenerator.utils.prompt_compose import is_original_prompt
 from zvisiongenerator.utils.prompts import inspect_prompts_file
@@ -373,7 +374,11 @@ def main(*, prog: str = "ziv-video") -> None:
     ensure_ffmpeg()
 
     # Detect video model family
-    model_info = detect_video_model(args.model)
+    try:
+        model_info = detect_video_model(args.model)
+    except Exception as e:
+        logger.exception("Could not detect model type for %s", args.model)
+        parser.error(f"Could not detect model type: {describe_refusal(e) or e}")
     if model_info.family == "unknown":
         parser.error(f"Could not detect video model family for '{args.model}'. {_unknown_video_model_guidance()}")
 
@@ -510,9 +515,9 @@ def main(*, prog: str = "ziv-video") -> None:
                 loras=loras,
                 **ltx_load_options(config, model_name, upscale=bool(args.upscale)),
             )
-        except (RuntimeError, ValueError, FileNotFoundError, ImportError) as e:
+        except (RuntimeError, ValueError, OSError, ImportError) as e:
             logger.exception("Failed to load video model %s", args.model)
-            parser.error(str(e))
+            parser.error(describe_refusal(e) or str(e))
 
         # Build workflow
         workflow = build_video_workflow(args, enhance=plan.has_rewrites)

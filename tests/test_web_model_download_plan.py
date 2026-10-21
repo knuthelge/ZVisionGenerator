@@ -231,7 +231,7 @@ class TestModelsResponse:
         )
 
     def test_every_row_kind_carries_download_needed_as_a_bool(self, web_config):
-        payload = build_models_response(web_config, token_var=None)
+        payload = build_models_response(web_config, token_source=None)
 
         rows = [*payload["image_models"], *payload["video_models"], *payload["enhancer_models"]]
         assert {row.get("name", row.get("tier")) for row in rows} == {"zit", "seedvr2-7b@fp8", "ltx-8", "fast"}
@@ -249,7 +249,7 @@ class TestModelsResponse:
         monkeypatch.setattr(huggingface_hub, "snapshot_download", _raise)
         monkeypatch.setattr(huggingface_hub, "hf_hub_download", _raise)
 
-        payload = build_models_response(web_config, token_var=None)
+        payload = build_models_response(web_config, token_source=None)
 
         rows = {row["name"]: row for row in (*payload["image_models"], *payload["video_models"])}
         assert rows["zit"]["download_needed"] is True
@@ -263,7 +263,7 @@ class TestModelsResponse:
         monkeypatch.setattr(plan_module, "video_plan", _boom)
 
         with pytest.warns(UserWarning, match="ltx-8"):
-            payload = build_models_response(web_config, token_var=None)
+            payload = build_models_response(web_config, token_source=None)
 
         assert payload["video_models"][0]["download_needed"] is False
         assert payload["image_models"][0]["download_needed"] is True

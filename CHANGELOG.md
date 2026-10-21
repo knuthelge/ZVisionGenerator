@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Fixed
+- **Gated models say what to do.** When Hugging Face refuses a model (it is gated, or your token has no access to it), the Models page, the job card, the download list and `ziv-image` / `ziv-video` show one line that names the model, links to its page and says whether to accept its license, run `hf auth login` or sign in again, instead of Hugging Face's multi-line error. On Windows and Linux the Download button now shows this refusal too, where it showed "Could not reach Hugging Face"
+- **A token saved with `hf auth login` is found.** The Config page and Models page showed "Not set" unless `HF_TOKEN` was in the environment, even though downloads already used the saved token. They now report any token Hugging Face's tools find and where it comes from. The unsupported `HF_HUB_TOKEN` and `HUGGINGFACE_HUB_TOKEN` variables no longer count as a token
+
 ### Changed
 - **`klein9b` downloads from an ungated mirror.** It needs no Hugging Face token or license step any more. A copy downloaded before this update isn't used: `klein9b` downloads again (about 35 GB) and its `klein9b@q8` copy is made again once. Delete the old copy under Models → Other downloads (`black-forest-labs/FLUX.2-klein-9B`). Converting a Klein 9B checkpoint uses the mirror as its base too
 

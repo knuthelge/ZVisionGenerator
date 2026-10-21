@@ -18,6 +18,7 @@ from urllib.parse import quote
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+import huggingface_hub
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 import pytest
@@ -241,7 +242,6 @@ def test_phase_a_routes_share_config_and_path_authority(monkeypatch):
     monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
     monkeypatch.setattr(web_server, "list_gallery_assets", lambda _output_dir: [])
     monkeypatch.setattr(web_server, "_build_workspace_bootstrap_view", lambda _cfg: _make_workspace_bootstrap_view())
-    monkeypatch.setattr(web_server, "huggingface_token_env_var", lambda: "HF_TOKEN")
     monkeypatch.setattr(web_server.web_runner, "list_jobs", lambda: {"active_job": active_job_snapshot, "queued_jobs": []})
     monkeypatch.setattr(
         config_contract_module,
@@ -315,6 +315,53 @@ def test_phase_a_routes_share_config_and_path_authority(monkeypatch):
         "ignored_scene_image",
     }
     assert all(isinstance(value, str) and value for value in prompt_file["help"].values())
+
+
+class TestHuggingFaceTokenPayload:
+    """``/api/config`` and ``/api/models`` report the token ``huggingface_hub`` finds and where it comes from."""
+
+    @staticmethod
+    def _payloads(monkeypatch):
+        web_config = _make_web_config()
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        with TestClient(web_server.app) as client:
+            config = client.get("/api/config")
+            models = client.get("/api/models")
+        assert (config.status_code, models.status_code) == (200, 200)
+        return config.json()["ui"], models.json()
+
+    def test_no_token_is_not_configured(self, monkeypatch):
+        ui, models = self._payloads(monkeypatch)
+
+        assert (ui["huggingface_token_configured"], ui["huggingface_token_source"]) == (False, None)
+        assert (models["huggingface_configured"], models["huggingface_token_source"]) == (False, None)
+
+    def test_a_saved_token_is_configured_with_the_login_source(self, monkeypatch):
+        monkeypatch.setattr(huggingface_hub, "get_token", lambda: "saved")
+
+        ui, models = self._payloads(monkeypatch)
+
+        assert (ui["huggingface_token_configured"], ui["huggingface_token_source"]) == (True, "hf auth login")
+        assert (models["huggingface_configured"], models["huggingface_token_source"]) == (True, "hf auth login")
+
+    def test_an_environment_token_names_its_variable(self, monkeypatch):
+        monkeypatch.setattr(huggingface_hub, "get_token", lambda: "from-env")
+        monkeypatch.setenv("HF_TOKEN", "from-env")
+
+        ui, models = self._payloads(monkeypatch)
+
+        assert ui["huggingface_token_source"] == models["huggingface_token_source"] == "HF_TOKEN"
+
+    def test_a_token_reader_that_raises_reads_as_not_configured(self, monkeypatch):
+        def broken() -> str:
+            raise RuntimeError("OIDC unavailable")
+
+        monkeypatch.setattr(huggingface_hub, "get_token", broken)
+
+        ui, models = self._payloads(monkeypatch)
+
+        assert ui["huggingface_token_configured"] is False
+        assert models["huggingface_configured"] is False
 
 
 def test_workspace_route_can_skip_history_asset_serialization(monkeypatch):
@@ -2073,7 +2120,7 @@ def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
     workspace_calls = list(calls)
     models = workspace_api_module.build_models_response(
         web_config,
-        token_var=None,
+        token_source=None,
         image_defaults_for=lambda name, _cfg: bootstrap_view["image_model_defaults"].get(name, {}),
     )
 
@@ -2150,7 +2197,7 @@ def test_models_page_skips_quantize_resolution_without_a_memory_budget(monkeypat
 
     models = workspace_api_module.build_models_response(
         web_config,
-        token_var=None,
+        token_source=None,
         image_defaults_for=lambda name, _cfg: pytest.fail("resolved image defaults without a memory budget"),
     )
 
@@ -3496,6 +3543,21 @@ class TestModelDownloadPlanRoute:
 
         assert response.status_code == 424
         assert "owner/vae" in response.json()["detail"]
+
+    def test_a_refusal_while_planning_the_row_is_424_on_both_routes(self, client, monkeypatch):
+        line = "owner/zit needs a Hugging Face token: accept its license at https://huggingface.co/owner/zit, then run `hf auth login`."
+
+        def refuse(*_args, **_kwargs):
+            raise RuntimeError(line)
+
+        monkeypatch.setattr(download_plan_module, "image_plan", refuse)
+
+        plan = client.get("/api/models/download/plan", params={"kind": "model", "name": "zit"})
+        queued = client.post("/api/models/download", json={"kind": "model", "name": "zit"})
+
+        assert (plan.status_code, queued.status_code) == (424, 424)
+        assert plan.json()["detail"] == line
+        assert queued.json()["detail"] == line
 
 
 class TestJobLogRoutes:

@@ -21,6 +21,7 @@ from zvisiongenerator.utils.config import MAX_SHARPEN_AMOUNT, load_config, resol
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import resolve_lora_references
+from zvisiongenerator.downloads import describe_refusal
 from zvisiongenerator.utils.paths import get_ziv_data_dir, resolve_model_path
 from zvisiongenerator.utils.prompts import inspect_prompts_file
 from zvisiongenerator.utils.prompt_enhance import image_enhance_entries
@@ -198,7 +199,7 @@ def main(*, prog: str = "ziv-image") -> None:
         model_info = detect_image_model(args.model)
     except Exception as e:
         logger.exception("Could not detect model type for %s", args.model)
-        parser.error(f"Could not detect model type: {e}")
+        parser.error(f"Could not detect model type: {describe_refusal(e) or e}")
     try:
         backend = get_backend()
     except (RuntimeError, ImportError) as e:
@@ -330,7 +331,7 @@ def main(*, prog: str = "ziv-image") -> None:
             )
         except (RuntimeError, ImportError, OSError, ValueError) as e:
             logger.exception("Failed to load model %s", args.model)
-            parser.error(f"Failed to load model: {e}")
+            parser.error(f"Failed to load model: {describe_refusal(e) or e}")
         run_batch(backend, loaded_model, prompts_data, config, args, model_info=loaded_model_info, plan=plan, skip_signal=skip)
     finally:
         skip.stop()

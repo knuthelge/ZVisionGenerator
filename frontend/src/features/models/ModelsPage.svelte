@@ -599,8 +599,8 @@
           { label: 'Models folder', value: inventory.models_dir || '—', mono: true },
           { label: 'LoRAs folder', value: inventory.loras_dir || '—', mono: true },
           inventory.huggingface_configured
-            ? { label: 'Hugging Face token', value: 'Available', tone: 'success', hint: `Read from ${inventory.huggingface_token_env_var ?? 'HF_TOKEN'}.` }
-            : { label: 'Hugging Face token', value: 'Not set', tone: 'muted', hint: 'Set HF_TOKEN for gated model downloads.' },
+            ? { label: 'Hugging Face token', value: 'Available', tone: 'success', hint: inventory.huggingface_token_source ? `From ${inventory.huggingface_token_source}.` : undefined }
+            : { label: 'Hugging Face token', value: 'Not set', tone: 'muted', hint: 'Run hf auth login (or set HF_TOKEN) to download gated models.' },
         ]} />
       </Panel>
 
@@ -975,7 +975,7 @@
           </FormField>
 
           {#if !inventory.huggingface_configured}
-            <Alert tone="warning">Set <span class="font-mono">HF_TOKEN</span> for gated model downloads.</Alert>
+            <Alert tone="warning">Run <span class="font-mono">hf auth login</span> (or set <span class="font-mono">HF_TOKEN</span>) to download gated models.</Alert>
           {/if}
 
           {@render submitRow('Download LoRA', false)}

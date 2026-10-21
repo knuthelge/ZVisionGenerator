@@ -6,8 +6,10 @@ import warnings
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from conftest import make_extend_source
+from huggingface_hub.errors import GatedRepoError
 
 from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
 from zvisiongenerator.utils.model_memory import MemoryBudget
@@ -102,6 +104,40 @@ class TestBuildVideoParser:
         assert args.image_path is None
         assert args.ratio is None
         assert args.size is None
+
+
+class TestVideoCliHubRefusals:
+    """A Hub refusal ends ziv-video with a usage error that says what to do, not a traceback."""
+
+    @staticmethod
+    def _gated() -> GatedRepoError:
+        return GatedRepoError("boom", response=httpx.Response(403, request=httpx.Request("GET", "https://huggingface.co/api/models/owner/model")))
+
+    @pytest.mark.parametrize("stage", ["detect", "load"])
+    def test_gated_model_exits_2_with_the_next_step(self, monkeypatch, tmp_path, capsys, stage):
+        backend = MagicMock()
+        options = {}
+        if stage == "load":
+            backend.load_model.side_effect = self._gated()
+        else:
+
+            def refuse(_model):
+                raise self._gated()
+
+            options["detect"] = refuse
+        with pytest.raises(SystemExit, match="2"):
+            _run_cli(monkeypatch, tmp_path, ["-m", "owner/model", "--prompt", "a dog"], backend=backend, **options)
+        error = capsys.readouterr().err.strip().splitlines()[-1]
+        assert "hf auth login" in error
+        assert "https://huggingface.co" in error
+        assert "Traceback" not in error
+
+    def test_other_load_errors_keep_their_text(self, monkeypatch, tmp_path, capsys):
+        backend = MagicMock()
+        backend.load_model.side_effect = RuntimeError("out of memory")
+        with pytest.raises(SystemExit, match="2"):
+            _run_cli(monkeypatch, tmp_path, ["-m", "owner/model", "--prompt", "a dog"], backend=backend)
+        assert "out of memory" in capsys.readouterr().err
 
 
 class TestVideoCliExecution:
@@ -464,6 +500,7 @@ def _run_cli(
     extend_supported=True,
     fit=None,
     resolve=None,
+    detect=None,
 ):
     """Run ``main()`` with heavy steps patched out; return what the batch received plus the backend and memory-check mocks."""
     import zvisiongenerator.video_cli as video_cli
@@ -479,7 +516,7 @@ def _run_cli(
     monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
     monkeypatch.setattr(video_cli, "supports_video_extend", lambda: extend_supported)
     monkeypatch.setattr(video_cli, "supports_video_audio", lambda: True)
-    monkeypatch.setattr(video_cli, "detect_video_model", lambda _model: model_info)
+    monkeypatch.setattr(video_cli, "detect_video_model", detect or (lambda _model: model_info))
     monkeypatch.setattr(video_cli, "resolve_video_defaults", lambda _family, _config, cli_overrides: {"steps": 8, "width": 704, "height": 448, "num_frames": 49})
     monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
     monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: MemoryBudget(16 * 1024**3))

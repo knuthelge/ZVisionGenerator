@@ -182,15 +182,14 @@
     }
   }
 
-  /** Read-only folders and the Hugging Face token, which only the server's environment can change. */
+  /** Read-only folders and the Hugging Face token, which only the server's environment or `hf auth login` can change. */
   function locationItems(c: AppConfig): KeyValueItem[] {
-    const tokenVar = c.ui.huggingface_token_env_var ?? 'HF_TOKEN';
     return [
       { label: 'Model cache', value: c.ui.model_cache_dir ?? '(runtime-only)', mono: true, hint: 'Set when the app starts; not editable here.' },
       { label: 'LoRAs folder', value: c.ui.loras_dir ?? '(runtime-only)', mono: true, hint: 'Inside the current data folder.' },
       c.ui.huggingface_token_configured
-        ? { label: 'Hugging Face token', value: 'Available', tone: 'success', hint: `Read from ${tokenVar}.` }
-        : { label: 'Hugging Face token', value: 'Not set', tone: 'muted', hint: 'Set HF_TOKEN before starting the app for gated model downloads.' },
+        ? { label: 'Hugging Face token', value: 'Available', tone: 'success', hint: c.ui.huggingface_token_source ? `From ${c.ui.huggingface_token_source}.` : undefined }
+        : { label: 'Hugging Face token', value: 'Not set', tone: 'muted', hint: 'Run hf auth login (or set HF_TOKEN) to download gated models.' },
     ];
   }
 

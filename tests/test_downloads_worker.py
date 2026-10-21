@@ -9,7 +9,9 @@ import time
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+from huggingface_hub.errors import GatedRepoError
 
 from zvisiongenerator.downloads import worker
 from zvisiongenerator.downloads.target import DownloadTarget
@@ -97,6 +99,18 @@ def test_main_reports_a_failure(monkeypatch: pytest.MonkeyPatch, capsys: pytest.
     lines = _protocol(capsys.readouterr().out)
     assert lines[-1] == {"error": "OSError: No space left on device"}
     assert not any(line.get("done") for line in lines)
+
+
+def test_main_reports_a_hub_refusal_as_one_line_with_the_next_step(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    def fake(repo_id: str, **kwargs: Any) -> str:
+        raise GatedRepoError("boom", response=httpx.Response(403, request=httpx.Request("GET", "https://huggingface.co/api/models/owner/repo")))
+
+    _patch_download(monkeypatch, fake)
+    assert worker.main([_TARGET.to_json()]) == 1
+    error = _protocol(capsys.readouterr().out)[-1]["error"]
+    assert "\n" not in error
+    assert "https://huggingface.co/owner/repo" in error
+    assert "hf auth login" in error
 
 
 @pytest.mark.parametrize("argv", [[], ["{not json"], ["{}"], ["a", "b"]])

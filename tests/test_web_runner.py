@@ -15,6 +15,8 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
+import httpx
+from huggingface_hub.errors import GatedRepoError
 from PIL import Image
 import pytest
 
@@ -790,6 +792,25 @@ class TestWebRunner:
 
             reusable_job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=lambda _progress_callback: None)
             assert _wait_for_status(runner, reusable_job_id, "completed")["terminal_event"] == "job_completed"
+        finally:
+            runner.shutdown()
+
+    def test_a_hub_refusal_fails_the_job_with_one_actionable_line(self):
+        """A gated repo ends the job with the next step, not the raw Hub error."""
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        gated = GatedRepoError("boom\nmulti-line detail", response=httpx.Response(403, request=httpx.Request("GET", "https://huggingface.co/api/models/owner/repo")))
+
+        def _fail(_progress_callback):
+            raise RuntimeError("Failed to load model") from gated
+
+        try:
+            job_id = runner._submit_job(job_type="test", exclusive=True, target_factory=_fail)
+            snapshot = _wait_for_status(runner, job_id, "failed")
+
+            message = snapshot["last_event"]["message"]
+            assert "\n" not in message
+            assert "hf auth login" in message
+            assert "https://huggingface.co" in message
         finally:
             runner.shutdown()
 

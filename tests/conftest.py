@@ -43,6 +43,16 @@ def _no_web_download_planning(request, monkeypatch):
         monkeypatch.setattr(web_runner, name, lambda *_a, **_kw: None)
 
 
+@pytest.fixture(autouse=True)
+def _no_hugging_face_token(monkeypatch):
+    """Keep every test from seeing the real Hugging Face token (env or ``hf auth login`` file); tests that need one inject it."""
+    import huggingface_hub
+
+    monkeypatch.setattr(huggingface_hub, "get_token", lambda: None)
+    for name in ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "HF_OIDC_RESOURCE"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def _make_args(**overrides):
     """Return a minimal argparse Namespace for run_batch()."""
     defaults = dict(

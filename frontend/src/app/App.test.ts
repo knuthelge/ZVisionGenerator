@@ -49,7 +49,7 @@ function makeConfig(startupView: AppConfig['ui']['startup_view'] = 'config'): Ap
       model_cache_dir: '/tmp/models',
       loras_dir: '/tmp/loras',
       huggingface_token_configured: false,
-      huggingface_token_env_var: null,
+      huggingface_token_source: null,
       default_image_size: 'm',
     },
     writable_config: {

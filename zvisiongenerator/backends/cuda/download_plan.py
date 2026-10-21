@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.downloads.hub_access import describe_refusal
 from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 
@@ -89,7 +90,8 @@ def image_download_plan(
         read_index: Reads a repo's ``model_index.json`` as ``(repo_id, revision) -> dict``; defaults to the Hub (local cache first).
 
     Raises:
-        LookupError: If the repo's ``model_index.json`` cannot be read.
+        RuntimeError: If the Hub refuses the repo (gated, no access or not found); the message says what to do.
+        LookupError: If the repo's ``model_index.json`` cannot be read for any other reason.
     """
     reference = parse_huggingface_repo_reference(model_ref)
     if reference is None or Path(model_ref).expanduser().is_dir() or family == "ideogram4":
@@ -97,6 +99,9 @@ def image_download_plan(
     try:
         index = (read_index or _read_hub_model_index)(reference.repo_id, reference.revision)
     except Exception as exc:
+        refusal = describe_refusal(exc, reference.repo_id)
+        if refusal is not None:
+            raise RuntimeError(refusal) from exc
         raise LookupError(f"Could not read model_index.json of '{reference.repo_id}': {exc}") from exc
     allow = ("model_index.json", *DIFFUSERS_ROOT_FILES, *(f"{folder}/*" for folder in _component_folders(index)))
     return (DownloadTarget(reference.repo_id, reference.revision, allow, DIFFUSERS_IGNORE),)

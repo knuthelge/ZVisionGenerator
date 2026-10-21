@@ -670,7 +670,7 @@ export interface WebUiConfig {
   model_cache_dir?: string;
   loras_dir?: string;
   huggingface_token_configured?: boolean;
-  huggingface_token_env_var?: string | null;
+  huggingface_token_source?: string | null;
   image_size_labels?: { value: string; label: string }[];
   default_image_size?: string;
 }
@@ -1277,5 +1277,5 @@ export interface ModelInventory {
   /** Whether this platform can save quantized copies of models (macOS). */
   stored_quants_supported?: boolean;
   huggingface_configured: boolean;
-  huggingface_token_env_var: string | null;
+  huggingface_token_source: string | null;
 }

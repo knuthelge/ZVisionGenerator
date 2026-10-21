@@ -67,7 +67,7 @@ function makeInventory(): ModelInventory {
     video_models: [],
     loras: [],
     huggingface_configured: false,
-    huggingface_token_env_var: 'HF_TOKEN',
+    huggingface_token_source: null,
   };
 }
 
