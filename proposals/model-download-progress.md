@@ -1,21 +1,24 @@
 # Show model download progress in Web UI jobs
 
-**Status:** Proposed (2026-10-10)
+**Status:** Proposed (2026-10-21)
 
 ## Problem
 
 When a Web UI job uses a model that isn't downloaded yet, the job card says "Loading klein9b..." for the whole download, which can be 16 to 35 GB for an image model and more than 60 GB for video. There is no size, progress, speed or ETA. From the browser, a download that takes 40 minutes looks the same as a load that has hung.
 
-Nothing reports progress today because the download is a side effect of loading the model, inside a library:
+Nothing reports progress today because the download is a side effect of loading the model, either inside a library or in our own load code:
 
 - **Image on macOS:** mflux's `PathResolution` calls `snapshot_download(repo_id, allow_patterns=…)` when no complete cached snapshot matches the weight definition's patterns.
-- **Image on CUDA:** diffusers `from_pretrained` (`backends/cuda/image/backend.py:97`, `image_win_quant.py:136`) and our own `snapshot_download` of single components (`image_win_quant.py:166`).
-- **Video on macOS:** the vendored LTX pipeline calls `snapshot_download(model_dir)` with no patterns (`packages/ltx_pipelines_mlx/ti2vid_one_stage.py:78`). The Gemma text encoder is a second repo (`utils/model_files.ltx_mlx_text_encoder_repo`).
-- **Video on CUDA:** diffusers `from_pretrained` (`backends/cuda/video/backend.py:184`).
+- **Image on CUDA:** diffusers `from_pretrained` with a repo id, for the generic pipeline (`backends/cuda/image/backend.py`, `_load_nf4` and `_load_pipeline`) and for Ideogram 4 (`backends/cuda/image/ideogram4.py`). Quantized loads fetch single components with our own `snapshot_download(model_path, allow_patterns=[f"{name}/*"])` (`backends/cuda/quant.py`, `_component_dir`).
+- **Ideogram 4 Instant (both platforms):** `ideogram4_instant_builder.ensure_instant_model` downloads the reused components (`snapshot_download` with `_COMPONENT_PATTERNS`) and the transformer file (`hf_hub_download` into a downloads folder), then builds the model folder. The job reports this as `model_loading` with `phase: "building"`.
+- **Video on macOS:** the vendored LTX pipeline resolves a repo id with `snapshot_download(model_dir)` and no patterns (`packages/ltx_pipelines_mlx/utils/_orchestration.py`, `resolve_model_dir`; also `utils/blocks.py`). The Gemma text encoder is a second repo (`utils/model_files.ltx_mlx_text_encoder_repo`, the pipeline's `gemma_model_id` default). Converted LTX folders take their VAEs, vocoder and configs from a base repo with our own `snapshot_download(repo, allow_patterns=…)` (`backends/mac/ltx_converted.py`, `_base_dir`).
+- **Video on CUDA:** our own `snapshot_download(model_path, ignore_patterns=…)` (`backends/cuda/video/backend.py`, `_repo_dir`), which skips the repo's transformer weights when a separate transformer is used, plus single files through `_download_hub_file`.
+- **SeedVR2 upscaler:** `seedvr2_loader.load_seedvr2` reports `phase: "downloading"`, then either lets the engine fetch the missing files into its weights folder or, on macOS, loads from the repo, saves an 8-bit copy and deletes the download.
+- **LoRAs from a repo:** `converters/lora_import` downloads one file with `hf_hub_download` into its own folder, outside the cache.
 
 None of these calls back into our code. Web workers also set `HF_HUB_DISABLE_PROGRESS_BARS` and `TQDM_DISABLE` (`web/web_runner.worker_runtime_context`), so even the server terminal shows nothing.
 
-The prompt enhancer already reports a `downloading` phase (`enhancer_loading`), but only as text, with no progress.
+The prompt enhancer (`enhancer_loading`) and SeedVR2 (`model_loading`) already report a `downloading` phase, but only as text, with no progress.
 
 ## Relationship to other proposals
 
@@ -29,12 +32,15 @@ Before the backend loads anything, the job runs an **ensure-downloaded** step:
 
 1. Ask the backend which repos and file patterns it will read, through a new method `download_plan(model_ref, **load_options) -> list[DownloadTarget]`. A `DownloadTarget(repo_id, revision, allow_patterns)` is a frozen dataclass, and an empty list means a local path that needs nothing.
    - mflux: the weight definition's `get_download_patterns()`, or the Krea 2 variant patterns we already pass. They have to be **the same patterns** mflux uses, because `PathResolution` only treats a snapshot as cached when it matches them.
-   - diffusers (image and video): the component folders from the repo's `model_index.json` (fetched with `hf_hub_download`, a few KB), plus the tokenizer and config files, without root-level single-file checkpoints. This matches `utils/model_files.model_weight_files`.
-   - LTX MLX: the model repo (all files, as the vendored code downloads it) and the Gemma text encoder repo.
-   - LoRAs from a repo: the single file `converters/lora_import` already resolves.
+   - diffusers image (generic, Krea, Ideogram 4): the component folders from the repo's `model_index.json` (fetched with `hf_hub_download`, a few KB), plus the tokenizer and config files, without root-level single-file checkpoints. This matches `utils/model_files.model_weight_files`. For quantized loads, only the components `quant._component_dir` fetches.
+   - CUDA video: the same `ignore_patterns` `_repo_dir` passes today, plus the single files from `_download_hub_file`. Moving the patterns into one shared constant keeps the plan and the load from drifting.
+   - LTX MLX: the model repo (all files, as the vendored code downloads it) and the Gemma text encoder repo. For a converted folder, the base repo with `_base_dir`'s patterns.
+   - Ideogram 4 Instant: the builder's two sources (components with `_COMPONENT_PATTERNS`, and the transformer file), while the folder isn't built yet. The build itself stays a `model_loading` phase after the download.
+   - SeedVR2: the tier's files from `SeedVR2Weights.files`, while `seedvr2_downloaded` is false. Saving the 8-bit copy stays the `saving_quant` phase.
+   - LoRAs from a repo: the single file `converters/lora_import` already resolves. It downloads outside the cache, so its target names a local folder instead of using the cache check in step 2.
 2. For each target that isn't complete in the cache, call `snapshot_download(..., dry_run=True)` (huggingface_hub 1.33) to get the files still missing and their sizes. If nothing is missing, skip to loading. No network beyond the metadata call, no events.
 3. Otherwise download it with `snapshot_download(..., allow_patterns=…, tqdm_class=_JobProgress)` and report progress (§2).
-4. Load the model as today. The backend finds the complete snapshot in the cache and doesn't download again.
+4. Load the model as today. The backend finds the complete snapshot in the cache and doesn't download again. Where loading also builds or converts (Ideogram 4 Instant, the SeedVR2 8-bit copy), that part keeps its existing `model_loading` phase, so the job card reads Downloading → Building → Loading.
 
 The step is one pure planner per backend plus one shared function in a new `utils/model_download.py`, which the CLI and the first-run download lane can reuse. Backend selection stays in `backends/__init__.py`. The ensure step only calls the backend's `download_plan`.
 
@@ -63,13 +69,14 @@ A new job event, `model_downloading`:
 | `bytes_per_sec` | Smoothed speed over the last ~10 s |
 | `download_eta_secs` | Remaining time, or `null` |
 
-- At most **one event per second**. Each new `model_downloading` event **replaces the previous one in the job history** instead of appending, so a 40-minute download doesn't push the earlier events out of the 200-event cap, and a client that reconnects still gets the latest numbers.
+- At most **one event per second**. Each new `model_downloading` event **replaces the previous one in the job history**, so a 40-minute download doesn't push the earlier events out of the 200-event cap, and a client that reconnects still gets the latest numbers. The replacement removes the earlier `model_downloading` entry and appends the new one with the next `event_id`, so the history stays in `event_id` order and `stream_job_events(after_event_id=…)` replay (the SSE `Last-Event-ID`) keeps working: a client that reconnects mid-download gets only the latest event.
 - The ETA uses its own key. `_publish_event` carries `eta_secs` forward to later events (`record.last_eta_secs`), so a download ETA under that key would show up as the generation ETA.
 - After the download finishes, the usual `model_loading` event follows.
+- The existing `downloading` phases move to this event. SeedVR2's `model_loading` with `phase: "downloading"` and the enhancer's `enhancer_loading` with `phase: "downloading"` are replaced by `model_downloading` (with `mode` and `model` naming the upscaler or enhancer model) once their downloads go through the ensure step. Until then they keep sending the text phase.
 
 ### 4. Job card
 
-The job card shows "Downloading klein9b — 12.4 / 34.7 GB · 48 MB/s · about 8 min", with a determinate progress bar, using the existing progress bar component. For multi-repo models it adds "(part 1 of 2)". When `bytes_total` is unknown, it shows the bytes and speed with an indeterminate bar. The enhancer's `downloading` phase can use the same event later.
+The job card shows "Downloading klein9b — 12.4 / 34.7 GB · 48 MB/s · about 8 min", with a determinate progress bar, using the existing progress bar component. For multi-repo models it adds "(part 1 of 2)". When `bytes_total` is unknown, it shows the bytes and speed with an indeterminate bar. The upscaler and the enhancer use the same line once they send the event (§3).
 
 The UI change gets an HTML preview for approval before it is built.
 
@@ -101,4 +108,4 @@ A failed download (network, disk full, 401/403) fails the job with a message tha
 ## Out of scope
 
 - The download lane, `POST /api/models/download`, the disk-space check and the Welcome panel ([First run](first-run.md)).
-- Download progress for models converted from checkpoints (`converters/convert_checkpoint.py`), which runs as its own Models-page action.
+- Download progress for models converted from checkpoints (`converters/convert_checkpoint.py`, `converters/ltx_convert.py`), which run as their own Models-page actions.
