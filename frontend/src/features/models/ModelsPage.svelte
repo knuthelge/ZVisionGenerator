@@ -1,13 +1,13 @@
 <script lang="ts">
   import { onDestroy, onMount, tick, type Snippet } from 'svelte';
-  import { errorText, isRetryable } from '$lib/api/client';
-  import { cancelDownload, getDownloadPlan, getDownloads, getModelInventory, startDownload, convertCheckpoint, getConversionStatus, inspectLtxCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
-  import { downloadConfirmText } from '$lib/state/downloadConfirm';
+  import { errorText } from '$lib/api/client';
+  import { getModelInventory, convertCheckpoint, getConversionStatus, inspectLtxCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
   import { downloadLine, partLabel } from '$lib/state/downloadProgress';
-  import { addToast, dismissToast } from '$lib/state/toasts.svelte';
+  import { downloadStore } from '$lib/state/downloads.svelte';
+  import { addToast } from '$lib/state/toasts.svelte';
   import type { ConversionStatus, DownloadItem, EnhancerModelEntry, LtxCheckpointInspection, ModelDeleteInfo, ModelInventory, ModelOperationResult, ModelStatusFields } from '$lib/types';
   import { Badge, Button, Icon, Input, Select, StepProgress, Tooltip } from '$lib/components/atoms';
-  import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField, requestConfirm } from '$lib/components/molecules';
+  import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField } from '$lib/components/molecules';
   import { DOWNLOADABLE_TOOLTIP, DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
 
@@ -43,21 +43,13 @@
   const ENHANCER_TIER_LABELS: Record<EnhancerModelEntry['tier'], string> = { fast: 'Fast', smart: 'Smart', custom: 'Custom' };
 
   type DownloadKind = DownloadItem['kind'];
-  const DOWNLOAD_POLL_MS = 1000;
-  /** The lane's items, newest state from the server; finished ones stay until the server drops them. */
-  let downloads = $state<DownloadItem[]>([]);
-  /** Rows (by `rowKey`) whose plan is being read or whose download is being requested or cancelled. */
-  let busyRows = $state<ReadonlySet<string>>(new Set());
-  let downloadTimer: ReturnType<typeof setTimeout> | null = null;
-  let downloadPolling = false;
-  let pollRequested = false;
-  let downloadsSeeded = false;
-  const knownStates = new Map<string, DownloadItem['state']>();
-  const retryToastIds = new Set<string>();
-  const activeDownloads = $derived(new Map(downloads.filter(isActive).map((item) => [rowKey(item.kind, item.name), item])));
+
+  let stopDownloadSync: (() => void) | null = null;
+  let stopDownloadedHook: (() => void) | null = null;
 
   onMount(async () => {
-    void pollDownloads();
+    stopDownloadSync = downloadStore.startSync();
+    stopDownloadedHook = downloadStore.onDownloaded(() => void loadInventory({ silent: true }));
     await loadInventory();
     await pollConversion(false);
   });
@@ -66,13 +58,15 @@
     destroyed = true;
     if (conversionTimer) clearTimeout(conversionTimer);
     if (inspectTimer) clearTimeout(inspectTimer);
-    if (downloadTimer) clearTimeout(downloadTimer);
-    for (const id of retryToastIds) dismissToast(id);
+    stopDownloadSync?.();
+    stopDownloadedHook?.();
   });
 
-  function isActive(item: DownloadItem): boolean {
-    return item.state === 'queued' || item.state === 'running';
-  }
+  // Rows re-render when the lane changes: keep the keyboard focus in the row it was in.
+  $effect.pre(() => {
+    void downloadStore.items;
+    void focusRowControl(focusedRowKey());
+  });
 
   function rowKey(kind: DownloadKind, name: string): string {
     return `${kind}:${name}`;
@@ -110,13 +104,6 @@
     };
   }
 
-  function setBusy(key: string, busy: boolean): void {
-    const next = new Set(busyRows);
-    if (busy) next.add(key);
-    else next.delete(key);
-    busyRows = next;
-  }
-
   /** Key of the row whose action cell holds the keyboard focus, if any. */
   function focusedRowKey(): string | null {
     const active = document.activeElement;
@@ -132,107 +119,15 @@
     document.querySelector<HTMLElement>(`[data-dl-key="${CSS.escape(key)}"] button`)?.focus();
   }
 
-  /** Read the lane; while anything is queued or running, read it again in a second. */
-  async function pollDownloads(): Promise<void> {
-    if (downloadPolling) {
-      // A read already on its way may predate what the caller just changed: read again right after it.
-      pollRequested = true;
-      return;
-    }
-    downloadPolling = true;
-    if (downloadTimer) clearTimeout(downloadTimer);
-    downloadTimer = null;
-    try {
-      const { items } = await getDownloads();
-      if (!destroyed) applyDownloads(items);
-    } catch {
-      // A missed read says nothing about the downloads: try again while one is known to be active.
-    } finally {
-      downloadPolling = false;
-    }
-    if (pollRequested) {
-      pollRequested = false;
-      if (!destroyed) await pollDownloads();
-      return;
-    }
-    if (!destroyed && downloads.some(isActive)) downloadTimer = setTimeout(() => void pollDownloads(), DOWNLOAD_POLL_MS);
-  }
-
-  /** Take the lane's items and report each download this page saw finish or fail. The first read only records states. */
-  function applyDownloads(items: DownloadItem[]): void {
-    const focusKey = focusedRowKey();
-    downloads = items;
-    for (const item of items) reportTransition(item);
-    downloadsSeeded = true;
-    void focusRowControl(focusKey);
-  }
-
-  /** Raise an error toast whose Retry runs the Download flow again; the page dismisses it when it is destroyed. */
-  function addRetryToast(message: string, kind: DownloadKind, name: string): void {
-    retryToastIds.add(addToast(message, 'error', { action: { label: 'Retry', run: () => void requestDownload(kind, name) } }));
-  }
-
-  function reportTransition(item: DownloadItem): void {
-    const before = knownStates.get(item.id);
-    knownStates.set(item.id, item.state);
-    if (!downloadsSeeded || before === item.state || !(before === 'queued' || before === 'running')) return;
-    const label = rowName(item.kind, item.name);
-    if (item.state === 'done') {
-      addToast(`${label} downloaded`, 'success');
-      void loadInventory({ silent: true });
-    } else if (item.state === 'failed') {
-      addRetryToast(item.message || `Downloading ${label} failed.`, item.kind, item.name);
-    }
-  }
-
-  /** Add or replace one item the server answered with, keeping the rest of the lane. */
-  function applyItem(item: DownloadItem): void {
-    const focusKey = focusedRowKey();
-    if (!knownStates.has(item.id)) knownStates.set(item.id, 'queued');
-    downloads = [...downloads.filter((other) => other.id !== item.id), item];
-    reportTransition(item);
-    void focusRowControl(focusKey);
-  }
-
-  /** Read the plan, ask the user to confirm its size and free space, then queue the download. */
+  /** Ask the store to download the row, then put focus on the control now in its action cell. */
   async function requestDownload(kind: DownloadKind, name: string): Promise<void> {
-    const key = rowKey(kind, name);
-    if (busyRows.has(key)) return;
-    setBusy(key, true);
-    try {
-      const plan = await getDownloadPlan(kind, name);
-      if (plan.parts.length === 0) {
-        addToast(`${rowName(kind, name)} is already downloaded.`, 'info');
-        await loadInventory({ silent: true });
-        return;
-      }
-      const { info, confirmLabel } = downloadConfirmText(plan);
-      const approved = await requestConfirm({ question: `Download ${rowPhrase(kind, name)}?`, info, confirmLabel, danger: false });
-      if (!approved) return;
-      applyItem(await startDownload(kind, name));
-      void pollDownloads();
-      await focusRowControl(key);
-    } catch (err) {
-      const message = errorText(err, `Could not download ${rowPhrase(kind, name)}.`);
-      if (isRetryable(err)) addRetryToast(message, kind, name);
-      else addToast(message, 'error');
-    } finally {
-      setBusy(key, false);
-    }
+    await downloadStore.request(kind, name, rowPhrase(kind, name));
+    await focusRowControl(rowKey(kind, name));
   }
 
   async function requestCancel(item: DownloadItem): Promise<void> {
-    const key = rowKey(item.kind, item.name);
-    if (busyRows.has(key)) return;
-    setBusy(key, true);
-    try {
-      applyItem(await cancelDownload(item.id));
-      await focusRowControl(key);
-    } catch (err) {
-      addToast(errorText(err, 'Could not cancel the download.'), 'error');
-    } finally {
-      setBusy(key, false);
-    }
+    await downloadStore.cancel(item);
+    await focusRowControl(rowKey(item.kind, item.name));
   }
 
   /** Read the LTX conversion's status; while it runs (or the read failed), read it again shortly. A finished one is reported when *report* is set. */
@@ -502,10 +397,10 @@
 
 {#snippet downloadControl(kind: DownloadKind, name: string, remove: Snippet)}
   {@const key = rowKey(kind, name)}
-  {@const item = activeDownloads.get(key)}
+  {@const item = downloadStore.active(kind, name)}
   <td class="text-right" data-dl-key={key}>
     {#if item}
-      <Button size="sm" disabled={busyRows.has(key)} aria-label={item.state === 'queued' ? `Cancel the queued download of ${rowPhrase(kind, name)}` : `Cancel the download of ${rowPhrase(kind, name)}`} data-testid="download-cancel" onclick={() => void requestCancel(item)}>Cancel</Button>
+      <Button size="sm" disabled={downloadStore.busy(kind, name)} aria-label={item.state === 'queued' ? `Cancel the queued download of ${rowPhrase(kind, name)}` : `Cancel the download of ${rowPhrase(kind, name)}`} data-testid="download-cancel" onclick={() => void requestCancel(item)}>Cancel</Button>
     {:else}
       {@render remove()}
     {/if}
@@ -513,15 +408,14 @@
 {/snippet}
 
 {#snippet downloadButton(kind: DownloadKind, name: string, partial: boolean)}
-  {@const key = rowKey(kind, name)}
   {@const label = partial ? `Download the remaining files of ${rowPhrase(kind, name)}` : `Download ${rowPhrase(kind, name)}`}
-  <Button size="sm" disabled={busyRows.has(key)} aria-label={label} title={partial ? label : undefined} data-testid="download-button" onclick={() => void requestDownload(kind, name)}>
+  <Button size="sm" disabled={downloadStore.busy(kind, name)} aria-label={label} title={partial ? label : undefined} data-testid="download-button" onclick={() => void requestDownload(kind, name)}>
     <Icon name="download" size={14} />Download
   </Button>
 {/snippet}
 
 {#snippet downloadSubRow(kind: DownloadKind, name: string, columns: number)}
-  {@const item = activeDownloads.get(rowKey(kind, name))}
+  {@const item = downloadStore.active(kind, name)}
   {#if item}
     <tr class="dl-sub" data-testid="download-subrow">
       <td colspan={columns}>
@@ -625,7 +519,7 @@
                   </thead>
                   <tbody>
                     {#each inventory.image_models as m}
-                      <tr class:dl-main={activeDownloads.has(rowKey('model', m.name))}>
+                      <tr class:dl-main={downloadStore.active('model', m.name) !== null}>
                         <td>
                           {@render modelName(m)}
                           {#if m.stored_quant}
@@ -670,7 +564,7 @@
                   </thead>
                   <tbody>
                     {#each inventory.video_models as m}
-                      <tr class:dl-main={activeDownloads.has(rowKey('model', m.name))}>
+                      <tr class:dl-main={downloadStore.active('model', m.name) !== null}>
                         <td>
                           {@render modelName(m)}
                           {#if m.converted_bits}
@@ -713,7 +607,7 @@
                   <tbody>
                     {#each inventory.enhancer_models as e (e.tier)}
                       {@const label = ENHANCER_TIER_LABELS[e.tier]}
-                      <tr data-testid="enhancer-row" data-tier={e.tier} class:dl-main={activeDownloads.has(rowKey('enhancer', e.tier))}>
+                      <tr data-testid="enhancer-row" data-tier={e.tier} class:dl-main={downloadStore.active('enhancer', e.tier) !== null}>
                         <td>
                           {@render modelName({ name: label, downloaded: e.downloaded, source: 'enhancer', download_needed: e.download_needed })}
                           {#if e.unavailable}

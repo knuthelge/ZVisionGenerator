@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { downloadLine, partLabel, sizeLabel } from './downloadProgress';
+import type { DownloadItem } from '$lib/types';
+import { downloadLine, downloadStatusText, partLabel, sizeLabel } from './downloadProgress';
 
 const base = { bytes_done: 0, bytes_total: null, bytes_per_sec: null, download_eta_secs: null };
 
@@ -85,5 +86,32 @@ describe('partLabel', () => {
     expect(partLabel({ part: 1, parts: 2 })).toBe('part 1 of 2');
     expect(partLabel({ part: 2, parts: 3 })).toBe('part 2 of 3');
     expect(partLabel({ part: 1, parts: 1 })).toBe('');
+  });
+});
+
+describe('downloadStatusText', () => {
+  const item = (overrides: Partial<DownloadItem> = {}): DownloadItem => ({ id: 'd1', kind: 'model', name: 'klein9b', label: 'klein9b', state: 'running', message: null, ...overrides });
+
+  it('has no text without a queued or running download', () => {
+    expect(downloadStatusText(null)).toBeNull();
+    expect(downloadStatusText(item({ state: 'done' }))).toBeNull();
+    expect(downloadStatusText(item({ state: 'failed' }))).toBeNull();
+    expect(downloadStatusText(item({ state: 'cancelled' }))).toBeNull();
+  });
+
+  it('says a queued download is queued', () => {
+    expect(downloadStatusText(item({ state: 'queued' }))).toBe('Download queued');
+  });
+
+  it('shows the rounded percentage of a running download of known size', () => {
+    expect(downloadStatusText(item({ bytes_done: 12.4e9, bytes_total: 29.5e9 }))).toBe('Downloading 42%');
+    expect(downloadStatusText(item({ bytes_done: 0, bytes_total: 10 }))).toBe('Downloading 0%');
+    expect(downloadStatusText(item({ bytes_done: 12, bytes_total: 10 }))).toBe('Downloading 100%');
+  });
+
+  it('shows no percentage before progress or a size is known', () => {
+    expect(downloadStatusText(item())).toBe('Downloading');
+    expect(downloadStatusText(item({ bytes_done: 5e6, bytes_total: null }))).toBe('Downloading');
+    expect(downloadStatusText(item({ bytes_done: 5e6, bytes_total: 0 }))).toBe('Downloading');
   });
 });

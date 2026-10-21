@@ -4,6 +4,8 @@
   import { draft, videoTimingFor } from '$lib/state/draft.svelte';
   import { anyEnhancedUsed, enhancedPartUsed, submittedCaption, submittedPair } from '$lib/state/promptEnhance';
   import { jobStore } from '$lib/state/job.svelte';
+  import { downloadStore } from '$lib/state/downloads.svelte';
+  import { downloadStatusText } from '$lib/state/downloadProgress';
   import { historyStore } from '$lib/state/history.svelte';
   import { router } from '$lib/state/router.svelte';
   import { hold } from '$lib/actions/hold';
@@ -55,7 +57,7 @@
   import { startUpscale } from '$lib/state/upscale';
   import { hasPendingJobSettings, takeJobSettings } from '$lib/state/pendingJobSettings.svelte';
   import { applyPromptRun, takePromptRun, type PendingPromptRun } from '$lib/state/pendingPromptRun';
-  import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, UpscaleFactor, UpscaleMethod, WorkspaceContext, Workflow } from '$lib/types';
+  import type { DraftState, GalleryAsset, JobControlAction, JobSettings, JobSnapshot, ModelOption, UpscaleFactor, UpscaleMethod, WorkspaceContext, Workflow } from '$lib/types';
 
   interface Props {
     /** The workflows the server offers, once its context has loaded; the top bar shows a tab for each. */
@@ -444,6 +446,13 @@
       .catch(() => undefined);
   }
 
+  /** A picker option's text: the model's label, plus its download state when its files are not all there. */
+  function modelOptionText(model: ModelOption): string {
+    if (model.downloaded !== false) return model.label;
+    const status = downloadStatusText(downloadStore.active('model', model.id));
+    return `${model.label} (${status ? status.toLowerCase() : 'not downloaded'})`;
+  }
+
   async function handleJobComplete(): Promise<void> {
     react('cheerful');
     refreshModelStatus();
@@ -740,6 +749,8 @@
       onLost: handleJobLost,
     });
     const stopJobSync = jobStore.startSync();
+    const stopDownloadSync = downloadStore.startSync();
+    const stopDownloaded = downloadStore.onDownloaded(refreshModelStatus);
     const urlParams = parseUrlPrefill();
     const hasUrlParams = Object.keys(urlParams).length > 0;
 
@@ -845,6 +856,8 @@
       cancelled = true;
       clipMemory.reset();
       stopJobSync();
+      stopDownloadSync();
+      stopDownloaded();
       unsubscribeLifecycle();
       if (historyTimer) clearTimeout(historyTimer);
       document.removeEventListener('keydown', handleKeydown);
@@ -1099,7 +1112,7 @@
           {/snippet}
           {#snippet options()}
             {#each currentModels as m}
-              <option value={m.id}>{m.downloaded === false ? `${m.label} (not downloaded)` : m.label}</option>
+              <option value={m.id}>{modelOptionText(m)}</option>
             {/each}
           {/snippet}
         </ToolbarSelectShell>
@@ -1132,6 +1145,7 @@
         {#if authorityReady && selectedModel}
           <ModelStatusBadges
             downloaded={selectedModel.downloaded}
+            downloadStatus={downloadStatusText(downloadStore.active('model', selectedModel.id))}
             memoryFit={selectedModel.memory_fit}
             quantize={supportsQuantize ? draft.state.quantize : null}
             lowMemory={!visibleControls.has('low_memory') || draft.state.lowMemory}

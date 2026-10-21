@@ -107,6 +107,20 @@ describe('ModelStatusBadges', () => {
     expect(target.querySelector('[data-testid="model-memory-fit"]')).toBeNull();
   });
 
+  it('shows the download status instead of "Not downloaded" while a download runs', () => {
+    render({ downloaded: false, downloadStatus: 'Downloading 42%' });
+
+    const status = target.querySelector('[data-testid="model-download-status"]');
+    expect(status?.textContent).toContain('Downloading 42%');
+    expect(status?.textContent).not.toContain('Not downloaded');
+  });
+
+  it('ignores a download status for a model that is downloaded', () => {
+    render({ downloaded: true, downloadStatus: 'Downloading 42%' });
+
+    expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
+  });
+
   it('right-aligns the tooltip when asked and appends the estimate note', () => {
     render({ memoryFit: { ...FIT, note: 'Excludes the optional upscale pass.' }, tooltipAlign: 'end' });
 

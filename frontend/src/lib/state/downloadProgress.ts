@@ -1,4 +1,4 @@
-import type { DownloadProgressFields } from '$lib/types';
+import type { DownloadItem, DownloadProgressFields } from '$lib/types';
 
 type DownloadLineFields = Pick<DownloadProgressFields, 'bytes_done' | 'bytes_total' | 'bytes_per_sec' | 'download_eta_secs'>;
 
@@ -45,4 +45,17 @@ export function downloadLine(p: DownloadLineFields): string {
 /** "part 1 of 2" for a download with several parts, otherwise an empty string. */
 export function partLabel(p: Pick<DownloadProgressFields, 'part' | 'parts'>): string {
   return p.parts > 1 ? `part ${p.part} of ${p.parts}` : '';
+}
+
+/**
+ * How a model's download reads in a badge or a picker option: "Download queued", "Downloading 42%", or
+ * "Downloading" when the size is not known yet. `null` when the model has no queued or running download.
+ */
+export function downloadStatusText(item: DownloadItem | null): string | null {
+  if (!item) return null;
+  if (item.state === 'queued') return 'Download queued';
+  if (item.state !== 'running') return null;
+  const { bytes_done: done, bytes_total: total } = item;
+  if (done === undefined || !total || total <= 0) return 'Downloading';
+  return `Downloading ${Math.min(100, Math.round((done / total) * 100))}%`;
 }

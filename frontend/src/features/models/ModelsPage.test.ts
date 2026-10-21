@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/inde
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '$lib/api/client';
+import { downloadStore } from '$lib/state/downloads.svelte';
 import { addToast, dismissToast } from '$lib/state/toasts.svelte';
 import type { DownloadItem, DownloadPlan, ModelInventory } from '$lib/types';
 
@@ -101,6 +102,7 @@ describe('ModelsPage Browse buttons', () => {
   let app: Record<string, unknown> | null = null;
 
   beforeEach(() => {
+    downloadStore.reset();
     modelApiMocks.getModelInventory.mockReset();
     modelApiMocks.convertCheckpoint.mockReset();
     modelApiMocks.inspectLtxCheckpoint.mockReset();
@@ -852,6 +854,7 @@ describe('ModelsPage downloads', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
+    downloadStore.reset();
     for (const mock of Object.values(modelApiMocks)) mock.mockReset();
     modelApiMocks.getConversionStatus.mockResolvedValue({ state: 'idle' });
     modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
@@ -1028,7 +1031,7 @@ describe('ModelsPage downloads', () => {
     expect(modelApiMocks.getDownloads.mock.calls.length).toBe(afterDestroy);
   });
 
-  it('raises an error toast with a Retry action when a download fails, and dismisses it on destroy', async () => {
+  it('raises an error toast with a Retry action when a download fails, and the toast survives the page', async () => {
     modelApiMocks.getDownloads.mockResolvedValue({ items: [running()] });
     await mountPage();
 
@@ -1038,7 +1041,12 @@ describe('ModelsPage downloads', () => {
     expect(addToast).toHaveBeenCalledWith('No space left on device', 'error', { action: { label: 'Retry', run: expect.any(Function) } });
     await unmount(app!);
     app = null;
-    expect(dismissToast).toHaveBeenCalledWith('toast-1');
+    expect(dismissToast).not.toHaveBeenCalled();
+
+    const request = vi.spyOn(downloadStore, 'request').mockResolvedValue('declined');
+    vi.mocked(addToast).mock.calls.at(-1)?.[2]?.action?.run();
+    expect(request).toHaveBeenCalledWith('model', 'klein9b', 'klein9b');
+    request.mockRestore();
   });
 
   it('runs the Download flow again from the Retry action', async () => {
@@ -1110,17 +1118,35 @@ describe('ModelsPage downloads', () => {
     });
   });
 
-  it('dismisses the Retry toast of a failed request when the page is destroyed', async () => {
+  it('keeps the Retry toast of a failed request after the page is destroyed, and Retry asks the store again', async () => {
     modelApiMocks.getDownloadPlan.mockRejectedValueOnce(new ApiError('Bad gateway', 502, 'Hub unreachable'));
-    vi.mocked(addToast).mockReturnValueOnce('toast-request');
     await mountPage();
 
     downloadButton()!.click();
     await tickFor();
     await unmount(app!);
     app = null;
+    expect(dismissToast).not.toHaveBeenCalled();
 
-    expect(dismissToast).toHaveBeenCalledWith('toast-request');
+    const request = vi.spyOn(downloadStore, 'request').mockResolvedValue('declined');
+    vi.mocked(addToast).mock.calls.at(-1)?.[2]?.action?.run();
+    expect(request).toHaveBeenCalledWith('model', 'klein9b', 'klein9b');
+    request.mockRestore();
+  });
+
+  it('keeps the focus inside a row when a poll replaces that row\'s control', async () => {
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [item({ queue_position: 1 })] });
+    await mountPage();
+    const cancel = target.querySelector<HTMLButtonElement>('[data-dl-key="model:klein9b"] [data-testid="download-cancel"]')!;
+    cancel.focus();
+    expect(document.activeElement).toBe(cancel);
+
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [item({ state: 'cancelled' })] });
+    await tickFor(1000);
+
+    expect(target.querySelector('[data-testid="download-cancel"]')).toBeNull();
+    expect(document.activeElement?.closest('[data-dl-key="model:klein9b"]')).not.toBeNull();
+    expect(document.activeElement?.getAttribute('data-testid')).toBe('download-button');
   });
 
   it('reads the lane once per second after a submit, however often the row was submitted', async () => {

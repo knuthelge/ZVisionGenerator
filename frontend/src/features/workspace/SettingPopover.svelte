@@ -3,6 +3,8 @@
   import { ModelStatusBadges, PathBrowser, PathInput, Segmented } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { draft, offeredSizes, settingDefaultsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
+  import { downloadStatusText } from '$lib/state/downloadProgress';
+  import { downloadStore } from '$lib/state/downloads.svelte';
   import { historyStore } from '$lib/state/history.svelte';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { memoryFitNote } from '$lib/state/memoryFit';
@@ -239,7 +241,7 @@
           <button type="button" class="pop-item" role="radio" aria-checked={model.id === s.model} onclick={() => { if (model.id !== s.model) onModelChange(model.id); }}>
             <Icon name="cube" size={16} />
             <span class="pop-item-text">{model.label}</span>
-            <ModelStatusBadges downloaded={model.downloaded} memoryFit={model.memory_fit} quantize={quantizeOptions ? s.quantize : null} lowMemory={!caps.showLowMemory || s.lowMemory} tooltipPlacement="top" />
+            <ModelStatusBadges downloaded={model.downloaded} downloadStatus={downloadStatusText(downloadStore.active('model', model.id))} memoryFit={model.memory_fit} quantize={quantizeOptions ? s.quantize : null} lowMemory={!caps.showLowMemory || s.lowMemory} tooltipPlacement="top" />
           </button>
         {/each}
       </div>

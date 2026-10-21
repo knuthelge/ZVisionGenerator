@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
 import { reactiveProps } from '../../test-utils/reactiveProps.svelte';
 import { draft } from '$lib/state/draft.svelte';
+import { downloadStore } from '$lib/state/downloads.svelte';
 import { clipMemory } from '$lib/state/clipMemory.svelte';
 import { extendInspection } from '$lib/state/extendInspection.svelte';
 import { legacySource, sceneSource, sourceInfo } from '$lib/state/extend.fixtures';
@@ -15,7 +16,7 @@ import { hasPendingJobSettings, requestJobSettings } from '$lib/state/pendingJob
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { router } from '$lib/state/router.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
-import type { EnhanceFrame, ImageModelDefaults, JobContext, JobSnapshot, PromptEnhancerContract, VideoModelDefaults, WorkspaceContext, GalleryAsset, GalleryPage } from '$lib/types';
+import type { DownloadItem, EnhanceFrame, ImageModelDefaults, JobContext, JobSnapshot, PromptEnhancerContract, VideoModelDefaults, WorkspaceContext, GalleryAsset, GalleryPage } from '$lib/types';
 
 const workspaceApiMocks = vi.hoisted(() => ({
   getWorkspaceContext: vi.fn<() => Promise<WorkspaceContext>>(),
@@ -89,6 +90,15 @@ vi.mock('$lib/api/promptEnhance', async (importOriginal) => {
 
 vi.mock('$lib/api/browse', () => browseApiMocks);
 
+const modelApiMocks = vi.hoisted(() => ({
+  getDownloads: vi.fn<() => Promise<{ items: DownloadItem[] }>>(),
+}));
+
+vi.mock('$lib/api/models', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('$lib/api/models')>();
+  return { ...actual, getDownloads: modelApiMocks.getDownloads };
+});
+
 vi.mock('$lib/api/promptFiles', () => ({
   inspectPromptFile: promptFileApiMocks.inspectPromptFile,
   writePromptFile: promptFileApiMocks.writePromptFile,
@@ -110,6 +120,9 @@ beforeEach(() => {
   clipMemory.reset();
   historyStore.seedHistory([]);
   jobStore.clearJob();
+  downloadStore.reset();
+  modelApiMocks.getDownloads.mockReset();
+  modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
   toasts.splice(0, toasts.length);
   for (const mock of [
     workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.getJobSnapshot,
@@ -2204,6 +2217,61 @@ describe('WorkspacePage', () => {
     await settle();
     expect(target.querySelector('[data-testid="model-download-status"]')?.textContent).toContain('Not downloaded');
     expect(fitBadge()).toBeNull();
+  });
+
+  describe('model downloads from the Models page', () => {
+    const lane = (overrides: Partial<DownloadItem> = {}): DownloadItem => ({
+      id: 'd1', kind: 'model', name: 'flux-lite', label: 'flux-lite', state: 'running', message: null, bytes_done: 4.2e9, bytes_total: 10e9, ...overrides,
+    });
+    const downloadContext = () => makeContext({
+      image_models: [
+        { id: 'zit', label: 'zit', type: 'image', downloaded: true, memory_fit: null },
+        { id: 'flux-lite', label: 'flux-lite', type: 'image', downloaded: false, memory_fit: null },
+      ],
+    });
+
+    it('shows a running download in the picker option and the status badge instead of "not downloaded"', async () => {
+      modelApiMocks.getDownloads.mockResolvedValue({ items: [lane()] });
+      await mountWorkspace(downloadContext());
+
+      const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement;
+      expect(Array.from(modelSelect.options).map((option) => option.textContent)).toEqual(['zit', 'flux-lite (downloading 42%)']);
+
+      modelSelect.value = 'flux-lite';
+      modelSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      await settle();
+      const status = target.querySelector('[data-testid="model-download-status"]');
+      expect(status?.textContent).toContain('Downloading 42%');
+      expect(status?.textContent).not.toContain('Not downloaded');
+    });
+
+    it('says a queued download is queued', async () => {
+      modelApiMocks.getDownloads.mockResolvedValue({ items: [lane({ state: 'queued' })] });
+      await mountWorkspace(downloadContext());
+
+      const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement;
+      expect(modelSelect.options[1].textContent).toBe('flux-lite (download queued)');
+    });
+
+    it('reads the model status again when a download that was running finishes', async () => {
+      modelApiMocks.getDownloads.mockResolvedValue({ items: [lane()] });
+      await mountWorkspace(downloadContext());
+      expect(workspaceApiMocks.getWorkspaceCoreContext).toHaveBeenCalledTimes(1);
+
+      modelApiMocks.getDownloads.mockResolvedValue({ items: [lane({ state: 'done' })] });
+      workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext({
+        image_models: [
+          { id: 'zit', label: 'zit', type: 'image', downloaded: true, memory_fit: null },
+          { id: 'flux-lite', label: 'flux-lite', type: 'image', downloaded: true, memory_fit: null },
+        ],
+      }));
+      await downloadStore.refresh();
+      await settle();
+
+      expect(workspaceApiMocks.getWorkspaceCoreContext).toHaveBeenCalledTimes(2);
+      const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement;
+      expect(Array.from(modelSelect.options).map((option) => option.textContent)).toEqual(['zit', 'flux-lite']);
+    });
   });
 
   it('keeps a changed setting and applies the new model defaults to the rest when the toolbar model changes', async () => {

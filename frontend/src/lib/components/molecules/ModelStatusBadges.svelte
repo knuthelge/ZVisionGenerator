@@ -11,6 +11,8 @@
   export const DOWNLOADED_TOOLTIP = 'Downloaded: the model files are on this machine.';
   /** Shown in the Workspace, where a model can be downloaded ahead from the Models page. */
   export const NOT_DOWNLOADED_TOOLTIP = 'Not downloaded: it downloads the first time you generate with it, or ahead from the Models page.';
+  /** Shown instead of the not-downloaded text while a download of the model is queued or running. */
+  export const DOWNLOADING_TOOLTIP = 'Download in progress: the model is ready to use when it finishes.';
   /** Shown on the Models page for a row with a Download button. */
   export const DOWNLOADABLE_TOOLTIP = 'Not downloaded: Download fetches it now, or it downloads the first time you generate with it.';
   /** Shown on the Models page for a row without a Download button. */
@@ -64,6 +66,8 @@
 
   interface Props {
     downloaded?: boolean | null;
+    /** Text for a queued or running download of the model, such as "Downloading 42%"; replaces "Not downloaded" while it is set. */
+    downloadStatus?: string | null;
     memoryFit?: MemoryFit | null;
     quantize?: number | null;
     /** Whether low-memory mode is on (video); the estimate switches to all-components-resident when off. */
@@ -75,7 +79,7 @@
     class?: string;
   }
 
-  let { downloaded = null, memoryFit = null, quantize = null, lowMemory = true, tooltipPlacement = 'top', tooltipAlign = 'start', size = 'badge', class: extraClass = '' }: Props = $props();
+  let { downloaded = null, downloadStatus = null, memoryFit = null, quantize = null, lowMemory = true, tooltipPlacement = 'top', tooltipAlign = 'start', size = 'badge', class: extraClass = '' }: Props = $props();
 
   const badgeClass = $derived(size === 'control' ? 'ui-badge-control whitespace-nowrap' : 'whitespace-nowrap');
 
@@ -91,8 +95,8 @@
 {#if downloaded === false || (memoryFit && estimate)}
   <span class="inline-flex flex-wrap items-center gap-1 {extraClass}">
     {#if downloaded === false}
-      <Tooltip text={NOT_DOWNLOADED_TOOLTIP} placement={tooltipPlacement} align={tooltipAlign} testId="model-download-status">
-        <Badge variant="neutral" class={badgeClass}>Not downloaded</Badge>
+      <Tooltip text={downloadStatus ? DOWNLOADING_TOOLTIP : NOT_DOWNLOADED_TOOLTIP} placement={tooltipPlacement} align={tooltipAlign} testId="model-download-status">
+        <Badge variant="neutral" class={badgeClass}>{downloadStatus ?? 'Not downloaded'}</Badge>
       </Tooltip>
     {/if}
     {#if memoryFit && estimate}
