@@ -135,21 +135,49 @@ model_alias_families:
   krea2: krea2
 
 # How an alias reads in the Web UI; the alias stays its id everywhere else (CLI, prompt files, API).
+# download_size_label (image aliases) is the one-time download per platform, in whole GB, shown in the first-run dialog.
 model_labels:
   klein9b:
     name: "FLUX.2 Klein 9B"
+    download_size_label:
+      darwin: 35 GB
+      win32: 35 GB
+      linux: 35 GB
   klein4b:
     name: "FLUX.2 Klein 4B"
+    download_size_label:
+      darwin: 16 GB
+      win32: 16 GB
+      linux: 16 GB
   zit:
     name: "Z-Image Turbo"
+    download_size_label:
+      darwin: 33 GB
+      win32: 33 GB
+      linux: 33 GB
   krea2:
     name: "Krea 2 Turbo"
+    download_size_label:
+      darwin: 36 GB
+      win32: 36 GB
+      linux: 36 GB
   ideo:
     name: "Ideogram 4 Instant"
+    download_size_label:
+      darwin: 28 GB
+      win32: 24 GB
+      linux: 24 GB
   ltx-8:
     name: "LTX-2.3 8-bit"
   ltx-4:
     name: "LTX-2.3 4-bit"
+
+# First-run dialog: the model it preselects. large_model is for machines with at least min_memory_gb of memory
+# (unified memory on Apple Silicon, VRAM on a CUDA card); every other machine gets small_model.
+first_run:
+  large_model: klein9b
+  small_model: klein4b
+  min_memory_gb: 32
 
 model_presets:
   zimage:
@@ -342,3 +370,5 @@ ui:
   default_models:
     image: klein9b
     video: ltx-8
+  # Set once the first-run dialog is skipped; a user setting, not part of the writable config contract.
+  first_run_skipped: false

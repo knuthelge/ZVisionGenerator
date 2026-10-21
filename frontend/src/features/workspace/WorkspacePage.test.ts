@@ -7,6 +7,7 @@ import { ApiError } from '$lib/api/client';
 import { reactiveProps } from '../../test-utils/reactiveProps.svelte';
 import { draft } from '$lib/state/draft.svelte';
 import { downloadStore } from '$lib/state/downloads.svelte';
+import { firstRun } from './firstRun.svelte';
 import { clipMemory } from '$lib/state/clipMemory.svelte';
 import { extendInspection } from '$lib/state/extendInspection.svelte';
 import { legacySource, sceneSource, sourceInfo } from '$lib/state/extend.fixtures';
@@ -28,7 +29,17 @@ const workspaceApiMocks = vi.hoisted(() => ({
   listJobs: vi.fn(async () => ({ active_job: null as JobSnapshot | null, queued_jobs: [] as JobSnapshot[] })),
   clearQueue: vi.fn(async () => ({ cancelled: [] as string[] })),
   cancelJob: vi.fn(async () => undefined),
+  skipFirstRun: vi.fn(async () => ({ skipped: true })),
 }));
+
+const configApiMocks = vi.hoisted(() => ({
+  updateConfig: vi.fn(async () => ({})),
+}));
+
+vi.mock('$lib/api/config', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('$lib/api/config')>();
+  return { ...actual, updateConfig: configApiMocks.updateConfig };
+});
 
 const browseApiMocks = vi.hoisted(() => ({
   listDirectory: vi.fn(),
@@ -66,6 +77,7 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
     listJobs: workspaceApiMocks.listJobs,
     clearQueue: workspaceApiMocks.clearQueue,
     cancelJob: workspaceApiMocks.cancelJob,
+    skipFirstRun: workspaceApiMocks.skipFirstRun,
   };
 });
 
@@ -121,6 +133,9 @@ beforeEach(() => {
   historyStore.seedHistory([]);
   jobStore.clearJob();
   downloadStore.reset();
+  firstRun.reset();
+  configApiMocks.updateConfig.mockClear();
+  workspaceApiMocks.skipFirstRun.mockClear();
   modelApiMocks.getDownloads.mockReset();
   modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
   toasts.splice(0, toasts.length);
@@ -4945,4 +4960,141 @@ describe('WorkspacePage clip memory note', () => {
     expect(note()).toBeNull();
   });
 
+
+  describe('first-run dialog', () => {
+    const firstRunContext = (overrides: Partial<WorkspaceContext> = {}) => makeContext({
+      image_models: [
+        { id: 'zit', label: 'Z-Image Turbo', type: 'image', downloaded: false, memory_fit: null, download_size_label: '33 GB' },
+        { id: 'klein4b', label: 'FLUX.2 Klein 4B', type: 'image', downloaded: false, memory_fit: null, download_size_label: '16 GB' },
+      ],
+      current_image_model: 'zit',
+      image_model_defaults: { zit: makeImageDefaults({}), klein4b: makeImageDefaults({ steps: 4 }) },
+      first_run: { skipped: false, recommended_model: 'klein4b' },
+      ...overrides,
+    });
+    const dialog = () => document.querySelector('[data-testid="first-run-dialog"]');
+    const press = async (action: string) => {
+      (document.querySelector(`[data-action="${action}"]`) as HTMLButtonElement).click();
+      await settle();
+    };
+
+    it('opens with the recommended model chosen when nothing is downloaded', async () => {
+      await mountWorkspace(firstRunContext());
+
+      expect(dialog()).not.toBeNull();
+      expect((document.querySelector('[data-testid="first-run-model-klein4b"]') as HTMLInputElement).checked).toBe(true);
+    });
+
+    it.each([
+      ['it was skipped', { first_run: { skipped: true, recommended_model: 'klein4b' } }],
+      ['a model is downloaded', { image_models: [{ id: 'zit', label: 'zit', type: 'image', downloaded: true, memory_fit: null }] }],
+    ] as [string, Partial<WorkspaceContext>][])('stays closed when %s', async (_why, overrides) => {
+      await mountWorkspace(firstRunContext(overrides));
+
+      expect(dialog()).toBeNull();
+    });
+
+    it('stays closed while an image model is already downloading', async () => {
+      modelApiMocks.getDownloads.mockResolvedValue({ items: [{ id: 'd1', kind: 'model', name: 'klein4b', label: 'FLUX.2 Klein 4B', state: 'running', message: null }] });
+
+      await mountWorkspace(firstRunContext());
+
+      expect(dialog()).toBeNull();
+    });
+
+    it('queues the chosen model, saves it as the default, selects it and closes', async () => {
+      const request = vi.spyOn(downloadStore, 'request').mockResolvedValue('queued');
+      await mountWorkspace(firstRunContext());
+
+      (document.querySelector('[data-testid="first-run-model-zit"]') as HTMLInputElement).click();
+      await settle();
+      await press('first-run-download');
+
+      expect(request).toHaveBeenCalledWith('model', 'zit', 'Z-Image Turbo');
+      expect(configApiMocks.updateConfig).toHaveBeenCalledWith({ 'ui.default_models.image': 'zit' });
+      expect(draft.state.model).toBe('zit');
+      expect(dialog()).toBeNull();
+    });
+
+    it('selects the downloaded model in the draft', async () => {
+      vi.spyOn(downloadStore, 'request').mockResolvedValue('present');
+      await mountWorkspace(firstRunContext());
+
+      await press('first-run-download');
+
+      expect(configApiMocks.updateConfig).toHaveBeenCalledWith({ 'ui.default_models.image': 'klein4b' });
+      expect(draft.state.model).toBe('klein4b');
+    });
+
+    it.each(['declined', 'failed'] as const)('stays open and saves nothing when the download is %s', async (result) => {
+      vi.spyOn(downloadStore, 'request').mockResolvedValue(result);
+      await mountWorkspace(firstRunContext());
+
+      await press('first-run-download');
+
+      expect(dialog()).not.toBeNull();
+      expect(configApiMocks.updateConfig).not.toHaveBeenCalled();
+    });
+
+    it('remembers a skip on the server and closes', async () => {
+      await mountWorkspace(firstRunContext());
+
+      await press('first-run-skip');
+
+      expect(workspaceApiMocks.skipFirstRun).toHaveBeenCalledOnce();
+      expect(dialog()).toBeNull();
+    });
+
+    it('does not reopen when the queued download fails and the lane empties', async () => {
+      vi.spyOn(downloadStore, 'request').mockResolvedValue('queued');
+      await mountWorkspace(firstRunContext());
+      await press('first-run-download');
+      expect(dialog()).toBeNull();
+
+      // The download ends without a model on disk: the lane is empty and every model is still missing.
+      modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
+      await downloadStore.refresh();
+      await settle();
+
+      expect(dialog()).toBeNull();
+    });
+
+    it('still closes, and says so, when remembering the skip fails', async () => {
+      workspaceApiMocks.skipFirstRun.mockRejectedValueOnce(new Error('disk full'));
+      await mountWorkspace(firstRunContext());
+
+      await press('first-run-skip');
+
+      expect(dialog()).toBeNull();
+      expect(toasts.some((toast) => toast.type === 'error')).toBe(true);
+    });
+
+    it('selects the model and says so when saving the default fails', async () => {
+      vi.spyOn(downloadStore, 'request').mockResolvedValue('queued');
+      configApiMocks.updateConfig.mockRejectedValueOnce(new Error('read-only config'));
+      await mountWorkspace(firstRunContext());
+
+      await press('first-run-download');
+
+      expect(dialog()).toBeNull();
+      expect(draft.state.model).toBe('klein4b');
+      expect(toasts.some((toast) => toast.type === 'error')).toBe(true);
+    });
+
+    it('closes on Escape without remembering anything, and does not reopen after the page is mounted again', async () => {
+      const context = firstRunContext();
+      await mountWorkspace(context);
+
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await settle();
+      expect(dialog()).toBeNull();
+      expect(workspaceApiMocks.skipFirstRun).not.toHaveBeenCalled();
+
+      await unmount(app!);
+      app = null;
+      await mountWorkspace(context);
+
+      expect(dialog()).toBeNull();
+    });
+  });
 });

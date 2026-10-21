@@ -40,7 +40,7 @@ The Workspace's inspector is already called **Settings**, so the merged page is 
 ## Open questions
 
 - "Setup" or "Manage"? Either works; decide when the sub-navigation is mocked up with the design system.
-- Should the first-run Welcome panel ([First run](first-run.md)) link to the Models tab? Yes, once both exist.
+- Should the first-run Welcome panel ([First run](archive/first-run.md)) link to the Models tab? Yes, once both exist.
 
 ## Out of scope
 

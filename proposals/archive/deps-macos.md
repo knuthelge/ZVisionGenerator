@@ -89,7 +89,7 @@ Two PRs, mflux first because it's smaller and independent of LTX.
 
 ### Not in this proposal (follow-ups)
 
-- **LTX-2.5 aliases** (`ltx25-4`, `ltx25-8`). Re-vendoring makes them possible, and they're the most visible gain, but they need their own defaults (steps, sizes, auto duration), memory checks and docs. They're also gated, so they depend on the token handling in [first-run.md](../first-run.md). Decided 2026-10-10: LTX-2.5 not planned.
+- **LTX-2.5 aliases** (`ltx25-4`, `ltx25-8`). Re-vendoring makes them possible, and they're the most visible gain, but they need their own defaults (steps, sizes, auto duration), memory checks and docs. They're also gated, so they depend on the token handling in [first-run.md](first-run.md). Decided 2026-10-10: LTX-2.5 not planned.
 - Retake, extend, audio-to-video, keyframe interpolation and HDR in the Web UI.
 - Float16 LTX compute (`LTX2_COMPUTE_DTYPE`) and block-sparse attention as user options.
 

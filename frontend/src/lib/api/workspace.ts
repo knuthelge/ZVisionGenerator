@@ -57,3 +57,8 @@ export function parseUrlPrefill(): Record<string, string> {
   });
   return params;
 }
+
+/** Remember that the first-run dialog was skipped, so the Workspace stops offering it. */
+export function skipFirstRun(): Promise<{ skipped: boolean }> {
+  return api.post<{ skipped: boolean }>('/api/first-run/skip');
+}

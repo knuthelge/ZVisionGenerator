@@ -41,6 +41,7 @@ from zvisiongenerator.utils.seedvr2 import SEEDVR2_REPO, SeedVR2Setup, seedvr2_d
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.model_download_plan import KIND_MODEL, enhancer_download_needed, row_download_needed
+from zvisiongenerator.web.first_run import first_run_payload
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
 from zvisiongenerator.web.model_delete import cache_repos_linked_from, delete_scope, enhancer_delete_target, installed_models_linking_to, model_delete_target, seedvr2_delete_target, used_repo_ids
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
@@ -109,7 +110,17 @@ def build_workspace_response(
     status = _status_resolver(web_config, image_model_defaults_map)
     image_entries = {entry.name: entry for entry in web_config.image_inventory}
     video_entries = {entry.name: entry for entry in web_config.video_inventory}
-    image_models = [{"id": name, "label": model_display_name(web_config.app_config, name), "type": "image", **status(image_entries.get(name), "image")} for name in web_config.image_model_options]
+    model_labels = web_config.app_config.get("model_labels") or {}
+    image_models = [
+        {
+            "id": name,
+            "label": model_display_name(web_config.app_config, name),
+            "type": "image",
+            "download_size_label": _size_label(model_labels.get(name) or {}),
+            **status(image_entries.get(name), "image"),
+        }
+        for name in web_config.image_model_options
+    ]
     video_models = [{"id": name, "label": model_display_name(web_config.app_config, name), "type": "video", **status(video_entries.get(name), "video")} for name in web_config.video_model_options]
     loras = [{"name": name, "path": str(Path(web_config.loras_dir) / f"{name}.safetensors")} for name in web_config.lora_options]
     image_defaults = image_model_defaults_map.get(image_default_model) or _build_image_bootstrap_defaults(image_default_model or "", web_config)
@@ -142,6 +153,7 @@ def build_workspace_response(
         "prompt_file": prompt_file_contract,
         "workflow_contract": workflow_contract,
         "prompt_enhancer": build_prompt_enhancer_contract(web_config),
+        "first_run": first_run_payload(web_config.app_config, memory_budget(), web_config.image_model_options),
         "config": {
             "gallery_page_size": web_config.gallery_page_size,
             "startup_view": web_config.startup_view,

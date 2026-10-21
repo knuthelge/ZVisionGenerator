@@ -1,12 +1,24 @@
 # First run: pick a model, download it, and no gated defaults
 
-**Status:** In progress (2026-10-21). Explicit downloads with progress have shipped (see [Done so far](#done-so-far)). Still open: an ungated `klein9b`, gated errors that say what to do, downloads kept in sync across pages, and a first-run dialog that picks a model.
+**Status:** Done (unreleased, 2026-10-21). All four parts shipped, plus friendly model names. The dialog's final design differs from the sketch in §4; [As built](#as-built) records what shipped.
 
-## Done so far
+## Done
 
-- **Downloads with progress** (v0.13.0b25), designed in [Show model download progress in Web UI jobs](archive/model-download-progress.md): a Download button on each Models-page row, a download lane beside the job queue that runs one download at a time, and byte progress on the job card instead of "Loading model…".
-- **No gated Ideogram** (v0.13.0b24), from [Replace Ideogram 4 with Ideogram 4 Instant](archive/ideogram-instant.md): `ideo` is built on first use from ungated, pinned sources.
+- **Downloads with progress** (v0.13.0b25), designed in [Show model download progress in Web UI jobs](model-download-progress.md): a Download button on each Models-page row, a download lane beside the job queue that runs one download at a time, and byte progress on the job card instead of "Loading model…".
+- **No gated Ideogram** (v0.13.0b24), from [Replace Ideogram 4 with Ideogram 4 Instant](ideogram-instant.md): `ideo` is built on first use from ungated, pinned sources.
 - **Job failures say why** (v0.13.0b25): a failed job's card and toast show a one-line reason.
+- **Ungated `klein9b`, gated errors that say what to do, and downloads in sync across pages** (§1 to §3), shipped in the next release.
+- **Friendly model names**: the Web UI shows FLUX.2 Klein 9B instead of `klein9b`; the alias stays the id in the CLI, prompt files and API. The name comes from `model_labels.<alias>.name` in `config.yaml`.
+- **The first-run dialog** (§4), described in [As built](#as-built).
+
+## As built
+
+- **Trigger.** The Workspace opens the dialog when every image model reads as not downloaded, none is queued or downloading, the download lane has been read once, and the user has not skipped it. Closing it with Escape, the backdrop or Close hides it until the page reloads; Skip saves `ui.first_run_skipped: true` in the user config through `POST /api/first-run/skip` (not a writable config field), and the dialog never opens again.
+- **Content.** A slim hero strip with Blob, the headline "Your studio is ready. It needs a model.", a recommended card (name and "about N GB" one-time download) and the other image models as a two-column menu with dotted leaders (one column on a phone, where the dialog is a full-height sheet with Skip and Download pinned). It shows names and sizes only, no aliases. The picture is a Krea 2 q8 render made with the app (ukiyo-e enhanced prompt), shipped as one WebP in the app's static files.
+- **Recommendation.** `web/first_run.recommended_first_run_model` picks `first_run.large_model` (`klein9b`) when the machine has at least `first_run.min_memory_gb` (32) of memory, within 5%: total unified memory on a Mac, VRAM on CUDA. Any other machine, including one whose memory is unknown, gets `first_run.small_model` (`klein4b`). A pick that is not listed falls back to the small model, and with neither listed nothing is preselected.
+- **Sizes.** Each image alias has a `model_labels.<alias>.download_size_label` per platform (`darwin`, `win32`, `linux`), measured with a dry-run download plan against an empty cache and rounded to whole GB.
+- **Download.** The dialog asks for the model's plan through the shared download store, including the free-space confirmation. Once it is queued (or already present) the dialog closes, the choice is saved as `ui.default_models.image` and, in an image workflow, selected. A declined or failed request leaves the dialog open with the store's own toast.
+- **Rejected on the way.** A plain list that showed aliases, and the banner, editorial and no-picture layouts tried before the slim banner.
 
 ## Problem
 
@@ -79,5 +91,7 @@ Each part ships as its own commit, in this order.
 - `ziv-model download <alias>` in the terminal.
 
 ## Open questions
+
+Not done:
 
 - Whether `ziv-image` without `-m` should use `ui.default_models.image`, so the CLI and the Web UI share one default. Today it errors (`image_cli.py:186`).

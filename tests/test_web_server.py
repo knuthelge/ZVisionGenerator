@@ -2163,6 +2163,34 @@ def test_workspace_options_carry_the_configured_name_as_their_label(monkeypatch)
     assert [(entry["id"], entry["label"]) for entry in workspace["video_models"]] == [("ltx-8", "LTX-2.3 8-bit")]
 
 
+def test_workspace_carries_the_first_run_state_and_the_platform_size_labels(monkeypatch):
+    """AC5.3: image options carry this platform's download size, and ``first_run`` the skip flag and the recommendation."""
+    web_config = _make_web_config()
+    web_config.image_model_options = ("klein9b", "klein4b", "local-image")
+    web_config.app_config["first_run"] = {"large_model": "klein9b", "small_model": "klein4b", "min_memory_gb": 32}
+    web_config.app_config["ui"] = {"first_run_skipped": True}
+    web_config.app_config["model_labels"] = {
+        "klein9b": {"name": "FLUX.2 Klein 9B", "download_size_label": {"darwin": "35 GB", "win32": "36 GB", "linux": "37 GB"}},
+        "klein4b": {"name": "FLUX.2 Klein 4B", "download_size_label": {"darwin": "16 GB"}},
+    }
+    monkeypatch.setattr(workspace_api_module.sys, "platform", "linux")
+    monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: MemoryBudget(gpu_bytes=32607 * 1024**2, system_bytes=64 * 1024**3))
+
+    workspace = workspace_api_module.build_workspace_response(
+        web_config,
+        [],
+        active_job=None,
+        prompt_sources=["inline"],
+        default_prompt_source="inline",
+        prompt_file_contract={},
+        workflow_contract={},
+        build_bootstrap_view=lambda _cfg: _make_workspace_bootstrap_view(),
+    )
+
+    assert {entry["id"]: entry["download_size_label"] for entry in workspace["image_models"]} == {"klein9b": "37 GB", "klein4b": None, "local-image": None}
+    assert workspace["first_run"] == {"skipped": True, "recommended_model": "klein9b"}
+
+
 def test_workspace_models_without_inventory_entry_report_unknown_status(monkeypatch):
     """Names with no inventory entry (e.g. stale config) report unknown rather than guessing."""
     web_config = _make_web_config()

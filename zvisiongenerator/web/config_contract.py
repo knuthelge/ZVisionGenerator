@@ -186,6 +186,14 @@ def persist_writable_config_patch(patch: dict[str, Any], current: Any) -> None:
         write_user_config_override(override_config)
 
 
+def persist_first_run_skipped() -> None:
+    """Record in the user config override that the first-run dialog was skipped, keeping every other key."""
+    with _USER_CONFIG_WRITE_LOCK:
+        override_config = read_user_config_override()
+        _set_nested_mapping_value(override_config, ("ui", "first_run_skipped"), True)
+        write_user_config_override(override_config)
+
+
 def read_user_config_override() -> dict[str, Any]:
     """Read the mutable user config override file, if present."""
     config_path = get_ziv_data_dir() / "config.yaml"

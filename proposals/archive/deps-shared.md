@@ -125,4 +125,4 @@ The lock is shared, so every proposal moves packages for all platforms. CI runs 
 
 ## Open questions
 
-- Whether the first-run download proposal ([first-run.md](../first-run.md)) should set `HF_XET_HIGH_PERFORMANCE` for its downloads. It saturates the network bandwidth and uses all CPU cores, so it may help most on fast links. Whether it also raises connection counts or memory use isn't documented.
+- Whether the first-run download proposal ([first-run.md](first-run.md)) should set `HF_XET_HIGH_PERFORMANCE` for its downloads. It saturates the network bandwidth and uses all CPU cores, so it may help most on fast links. Whether it also raises connection counts or memory use isn't documented.

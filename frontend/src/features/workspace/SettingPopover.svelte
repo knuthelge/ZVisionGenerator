@@ -245,8 +245,8 @@
           </button>
         {/each}
       </div>
-      {#if selectedModel && selectedModel.downloaded === false}
-        <p class="ui-help">{selectedModel.label} is not downloaded. The first run downloads it; the Models page shows its size.</p>
+      {#if selectedModel && selectedModel.downloaded === false && !downloadStore.active('model', selectedModel.id)}
+        <p class="ui-help" data-testid="model-not-downloaded">{selectedModel.label} is not downloaded. The first run downloads it; the Models page shows its size.</p>
       {/if}
       {#if quantizeOptions}
         <div class="pop-row"><span>Quantization</span>

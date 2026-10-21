@@ -15,8 +15,8 @@
   interface Props {
     open?: boolean;
     title?: string;
-    /** `lg` widens the dialog for lists and editors; `sm` fits a short question. */
-    size?: 'sm' | 'md' | 'lg';
+    /** `lg` widens the dialog for lists and editors, `xl` for a welcome screen; `sm` fits a short question. */
+    size?: 'sm' | 'md' | 'lg' | 'xl';
     /** `alertdialog` for a dialog that asks the user to approve an action. */
     role?: 'dialog' | 'alertdialog';
     /** Id of the element that names the dialog, used instead of `title`. */
@@ -49,7 +49,7 @@
     footer
   }: Props = $props();
 
-  const SIZE_CLASSES = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-3xl' } as const;
+  const SIZE_CLASSES = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-3xl', xl: 'max-w-[70rem]' } as const;
 
   const side = $derived(placement === 'side');
 

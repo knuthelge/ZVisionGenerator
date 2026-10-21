@@ -240,6 +240,14 @@ export interface ModelOption extends ModelStatusFields {
   id: string;
   label: string;
   type: 'image' | 'video';
+  /** One-time download size on this platform, e.g. "35 GB"; image models only, null when unknown. */
+  download_size_label?: string | null;
+}
+
+/** What the first-run dialog needs: whether it was skipped for good and the model it preselects. */
+export interface FirstRunContext {
+  skipped: boolean;
+  recommended_model: string | null;
 }
 
 export interface LoraInfo {
@@ -276,6 +284,7 @@ export interface WorkspaceContext {
   prompt_file: PromptFileContract;
   workflow_contract: WorkflowContract;
   prompt_enhancer?: PromptEnhancerContract;
+  first_run?: FirstRunContext;
 }
 
 // ── Prompt enhancer ────────────────────────────────────────────────────────────

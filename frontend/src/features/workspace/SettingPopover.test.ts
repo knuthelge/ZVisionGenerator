@@ -3,6 +3,7 @@ import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/inde
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { draft } from '$lib/state/draft.svelte';
+import { downloadStore } from '$lib/state/downloads.svelte';
 import type { ModelOption, WorkspaceContext } from '$lib/types';
 import SettingPopover from './SettingPopover.svelte';
 
@@ -70,5 +71,34 @@ describe('SettingPopover model list', () => {
     (target.querySelector('[role="radio"][aria-checked="true"]') as HTMLButtonElement).click();
 
     expect(onModelChange).not.toHaveBeenCalled();
+  });
+
+  describe('not-downloaded note', () => {
+    const missing: ModelOption[] = [{ id: 'zit', label: 'Z-Image Turbo', type: 'image', downloaded: false }];
+
+    function mountMissing(): void {
+      app = flushSync(() => mount(SettingPopover, {
+        target,
+        props: {
+          key: 'model', context, busy: false, models: missing, quantizeOptions: null, imageFile: null, referencePreviewUrl: null, lastSeed: null,
+          onImageFileChange: vi.fn(), onModelChange: vi.fn(), onUseLatestAsReference: vi.fn(), onclose: vi.fn(),
+        },
+      }));
+    }
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it('is shown for a missing model with no download on its way', () => {
+      mountMissing();
+
+      expect(target.querySelector('[data-testid="model-not-downloaded"]')).not.toBeNull();
+    });
+
+    it('is hidden while that model is downloading', () => {
+      vi.spyOn(downloadStore, 'active').mockReturnValue({ id: 'd1', kind: 'model', name: 'zit', label: 'Z-Image Turbo', state: 'running', message: null });
+      mountMissing();
+
+      expect(target.querySelector('[data-testid="model-not-downloaded"]')).toBeNull();
+    });
   });
 });

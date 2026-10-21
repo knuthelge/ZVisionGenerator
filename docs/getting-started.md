@@ -29,6 +29,14 @@ uv sync
 
 ## Quick Start
 
+### First run in the Web UI
+
+```bash
+ziv ui
+```
+
+The Web UI opens in your browser. The first time, when no image model is downloaded yet, it opens a welcome dialog that lists the image models with the size of each download. One is preselected for your machine: FLUX.2 Klein 9B when it has 32 GB or more of memory (unified memory on a Mac, GPU memory on a graphics card) and FLUX.2 Klein 4B otherwise. **Download** starts the model you chose, makes it your default image model and closes the dialog; its progress shows in the Workspace model picker and on the Models page. **Skip** closes the dialog for good; closing it any other way (Escape, clicking outside it, or the phone sheet's ✕) shows it again the next time the page loads, until a model is downloaded. If a model is already downloading, the dialog does not open. See [Web UI](#web-ui) below for the rest of the Web UI.
+
 ### Image Generation
 
 ```bash

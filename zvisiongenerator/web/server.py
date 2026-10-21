@@ -89,7 +89,7 @@ from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_upscale_workflow
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response
-from zvisiongenerator.web.config_contract import persist_writable_config_patch, resolve_output_dir as resolve_config_output_dir
+from zvisiongenerator.web.config_contract import persist_first_run_skipped, persist_writable_config_patch, resolve_output_dir as resolve_config_output_dir
 from zvisiongenerator.web.download_lane import DownloadLane
 from zvisiongenerator.web.defaults import default_image_size_for_ratio, default_video_size_for_ratio
 from zvisiongenerator.web.extend_api import EXTEND_UNAVAILABLE_MESSAGE, extend_context_from_body, extend_source_response, load_source_video, requested_extend_frames
@@ -1848,6 +1848,16 @@ async def api_save_config(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     web_config = await run_in_threadpool(load_web_config)
     return build_api_config_response(web_config)
+
+
+@app.post("/api/first-run/skip")
+async def api_first_run_skip() -> dict[str, bool]:
+    """Remember that the first-run dialog was skipped, so the Workspace stops offering it."""
+    try:
+        await run_in_threadpool(persist_first_run_skipped)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"skipped": True}
 
 
 @app.get("/api/models")

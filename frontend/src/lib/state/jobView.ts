@@ -217,7 +217,7 @@ export function downloadView(download: JobDownload): DownloadView {
   const amount = line[0];
   const valuetext = fraction === null ? `${amount} downloaded, size unknown` : `${amount.replace(' / ', ' of ')}${part ? `, ${part}` : ''}`;
   let help = 'Only the first time; later jobs load the saved files.';
-  if (download.shared) help = 'Downloading on the Models page. Cancel stops this job; the download keeps going.';
+  if (download.shared) help = 'Already downloading. Cancel stops this job; the download keeps going.';
   else if (download.role === 'enhancer') help = `Downloading ${download.repo}. Only the first time.`;
   return {
     segments: part ? [part.charAt(0).toUpperCase() + part.slice(1), ...line] : line,

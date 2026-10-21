@@ -6,7 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Added
+- **Web UI: pick a model on first run.** When no image model is downloaded yet, the Workspace opens a welcome dialog listing the image models with the size of each download, with one preselected for your machine (FLUX.2 Klein 9B from 32 GB of memory, FLUX.2 Klein 4B below). **Download** starts it, makes it your default image model and selects it; **Skip** closes the dialog for good. If you only have the old `black-forest-labs/FLUX.2-klein-9B` download, `klein9b` counts as not downloaded and the dialog opens; delete the old copy under Models → Other downloads
+
 ### Fixed
+- **Web UI: no "not downloaded" note on a model that is downloading.** The model picker's note under the list now goes away while that model's download is queued or running
 - **Gated models say what to do.** When Hugging Face refuses a model (it is gated, or your token has no access to it), the Models page, the job card, the download list and `ziv-image` / `ziv-video` show one line that names the model, links to its page and says whether to accept its license, run `hf auth login` or sign in again, instead of Hugging Face's multi-line error. On Windows and Linux the Download button now shows this refusal too, where it showed "Could not reach Hugging Face"
 - **A token saved with `hf auth login` is found.** The Config page and Models page showed "Not set" unless `HF_TOKEN` was in the environment, even though downloads already used the saved token. They now report any token Hugging Face's tools find and where it comes from. The unsupported `HF_HUB_TOKEN` and `HUGGINGFACE_HUB_TOKEN` variables no longer count as a token
 

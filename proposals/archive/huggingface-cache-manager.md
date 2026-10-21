@@ -63,5 +63,5 @@ A plain **Other downloads** table on the Models page, below the enhancer table: 
 
 ## Out of scope
 
-- Downloading models from the page, and download progress ([First run](../first-run.md), [Show model download progress](model-download-progress.md)).
+- Downloading models from the page, and download progress ([First run](first-run.md), [Show model download progress](model-download-progress.md)).
 - Removing old revisions of a repo.

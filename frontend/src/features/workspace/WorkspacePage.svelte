@@ -4,7 +4,7 @@
   import { draft, videoTimingFor } from '$lib/state/draft.svelte';
   import { anyEnhancedUsed, enhancedPartUsed, submittedCaption, submittedPair } from '$lib/state/promptEnhance';
   import { jobStore } from '$lib/state/job.svelte';
-  import { downloadStore } from '$lib/state/downloads.svelte';
+  import { downloadStore, type DownloadRequestResult } from '$lib/state/downloads.svelte';
   import { downloadStatusText } from '$lib/state/downloadProgress';
   import { historyStore } from '$lib/state/history.svelte';
   import { router } from '$lib/state/router.svelte';
@@ -12,7 +12,8 @@
   import { canScrollToward, OWN_DRAG, pan, rubberBand, type PanEnd, type PanMove, type PanStart } from '$lib/actions/pan';
   import { GALLERY_PULL_PX, galleryPullReady, stageSwipeOutcome, wheelStep, type StageMoves } from './stageSwipe';
   import { addToast } from '$lib/state/toasts.svelte';
-  import { getWorkspaceCoreContext, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
+  import { getWorkspaceCoreContext, skipFirstRun, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
+  import { updateConfig } from '$lib/api/config';
   import { deleteAsset } from '$lib/api/gallery';
   import { canExtend, extendParams, referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { Icon, MascotSpot, ToolbarSelectShell } from '$lib/components/atoms';
@@ -38,6 +39,8 @@
   import { clipMemoryRequest } from '$lib/state/memoryFit';
   import { formatLoraString, loraLabel, parseLoraString, type LoraChip } from '$lib/state/loras';
   import QueuePanel from './QueuePanel.svelte';
+  import FirstRunDialog from './FirstRunDialog.svelte';
+  import { firstRun, shouldOfferFirstRun } from './firstRun.svelte';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import ControlsSidebar from './ControlsSidebar.svelte';
   import ComposePane from './ComposePane.svelte';
@@ -1059,6 +1062,38 @@
     }
   }
 
+  // First run: nothing is downloaded and the user has not skipped, so offer the image models once the lane is known.
+  const offerFirstRun = $derived(
+    shouldOfferFirstRun(context, {
+      downloadsSeeded: downloadStore.seeded,
+      activeImageDownload: downloadStore.items.some((item) => item.kind === 'model' && imageModels.some((model) => model.id === item.name) && (item.state === 'queued' || item.state === 'running')),
+      dismissed: firstRun.dismissed,
+    }),
+  );
+
+  /** Download the model chosen in the first-run dialog; once it is queued, make it the default and select it. */
+  async function downloadFirstRunModel(model: ModelOption): Promise<DownloadRequestResult> {
+    const result = await downloadStore.request('model', model.id, model.label);
+    if (result !== 'queued' && result !== 'present') return result;
+    firstRun.dismiss();
+    try {
+      await updateConfig({ 'ui.default_models.image': model.id });
+    } catch (e) {
+      addToast(errorText(e, 'Could not save the default model.'), 'error');
+    }
+    if (isImageMode) switchModel(model.id);
+    return result;
+  }
+
+  async function skipFirstRunDialog(): Promise<void> {
+    firstRun.dismiss();
+    try {
+      await skipFirstRun();
+    } catch (e) {
+      addToast(errorText(e, 'Could not remember that you skipped.'), 'error');
+    }
+  }
+
   function onModelChange(e: Event): void {
     switchModel((e.currentTarget as HTMLSelectElement).value);
   }
@@ -1560,6 +1595,16 @@
     </main>
   {/if}
 </form>
+
+{#if offerFirstRun && context}
+  <FirstRunDialog
+    models={imageModels}
+    recommended={context.first_run?.recommended_model ?? null}
+    ondownload={downloadFirstRunModel}
+    onskip={() => void skipFirstRunDialog()}
+    onclose={() => firstRun.dismiss()}
+  />
+{/if}
 
 <!-- One viewer for history and completed outputs -->
 <AssetViewer
