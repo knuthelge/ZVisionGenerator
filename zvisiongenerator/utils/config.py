@@ -215,6 +215,13 @@ def get_variant_key(model_info: ImageModelInfo) -> str | None:
     return None
 
 
+def model_display_name(config: dict[str, Any], name: str) -> str:
+    """Return how a model alias reads in the Web UI: its configured ``model_labels`` name, else the alias itself."""
+    entry = (config.get("model_labels") or {}).get(name)
+    label = entry.get("name") if isinstance(entry, dict) else None
+    return label.strip() if isinstance(label, str) and label.strip() else name
+
+
 def model_capabilities(config: dict[str, Any], family: str) -> dict[str, Any]:
     """Return a model family's capability flags and dimension limits from its preset, with permissive defaults.
 

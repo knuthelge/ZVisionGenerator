@@ -110,7 +110,7 @@ ziv-model list --loras
 
 ## Managing Models in the Web UI
 
-The Web UI's Models page lists the same models and LoRAs and can convert checkpoints and import LoRAs. The **Size** column shows the disk each model uses: an alias's HuggingFace download (with the extra repos LTX downloads on Windows/Linux), or a converted model's own folder without the base-model files it links to. Quantized copies count with their model when they don't have a row of their own. Two aliases that load the same download, such as `ltx-4` and `ltx-8` on Windows/Linux, both show it.
+The Web UI's Models page lists the same models and LoRAs and can convert checkpoints and import LoRAs. Each alias row shows the model's name (for example FLUX.2 Klein 9B) with the alias under it. The **Size** column shows the disk each model uses: an alias's HuggingFace download (with the extra repos LTX downloads on Windows/Linux), or a converted model's own folder without the base-model files it links to. Quantized copies count with their model when they don't have a row of their own. Two aliases that load the same download, such as `ltx-4` and `ltx-8` on Windows/Linux, both show it.
 
 Rows whose files are not fully downloaded have a **Download** button, so a model is ready before the first job that uses it (without it, the first job downloads the model and shows the download on its card). The prompt enhancer rows and the SeedVR2 row have one too.
 

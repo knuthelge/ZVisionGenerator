@@ -350,8 +350,8 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       image_models: [
-        { download_needed: false, name: 'atlas', family: 'flux2_klein', size_label: '9b', stored_quant: null },
-        { download_needed: false, name: 'atlas@q8', family: 'flux2_klein', size_label: '9b', stored_quant: { base_model: 'atlas', bits: 8 } },
+        { download_needed: false, name: 'atlas', label: 'atlas', family: 'flux2_klein', size_label: '9b', stored_quant: null },
+        { download_needed: false, name: 'atlas@q8', label: 'atlas@q8', family: 'flux2_klein', size_label: '9b', stored_quant: { base_model: 'atlas', bits: 8 } },
       ],
     });
 
@@ -367,8 +367,8 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       video_models: [
-        { download_needed: false, name: 'ltx-8', family: 'ltx', supports_i2v: true, converted_bits: null },
-        { download_needed: false, name: 'my-finetune', family: 'ltx', supports_i2v: true, converted_bits: 8 },
+        { download_needed: false, name: 'ltx-8', label: 'ltx-8', family: 'ltx', supports_i2v: true, converted_bits: null },
+        { download_needed: false, name: 'my-finetune', label: 'my-finetune', family: 'ltx', supports_i2v: true, converted_bits: 8 },
       ],
     });
 
@@ -486,10 +486,10 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       image_models: [
-        { download_needed: false, name: 'zit', family: 'zimage', size_label: 'xl', disk_size_label: '32.9 GB' },
-        { download_needed: false, name: 'klein4b', family: 'flux2_klein', size_label: '4b', disk_size_label: null },
+        { download_needed: false, name: 'zit', label: 'zit', family: 'zimage', size_label: 'xl', disk_size_label: '32.9 GB' },
+        { download_needed: false, name: 'klein4b', label: 'klein4b', family: 'flux2_klein', size_label: '4b', disk_size_label: null },
       ],
-      video_models: [{ download_needed: false, name: 'ltx-8', family: 'ltx', supports_i2v: true, disk_size_label: '112.3 GB' }],
+      video_models: [{ download_needed: false, name: 'ltx-8', label: 'ltx-8', family: 'ltx', supports_i2v: true, disk_size_label: '112.3 GB' }],
     });
 
     app = flushSync(() => mount(ModelsPage, { target }));
@@ -504,7 +504,7 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       models_dir: modelsDir,
-      image_models: [{ download_needed: false, name: longName, family: 'a-very-long-family', size_label: 'extra-long-size' }],
+      image_models: [{ download_needed: false, name: longName, label: longName, family: 'a-very-long-family', size_label: 'extra-long-size' }],
     });
 
     app = flushSync(() => mount(ModelsPage, { target }));
@@ -525,13 +525,14 @@ describe('ModelsPage Browse buttons', () => {
         {
           download_needed: false,
           name: 'zit',
+          label: 'zit',
           family: 'zimage',
           downloaded: true,
           memory_fit: { budget_gb: 10.7, by_quantize: { none: { status: 'too_large', required_gb: 20.8 }, '8': { status: 'fits', required_gb: 8.1 } } },
         },
-        { download_needed: true, name: 'klein4b', family: 'flux2_klein', downloaded: false, memory_fit: null },
+        { download_needed: true, name: 'klein4b', label: 'klein4b', family: 'flux2_klein', downloaded: false, memory_fit: null },
       ],
-      video_models: [{ download_needed: false, name: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, memory_fit: null }],
+      video_models: [{ download_needed: false, name: 'ltx-4', label: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, memory_fit: null }],
     });
     app = flushSync(() => mount(ModelsPage, { target }));
     await settle();
@@ -559,8 +560,8 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       image_models: [
-        { download_needed: false, name: 'zit', family: 'zimage', downloaded: true, delete: { kind: 'huggingface', repo_id: 'org/zit', linked_by: [], stored_quants: ['zit@q8'] } },
-        { download_needed: false, name: 'atlas', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
+        { download_needed: false, name: 'zit', label: 'zit', family: 'zimage', downloaded: true, delete: { kind: 'huggingface', repo_id: 'org/zit', linked_by: [], stored_quants: ['zit@q8'] } },
+        { download_needed: false, name: 'atlas', label: 'atlas', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
       ],
     });
     app = flushSync(() => mount(ModelsPage, { target }));
@@ -582,7 +583,7 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       video_models: [
-        { download_needed: false, name: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, delete: { kind: 'copy', repo_id: 'org/ltx', linked_by: [], stored_quants: ['ltx-4@q4'], shared_with: ['ltx-8'] } },
+        { download_needed: false, name: 'ltx-4', label: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, delete: { kind: 'copy', repo_id: 'org/ltx', linked_by: [], stored_quants: ['ltx-4@q4'], shared_with: ['ltx-8'] } },
       ],
     });
     app = flushSync(() => mount(ModelsPage, { target }));
@@ -602,9 +603,9 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       image_models: [
-        { download_needed: false, name: 'artaix', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
-        { download_needed: false, name: 'klein9b', family: 'flux2_klein', downloaded: true, delete: { kind: 'huggingface', repo_id: 'org/klein', linked_by: ['artaix'] } },
-        { download_needed: true, name: 'klein4b', family: 'flux2_klein', downloaded: false, delete: null },
+        { download_needed: false, name: 'artaix', label: 'artaix', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
+        { download_needed: false, name: 'klein9b', label: 'klein9b', family: 'flux2_klein', downloaded: true, delete: { kind: 'huggingface', repo_id: 'org/klein', linked_by: ['artaix'] } },
+        { download_needed: true, name: 'klein4b', label: 'klein4b', family: 'flux2_klein', downloaded: false, delete: null },
       ],
       loras: [{ name: 'style', size_label: '10 MB' }],
     });
@@ -634,6 +635,7 @@ describe('ModelsPage Browse buttons', () => {
   describe('SeedVR2 row', () => {
     const seedvr2Row = {
       name: 'seedvr2-7b@q8',
+      label: 'seedvr2-7b@q8',
       family: 'seedvr2',
       size_label: '7b',
       source: 'seedvr2',
@@ -652,7 +654,7 @@ describe('ModelsPage Browse buttons', () => {
         ...makeInventory(),
         image_models: [
           { download_needed: false, ...seedvr2Row, downloaded: true, disk_size_label: '9.3 GB', delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
-          { download_needed: false, name: 'zit', family: 'zimage', downloaded: true, delete: null },
+          { download_needed: false, name: 'zit', label: 'zit', family: 'zimage', downloaded: true, delete: null },
         ],
       });
       app = flushSync(() => mount(ModelsPage, { target }));
@@ -670,7 +672,7 @@ describe('ModelsPage Browse buttons', () => {
         ...makeInventory(),
         image_models: [
           { download_needed: true, ...seedvr2Row, downloaded: false, disk_size_label: null, delete: null },
-          { download_needed: true, name: 'klein4b', family: 'flux2_klein', downloaded: false, delete: null },
+          { download_needed: true, name: 'klein4b', label: 'klein4b', family: 'flux2_klein', downloaded: false, delete: null },
         ],
       });
       app = flushSync(() => mount(ModelsPage, { target }));
@@ -687,7 +689,7 @@ describe('ModelsPage Browse buttons', () => {
         ...makeInventory(),
         image_models: [
           { download_needed: false, ...seedvr2Row, downloaded: true, disk_size_label: '9.3 GB', delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
-          { download_needed: false, name: 'artaix', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
+          { download_needed: false, name: 'artaix', label: 'artaix', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
         ],
       });
       modelApiMocks.deleteModel.mockResolvedValue({ tone: 'success', message: "Deleted model 'seedvr2-7b@q8'.", detail: '' });
@@ -819,8 +821,8 @@ describe('ModelsPage downloads', () => {
     return {
       ...makeInventory(),
       image_models: [
-        { name: 'klein9b', family: 'flux2_klein', downloaded: false, download_needed: true, delete: null },
-        { name: 'klein4b', family: 'flux2_klein', downloaded: true, download_needed: false, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
+        { name: 'klein9b', label: 'klein9b', family: 'flux2_klein', downloaded: false, download_needed: true, delete: null },
+        { name: 'klein4b', label: 'klein4b', family: 'flux2_klein', downloaded: true, download_needed: false, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
       ],
       ...overrides,
     };
@@ -1063,9 +1065,26 @@ describe('ModelsPage downloads', () => {
     expect(modelApiMocks.getDownloadPlan).toHaveBeenCalledWith('model', 'klein9b');
   });
 
+  it('shows a model by its name with the alias under it, and uses the name in the row controls', async () => {
+    await mountPage(inventoryWith({
+      image_models: [
+        { name: 'klein9b', label: 'FLUX.2 Klein 9B', family: 'flux2_klein', downloaded: false, download_needed: true, delete: null },
+        { name: 'plain', label: 'plain', family: 'flux2_klein', downloaded: true, download_needed: false, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
+      ],
+    }));
+
+    const [named, plain] = Array.from(target.querySelectorAll('tbody tr')).filter((row) => row.querySelector('[data-testid="model-name"]'));
+    expect(named.querySelector('[data-testid="model-name"]')?.textContent).toBe('FLUX.2 Klein 9B');
+    expect(named.querySelector('[data-testid="model-id"]')?.textContent).toBe('klein9b');
+    expect(named.querySelector('[data-testid="download-button"]')?.getAttribute('aria-label')).toBe('Download FLUX.2 Klein 9B');
+    expect(plain.querySelector('[data-testid="model-name"]')?.textContent).toBe('plain');
+    expect(plain.querySelector('[data-testid="model-id"]')).toBeNull();
+    expect(plain.querySelector('[data-testid="delete-button"]')?.getAttribute('aria-label')).toBe('Delete plain');
+  });
+
   it('keeps a partly downloaded row downloaded and offers Download and Delete together', async () => {
     await mountPage(inventoryWith({
-      image_models: [{ name: 'partial', family: 'flux2_klein', downloaded: true, download_needed: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } }],
+      image_models: [{ name: 'partial', label: 'partial', family: 'flux2_klein', downloaded: true, download_needed: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } }],
     }));
 
     expect(target.querySelector('[data-testid="model-name"]')?.getAttribute('data-downloaded')).toBe('true');
@@ -1079,7 +1098,7 @@ describe('ModelsPage downloads', () => {
   it('offers Cancel only, without Delete, while a row is downloading', async () => {
     modelApiMocks.getDownloads.mockResolvedValue({ items: [running({ name: 'partial' })] });
     await mountPage(inventoryWith({
-      image_models: [{ name: 'partial', family: 'flux2_klein', downloaded: true, download_needed: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } }],
+      image_models: [{ name: 'partial', label: 'partial', family: 'flux2_klein', downloaded: true, download_needed: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } }],
     }));
 
     expect(target.querySelector('[data-testid="download-cancel"]')).not.toBeNull();
@@ -1105,9 +1124,9 @@ describe('ModelsPage downloads', () => {
     it('says the SeedVR2 copy and the Ideogram 4 Instant build are made on first use when nothing is left to fetch', async () => {
       await mountPage(inventoryWith({
         image_models: [
-          { name: 'seedvr2-7b@q8', family: 'seedvr2', source: 'seedvr2', downloaded: false, download_needed: false, download_size_label: '17.0 GB', delete: null },
-          { name: 'ideo', family: 'ideogram4', downloaded: false, download_needed: false, delete: null },
-          { name: 'klein9b', family: 'flux2_klein', downloaded: false, download_needed: true, delete: null },
+          { name: 'seedvr2-7b@q8', label: 'seedvr2-7b@q8', family: 'seedvr2', source: 'seedvr2', downloaded: false, download_needed: false, download_size_label: '17.0 GB', delete: null },
+          { name: 'ideo', label: 'ideo', family: 'ideogram4', downloaded: false, download_needed: false, delete: null },
+          { name: 'klein9b', label: 'klein9b', family: 'flux2_klein', downloaded: false, download_needed: true, delete: null },
         ],
       }));
 

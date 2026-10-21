@@ -110,6 +110,18 @@ class TestRowPlan:
         assert (plan.kind, plan.name, plan.label, plan.targets) == ("model", "ltx-8", "ltx-8", targets)
         planner.assert_called_once_with("owner/ltx", family="ltx", config=web_config.app_config, model_name="ltx-8", upscale=True)
 
+    def test_a_row_is_labelled_by_its_configured_name(self, env, monkeypatch):
+        monkeypatch.setattr(plan_module, "image_plan", MagicMock(return_value=(DownloadTarget("owner/zit"),)))
+        monkeypatch.setattr(plan_module, "video_plan", MagicMock(return_value=(DownloadTarget("owner/ltx"),)))
+        labels = {"zit": {"name": "Z-Image Turbo"}, "ltx-8": {"name": "LTX-2.3 8-bit"}}
+        web_config = _web_config(env, image=[_image("zit", "owner/zit")], video=[_video("ltx-8", "owner/ltx")], app_config={**_CONFIG, "model_labels": labels})
+
+        image, video = row_plan("model", "zit", web_config), row_plan("model", "ltx-8", web_config)
+        summary = plan_summary(image, check=lambda t: None, present=lambda t: True, cache_dir=lambda: env.data_dir)
+
+        assert (image.name, image.label, video.name, video.label) == ("zit", "Z-Image Turbo", "ltx-8", "LTX-2.3 8-bit")
+        assert (summary["name"], summary["label"]) == ("zit", "Z-Image Turbo")
+
     def test_the_seedvr2_row_is_planned_by_its_row_name(self, env, monkeypatch):
         targets = (DownloadTarget("owner/seedvr2", None, ("a.safetensors",), local_dir="/x"),)
         planner = MagicMock(return_value=targets)

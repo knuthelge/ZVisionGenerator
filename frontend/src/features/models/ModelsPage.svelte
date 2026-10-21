@@ -20,7 +20,7 @@
   let localLoraPath = $state('');
   let checkpointPathReset = $state(0);
   let localLoraPathReset = $state(0);
-  let pendingDelete = $state<{ type: 'model'; name: string; info: ModelDeleteInfo; downloadSizeLabel?: string | null } | { type: 'enhancer'; name: string; model: EnhancerModelEntry } | { type: 'download'; name: string; sizeLabel: string } | { type: 'stranded'; name: string; count: number; sizeLabel: string } | { type: 'lora'; name: string } | null>(null);
+  let pendingDelete = $state<{ type: 'model'; name: string; label: string; info: ModelDeleteInfo; downloadSizeLabel?: string | null } | { type: 'enhancer'; name: string; model: EnhancerModelEntry } | { type: 'download'; name: string; sizeLabel: string } | { type: 'stranded'; name: string; count: number; sizeLabel: string } | { type: 'lora'; name: string } | null>(null);
   let deleteOpen = $state(false);
   let deleting = $state(false);
 
@@ -72,14 +72,20 @@
     return `${kind}:${name}`;
   }
 
-  /** The row's name as a noun phrase without an article: "klein9b", "Smart enhancer model". */
+  /** How the page names a model row: its configured name, else its alias. */
+  function modelLabelFor(name: string): string {
+    const row = inventory?.image_models.find((m) => m.name === name) ?? inventory?.video_models.find((m) => m.name === name);
+    return row?.label || name;
+  }
+
+  /** The row's name as a noun phrase without an article: "FLUX.2 Klein 9B", "Smart enhancer model". */
   function rowName(kind: DownloadKind, name: string): string {
-    return kind === 'enhancer' ? `${ENHANCER_TIER_LABELS[name as EnhancerModelEntry['tier']] ?? name} enhancer model` : name;
+    return kind === 'enhancer' ? `${ENHANCER_TIER_LABELS[name as EnhancerModelEntry['tier']] ?? name} enhancer model` : modelLabelFor(name);
   }
 
   /** The row's name for a sentence: enhancer models read "the Smart enhancer model". */
   function rowPhrase(kind: DownloadKind, name: string): string {
-    return kind === 'enhancer' ? `the ${rowName(kind, name)}` : name;
+    return kind === 'enhancer' ? `the ${rowName(kind, name)}` : modelLabelFor(name);
   }
 
   /** What a running item's sub-row shows: the byte line split into segments, the percentage and the bar's numbers. */
@@ -291,7 +297,7 @@
     if (target.type === 'download') return `Delete the Hugging Face download of ${target.name}?`;
     if (target.type === 'stranded') return `Delete ${target.count} unused Hugging Face cache files?`;
     if (target.info.kind === 'installed') return `Delete the model folder ${target.name} from the models folder?`;
-    if (target.info.kind === 'copy') return `Delete the prepared copy of ${target.name}?`;
+    if (target.info.kind === 'copy') return `Delete the prepared copy of ${target.label}?`;
     return `Delete the Hugging Face download of ${target.info.repo_id}?`;
   }
 
@@ -361,10 +367,11 @@
   }
 </script>
 
-{#snippet modelName(m: ModelStatusFields & { name: string; family?: string; source?: string; download_size_label?: string | null; download_needed?: boolean })}
+{#snippet modelName(m: ModelStatusFields & { name: string; label?: string; family?: string; source?: string; download_size_label?: string | null; download_needed?: boolean })}
   {@const downloaded = m.downloaded}
+  {@const label = m.label || m.name}
   {#if downloaded === true || downloaded === false}
-    <Tooltip text={`${m.name}\n${downloaded ? DOWNLOADED_TOOLTIP : notDownloadedTooltip(m)}`} focusable={false} class="max-w-full items-center gap-1.5">
+    <Tooltip text={`${label}\n${downloaded ? DOWNLOADED_TOOLTIP : notDownloadedTooltip(m)}`} focusable={false} class="max-w-full items-center gap-1.5">
       {#if downloaded}
         <svg class="h-3.5 w-3.5 shrink-0 text-primary-main" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
@@ -374,10 +381,13 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"></path>
         </svg>
       {/if}
-      <span class="break-words {downloaded ? 'text-text-primary' : 'text-text-muted'}" data-testid="model-name" data-downloaded={String(downloaded)}>{m.name}</span>
+      <span class="break-words {downloaded ? 'text-text-primary' : 'text-text-muted'}" data-testid="model-name" data-downloaded={String(downloaded)}>{label}</span>
     </Tooltip>
   {:else}
-    <span class="block break-words text-text-primary" title={m.name} data-testid="model-name" data-downloaded="unknown">{m.name}</span>
+    <span class="block break-words text-text-primary" title={label} data-testid="model-name" data-downloaded="unknown">{label}</span>
+  {/if}
+  {#if label !== m.name}
+    <span class="ui-help block break-all font-mono font-normal" data-testid="model-id">{m.name}</span>
   {/if}
 {/snippet}
 
@@ -387,11 +397,12 @@
   </button>
 {/snippet}
 
-{#snippet modelDeleteCell(m: { name: string; delete?: ModelDeleteInfo | null; source?: string; download_size_label?: string | null })}
+{#snippet modelDeleteCell(m: { name: string; label?: string; delete?: ModelDeleteInfo | null; source?: string; download_size_label?: string | null })}
   {#if m.delete}
     {@const info = m.delete}
+    {@const label = m.label || m.name}
     {@const downloadSizeLabel = m.source === 'seedvr2' ? m.download_size_label : null}
-    {@render deleteButton(info.kind === 'huggingface' ? `Delete the Hugging Face download of ${m.name}` : info.kind === 'copy' ? `Delete the prepared copy of ${m.name}` : `Delete ${m.name}`, () => requestDelete({ type: 'model', name: m.name, info, downloadSizeLabel }))}
+    {@render deleteButton(info.kind === 'huggingface' ? `Delete the Hugging Face download of ${label}` : info.kind === 'copy' ? `Delete the prepared copy of ${label}` : `Delete ${label}`, () => requestDelete({ type: 'model', name: m.name, label, info, downloadSizeLabel }))}
   {/if}
 {/snippet}
 

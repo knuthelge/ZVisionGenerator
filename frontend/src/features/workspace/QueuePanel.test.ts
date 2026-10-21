@@ -51,6 +51,15 @@ describe('QueuePanel', () => {
     expect(loadButtons()).toHaveLength(1);
   });
 
+  it('names the model by its label in the queue row, falling back to its id', () => {
+    mountPanel([makeJob({ model: 'klein9b', model_label: 'FLUX.2 Klein 9B' }), makeJob({ id: 'job-2', job_id: 'job-2', model: 'zit' })]);
+
+    const rows = Array.from(target.querySelectorAll('.queue-meta')).map((row) => row.textContent ?? '');
+    expect(rows[0]).toContain('FLUX.2 Klein 9B');
+    expect(rows[0]).not.toContain('klein9b');
+    expect(rows[1]).toContain('zit');
+  });
+
   it('labels a queued upscale and offers no settings to load', () => {
     mountPanel([makeJob({ workflow: 'upscale', job_type: 'Upscale', prompt: '', settings: {}, meta: '2× → 1664×2432' })]);
 

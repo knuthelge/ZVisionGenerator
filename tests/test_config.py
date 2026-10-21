@@ -15,6 +15,7 @@ from zvisiongenerator.utils.config import (
     ltx_load_options,
     ltx_transformer_source,
     model_capabilities,
+    model_display_name,
     resolve_defaults,
     resolve_video_defaults,
     validate_video_size_choice,
@@ -1198,3 +1199,38 @@ class TestLtxLoadOptions:
         assert options["quantize"] is None
         assert options["upscale"] is True
         assert options["latent_upsampler"] == ("org/up", "up.safetensors")
+
+
+class TestModelDisplayName:
+    """AC4.1/AC4.2: an alias reads by its configured name in the Web UI, else by itself."""
+
+    def test_a_configured_alias_reads_by_its_name(self):
+        assert model_display_name({"model_labels": {"klein9b": {"name": "FLUX.2 Klein 9B"}}}, "klein9b") == "FLUX.2 Klein 9B"
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            {},
+            {"model_labels": None},
+            {"model_labels": {}},
+            {"model_labels": {"other": {"name": "Other"}}},
+            {"model_labels": {"zit": {"name": "   "}}},
+            {"model_labels": {"zit": {"name": 7}}},
+            {"model_labels": {"zit": {}}},
+            {"model_labels": {"zit": "Z-Image Turbo"}},
+        ],
+    )
+    def test_anything_unusable_reads_as_the_alias(self, config):
+        assert model_display_name(config, "zit") == "zit"
+
+    def test_every_packaged_alias_has_a_name(self, monkeypatch, tmp_path):
+        from zvisiongenerator.utils import config as config_module
+
+        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+        config = load_config()
+
+        for alias in config["model_aliases"]:
+            name = config["model_labels"][alias]["name"]
+            assert isinstance(name, str) and name.strip(), alias
+            assert model_display_name(config, alias) == name
+        assert model_display_name(config, "klein9b") == "FLUX.2 Klein 9B"

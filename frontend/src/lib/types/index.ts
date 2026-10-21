@@ -804,6 +804,8 @@ export interface JobContext {
   workflow: JobWorkflow;
   prompt: string;
   model: string;
+  /** How the Web UI shows `model`: its configured name, else the id. Absent on jobs from an older server. */
+  model_label?: string;
   runs: number;
   created_at: string;
   supported_controls?: string[];
@@ -1205,6 +1207,8 @@ export interface StoredQuantInfo {
 
 export interface ModelEntry extends ModelStatusFields {
   name: string;
+  /** How the Web UI shows the model: its configured name, else `name`. */
+  label: string;
   family: string;
   size_label?: string;
   /** Where the model comes from: `installed`, `alias`, or `seedvr2` for the plain-upscale model's stored copy. */
@@ -1221,6 +1225,8 @@ export interface ModelEntry extends ModelStatusFields {
 
 export interface VideoModelEntry extends ModelStatusFields {
   name: string;
+  /** How the Web UI shows the model: its configured name, else `name`. */
+  label: string;
   family: string;
   supports_i2v: boolean;
   size_label?: string;

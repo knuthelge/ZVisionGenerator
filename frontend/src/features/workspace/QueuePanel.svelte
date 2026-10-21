@@ -15,7 +15,7 @@
 
   function details(job: JobSnapshot): string {
     const runs = `${job.runs} ${job.runs === 1 ? 'run' : 'runs'}`;
-    return [job.model, job.workflow, runs, job.meta].filter(Boolean).join(' · ');
+    return [job.model_label || job.model, job.workflow, runs, job.meta].filter(Boolean).join(' · ');
   }
 </script>
 

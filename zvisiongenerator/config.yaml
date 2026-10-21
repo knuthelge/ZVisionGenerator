@@ -134,6 +134,23 @@ model_alias_families:
   ideo: ideogram4
   krea2: krea2
 
+# How an alias reads in the Web UI; the alias stays its id everywhere else (CLI, prompt files, API).
+model_labels:
+  klein9b:
+    name: "FLUX.2 Klein 9B"
+  klein4b:
+    name: "FLUX.2 Klein 4B"
+  zit:
+    name: "Z-Image Turbo"
+  krea2:
+    name: "Krea 2 Turbo"
+  ideo:
+    name: "Ideogram 4 Instant"
+  ltx-8:
+    name: "LTX-2.3 8-bit"
+  ltx-4:
+    name: "LTX-2.3 4-bit"
+
 model_presets:
   zimage:
     supports_negative_prompt: true

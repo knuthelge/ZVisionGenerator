@@ -94,6 +94,7 @@ def public_job_snapshot(
         "preview_version": preview_version,
         "prompt": context.get("prompt", ""),
         "model": context.get("model", ""),
+        "model_label": context.get("model_label") or context.get("model", ""),
         "runs": context.get("runs", 1),
         "meta": context.get("meta", ""),
         "settings": context.get("settings", {}),

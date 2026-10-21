@@ -295,8 +295,8 @@ export function headline(job: ActiveJobState): string {
     return rewrite ? `Enhancing prompt ${rewrite.current} of ${rewrite.total}` : 'Loading the prompt enhancer';
   }
   if (phase === 'load') {
-    if (job.download?.role === 'model' || job.loadPhase === 'downloading') return `Downloading ${job.model}`;
-    if (job.loadPhase === 'building') return `Building ${job.model}`;
+    if (job.download?.role === 'model' || job.loadPhase === 'downloading') return `Downloading ${job.model_label || job.model}`;
+    if (job.loadPhase === 'building') return `Building ${job.model_label || job.model}`;
     return job.loadQuant ? 'Preparing the model' : 'Loading the model';
   }
   if (job.workflow === 'upscale') return 'Upscaling';
@@ -440,7 +440,7 @@ export function loadBody(job: ActiveJobState): string {
   if (job.loadPhase === 'building') return 'Converting the model files for this machine. Only the first time you use this model.';
   if (job.loadQuant && job.loadReplacesDownload) return 'Saving an 8-bit copy and removing the downloaded files to save disk. Only the first time.';
   if (job.loadQuant) return 'Saving a quantized copy so later jobs load in seconds. Only the first time you use this model.';
-  return `Loading ${job.model} into memory.`;
+  return `Loading ${job.model_label || job.model} into memory.`;
 }
 
 function loadLabel(job: ActiveJobState): string {
@@ -459,7 +459,7 @@ function rowDetail(job: ActiveJobState, key: JobPhase, status: PhaseRowStatus, t
   }
   if (key === 'load') {
     if (job.loadPhase === 'building') return 'first use only';
-    return job.loadQuant ? `q${job.loadQuant} copy · first use only` : job.model;
+    return job.loadQuant ? `q${job.loadQuant} copy · first use only` : job.model_label || job.model;
   }
   if (key === 'generate') return total > 1 ? `${total} ${itemNoun(job)}s` : '';
   return '';

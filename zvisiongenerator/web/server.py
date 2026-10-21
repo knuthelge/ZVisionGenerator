@@ -48,6 +48,7 @@ from zvisiongenerator.utils.config import (
     ENHANCER_TIERS,
     enhancer_tier_models,
     load_config,
+    model_display_name,
     model_reference,
     resolve_defaults,
     resolve_enhancer_model,
@@ -674,6 +675,7 @@ def _job_response(job_id: str, context: dict[str, Any], supported_controls: tupl
             "job_type": context["job_type"],
             "prompt": context["prompt"],
             "model": context["model"],
+            "model_label": context.get("model_label") or context["model"],
             "runs": context["runs"],
             "created_at": context["created_at"],
             "events_url": f"/jobs/{job_id}/events",
@@ -692,6 +694,7 @@ def _public_job_context(
     mode: str,
     job_type: str,
     model: str,
+    model_label: str,
     prompt: str,
     runs: int,
     meta: str,
@@ -706,6 +709,7 @@ def _public_job_context(
         "job_type": job_type,
         "prompt": prompt,
         "model": model,
+        "model_label": model_label,
         "runs": runs,
         "meta": meta,
         "created_at": datetime.now(tz=timezone.utc).isoformat(),
@@ -776,11 +780,13 @@ def _upscale_from_body(body: Any) -> JSONResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # An upscale has no Workspace form, so it carries no settings to load back from the queue.
+    upscale_model = seedvr2_tier_label(setup.tier.model, setup.weights) if use_seedvr2 else plan.request.model_name or ""
     context = {
         "workflow": "upscale",
         "job_type": "Upscale",
         "prompt": plan.request.resolved_prompt or plan.request.prompt,
-        "model": seedvr2_tier_label(setup.tier.model, setup.weights) if use_seedvr2 else plan.request.model_name or "",
+        "model": upscale_model,
+        "model_label": model_display_name(web_config.app_config, upscale_model),
         "runs": 1,
         "meta": upscale_size_label(plan),
         "notices": list(plan.notices),
@@ -1090,6 +1096,7 @@ def _submit_image_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         mode="image",
         job_type="Image to Image" if args.image_path else "Text to Image",
         model=model_name,
+        model_label=model_display_name(app_config, model_name),
         prompt=prompt,
         runs=args.runs,
         meta=f"{args.ratio} · {args.size} · {args.steps} steps",
@@ -1222,6 +1229,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
         mode="video",
         job_type=job_type,
         model=model_name,
+        model_label=model_display_name(app_config, model_name),
         prompt=prompt or scene or "",
         runs=args.runs,
         meta=meta,

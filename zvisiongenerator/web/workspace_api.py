@@ -13,7 +13,16 @@ from zvisiongenerator.backends import accelerator_memory_budget_or_none as memor
 from zvisiongenerator.converters.list_assets import list_loras
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
-from zvisiongenerator.utils.config import enhancer_tier_models, ltx_companion_repos, resolve_defaults, resolve_enhancer_model, resolve_video_defaults, smart_enhancer_model, smart_unavailable
+from zvisiongenerator.utils.config import (
+    enhancer_tier_models,
+    ltx_companion_repos,
+    model_display_name,
+    resolve_defaults,
+    resolve_enhancer_model,
+    resolve_video_defaults,
+    smart_enhancer_model,
+    smart_unavailable,
+)
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.hf_cache import CachedRepo, cached_model_repos, repo_disk_bytes, stranded_shared_files
@@ -100,8 +109,8 @@ def build_workspace_response(
     status = _status_resolver(web_config, image_model_defaults_map)
     image_entries = {entry.name: entry for entry in web_config.image_inventory}
     video_entries = {entry.name: entry for entry in web_config.video_inventory}
-    image_models = [{"id": name, "label": name, "type": "image", **status(image_entries.get(name), "image")} for name in web_config.image_model_options]
-    video_models = [{"id": name, "label": name, "type": "video", **status(video_entries.get(name), "video")} for name in web_config.video_model_options]
+    image_models = [{"id": name, "label": model_display_name(web_config.app_config, name), "type": "image", **status(image_entries.get(name), "image")} for name in web_config.image_model_options]
+    video_models = [{"id": name, "label": model_display_name(web_config.app_config, name), "type": "video", **status(video_entries.get(name), "video")} for name in web_config.video_model_options]
     loras = [{"name": name, "path": str(Path(web_config.loras_dir) / f"{name}.safetensors")} for name in web_config.lora_options]
     image_defaults = image_model_defaults_map.get(image_default_model) or _build_image_bootstrap_defaults(image_default_model or "", web_config)
     video_defaults = video_model_defaults_map.get(video_default_model) or _build_video_bootstrap_defaults(video_default_model or "", web_config)
@@ -232,6 +241,7 @@ def build_models_response(
     image_rows = [
         {
             "name": entry.name,
+            "label": model_display_name(web_config.app_config, entry.name),
             "family": entry.family,
             "size_label": entry.size or "Unknown",
             "source": entry.source,
@@ -245,6 +255,7 @@ def build_models_response(
     video_rows = [
         {
             "name": entry.name,
+            "label": model_display_name(web_config.app_config, entry.name),
             "family": entry.family,
             "supports_i2v": entry.supports_i2v,
             "source": entry.source,
@@ -301,6 +312,7 @@ def _seedvr2_model_rows(setup: SeedVR2Setup | None, models_dir: Path) -> list[di
     return [
         {
             "name": seedvr2_row_name(model, setup.weights),
+            "label": seedvr2_row_name(model, setup.weights),
             "family": "seedvr2",
             "size_label": model.removeprefix("seedvr2-"),
             "source": "seedvr2",

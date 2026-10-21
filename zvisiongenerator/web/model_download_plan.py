@@ -12,7 +12,7 @@ from zvisiongenerator.downloads.check import check_target
 from zvisiongenerator.downloads.plans import enhancer_plan, image_plan, instant_plan, seedvr2_plan, video_plan
 from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.downloads.space import space_need
-from zvisiongenerator.utils.config import enhancer_tier_models
+from zvisiongenerator.utils.config import enhancer_tier_models, model_display_name
 from zvisiongenerator.utils.ideogram4_instant import is_instant_dir
 from zvisiongenerator.utils.model_files import huggingface_cache_dir
 from zvisiongenerator.utils.seedvr2 import seedvr2_row_name
@@ -175,13 +175,13 @@ def _model_row_plan(name: str, web_config: WebUiConfig) -> RowPlan:
     app_config = web_config.app_config
     image = _image_entry(name, web_config)
     if image is not None:
-        return RowPlan(KIND_MODEL, name, name, image_plan(image.resolved_path, family=image.family, config=app_config, platform_key=sys.platform))
+        return RowPlan(KIND_MODEL, name, model_display_name(app_config, name), image_plan(image.resolved_path, family=image.family, config=app_config, platform_key=sys.platform))
     setup = web_config.seedvr2
     if _is_seedvr2_row(name, web_config) and setup is not None:
         return RowPlan(KIND_MODEL, name, name, seedvr2_plan(setup.tier.model, models_dir=Path(web_config.models_dir), weights=setup.weights))
     video = next((entry for entry in web_config.video_inventory if entry.name == name), None)
     if video is not None:
-        return RowPlan(KIND_MODEL, name, name, video_plan(video.resolved_path, family=video.family, config=app_config, model_name=video.name, upscale=True))
+        return RowPlan(KIND_MODEL, name, model_display_name(app_config, name), video_plan(video.resolved_path, family=video.family, config=app_config, model_name=video.name, upscale=True))
     raise ValueError(f"No model named '{name}' to download.")
 
 

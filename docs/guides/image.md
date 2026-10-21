@@ -8,13 +8,15 @@ On Windows and Linux, image generation requires CUDA to be visible to PyTorch. C
 
 Built-in shorthands for common image models.
 
-| Alias | Expands To |
-|-------|------------|
-| `zit` | `Tongyi-MAI/Z-Image-Turbo` |
-| `klein4b` | `black-forest-labs/FLUX.2-klein-4B` |
-| `klein9b` | `unsloth/FLUX.2-klein-9B` |
-| `ideo` | Ideogram 4 Instant, built in `~/.ziv/models/ideo` on first use from `Hippotes/Ideogram4-Fal-ComfyUI` (transformer) plus `unsloth/ideogram-4-fp8` on macOS or `unsloth/ideogram-4-nf4-diffusers` on Windows and Linux (text encoder, VAE, tokenizer); see [Ideogram 4](#ideogram-4) |
-| `krea2` | `unsloth/Krea-2-Turbo` |
+| Alias | Web UI name | Expands To |
+|-------|-------------|------------|
+| `zit` | Z-Image Turbo | `Tongyi-MAI/Z-Image-Turbo` |
+| `klein4b` | FLUX.2 Klein 4B | `black-forest-labs/FLUX.2-klein-4B` |
+| `klein9b` | FLUX.2 Klein 9B | `unsloth/FLUX.2-klein-9B` |
+| `ideo` | Ideogram 4 Instant | Ideogram 4 Instant, built in `~/.ziv/models/ideo` on first use from `Hippotes/Ideogram4-Fal-ComfyUI` (transformer) plus `unsloth/ideogram-4-fp8` on macOS or `unsloth/ideogram-4-nf4-diffusers` on Windows and Linux (text encoder, VAE, tokenizer); see [Ideogram 4](#ideogram-4) |
+| `krea2` | Krea 2 Turbo | `unsloth/Krea-2-Turbo` |
+
+The Web UI shows a model by its name (in the Workspace model picker, on job cards and in the queue, and on the Models page, which lists the alias under the name). The alias is what you use with `-m`, in prompt files and on the Config page; names come from `model_labels` in `config.yaml`, and a model without one shows its alias.
 
 `klein9b` points to unsloth's ungated mirror of Black Forest Labs' repo, so no Hugging Face token is needed.
 

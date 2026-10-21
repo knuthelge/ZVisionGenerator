@@ -36,6 +36,7 @@ from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import video_clip as video_clip_module
 from zvisiongenerator.web import workspace_api as workspace_api_module
 from zvisiongenerator.web.gallery import list_gallery_assets
+from zvisiongenerator.web.job_contract import public_job_snapshot
 from zvisiongenerator.web.job_log import JOB_LOG_STATUS_FILTERS, JobLog
 from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry
@@ -1378,6 +1379,7 @@ def test_models_route_uses_shared_alias_inventory(monkeypatch, tmp_path):
         "alias-image": str(tmp_path / "models" / "alias-image"),
         "alias-video": str(tmp_path / "models" / "alias-video"),
     }
+    web_config.app_config["model_labels"] = {"alias-image": {"name": "Alias Image"}, "alias-video": {"name": "Alias Video"}}
     monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
     monkeypatch.setattr(
         model_inventory_module,
@@ -1422,6 +1424,9 @@ def test_models_route_uses_shared_alias_inventory(monkeypatch, tmp_path):
     video_models = {entry["name"]: entry for entry in payload["video_models"]}
 
     assert image_models["local-image"]["source"] == "installed"
+    assert image_models["alias-image"]["label"] == "Alias Image"
+    assert image_models["local-image"]["label"] == "local-image"
+    assert video_models["alias-video"]["label"] == "Alias Video"
     assert image_models["alias-image"]["family"] == "zimage"
     assert image_models["alias-image"]["source"] == "alias"
     assert image_models["local-image"]["size_label"] == "m"
@@ -1469,6 +1474,7 @@ def test_models_route_lists_the_downloaded_seedvr2_tier_with_its_disk_use(monkey
     assert rows == [
         {
             "name": "seedvr2-7b@q8",
+            "label": "seedvr2-7b@q8",
             "family": "seedvr2",
             "size_label": "7b",
             "source": "seedvr2",
@@ -2136,6 +2142,27 @@ def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
     assert video_names and set(video_names) == {("ltx-8", True)}  # a video model's level comes from its name and the config
 
 
+def test_workspace_options_carry_the_configured_name_as_their_label(monkeypatch):
+    """AC4.3: a named alias is labelled by its name, an unnamed model by its id; the id never changes."""
+    web_config = _make_web_config()
+    web_config.app_config["model_labels"] = {"zit": {"name": "Z-Image Turbo"}, "ltx-8": {"name": "LTX-2.3 8-bit"}}
+    monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: None)
+
+    workspace = workspace_api_module.build_workspace_response(
+        web_config,
+        [],
+        active_job=None,
+        prompt_sources=["inline"],
+        default_prompt_source="inline",
+        prompt_file_contract={},
+        workflow_contract={},
+        build_bootstrap_view=lambda _cfg: _make_workspace_bootstrap_view(),
+    )
+
+    assert {(entry["id"], entry["label"]) for entry in workspace["image_models"]} == {("zit", "Z-Image Turbo"), ("local-image", "local-image")}
+    assert [(entry["id"], entry["label"]) for entry in workspace["video_models"]] == [("ltx-8", "LTX-2.3 8-bit")]
+
+
 def test_workspace_models_without_inventory_entry_report_unknown_status(monkeypatch):
     """Names with no inventory entry (e.g. stale config) report unknown rather than guessing."""
     web_config = _make_web_config()
@@ -2379,9 +2406,51 @@ def test_submit_image_job_queues_with_its_public_context(monkeypatch, tmp_path):
     assert context == response["context"]
     assert context["prompt"] == "hello"
     assert context["model"] == "zit"
+    assert context["model_label"] == "zit"
     assert context["workflow"] == "txt2img"
     assert "steps" in context["meta"]
     assert context["settings"] == {"model": "zit", "prompt": "hello", "steps": "9", "workflow": "txt2img"}
+
+
+def test_a_submitted_job_carries_the_models_configured_name_beside_its_id(monkeypatch, tmp_path):
+    """AC4.5: the context and the response say the name; the model id is unchanged."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    web_config.app_config["model_labels"] = {"zit": {"name": "Z-Image Turbo"}}
+    submitted: list[dict[str, object]] = []
+    _patch_image_submit_dependencies(monkeypatch, model_info=ImageModelInfo(family="zimage", is_distilled=False, size=None), defaults=_make_resolved_image_defaults(), submitted=submitted)
+    monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+    monkeypatch.setattr(web_server.web_runner, "get_job_snapshot", lambda _job_id: {"queue_position": 1})
+
+    with TestClient(web_server.app) as client:
+        response = client.post("/api/generate", data={"mode": "image", "model": "zit", "prompt": "hello", "workflow": "txt2img"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["model"], body["model_label"]) == ("zit", "Z-Image Turbo")
+    assert (submitted[0]["context"]["model"], submitted[0]["context"]["model_label"]) == ("zit", "Z-Image Turbo")
+
+
+def test_a_job_snapshot_carries_the_model_label_and_falls_back_to_the_model():
+    """AC4.5: ``model_label`` is in the snapshot; a context without one reads as its model id."""
+    base = {
+        "job_id": "j",
+        "status": "queued",
+        "workflow": "txt2img",
+        "supported_controls": (),
+        "created_at": 0.0,
+        "completed_at": None,
+        "event_count": 0,
+        "last_event": None,
+        "paused": False,
+        "result_path": None,
+    }
+
+    named = public_job_snapshot(context={"model": "zit", "model_label": "Z-Image Turbo"}, **base)
+    unnamed = public_job_snapshot(context={"model": "zit"}, **base)
+
+    assert (named["model"], named["model_label"]) == ("zit", "Z-Image Turbo")
+    assert (unnamed["model"], unnamed["model_label"]) == ("zit", "zit")
 
 
 @pytest.mark.parametrize("amount", [-0.1, 1.6])
@@ -3348,6 +3417,7 @@ class TestModelDownloadRoutes:
         web_config.image_inventory = (ImageInventoryEntry(name="zit", family="zimage", size=None, source="alias", resolved_path="owner/zit"),)
         web_config.video_inventory = (VideoInventoryEntry(name="ltx-8", family="ltx", supports_i2v=True, source="alias", resolved_path="owner/ltx"),)
         web_config.app_config["prompt_enhancer"] = {"model": "owner/enhancer"}
+        web_config.app_config["model_labels"] = {"zit": {"name": "Z-Image Turbo"}, "ltx-8": {"name": "LTX-2.3 8-bit"}}
         monkeypatch.setattr(web_server, "download_lane", lane)
         monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
         monkeypatch.setattr(download_plan_module, "image_plan", lambda *a, **k: self._FAKE_PARTS)
@@ -3380,7 +3450,7 @@ class TestModelDownloadRoutes:
         assert response.status_code == 200
         assert response.json() == {"items": []}
 
-    @pytest.mark.parametrize(("kind", "name", "label"), [("model", "zit", "zit"), ("model", "ltx-8", "ltx-8"), ("enhancer", "fast", None)])
+    @pytest.mark.parametrize(("kind", "name", "label"), [("model", "zit", "Z-Image Turbo"), ("model", "ltx-8", "LTX-2.3 8-bit"), ("enhancer", "fast", None)])
     def test_posting_a_download_queues_an_item_keyed_by_kind_and_name(self, client, lane, kind, name, label):
         response = client.post("/api/models/download", json={"kind": kind, "name": name})
 

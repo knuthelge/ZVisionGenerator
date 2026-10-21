@@ -234,6 +234,7 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     workflow: snapshot.workflow,
     prompt: snapshot.prompt,
     model: snapshot.model,
+    model_label: snapshot.model_label,
     runs: snapshot.runs,
     created_at: String(snapshot.created_at),
     supported_controls: snapshot.supported_controls ?? [],

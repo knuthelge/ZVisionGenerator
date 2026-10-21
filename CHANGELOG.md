@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **A token saved with `hf auth login` is found.** The Config page and Models page showed "Not set" unless `HF_TOKEN` was in the environment, even though downloads already used the saved token. They now report any token Hugging Face's tools find and where it comes from. The unsupported `HF_HUB_TOKEN` and `HUGGINGFACE_HUB_TOKEN` variables no longer count as a token
 
 ### Changed
+- **Web UI: models are shown by name.** The Workspace, job cards and the Models page say FLUX.2 Klein 9B instead of `klein9b`. The alias is still what you use in the CLI and prompt files, and the Models page shows it under the name
 - **Web UI: downloads show in the Workspace.** A model downloading from the Models page shows its progress in the Workspace model picker (for example "Downloading 42%") instead of "not downloaded", and the picker updates when it finishes. The "downloaded" and "download failed" messages stay on screen when you leave the Models page, and Retry still works
 - **`klein9b` downloads from an ungated mirror.** It needs no Hugging Face token or license step any more. A copy downloaded before this update isn't used: `klein9b` downloads again (about 35 GB) and its `klein9b@q8` copy is made again once. Delete the old copy under Models → Other downloads (`black-forest-labs/FLUX.2-klein-9B`). Converting a Klein 9B checkpoint uses the mirror as its base too
 

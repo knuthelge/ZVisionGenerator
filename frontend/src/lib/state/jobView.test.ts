@@ -27,6 +27,20 @@ describe('jobView', () => {
     expect(iterations(job({ phase: 'enhance', runs: 4 })).index).toBe(0);
   });
 
+  describe('model name', () => {
+    it('shows the model label in the load headline, body and row, and the id when there is none', () => {
+      const named = { model: 'klein9b', model_label: 'FLUX.2 Klein 9B' };
+      const loadDetail = (state: ActiveJobState) => phaseRows(state).find((row) => row.key === 'load')!.detail;
+
+      expect(headline(job({ phase: 'load', loadPhase: 'downloading', ...named }))).toBe('Downloading FLUX.2 Klein 9B');
+      expect(headline(job({ phase: 'load', loadPhase: 'building', ...named }))).toBe('Building FLUX.2 Klein 9B');
+      expect(loadBody(job(named))).toContain('FLUX.2 Klein 9B');
+      expect(loadDetail(job({ phase: 'load', ...named }))).toBe('FLUX.2 Klein 9B');
+      expect(headline(job({ phase: 'load', loadPhase: 'downloading', model: 'klein9b' }))).toBe('Downloading klein9b');
+      expect(loadDetail(job({ phase: 'load', model: 'klein9b' }))).toBe('klein9b');
+    });
+  });
+
   describe('headline', () => {
     it.each([
       ['a waiting job', job({ status: 'queued', phase: 'queue' }), 'Waiting to start'],

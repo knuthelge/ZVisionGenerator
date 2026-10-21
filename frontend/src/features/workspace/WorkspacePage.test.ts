@@ -2274,6 +2274,24 @@ describe('WorkspacePage', () => {
     });
   });
 
+  it('shows the selected model by its label in the toolbar while the option value stays its id', async () => {
+    await mountWorkspace(makeContext({
+      image_models: [
+        { id: 'klein9b', label: 'FLUX.2 Klein 9B', type: 'image' },
+        { id: 'zit', label: 'zit', type: 'image' },
+      ],
+      current_image_model: 'klein9b',
+      image_model_defaults: { klein9b: makeImageDefaults({}), zit: makeImageDefaults({}) },
+    }));
+
+    const shell = target.querySelector('[data-testid="model-shell"]');
+    expect(shell?.textContent).toContain('FLUX.2 Klein 9B');
+    expect(shell?.textContent).not.toContain('klein9b');
+    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement;
+    expect(Array.from(modelSelect.options).map((option) => [option.value, option.textContent])).toEqual([['klein9b', 'FLUX.2 Klein 9B'], ['zit', 'zit']]);
+    expect(draft.state.model).toBe('klein9b');
+  });
+
   it('keeps a changed setting and applies the new model defaults to the rest when the toolbar model changes', async () => {
     const context = makeContext({
       image_models: [
