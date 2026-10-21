@@ -15,6 +15,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final
 
+from zvisiongenerator.backends.cuda.download_plan import SEPARATE_TRANSFORMER_IGNORE
 from zvisiongenerator.backends.cuda.driver import require_cuda
 from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, warn_unmatched_lora
 from zvisiongenerator.core.video_types import ExtendSegment
@@ -366,7 +367,7 @@ def _repo_dir(model_path: str, *, with_transformer: bool) -> Path:
         return local
     from huggingface_hub import snapshot_download
 
-    ignore = None if with_transformer else ["transformer/*.safetensors", "transformer/*.safetensors.index.json"]
+    ignore = None if with_transformer else list(SEPARATE_TRANSFORMER_IGNORE)
     try:
         return Path(snapshot_download(model_path, ignore_patterns=ignore))
     except Exception as exc:

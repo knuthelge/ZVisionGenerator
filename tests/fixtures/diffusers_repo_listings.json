@@ -1,0 +1,220 @@
+{
+  "Tongyi-MAI/Z-Image-Turbo": {
+    "files": [
+      ".gitattributes",
+      "README.md",
+      "assets/DMDR.webp",
+      "assets/Z-Image-Gallery.pdf",
+      "assets/architecture.webp",
+      "assets/decoupled-dmd.webp",
+      "assets/leaderboard.png",
+      "assets/leaderboard.webp",
+      "assets/reasoning.png",
+      "assets/showcase.jpg",
+      "assets/showcase_editing.png",
+      "assets/showcase_realistic.png",
+      "assets/showcase_rendering.png",
+      "model_index.json",
+      "scheduler/scheduler_config.json",
+      "text_encoder/config.json",
+      "text_encoder/generation_config.json",
+      "text_encoder/model-00001-of-00003.safetensors",
+      "text_encoder/model-00002-of-00003.safetensors",
+      "text_encoder/model-00003-of-00003.safetensors",
+      "text_encoder/model.safetensors.index.json",
+      "tokenizer/merges.txt",
+      "tokenizer/tokenizer.json",
+      "tokenizer/tokenizer_config.json",
+      "tokenizer/vocab.json",
+      "transformer/config.json",
+      "transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
+      "transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
+      "transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
+      "transformer/diffusion_pytorch_model.safetensors.index.json",
+      "vae/config.json",
+      "vae/diffusion_pytorch_model.safetensors"
+    ],
+    "model_index": {
+      "_class_name": "ZImagePipeline",
+      "_diffusers_version": "0.36.0.dev0",
+      "scheduler": [
+        "diffusers",
+        "FlowMatchEulerDiscreteScheduler"
+      ],
+      "text_encoder": [
+        "transformers",
+        "Qwen3Model"
+      ],
+      "tokenizer": [
+        "transformers",
+        "Qwen2Tokenizer"
+      ],
+      "transformer": [
+        "diffusers",
+        "ZImageTransformer2DModel"
+      ],
+      "vae": [
+        "diffusers",
+        "AutoencoderKL"
+      ]
+    }
+  },
+  "black-forest-labs/FLUX.2-klein-9B": {
+    "files": [
+      ".gitattributes",
+      "LICENSE.md",
+      "README.md",
+      "editing.jpg",
+      "flux-2-klein-9b.safetensors",
+      "model_index.json",
+      "others.jpg",
+      "realism.jpg",
+      "scheduler/scheduler_config.json",
+      "text_encoder/config.json",
+      "text_encoder/generation_config.json",
+      "text_encoder/model-00001-of-00004.safetensors",
+      "text_encoder/model-00002-of-00004.safetensors",
+      "text_encoder/model-00003-of-00004.safetensors",
+      "text_encoder/model-00004-of-00004.safetensors",
+      "text_encoder/model.safetensors.index.json",
+      "tokenizer/added_tokens.json",
+      "tokenizer/chat_template.jinja",
+      "tokenizer/merges.txt",
+      "tokenizer/special_tokens_map.json",
+      "tokenizer/tokenizer.json",
+      "tokenizer/tokenizer_config.json",
+      "tokenizer/vocab.json",
+      "transformer/config.json",
+      "transformer/diffusion_pytorch_model-00001-of-00002.safetensors",
+      "transformer/diffusion_pytorch_model-00002-of-00002.safetensors",
+      "transformer/diffusion_pytorch_model.safetensors.index.json",
+      "vae/config.json",
+      "vae/diffusion_pytorch_model.safetensors"
+    ],
+    "model_index": {
+      "_class_name": "Flux2KleinPipeline",
+      "_diffusers_version": "0.37.0.dev0",
+      "is_distilled": true,
+      "scheduler": [
+        "diffusers",
+        "FlowMatchEulerDiscreteScheduler"
+      ],
+      "text_encoder": [
+        "transformers",
+        "Qwen3ForCausalLM"
+      ],
+      "tokenizer": [
+        "transformers",
+        "Qwen2TokenizerFast"
+      ],
+      "transformer": [
+        "diffusers",
+        "Flux2Transformer2DModel"
+      ],
+      "vae": [
+        "diffusers",
+        "AutoencoderKLFlux2"
+      ]
+    }
+  },
+  "unsloth/Krea-2-Turbo": {
+    "files": [
+      ".gitattributes",
+      "LICENSE.pdf",
+      "NOTICE",
+      "README.md",
+      "images/00.jpg",
+      "images/01.jpg",
+      "images/02.jpg",
+      "images/03.jpg",
+      "images/04.jpg",
+      "images/05.jpg",
+      "images/06.jpg",
+      "images/07.jpg",
+      "images/08.jpg",
+      "images/09.jpg",
+      "images/10.jpg",
+      "images/11.jpg",
+      "images/12.jpg",
+      "images/13.jpg",
+      "images/14.jpg",
+      "images/15.jpg",
+      "images/16.jpg",
+      "images/17.jpg",
+      "images/18.jpg",
+      "images/19.jpg",
+      "images/20.jpg",
+      "images/21.jpg",
+      "images/22.jpg",
+      "images/23.jpg",
+      "images/24.jpg",
+      "images/25.jpg",
+      "images/26.jpg",
+      "images/27.jpg",
+      "images/28.jpg",
+      "images/29.jpg",
+      "images/30.jpg",
+      "images/31.jpg",
+      "images/32.jpg",
+      "images/33.jpg",
+      "images/34.jpg",
+      "images/35.jpg",
+      "images/header.jpg",
+      "model_index.json",
+      "scheduler/scheduler_config.json",
+      "text_encoder/config.json",
+      "text_encoder/model.safetensors",
+      "tokenizer/chat_template.jinja",
+      "tokenizer/tokenizer.json",
+      "tokenizer/tokenizer_config.json",
+      "transformer/config.json",
+      "transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
+      "transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
+      "transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
+      "transformer/diffusion_pytorch_model.safetensors.index.json",
+      "turbo.safetensors",
+      "vae/config.json",
+      "vae/diffusion_pytorch_model.safetensors"
+    ],
+    "model_index": {
+      "_class_name": "Krea2Pipeline",
+      "_diffusers_version": "0.39.0.dev0",
+      "is_distilled": true,
+      "patch_size": 2,
+      "scheduler": [
+        "diffusers",
+        "FlowMatchEulerDiscreteScheduler"
+      ],
+      "text_encoder": [
+        "transformers",
+        "Qwen3VLModel"
+      ],
+      "text_encoder_select_layers": [
+        2,
+        5,
+        8,
+        11,
+        14,
+        17,
+        20,
+        23,
+        26,
+        29,
+        32,
+        35
+      ],
+      "tokenizer": [
+        "transformers",
+        "Qwen2Tokenizer"
+      ],
+      "transformer": [
+        "diffusers",
+        "Krea2Transformer2DModel"
+      ],
+      "vae": [
+        "diffusers",
+        "AutoencoderKLQwenImage"
+      ]
+    }
+  }
+}

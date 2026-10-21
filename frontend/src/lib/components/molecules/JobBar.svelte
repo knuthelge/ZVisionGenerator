@@ -1,6 +1,6 @@
 <script lang="ts">
   import { errorText } from '$lib/api/client';
-  import { Badge, Icon } from '$lib/components/atoms';
+  import { Badge, Icon, StepProgress } from '$lib/components/atoms';
   import { workflowLabel } from '$lib/state/assetActions';
   import { etaLabel, headline, isActive, isPaused, itemNoun, iterations, jobBar, jobControls, jobPhase, stageBars } from '$lib/state/jobView';
   import { addToast } from '$lib/state/toasts.svelte';
@@ -74,7 +74,18 @@
       <button type="button" class="ui-btn ui-btn-sm ui-btn-icon" aria-label="Job details" aria-haspopup="dialog" onclick={ondetails}><Icon name="more" size={14} /></button>
     </span>
   </div>
-  {#if bar.kind === 'segments'}
+  {#if bar.kind === 'download'}
+    <StepProgress
+      class="jb-download"
+      value={bar.fraction ?? 0}
+      max={1}
+      label={bar.role === 'enhancer' ? 'Enhancer download' : 'Model download'}
+      live={active && !paused && !offline && bar.fraction !== null}
+      busy={active && !paused && !offline && bar.fraction === null}
+      indeterminate={bar.fraction === null}
+      valuetext={bar.fraction === null ? 'Size unknown' : `${Math.round(bar.fraction * 100)}% downloaded`}
+    />
+  {:else if bar.kind === 'segments'}
     <div class="jb-segments" role="progressbar" aria-label="Job progress" aria-valuemin="0" aria-valuemax={items.total} aria-valuenow={items.done}>
       {#each bar.segments as segment, index (index)}
         <i class="jb-segment" class:run-break={segment.runBreak} data-state={segment.state}>{#if segment.state === 'now'}<b style:width="{segment.fill * 100}%"></b>{/if}</i>
@@ -124,7 +135,7 @@
   .jb-stage-label small { font-family: var(--font-mono); font-weight: 400; color: var(--color-text-muted); }
   .jb-stage[data-state='current'] .jb-stage-label { color: var(--color-text-primary); }
   .jb-stage[data-state='done'] .ui-progress-fill { background: color-mix(in srgb, var(--color-primary-main) 55%, var(--color-zinc-700)); }
-  .job-bar .ui-progress { height: 6px; }
+  .job-bar .ui-progress, .job-bar :global(.jb-download) { height: 6px; }
   .jb-prompt { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; color: var(--color-text-muted); }
   .jb-prompt > :global(.ui-badge) { flex: none; }
   .jb-queue { flex: none; font-size: var(--text-ui); color: var(--color-text-secondary); text-decoration: underline dotted; text-underline-offset: 3px; }

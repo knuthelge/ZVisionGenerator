@@ -67,8 +67,16 @@ def _make_copy(models_dir: Path, model: str = "seedvr2-7b", manifest: dict | Non
     return copy
 
 
-def _load(parent: _Parent, models_dir: Path, model: str = "seedvr2-7b"):
-    return load_seedvr2(parent.upscaler, model, models_dir=models_dir, on_phase=parent.on_phase, delete_cached_file=parent.delete)
+def _load(parent: _Parent, models_dir: Path, model: str = "seedvr2-7b", *, cached: bool = False):
+    """Load through *parent*; *cached* tells whether the Hub files of the tier sit in the (faked) Hugging Face cache."""
+    return load_seedvr2(
+        parent.upscaler,
+        model,
+        models_dir=models_dir,
+        on_phase=parent.on_phase,
+        delete_cached_file=parent.delete,
+        files_cached=lambda _repo, name: f"/cache/{name}" if cached else None,
+    )
 
 
 class TestCopyLocation:
@@ -240,10 +248,35 @@ class TestFirstLoad:
         assert not stale.exists()
         assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
 
+    def test_files_already_in_the_cache_report_loading_instead_of_downloading(self, models_dir):
+        """After the ensure step fetched the files, the first load only reads and quantizes them."""
+        parent = _Parent()
+
+        _load(parent, models_dir, cached=True)
+
+        assert parent.on_phase.call_args_list == [call(LOADING_PHASE), call(SAVING_QUANT_PHASE)]
+        parent.upscaler.load_model.assert_called_once_with("seedvr2-7b", quantize=8, model_path=SEEDVR2_REPO)
+        assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
+
+    def test_one_missing_cached_file_still_reports_downloading(self, models_dir):
+        parent = _Parent()
+        present = {TRANSFORMER_7B}
+
+        load_seedvr2(
+            parent.upscaler,
+            "seedvr2-7b",
+            models_dir=models_dir,
+            on_phase=parent.on_phase,
+            delete_cached_file=parent.delete,
+            files_cached=lambda _repo, name: f"/cache/{name}" if name in present else None,
+        )
+
+        assert parent.on_phase.call_args_list[0] == call(DOWNLOADING_PHASE)
+
     def test_a_missing_on_phase_is_allowed(self, models_dir):
         parent = _Parent()
 
-        load_seedvr2(parent.upscaler, "seedvr2-7b", models_dir=models_dir, on_phase=None, delete_cached_file=parent.delete)
+        load_seedvr2(parent.upscaler, "seedvr2-7b", models_dir=models_dir, on_phase=None, delete_cached_file=parent.delete, files_cached=lambda *_: None)
 
         assert seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS)
 
@@ -308,6 +341,14 @@ class TestDownloadedFp8Files:
         _make_copy(models_dir)
 
         assert not seedvr2_downloaded("seedvr2-7b", models_dir, FP8_WEIGHTS)
+
+    def test_cached_hub_files_do_not_count_for_an_engine_that_reads_its_folder(self, models_dir):
+        """Only the tier folder's files are what this engine reads, so cached copies elsewhere still mean a download."""
+        parent = _Parent(weights=FP8_WEIGHTS)
+
+        _load(parent, models_dir, cached=True)
+
+        assert parent.on_phase.call_args_list == [call(DOWNLOADING_PHASE)]
 
     def test_first_use_reports_downloading_and_hands_over_the_new_folder(self, models_dir):
         parent = _Parent(weights=FP8_WEIGHTS)

@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from zvisiongenerator.backends.prompt_enhancer_session import PromptEnhancerSession
+from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.config import enhancer_tier_models
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.web import server as web_server
@@ -45,6 +46,21 @@ def layout(tmp_path, monkeypatch):
     (converted / "text_encoder").symlink_to(base_snapshot / "text_encoder", target_is_directory=True)
     _touch(data_dir / "loras" / "style.safetensors")
     return SimpleNamespace(data_dir=data_dir, models_dir=data_dir / "models", hub=hub, base_snapshot=base_snapshot)
+
+
+@pytest.fixture
+def downloading(monkeypatch):
+    """Register a running download in the server's registry (as a Models-page lane item would); returns the claim function."""
+    claimed = []
+
+    def _claim(target: DownloadTarget) -> None:
+        flight, owner = web_server.download_flights.claim(target)
+        assert owner
+        claimed.append(flight)
+
+    yield _claim
+    for flight in claimed:
+        web_server.download_flights.finish(flight, "stopped")
 
 
 class TestModelDeleteTarget:
@@ -213,6 +229,33 @@ class TestDeleteRoutes:
         assert client.delete("/api/loras/style").status_code == 200
         assert not (layout.data_dir / "loras" / "style.safetensors").exists()
         assert client.delete("/api/loras/style").status_code == 404
+
+    def test_deleting_a_huggingface_download_is_refused_while_its_repo_downloads(self, client, layout, downloading):
+        downloading(DownloadTarget("Org/Base"))
+
+        response = client.delete("/api/models/base")
+
+        assert response.status_code == 409
+        assert "org/base" in response.json()["detail"].lower()
+        assert (layout.hub / "models--org--base").is_dir()
+
+    def test_deleting_an_installed_model_is_refused_while_a_download_writes_inside_it(self, client, layout, downloading):
+        downloading(DownloadTarget("org/part", local_dir=str(layout.models_dir / "custom" / ".part")))
+
+        assert client.delete("/api/models/custom").status_code == 409
+        assert (layout.models_dir / "custom").is_dir()
+
+    def test_deletes_go_ahead_when_the_download_is_of_something_else(self, client, layout, downloading):
+        downloading(DownloadTarget("org/other-repo"))
+
+        assert client.delete("/api/models/custom").status_code == 200
+        assert client.delete("/api/models/base").status_code == 200
+        assert not (layout.hub / "models--org--base").exists()
+
+    def test_deleting_a_lora_ignores_running_downloads(self, client, layout, downloading):
+        downloading(DownloadTarget("org/base"))
+
+        assert client.delete("/api/loras/style").status_code == 200
 
     def test_deletes_are_refused_while_a_job_runs(self, client, layout, monkeypatch):
         monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: {"job_id": "j1"})
@@ -514,6 +557,16 @@ class TestEnhancerDeleteRoute:
     def test_unknown_or_undownloaded_tier_is_404(self, client):
         assert client.delete("/api/enhancer-models/smart").status_code == 404
         assert client.delete("/api/enhancer-models/org--fast").status_code == 404
+
+    def test_refused_while_the_tier_model_downloads_and_the_slot_stays_free(self, client, layout, session, downloading):
+        downloading(DownloadTarget("org/fast"))
+
+        response = client.delete("/api/enhancer-models/fast")
+
+        assert response.status_code == 409
+        assert "org/fast" in response.json()["detail"]
+        assert (layout.hub / "models--org--fast").is_dir()
+        assert not session.busy()
 
     def test_refused_while_an_enhancement_runs(self, client, layout, session):
         session.reserve()

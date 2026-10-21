@@ -4,10 +4,10 @@
   import type { IconName } from '$lib/components/atoms/Icon.svelte';
   import Alert from './Alert.svelte';
   import {
-    enhanceProgress, finishingLabel, finishingText, formatClock, isActive, isPaused, isVideo, itemActivity, iterations, jobPhase, loadBody, outcome, phaseRows,
+    activeDownload, downloadRowKey, downloadView, enhanceProgress, finishingLabel, finishingText, formatClock, isActive, isPaused, isVideo, itemActivity, iterations, jobPhase, loadBody, outcome, phaseRows,
     positionLabel, readySummary, stageBars, stepFraction, type PhaseRow, type PhaseRowStatus
   } from '$lib/state/jobView';
-  import type { ActiveJobState } from '$lib/types';
+  import type { ActiveJobState, JobDownload } from '$lib/types';
 
   interface Props {
     job: ActiveJobState;
@@ -46,6 +46,7 @@
   const shownPrompt = $derived(job.enhancedPrompt || job.prompt || 'No prompt supplied');
   const stepPct = $derived(Math.round(stepFraction(job) * 100));
   const activity = $derived(itemActivity(job));
+  const download = $derived(activeDownload(job));
 
   // Reserve the preview slot from the start, sized from the job's aspect ratio ("2:3 · m · 8 steps"), so text never re-wraps.
   const aspect = $derived.by(() => {
@@ -77,6 +78,22 @@
     {#if controls}<span class="job-line-controls">{@render controls()}</span>{/if}
     <span class="job-dur">{dur}</span>
   </div>
+{/snippet}
+
+{#snippet downloadBlock(current: JobDownload)}
+  {@const view = downloadView(current)}
+  <div class="job-step">
+    <div class="job-step-head">
+      <span class="dl-line">{#each view.segments as segment, index (index)}{#if index > 0}{' · '}{/if}<span class="dl-seg">{segment}</span>{/each}</span>
+      {#if view.percent !== null}<span class="num dl-pct">{view.percent}%</span>{:else}<span class="dl-pct">Size unknown</span>{/if}
+    </div>
+    {#if view.percent !== null}
+      <StepProgress value={current.bytes_done} max={current.bytes_total ?? 1} label={view.label} live={running} valuetext={view.valuetext} />
+    {:else}
+      <StepProgress value={0} max={1} label={view.label} busy={running} indeterminate valuetext={view.valuetext} />
+    {/if}
+  </div>
+  <p class="ui-help">{view.help}</p>
 {/snippet}
 
 {#snippet stepBlock()}
@@ -210,7 +227,9 @@
             <div class="job-detail"><p class="ui-help">The worker picks it up as soon as it’s free.</p></div>
           {:else if row.key === 'enhance'}
             <div class="job-detail">
-              {#if rewrite}
+              {#if download && downloadRowKey(download) === 'enhance'}
+                {@render downloadBlock(download)}
+              {:else if rewrite}
                 <div class="job-step">
                   <div class="job-step-head"><span>Rewriting prompt {rewrite.current} of {rewrite.total}</span></div>
                   <StepProgress value={rewrite.done} max={rewrite.total} label="Prompt enhancement" live={running} {stepMs} valuetext="{rewrite.done} of {rewrite.total} prompts rewritten" />
@@ -221,7 +240,11 @@
             </div>
           {:else if row.key === 'load'}
             <div class="job-detail">
-              <p class="ui-help">{loadBody(job)}</p>
+              {#if download && downloadRowKey(download) === 'load'}
+                {@render downloadBlock(download)}
+              {:else}
+                <p class="ui-help">{loadBody(job)}</p>
+              {/if}
             </div>
           {/if}
         {/if}
@@ -267,6 +290,9 @@
   .job-step-head { display: flex; justify-content: space-between; gap: 12px; font-size: var(--text-ui); line-height: 16px; color: var(--color-text-secondary); }
   .job-step-head > span + span { color: var(--color-text-muted); }
   .job-step-head .num { font-variant-numeric: tabular-nums; color: var(--color-text-primary); }
+  .job-step-head .dl-line { min-width: 0; font-variant-numeric: tabular-nums; }
+  .job-step-head .dl-pct { flex: none; }
+  .dl-seg { white-space: nowrap; }
   .job-step-done { display: inline-flex; align-items: center; gap: 4px; }
   .job-step :global(.job-stage-done) { --progress-color: color-mix(in srgb, var(--color-primary-main) 45%, var(--color-zinc-700)); }
   /* Never more than about half the detail, so a wide preview leaves the text a usable column on a narrow stage. */

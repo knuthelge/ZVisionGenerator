@@ -1,6 +1,22 @@
 # Show model download progress in Web UI jobs
 
-**Status:** Proposed (2026-10-21)
+**Status:** Done (2026-10-21, unreleased). On-demand Enhance progress and LoRA import progress were cut.
+
+## Shipped
+
+A job downloads a missing model as its own step before it loads, and the job card shows bytes, speed, time left and the part it is on, for image, video, Ideogram 4 Instant, SeedVR2 and the prompt enhancer in a job's preflight. What was decided on the way:
+
+- **Stop ends a child process.** Each download runs in a child process (`downloads/worker.py`). The spike showed that raising from `tqdm.update()` does not stop hf_xet, so Stop terminates the child, then removes its `*.incomplete` files.
+- **No cache polling.** `.incomplete` files do not grow during xet transfers, so progress comes only from the `tqdm_class` byte bars the worker counts.
+- **Resume is per file.** Finished files are kept; the file in progress starts over.
+- **Planners are module functions**, not `download_plan` methods on the backend Protocols: `backends/{mac,cuda}/download_plan.py`, dispatched in `backends/__init__.py`, so a plan exists without loading a backend.
+- **The Models-page lane is included.** `POST /api/models/download`, one download at a time beside the job queue, Queued and Cancel, a free-space estimate in the confirmation, and one shared download when a job and the lane need the same repo. This moves the lane out of [First run](../first-run.md) §3.
+- **Memory.** The child's memory follows hf_xet's RAM-derived buffer (about RAM/16 plus RAM/64 per active file), not file size; `child_env()` caps it with `HF_XET_RECONSTRUCTION_DOWNLOAD_BUFFER_SIZE=512mb` unless the user set one, which about halves the peak at the same speed.
+- **Offline.** `dry_run` needs the network; offline, the download step is skipped and the model loads as before.
+
+Cut: progress for the on-demand Enhance button's own download, and LoRA import from Hugging Face (still synchronous, without progress). The CLI keeps the libraries' own progress bars.
+
+The spike answered the first two open questions below: the "Downloading bytes" bar updates about ten times a second as bytes move, `.incomplete` files stay empty until a file completes, and an exception raised from `update()` is swallowed by hf_xet, which finishes the file.
 
 ## Problem
 
@@ -22,7 +38,7 @@ The prompt enhancer (`enhancer_loading`) and SeedVR2 (`model_loading`) already r
 
 ## Relationship to other proposals
 
-[First run](first-run.md) §3 plans explicit downloads: `POST /api/models/download`, a download lane beside the job queue, a disk-space check, and progress on the job card when a generation has to download a model first. This proposal covers the job-card part and the shared download helper that the download lane would use. It can ship before the rest of first-run and doesn't depend on the Welcome panel or the ungated mirrors.
+[First run](../first-run.md) §3 plans explicit downloads: `POST /api/models/download`, a download lane beside the job queue, a disk-space check, and progress on the job card when a generation has to download a model first. This proposal covers the job-card part and the shared download helper that the download lane would use. It can ship before the rest of first-run and doesn't depend on the Welcome panel or the ungated mirrors.
 
 ## Proposed change
 
@@ -86,7 +102,7 @@ The UI change gets an HTML preview for approval before it is built.
 
 ### 6. Errors
 
-A failed download (network, disk full, 401/403) fails the job with a message that names the repo and how much was downloaded. Making gated repos clear stays in [First run](first-run.md) §4.
+A failed download (network, disk full, 401/403) fails the job with a message that names the repo and how much was downloaded. Making gated repos clear stays in [First run](../first-run.md) §4.
 
 ### Docs and changelog
 
@@ -107,5 +123,5 @@ A failed download (network, disk full, 401/403) fails the job with a message tha
 
 ## Out of scope
 
-- The download lane, `POST /api/models/download`, the disk-space check and the Welcome panel ([First run](first-run.md)).
+- The download lane, `POST /api/models/download`, the disk-space check and the Welcome panel ([First run](../first-run.md)).
 - Download progress for models converted from checkpoints (`converters/convert_checkpoint.py`, `converters/ltx_convert.py`), which run as their own Models-page actions.

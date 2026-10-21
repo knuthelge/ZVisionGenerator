@@ -82,6 +82,7 @@ zvisiongenerator/
 │   ├── prompt_enhancer_session.py Single resident prompt-enhancer model: exclusive use and idle release
 │   ├── cuda/                      Windows and Linux (diffusers/CUDA); what image and video share sits here
 │   │   ├── block_streaming.py     Stream a model's blocks to the GPU as they run (group offloading, or a parameter swap that carries NF4)
+│   │   ├── download_plan.py       Hugging Face downloads the diffusers image, LTX video and transformers enhancer backends need (no torch import)
 │   │   ├── driver.py              NVIDIA driver hint when a CUDA build of PyTorch cannot start
 │   │   ├── lora_peft.py           Detect and report LoRA files that match no module (peft)
 │   │   ├── memory.py              CUDA memory release after a job, and GPU and system memory sizes
@@ -101,6 +102,7 @@ zvisiongenerator/
 │   │       ├── token_chunking.py  Run token-wise layers (feed-forward, RMSNorm) over a long sequence in chunks
 │   │       └── weights.py         LTX-2.3 weights: the single-file transformer and the Gemma text encoder, prepared once per quantize level
 │   └── mac/                       macOS (MLX)
+│       ├── download_plan.py       Hugging Face downloads the mflux image, MLX video and mlx-lm enhancer backends need (no mflux import until planning)
 │       ├── image.py               Image backend (mflux)
 │       ├── image_preview.py       Cheap latent → RGB live previews for the mflux backend
 │       ├── memory.py              MLX memory release, recommended GPU memory budget, machine memory size and scoped cache limit
@@ -124,6 +126,18 @@ zvisiongenerator/
 │   ├── prompt_enhancer.py         Prompt-enhancer protocol
 │   ├── seedvr2.py                 SeedVR2 upscaler protocol
 │   └── workflow.py                Unified workflow engine (image + video)
+├── downloads/                     Hugging Face model downloads shown as progress (see Model Downloads)
+│   ├── check.py                   Dry-run check: files and bytes a target still needs, or None when offline
+│   ├── child.py                   Run one download in a child process; relay its byte counts, stop it on request
+│   ├── ensure.py                  Skip, wait for or run each part of a plan before a model loads
+│   ├── flights.py                 Single-flight registry: one owner per destination, waiters mirror its progress
+│   ├── plans.py                   Compose a model's targets from the platform planners, Instant sources and SeedVR2 tier files
+│   ├── presence.py                Offline presence test and partial-file cleanup
+│   ├── progress.py                Byte counting sink for tqdm, speed meter and progress from counts
+│   ├── protocol.py                Wire prefix of the child's stdout messages
+│   ├── space.py                   Free-space estimate for the main download drive
+│   ├── target.py                  DownloadTarget, TargetCheck and DownloadProgress value objects
+│   └── worker.py                  Child entry point: snapshot_download one target, print byte counts
 ├── processing/
 │   ├── contrast.py                Contrast adjustment
 │   ├── saturation.py              Saturation adjustment
@@ -170,11 +184,13 @@ zvisiongenerator/
 │   ├── config_api.py              JSON config response assembly
 │   ├── config_contract.py         Writable config semantics and path readback helpers
 │   ├── defaults.py                Ratio and size defaults for Web UI contracts
+│   ├── download_lane.py           Models-page downloads: a queue run one at a time on its own thread, beside the job queue
 │   ├── extend_api.py              Extend routes: check and describe a source video, fit its window to memory, build the rewrite context of an extension
 │   ├── gallery.py                 Gallery inventory and response serialization
 │   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
 │   ├── json_fields.py             Typed reads of optional fields in a JSON request body
 │   ├── model_delete.py            Delete installed models, LoRAs, and HF downloads
+│   ├── model_download_plan.py     Plan a Models-page row's downloads: targets, whether it needs any, sizes and free space
 │   ├── model_inventory.py         Backend model inventory for Web UI contracts
 │   ├── model_status.py            Per-model downloaded / memory-fit status for the SPA
 │   ├── path_browser.py            Host folder listings for the in-app path browser
@@ -205,6 +221,8 @@ bench/enhance/                     Prompt-enhancer bench (not packaged): cases, 
 Platform backends live in `backends/mac/image.py` (mflux/MLX), `backends/cuda/image/backend.py` (Windows/Linux diffusers image), `backends/mac/video.py` (MLX video), and `backends/cuda/video/backend.py` (Windows/Linux diffusers video). Image backends implement the `ImageBackend` Protocol from `core/image_backend.py`; video backends implement the `VideoBackend` Protocol from `core/video_backend.py`. The prompt-enhancer LLM follows the same split: `backends/mac/prompt_enhancer.py` (mlx-lm) and `backends/cuda/prompt_enhancer.py` (transformers) implement the `PromptEnhancer` Protocol from `core/prompt_enhancer.py`. Backend and accelerator selection stays centralized in `backends/__init__.py` — never branch on `sys.platform` elsewhere to pick a backend. OS-level checks unrelated to backends (drive listings, ffmpeg install hints, terminal handling) are fine where they are needed.
 
 SeedVR2, the plain upscale of existing images, has its own small Protocol, `SeedVR2Upscaler` in `core/seedvr2.py`, implemented by `backends/mac/seedvr2.py` (mflux) and `backends/cuda/seedvr2.py` (the vendored PyTorch core, see [Vendored SeedVR2](#vendored-seedvr2)). `supports_seedvr2()` and `get_seedvr2_upscaler()` in `backends/__init__.py` expose it, so other code asks for the capability instead of checking the platform. Each engine's `weights` (`utils/seedvr2.SeedVR2Weights`) say which Hub files it reads (repo and file each), its precision label, which `seedvr2` config tier list prices it (`tiers` or `discrete_tiers`) and whether it keeps a stored copy. `seedvr2_loader.py` follows that, with one hidden weights folder per tier (`<models>/.seedvr2/<model>@<precision>`): on macOS it loads through a stored 8-bit copy in the same way `image_model_loader.py` does for image models; on CUDA the engine downloads the FP8 transformer and the VAE into the folder, because the vendored core reads both from one folder. The CUDA 7B tier uses the FP8 file whose last block is FP16 (`AInVFX/SeedVR2_comfyUI`), since the plain FP8 file draws streaks in flat areas. `tests/test_mflux_seedvr2_contract.py` records the mflux surface the macOS engine relies on; re-run it on every mflux bump.
+
+Which Hugging Face files a model needs is not part of any backend Protocol, because a plan must be available without loading a backend. Each platform has a light planner module, `backends/mac/download_plan.py` and `backends/cuda/download_plan.py`, with module functions `image_download_plan`, `video_download_plan` and `enhancer_download_plan` that import neither torch, diffusers nor (until planning) mflux. `backends/__init__.py` holds the dispatch (`image_download_plan`, `video_download_plan`, `enhancer_download_plan`), so the platform is still chosen only there. See [Model Downloads](#model-downloads).
 
 Backends are grouped by platform: `backends/cuda/` (Windows and Linux) and `backends/mac/`. A task with helpers of its own gets a folder (`cuda/image/`, `cuda/video/`); what two tasks share stays one level up. The platform folders never import from each other. Platform selection still happens only in `backends/__init__.py`.
 
@@ -277,6 +295,38 @@ To add pre-load work (for example LoRA validation or a memory-fit check), add a 
 
 The *active* job is the claimed one or, between jobs, the head of the queue; every other unfinished generation job is *queued*, with a 1-based `queue_position`. `GET /api/jobs` and `/api/workspace` return them as `active_job` and `queued_jobs`, and a job is never in both. `DELETE /api/jobs/queue` removes the queued jobs and keeps the active one. Actions that need the model memory to themselves (manual prompt enhancement, saving a quantized copy, deleting models or LoRAs) still wait until no generation job is running or queued.
 
+Downloads started from the Models page take a second path: `DownloadLane` (`web/download_lane.py`) runs them one at a time on its own thread. The lane never touches the job executor or the exclusive slot, so generation jobs are admitted while it downloads. Deleting a model, an enhancer model or a Hugging Face download is refused with 409 while a download touches its repo or folder (`_ensure_not_downloading` in `web/server.py`, using `DownloadFlights.conflict`). See [Model Downloads](#model-downloads).
+
+### Model Downloads
+
+A model that is not on disk is fetched before it loads, as a step of its own, so the Web UI can show bytes, speed and time left and offer Stop. The pieces are plain functions and small value objects in `downloads/`, composed by `ensure_downloaded`:
+
+1. **Plan.** A planner returns `DownloadTarget` values (repo, revision, allow and ignore patterns, optional `local_dir`) for the files the load will read: `downloads/plans.py` composes the platform planners with the Ideogram 4 Instant sources and the SeedVR2 tier files (`image_plan`, `video_plan`, `instant_plan`, `seedvr2_plan`, `enhancer_plan`). A plan is `()` when nothing is to be fetched (a local folder, a built Instant folder) and `None` when it cannot be made now (offline with no cached file index); callers skip the ensure step for `None`. Planners mirror the patterns of the code that will load the model (mflux's weight definitions, mlx-lm's `DEFAULT_ALLOW_PATTERNS`, diffusers' pipeline files) so the downloaded files are exactly the loader's.
+2. **Presence.** `target_present_offline` decides without the network whether a target is fully on disk (cached files, complete weights, or a complete `local_dir`). A present part is skipped.
+3. **Dry-run.** `check_target` calls `snapshot_download(..., dry_run=True)` and returns the files and bytes still missing. It returns `None` when the Hub cannot be reached (offline mode, no connection, timeout), and raises `RuntimeError` when the Hub refuses (gated or missing repo or revision, server error). `dry_run` needs the network: offline, the part is **unchecked** and the load proceeds as before, with the loader's own text phases.
+4. **Child.** `run_in_child` runs `python -m zvisiongenerator.downloads.worker '<target json>'` unbuffered, in its own session (Windows: a new process group) so a terminal Ctrl+C does not reach it. The worker calls `snapshot_download` with a `tqdm_class` sink that counts the two aggregate byte bars ("Downloading bytes" as wire, "Reconstructing" as written; they overlap and are never summed) and prints `ZIV-DOWNLOAD {json}` lines on stdout every 0.5 s while the counts change, then a `done` or `error` line. The parent drains the lines on a reader thread, polls `cancelled()` and the exit code, and treats a missing `done` line as failure. The wire bytes of a xet transfer are a little below the file bytes (deduplication and compression), so a part's last report snaps to 100%. The child exits when its stdin closes, so a hard server kill leaves no orphan.
+5. **Flights.** `DownloadFlights` keeps one flight per destination (`DownloadTarget.key`). The first caller owns the download; others wait and mirror its progress with `shared: true`. When a flight ends stopped or unchecked, a waiter re-checks its own target and claims it, so a stale result is never read. Finished files stay, so the re-claimer downloads only the rest.
+6. **Ensure.** `ensure_downloaded(targets, flights=, report=, cancelled=)` walks the parts in order and returns `READY`, `UNCHECKED` (a part could not be checked; the rest is skipped and the load proceeds as before), `STOPPED` (this caller owned a download and stopped it) or `DETACHED` (this caller stopped waiting for someone else's download). It raises `RuntimeError` for a refused dry-run or a failed download, naming the repo and the bytes fetched. Reports are throttled to one per second, except a part's first and an owned part's final one. Every collaborator (`present`, `check`, `run`, `clock`) is a parameter.
+
+**Stop and detach.** Stopping an owning job or lane item terminates the child (killing it after `grace_secs`) and deletes its `*.incomplete` files; finished files are kept and resume is per file, so the file in progress starts over. A job that only waits on another download is detached instead: the job ends and the download continues. Stop has to end the process: raising from the tqdm sink does not stop hf_xet's transfer, and an xet download does not grow its `*.incomplete` file as it goes, so there is nothing to poll in the cache either; progress comes only from the sink.
+
+**Memory.** The child's memory is bounded by hf_xet's download buffer, which it sizes from host RAM (about RAM/16 plus RAM/64 per file in flight), not by file size, so a multi-GB file does not need that much memory. `child_env()` sets `HF_XET_RECONSTRUCTION_DOWNLOAD_BUFFER_SIZE=512mb` unless the parent environment already sets it, which about halves the peak at the same speed, so a download can run beside a generation.
+
+**Event contract.** Web jobs publish `model_downloading` with `mode` (`image` or `video`), `role` (`model` or `enhancer`), `model` (label), `repo`, `part` and `parts` (1-based, this job's plan), `bytes_done`, `bytes_total` (null if unknown), `bytes_per_sec` and `download_eta_secs` (null until known) and `shared`. It is published at most once a second per job plus each owned part's final report, and replaces the previous `model_downloading` in `record.history` so a client that connects later replays only the latest one. A job stopped during a download ends with `job_cancelled` carrying `download: "stopped"` or `"detached"`. The on-demand Enhance button's own NDJSON download frames are separate and unchanged. The Svelte job card turns the event into a row inside the load step (the enhancer's into the Enhance step), and ends it at `model_loading` (the enhancer's at its loading or rewriting events).
+
+**Models page.** `web/model_download_plan.py` plans a row (`row_plan`), judges offline whether it needs a download (`row_download_needed`, used by the workspace payload for the Download button) and summarizes a plan with sizes and free space (`plan_summary`, using `downloads/space.py`). `DownloadLane` (`web/download_lane.py`) queues items, runs them with the same `ensure_downloaded` and the server's shared `DownloadFlights`, and reports them as `DownloadItem`s. The routes:
+
+| Route | Purpose |
+|---|---|
+| `GET /api/models/downloads` | The running item, the queued ones in order and recently finished ones |
+| `GET /api/models/download/plan?kind=&name=` | Parts, sizes and free space of a row; 404 for an unknown row, 424 when Hugging Face refuses (gated or missing repo), 503 when it cannot be reached |
+| `POST /api/models/download` | Queue a row (`kind`, `name`); an already queued or running item for the row is returned |
+| `POST /api/models/downloads/{id}/cancel` | Remove a queued item or stop the running one |
+
+The free-space figure is an estimate: it checks only the main download drive, counts shared xet blobs twice and ignores `HF_XET_CACHE`. The confirmation lets the user proceed anyway.
+
+**Version bumps.** The planners depend on how the loaders choose files. After changing mflux, mlx-lm, diffusers, huggingface_hub or hf-xet, run the pattern pins (`tests/test_mac_download_plan.py` on macOS, which compare the planners with mflux's `get_download_patterns()` and mlx-lm's `DEFAULT_ALLOW_PATTERNS`; `tests/test_cuda_download_plan.py` on Linux, which pin the diffusers and CUDA video patterns against recorded file lists), and repeat the hand test with a small public repo: start a download from the Models page, check that progress moves, cancel mid-file, check that no `*.incomplete` remains and finished files stay, then start a job on the same model while the lane downloads it and check that Stop on the job leaves the download running. A renamed tqdm bar shows as progress stuck at 0 until each part completes, never as a failed download. A pattern that drifts only costs the progress display: the backend downloads the missing files during the load.
+
 ### Data Types
 
 Use `@dataclass(frozen=True)` for immutable value objects (inputs, detection results). Use mutable `@dataclass` only for working state. No pydantic or attrs.
@@ -329,6 +379,8 @@ The Web UI has one design system. Its tokens live in `@theme` in `frontend/src/a
 ### Test Strategy
 
 Mock heavy image and video dependencies in tests. Diffusers backend tests patch the lazy runtime loader, torch CUDA checks, upsampler weight download and loading, export helpers, and PIL image loading so the suite never instantiates a real model, downloads weights, or requires a real CUDA device. Platform dispatch, alias resolution, and Web inventory tests should assert behavior through config and protocol boundaries rather than backend internals.
+
+Download tests never use the network or a real `snapshot_download`: `check_target` and the worker take a fake `snapshot_download`, `run_in_child` takes a fake `popen` (a wrapper command that patches `snapshot_download` with a fake updating the sink), and `ensure_downloaded` and `DownloadLane` take fake `present`, `check`, `run` and `ensure` callables and a fake clock. The pattern pins that need mflux, mlx-lm or diffusers skip themselves with `pytest.importorskip` where those aren't installed.
 
 ## Prompt-Enhancer Bench
 

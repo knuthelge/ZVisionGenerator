@@ -86,7 +86,7 @@
   <div data-testid="confirm-dialog">
     <p id={questionId} class="font-heading text-content font-extrabold text-text-primary">{question}</p>
     {#if info}
-      <p id={infoId} class="mt-1.5 text-content text-text-secondary">{info}</p>
+      <p id={infoId} class="mt-1.5 text-content text-text-secondary [overflow-wrap:anywhere]">{info}</p>
     {/if}
     {#if children}
       <div class="mt-3 space-y-2 text-ui text-text-secondary">{@render children()}</div>

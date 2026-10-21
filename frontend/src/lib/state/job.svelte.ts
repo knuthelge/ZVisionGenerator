@@ -4,7 +4,8 @@ import type { SSESubscription } from '$lib/api/sse';
 import { ApiError } from '$lib/api/client';
 import { cancelJob, clearQueue, getJobSnapshot, jobPreviewUrl, listJobs } from '$lib/api/workspace';
 import { clearActiveJobId, readActiveJobId, writeActiveJobId } from './activeJobStorage';
-import { initialPhase, trackJobEvent } from './jobPhases';
+import { downloadFromEvent, downloadStopFromEvent, initialPhase, trackJobEvent } from './jobPhases';
+import { downloadLine, partLabel } from './downloadProgress';
 import { isSteppedStage } from './jobView';
 
 let _job = $state<ActiveJobState | null>(null);
@@ -104,6 +105,13 @@ function statusMessageForEvent(type: string | undefined, event: Record<string, u
       return `Saving a q${bits} copy of ${model || 'the model'} for faster loading (first use only)...`;
     }
     return `Loading ${model || 'model'}...`;
+  }
+  if (type === 'model_downloading') {
+    const download = downloadFromEvent(event);
+    if (!download) return '';
+    const subject = download.role === 'enhancer' ? 'the prompt enhancer' : download.model || 'the model';
+    const part = partLabel(download);
+    return `Downloading ${subject}${part ? ` (${part})` : ''}: ${downloadLine(download)}`;
   }
   if (type === 'batch_started') {
     return 'Starting generation...';
@@ -219,6 +227,7 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     ? `${completedIterations} / ${totalIterations} iterations`
     : '';
   const statusMessage = statusMessageForEvent(typeof lastEvent?.type === 'string' ? lastEvent.type : undefined, lastEvent);
+  const download = lastEvent?.type === 'model_downloading' ? downloadFromEvent(lastEvent) : null;
   return {
     job_id: snapshot.job_id ?? snapshot.id,
     id: snapshot.id,
@@ -246,6 +255,7 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     outputs: dedupeOutputs(snapshot.outputs ?? []),
     previewUrl: previewUrlFor(snapshot.job_id ?? snapshot.id, snapshot.preview_version),
     ...initialPhase(snapshot.status, snapshot.created_at, lastEvent),
+    ...(download ? { download } : {}),
     connection: 'live',
   };
 }
@@ -396,7 +406,7 @@ function attachJobEvents(jobId: string): void {
     },
     onJobCancelled(event) {
       track('job_cancelled', event);
-      if ((event as { reason?: unknown }).reason === REMOVED_REASON) finishRemoved();
+      if (event.type === 'job_cancelled' && event.reason === REMOVED_REASON) finishRemoved();
       else finishCancelled();
     },
     onJobPaused(event) {
@@ -451,9 +461,9 @@ function finishFailed(message: string): void {
   void refreshJobs();
 }
 
-function finishCancelled(): void {
+function finishCancelled(downloadStop?: ActiveJobState['downloadStop']): void {
   if (!_job) return;
-  _job = { ..._job, status: 'cancelled', paused: false, review: null, message: 'Job stopped.' };
+  _job = { ..._job, status: 'cancelled', paused: false, review: null, message: 'Job stopped.', ...(downloadStop ? { downloadStop } : {}) };
   clearActiveJobId(_job.job_id);
   notifyLifecycle('onCancelled');
   void refreshJobs();
@@ -546,7 +556,7 @@ async function recoverLostStream(jobId: string): Promise<void> {
   } else if (wasRemoved(snapshot)) {
     finishRemoved();
   } else if (snapshot.status === 'cancelled') {
-    finishCancelled();
+    finishCancelled(downloadStopFromEvent(snapshot.last_event));
   } else if (snapshot.status === 'failed') {
     finishFailed(failureMessage(snapshot.last_event));
   } else {

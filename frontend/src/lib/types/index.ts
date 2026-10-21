@@ -881,6 +881,10 @@ export interface ActiveJobState extends JobContext {
   enhanceTotal?: number;
   /** Bits of the quantized copy the model load saves first (first use of a model only); unset for a plain load. */
   loadQuant?: number;
+  /** Progress of the model download the job is waiting on; cleared once the model or enhancer starts loading. */
+  download?: JobDownload | null;
+  /** How the job's download ended when the job was cancelled: stopped (owner) or detached (waiting on another download). */
+  downloadStop?: 'stopped' | 'detached';
   /** Newest `model_loading` phase: the model's files are downloading, loading into memory, or being saved as a quantized copy. */
   loadPhase?: LoadPhase;
   /** The quantized copy replaces the downloaded files (SeedVR2), so saving it frees disk. */
@@ -991,6 +995,10 @@ export interface JobFailedEvent {
 export interface JobCancelledEvent {
   type: 'job_cancelled';
   job_id: string;
+  /** `removed` for a job taken off the queue before it started. */
+  reason?: string;
+  /** How the job's model download ended: `stopped` (the job owned it) or `detached` (it only waited on another download). */
+  download?: 'stopped' | 'detached';
 }
 
 export interface ProgressTextEvent {
@@ -1012,8 +1020,36 @@ export interface JobResumedEvent {
   job_id: string;
 }
 
+/** Byte progress of one part of a model download, as carried by `model_downloading` and the downloads lane. */
+export interface DownloadProgressFields {
+  repo: string;
+  /** 1-based index of the part (repo) being downloaded. */
+  part: number;
+  parts: number;
+  bytes_done: number;
+  bytes_total: number | null;
+  bytes_per_sec: number | null;
+  download_eta_secs: number | null;
+  /** The download is another job's or the lane's; this one waits on it. */
+  shared: boolean;
+}
+
+export interface ModelDownloadingEvent extends DownloadProgressFields {
+  type: 'model_downloading';
+  mode: 'image' | 'video';
+  role: 'model' | 'enhancer';
+  model: string;
+}
+
+/** The download a job is waiting on, taken from its newest `model_downloading` event. */
+export interface JobDownload extends DownloadProgressFields {
+  role: 'model' | 'enhancer';
+  model: string;
+}
+
 export type SSEEvent =
   | StepEvent
+  | ModelDownloadingEvent
   | GenerationFinishedEvent
   | BatchCompletedEvent
   | JobCompletedEvent
@@ -1099,6 +1135,33 @@ export interface ModelDeleteInfo {
   shared_with?: string[];
 }
 
+/** One Models-page download in the downloads lane. */
+export type DownloadItem = {
+  id: string;
+  kind: 'model' | 'enhancer';
+  name: string;
+  label: string;
+  state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  queue_position?: number;
+  message: string | null;
+} & Partial<DownloadProgressFields>;
+
+/** Response of `GET /api/models/downloads`: queued, running and recently finished items. */
+export interface DownloadList {
+  items: DownloadItem[];
+}
+
+/** What a Models-page download would fetch, from `GET /api/models/download/plan`. */
+export interface DownloadPlan {
+  kind: 'model' | 'enhancer';
+  name: string;
+  label: string;
+  parts: { repo: string; files: number; bytes: number | null }[];
+  total_bytes: number | null;
+  /** Free space on the download drive against the estimate; `null` when it cannot be checked. */
+  space: { path: string; needed_bytes: number; free_bytes: number; enough: boolean } | null;
+}
+
 /** A quantized copy of an installed model, used automatically when that quantize level is selected. */
 export interface StoredQuantInfo {
   base_model: string;
@@ -1117,6 +1180,8 @@ export interface ModelEntry extends ModelStatusFields {
   disk_size_label?: string | null;
   /** Size of the first-use download, set on the SeedVR2 row. */
   download_size_label?: string | null;
+  /** Files are missing, so the Models page offers Download. */
+  download_needed: boolean;
 }
 
 export interface VideoModelEntry extends ModelStatusFields {
@@ -1129,6 +1194,8 @@ export interface VideoModelEntry extends ModelStatusFields {
   delete?: ModelDeleteInfo | null;
   /** Disk use of the model's files, as on image rows. */
   disk_size_label?: string | null;
+  /** Files are missing, so the Models page offers Download. */
+  download_needed: boolean;
 }
 
 /** A prompt-enhancer model configured on this platform: the Fast or Smart tier, or a custom `user_model`. */
@@ -1145,6 +1212,8 @@ export interface EnhancerModelEntry {
   unavailable: string | null;
   /** Whether a Hugging Face download is on disk to delete (never for a local folder). */
   deletable: boolean;
+  /** Files are missing, so the Models page offers Download. */
+  download_needed: boolean;
 }
 
 /** Hugging Face cache content nothing on the Models page uses. */

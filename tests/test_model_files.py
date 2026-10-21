@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from zvisiongenerator.utils import model_files
-from zvisiongenerator.utils.model_files import find_local_model_dir, has_complete_weights
+from zvisiongenerator.utils.model_files import cached_snapshot_dirs, find_local_model_dir, has_complete_weights
 
 
 def _touch(path: Path, content: str = "x") -> Path:
@@ -286,3 +286,64 @@ def test_directory_bytes_counts_regular_files_and_skips_symlinks(tmp_path):
 
 def test_directory_bytes_is_zero_for_a_missing_directory(tmp_path):
     assert model_files.directory_bytes(tmp_path / "missing") == 0
+
+
+class TestHasCompleteWeightsOnly:
+    def test_none_requires_every_declared_component(self, tmp_path):
+        _write_model_index(tmp_path)
+        for component in ("text_encoder", "vae"):
+            _touch(tmp_path / component / "model.safetensors")
+
+        assert has_complete_weights(tmp_path, only=None) is False
+
+    def test_only_restricts_the_required_components(self, tmp_path):
+        _write_model_index(tmp_path)
+        for component in ("text_encoder", "vae"):
+            _touch(tmp_path / component / "model.safetensors")
+
+        assert has_complete_weights(tmp_path, only={"text_encoder", "vae"}) is True
+        assert has_complete_weights(tmp_path, only={"transformer", "vae"}) is False
+
+    def test_empty_set_requires_no_component(self, tmp_path):
+        _write_model_index(tmp_path)
+
+        assert has_complete_weights(tmp_path, only=set()) is True
+
+    def test_shard_completeness_still_applies(self, tmp_path):
+        _write_model_index(tmp_path)
+        _touch(tmp_path / "vae" / "model-00001-of-00002.safetensors")
+
+        assert has_complete_weights(tmp_path, only=set()) is False
+        assert has_complete_weights(tmp_path, only={"vae"}) is False
+
+    def test_unreadable_index_still_fails(self, tmp_path):
+        _touch(tmp_path / "model_index.json", "{not json")
+
+        assert has_complete_weights(tmp_path, only=set()) is False
+
+    def test_missing_index_in_an_empty_folder_is_not_complete(self, tmp_path):
+        assert has_complete_weights(tmp_path, only=set()) is False
+        assert has_complete_weights(tmp_path, only={"vae"}) is False
+
+
+class TestCachedSnapshotDirs:
+    def test_lists_snapshots_newest_first(self, tmp_path, monkeypatch):
+        import os
+
+        monkeypatch.setattr("huggingface_hub.constants.HF_HUB_CACHE", str(tmp_path))
+        snapshots = tmp_path / "models--owner--repo" / "snapshots"
+        old = _touch(snapshots / "old" / "a").parent
+        new = _touch(snapshots / "new" / "a").parent
+        os.utime(old, (1, 1))
+
+        assert cached_snapshot_dirs("owner/repo", None) == [new, old]
+
+    def test_revision_maps_through_refs_and_missing_repo_is_empty(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("huggingface_hub.constants.HF_HUB_CACHE", str(tmp_path))
+        repo = tmp_path / "models--owner--repo"
+        snapshot = _touch(repo / "snapshots" / "abc123" / "a").parent
+        _touch(repo / "refs" / "main", "abc123\n")
+
+        assert cached_snapshot_dirs("owner/repo", "main") == [snapshot]
+        assert cached_snapshot_dirs("owner/repo", "..") == []
+        assert cached_snapshot_dirs("owner/missing", None) == []

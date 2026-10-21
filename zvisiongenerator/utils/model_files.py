@@ -111,7 +111,7 @@ def find_local_model_dir(reference: str) -> Path | None:
     repo = parse_huggingface_repo_reference(reference)
     if repo is None:
         return None
-    return next((snapshot for snapshot in _cached_snapshots(repo.repo_id, repo.revision) if has_complete_weights(snapshot)), None)
+    return next((snapshot for snapshot in cached_snapshot_dirs(repo.repo_id, repo.revision) if has_complete_weights(snapshot)), None)
 
 
 def model_weight_files(model_dir: Path, components: tuple[str, ...] | None = None) -> tuple[Path, ...]:
@@ -176,19 +176,25 @@ def is_ideogram4_model(model_dir: Path) -> bool:
     return index is not None and index.get("_class_name") == "Ideogram4Pipeline"
 
 
-def has_complete_weights(model_dir: Path) -> bool:
-    """Return whether *model_dir* holds every weight file its layout declares."""
+def has_complete_weights(model_dir: Path, only: set[str] | None = None) -> bool:
+    """Return whether *model_dir* holds every weight file its layout declares.
+
+    Args:
+        model_dir: The model directory.
+        only: Restricts the components that must hold weights to these folder names (``set()`` requires none);
+            ``None`` requires every declared one. File selection and shard completeness are checked either way.
+    """
     components = weighted_components(model_dir)
     if components is None and (model_dir / "model_index.json").is_file():
         return False  # An unreadable index cannot vouch for the download.
     files = model_weight_files(model_dir, components)
-    if not files:
-        return False
+    if not files and (only is None or components is None):
+        return False  # Without an index nothing declares what a complete snapshot holds.
     if is_ltx_mlx_layout(model_dir):
         return ltx_mlx_transformer_file(model_dir) is not None and (model_dir / "vae_decoder.safetensors").is_file()
     # Root-level files are only selected when they stand in for the transformer folder.
     present = {component_of(model_dir, path) or _TRANSFORMER_COMPONENT for path in files}
-    required = [name for name in components or () if not (name == _TRANSFORMER_COMPONENT and _has_separate_transformer(model_dir))]
+    required = [name for name in components or () if (only is None or name in only) and not (name == _TRANSFORMER_COMPONENT and _has_separate_transformer(model_dir))]
     return all(name in present for name in required) and _shards_complete(files)
 
 
@@ -236,7 +242,7 @@ def huggingface_cache_repo_dir(repo_id: str) -> Path:
     return huggingface_cache_dir() / f"models--{repo_id.replace('/', '--')}"
 
 
-def _cached_snapshots(repo_id: str, revision: str | None) -> list[Path]:
+def cached_snapshot_dirs(repo_id: str, revision: str | None) -> list[Path]:
     """Return candidate cache snapshots, newest first, as mflux's offline resolution considers them.
 
     With a *revision* only that snapshot counts: a commit hash is its folder's name, and a tag or branch name maps to

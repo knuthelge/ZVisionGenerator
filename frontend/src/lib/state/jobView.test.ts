@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ActiveJobState } from '$lib/types';
+import { downloadFromEvent } from './jobPhases';
 import {
-  documentTitle, etaLabel, finishingLabel, formatClock, headline, isReviewing, isSteppedStage, isVideo, itemActivity, itemFraction, iterations,
+  activeDownload, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, finishingLabel, formatClock, headline, isReviewing, isSteppedStage, isVideo, itemActivity, itemFraction, iterations,
   jobBar, jobControls, jobTone, loadBody, outcome, phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine,
   reviewVideoUrl, stageBars, timeLeft
 } from './jobView';
@@ -338,5 +339,73 @@ describe('review before upscaling', () => {
   it('marks the tab title only while a review waits', () => {
     expect(documentTitle('ZVision Generator', true)).toBe('⏸ Review · ZVision Generator');
     expect(documentTitle('ZVision Generator', false)).toBe('ZVision Generator');
+  });
+
+  describe('model downloads', () => {
+    const base = { bytes_done: 250, bytes_total: 1000, bytes_per_sec: null, download_eta_secs: null, repo: 'org/repo', part: 1, parts: 1, shared: false };
+    const download = (overrides: Record<string, unknown> = {}) => downloadFromEvent({ role: 'model', model: 'klein9b', ...base, ...overrides })!;
+    const downloading = (overrides: Partial<ActiveJobState> = {}, event: Record<string, unknown> = {}) =>
+      job({ phase: 'load', model: 'klein9b', download: download(event), ...overrides });
+
+    it('puts the download on the load row for a model and the enhance row for an enhancer', () => {
+      expect(downloadRowKey(download())).toBe('load');
+      expect(downloadRowKey(download({ role: 'enhancer' }))).toBe('enhance');
+    });
+
+    it('shows the download only while the job waits on it', () => {
+      expect(activeDownload(downloading())).not.toBeNull();
+      expect(activeDownload(downloading({ phase: 'generate' }))).toBeNull();
+      expect(activeDownload(downloading({ status: 'cancelled' }))).toBeNull();
+      expect(activeDownload(job())).toBeNull();
+    });
+
+    it('derives the fraction from the bytes, or none when the total is unknown', () => {
+      expect(downloadFraction({ bytes_done: 250, bytes_total: 1000 })).toBe(0.25);
+      expect(downloadFraction({ bytes_done: 2000, bytes_total: 1000 })).toBe(1);
+      expect(downloadFraction({ bytes_done: 250, bytes_total: null })).toBeNull();
+      expect(downloadFraction({ bytes_done: 0, bytes_total: 0 })).toBeNull();
+    });
+
+    it('drives the job bar from the download, then back to the steps once generating', () => {
+      expect(jobBar(downloading())).toEqual({ kind: 'download', fraction: 0.25, role: 'model' });
+      expect(jobBar(downloading({}, { bytes_total: null }))).toEqual({ kind: 'download', fraction: null, role: 'model' });
+      expect(jobBar(downloading({ phase: 'enhance' }, { role: 'enhancer' }))).toMatchObject({ kind: 'download', role: 'enhancer' });
+      expect(jobBar(downloading({ phase: 'generate', currentStep: 14 })).kind).toBe('bar');
+      expect(jobBar(downloading({ status: 'cancelled' })).kind).toBe('bar');
+    });
+
+    it('describes the block: percent, parts, accessible values and the help for each kind of download', () => {
+      const own = downloadView(download({ parts: 2, part: 2 }));
+      expect(own.percent).toBe(25);
+      expect(own.segments).toHaveLength(2);
+      expect(own.valuetext).not.toBe(downloadView(download()).valuetext);
+
+      const unknown = downloadView(download({ bytes_total: null }));
+      expect(unknown.percent).toBeNull();
+      expect(unknown.valuetext).not.toBe(own.valuetext);
+
+      const shared = downloadView(download({ shared: true }));
+      const enhancer = downloadView(download({ role: 'enhancer' }));
+      expect(new Set([own.help, shared.help, enhancer.help]).size).toBe(3);
+      expect(enhancer.help).toContain('org/repo');
+      expect(own.label).not.toBe(enhancer.label);
+    });
+
+    it('names the download in the headline, the row and the way a stop ended', () => {
+      expect(headline(downloading())).toContain('klein9b');
+      expect(headline(downloading())).not.toBe(headline(job({ phase: 'load' })));
+      const enhancing = downloading({ phase: 'enhance', enhanceTotal: 2 }, { role: 'enhancer' });
+      expect(headline(enhancing)).not.toBe(headline(job({ phase: 'enhance', enhanceTotal: 2 })));
+      expect(headline(enhancing)).not.toContain('klein9b');
+
+      const rows = (state: ActiveJobState) => phaseRows(state);
+      expect(rows(downloading()).find((row) => row.key === 'load')!.label).not.toBe(rows(job({ phase: 'load' })).find((row) => row.key === 'load')!.label);
+
+      const stopped = downloading({ status: 'cancelled', downloadStop: 'stopped' });
+      const detached = downloading({ status: 'cancelled', downloadStop: 'detached' });
+      expect(headline(stopped)).toBe(headline(detached));
+      expect(headline(stopped)).not.toBe(headline(job({ status: 'cancelled', phase: 'load' })));
+      expect(new Set([outcome(stopped)!.text, outcome(detached)!.text, outcome(job({ status: 'cancelled', message: 'Job stopped.' }))!.text]).size).toBe(3);
+    });
   });
 });

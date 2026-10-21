@@ -16,9 +16,13 @@ from zvisiongenerator.utils.paths import get_ziv_data_dir, split_huggingface_rev
 
 __all__ = [
     "BUILD_RECORD_NAME",
+    "COMPONENT_PATTERNS",
     "INSTANT_DIR_NAME",
+    "LICENSE_FILES",
+    "LINKED_COMPONENTS",
     "TRANSFORMER_FORMATS",
     "InstantSource",
+    "instant_downloads_dir",
     "instant_source",
     "is_built",
     "is_instant_dir",
@@ -34,6 +38,12 @@ BUILD_RECORD_NAME = "ziv-build.json"
 # ``bf16``: diffusers' names and dtype (the CUDA backend). ``fp8``: the base FP8 repo's names and storage (mflux).
 TRANSFORMER_FORMATS = ("bf16", "fp8")
 _RECORD_VERSION = 1
+# The base repo's components the build reuses as they are.
+LINKED_COMPONENTS = ("scheduler", "text_encoder", "tokenizer", "vae")
+# Ideogram's license agreement and attribution notice travel with the model.
+LICENSE_FILES = ("LICENSE.md", "NOTICE")
+# The files of the components repo the build downloads (the transformer comes from the single-file checkpoint).
+COMPONENT_PATTERNS = ("model_index.json", "transformer/config.json", *LICENSE_FILES, *(f"{name}/*" for name in LINKED_COMPONENTS))
 
 
 @dataclass(frozen=True)
@@ -97,6 +107,11 @@ def _platform_value(block: dict[str, Any], key: str, platform_key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"config 'ideogram4_instant.{key}' has no entry for '{platform_key}'.")
     return value
+
+
+def instant_downloads_dir(target: Path) -> Path:
+    """Return the hidden folder next to *target* that holds the transformer download while the model is built."""
+    return target.with_name(f".{target.name}.download")
 
 
 def is_instant_dir(path: str | Path) -> bool:

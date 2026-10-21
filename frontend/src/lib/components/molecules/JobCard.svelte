@@ -263,6 +263,18 @@
         {stepMs}
         valuetext={activity === 'stepping' ? `Step ${job.currentStep} of ${job.totalSteps}` : activity === 'finishing' ? finishingText(job) : 'Starting'}
       />
+    {:else if bar.kind === 'download'}
+      <!-- While the model's files download, the bar is that download; it goes back to the steps once generation starts. -->
+      <StepProgress
+        class="job-bar"
+        value={bar.fraction ?? 0}
+        max={1}
+        label={bar.role === 'enhancer' ? 'Enhancer download' : 'Model download'}
+        live={headerLive && bar.fraction !== null}
+        busy={headerLive && bar.fraction === null}
+        indeterminate={bar.fraction === null}
+        valuetext={bar.fraction === null ? 'Size unknown' : `${Math.round(bar.fraction * 100)}% downloaded`}
+      />
     {:else if bar.kind === 'bar'}
       <div class="ui-progress job-bar" role="progressbar" aria-label="Job progress" aria-valuemin="0" aria-valuemax={total} aria-valuenow={done} aria-valuetext="{done} of {total} {noun}s done">
         <span class="ui-progress-fill" style:width="{bar.fraction * 100}%"></span>

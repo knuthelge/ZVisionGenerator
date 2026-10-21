@@ -158,6 +158,51 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current?.enhanceStatus).toBe('skipped');
   });
 
+  describe('model downloads', () => {
+    type Source = { emit: (type: string, data: unknown) => void };
+    const source = (): Source => (globalThis.EventSource as unknown as { lastInstance: Source }).lastInstance;
+    const progress = { bytes_done: 5, bytes_total: 10, bytes_per_sec: 2, download_eta_secs: 3, repo: 'org/repo', part: 1, parts: 2, shared: false };
+
+    it('follows a download from the first event to the model loading, and keeps how a stop left it', () => {
+      jobStore.startJob({ job_id: 'dl', workflow: 'txt2img', prompt: 'P', model: 'klein9b', runs: 1, created_at: '' });
+      source().emit('job_started', { type: 'job_started' });
+      source().emit('model_downloading', { type: 'model_downloading', mode: 'image', role: 'model', model: 'klein9b', ...progress });
+      expect(jobStore.current).toMatchObject({ phase: 'load', download: { role: 'model', bytes_done: 5, bytes_total: 10 } });
+      expect(jobStore.current?.message).toContain('klein9b');
+
+      source().emit('model_downloading', { type: 'model_downloading', mode: 'image', role: 'model', model: 'klein9b', ...progress, bytes_done: 8 });
+      expect(jobStore.current?.download?.bytes_done).toBe(8);
+
+      source().emit('job_cancelled', { type: 'job_cancelled', download: 'stopped' });
+      expect(jobStore.current).toMatchObject({ status: 'cancelled', downloadStop: 'stopped' });
+    });
+
+    it('clears the download when the model loads', () => {
+      jobStore.startJob({ job_id: 'dl-load', workflow: 'txt2img', prompt: 'P', model: 'klein9b', runs: 1, created_at: '' });
+      source().emit('model_downloading', { type: 'model_downloading', mode: 'image', role: 'model', model: 'klein9b', ...progress });
+      source().emit('model_loading', { type: 'model_loading', mode: 'image', model: 'klein9b' });
+      expect(jobStore.current?.download).toBeNull();
+    });
+
+    it('restores the download and the load phase from a reconnect snapshot', async () => {
+      await jobStore.reconnectActiveJob({ snapshot: {
+        id: 'dl-restore', job_id: 'dl-restore', workflow: 'txt2img', job_type: 'txt2img', status: 'running',
+        prompt: 'P', model: 'klein9b', runs: 1, created_at: '', event_count: 3, paused: false,
+        last_event: { type: 'model_downloading', event_id: 3, mode: 'image', role: 'model', model: 'klein9b', ...progress },
+      } });
+      expect(jobStore.current).toMatchObject({ phase: 'load', download: { role: 'model', bytes_done: 5, parts: 2 } });
+    });
+
+    it('restores an enhancer download in the enhance phase', async () => {
+      await jobStore.reconnectActiveJob({ snapshot: {
+        id: 'dl-enh', job_id: 'dl-enh', workflow: 'txt2img', job_type: 'txt2img', status: 'running',
+        prompt: 'P', model: 'klein9b', runs: 1, created_at: '', event_count: 3, paused: false,
+        last_event: { type: 'model_downloading', event_id: 3, mode: 'image', role: 'enhancer', model: 'enhancer', ...progress },
+      } });
+      expect(jobStore.current).toMatchObject({ phase: 'enhance', download: { role: 'enhancer' } });
+    });
+  });
+
   it('tracks the live preview URL from step versions and clears it when the generation ends', () => {
     jobStore.startJob({ job_id: 'job-preview', workflow: 'txt2img', prompt: 'P', model: 'zit', runs: 1, created_at: '' });
     const source = (globalThis.EventSource as unknown as { lastInstance: { emit: (type: string, data: unknown) => void } }).lastInstance;

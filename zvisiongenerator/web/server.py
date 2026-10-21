@@ -42,6 +42,7 @@ from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_
 from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
+from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.utils.config import (
     ENHANCER_TIERS,
     enhancer_tier_models,
@@ -87,6 +88,7 @@ from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_ups
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response, huggingface_token_env_var
 from zvisiongenerator.web.config_contract import persist_writable_config_patch, resolve_output_dir as resolve_config_output_dir
+from zvisiongenerator.web.download_lane import DownloadLane
 from zvisiongenerator.web.defaults import default_image_size_for_ratio, default_video_size_for_ratio
 from zvisiongenerator.web.extend_api import EXTEND_UNAVAILABLE_MESSAGE, extend_context_from_body, extend_source_response, load_source_video, requested_extend_frames
 from zvisiongenerator.web.gallery import (
@@ -99,6 +101,7 @@ from zvisiongenerator.web.gallery import (
     resolve_output_asset_path,
 )
 from zvisiongenerator.web.json_fields import json_field
+from zvisiongenerator.web.model_download_plan import PlanUnchecked, plan_summary, row_plan
 from zvisiongenerator.web.path_browser import BrowsePlace, BrowsePurpose, DirectoryListing, browse_places, create_folder, default_place_dir, host_drives, list_directory, resolve_purpose
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
 from zvisiongenerator.web.upscale_api import plan_seedvr2_upscale, plan_upscale, upscale_json_request, upscale_size_label
@@ -131,9 +134,13 @@ _WORKFLOW_DEFINITIONS = WORKFLOW_DEFINITIONS
 
 _PROMPT_FILE_EXTENSIONS = tuple(PROMPT_FILE_CONTRACT["accepted_extensions"])
 
-web_runner = WebRunner()
+download_flights = DownloadFlights()
+web_runner = WebRunner(download_flights=download_flights)
+download_lane = DownloadLane(flights=download_flights)
 logger = logging.getLogger(__name__)
 _ENHANCE_TERMINAL_FRAMES = frozenset({"done", "error"})
+# How long shutting down waits for a running Models-page download's child process to stop and clean up.
+_LANE_SHUTDOWN_SECS = 10.0
 
 
 @asynccontextmanager
@@ -142,6 +149,7 @@ async def _lifespan(_: FastAPI):
     try:
         yield
     finally:
+        download_lane.shutdown(join_timeout=_LANE_SHUTDOWN_SECS)
         web_runner.shutdown()
 
 
@@ -1893,6 +1901,56 @@ async def api_models_import_lora_hf(request: Request) -> dict[str, Any]:
     return {"status": "ok", "tone": notice["tone"], "message": notice["message"]}
 
 
+# The download routes are declared before DELETE /api/models/{name} so that path pattern cannot shadow them.
+@app.get("/api/models/downloads")
+def api_models_downloads() -> dict[str, Any]:
+    """Return the download lane: running, queued and recently finished Models-page downloads."""
+    return download_lane.snapshot()
+
+
+@app.get("/api/models/download/plan")
+async def api_models_download_plan(kind: str, name: str) -> dict[str, Any]:
+    """Return what downloading a Models-page row would fetch: parts, sizes and the free space on the download drive."""
+    web_config = await run_in_threadpool(load_web_config)
+    try:
+        plan = await run_in_threadpool(row_plan, kind, name, web_config)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        return await run_in_threadpool(plan_summary, plan)
+    except PlanUnchecked as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=424, detail=str(exc)) from exc
+
+
+@app.post("/api/models/download")
+async def api_models_download(request: Request) -> dict[str, Any]:
+    """Queue the download of a Models-page row; an already queued or running one for the same row is returned."""
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail="Expected a JSON object.")
+    kind = _required_json_string(payload, "kind")
+    name = _required_json_string(payload, "name")
+    try:
+        plan = await run_in_threadpool(lambda: row_plan(kind, name, load_web_config()))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        return download_lane.submit(kind=kind, name=name, label=plan.label, plan=lambda: row_plan(kind, name, load_web_config()).targets)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/models/downloads/{item_id}/cancel")
+def api_models_download_cancel(item_id: str) -> dict[str, Any]:
+    """Cancel a queued download, or stop the running one (finished files are kept)."""
+    try:
+        return download_lane.cancel(item_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Unknown download: {item_id}") from exc
+
+
 def _seedvr2_copy_target(name: str, setup: SeedVR2Setup, models_dir: Path) -> DeleteTarget | None:
     """Return the delete target when *name* is the Models-page row of the SeedVR2 tier in use and its weights are on disk."""
     if name != seedvr2_row_name(setup.tier.model, setup.weights):
@@ -1912,6 +1970,7 @@ def api_delete_model(name: str) -> dict[str, Any]:
         target = _seedvr2_copy_target(name, web_config.seedvr2, Path(web_config.models_dir))
     if target is None:
         raise HTTPException(status_code=404, detail=f"No deletable model named '{name}'.")
+    _ensure_not_downloading(repo_ids=(target.repo_id,) if target.repo_id else (), paths=(target.path,))
     try:
         delete_model(target)
     except FileNotFoundError as exc:
@@ -1945,6 +2004,7 @@ def api_delete_enhancer_model(tier: str) -> dict[str, Any]:
     except JobConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
+        _ensure_not_downloading(repo_ids=(target.repo_id,))
         session.release()
         delete_model(target)
     except FileNotFoundError as exc:
@@ -1961,6 +2021,7 @@ def api_delete_enhancer_model(tier: str) -> dict[str, Any]:
 def api_free_stranded_shared_files() -> dict[str, Any]:
     """Delete the files in the HuggingFace cache's shared store that no downloaded repo links to."""
     _ensure_no_active_job()
+    _ensure_not_downloading(any_cache=True)
     try:
         freed = free_stranded_shared_files(huggingface_cache_dir())
     except OSError as exc:
@@ -1975,6 +2036,7 @@ def api_delete_other_download(repo_id: str) -> dict[str, Any]:
     repo = next((repo for repo in find_other_downloads(load_web_config()) if repo.repo_id == repo_id), None)
     if repo is None:
         raise HTTPException(status_code=404, detail=f"No unused HuggingFace download named '{repo_id}'.")
+    _ensure_not_downloading(repo_ids=(repo.repo_id,))
     try:
         delete_model(DeleteTarget("huggingface", repo.path, repo_id=repo.repo_id))
     except FileNotFoundError as exc:
@@ -2001,6 +2063,13 @@ def _ensure_no_active_job() -> None:
     """Refuse model and LoRA deletes while a generation job may be reading their files."""
     if web_runner.get_active_exclusive_job_snapshot() is not None:
         raise HTTPException(status_code=409, detail="Wait for all jobs to finish before deleting models or LoRAs.")
+
+
+def _ensure_not_downloading(*, repo_ids: tuple[str, ...] = (), paths: tuple[Path, ...] = (), any_cache: bool = False) -> None:
+    """Refuse a delete while a Models-page download is writing to the repos, folders or cache it would remove."""
+    repo = download_flights.conflict(repo_ids=repo_ids, paths=paths, any_cache=any_cache)
+    if repo is not None:
+        raise HTTPException(status_code=409, detail=f"Wait for the download of {repo} to finish, or cancel it, before deleting it.")
 
 
 # Declared before the parameterised /api/jobs/{job_id} routes.

@@ -2,7 +2,9 @@
 import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/index-client.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { ModelInventory } from '$lib/types';
+import { ApiError } from '$lib/api/client';
+import { addToast, dismissToast } from '$lib/state/toasts.svelte';
+import type { DownloadItem, DownloadPlan, ModelInventory } from '$lib/types';
 
 const modelApiMocks = vi.hoisted(() => ({
   getModelInventory: vi.fn<() => Promise<ModelInventory>>(),
@@ -16,6 +18,10 @@ const modelApiMocks = vi.hoisted(() => ({
   deleteOtherDownload: vi.fn(),
   freeStrandedCacheFiles: vi.fn(),
   deleteLora: vi.fn(),
+  getDownloadPlan: vi.fn(),
+  startDownload: vi.fn(),
+  getDownloads: vi.fn(),
+  cancelDownload: vi.fn(),
 }));
 
 const browseApiMocks = vi.hoisted(() => ({
@@ -36,15 +42,20 @@ vi.mock('$lib/api/models', () => ({
   deleteOtherDownload: modelApiMocks.deleteOtherDownload,
   freeStrandedCacheFiles: modelApiMocks.freeStrandedCacheFiles,
   deleteLora: modelApiMocks.deleteLora,
+  getDownloadPlan: modelApiMocks.getDownloadPlan,
+  startDownload: modelApiMocks.startDownload,
+  getDownloads: modelApiMocks.getDownloads,
+  cancelDownload: modelApiMocks.cancelDownload,
 }));
 
 vi.mock('$lib/api/browse', () => browseApiMocks);
 
 vi.mock('$lib/state/toasts.svelte', () => ({
-  addToast: vi.fn(),
+  addToast: vi.fn(() => 'toast-1'),
+  dismissToast: vi.fn(),
 }));
 
-import { NOT_DOWNLOADED_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
+import { DOWNLOADABLE_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
 import ModelsPage from './ModelsPage.svelte';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 
@@ -102,6 +113,11 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.deleteOtherDownload.mockReset();
     modelApiMocks.freeStrandedCacheFiles.mockReset();
     modelApiMocks.deleteLora.mockReset();
+    modelApiMocks.getDownloadPlan.mockReset();
+    modelApiMocks.startDownload.mockReset();
+    modelApiMocks.getDownloads.mockReset();
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
+    modelApiMocks.cancelDownload.mockReset();
     modelApiMocks.getModelInventory.mockResolvedValue(makeInventory());
     for (const mock of Object.values(browseApiMocks)) mock.mockReset();
     browseApiMocks.browsePlaces.mockImplementation(async (purpose: 'checkpoint_file' | 'lora_file') => placesFor(purpose));
@@ -152,6 +168,19 @@ describe('ModelsPage Browse buttons', () => {
       input_path: '/models/first-checkpoint.safetensors',
       model_type: 'zimage',
     }));
+  });
+
+  it('still imports a LoRA from Hugging Face with the form values', async () => {
+    modelApiMocks.importLoraHF.mockResolvedValue({ tone: 'error', message: 'Keep values for assertion.' });
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+
+    typePath(target.querySelector('#import-hf-repo-id') as HTMLInputElement, 'owner/repository');
+    typePath(target.querySelector('#import-hf-filename') as HTMLInputElement, 'style.safetensors');
+    (target.querySelector('#import-hf-repo-id') as HTMLInputElement).closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+
+    expect(modelApiMocks.importLoraHF).toHaveBeenCalledWith(expect.objectContaining({ repo_id: 'owner/repository', filename: 'style.safetensors' }));
   });
 
   it('submits the first browse-selected local LoRA path in the import API payload', async () => {
@@ -319,8 +348,8 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       image_models: [
-        { name: 'atlas', family: 'flux2_klein', size_label: '9b', stored_quant: null },
-        { name: 'atlas@q8', family: 'flux2_klein', size_label: '9b', stored_quant: { base_model: 'atlas', bits: 8 } },
+        { download_needed: false, name: 'atlas', family: 'flux2_klein', size_label: '9b', stored_quant: null },
+        { download_needed: false, name: 'atlas@q8', family: 'flux2_klein', size_label: '9b', stored_quant: { base_model: 'atlas', bits: 8 } },
       ],
     });
 
@@ -336,8 +365,8 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       video_models: [
-        { name: 'ltx-8', family: 'ltx', supports_i2v: true, converted_bits: null },
-        { name: 'my-finetune', family: 'ltx', supports_i2v: true, converted_bits: 8 },
+        { download_needed: false, name: 'ltx-8', family: 'ltx', supports_i2v: true, converted_bits: null },
+        { download_needed: false, name: 'my-finetune', family: 'ltx', supports_i2v: true, converted_bits: 8 },
       ],
     });
 
@@ -455,10 +484,10 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       image_models: [
-        { name: 'zit', family: 'zimage', size_label: 'xl', disk_size_label: '32.9 GB' },
-        { name: 'klein4b', family: 'flux2_klein', size_label: '4b', disk_size_label: null },
+        { download_needed: false, name: 'zit', family: 'zimage', size_label: 'xl', disk_size_label: '32.9 GB' },
+        { download_needed: false, name: 'klein4b', family: 'flux2_klein', size_label: '4b', disk_size_label: null },
       ],
-      video_models: [{ name: 'ltx-8', family: 'ltx', supports_i2v: true, disk_size_label: '112.3 GB' }],
+      video_models: [{ download_needed: false, name: 'ltx-8', family: 'ltx', supports_i2v: true, disk_size_label: '112.3 GB' }],
     });
 
     app = flushSync(() => mount(ModelsPage, { target }));
@@ -473,7 +502,7 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       models_dir: modelsDir,
-      image_models: [{ name: longName, family: 'a-very-long-family', size_label: 'extra-long-size' }],
+      image_models: [{ download_needed: false, name: longName, family: 'a-very-long-family', size_label: 'extra-long-size' }],
     });
 
     app = flushSync(() => mount(ModelsPage, { target }));
@@ -492,14 +521,15 @@ describe('ModelsPage Browse buttons', () => {
       ...makeInventory(),
       image_models: [
         {
+          download_needed: false,
           name: 'zit',
           family: 'zimage',
           downloaded: true,
           memory_fit: { budget_gb: 10.7, by_quantize: { none: { status: 'too_large', required_gb: 20.8 }, '8': { status: 'fits', required_gb: 8.1 } } },
         },
-        { name: 'klein4b', family: 'flux2_klein', downloaded: false, memory_fit: null },
+        { download_needed: true, name: 'klein4b', family: 'flux2_klein', downloaded: false, memory_fit: null },
       ],
-      video_models: [{ name: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, memory_fit: null }],
+      video_models: [{ download_needed: false, name: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, memory_fit: null }],
     });
     app = flushSync(() => mount(ModelsPage, { target }));
     await settle();
@@ -527,8 +557,8 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       image_models: [
-        { name: 'zit', family: 'zimage', downloaded: true, delete: { kind: 'huggingface', repo_id: 'org/zit', linked_by: [], stored_quants: ['zit@q8'] } },
-        { name: 'atlas', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
+        { download_needed: false, name: 'zit', family: 'zimage', downloaded: true, delete: { kind: 'huggingface', repo_id: 'org/zit', linked_by: [], stored_quants: ['zit@q8'] } },
+        { download_needed: false, name: 'atlas', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
       ],
     });
     app = flushSync(() => mount(ModelsPage, { target }));
@@ -550,7 +580,7 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       video_models: [
-        { name: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, delete: { kind: 'copy', repo_id: 'org/ltx', linked_by: [], stored_quants: ['ltx-4@q4'], shared_with: ['ltx-8'] } },
+        { download_needed: false, name: 'ltx-4', family: 'ltx', supports_i2v: true, downloaded: true, delete: { kind: 'copy', repo_id: 'org/ltx', linked_by: [], stored_quants: ['ltx-4@q4'], shared_with: ['ltx-8'] } },
       ],
     });
     app = flushSync(() => mount(ModelsPage, { target }));
@@ -570,9 +600,9 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       image_models: [
-        { name: 'artaix', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
-        { name: 'klein9b', family: 'flux2_klein', downloaded: true, delete: { kind: 'huggingface', repo_id: 'org/klein', linked_by: ['artaix'] } },
-        { name: 'klein4b', family: 'flux2_klein', downloaded: false, delete: null },
+        { download_needed: false, name: 'artaix', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
+        { download_needed: false, name: 'klein9b', family: 'flux2_klein', downloaded: true, delete: { kind: 'huggingface', repo_id: 'org/klein', linked_by: ['artaix'] } },
+        { download_needed: true, name: 'klein4b', family: 'flux2_klein', downloaded: false, delete: null },
       ],
       loras: [{ name: 'style', size_label: '10 MB' }],
     });
@@ -619,8 +649,8 @@ describe('ModelsPage Browse buttons', () => {
       modelApiMocks.getModelInventory.mockResolvedValue({
         ...makeInventory(),
         image_models: [
-          { ...seedvr2Row, downloaded: true, disk_size_label: '9.3 GB', delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
-          { name: 'zit', family: 'zimage', downloaded: true, delete: null },
+          { download_needed: false, ...seedvr2Row, downloaded: true, disk_size_label: '9.3 GB', delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
+          { download_needed: false, name: 'zit', family: 'zimage', downloaded: true, delete: null },
         ],
       });
       app = flushSync(() => mount(ModelsPage, { target }));
@@ -637,16 +667,16 @@ describe('ModelsPage Browse buttons', () => {
       modelApiMocks.getModelInventory.mockResolvedValue({
         ...makeInventory(),
         image_models: [
-          { ...seedvr2Row, downloaded: false, disk_size_label: null, delete: null },
-          { name: 'klein4b', family: 'flux2_klein', downloaded: false, delete: null },
+          { download_needed: true, ...seedvr2Row, downloaded: false, disk_size_label: null, delete: null },
+          { download_needed: true, name: 'klein4b', family: 'flux2_klein', downloaded: false, delete: null },
         ],
       });
       app = flushSync(() => mount(ModelsPage, { target }));
       await settle();
 
       expect(tooltipFor('seedvr2-7b@q8')).toContain(seedvr2Row.download_size_label);
-      expect(tooltipFor('seedvr2-7b@q8')).not.toContain(NOT_DOWNLOADED_TOOLTIP);
-      expect(tooltipFor('klein4b')).toContain(NOT_DOWNLOADED_TOOLTIP);
+      expect(tooltipFor('seedvr2-7b@q8')).not.toContain(NOT_DOWNLOADED_FIRST_USE_TOOLTIP);
+      expect(tooltipFor('klein4b')).toContain(DOWNLOADABLE_TOOLTIP);
       expect(target.querySelector('[data-testid="disk-size"]')).toBeNull();
     });
 
@@ -654,8 +684,8 @@ describe('ModelsPage Browse buttons', () => {
       modelApiMocks.getModelInventory.mockResolvedValue({
         ...makeInventory(),
         image_models: [
-          { ...seedvr2Row, downloaded: true, disk_size_label: '9.3 GB', delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
-          { name: 'artaix', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
+          { download_needed: false, ...seedvr2Row, downloaded: true, disk_size_label: '9.3 GB', delete: { kind: 'installed', repo_id: null, linked_by: [], stored_quants: [] } },
+          { download_needed: false, name: 'artaix', family: 'flux2_klein', downloaded: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
         ],
       });
       modelApiMocks.deleteModel.mockResolvedValue({ tone: 'success', message: "Deleted model 'seedvr2-7b@q8'.", detail: '' });
@@ -704,8 +734,8 @@ describe('ModelsPage Browse buttons', () => {
     modelApiMocks.getModelInventory.mockResolvedValue({
       ...makeInventory(),
       enhancer_models: [
-        { ...tier, tier: 'fast', repo: 'org/fast', downloaded: true, disk_size_label: '9.1 GB', deletable: true },
-        { ...tier, tier: 'smart', repo: 'org/smart', downloaded: false, disk_size_label: null, deletable: false, unavailable: 'Needs about 9 GB.' },
+        { download_needed: false, ...tier, tier: 'fast', repo: 'org/fast', downloaded: true, disk_size_label: '9.1 GB', deletable: true },
+        { download_needed: false, ...tier, tier: 'smart', repo: 'org/smart', downloaded: false, disk_size_label: null, deletable: false, unavailable: 'Needs about 9 GB.' },
       ],
     });
     modelApiMocks.deleteEnhancerModel.mockResolvedValue({ status: 'ok', tone: 'success', message: "Deleted the HuggingFace download of 'org/fast'." });
@@ -763,5 +793,360 @@ describe('ModelsPage Browse buttons', () => {
     await settle();
 
     expect(target.querySelector('[data-testid="enhancer-row"]')).toBeNull();
+  });
+});
+
+describe('ModelsPage downloads', () => {
+  let target: HTMLDivElement;
+  let app: Record<string, unknown> | null = null;
+
+  const plan = (overrides: Partial<DownloadPlan> = {}): DownloadPlan => ({
+    kind: 'model',
+    name: 'klein9b',
+    label: 'klein9b',
+    parts: [{ repo: 'org/klein', files: 4, bytes: 34.7e9 }],
+    total_bytes: 34.7e9,
+    space: { path: '/hub', needed_bytes: 34.7e9, free_bytes: 512e9, enough: true },
+    ...overrides,
+  });
+  const item = (overrides: Partial<DownloadItem> = {}): DownloadItem => ({ id: 'd1', kind: 'model', name: 'klein9b', label: 'klein9b', state: 'queued', message: null, ...overrides });
+  const running = (overrides: Partial<DownloadItem> = {}): DownloadItem =>
+    item({ state: 'running', repo: 'org/klein', part: 1, parts: 1, bytes_done: 12.4e9, bytes_total: 34.7e9, bytes_per_sec: 48e6, download_eta_secs: 460, shared: false, ...overrides });
+
+  function inventoryWith(overrides: Partial<ModelInventory> = {}): ModelInventory {
+    return {
+      ...makeInventory(),
+      image_models: [
+        { name: 'klein9b', family: 'flux2_klein', downloaded: false, download_needed: true, delete: null },
+        { name: 'klein4b', family: 'flux2_klein', downloaded: true, download_needed: false, delete: { kind: 'installed', repo_id: null, linked_by: [] } },
+      ],
+      ...overrides,
+    };
+  }
+
+  /** Let pending promises settle and run the timers due within *ms* (a poll fires every second). */
+  async function tickFor(ms = 0): Promise<void> {
+    await vi.advanceTimersByTimeAsync(ms);
+    flushSync();
+  }
+
+  async function mountPage(inventory: ModelInventory = inventoryWith()): Promise<void> {
+    modelApiMocks.getModelInventory.mockResolvedValue(inventory);
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await tickFor();
+  }
+
+  function downloadButton(name = 'klein9b'): HTMLButtonElement | null {
+    return target.querySelector<HTMLButtonElement>(`[data-testid="download-button"][aria-label="Download ${name}"]`);
+  }
+
+  const confirmDialog = (): HTMLElement | null => document.querySelector('[role="alertdialog"]');
+  const confirmButton = (): HTMLButtonElement => document.querySelector('[data-action="confirm"]') as HTMLButtonElement;
+
+  async function startAndConfirm(): Promise<void> {
+    downloadButton()!.click();
+    await tickFor();
+    confirmButton().click();
+    await tickFor();
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    for (const mock of Object.values(modelApiMocks)) mock.mockReset();
+    modelApiMocks.getConversionStatus.mockResolvedValue({ state: 'idle' });
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
+    vi.mocked(addToast).mockClear();
+    vi.mocked(dismissToast).mockClear();
+    target = document.createElement('div');
+    document.body.appendChild(target);
+  });
+
+  afterEach(async () => {
+    if (app) { await unmount(app); app = null; }
+    target.remove();
+    document.body.innerHTML = '';
+    vi.useRealTimers();
+  });
+
+  it('offers Download only on rows that need files, and Delete on the rest', async () => {
+    await mountPage();
+
+    expect(downloadButton('klein9b')).not.toBeNull();
+    expect(target.querySelectorAll('[data-testid="download-button"]')).toHaveLength(1);
+    expect(Array.from(target.querySelectorAll('[data-testid="delete-button"]')).map((el) => el.getAttribute('aria-label'))).toEqual(['Delete klein4b']);
+  });
+
+  it('reads the plan, confirms with the plain label, then starts the download for the row', async () => {
+    modelApiMocks.getDownloadPlan.mockResolvedValue(plan());
+    modelApiMocks.startDownload.mockResolvedValue(item());
+    await mountPage();
+
+    downloadButton()!.click();
+    await tickFor();
+    expect(modelApiMocks.getDownloadPlan).toHaveBeenCalledWith('model', 'klein9b');
+    expect(confirmDialog()).not.toBeNull();
+    expect(confirmButton().textContent?.trim()).toBe('Download');
+    expect(confirmButton().classList.contains('ui-btn-danger')).toBe(false);
+    expect(modelApiMocks.startDownload).not.toHaveBeenCalled();
+
+    confirmButton().click();
+    await tickFor();
+    expect(modelApiMocks.startDownload).toHaveBeenCalledWith('model', 'klein9b');
+  });
+
+  it('asks to Download anyway only when the free space is short', async () => {
+    modelApiMocks.getDownloadPlan.mockResolvedValue(plan({ space: { path: '/hub', needed_bytes: 34.7e9, free_bytes: 21e9, enough: false } }));
+    await mountPage();
+
+    downloadButton()!.click();
+    await tickFor();
+    expect(confirmButton().textContent?.trim()).toBe('Download anyway');
+  });
+
+  it('starts nothing when the confirmation is declined', async () => {
+    modelApiMocks.getDownloadPlan.mockResolvedValue(plan());
+    await mountPage();
+
+    downloadButton()!.click();
+    await tickFor();
+    (document.querySelector('[data-action="cancel"]') as HTMLButtonElement).click();
+    await tickFor();
+
+    expect(modelApiMocks.startDownload).not.toHaveBeenCalled();
+  });
+
+  it('skips the confirmation for an empty plan, tells so and reloads the inventory', async () => {
+    modelApiMocks.getDownloadPlan.mockResolvedValue(plan({ parts: [], total_bytes: 0, space: null }));
+    await mountPage();
+    const reads = modelApiMocks.getModelInventory.mock.calls.length;
+
+    downloadButton()!.click();
+    await tickFor();
+
+    expect(confirmDialog()).toBeNull();
+    expect(modelApiMocks.startDownload).not.toHaveBeenCalled();
+    expect(addToast).toHaveBeenCalledWith(expect.any(String), 'info');
+    expect(modelApiMocks.getModelInventory.mock.calls.length).toBe(reads + 1);
+  });
+
+  it('downloads an enhancer tier by kind and tier name', async () => {
+    const tier = { revision: null, download_size_label: null, unavailable: null, disk_size_label: null, deletable: false };
+    modelApiMocks.getDownloadPlan.mockResolvedValue(plan({ kind: 'enhancer', name: 'smart', label: 'Smart enhancer model' }));
+    modelApiMocks.startDownload.mockResolvedValue(item({ kind: 'enhancer', name: 'smart' }));
+    await mountPage({ ...inventoryWith(), enhancer_models: [{ ...tier, tier: 'smart', repo: 'org/smart', downloaded: false, download_needed: true }] });
+
+    target.querySelector<HTMLButtonElement>('[data-testid="enhancer-row"] [data-testid="download-button"]')!.click();
+    await tickFor();
+    confirmButton().click();
+    await tickFor();
+
+    expect(modelApiMocks.getDownloadPlan).toHaveBeenCalledWith('enhancer', 'smart');
+    expect(modelApiMocks.startDownload).toHaveBeenCalledWith('enhancer', 'smart');
+  });
+
+  it('shows a queued item with Cancel in place of Download, and no progress bar', async () => {
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [item({ queue_position: 2 })] });
+    await mountPage();
+
+    expect(downloadButton()).toBeNull();
+    expect(target.querySelector('[data-testid="download-cancel"]')).not.toBeNull();
+    expect(target.querySelector('[data-testid="download-subrow"]')).not.toBeNull();
+    expect(target.querySelector('[data-testid="download-progress"]')).toBeNull();
+  });
+
+  it('shows a running item with a progress bar and cancels it by id without a toast', async () => {
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [running()] });
+    modelApiMocks.cancelDownload.mockResolvedValue(item({ state: 'cancelled' }));
+    await mountPage();
+
+    const bar = target.querySelector('[data-testid="download-progress"] [role="progressbar"]');
+    expect(bar?.getAttribute('aria-valuenow')).toBe(String(12.4e9));
+    expect(bar?.getAttribute('aria-valuemax')).toBe(String(34.7e9));
+
+    target.querySelector<HTMLButtonElement>('[data-testid="download-cancel"]')!.click();
+    await tickFor();
+
+    expect(modelApiMocks.cancelDownload).toHaveBeenCalledWith('d1');
+    expect(addToast).not.toHaveBeenCalled();
+    expect(downloadButton()).not.toBeNull();
+  });
+
+  it('shows a running item of unknown size as an indeterminate bar', async () => {
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [running({ bytes_total: null, download_eta_secs: null })] });
+    await mountPage();
+
+    const bar = target.querySelector('[data-testid="download-progress"] [role="progressbar"]');
+    expect(bar?.classList.contains('is-live')).toBe(true);
+    expect(bar?.getAttribute('aria-valuenow')).toBe('0');
+  });
+
+  it('polls every second while a download is active and stops once it is done, reloading the inventory', async () => {
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [running()] });
+    await mountPage();
+    const reads = modelApiMocks.getModelInventory.mock.calls.length;
+    const polled = modelApiMocks.getDownloads.mock.calls.length;
+
+    await tickFor(1000);
+    expect(modelApiMocks.getDownloads.mock.calls.length).toBe(polled + 1);
+
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [item({ state: 'done' })] });
+    await tickFor(1000);
+    expect(addToast).toHaveBeenCalledWith(expect.any(String), 'success');
+    expect(modelApiMocks.getModelInventory.mock.calls.length).toBe(reads + 1);
+
+    const settled = modelApiMocks.getDownloads.mock.calls.length;
+    await tickFor(3000);
+    expect(modelApiMocks.getDownloads.mock.calls.length).toBe(settled);
+  });
+
+  it('does not poll while nothing is active, nor announce what finished before the page opened', async () => {
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [item({ state: 'done' }), item({ id: 'd2', state: 'failed', message: 'Disk full' })] });
+    await mountPage();
+    const polled = modelApiMocks.getDownloads.mock.calls.length;
+
+    await tickFor(3000);
+
+    expect(modelApiMocks.getDownloads.mock.calls.length).toBe(polled);
+    expect(addToast).not.toHaveBeenCalled();
+  });
+
+  it('starts polling after a download is queued and stops polling when the page is destroyed', async () => {
+    modelApiMocks.getDownloadPlan.mockResolvedValue(plan());
+    modelApiMocks.startDownload.mockResolvedValue(running());
+    await mountPage();
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [running()] });
+
+    await startAndConfirm();
+    const polled = modelApiMocks.getDownloads.mock.calls.length;
+    await tickFor(1000);
+    expect(modelApiMocks.getDownloads.mock.calls.length).toBeGreaterThan(polled);
+
+    await unmount(app!);
+    app = null;
+    const afterDestroy = modelApiMocks.getDownloads.mock.calls.length;
+    await tickFor(3000);
+    expect(modelApiMocks.getDownloads.mock.calls.length).toBe(afterDestroy);
+  });
+
+  it('raises an error toast with a Retry action when a download fails, and dismisses it on destroy', async () => {
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [running()] });
+    await mountPage();
+
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [item({ state: 'failed', message: 'No space left on device' })] });
+    await tickFor(1000);
+
+    expect(addToast).toHaveBeenCalledWith('No space left on device', 'error', { action: { label: 'Retry', run: expect.any(Function) } });
+    await unmount(app!);
+    app = null;
+    expect(dismissToast).toHaveBeenCalledWith('toast-1');
+  });
+
+  it('runs the Download flow again from the Retry action', async () => {
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [running()] });
+    modelApiMocks.getDownloadPlan.mockResolvedValue(plan());
+    await mountPage();
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [item({ state: 'failed', message: 'Network error' })] });
+    await tickFor(1000);
+    const options = vi.mocked(addToast).mock.calls.at(-1)?.[2];
+
+    options?.action?.run();
+    await tickFor();
+
+    expect(modelApiMocks.getDownloadPlan).toHaveBeenCalledWith('model', 'klein9b');
+  });
+
+  it('keeps a partly downloaded row downloaded and offers Download and Delete together', async () => {
+    await mountPage(inventoryWith({
+      image_models: [{ name: 'partial', family: 'flux2_klein', downloaded: true, download_needed: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } }],
+    }));
+
+    expect(target.querySelector('[data-testid="model-name"]')?.getAttribute('data-downloaded')).toBe('true');
+    const download = target.querySelector('[data-testid="download-button"]');
+    expect(download).not.toBeNull();
+    expect(download?.getAttribute('aria-label')).not.toBe('Download partial');
+    expect(target.querySelector('[data-testid="delete-button"]')).not.toBeNull();
+    expect(download!.compareDocumentPosition(target.querySelector('[data-testid="delete-button"]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('offers Cancel only, without Delete, while a row is downloading', async () => {
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [running({ name: 'partial' })] });
+    await mountPage(inventoryWith({
+      image_models: [{ name: 'partial', family: 'flux2_klein', downloaded: true, download_needed: true, delete: { kind: 'installed', repo_id: null, linked_by: [] } }],
+    }));
+
+    expect(target.querySelector('[data-testid="download-cancel"]')).not.toBeNull();
+    expect(target.querySelector('[data-testid="download-button"]')).toBeNull();
+    expect(target.querySelector('[data-testid="delete-button"]')).toBeNull();
+  });
+
+  it('offers Download and Delete for a deletable enhancer that needs files', async () => {
+    const tier = { revision: null, download_size_label: null, unavailable: null, disk_size_label: '4.0 GB' };
+    await mountPage({ ...inventoryWith(), enhancer_models: [{ ...tier, tier: 'fast', repo: 'org/fast', downloaded: true, download_needed: true, deletable: true }] });
+
+    const row = target.querySelector('[data-testid="enhancer-row"]')!;
+    expect(row.querySelector('[data-testid="download-button"]')).not.toBeNull();
+    expect(row.querySelector('[data-testid="delete-button"]')).not.toBeNull();
+  });
+
+  describe('prepared on first use', () => {
+    function nameTooltip(name: string): string {
+      const label = Array.from(target.querySelectorAll('[data-testid="model-name"]')).find((el) => el.textContent === name);
+      return label?.parentElement?.querySelector('[role="tooltip"]')?.textContent ?? '';
+    }
+
+    it('says the SeedVR2 copy and the Ideogram 4 Instant build are made on first use when nothing is left to fetch', async () => {
+      await mountPage(inventoryWith({
+        image_models: [
+          { name: 'seedvr2-7b@q8', family: 'seedvr2', source: 'seedvr2', downloaded: false, download_needed: false, download_size_label: '17.0 GB', delete: null },
+          { name: 'ideo', family: 'ideogram4', downloaded: false, download_needed: false, delete: null },
+          { name: 'klein9b', family: 'flux2_klein', downloaded: false, download_needed: true, delete: null },
+        ],
+      }));
+
+      expect(nameTooltip('seedvr2-7b@q8')).toContain(PREPARED_SEEDVR2_TOOLTIP);
+      expect(nameTooltip('ideo')).toContain(PREPARED_INSTANT_TOOLTIP);
+      expect(nameTooltip('klein9b')).toContain(DOWNLOADABLE_TOOLTIP);
+      expect(target.querySelectorAll('[data-testid="download-button"]')).toHaveLength(1);
+    });
+  });
+
+  it('dismisses the Retry toast of a failed request when the page is destroyed', async () => {
+    modelApiMocks.getDownloadPlan.mockRejectedValueOnce(new ApiError('Bad gateway', 502, 'Hub unreachable'));
+    vi.mocked(addToast).mockReturnValueOnce('toast-request');
+    await mountPage();
+
+    downloadButton()!.click();
+    await tickFor();
+    await unmount(app!);
+    app = null;
+
+    expect(dismissToast).toHaveBeenCalledWith('toast-request');
+  });
+
+  it('reads the lane once per second after a submit, however often the row was submitted', async () => {
+    modelApiMocks.getDownloadPlan.mockResolvedValue(plan());
+    modelApiMocks.startDownload.mockResolvedValue(running());
+    await mountPage();
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [running()] });
+
+    await startAndConfirm();
+    await tickFor(1000);
+    const polled = modelApiMocks.getDownloads.mock.calls.length;
+    await tickFor(3000);
+
+    expect(modelApiMocks.getDownloads.mock.calls.length).toBe(polled + 3);
+  });
+
+  it('offers Retry on a failed request only when repeating it could work', async () => {
+    modelApiMocks.getDownloadPlan.mockRejectedValueOnce(new ApiError('Not found', 404, 'Unknown model')).mockRejectedValueOnce(new ApiError('Bad gateway', 502, 'Hub unreachable'));
+    await mountPage();
+
+    downloadButton()!.click();
+    await tickFor();
+    expect(addToast).toHaveBeenLastCalledWith('Unknown model', 'error');
+
+    downloadButton()!.click();
+    await tickFor();
+    expect(addToast).toHaveBeenLastCalledWith('Hub unreachable', 'error', { action: { label: 'Retry', run: expect.any(Function) } });
   });
 });

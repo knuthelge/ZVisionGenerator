@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { ConversionStatus, LtxCheckpointInspection, ModelInventory, ModelOperationResult } from '$lib/types';
+import type { ConversionStatus, DownloadItem, DownloadList, DownloadPlan, LtxCheckpointInspection, ModelInventory, ModelOperationResult } from '$lib/types';
 
 export function getModelInventory(): Promise<ModelInventory> {
   return api.get<ModelInventory>('/api/models');
@@ -62,4 +62,23 @@ export function freeStrandedCacheFiles(): Promise<ModelOperationResult> {
 
 export function deleteLora(name: string): Promise<ModelOperationResult> {
   return api.delete<ModelOperationResult>(`/api/loras/${encodeURIComponent(name)}`);
+}
+
+/** What downloading a model or enhancer would fetch: parts, sizes and free space. */
+export function getDownloadPlan(kind: 'model' | 'enhancer', name: string): Promise<DownloadPlan> {
+  return api.get<DownloadPlan>(`/api/models/download/plan?kind=${encodeURIComponent(kind)}&name=${encodeURIComponent(name)}`);
+}
+
+/** Queue a Models-page download; an already queued or running one for the same row is returned. */
+export function startDownload(kind: 'model' | 'enhancer', name: string): Promise<DownloadItem> {
+  return api.post<DownloadItem>('/api/models/download', { kind, name });
+}
+
+/** The downloads lane: queued, running and recently finished items. */
+export function getDownloads(): Promise<DownloadList> {
+  return api.get<DownloadList>('/api/models/downloads');
+}
+
+export function cancelDownload(id: string): Promise<DownloadItem> {
+  return api.post<DownloadItem>(`/api/models/downloads/${encodeURIComponent(id)}/cancel`, {});
 }

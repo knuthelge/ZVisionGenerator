@@ -24,6 +24,25 @@ os.environ.setdefault("ZIV_UI_ALLOWED_HOSTS", "testserver")
 os.environ.setdefault("ZIV_LOG", "off")
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    """Register the ``real_download_plans`` marker."""
+    config.addinivalue_line("markers", "real_download_plans: keep the web runner's real download planners (they may read model indexes)")
+
+
+@pytest.fixture(autouse=True)
+def _no_web_download_planning(request, monkeypatch):
+    """Plan no downloads in the web runner (``None`` = cannot plan), so no web job test reaches Hugging Face through a planner.
+
+    Tests install the planners they need after this runs; ``@pytest.mark.real_download_plans`` keeps the real ones.
+    """
+    if request.node.get_closest_marker("real_download_plans"):
+        return
+    from zvisiongenerator.web import web_runner
+
+    for name in ("image_plan", "video_plan", "seedvr2_plan", "enhancer_plan"):
+        monkeypatch.setattr(web_runner, name, lambda *_a, **_kw: None)
+
+
 def _make_args(**overrides):
     """Return a minimal argparse Namespace for run_batch()."""
     defaults = dict(

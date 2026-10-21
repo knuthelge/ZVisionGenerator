@@ -29,6 +29,7 @@ from zvisiongenerator.backends import get_backend, get_seedvr2_upscaler, get_vid
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.core.workflow import GenerationWorkflow
+from zvisiongenerator.downloads import DETACHED, STOPPED, DownloadFlights, DownloadReport, DownloadTarget, enhancer_plan, ensure_downloaded, image_plan, seedvr2_plan, video_plan
 from zvisiongenerator.ideogram4_instant_builder import ensure_instant_model
 from zvisiongenerator.image_model_loader import load_image_model
 from zvisiongenerator.image_runner import run_batch
@@ -48,6 +49,7 @@ from zvisiongenerator.web.config import load_web_config
 from zvisiongenerator.web.gallery import gallery_asset_for_output_path, gallery_asset_to_json
 from zvisiongenerator.web.job_contract import (
     CANCELLED_TERMINAL_EVENT,
+    DOWNLOADING_EVENT,
     FAILED_TERMINAL_EVENT,
     QUEUED_STATUS,
     REMOVED_REASON,
@@ -240,8 +242,14 @@ class WebRunner:
         max_history_events: int = 200,
         terminal_retention_seconds: float = 300.0,
         max_terminal_jobs: int = 25,
+        download_flights: DownloadFlights | None = None,
     ) -> None:
-        """Create the thread-backed web runner facade."""
+        """Create the thread-backed web runner facade.
+
+        *download_flights* is the registry that lets jobs (and the server's download lane) share one download per
+        destination; it defaults to a registry of its own.
+        """
+        self._download_flights = download_flights if download_flights is not None else DownloadFlights()
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="ziv-web-runner")
         self._heartbeat_seconds = heartbeat_seconds
         self._max_history_events = max(1, max_history_events)
@@ -256,6 +264,11 @@ class WebRunner:
         # Waiting generation job ids, oldest first, and the job the worker is running; both guarded by _jobs_lock.
         self._queue: deque[str] = deque()
         self._claimed_job_id: str | None = None
+
+    @property
+    def download_flights(self) -> DownloadFlights:
+        """Return the registry of running model downloads that jobs share."""
+        return self._download_flights
 
     def submit_image_request_job(
         self,
@@ -716,8 +729,19 @@ class WebRunner:
             enhance_by_set=enhance_by_set,
             control=control_signal,
             progress_callback=progress_callback,
+            ensure_downloads=self._enhancer_download_hook(mode="image", prompts_data=prompts_data, args=args, progress_callback=progress_callback, control_signal=control_signal),
         )
         if plan.cancelled:
+            return
+        if not self._ensure_downloads(
+            image_plan(model_ref, family=request.model_family, config=config, platform_key=sys.platform),
+            mode="image",
+            role="model",
+            model=request.model_name or model_ref,
+            total_iterations=len(plan.iterations),
+            progress_callback=progress_callback,
+            control_signal=control_signal,
+        ):
             return
         backend, model, model_info = _load_image_model_with_progress(request, model_ref, quantize, progress_callback, control_signal, config=config)
         run_batch(
@@ -744,6 +768,16 @@ class WebRunner:
         """Load the upscale model inside the worker thread (SeedVR2 or the recorded image model) and run the upscale workflow once."""
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "image", "completed_iterations": 0, "total_iterations": 1})
+            return
+        if not self._ensure_downloads(
+            self._upscale_download_plan(request, model_ref),
+            mode="image",
+            role="model",
+            model=self._upscale_model_label(request, model_ref),
+            total_iterations=1,
+            progress_callback=progress_callback,
+            control_signal=control_signal,
+        ):
             return
         if request.upscale_method == UPSCALE_METHOD_SEEDVR2:
             backend, model = _load_seedvr2_with_progress(request, progress_callback)
@@ -777,11 +811,22 @@ class WebRunner:
             scene_by_set=scene_by_set,
             control=control_signal,
             progress_callback=progress_callback,
+            ensure_downloads=self._enhancer_download_hook(mode="video", prompts_data=prompts_data, args=args, progress_callback=progress_callback, control_signal=control_signal),
         )
         if plan.cancelled:
             return
         if control_signal.pending() == "quit":
             progress_callback({"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": len(plan.iterations)})
+            return
+        if not self._ensure_downloads(
+            video_plan(model_ref, family=request.model_family, config=config, model_name=request.model_name or model_ref, upscale=bool(request.upscale)),
+            mode="video",
+            role="model",
+            model=request.model_name or model_ref,
+            total_iterations=len(plan.iterations),
+            progress_callback=progress_callback,
+            control_signal=control_signal,
+        ):
             return
         progress_callback({"type": "model_loading", "mode": "video", "model": request.model_name or model_ref})
         backend = get_video_backend(request.model_family)
@@ -808,6 +853,100 @@ class WebRunner:
             progress_callback=progress_callback,
             skip_signal=control_signal,
         )
+
+    @staticmethod
+    def _upscale_download_plan(request: ImageGenerationRequest, model_ref: str) -> tuple[DownloadTarget, ...] | None:
+        """Return the downloads an upscale job needs: the SeedVR2 tier's files or the creative refinement model's."""
+        if request.upscale_method != UPSCALE_METHOD_SEEDVR2:
+            return image_plan(model_ref, family=request.model_family, config=None, platform_key=sys.platform)
+        upscaler = get_seedvr2_upscaler()
+        if upscaler is None:
+            return None  # the load reports that this platform has no SeedVR2 engine
+        return seedvr2_plan(request.upscale_model, models_dir=get_ziv_data_dir() / "models", weights=upscaler.weights)
+
+    @staticmethod
+    def _upscale_model_label(request: ImageGenerationRequest, model_ref: str) -> str:
+        """Return the model name an upscale job's download events show."""
+        if request.upscale_method != UPSCALE_METHOD_SEEDVR2:
+            return request.model_name or model_ref
+        upscaler = get_seedvr2_upscaler()
+        return seedvr2_tier_label(request.upscale_model, upscaler.weights) if upscaler is not None else str(request.upscale_model)
+
+    def _enhancer_download_hook(
+        self,
+        *,
+        mode: str,
+        prompts_data: dict[str, list[tuple[str, str | None]]],
+        args: argparse.Namespace,
+        progress_callback: Callable[[EventPayload], None],
+        control_signal: SkipSignal,
+    ) -> Callable[[str, str | None], bool]:
+        """Return the preflight hook that downloads the prompt enhancer ``(repo, revision)`` with ``role: "enhancer"`` events.
+
+        The hook returns False when the job was cancelled (stopped or detached) while it downloaded; the cancellation
+        event is already published by then.
+        """
+        total_iterations = sum(len(prompts) for prompts in prompts_data.values()) * args.runs
+
+        def ensure(repo: str, revision: str | None) -> bool:
+            return self._ensure_downloads(
+                enhancer_plan(repo, revision),
+                mode=mode,
+                role="enhancer",
+                model=repo,
+                total_iterations=total_iterations,
+                progress_callback=progress_callback,
+                control_signal=control_signal,
+            )
+
+        return ensure
+
+    def _ensure_downloads(
+        self,
+        targets: tuple[DownloadTarget, ...] | None,
+        *,
+        mode: str,
+        role: str,
+        model: str,
+        total_iterations: int,
+        progress_callback: Callable[[EventPayload], None],
+        control_signal: SkipSignal,
+    ) -> bool:
+        """Download what *targets* still miss, publishing ``model_downloading`` events; return False when the job was cancelled.
+
+        ``None`` (the plan could not be made) and no targets skip the step. A Stop while this job owns the download
+        ends the job with ``download: "stopped"``; a Stop while it only waits on another download, with
+        ``download: "detached"`` (the other download continues).
+
+        Raises:
+            RuntimeError: If a download fails; the message names the repo.
+        """
+        if not targets:
+            return True
+
+        def report(update: DownloadReport) -> None:
+            progress_callback(
+                {
+                    "type": DOWNLOADING_EVENT,
+                    "mode": mode,
+                    "role": role,
+                    "model": model,
+                    "repo": update.repo,
+                    "part": update.part,
+                    "parts": update.parts,
+                    "bytes_done": update.progress.bytes_done,
+                    "bytes_total": update.progress.bytes_total,
+                    "bytes_per_sec": update.progress.bytes_per_sec,
+                    "download_eta_secs": update.progress.eta_secs,
+                    "shared": update.shared,
+                }
+            )
+
+        outcome = ensure_downloaded(targets, flights=self._download_flights, report=report, cancelled=lambda: control_signal.pending() == "quit")
+        if outcome in (STOPPED, DETACHED):
+            progress_callback({"type": "batch_cancelled", "mode": mode, "completed_iterations": 0, "total_iterations": total_iterations, "download": outcome})
+            return False
+        return True
 
     def _make_progress_callback(self, job_id: str) -> Callable[[EventPayload], None]:
         """Bind a job id to a runner progress callback."""
@@ -869,6 +1008,9 @@ class WebRunner:
             if enriched_event["type"] == SUCCESS_TERMINAL_EVENT and "outputs" not in enriched_event:
                 enriched_event["outputs"] = [dict(output) for output in record.outputs]
             record.next_event_id += 1
+            if enriched_event["type"] == DOWNLOADING_EVENT:
+                # Only the latest download progress is worth replaying to a client that connects later.
+                record.history[:] = [past for past in record.history if past["type"] != DOWNLOADING_EVENT]
             record.history.append(enriched_event)
             if len(record.history) > self._max_history_events:
                 del record.history[: len(record.history) - self._max_history_events]

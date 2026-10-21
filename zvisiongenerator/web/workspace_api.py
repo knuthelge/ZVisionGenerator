@@ -7,10 +7,11 @@ import sys
 import warnings
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, get_backend_name, supports_stored_quants, supports_video_audio
 from zvisiongenerator.converters.list_assets import list_loras
+from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
 from zvisiongenerator.utils.config import enhancer_tier_models, ltx_companion_repos, resolve_defaults, resolve_enhancer_model, resolve_video_defaults, smart_enhancer_model, smart_unavailable
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
@@ -30,11 +31,14 @@ from zvisiongenerator.utils.stored_quant import stored_quant_dirs_for
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_REPO, SeedVR2Setup, seedvr2_download_bytes, seedvr2_row_name, seedvr2_size_label
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
+from zvisiongenerator.web.model_download_plan import KIND_MODEL, enhancer_download_needed, row_download_needed
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
 from zvisiongenerator.web.model_delete import cache_repos_linked_from, delete_scope, enhancer_delete_target, installed_models_linking_to, model_delete_target, seedvr2_delete_target, used_repo_ids
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
 from zvisiongenerator.web.model_status import describe_model_status
 
+if TYPE_CHECKING:
+    from zvisiongenerator.downloads.target import DownloadTarget
 
 _UNKNOWN_STATUS: dict[str, Any] = {"downloaded": None, "memory_fit": None}
 _IMAGE_BOOTSTRAP_STRENGTH = 0.5
@@ -223,37 +227,41 @@ def build_models_response(
     inventory = (*web_config.image_inventory, *web_config.video_inventory)
     delete_info = _delete_info_resolver(data_dir / "models", find_local_dir, inventory=inventory, app_config=web_config.app_config)
     disk_size = _disk_size_resolver(data_dir / "models", listed={entry.name for entry in inventory}, app_config=web_config.app_config)
+    download_needed = _download_needed_resolver(web_config)
     loras = [{"name": lora.name, "file_size_mb": lora.file_size_mb, "size_label": f"{lora.file_size_mb} MB"} for lora in list_loras(data_dir)]
+    image_rows = [
+        {
+            "name": entry.name,
+            "family": entry.family,
+            "size_label": entry.size or "Unknown",
+            "source": entry.source,
+            "stored_quant": _stored_quant_payload(entry),
+            **status(entry, "image"),
+            "delete": delete_info(entry),
+            "disk_size_label": disk_size(entry),
+        }
+        for entry in web_config.image_inventory
+    ] + _seedvr2_model_rows(web_config.seedvr2, Path(web_config.models_dir))
+    video_rows = [
+        {
+            "name": entry.name,
+            "family": entry.family,
+            "supports_i2v": entry.supports_i2v,
+            "source": entry.source,
+            "converted_bits": _converted_bits(entry),
+            **status(entry, "video"),
+            "delete": delete_info(entry),
+            "disk_size_label": disk_size(entry),
+        }
+        for entry in web_config.video_inventory
+    ]
+    for row in (*image_rows, *video_rows):
+        row["download_needed"] = download_needed(KIND_MODEL, row["name"], row["downloaded"])
     return {
         "models_dir": web_config.models_dir,
         "loras_dir": web_config.loras_dir,
-        "image_models": [
-            {
-                "name": entry.name,
-                "family": entry.family,
-                "size_label": entry.size or "Unknown",
-                "source": entry.source,
-                "stored_quant": _stored_quant_payload(entry),
-                **status(entry, "image"),
-                "delete": delete_info(entry),
-                "disk_size_label": disk_size(entry),
-            }
-            for entry in web_config.image_inventory
-        ]
-        + _seedvr2_model_rows(web_config.seedvr2, Path(web_config.models_dir)),
-        "video_models": [
-            {
-                "name": entry.name,
-                "family": entry.family,
-                "supports_i2v": entry.supports_i2v,
-                "source": entry.source,
-                "converted_bits": _converted_bits(entry),
-                **status(entry, "video"),
-                "delete": delete_info(entry),
-                "disk_size_label": disk_size(entry),
-            }
-            for entry in web_config.video_inventory
-        ],
+        "image_models": image_rows,
+        "video_models": video_rows,
         "enhancer_models": _enhancer_model_rows(web_config.app_config),
         "other_downloads": _other_downloads_payload(web_config),
         "loras": loras,
@@ -261,6 +269,23 @@ def build_models_response(
         "huggingface_configured": token_var is not None,
         "huggingface_token_env_var": token_var,
     }
+
+
+def _download_needed_resolver(web_config: WebUiConfig) -> Callable[[str, str, bool | None], bool]:
+    """Return a resolver for each model row's ``download_needed``: whether anything is still to be downloaded.
+
+    The answer comes from what is on disk only (no network, no backend import). One row that cannot be planned
+    warns and reads as not needing a download, like an unreadable status.
+    """
+
+    def _needed(kind: str, name: str, downloaded: bool | None) -> bool:
+        try:
+            return row_download_needed(kind, name, web_config, downloaded=downloaded)
+        except Exception as exc:  # noqa: BLE001 - one unreadable row must not break the whole listing
+            warnings.warn(f"Could not determine whether '{name}' needs a download: {exc}", stacklevel=2)
+            return False
+
+    return _needed
 
 
 def _seedvr2_model_rows(setup: SeedVR2Setup | None, models_dir: Path) -> list[dict[str, Any]]:
@@ -294,11 +319,13 @@ def _enhancer_model_rows(
     *,
     downloaded: Callable[[str, str | None], bool] = is_model_downloaded,
     budget_bytes: Callable[[], int | None] | None = None,
+    present: Callable[[DownloadTarget], bool] = target_present_offline,
 ) -> list[dict[str, Any]]:
-    """Return one Models-page row per configured enhancer tier, with its disk use and whether it can be deleted.
+    """Return one Models-page row per configured enhancer tier, with its disk use, whether it can be deleted and whether it needs a download.
 
     Args:
         budget_bytes: Returns the machine's accelerator memory, for Smart's ``unavailable`` reason.
+        present: Tells whether a download target is fully on disk without using the network.
     """
     section = app_config.get("prompt_enhancer") or {}
     size_sections = {"fast": section, "smart": section.get("smart") or {}}
@@ -317,9 +344,19 @@ def _enhancer_model_rows(
                 "download_size_label": _size_label(size_sections[tier]) if tier in size_sections else None,
                 "unavailable": unavailable,
                 "deletable": target is not None,
+                "download_needed": _enhancer_download_needed(tier, repo, revision, unavailable, present),
             }
         )
     return rows
+
+
+def _enhancer_download_needed(tier: str, repo: str, revision: str | None, unavailable: str | None, present: Callable[[DownloadTarget], bool]) -> bool:
+    """Return an enhancer row's ``download_needed``; a tier that cannot be planned warns and needs none."""
+    try:
+        return enhancer_download_needed(repo, revision, unavailable=unavailable, present=present)
+    except Exception as exc:  # noqa: BLE001 - one unreadable row must not break the whole listing
+        warnings.warn(f"Could not determine whether the '{tier}' enhancer model needs a download: {exc}", stacklevel=2)
+        return False
 
 
 def find_other_downloads(web_config: WebUiConfig, *, cache_dir: Path | None = None) -> tuple[CachedRepo, ...]:

@@ -110,7 +110,17 @@ ziv-model list --loras
 
 ## Managing Models in the Web UI
 
-The Web UI's Models page lists the same models and LoRAs and can convert checkpoints and import LoRAs. The **Size** column shows the disk each model uses: an alias's HuggingFace download (with the extra repos LTX downloads on Windows/Linux), or a converted model's own folder without the base-model files it links to. Quantized copies count with their model when they don't have a row of their own. Two aliases that load the same download, such as `ltx-4` and `ltx-8` on Windows/Linux, both show it. Each row also has a delete button, which asks for confirmation first and is unavailable while generation jobs are running or queued:
+The Web UI's Models page lists the same models and LoRAs and can convert checkpoints and import LoRAs. The **Size** column shows the disk each model uses: an alias's HuggingFace download (with the extra repos LTX downloads on Windows/Linux), or a converted model's own folder without the base-model files it links to. Quantized copies count with their model when they don't have a row of their own. Two aliases that load the same download, such as `ltx-4` and `ltx-8` on Windows/Linux, both show it.
+
+Rows whose files are not fully downloaded have a **Download** button, so a model is ready before the first job that uses it (without it, the first job downloads the model and shows the download on its card). The prompt enhancer rows and the SeedVR2 row have one too.
+
+- **Confirm.** The button first shows the download's size, split into parts for models that download several (such as LTX video), and the free space on the drive it downloads to. Both are estimates: the free-space check covers only the main download drive and can count files that other downloads share twice. **Download anyway** replaces the button when the space looks short.
+- **One at a time, beside your jobs.** Downloads run one after another and don't take a place in the job queue, so generation jobs start while a download runs. Later downloads wait as **Queued**; **Cancel** on a row stops a running download or removes a queued one. Cancelling keeps the finished files and removes the half-written one, so the next Download continues with the rest.
+- **Jobs share the download.** A job that needs a model being downloaded waits for it and shows its progress on the job card. Cancelling that job leaves the download running.
+- **Ideogram 4 Instant and SeedVR2.** The **Download** button for `ideo` fetches its source files; the first job then prepares the model folder from them (see [Ideogram 4 Instant](image.md#ideogram-4)). On a Mac, the SeedVR2 row downloads the model, and the first plain upscale makes its 8-bit copy and removes the download.
+- **No connection.** If Hugging Face can't be reached, the size can't be read and the download can't start. A gated or missing repository shows Hugging Face's reason.
+
+Each row also has a delete button, which asks for confirmation first and is unavailable while generation jobs are running or queued, or while the row's model is downloading (wait for the download or cancel it):
 
 - **Converted models** (in `~/.ziv/models/`): deletes the model folder. Base-model files it links to in the HuggingFace cache are kept.
 - **HuggingFace models** (aliases such as `klein9b`): deletes the model's download from the HuggingFace cache. The alias stays, and the model downloads again the next time you use it. If converted models link to files in that download, the confirmation lists them, because they stop working until it is downloaded again. The button appears once the model's files are fully downloaded.

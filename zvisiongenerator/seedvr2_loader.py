@@ -91,6 +91,18 @@ def _delete_cached_file(repo_id: str, filename: str) -> None:
     blob.unlink(missing_ok=True)
 
 
+def _cached_file(repo_id: str, filename: str) -> object:
+    """Look up *filename* of *repo_id* in the Hugging Face cache; a path string means it is cached."""
+    from huggingface_hub import try_to_load_from_cache
+
+    return try_to_load_from_cache(repo_id, filename)
+
+
+def _files_on_disk(files: tuple[tuple[str, str], ...], files_cached: Callable[[str, str], object]) -> bool:
+    """Return whether every ``(repo, name)`` of *files* is in the Hugging Face cache."""
+    return all(isinstance(files_cached(repo, name), str) for repo, name in files)
+
+
 def load_seedvr2(
     upscaler: SeedVR2Upscaler,
     model: str,
@@ -98,6 +110,7 @@ def load_seedvr2(
     models_dir: Path,
     on_phase: Callable[[str], None] | None,
     delete_cached_file: Callable[[str, str], None] = _delete_cached_file,
+    files_cached: Callable[[str, str], object] = _cached_file,
 ) -> Any:
     """Load *model* at 8 bits from its weights folder, filling the folder on first use.
 
@@ -108,10 +121,15 @@ def load_seedvr2(
         upscaler: The platform SeedVR2 engine.
         model: "seedvr2-3b" or "seedvr2-7b".
         models_dir: The installed-models directory; the weights live in its hidden ``.seedvr2`` folder.
-        on_phase: Receives :data:`LOADING_PHASE` when the weights are on disk, otherwise :data:`DOWNLOADING_PHASE`
-            while the files are fetched, then (for a stored copy) :data:`SAVING_QUANT_PHASE` while it is written.
+        on_phase: Receives :data:`LOADING_PHASE` when every file the load reads is on disk (a stored copy, the
+            downloaded files, or, where a copy is stored, the tier's files in the Hugging Face cache), otherwise
+            :data:`DOWNLOADING_PHASE` while the library fetches them, then (for a stored copy)
+            :data:`SAVING_QUANT_PHASE` while it is written. A download the job ran beforehand reports its own
+            progress, so the load then reports :data:`LOADING_PHASE`.
         delete_cached_file: Removes one file of a Hugging Face repo from the local cache; the default deletes the
             cache link and its blob.
+        files_cached: Looks one file up in the Hugging Face cache, returning its path when it is cached; the default
+            is ``huggingface_hub.try_to_load_from_cache``.
 
     Returns:
         The loaded model.
@@ -122,7 +140,8 @@ def load_seedvr2(
         _report(on_phase, LOADING_PHASE)
         return upscaler.load_model(model, quantize=None, model_path=str(folder))
 
-    _report(on_phase, DOWNLOADING_PHASE)
+    on_disk = weights.stores_copy and _files_on_disk(weights.files[model], files_cached)
+    _report(on_phase, LOADING_PHASE if on_disk else DOWNLOADING_PHASE)
     if not weights.stores_copy:
         folder.mkdir(parents=True, exist_ok=True)
         return upscaler.load_model(model, quantize=None, model_path=str(folder))

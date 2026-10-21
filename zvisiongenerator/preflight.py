@@ -119,6 +119,7 @@ def run_preflight(
     progress_callback: ProgressCallback | None = None,
     session: PromptEnhancerSession | None = None,
     release_memory: Callable[[], None] | None = None,
+    ensure_downloads: Callable[[str, str | None], bool] | None = None,
 ) -> JobPlan:
     """Plan every iteration and rewrite its prompt before the generation model loads.
 
@@ -138,9 +139,12 @@ def run_preflight(
         session: Enhancer session (defaults to the process-wide one).
         release_memory: Frees accelerator memory after the enhancer closes (defaults to
             ``release_accelerator_memory``, looked up at call time).
+        ensure_downloads: Called with the enhancer ``(repo, revision)`` before it loads, to fetch what it lacks.
+            Returning ``False`` ends the job without loading the enhancer; the hook reports that cancellation itself.
+            ``None`` (the CLI) loads straight away and reports a first-use download as the ``downloading`` load phase.
 
     Returns:
-        The job plan; ``cancelled`` is set when the user quit during preflight.
+        The job plan; ``cancelled`` is set when the user quit during preflight or the hook ended the job.
 
     Raises:
         ValueError: For a bad *mode*, no enhancer configured, or a malformed ``--enhance-model``.
@@ -188,6 +192,8 @@ def run_preflight(
     )
     if reference is None:
         raise RuntimeError("Prompt enhancement was requested but no enhancer model could be planned.")
+    if ensure_downloads is not None and not ensure_downloads(*reference):
+        return JobPlan(iterations, cancelled=True)
     pause = _make_pause(control, mode=mode, total_iterations=total_iterations, progress_callback=progress_callback)
     caption = mode == "image" and getattr(args, "enhance_format", None) == "json"
     rewrite = _make_rewriter(config, mode=mode, model_family=model_family, context=_job_context(args, mode=mode), caption=caption)

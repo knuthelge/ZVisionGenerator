@@ -41,6 +41,7 @@ export function connectJobSSE(
     switch (type) {
       case 'step_progress': handlers.onStep?.(data); break;
       case 'model_loading':
+      case 'model_downloading':
       case 'prompt_started':
       case 'batch_started':
       case 'workflow_stage_started':
@@ -80,7 +81,7 @@ export function connectJobSSE(
 
   }
 
-  const eventTypes = ['prompt_started', 'step_progress', 'batch_completed', 'job_completed', 'job_failed', 'job_cancelled', 'progress_text', 'job_paused', 'job_resumed', 'model_loading', 'batch_started', 'workflow_stage_started', 'workflow_stage_completed', 'generation_finished', 'enhancer_loading', 'prompt_enhanced', 'preflight_started', 'prompts_enhancing', 'prompt_enhance_failed', 'preflight_finished', 'job_started', 'workflow_started', 'generation_repeat', 'control_queued'];
+  const eventTypes = ['prompt_started', 'step_progress', 'batch_completed', 'job_completed', 'job_failed', 'job_cancelled', 'progress_text', 'job_paused', 'job_resumed', 'model_loading', 'model_downloading', 'batch_started', 'workflow_stage_started', 'workflow_stage_completed', 'generation_finished', 'enhancer_loading', 'prompt_enhanced', 'preflight_started', 'prompts_enhancing', 'prompt_enhance_failed', 'preflight_finished', 'job_started', 'workflow_started', 'generation_repeat', 'control_queued'];
   eventTypes.forEach(type => {
     es.addEventListener(type, (event: Event) => {
       try {

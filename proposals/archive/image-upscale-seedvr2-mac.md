@@ -157,7 +157,7 @@ SeedVR2 isn't in the app's model inventory. Disk use comes first:
 - Once the copy is saved, the app deletes both downloaded files, the transformer and the VAE, from the Hugging Face cache. Later jobs load the copy. If the save fails, nothing is deleted and the next job tries again.
 - Whether SeedVR2 counts as downloaded is simply whether a current copy exists.
 
-This is the step the video proposal's step 6 asked for. If [model download progress](../model-download-progress.md) has shipped by then, it covers this; otherwise the job card shows "Downloading SeedVR2" with no progress bar. The first-use message says the copy saves disk, not that it loads faster: a warm in-memory quantize takes only seconds.
+This is the step the video proposal's step 6 asked for. If [model download progress](model-download-progress.md) has shipped by then, it covers this; otherwise the job card shows "Downloading SeedVR2" with no progress bar. The first-use message says the copy saves disk, not that it loads faster: a warm in-memory quantize takes only seconds.
 
 ### 3. Workflow, runner and metadata
 

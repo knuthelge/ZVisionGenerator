@@ -1,5 +1,6 @@
-import type { ActiveJobState, JobControlAction, JobPhase } from '$lib/types';
+import type { ActiveJobState, JobControlAction, JobDownload, JobPhase } from '$lib/types';
 import { jobReviewUrl } from '$lib/api/workspace';
+import { downloadLine, partLabel } from './downloadProgress';
 import { phaseSeconds } from './jobPhases';
 import { checked } from './jobSettings';
 
@@ -39,7 +40,22 @@ export interface StageBar {
 export type JobBarSegment = { state: 'done' | 'now' | 'failed' | 'pending'; runBreak: boolean; fill: number };
 export type JobBar =
   | { kind: 'segments'; segments: JobBarSegment[] }
-  | { kind: 'bar'; fraction: number };
+  | { kind: 'bar'; fraction: number }
+  /** A model download: *fraction* is its progress in [0, 1], or null while the total size is unknown. */
+  | { kind: 'download'; fraction: number | null; role: JobDownload['role'] };
+
+/** What the job card's download block shows for one download. */
+export interface DownloadView {
+  /** The head's left side, one entry per nowrap segment: "Part 2 of 3", "18.3 / 46.1 GB", "52 MB/s", "about 9 min". */
+  segments: string[];
+  /** Whole percent done, or null while the total size is unknown. */
+  percent: number | null;
+  /** Accessible name of the progress bar. */
+  label: string;
+  valuetext: string;
+  /** The line under the bar: why the download happens and what Cancel does. */
+  help: string;
+}
 
 export interface JobControls {
   /** Job-scoped controls for the header: Pause or Resume, then Cancel. */
@@ -174,8 +190,46 @@ export function itemFraction(job: ActiveJobState): number {
   return (done + part) / bars.length;
 }
 
+/** The phase row a download belongs to: the enhancer's in the enhance step, the model's in the load step. */
+export function downloadRowKey(download: JobDownload): JobPhase {
+  return download.role === 'enhancer' ? 'enhance' : 'load';
+}
+
+/** The download the job is waiting on right now, or null (none, already generating, or the job ended). */
+export function activeDownload(job: ActiveJobState): JobDownload | null {
+  return job.download && isActive(job) && jobPhase(job) !== 'generate' ? job.download : null;
+}
+
+/** The download in progress as a fraction in [0, 1], or null when no total is known. */
+export function downloadFraction(download: Pick<JobDownload, 'bytes_done' | 'bytes_total'>): number | null {
+  if (download.bytes_total === null || !(download.bytes_total > 0)) return null;
+  return Math.min(1, Math.max(0, download.bytes_done / download.bytes_total));
+}
+
+/** The text, percentage and accessible values of a download block. */
+export function downloadView(download: JobDownload): DownloadView {
+  const line = downloadLine(download).split(' · ');
+  const part = partLabel(download);
+  const fraction = downloadFraction(download);
+  const amount = line[0];
+  const valuetext = fraction === null ? `${amount} downloaded, size unknown` : `${amount.replace(' / ', ' of ')}${part ? `, ${part}` : ''}`;
+  let help = 'Only the first time; later jobs load the saved files.';
+  if (download.shared) help = 'Downloading on the Models page. Cancel stops this job; the download keeps going.';
+  else if (download.role === 'enhancer') help = `Downloading ${download.repo}. Only the first time.`;
+  return {
+    segments: part ? [part.charAt(0).toUpperCase() + part.slice(1), ...line] : line,
+    percent: fraction === null ? null : Math.round(fraction * 100),
+    label: download.role === 'enhancer' ? 'Enhancer download' : 'Model download',
+    valuetext,
+    help,
+  };
+}
+
 /** The whole-job bar: one segment per item, the current one filling as it runs, or a plain bar for long jobs. */
 export function jobBar(job: ActiveJobState): JobBar {
+  // While files download the bar shows that download; it goes back to the steps once generation starts.
+  const download = activeDownload(job);
+  if (download) return { kind: 'download', fraction: downloadFraction(download), role: download.role };
   const { total, index, done } = iterations(job);
   const active = isActive(job);
   const generating = jobPhase(job) === 'generate';
@@ -200,6 +254,11 @@ export function jobBar(job: ActiveJobState): JobBar {
   return { kind: 'segments', segments };
 }
 
+const DOWNLOAD_STOP_TEXT: Record<string, string> = {
+  stopped: 'Download stopped. Finished files are kept; the file in progress starts over.',
+  detached: 'Stopped. The download continues on the Models page.',
+};
+
 /** The one sentence that says what is happening, or how the job ended and where. */
 export function headline(job: ActiveJobState): string {
   const { total, index, done } = iterations(job);
@@ -213,6 +272,7 @@ export function headline(job: ActiveJobState): string {
   }
   if (tone === 'stopped') {
     if (phase === 'queue' && job.message.startsWith('Removed')) return 'Removed from the queue';
+    if (job.downloadStop) return phase === 'enhance' ? 'Stopped while downloading the prompt enhancer' : 'Stopped while downloading the model';
     if (!generating) return `Stopped ${ENDED_PHASE_WORDS[phase]}`;
     return total > 1 ? `Stopped after ${done} of ${total} ${noun}s` : 'Stopped';
   }
@@ -227,11 +287,12 @@ export function headline(job: ActiveJobState): string {
   }
   if (phase === 'queue') return 'Waiting to start';
   if (phase === 'enhance') {
+    if (job.download?.role === 'enhancer') return 'Downloading the prompt enhancer';
     const rewrite = enhanceProgress(job);
     return rewrite ? `Enhancing prompt ${rewrite.current} of ${rewrite.total}` : 'Loading the prompt enhancer';
   }
   if (phase === 'load') {
-    if (job.loadPhase === 'downloading') return `Downloading ${job.model}`;
+    if (job.download?.role === 'model' || job.loadPhase === 'downloading') return `Downloading ${job.model}`;
     if (job.loadPhase === 'building') return `Building ${job.model}`;
     return job.loadQuant ? 'Preparing the model' : 'Loading the model';
   }
@@ -373,14 +434,14 @@ export function phaseRows(job: ActiveJobState): PhaseRow[] {
 /** The explanation under the model-load row: what the load is doing and why it only happens the first time. */
 export function loadBody(job: ActiveJobState): string {
   if (job.loadPhase === 'downloading') return 'Downloading the model files. Only the first time; later upscales start from the saved copy.';
-  if (job.loadPhase === 'building') return 'Downloading the model files and converting them for this machine. Only the first time you use this model.';
+  if (job.loadPhase === 'building') return 'Converting the model files for this machine. Only the first time you use this model.';
   if (job.loadQuant && job.loadReplacesDownload) return 'Saving an 8-bit copy and removing the downloaded files to save disk. Only the first time.';
   if (job.loadQuant) return 'Saving a quantized copy so later jobs load in seconds. Only the first time you use this model.';
   return `Loading ${job.model} into memory.`;
 }
 
 function loadLabel(job: ActiveJobState): string {
-  if (job.loadPhase === 'downloading') return 'Download model';
+  if (job.loadPhase === 'downloading' || job.download?.role === 'model') return 'Download model';
   if (job.loadPhase === 'building') return 'Build model';
   return job.loadQuant ? 'Prepare model' : 'Load model';
 }
@@ -457,7 +518,7 @@ export function outcome(job: ActiveJobState): { text: string; error: boolean; sa
   const failedItem = job.status === 'failed' && jobPhase(job) === 'generate' ? 1 : 0;
   const notRun = Math.max(0, total - Math.max(done, saved) - failedItem);
   let text = job.message;
-  if (job.status === 'cancelled' && !job.message.startsWith('Removed')) text = 'You stopped the job.';
+  if (job.status === 'cancelled' && !job.message.startsWith('Removed')) text = DOWNLOAD_STOP_TEXT[job.downloadStop ?? ''] ?? 'You stopped the job.';
   if (job.status === 'unknown') text = 'The server restarted and no longer has this job.';
   const savedText = saved === 0 ? 'Nothing saved' : total > 1 ? `${saved} of ${total} saved to History` : 'Saved to History';
   return { text, error: job.status === 'failed', saved: total > 1 && notRun > 0 ? `${savedText} · ${notRun} not run` : savedText };

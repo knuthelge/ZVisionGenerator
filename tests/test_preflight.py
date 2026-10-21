@@ -286,6 +286,41 @@ class TestRunPreflight:
         _plan, events, *_ = _run(session=_session(_FakeEnhancer([]), downloaded=False))
         assert [e for e in events if e["type"] == "enhancer_loading"] == [{"type": "enhancer_loading", "mode": "image", "phase": "downloading"}]
 
+    def test_the_download_hook_runs_with_the_planned_enhancer_before_it_loads(self):
+        order: list[str] = []
+        calls: list[tuple[str, str | None]] = []
+        enhancer = _FakeEnhancer(order)
+        session = PromptEnhancerSession(lambda repo, revision: (order.append("load"), enhancer)[1], scheduler=lambda delay, callback: None, downloaded=lambda repo, revision: True)
+
+        def hook(repo, revision):
+            calls.append((repo, revision))
+            order.append("ensure")
+            return True
+
+        plan, events, _release, _enhancer = _run(session=session, ensure_downloads=hook)
+        assert calls == [("a/b", None)]
+        assert order[:2] == ["ensure", "load"]
+        assert plan.has_rewrites and not plan.cancelled
+        assert [e["phase"] for e in events if e["type"] == "enhancer_loading"] == ["loading"]
+
+    def test_a_hook_that_ends_the_job_cancels_without_loading_or_emitting_a_cancellation(self):
+        session = MagicMock()
+        plan, events, release, _enhancer = _run(session=session, ensure_downloads=lambda repo, revision: False)
+        assert plan.cancelled and plan.enhancer is None
+        assert len(plan.iterations) == 2
+        session.acquire.assert_not_called()
+        release.assert_not_called()
+        assert _types(events) == ["preflight_started"]
+
+    def test_the_hook_is_not_called_when_nothing_is_rewritten(self):
+        hook = MagicMock(return_value=True)
+        _run(args=_args(enhance=None), session=MagicMock(), ensure_downloads=hook)
+        hook.assert_not_called()
+
+    def test_without_a_hook_a_first_use_download_is_the_downloading_load_phase(self):
+        _plan, events, *_ = _run(session=_session(_FakeEnhancer([]), downloaded=False), ensure_downloads=None)
+        assert [e["phase"] for e in events if e["type"] == "enhancer_loading"] == ["downloading"]
+
     def test_cpu_phase_event(self):
         enhancer = _FakeEnhancer([], on_cuda=False)
         _plan, events, *_ = _run(enhancer=enhancer)

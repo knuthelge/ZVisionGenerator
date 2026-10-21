@@ -1,4 +1,4 @@
-import type { ActiveJobState, JobControlAction, JobPhase, PhaseMarks } from '$lib/types';
+import type { ActiveJobState, JobControlAction, JobDownload, JobPhase, PhaseMarks } from '$lib/types';
 
 type EventData = Record<string, unknown> | null | undefined;
 
@@ -29,6 +29,38 @@ function numberField(event: EventData, key: string): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+/** Events that end an enhancer download: the enhancer loads, rewrites, fails to, or the pre-flight is over. */
+const ENHANCER_DOWNLOAD_ENDS: ReadonlySet<string> = new Set(['enhancer_loading', 'prompts_enhancing', 'prompt_enhance_failed', 'preflight_finished']);
+
+function stringField(event: EventData, key: string): string {
+  const value = event?.[key];
+  return typeof value === 'string' ? value : '';
+}
+
+/** The download a `model_downloading` event reports, or null when the event carries no byte count. */
+export function downloadFromEvent(event: EventData): JobDownload | null {
+  const done = numberField(event, 'bytes_done');
+  if (done === undefined) return null;
+  return {
+    role: event?.role === 'enhancer' ? 'enhancer' : 'model',
+    model: stringField(event, 'model'),
+    repo: stringField(event, 'repo'),
+    part: numberField(event, 'part') ?? 1,
+    parts: numberField(event, 'parts') ?? 1,
+    bytes_done: done,
+    bytes_total: numberField(event, 'bytes_total') ?? null,
+    bytes_per_sec: numberField(event, 'bytes_per_sec') ?? null,
+    download_eta_secs: numberField(event, 'download_eta_secs') ?? null,
+    shared: event?.shared === true,
+  };
+}
+
+/** How a cancelled job's download ended (`stopped` it owned, `detached` it only waited on), from a `job_cancelled` event. */
+export function downloadStopFromEvent(event: EventData): ActiveJobState['downloadStop'] {
+  const stop = event?.download;
+  return stop === 'stopped' || stop === 'detached' ? stop : undefined;
+}
+
 /** The phase an event moves the job into, or null when the event does not say. */
 export function phaseForEvent(type: string, event: EventData): JobPhase | null {
   if (type === 'job_submitted') return 'queue';
@@ -36,6 +68,8 @@ export function phaseForEvent(type: string, event: EventData): JobPhase | null {
   if (type === 'job_started' || type === 'model_loading') return 'load';
   if (type === 'preflight_started') return (numberField(event, 'total_rewrites') ?? 0) > 0 ? 'enhance' : null;
   if (type === 'enhancer_loading' || type === 'prompts_enhancing') return 'enhance';
+  // The enhancer's files download in the enhance step, the model's in the load step.
+  if (type === 'model_downloading') return event?.role === 'enhancer' ? 'enhance' : 'load';
   if (GENERATE_EVENTS.has(type)) return 'generate';
   return null;
 }
@@ -85,6 +119,10 @@ export function settleControl(queued: JobControlAction | null | undefined, type:
   return SETTLED_BY[queued].has(type) ? null : queued;
 }
 
+function endsDownload(download: JobDownload, type: string): boolean {
+  return download.role === 'enhancer' ? ENHANCER_DOWNLOAD_ENDS.has(type) : type === 'model_loading';
+}
+
 /**
  * Fold the phase, phase timing, stage plan and queued-control bookkeeping of one event into the job.
  *
@@ -95,7 +133,9 @@ export function trackJobEvent(job: ActiveJobState, type: string, event: EventDat
   const phase = nextPhase(job, phaseForEvent(type, event));
   let phaseMarks = job.phaseMarks ?? {};
   if (phase && phase !== job.phase) phaseMarks = markPhase(phaseMarks, job.phase, phase, at, type !== 'job_started');
-  if (type === 'model_loading' && at !== undefined && phaseMarks.load?.start === undefined) {
+  // The load step is timed from its first event, which is the download when the model's files are missing.
+  const opensLoad = type === 'model_loading' || (type === 'model_downloading' && event?.role !== 'enhancer');
+  if (opensLoad && at !== undefined && phaseMarks.load?.start === undefined) {
     phaseMarks = { ...phaseMarks, load: { ...phaseMarks.load, start: at } };
   }
 
@@ -124,6 +164,12 @@ export function trackJobEvent(job: ActiveJobState, type: string, event: EventDat
     if (loadPhase === 'building' || loadPhase === 'downloading' || loadPhase === 'loading' || loadPhase === 'saving_quant') next.loadPhase = loadPhase;
     if (event?.replaces_download === true) next.loadReplacesDownload = true;
     if (loadPhase === 'saving_quant') next.loadQuant = numberField(event, 'quantize') ?? 8;
+  }
+  if (type === 'model_downloading') next.download = downloadFromEvent(event);
+  else if (job.download && (phase === 'generate' || endsDownload(job.download, type))) next.download = null;
+  if (type === 'job_cancelled') {
+    const stop = downloadStopFromEvent(event);
+    if (stop) next.downloadStop = stop;
   }
   if (type === 'generation_finished') next.itemFinished = true;
   if (type === 'prompt_started' || type === 'generation_repeat') next.itemFinished = false;

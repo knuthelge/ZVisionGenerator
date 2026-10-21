@@ -1,6 +1,6 @@
 # First run: pick a model, download it, and no gated defaults
 
-**Status:** Proposed (2026-10-09)
+**Status:** In progress (2026-10-21). §3 has shipped except the terminal command, the slim bar and the Welcome-panel hookup; §1, §2 and §4 are open.
 
 ## Problem
 
@@ -43,21 +43,25 @@ When no image model is downloaded and none is installed in `~/.ziv/models`, the 
 - **Starter models** for this platform, as cards. Each shows the name, a one-line summary, the download size, the memory fit at the quant it would use, the license, and speed (steps). The data comes from a new `starter` block per alias in `config.yaml` (order, summary, suggested quant per memory tier), so changing the list doesn't need code.
 - **One recommended card**, chosen by memory: the best model that **Fits** at its suggested quant. With today's list that is `klein9b` q8 at 32 GB and above, and `klein4b` below. On CUDA the budget is the GPU's total VRAM, using the same Fits/Tight/Too large rule.
 - **Memory before download.** `HfApi.get_safetensors_metadata` reads the safetensors headers with range requests, without downloading the weights. That feeds the same `WeightTotals` that `utils/model_memory.estimate_image_memory` builds from local files today, so the Workspace picker and Models page also show **Fits/Tight/Too large** for models that aren't downloaded yet. It is cached per repo revision.
-- **Download & set as default** downloads with progress (below) and sets `ui.default_models.image` in the user config. A **Skip** link closes the panel for good (stored in the user config, not just the browser), and the panel shows again only when no model is downloaded.
+- **Download & set as default** downloads with progress through the download lane (§3) and sets `ui.default_models.image` in the user config. A **Skip** link closes the panel for good (stored in the user config, not just the browser), and the panel shows again only when no model is downloaded.
 - The same panel offers the video model (`ltx-4`/`ltx-8` or `ltx-2.3`) as an optional second step, since it is another 60+ GB.
 
 ### 3. Explicit downloads with progress
 
 Downloads become something you can see and control, not a side effect of the first generation.
 
-The ensure-downloaded step, the progress event and the job-card display are written up separately in [Show model download progress in Web UI jobs](model-download-progress.md). The download lane below builds on that helper.
+**Shipped (unreleased)**, designed in [Show model download progress in Web UI jobs](archive/model-download-progress.md):
 
-- `POST /api/models/download {name}` runs `huggingface_hub.snapshot_download` with the allow-patterns the backend needs: the diffusers component folders listed in `model_index.json`, the tokenizer files, and no top-level single-file checkpoints. Without that filter, `klein9b` would also fetch the 18 GB `flux-2-klein-9b.safetensors`, and `krea2` the 26 GB `turbo.safetensors`. When the snapshot is complete, `find_local_dir` sees it and the backends load from the cache as they already do.
-- Progress is reported through `tqdm_class` (supported by huggingface_hub 1.33) as SSE events: bytes done and total, speed, and ETA. If hf_xet's transfers don't report through tqdm, the fallback is to poll the size of the repo's blob folder against the known total.
-- **Its own lane, beside the job queue.** Downloads use the network, not the GPU, so you can download one model while generating with another. Downloads run one at a time, can be cancelled (partial blobs resume next time), and show in a slim bar under the top nav and on the model's row on the Models page.
-- **Free disk space** is checked against the download size before starting, using `shutil.disk_usage` on the Hugging Face cache folder. When there isn't enough space, the download is refused with the numbers, instead of failing near the end.
-- **Downloads during a generation** (a job that uses a model that isn't downloaded yet) report the same progress on the job card instead of "Loading model…".
+- `POST /api/models/download {kind, name}` queues a download of a Models-page row with the allow-patterns the backend needs (no top-level single-file checkpoints). `GET /api/models/download/plan` returns the parts, sizes and free space first.
+- Progress comes from `tqdm_class` byte counts in a child process; the cache is not polled. The Models page shows Download, Queued and Cancel on each row, and a job that needs a model shows the same progress on its card instead of "Loading model…".
+- A lane beside the job queue runs downloads one at a time, so you can download one model while generating with another. Cancel keeps the finished files.
+- Free disk space is a confirmation, not a refusal: the confirmation shows the size and the free space on the download's drive (an estimate), with **Download anyway** when it looks short.
+
+**Remaining:**
+
 - `ziv-model download <alias>` does the same from the terminal with a tqdm bar.
+- A slim bar under the top nav shows the lane's running download on every page (today it appears on the Models page rows and on the job card).
+- The Welcome panel's **Download & set as default** uses the lane.
 
 ### 4. Hugging Face token in the Web UI
 
@@ -81,7 +85,6 @@ The ensure-downloaded step, the progress event and the job-card display are writ
 
 ## Open questions
 
-- hf_xet progress through `tqdm_class`: to verify in a spike before choosing between tqdm and polling.
 - Whether `ziv-image` without `-m` should use `ui.default_models.image` too, so the CLI and the Web UI share one default. Today the CLI requires `-m`.
 
 ## Out of scope

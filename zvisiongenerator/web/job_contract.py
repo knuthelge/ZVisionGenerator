@@ -14,6 +14,8 @@ TERMINAL_STATUSES = frozenset({"completed", "cancelled", "failed"})
 QUEUED_STATUS = "queued"
 ACTIVE_STATUSES = frozenset({QUEUED_STATUS, "running", "paused"})
 STARTED_EVENT = "job_started"
+# Progress of a model download a job waits on; only the latest one is kept in a job's event history.
+DOWNLOADING_EVENT = "model_downloading"
 # ``reason`` of a ``job_cancelled`` event for a job removed from the queue before it started.
 REMOVED_REASON = "removed"
 IMAGE_SUPPORTED_CONTROLS = ("next", "pause", "resume", "repeat", "quit")

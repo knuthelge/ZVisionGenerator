@@ -9,7 +9,16 @@
   };
 
   export const DOWNLOADED_TOOLTIP = 'Downloaded: the model files are on this machine.';
-  export const NOT_DOWNLOADED_TOOLTIP = 'Not downloaded: it downloads the first time you generate with it.';
+  /** Shown in the Workspace, where a model can be downloaded ahead from the Models page. */
+  export const NOT_DOWNLOADED_TOOLTIP = 'Not downloaded: it downloads the first time you generate with it, or ahead from the Models page.';
+  /** Shown on the Models page for a row with a Download button. */
+  export const DOWNLOADABLE_TOOLTIP = 'Not downloaded: Download fetches it now, or it downloads the first time you generate with it.';
+  /** Shown on the Models page for a row without a Download button. */
+  export const NOT_DOWNLOADED_FIRST_USE_TOOLTIP = 'Not downloaded: it downloads the first time you generate with it.';
+
+  /** Shown on the Models page for a row with nothing left to fetch that the first use still has to make. */
+  export const PREPARED_SEEDVR2_TOOLTIP = 'Downloaded. The first upscale makes its 8-bit copy.';
+  export const PREPARED_INSTANT_TOOLTIP = 'Downloaded. The first image builds it.';
 
   function needLine(fit: MemoryFit, estimate: MemoryFitEstimate): string {
     if (fit.kind !== 'discrete') return `Needs ~${estimate.required_gb} GB; this Mac recommends up to ~${fit.budget_gb} GB for the GPU.`;

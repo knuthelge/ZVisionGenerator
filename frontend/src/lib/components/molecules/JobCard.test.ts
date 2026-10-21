@@ -477,4 +477,33 @@ describe('JobCard', () => {
       expect(handlers.oncancel).not.toHaveBeenCalled();
     });
   });
+
+  describe('while the model downloads', () => {
+    const download = { role: 'model' as const, model: 'zit', repo: 'org/zit', part: 1, parts: 2, bytes_done: 250, bytes_total: 1000, bytes_per_sec: null, download_eta_secs: null, shared: false };
+
+    it('shows the download in the header bar and in the load row', () => {
+      render({ phase: 'load', download });
+      const bar = target.querySelector<HTMLElement>('.job-head [aria-label="Model download"]')!;
+      expect(bar.getAttribute('aria-valuenow')).toBe('0.25');
+      expect(log().querySelector('[aria-label="Model download"]')).not.toBeNull();
+      expect(log().querySelector('.dl-pct')?.textContent).toBe('25%');
+    });
+
+    it('leaves the bars indeterminate while the total is unknown', () => {
+      render({ phase: 'load', download: { ...download, bytes_total: null } });
+      for (const bar of target.querySelectorAll('[aria-label="Model download"]')) expect(bar.hasAttribute('aria-valuenow')).toBe(false);
+    });
+
+    it('shows an enhancer download on the enhance row', () => {
+      render({ phase: 'enhance', enhanceTotal: 2, download: { ...download, role: 'enhancer' } });
+      expect(log().querySelector('.job-item[data-s="current"] [aria-label="Enhancer download"]')).not.toBeNull();
+      expect(log().querySelector('[aria-label="Model download"]')).toBeNull();
+    });
+
+    it('drops the download block once the job is stopped', () => {
+      render({ phase: 'load', status: 'cancelled', downloadStop: 'detached', download });
+      expect(log().querySelector('[aria-label="Model download"]')).toBeNull();
+      expect(log().querySelector('.job-item[data-s="stopped"] .job-prompt')).not.toBeNull();
+    });
+  });
 });

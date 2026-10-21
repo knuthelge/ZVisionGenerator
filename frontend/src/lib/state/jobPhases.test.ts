@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ActiveJobState } from '$lib/types';
-import { epochSeconds, initialPhase, nextPhase, phaseForEvent, phaseSeconds, settleControl, trackJobEvent } from './jobPhases';
+import { downloadFromEvent, downloadStopFromEvent, epochSeconds, initialPhase, nextPhase, phaseForEvent, phaseSeconds, settleControl, trackJobEvent } from './jobPhases';
 
 function job(overrides: Partial<ActiveJobState> = {}): ActiveJobState {
   return {
@@ -19,6 +19,8 @@ describe('jobPhases', () => {
     ['preflight_started', { total_rewrites: 0 }, null],
     ['prompts_enhancing', {}, 'enhance'],
     ['model_loading', {}, 'load'],
+    ['model_downloading', { role: 'model' }, 'load'],
+    ['model_downloading', { role: 'enhancer' }, 'enhance'],
     ['batch_started', {}, 'generate'],
     ['step_progress', {}, 'generate'],
     ['control_queued', {}, null],
@@ -115,5 +117,75 @@ describe('jobPhases', () => {
   it('keeps the load phase when a model_loading event names none', () => {
     const state = trackJobEvent(job({ phase: 'load', loadPhase: 'loading' }), 'model_loading', { mode: 'image' }, 0);
     expect(state.loadPhase).toBe('loading');
+  });
+
+  describe('model downloads', () => {
+    const progress = { bytes_done: 5, bytes_total: 10, bytes_per_sec: 2, download_eta_secs: 3, repo: 'org/repo', part: 1, parts: 2, shared: false };
+    const dlEvent = (role: 'model' | 'enhancer') => ({ ...progress, role, model: 'klein9b' });
+
+    it('reads the byte progress and role of a model_downloading event', () => {
+      expect(downloadFromEvent(dlEvent('enhancer'))).toEqual({ ...progress, role: 'enhancer', model: 'klein9b' });
+      expect(downloadFromEvent({ role: 'model', bytes_done: 1, model: 'm' })).toMatchObject({ bytes_total: null, bytes_per_sec: null, download_eta_secs: null, part: 1, parts: 1, shared: false });
+      expect(downloadFromEvent({ role: 'model' })).toBeNull();
+    });
+
+    it('sets the download and moves the job into the row of its role', () => {
+      const model = trackJobEvent(job({ phase: 'load' }), 'model_downloading', dlEvent('model'), 0);
+      expect(model).toMatchObject({ phase: 'load', download: { role: 'model', bytes_done: 5 } });
+
+      const enhancer = trackJobEvent(job({ phase: 'enhance', enhanceTotal: 2 }), 'model_downloading', dlEvent('enhancer'), 0);
+      expect(enhancer).toMatchObject({ phase: 'enhance', download: { role: 'enhancer' } });
+    });
+
+    it('replaces the download with each newer event', () => {
+      const first = trackJobEvent(job({ phase: 'load' }), 'model_downloading', dlEvent('model'), 0);
+      const next = trackJobEvent(first, 'model_downloading', { ...dlEvent('model'), bytes_done: 9 }, 0);
+      expect(next.download?.bytes_done).toBe(9);
+    });
+
+    it('clears a model download when the model starts loading, and an enhancer download when the enhancer does', () => {
+      const model = job({ phase: 'load', download: downloadFromEvent(dlEvent('model')) });
+      expect(trackJobEvent(model, 'model_loading', { phase: 'loading' }, 0).download).toBeNull();
+      expect(trackJobEvent(model, 'enhancer_loading', {}, 0).download).not.toBeNull();
+
+      const enhancer = job({ phase: 'enhance', download: downloadFromEvent(dlEvent('enhancer')) });
+      for (const type of ['enhancer_loading', 'prompts_enhancing']) expect(trackJobEvent(enhancer, type, {}, 0).download).toBeNull();
+      expect(trackJobEvent(enhancer, 'model_loading', {}, 0).download).not.toBeNull();
+    });
+
+    it('clears the download once generation starts', () => {
+      const state = job({ phase: 'load', download: downloadFromEvent(dlEvent('model')) });
+      expect(trackJobEvent(state, 'batch_started', {}, 0).download).toBeNull();
+    });
+
+    it('records how a cancelled job left its download', () => {
+      const state = job({ phase: 'load', download: downloadFromEvent(dlEvent('model')) });
+      expect(trackJobEvent(state, 'job_cancelled', { download: 'stopped' }, 0).downloadStop).toBe('stopped');
+      expect(trackJobEvent(state, 'job_cancelled', { download: 'detached' }, 0).downloadStop).toBe('detached');
+      expect(trackJobEvent(state, 'job_cancelled', {}, 0).downloadStop).toBeUndefined();
+      expect(downloadStopFromEvent({ download: 'other' })).toBeUndefined();
+    });
+
+    it('times the load step from the download, so its duration covers it', () => {
+      let state = trackJobEvent(job({ phase: 'queue' }), 'job_started', { timestamp: 100 }, 0);
+      expect(state.phaseMarks?.load?.start).toBeUndefined();
+      state = trackJobEvent(state, 'model_downloading', { ...dlEvent('model'), timestamp: 110 }, 0);
+      expect(state.phaseMarks?.load?.start).toBe(110);
+      state = trackJobEvent(state, 'model_downloading', { ...dlEvent('model'), timestamp: 130 }, 0);
+      expect(state.phaseMarks?.load?.start).toBe(110);
+      state = trackJobEvent(state, 'model_loading', { timestamp: 160 }, 0);
+      state = trackJobEvent(state, 'batch_started', { timestamp: 170 }, 0);
+      expect(phaseSeconds(state.phaseMarks, 'load')).toBe(60);
+    });
+
+    it('does not open the load step for an enhancer download', () => {
+      const state = trackJobEvent(job({ phase: 'load' }), 'model_downloading', { ...dlEvent('enhancer'), timestamp: 100 }, 0);
+      expect(state.phaseMarks?.load?.start).toBeUndefined();
+    });
+
+    it('takes the phase of a reconnected job from its last model_downloading event', () => {
+      expect(initialPhase('running', '100', { type: 'model_downloading', role: 'model' }).phase).toBe('load');
+      expect(initialPhase('running', '100', { type: 'model_downloading', role: 'enhancer' }).phase).toBe('enhance');
+    });
   });
 });

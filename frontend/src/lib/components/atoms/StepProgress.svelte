@@ -11,10 +11,12 @@
     /** Work runs between steps (getting ready, or finishing up after the last step): sweep without a ghost. */
     busy?: boolean;
     valuetext?: string;
+    /** The amount of work is not known: the bar exposes no current value to assistive technology. */
+    indeterminate?: boolean;
     class?: string;
   }
 
-  let { value, max, label, live = false, stepMs = null, busy = false, valuetext, class: extraClass = '' }: Props = $props();
+  let { value, max, label, live = false, stepMs = null, busy = false, valuetext, indeterminate = false, class: extraClass = '' }: Props = $props();
 
   const fraction = $derived(max > 0 ? Math.min(1, Math.max(0, value / max)) : 0);
   // value counts finished steps, so the step being worked on is the next one.
@@ -29,7 +31,7 @@
   aria-label={label}
   aria-valuemin="0"
   aria-valuemax={max}
-  aria-valuenow={value}
+  aria-valuenow={indeterminate ? undefined : value}
   aria-valuetext={valuetext}
 >
   <span class="ui-progress-fill" style:width="{fraction * 100}%"></span>

@@ -22,7 +22,12 @@ from PIL.PngImagePlugin import PngInfo
 import pytest
 from conftest import make_probe
 
+from zvisiongenerator.downloads.space import SpaceNeed
+from zvisiongenerator.downloads.target import DownloadTarget, TargetCheck
 from zvisiongenerator.web import config_contract as config_contract_module
+from zvisiongenerator.web import model_download_plan as download_plan_module
+from zvisiongenerator.web.download_lane import DownloadLane
+from zvisiongenerator.web.model_download_plan import plan_summary as real_plan_summary
 from zvisiongenerator.web import extend_api as extend_api_module
 from zvisiongenerator.web import model_inventory as model_inventory_module
 from zvisiongenerator.web import server as web_server
@@ -1424,6 +1429,7 @@ def test_models_route_lists_the_downloaded_seedvr2_tier_with_its_disk_use(monkey
             "delete": {"kind": "installed", "repo_id": None, "linked_by": [], "stored_quants": []},
             "disk_size_label": "2.5 GB",
             "download_size_label": "17.0 GB",
+            "download_needed": False,
         }
     ]
 
@@ -3267,3 +3273,224 @@ def test_converter_subprocesses_print_in_utf8(monkeypatch):
     web_server._run_model_management_command(["model"])
 
     assert [(kwargs["encoding"], kwargs["env"]["PYTHONIOENCODING"]) for kwargs in seen] == [("utf-8", "utf-8")] * 2
+
+
+class TestModelDownloadRoutes:
+    """The Models-page download lane routes: plan, queue, poll and cancel."""
+
+    _FAKE_PARTS = (DownloadTarget("owner/zit"),)
+
+    @pytest.fixture
+    def lane(self, monkeypatch, tmp_path):
+        """A fresh lane whose ensure step is a fake that waits for ``release`` and honours cancel."""
+        release = threading.Event()
+        calls: list[tuple[DownloadTarget, ...]] = []
+
+        def _ensure(targets, *, flights, report, cancelled, **_):
+            calls.append(tuple(targets))
+            while not release.wait(0.01):
+                if cancelled():
+                    return "stopped"
+            return "ready"
+
+        lane = DownloadLane(flights=web_server.download_flights, ensure=_ensure)
+        web_config = _make_web_config()
+        web_config.data_dir = str(tmp_path)
+        web_config.image_inventory = (ImageInventoryEntry(name="zit", family="zimage", size=None, source="alias", resolved_path="owner/zit"),)
+        web_config.video_inventory = (VideoInventoryEntry(name="ltx-8", family="ltx", supports_i2v=True, source="alias", resolved_path="owner/ltx"),)
+        web_config.app_config["prompt_enhancer"] = {"model": "owner/enhancer"}
+        monkeypatch.setattr(web_server, "download_lane", lane)
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        monkeypatch.setattr(download_plan_module, "image_plan", lambda *a, **k: self._FAKE_PARTS)
+        monkeypatch.setattr(download_plan_module, "video_plan", lambda *a, **k: (DownloadTarget("owner/ltx"),))
+        monkeypatch.setattr(download_plan_module, "enhancer_plan", lambda *a, **k: (DownloadTarget("owner/enhancer"),))
+        lane.release = release
+        lane.calls = calls
+        yield lane
+        release.set()
+        lane.shutdown(join_timeout=5.0)
+
+    @pytest.fixture
+    def client(self, lane):
+        with TestClient(web_server.app) as client:
+            yield client
+
+    @staticmethod
+    def _wait_for(client, item_id: str, state: str) -> dict:
+        for _ in range(500):
+            items = client.get("/api/models/downloads").json()["items"]
+            item = next((entry for entry in items if entry["id"] == item_id), None)
+            if item is not None and item["state"] == state:
+                return item
+            threading.Event().wait(0.01)
+        raise AssertionError(f"{item_id} never reached {state}")
+
+    def test_the_lane_is_empty_to_begin_with_and_the_route_is_not_taken_by_the_delete_pattern(self, client):
+        response = client.get("/api/models/downloads")
+
+        assert response.status_code == 200
+        assert response.json() == {"items": []}
+
+    @pytest.mark.parametrize(("kind", "name", "label"), [("model", "zit", "zit"), ("model", "ltx-8", "ltx-8"), ("enhancer", "fast", None)])
+    def test_posting_a_download_queues_an_item_keyed_by_kind_and_name(self, client, lane, kind, name, label):
+        response = client.post("/api/models/download", json={"kind": kind, "name": name})
+
+        assert response.status_code == 200
+        item = response.json()
+        assert (item["kind"], item["name"], item["state"]) == (kind, name, item["state"])
+        assert item["state"] in {"queued", "running"}
+        assert item["id"]
+        assert item["message"] is None
+        assert item["label"] == (label or item["label"])
+        assert client.get("/api/models/downloads").json()["items"][0]["id"] == item["id"]
+
+    def test_the_lane_runs_the_rows_plan_and_finishes_the_item(self, client, lane):
+        item = client.post("/api/models/download", json={"kind": "model", "name": "zit"}).json()
+        lane.release.set()
+
+        done = self._wait_for(client, item["id"], "done")
+
+        assert lane.calls == [self._FAKE_PARTS]
+        assert done["message"] is None
+
+    def test_posting_the_same_row_again_returns_the_existing_item(self, client, lane):
+        first = client.post("/api/models/download", json={"kind": "model", "name": "zit"}).json()
+        second = client.post("/api/models/download", json={"kind": "model", "name": "zit"}).json()
+        other = client.post("/api/models/download", json={"kind": "model", "name": "ltx-8"}).json()
+
+        assert second["id"] == first["id"]
+        assert other["id"] != first["id"]
+        assert other["state"] == "queued"
+        assert other["queue_position"] == 1
+
+    def test_unknown_rows_and_kinds_are_404_and_bad_bodies_422(self, client):
+        assert client.post("/api/models/download", json={"kind": "model", "name": "nope"}).status_code == 404
+        assert client.post("/api/models/download", json={"kind": "enhancer", "name": "nope"}).status_code == 404
+        assert client.post("/api/models/download", json={"kind": "lora", "name": "zit"}).status_code == 404
+        assert client.post("/api/models/download", json={"kind": "model"}).status_code == 422
+        assert client.post("/api/models/download", json=["model", "zit"]).status_code == 422
+        assert client.get("/api/models/downloads").json() == {"items": []}
+
+    def test_cancelling_a_queued_item_cancels_it_and_a_running_one_stops(self, client, lane):
+        running = client.post("/api/models/download", json={"kind": "model", "name": "zit"}).json()
+        queued = client.post("/api/models/download", json={"kind": "model", "name": "ltx-8"}).json()
+
+        cancelled_queued = client.post(f"/api/models/downloads/{queued['id']}/cancel")
+        cancelled_running = client.post(f"/api/models/downloads/{running['id']}/cancel")
+
+        assert cancelled_queued.status_code == 200
+        assert cancelled_queued.json()["state"] == "cancelled"
+        assert cancelled_running.status_code == 200
+        self._wait_for(client, running["id"], "cancelled")
+        assert lane.calls == [self._FAKE_PARTS]
+
+    def test_cancelling_an_unknown_item_is_404(self, client):
+        assert client.post("/api/models/downloads/dl-999/cancel").status_code == 404
+
+    def test_a_shut_down_lane_refuses_new_downloads_with_a_retryable_status(self, client, lane):
+        lane.shutdown()
+
+        assert client.post("/api/models/download", json={"kind": "model", "name": "zit"}).status_code == 503
+
+    def test_a_running_download_does_not_block_generation_jobs(self, client, lane, monkeypatch):
+        client.post("/api/models/download", json={"kind": "model", "name": "zit"})
+        monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: None)
+
+        web_server._reject_while_busy()
+
+        assert client.get("/api/jobs").json()["active_job"] is None
+        assert web_server.web_runner.has_active_jobs() is False
+
+    def test_the_lifespan_shuts_the_lane_down(self, lane):
+        with TestClient(web_server.app):
+            assert lane.snapshot() == {"items": []}
+
+        with pytest.raises(RuntimeError):
+            lane.submit(kind="model", name="zit", label="zit", plan=lambda: ())
+
+
+class TestModelDownloadPlanRoute:
+    @pytest.fixture
+    def client(self, monkeypatch, tmp_path):
+        web_config = _make_web_config()
+        web_config.data_dir = str(tmp_path)
+        web_config.image_inventory = (ImageInventoryEntry(name="zit", family="zimage", size=None, source="alias", resolved_path="owner/zit"),)
+        web_config.app_config["prompt_enhancer"] = {"model": "owner/enhancer"}
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        monkeypatch.setattr(download_plan_module, "image_plan", lambda *a, **k: (DownloadTarget("owner/zit"), DownloadTarget("owner/vae")))
+        monkeypatch.setattr(download_plan_module, "enhancer_plan", lambda *a, **k: (DownloadTarget("owner/enhancer"),))
+        monkeypatch.setattr(download_plan_module, "target_present_offline", lambda target: False)
+        self.checks: dict[str, object] = {"owner/zit": TargetCheck(3, 3_000), "owner/vae": TargetCheck(1, 500), "owner/enhancer": TargetCheck(2, 40)}
+        monkeypatch.setattr(
+            web_server,
+            "plan_summary",
+            functools.partial(
+                real_plan_summary,
+                check=lambda target: self._check(target),
+                present=lambda target: False,
+                space=lambda items, *, cache_dir: SpaceNeed(cache_dir, sum(check.missing_bytes or 0 for _, check in items), 1_000),
+                cache_dir=lambda: tmp_path / "hub",
+            ),
+        )
+        with TestClient(web_server.app) as client:
+            yield client
+
+    def _check(self, target):
+        outcome = self.checks[target.repo_id]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    def test_returns_the_parts_total_and_space_for_a_model_row(self, client, tmp_path):
+        response = client.get("/api/models/download/plan", params={"kind": "model", "name": "zit"})
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "kind": "model",
+            "name": "zit",
+            "label": "zit",
+            "parts": [{"repo": "owner/zit", "files": 3, "bytes": 3_000}, {"repo": "owner/vae", "files": 1, "bytes": 500}],
+            "total_bytes": 3_500,
+            "space": {"path": str(tmp_path / "hub"), "needed_bytes": 3_500, "free_bytes": 1_000, "enough": False},
+        }
+
+    def test_an_enhancer_row_is_looked_up_by_tier(self, client):
+        payload = client.get("/api/models/download/plan", params={"kind": "enhancer", "name": "fast"}).json()
+
+        assert (payload["kind"], payload["name"], payload["total_bytes"]) == ("enhancer", "fast", 40)
+
+    def test_a_row_with_nothing_missing_has_no_parts_and_no_space(self, client):
+        self.checks.update({"owner/zit": TargetCheck(0, 0), "owner/vae": TargetCheck(0, 0)})
+
+        payload = client.get("/api/models/download/plan", params={"kind": "model", "name": "zit"}).json()
+
+        assert (payload["parts"], payload["total_bytes"], payload["space"]) == ([], 0, None)
+
+    def test_unknown_row_is_404(self, client):
+        assert client.get("/api/models/download/plan", params={"kind": "model", "name": "nope"}).status_code == 404
+        assert client.get("/api/models/download/plan", params={"kind": "enhancer", "name": "smart"}).status_code == 404
+        assert client.get("/api/models/download/plan", params={"kind": "bogus", "name": "zit"}).status_code == 404
+
+    def test_a_missing_query_field_is_422(self, client):
+        assert client.get("/api/models/download/plan", params={"kind": "model"}).status_code == 422
+
+    def test_an_unreachable_hub_is_503(self, client):
+        self.checks["owner/vae"] = None
+
+        response = client.get("/api/models/download/plan", params={"kind": "model", "name": "zit"})
+
+        assert response.status_code == 503
+        assert response.json()["detail"]
+
+    def test_a_plan_that_cannot_be_made_is_503(self, client, monkeypatch):
+        monkeypatch.setattr(download_plan_module, "image_plan", lambda *a, **k: None)
+
+        assert client.get("/api/models/download/plan", params={"kind": "model", "name": "zit"}).status_code == 503
+
+    def test_a_hub_refusal_is_424_and_names_the_repo(self, client):
+        self.checks["owner/vae"] = RuntimeError("Could not download owner/vae: gated")
+
+        response = client.get("/api/models/download/plan", params={"kind": "model", "name": "zit"})
+
+        assert response.status_code == 424
+        assert "owner/vae" in response.json()["detail"]

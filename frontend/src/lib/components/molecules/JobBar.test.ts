@@ -64,4 +64,11 @@ describe('JobBar', () => {
     app = flushSync(() => mount(JobBar, { target, props: { job: makeJob({ runs: 4, batchIndex: 1 }), ondetails: vi.fn() } }));
     expect(target.querySelectorAll('.jb-segment')).toHaveLength(4);
   });
+
+  it('shows the download progress while the model downloads and the steps afterwards', () => {
+    const download = { role: 'model' as const, model: 'zit', repo: 'org/zit', part: 1, parts: 2, bytes_done: 250, bytes_total: 1000, bytes_per_sec: null, download_eta_secs: null, shared: false };
+    app = flushSync(() => mount(JobBar, { target, props: { job: makeJob({ phase: 'load', download }), ondetails: vi.fn() } }));
+    expect(target.querySelector('[aria-label="Model download"]')?.getAttribute('aria-valuenow')).toBe('0.25');
+    expect(target.querySelector('[aria-label="Job progress"]')).toBeNull();
+  });
 });

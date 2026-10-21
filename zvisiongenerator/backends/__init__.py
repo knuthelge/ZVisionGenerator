@@ -15,12 +15,14 @@ if TYPE_CHECKING:
     from zvisiongenerator.core.image_backend import ImageBackend
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
     from zvisiongenerator.core.seedvr2 import SeedVR2Upscaler
+    from zvisiongenerator.downloads.target import DownloadTarget
     from zvisiongenerator.utils.model_memory import LtxCudaMemoryEstimate, MemoryBudget
 
 __all__ = [
     "convert_ltx_checkpoint",
     "create_prompt_enhancer",
     "accelerator_memory_budget_or_none",
+    "enhancer_download_plan",
     "estimate_ltx_system_memory",
     "get_accelerator_memory_budget",
     "get_backend",
@@ -28,10 +30,12 @@ __all__ = [
     "get_prompt_enhancer_session",
     "get_seedvr2_upscaler",
     "get_video_backend",
+    "image_download_plan",
     "release_accelerator_memory",
     "supports_seedvr2",
     "supports_stored_quants",
     "supports_video_upscale_review",
+    "video_download_plan",
 ]
 
 BACKENDS: dict[str, "ImageBackend"] = {}
@@ -285,6 +289,74 @@ def convert_ltx_checkpoint(
         convert(checkpoint, target, bits, config=config, models_dir=models_dir, lora=lora, report=report)
         return
     raise RuntimeError(f"Unsupported platform: {sys.platform}. Converting LTX checkpoints supports macOS, Windows, and Linux.")
+
+
+# --- Download plans ---
+# Each platform has a light planner module (no torch, diffusers or mflux import) that lists the Hugging Face
+# downloads a model needs, so a plan is available without a backend instance.
+
+
+def image_download_plan(model_ref: str, *, family: str, read_index: Callable[[str, str | None], dict[str, Any]] | None = None) -> "tuple[DownloadTarget, ...]":
+    """Return the downloads this platform's image backend needs for *model_ref* (empty for a local folder).
+
+    Args:
+        model_ref: A local path or a Hugging Face ``owner/repo[@revision]`` reference.
+        family: The detected model family.
+        read_index: Reads a repo's ``model_index.json`` as ``(repo_id, revision) -> dict`` (diffusers platforms only; defaults to the Hub).
+
+    Raises:
+        LookupError: If a diffusers repo's ``model_index.json`` cannot be read.
+        RuntimeError: On an unsupported platform.
+    """
+    if sys.platform == "darwin":
+        from zvisiongenerator.backends.mac.download_plan import image_download_plan as plan
+
+        return plan(model_ref, family=family)
+    if sys.platform in ("win32", "linux"):
+        from zvisiongenerator.backends.cuda.download_plan import image_download_plan as plan
+
+        return plan(model_ref, family=family, read_index=read_index)
+    raise RuntimeError(f"Unsupported platform: {sys.platform}. Image generation supports macOS, Windows, and Linux.")
+
+
+def video_download_plan(
+    model_ref: str,
+    *,
+    family: str,
+    transformer_source: tuple[str, str] | None = None,
+    latent_upsampler: tuple[str, str] | None = None,
+    upscale: bool = False,
+) -> "tuple[DownloadTarget, ...]":
+    """Return the downloads this platform's video backend needs for *model_ref* (empty for a local folder).
+
+    macOS lists the model repo and the Gemma text encoder; Windows and Linux list the diffusers repo, the
+    single-file *transformer_source* and, with *upscale*, the *latent_upsampler* (each a ``(repo_id, filename)`` pair).
+
+    Raises:
+        RuntimeError: On an unsupported platform.
+    """
+    if sys.platform == "darwin":
+        from zvisiongenerator.backends.mac.download_plan import video_download_plan as plan
+    elif sys.platform in ("win32", "linux"):
+        from zvisiongenerator.backends.cuda.download_plan import video_download_plan as plan
+    else:
+        raise RuntimeError(f"Unsupported video platform: {sys.platform}. Video generation supports macOS, Windows, and Linux.")
+    return plan(model_ref, family=family, transformer_source=transformer_source, latent_upsampler=latent_upsampler, upscale=upscale)
+
+
+def enhancer_download_plan(repo: str, revision: str | None) -> "tuple[DownloadTarget, ...]":
+    """Return the download of the prompt-enhancer model *repo* for this platform's loader (empty for a local folder).
+
+    Raises:
+        RuntimeError: On an unsupported platform.
+    """
+    if sys.platform == "darwin":
+        from zvisiongenerator.backends.mac.download_plan import enhancer_download_plan as plan
+    elif sys.platform in ("win32", "linux"):
+        from zvisiongenerator.backends.cuda.download_plan import enhancer_download_plan as plan
+    else:
+        raise RuntimeError(f"Unsupported platform: {sys.platform}. Prompt enhancement supports macOS, Windows, and Linux.")
+    return plan(repo, revision)
 
 
 # --- Prompt enhancer ---

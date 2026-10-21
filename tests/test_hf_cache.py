@@ -11,6 +11,7 @@ import huggingface_hub.constants
 import pytest
 from fastapi.testclient import TestClient
 
+from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.hf_cache import cached_model_repos, free_stranded_shared_files, stranded_shared_files
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web.model_delete import cache_repos_linked_from, installed_models_linking_to, used_repo_ids
@@ -201,6 +202,48 @@ class TestOtherDownloadRoutes:
 
         assert response.status_code == 200
         assert not (hub / "blobs" / "ee" / ("ee" * 32)).exists()
+
+    def test_refused_while_that_repo_downloads(self, client, hub):
+        flight, _ = web_server.download_flights.claim(DownloadTarget("org/old"))
+        try:
+            response = client.delete("/api/hf-cache/org/old")
+        finally:
+            web_server.download_flights.finish(flight, "stopped")
+
+        assert response.status_code == 409
+        assert "org/old" in response.json()["detail"]
+        assert (hub / "models--org--old").is_dir()
+
+    def test_another_repo_downloading_does_not_block_a_delete(self, client, hub):
+        flight, _ = web_server.download_flights.claim(DownloadTarget("org/elsewhere"))
+        try:
+            response = client.delete("/api/hf-cache/org/old")
+        finally:
+            web_server.download_flights.finish(flight, "stopped")
+
+        assert response.status_code == 200
+        assert not (hub / "models--org--old").exists()
+
+    def test_freeing_stranded_files_is_refused_while_anything_downloads_into_the_cache(self, client, hub):
+        stranded = _repo(hub, "org/gone", shared={"ee" * 32: 2_000_000})
+        shutil.rmtree(stranded)
+        flight, _ = web_server.download_flights.claim(DownloadTarget("org/new"))
+        try:
+            response = client.delete("/api/hf-cache/stranded")
+        finally:
+            web_server.download_flights.finish(flight, "stopped")
+
+        assert response.status_code == 409
+        assert (hub / "blobs" / "ee" / ("ee" * 32)).exists()
+
+    def test_a_download_into_a_local_folder_does_not_block_freeing_stranded_files(self, client, hub, tmp_path):
+        flight, _ = web_server.download_flights.claim(DownloadTarget("org/new", local_dir=str(tmp_path / "elsewhere")))
+        try:
+            response = client.delete("/api/hf-cache/stranded")
+        finally:
+            web_server.download_flights.finish(flight, "stopped")
+
+        assert response.status_code == 200
 
     def test_refused_while_a_job_runs(self, client, hub, monkeypatch):
         monkeypatch.setattr(web_server.web_runner, "get_active_exclusive_job_snapshot", lambda: {"job_id": "j1"})

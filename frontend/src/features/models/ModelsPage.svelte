@@ -1,12 +1,14 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
-  import { errorText } from '$lib/api/client';
-  import { getModelInventory, convertCheckpoint, getConversionStatus, inspectLtxCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
-  import { addToast } from '$lib/state/toasts.svelte';
-  import type { ConversionStatus, EnhancerModelEntry, LtxCheckpointInspection, ModelDeleteInfo, ModelInventory, ModelOperationResult, ModelStatusFields } from '$lib/types';
-  import { Button, Icon, Input, Select, StepProgress, Tooltip } from '$lib/components/atoms';
-  import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField } from '$lib/components/molecules';
-  import { DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
+  import { onDestroy, onMount, tick, type Snippet } from 'svelte';
+  import { errorText, isRetryable } from '$lib/api/client';
+  import { cancelDownload, getDownloadPlan, getDownloads, getModelInventory, startDownload, convertCheckpoint, getConversionStatus, inspectLtxCheckpoint, importLoraLocal, importLoraHF, deleteModel, deleteEnhancerModel, deleteLora, deleteOtherDownload, freeStrandedCacheFiles } from '$lib/api/models';
+  import { downloadConfirmText } from '$lib/state/downloadConfirm';
+  import { downloadLine, partLabel } from '$lib/state/downloadProgress';
+  import { addToast, dismissToast } from '$lib/state/toasts.svelte';
+  import type { ConversionStatus, DownloadItem, EnhancerModelEntry, LtxCheckpointInspection, ModelDeleteInfo, ModelInventory, ModelOperationResult, ModelStatusFields } from '$lib/types';
+  import { Badge, Button, Icon, Input, Select, StepProgress, Tooltip } from '$lib/components/atoms';
+  import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField, requestConfirm } from '$lib/components/molecules';
+  import { DOWNLOADABLE_TOOLTIP, DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
 
   let inventory = $state<ModelInventory | null>(null);
@@ -40,8 +42,22 @@
 
   const ENHANCER_TIER_LABELS: Record<EnhancerModelEntry['tier'], string> = { fast: 'Fast', smart: 'Smart', custom: 'Custom' };
 
+  type DownloadKind = DownloadItem['kind'];
+  const DOWNLOAD_POLL_MS = 1000;
+  /** The lane's items, newest state from the server; finished ones stay until the server drops them. */
+  let downloads = $state<DownloadItem[]>([]);
+  /** Rows (by `rowKey`) whose plan is being read or whose download is being requested or cancelled. */
+  let busyRows = $state<ReadonlySet<string>>(new Set());
+  let downloadTimer: ReturnType<typeof setTimeout> | null = null;
+  let downloadPolling = false;
+  let pollRequested = false;
+  let downloadsSeeded = false;
+  const knownStates = new Map<string, DownloadItem['state']>();
+  const retryToastIds = new Set<string>();
+  const activeDownloads = $derived(new Map(downloads.filter(isActive).map((item) => [rowKey(item.kind, item.name), item])));
 
   onMount(async () => {
+    void pollDownloads();
     await loadInventory();
     await pollConversion(false);
   });
@@ -50,7 +66,174 @@
     destroyed = true;
     if (conversionTimer) clearTimeout(conversionTimer);
     if (inspectTimer) clearTimeout(inspectTimer);
+    if (downloadTimer) clearTimeout(downloadTimer);
+    for (const id of retryToastIds) dismissToast(id);
   });
+
+  function isActive(item: DownloadItem): boolean {
+    return item.state === 'queued' || item.state === 'running';
+  }
+
+  function rowKey(kind: DownloadKind, name: string): string {
+    return `${kind}:${name}`;
+  }
+
+  /** The row's name as a noun phrase without an article: "klein9b", "Smart enhancer model". */
+  function rowName(kind: DownloadKind, name: string): string {
+    return kind === 'enhancer' ? `${ENHANCER_TIER_LABELS[name as EnhancerModelEntry['tier']] ?? name} enhancer model` : name;
+  }
+
+  /** The row's name for a sentence: enhancer models read "the Smart enhancer model". */
+  function rowPhrase(kind: DownloadKind, name: string): string {
+    return kind === 'enhancer' ? `the ${rowName(kind, name)}` : name;
+  }
+
+  /** What a running item's sub-row shows: the byte line split into segments, the percentage and the bar's numbers. */
+  function downloadView(item: DownloadItem): { segments: string[]; part: string; percent: number | null; value: number; max: number; busy: boolean; valuetext: string } {
+    if (item.bytes_done === undefined) {
+      return { segments: ['Starting…'], part: '', percent: null, value: 0, max: 1, busy: true, valuetext: 'Starting' };
+    }
+    const progress = { part: item.part ?? 1, parts: item.parts ?? 1, bytes_done: item.bytes_done, bytes_total: item.bytes_total ?? null, bytes_per_sec: item.bytes_per_sec ?? null, download_eta_secs: item.download_eta_secs ?? null };
+    const line = downloadLine(progress);
+    const part = partLabel(progress);
+    const known = progress.bytes_total !== null && progress.bytes_total > 0;
+    const amount = line.split(' · ')[0].replace(' / ', ' of ');
+    const label = part ? part.charAt(0).toUpperCase() + part.slice(1) : '';
+    return {
+      segments: label ? [label, ...line.split(' · ')] : line.split(' · '),
+      part,
+      percent: known ? Math.min(100, Math.round((progress.bytes_done / progress.bytes_total!) * 100)) : null,
+      value: known ? progress.bytes_done : 0,
+      max: known ? progress.bytes_total! : 1,
+      busy: !known,
+      valuetext: `${known ? amount : `${amount} downloaded, size unknown`}${part ? `, ${part}` : ''}`,
+    };
+  }
+
+  function setBusy(key: string, busy: boolean): void {
+    const next = new Set(busyRows);
+    if (busy) next.add(key);
+    else next.delete(key);
+    busyRows = next;
+  }
+
+  /** Key of the row whose action cell holds the keyboard focus, if any. */
+  function focusedRowKey(): string | null {
+    const active = document.activeElement;
+    return active instanceof HTMLElement ? (active.closest<HTMLElement>('[data-dl-key]')?.dataset.dlKey ?? null) : null;
+  }
+
+  /** Once the row has re-rendered, move focus to the control now in its action cell unless focus went elsewhere. */
+  async function focusRowControl(key: string | null): Promise<void> {
+    if (!key) return;
+    await tick();
+    const active = document.activeElement;
+    if (active && active !== document.body && !active.closest(`[data-dl-key="${CSS.escape(key)}"]`)) return;
+    document.querySelector<HTMLElement>(`[data-dl-key="${CSS.escape(key)}"] button`)?.focus();
+  }
+
+  /** Read the lane; while anything is queued or running, read it again in a second. */
+  async function pollDownloads(): Promise<void> {
+    if (downloadPolling) {
+      // A read already on its way may predate what the caller just changed: read again right after it.
+      pollRequested = true;
+      return;
+    }
+    downloadPolling = true;
+    if (downloadTimer) clearTimeout(downloadTimer);
+    downloadTimer = null;
+    try {
+      const { items } = await getDownloads();
+      if (!destroyed) applyDownloads(items);
+    } catch {
+      // A missed read says nothing about the downloads: try again while one is known to be active.
+    } finally {
+      downloadPolling = false;
+    }
+    if (pollRequested) {
+      pollRequested = false;
+      if (!destroyed) await pollDownloads();
+      return;
+    }
+    if (!destroyed && downloads.some(isActive)) downloadTimer = setTimeout(() => void pollDownloads(), DOWNLOAD_POLL_MS);
+  }
+
+  /** Take the lane's items and report each download this page saw finish or fail. The first read only records states. */
+  function applyDownloads(items: DownloadItem[]): void {
+    const focusKey = focusedRowKey();
+    downloads = items;
+    for (const item of items) reportTransition(item);
+    downloadsSeeded = true;
+    void focusRowControl(focusKey);
+  }
+
+  /** Raise an error toast whose Retry runs the Download flow again; the page dismisses it when it is destroyed. */
+  function addRetryToast(message: string, kind: DownloadKind, name: string): void {
+    retryToastIds.add(addToast(message, 'error', { action: { label: 'Retry', run: () => void requestDownload(kind, name) } }));
+  }
+
+  function reportTransition(item: DownloadItem): void {
+    const before = knownStates.get(item.id);
+    knownStates.set(item.id, item.state);
+    if (!downloadsSeeded || before === item.state || !(before === 'queued' || before === 'running')) return;
+    const label = rowName(item.kind, item.name);
+    if (item.state === 'done') {
+      addToast(`${label} downloaded`, 'success');
+      void loadInventory({ silent: true });
+    } else if (item.state === 'failed') {
+      addRetryToast(item.message || `Downloading ${label} failed.`, item.kind, item.name);
+    }
+  }
+
+  /** Add or replace one item the server answered with, keeping the rest of the lane. */
+  function applyItem(item: DownloadItem): void {
+    const focusKey = focusedRowKey();
+    if (!knownStates.has(item.id)) knownStates.set(item.id, 'queued');
+    downloads = [...downloads.filter((other) => other.id !== item.id), item];
+    reportTransition(item);
+    void focusRowControl(focusKey);
+  }
+
+  /** Read the plan, ask the user to confirm its size and free space, then queue the download. */
+  async function requestDownload(kind: DownloadKind, name: string): Promise<void> {
+    const key = rowKey(kind, name);
+    if (busyRows.has(key)) return;
+    setBusy(key, true);
+    try {
+      const plan = await getDownloadPlan(kind, name);
+      if (plan.parts.length === 0) {
+        addToast(`${rowName(kind, name)} is already downloaded.`, 'info');
+        await loadInventory({ silent: true });
+        return;
+      }
+      const { info, confirmLabel } = downloadConfirmText(plan);
+      const approved = await requestConfirm({ question: `Download ${rowPhrase(kind, name)}?`, info, confirmLabel, danger: false });
+      if (!approved) return;
+      applyItem(await startDownload(kind, name));
+      void pollDownloads();
+      await focusRowControl(key);
+    } catch (err) {
+      const message = errorText(err, `Could not download ${rowPhrase(kind, name)}.`);
+      if (isRetryable(err)) addRetryToast(message, kind, name);
+      else addToast(message, 'error');
+    } finally {
+      setBusy(key, false);
+    }
+  }
+
+  async function requestCancel(item: DownloadItem): Promise<void> {
+    const key = rowKey(item.kind, item.name);
+    if (busyRows.has(key)) return;
+    setBusy(key, true);
+    try {
+      applyItem(await cancelDownload(item.id));
+      await focusRowControl(key);
+    } catch (err) {
+      addToast(errorText(err, 'Could not cancel the download.'), 'error');
+    } finally {
+      setBusy(key, false);
+    }
+  }
 
   /** Read the LTX conversion's status; while it runs (or the read failed), read it again shortly. A finished one is reported when *report* is set. */
   async function pollConversion(report: boolean): Promise<void> {
@@ -99,8 +282,9 @@
     }, INSPECT_DELAY_MS);
   }
 
-  async function loadInventory(): Promise<void> {
-    loading = true;
+  /** Read the inventory. *silent* keeps the page on screen instead of showing the loading state, for a refresh the user did not ask for. */
+  async function loadInventory({ silent = false }: { silent?: boolean } = {}): Promise<void> {
+    loading = !silent;
     error = null;
     try {
       inventory = await getModelInventory();
@@ -194,11 +378,16 @@
     }
   }
 
-  function notDownloadedTooltip(m: { source?: string; download_size_label?: string | null }): string {
-    if (m.source === 'enhancer') return 'Not downloaded: it downloads the first time you enhance a prompt with it.';
-    return m.source === 'seedvr2' && m.download_size_label
-      ? `Not downloaded: the first plain upscale downloads it (${m.download_size_label}).`
-      : NOT_DOWNLOADED_TOOLTIP;
+  function notDownloadedTooltip(m: { family?: string; source?: string; download_size_label?: string | null; download_needed?: boolean }): string {
+    // Nothing to fetch, yet not ready: the first use makes it (the SeedVR2 stored copy, the Ideogram 4 Instant build).
+    if (m.download_needed === false) {
+      if (m.source === 'seedvr2') return PREPARED_SEEDVR2_TOOLTIP;
+      if (m.family === 'ideogram4') return PREPARED_INSTANT_TOOLTIP;
+    }
+    const ahead = m.download_needed ? 'Download fetches it now, or ' : '';
+    if (m.source === 'enhancer') return `Not downloaded: ${ahead}it downloads the first time you enhance a prompt with it.`;
+    if (m.source === 'seedvr2' && m.download_size_label) return `Not downloaded: ${ahead}the first plain upscale downloads it (${m.download_size_label}).`;
+    return m.download_needed ? DOWNLOADABLE_TOOLTIP : NOT_DOWNLOADED_FIRST_USE_TOOLTIP;
   }
 
   function deleteQuestion(target: NonNullable<typeof pendingDelete>): string {
@@ -277,10 +466,11 @@
   }
 </script>
 
-{#snippet modelName(m: ModelStatusFields & { name: string; source?: string; download_size_label?: string | null })}
-  {#if m.downloaded === true || m.downloaded === false}
-    <Tooltip text={`${m.name}\n${m.downloaded ? DOWNLOADED_TOOLTIP : notDownloadedTooltip(m)}`} focusable={false} class="max-w-full items-center gap-1.5">
-      {#if m.downloaded}
+{#snippet modelName(m: ModelStatusFields & { name: string; family?: string; source?: string; download_size_label?: string | null; download_needed?: boolean })}
+  {@const downloaded = m.downloaded}
+  {#if downloaded === true || downloaded === false}
+    <Tooltip text={`${m.name}\n${downloaded ? DOWNLOADED_TOOLTIP : notDownloadedTooltip(m)}`} focusable={false} class="max-w-full items-center gap-1.5">
+      {#if downloaded}
         <svg class="h-3.5 w-3.5 shrink-0 text-primary-main" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
         </svg>
@@ -289,7 +479,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"></path>
         </svg>
       {/if}
-      <span class="break-words {m.downloaded ? 'text-text-primary' : 'text-text-muted'}" data-testid="model-name" data-downloaded={String(m.downloaded)}>{m.name}</span>
+      <span class="break-words {downloaded ? 'text-text-primary' : 'text-text-muted'}" data-testid="model-name" data-downloaded={String(downloaded)}>{m.name}</span>
     </Tooltip>
   {:else}
     <span class="block break-words text-text-primary" title={m.name} data-testid="model-name" data-downloaded="unknown">{m.name}</span>
@@ -307,6 +497,62 @@
     {@const info = m.delete}
     {@const downloadSizeLabel = m.source === 'seedvr2' ? m.download_size_label : null}
     {@render deleteButton(info.kind === 'huggingface' ? `Delete the Hugging Face download of ${m.name}` : info.kind === 'copy' ? `Delete the prepared copy of ${m.name}` : `Delete ${m.name}`, () => requestDelete({ type: 'model', name: m.name, info, downloadSizeLabel }))}
+  {/if}
+{/snippet}
+
+{#snippet downloadControl(kind: DownloadKind, name: string, remove: Snippet)}
+  {@const key = rowKey(kind, name)}
+  {@const item = activeDownloads.get(key)}
+  <td class="text-right" data-dl-key={key}>
+    {#if item}
+      <Button size="sm" disabled={busyRows.has(key)} aria-label={item.state === 'queued' ? `Cancel the queued download of ${rowPhrase(kind, name)}` : `Cancel the download of ${rowPhrase(kind, name)}`} data-testid="download-cancel" onclick={() => void requestCancel(item)}>Cancel</Button>
+    {:else}
+      {@render remove()}
+    {/if}
+  </td>
+{/snippet}
+
+{#snippet downloadButton(kind: DownloadKind, name: string, partial: boolean)}
+  {@const key = rowKey(kind, name)}
+  {@const label = partial ? `Download the remaining files of ${rowPhrase(kind, name)}` : `Download ${rowPhrase(kind, name)}`}
+  <Button size="sm" disabled={busyRows.has(key)} aria-label={label} title={partial ? label : undefined} data-testid="download-button" onclick={() => void requestDownload(kind, name)}>
+    <Icon name="download" size={14} />Download
+  </Button>
+{/snippet}
+
+{#snippet downloadSubRow(kind: DownloadKind, name: string, columns: number)}
+  {@const item = activeDownloads.get(rowKey(kind, name))}
+  {#if item}
+    <tr class="dl-sub" data-testid="download-subrow">
+      <td colspan={columns}>
+        {#if item.state === 'queued'}
+          <div class="dl-queued">
+            <span class="sr-only" role="status">Queued</span>
+            <Badge variant="neutral"><Icon name="clock" size={12} />Queued</Badge>
+            {#if item.queue_position && item.queue_position > 0}
+              <span>Starts after {item.queue_position} {item.queue_position === 1 ? 'download' : 'downloads'}</span>
+            {/if}
+          </div>
+        {:else}
+          {@const view = downloadView(item)}
+          <div class="dl-block" data-testid="download-progress">
+            <span class="sr-only" role="status">Downloading {rowPhrase(kind, name)}{view.part ? `, ${view.part}` : ''}</span>
+            <div class="dl-head">
+              <span class="dl-line">{#each view.segments as segment, i}{#if i > 0}{' · '}{/if}<span class="whitespace-nowrap">{segment}</span>{/each}</span>
+              {#if view.percent === null}
+                <span class="dl-muted">Size unknown</span>
+              {:else}
+                <span class="dl-pct">{view.percent}%</span>
+              {/if}
+            </div>
+            <StepProgress value={view.value} max={view.max} live={!view.busy} busy={view.busy} label={`Download of ${rowName(kind, name)}`} valuetext={view.valuetext} />
+            {#if item.shared}
+              <p class="ui-help">A running job started this download. Cancel stops waiting here; the job keeps downloading.</p>
+            {/if}
+          </div>
+        {/if}
+      </td>
+    </tr>
   {/if}
 {/snippet}
 
@@ -366,8 +612,8 @@
             {#if inventory.image_models.length === 0}
               <p class="ui-help p-3 text-center">None found</p>
             {:else}
-              <div class="overflow-x-auto px-1 pb-1">
-                <table class="ui-table ui-table-comfortable">
+              <div class="@container overflow-x-auto px-1 pb-1">
+                <table class="ui-table ui-table-comfortable sticky-actions">
                   <thead>
                     <tr>
                       <th>Name</th>
@@ -379,7 +625,7 @@
                   </thead>
                   <tbody>
                     {#each inventory.image_models as m}
-                      <tr>
+                      <tr class:dl-main={activeDownloads.has(rowKey('model', m.name))}>
                         <td>
                           {@render modelName(m)}
                           {#if m.stored_quant}
@@ -389,8 +635,15 @@
                         <td class="font-mono">{m.family}</td>
                         <td>{@render diskSizeCell(m.disk_size_label)}</td>
                         <td>{@render memoryFitCell(m)}</td>
-                        <td class="text-right">{@render modelDeleteCell(m)}</td>
+                        {#snippet remove()}
+                          <span class="dl-actions">
+                            {#if m.download_needed}{@render downloadButton('model', m.name, m.downloaded === true)}{/if}
+                            {@render modelDeleteCell(m)}
+                          </span>
+                        {/snippet}
+                        {@render downloadControl('model', m.name, remove)}
                       </tr>
+                      {@render downloadSubRow('model', m.name, 5)}
                     {/each}
                   </tbody>
                 </table>
@@ -403,8 +656,8 @@
             {#if inventory.video_models.length === 0}
               <p class="ui-help p-3 text-center">None found</p>
             {:else}
-              <div class="overflow-x-auto px-1 pb-1">
-                <table class="ui-table ui-table-comfortable">
+              <div class="@container overflow-x-auto px-1 pb-1">
+                <table class="ui-table ui-table-comfortable sticky-actions">
                   <thead>
                     <tr>
                       <th>Name</th>
@@ -417,7 +670,7 @@
                   </thead>
                   <tbody>
                     {#each inventory.video_models as m}
-                      <tr>
+                      <tr class:dl-main={activeDownloads.has(rowKey('model', m.name))}>
                         <td>
                           {@render modelName(m)}
                           {#if m.converted_bits}
@@ -428,8 +681,15 @@
                         <td>{m.supports_i2v ? 'Yes' : '—'}</td>
                         <td>{@render diskSizeCell(m.disk_size_label)}</td>
                         <td>{@render memoryFitCell(m)}</td>
-                        <td class="text-right">{@render modelDeleteCell(m)}</td>
+                        {#snippet remove()}
+                          <span class="dl-actions">
+                            {#if m.download_needed}{@render downloadButton('model', m.name, m.downloaded === true)}{/if}
+                            {@render modelDeleteCell(m)}
+                          </span>
+                        {/snippet}
+                        {@render downloadControl('model', m.name, remove)}
                       </tr>
+                      {@render downloadSubRow('model', m.name, 6)}
                     {/each}
                   </tbody>
                 </table>
@@ -440,8 +700,8 @@
           {#if inventory.enhancer_models?.length}
             <Panel title="Prompt enhancer" icon="cube" flush>
               {#snippet actions()}{@render count(inventory!.enhancer_models!.length)}{/snippet}
-              <div class="overflow-x-auto px-1 pb-1">
-                <table class="ui-table ui-table-comfortable">
+              <div class="@container overflow-x-auto px-1 pb-1">
+                <table class="ui-table ui-table-comfortable sticky-actions">
                   <thead>
                     <tr>
                       <th>Name</th>
@@ -453,9 +713,9 @@
                   <tbody>
                     {#each inventory.enhancer_models as e (e.tier)}
                       {@const label = ENHANCER_TIER_LABELS[e.tier]}
-                      <tr data-testid="enhancer-row" data-tier={e.tier}>
+                      <tr data-testid="enhancer-row" data-tier={e.tier} class:dl-main={activeDownloads.has(rowKey('enhancer', e.tier))}>
                         <td>
-                          {@render modelName({ name: label, downloaded: e.downloaded, source: 'enhancer' })}
+                          {@render modelName({ name: label, downloaded: e.downloaded, source: 'enhancer', download_needed: e.download_needed })}
                           {#if e.unavailable}
                             <span class="ui-help block font-normal" data-testid="enhancer-unavailable">{e.unavailable}</span>
                           {/if}
@@ -470,12 +730,17 @@
                             <span class="text-text-muted">—</span>
                           {/if}
                         </td>
-                        <td class="text-right">
-                          {#if e.deletable}
-                            {@render deleteButton(`Delete the ${label} enhancer model`, () => requestDelete({ type: 'enhancer', name: label, model: e }))}
-                          {/if}
-                        </td>
+                        {#snippet remove()}
+                          <span class="dl-actions">
+                            {#if e.download_needed}{@render downloadButton('enhancer', e.tier, e.downloaded === true)}{/if}
+                            {#if e.deletable}
+                              {@render deleteButton(`Delete the ${label} enhancer model`, () => requestDelete({ type: 'enhancer', name: label, model: e }))}
+                            {/if}
+                          </span>
+                        {/snippet}
+                        {@render downloadControl('enhancer', e.tier, remove)}
                       </tr>
+                      {@render downloadSubRow('enhancer', e.tier, 4)}
                     {/each}
                   </tbody>
                 </table>
@@ -490,8 +755,8 @@
               <p class="ui-help px-3 pt-2">
                 In the Hugging Face cache (<span class="font-mono break-all">{other.cache_dir}</span>) but not used by any model here.
               </p>
-              <div class="overflow-x-auto px-1 pb-1">
-                <table class="ui-table ui-table-comfortable">
+              <div class="@container overflow-x-auto px-1 pb-1">
+                <table class="ui-table ui-table-comfortable sticky-actions">
                   <thead>
                     <tr>
                       <th>Repository</th>
@@ -530,8 +795,8 @@
           {#if inventory.loras.length === 0}
             <p class="ui-help p-3 text-center">None found</p>
           {:else}
-            <div class="overflow-x-auto px-1 pb-1">
-              <table class="ui-table ui-table-comfortable">
+            <div class="@container overflow-x-auto px-1 pb-1">
+              <table class="ui-table ui-table-comfortable sticky-actions">
                 <thead>
                   <tr>
                     <th>Name</th>
@@ -769,3 +1034,22 @@
   {/if}
 </ConfirmDialog>
 
+
+<style>
+  /* A row the lane is downloading or has queued reads as one with the sub-row under it. */
+  .ui-table tr.dl-main > td { border-bottom-color: transparent; }
+  /* Overrides `.ui-table td:first-child`, which bolds a row's only cell. */
+  .ui-table tr.dl-sub > td { padding-top: 0; font-weight: 400; color: var(--color-text-secondary); }
+  .dl-block { display: flex; flex-direction: column; gap: 8px; }
+  .dl-head { display: flex; justify-content: space-between; gap: 12px; font-size: var(--text-ui); line-height: 16px; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+  .dl-line { min-width: 0; }
+  .dl-pct { flex: none; color: var(--color-text-primary); }
+  .dl-muted { flex: none; color: var(--color-text-muted); }
+  .dl-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; white-space: nowrap; }
+  .dl-queued { display: flex; align-items: center; gap: 8px; font-size: var(--text-ui); color: var(--color-text-muted); }
+  /* The table scrolls sideways on a phone: the block stays inside the visible width (the scroll box is a size container), so the percentage and the Queued note never scroll out of view. */
+  .dl-sub .dl-block, .dl-sub .dl-queued { position: sticky; left: 14px; width: calc(100cqi - 20px); }
+  /* The actions column stays at the right edge while the table scrolls, so Download, Cancel and Delete are always in reach. */
+  .sticky-actions th:last-child, .sticky-actions td:last-child { position: sticky; right: 0; z-index: 1; background: var(--color-bg-surface); }
+  .sticky-actions tr.dl-sub > td:last-child { position: static; background: none; }
+</style>

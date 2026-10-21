@@ -188,4 +188,16 @@ describe('connectJobSSE', () => {
     expect(onStatus.mock.calls.map(([type]) => type)).toEqual(types);
     subscription.close();
   });
+
+  it('routes model_downloading to onStatus', () => {
+    const onStatus = vi.fn();
+    const subscription = connectJobSSE('test-job', { onStatus });
+    const event = {
+      type: 'model_downloading', mode: 'image', role: 'model', model: 'flux', repo: 'org/flux', part: 1, parts: 1,
+      bytes_done: 10, bytes_total: 100, bytes_per_sec: 5, download_eta_secs: 18, shared: false,
+    };
+    latestEventSource().emit('model_downloading', event);
+    expect(onStatus).toHaveBeenCalledWith('model_downloading', expect.objectContaining(event));
+    subscription.close();
+  });
 });
