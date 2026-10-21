@@ -3,7 +3,7 @@
   import { ApiError, errorText } from '$lib/api/client';
   import { loadPromptDocument, previewPromptDocument, savePromptDocument } from '$lib/api/promptFiles';
   import { Icon, Spinner } from '$lib/components/atoms';
-  import { ActionMenu, EmptyState, PathBrowser, Segmented, requestConfirm } from '$lib/components/molecules';
+  import { ActionMenu, EmptyState, NewPromptFileDialog, PathBrowser, Segmented, requestConfirm } from '$lib/components/molecules';
   import { layout } from '$lib/state/layoutMode.svelte';
   import type { ActionMenuEntry } from '$lib/components/molecules/ActionMenu.svelte';
   import { hasOpenModal, isCommandKey } from '$lib/keyboard';
@@ -16,11 +16,10 @@
   import { optionId, remapOptionIds } from './document';
   import { DragDrop } from './dragDrop.svelte';
   import EntryPreview from './EntryPreview.svelte';
-  import NewFileDialog from './NewFileDialog.svelte';
   import PromptSetSection from './PromptSetSection.svelte';
   import RepairView from './RepairView.svelte';
   import SnippetsPanel from './SnippetsPanel.svelte';
-  import { clearUnsaved, forgetRecent, loadUnsaved, recentFiles, rememberRecent, saveUnsaved } from './storage';
+  import { clearUnsaved, forgetRecent, loadUnsaved, recentFiles, rememberRecent, saveUnsaved } from '$lib/state/promptFileStorage';
 
   const UNSAVED_DELAY_MS = 400;
 
@@ -335,7 +334,7 @@
 </div>
 
 <PathBrowser bind:open={browsing} purpose="prompt_file" initialPath={builder.path} onchoose={(path) => void openFile(path)} />
-<NewFileDialog bind:open={newFileOpen} initialDirectory={folder || null} oncreated={(path) => void openFile(path)} />
+<NewPromptFileDialog bind:open={newFileOpen} initialDirectory={folder || null} oncreated={(path) => void openFile(path)} />
 
 <style>
   .prompts-page { display: flex; flex: 1; flex-direction: column; min-height: 0; }

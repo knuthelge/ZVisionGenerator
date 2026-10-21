@@ -4,6 +4,7 @@ import { createClassComponent } from 'svelte/legacy';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '$lib/api/client';
+import { lastSaveTarget, recentFiles, rememberRecent } from '$lib/state/promptFileStorage';
 import { reactiveProps } from '../../test-utils/reactiveProps.svelte';
 import { draft } from '$lib/state/draft.svelte';
 import { downloadStore } from '$lib/state/downloads.svelte';
@@ -50,6 +51,8 @@ const browseApiMocks = vi.hoisted(() => ({
 const promptFileApiMocks = vi.hoisted(() => ({
   inspectPromptFile: vi.fn(),
   writePromptFile: vi.fn(),
+  appendPromptEntry: vi.fn(),
+  createPromptFile: vi.fn(),
 }));
 
 const extendApiMocks = vi.hoisted(() => ({
@@ -114,6 +117,8 @@ vi.mock('$lib/api/models', async (importOriginal) => {
 vi.mock('$lib/api/promptFiles', () => ({
   inspectPromptFile: promptFileApiMocks.inspectPromptFile,
   writePromptFile: promptFileApiMocks.writePromptFile,
+  appendPromptEntry: promptFileApiMocks.appendPromptEntry,
+  createPromptFile: promptFileApiMocks.createPromptFile,
 }));
 
 import WorkspacePage from './WorkspacePage.svelte';
@@ -142,7 +147,7 @@ beforeEach(() => {
   for (const mock of [
     workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.getJobSnapshot,
     workspaceApiMocks.getHistory, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.listJobs, browseApiMocks.listDirectory, browseApiMocks.browsePlaces,
-    promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, extendApiMocks.inspectExtendSource, enhanceApiMocks.enhancePrompt,
+    promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, promptFileApiMocks.appendPromptEntry, promptFileApiMocks.createPromptFile, extendApiMocks.inspectExtendSource, enhanceApiMocks.enhancePrompt,
     videoMemoryApiMocks.checkVideoMemoryFit, galleryApiMocks.deleteAsset,
   ]) mock.mockReset();
   workspaceApiMocks.clearQueue.mockClear();
@@ -3452,6 +3457,223 @@ describe('WorkspacePage', () => {
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:first-image');
 
     legacyApp.$destroy();
+  });
+
+  describe('save to prompt file', () => {
+    function withVideoEnhancer(context: WorkspaceContext): WorkspaceContext {
+      withEnhancer(context);
+      for (const workflow of ['txt2vid', 'img2vid'] as const) {
+        context.workflow_contract.definitions[workflow].visible_controls.push('prompt_enhance', 'prompt_enhance_auto');
+      }
+      return context;
+    }
+
+    const saveButton = () => target.querySelector('#ws-save-prompt') as HTMLButtonElement | null;
+
+    async function openSaveMenu(): Promise<void> {
+      saveButton()!.click();
+      await settle();
+    }
+
+    async function chooseTarget(path: string): Promise<void> {
+      (document.querySelector(`[role="menu"] [data-action="target-${path}"]`) as HTMLButtonElement).click();
+      await settle();
+    }
+
+    beforeEach(() => {
+      promptFileApiMocks.appendPromptEntry.mockImplementation(async (data: { path: string }) => ({
+        path: data.path, revision: 'r1', entry_id: 's0.e1', set_name: 'prompts',
+      }));
+    });
+
+    it('appends the typed prompt to a recent file, remembers it and offers to open it in Prompts', async () => {
+      rememberRecent('/p/a.yaml');
+      draft.update('prompt', 'a fox in snow');
+      await mountWorkspace(makeContext());
+
+      await openSaveMenu();
+      await chooseTarget('/p/a.yaml');
+
+      expect(promptFileApiMocks.appendPromptEntry).toHaveBeenCalledWith({ path: '/p/a.yaml', prompt: 'a fox in snow' });
+      expect(recentFiles()[0]).toBe('/p/a.yaml');
+      expect(lastSaveTarget()).toBe('/p/a.yaml');
+      const toast = toasts.find((item) => item.type === 'success');
+      expect(typeof toast?.action?.run).toBe('function');
+      toast!.action!.run();
+      expect(router.page).toBe('prompts');
+      expect(router.params.path).toBe('/p/a.yaml');
+    });
+
+    it('saves the negative prompt when it is shown', async () => {
+      rememberRecent('/p/a.yaml');
+      draft.update('prompt', 'a fox');
+      draft.update('negativePrompt', 'blurry');
+      await mountWorkspace(makeContext());
+
+      await openSaveMenu();
+      await chooseTarget('/p/a.yaml');
+
+      expect(promptFileApiMocks.appendPromptEntry).toHaveBeenCalledWith({ path: '/p/a.yaml', prompt: 'a fox', negative: 'blurry' });
+    });
+
+    it('saves the Enhanced text when the Enhanced tab is in view', async () => {
+      rememberRecent('/p/a.yaml');
+      draft.update('prompt', 'a fox');
+      draft.update('enhancedPrompt', 'A red fox in deep snow.');
+      await mountWorkspace(withEnhancer(makeContext()));
+      (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
+      await settle();
+
+      await openSaveMenu();
+      await chooseTarget('/p/a.yaml');
+
+      expect(promptFileApiMocks.appendPromptEntry).toHaveBeenCalledWith({ path: '/p/a.yaml', prompt: 'A red fox in deep snow.' });
+    });
+
+    it('is disabled on the Enhanced tab while nothing is enhanced', async () => {
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(withEnhancer(makeContext()));
+      (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
+      await settle();
+
+      expect(saveButton()!.disabled).toBe(true);
+    });
+
+    it('saves the scene and action of a video prompt', async () => {
+      rememberRecent('/p/a.yaml');
+      draft.update('workflow', 'txt2vid');
+      draft.update('scene', 'A rainy street.');
+      draft.update('prompt', 'She opens an umbrella.');
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+
+      await openSaveMenu();
+      await chooseTarget('/p/a.yaml');
+
+      expect(promptFileApiMocks.appendPromptEntry).toHaveBeenCalledWith({ path: '/p/a.yaml', scene: 'A rainy street.', prompt: 'She opens an umbrella.' });
+    });
+
+    it('is absent in the Prompt file source', async () => {
+      await mountWorkspace(makeContext());
+      expect(saveButton()).not.toBeNull();
+
+      draft.update('promptSource', 'file');
+      await settle();
+      expect(saveButton()).toBeNull();
+    });
+
+    it('is absent in JSON prompt mode', async () => {
+      const ideogramDefaults = makeIdeogramDefaults();
+      draft.update('jsonPromptEnabled', true);
+      await mountWorkspace(makeContext({
+        image_models: [{ id: 'ideo', label: 'ideo', type: 'image' }],
+        defaults: ideogramDefaults,
+        current_image_model: 'ideo',
+        image_model_defaults: { ideo: ideogramDefaults },
+      }));
+
+      expect(target.querySelector('#ws-json-prompt-toggle')).not.toBeNull();
+      expect(target.querySelector('textarea[name="json_prompt"]')).not.toBeNull();
+      expect(saveButton()).toBeNull();
+    });
+
+    it('is disabled while the prompt is blank', async () => {
+      await mountWorkspace(makeContext());
+      expect(saveButton()!.disabled).toBe(true);
+
+      type('ws-prompt', 'a fox');
+      await settle();
+      expect(saveButton()!.disabled).toBe(false);
+    });
+
+    it('saves to a file chosen with Browse…', async () => {
+      draft.update('prompt', 'a fox');
+      browseApiMocks.browsePlaces.mockResolvedValue(placesFor('prompt_file'));
+      browseApiMocks.listDirectory.mockResolvedValue(listingWith('/p/b.yaml'));
+      await mountWorkspace(makeContext());
+
+      await openSaveMenu();
+      (document.querySelector('[role="menu"] [data-action="browse"]') as HTMLButtonElement).click();
+      await settle();
+      chooseInBrowser('b.yaml');
+      await settle();
+
+      expect(promptFileApiMocks.appendPromptEntry).toHaveBeenCalledWith({ path: '/p/b.yaml', prompt: 'a fox' });
+      expect(lastSaveTarget()).toBe('/p/b.yaml');
+    });
+
+    it('saves the enhanced action of a video with your scene when only the action was enhanced', async () => {
+      rememberRecent('/p/a.yaml');
+      draft.update('workflow', 'txt2vid');
+      draft.update('scene', 'A rainy street.');
+      draft.update('prompt', 'She walks.');
+      draft.update('enhancedPrompt', 'She walks slowly under a red umbrella.');
+      await mountWorkspace(withVideoEnhancer(makeContext()));
+      (target.querySelector('#ws-tab-enhanced') as HTMLButtonElement).click();
+      await settle();
+
+      await openSaveMenu();
+      await chooseTarget('/p/a.yaml');
+
+      expect(promptFileApiMocks.appendPromptEntry).toHaveBeenCalledWith({
+        path: '/p/a.yaml', scene: 'A rainy street.', prompt: 'She walks slowly under a red umbrella.',
+      });
+    });
+
+    it('leaves the negative prompt out for a workflow that does not show it', async () => {
+      rememberRecent('/p/a.yaml');
+      draft.update('model', 'flux-lite');
+      draft.update('prompt', 'a fox');
+      await mountWorkspace(makeContext());
+      draft.update('negativePrompt', 'blurry');
+      await settle();
+      expect(target.querySelector('#ws-negative-prompt')).toBeNull();
+
+      await openSaveMenu();
+      await chooseTarget('/p/a.yaml');
+
+      expect(promptFileApiMocks.appendPromptEntry).toHaveBeenCalledWith({ path: '/p/a.yaml', prompt: 'a fox' });
+    });
+
+    it('creates a new file from New file… and then appends the prompt to it', async () => {
+      rememberRecent('/p/a.yaml');
+      draft.update('prompt', 'a fox');
+      promptFileApiMocks.createPromptFile.mockResolvedValue({ path: '/p/new.yaml' });
+      await mountWorkspace(makeContext());
+
+      await openSaveMenu();
+      (document.querySelector('[role="menu"] [data-action="new"]') as HTMLButtonElement).click();
+      await settle();
+      const name = document.querySelector('#prompts-new-name') as HTMLInputElement;
+      name.value = 'new';
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+      await settle();
+      (Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Create') as HTMLButtonElement).click();
+      await settle();
+
+      expect(promptFileApiMocks.createPromptFile).toHaveBeenCalledWith('/p/', 'new');
+      expect(promptFileApiMocks.appendPromptEntry).toHaveBeenCalledWith({ path: '/p/new.yaml', prompt: 'a fox' });
+      expect(promptFileApiMocks.createPromptFile.mock.invocationCallOrder[0]).toBeLessThan(promptFileApiMocks.appendPromptEntry.mock.invocationCallOrder[0]);
+      expect(lastSaveTarget()).toBe('/p/new.yaml');
+      expect(recentFiles()[0]).toBe('/p/new.yaml');
+    });
+
+    it('toasts the server error and remembers nothing when the save is rejected', async () => {
+      rememberRecent('/p/a.yaml');
+      draft.update('prompt', 'a fox $bill');
+      const detail = 'server-detail-for-rejected-save';
+      promptFileApiMocks.appendPromptEntry.mockRejectedValue(new ApiError('rejected', 422, detail));
+      await mountWorkspace(makeContext());
+
+      await openSaveMenu();
+      await chooseTarget('/p/a.yaml');
+
+      const toast = toasts.find((item) => item.type === 'error');
+      expect(toast).toBeDefined();
+      expect(toast?.message).toBe(detail);
+      expect(toasts.some((item) => item.type === 'success')).toBe(false);
+      expect(lastSaveTarget()).toBeNull();
+      expect(saveButton()!.disabled).toBe(false);
+    });
   });
 });
 

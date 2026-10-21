@@ -1,6 +1,16 @@
 # Recent prompts, rewrite history and "save to a prompt file"
 
-**Status:** Proposed (2026-10-17)
+**Status:** In progress (2026-10-21)
+
+## Shipped (unreleased): save a Workspace prompt to a prompt file
+
+- **Save…** sits in the prompt box's tools row (not in a Compose header menu) and offers Recent files, **Browse…** and **New file…**.
+- It saves the text the prompt box shows (Original or Enhanced, with the scene for video and the negative prompt when shown) and writes no `enhance:` field.
+- A server route, `POST /api/prompt-files/append`, appends the entry atomically; the client no longer loads and saves the document.
+- The entry always goes to the end of a set named `prompts`, created at the end of the file when missing, rather than the last set or a set named after the model.
+- The route validates the whole resulting file and refuses with a message when it would have errors; the toast offers **Open in Prompts**.
+
+The shipped design differs from the original section 3 in these points. Sections 1 and 2 below are still open.
 
 ## Problem
 
@@ -9,8 +19,8 @@ The Workspace remembers one prompt: the one in the box. Typing a new one loses t
 ## Evidence
 
 - `DraftState` holds `prompt`, `scene`, `negativePrompt`, `enhancedPrompt`, `enhancedScene` and `enhancedFrom`, each a single value, saved under one `localStorage` key (`ziv-workspace-draft-v1`).
-- The Prompts page already keeps a recent-files list in the browser (`features/prompts/storage.ts`, `RECENT_KEY`, 8 entries), so the pattern exists.
-- The prompt-file API can load and save a document (`POST /api/prompt-files/document`, `PUT /api/prompt-files/document`) and create a file (`POST /api/prompt-files/create`); `NewFileDialog` and the path browser (`purpose: prompt_file`) exist.
+- The Prompts page already keeps a recent-files list in the browser (`lib/state/promptFileStorage.ts`, `RECENT_KEY`, 8 entries), so the pattern exists.
+- The prompt-file API can load and save a document (`POST /api/prompt-files/document`, `PUT /api/prompt-files/document`) and create a file (`POST /api/prompt-files/create`); `NewPromptFileDialog` and the path browser (`purpose: prompt_file`) exist.
 - `submittedPair` in `lib/state/promptEnhance.ts` already knows which text a job was submitted with.
 
 ## Proposed change
@@ -26,15 +36,9 @@ The Workspace remembers one prompt: the one in the box. Typing a new one loses t
 - The draft keeps the last five rewrites of the current text (`enhancedHistory: {prompt, scene, settings, at}[]`) instead of one. The Enhanced tab gets a `‹ 2 of 3 ›` stepper; the shown rewrite is the one Generate uses.
 - The history is cleared when the source text changes, which is when the existing "Out of date" badge appears, so the two rules match.
 
-### 3. Save to a prompt file
-
-- **Save to file…** in the Compose header menu. It opens the path browser on prompt files, with **New file…** beside it.
-- The client loads the document, appends an entry with the prompt, scene, negative prompt and the current enhance settings (as the file's `enhance:` field), to the last set, or to a new set named after the model when the file has none, and saves it. Comments in the file survive because the document API already keeps them.
-- The toast offers **Open in Prompts**.
-
 ### Docs and changelog
 
-- CHANGELOG `[Unreleased]`: "The Workspace remembers recent prompts and the last rewrites, and can save a prompt to a prompt file."
+- CHANGELOG `[Unreleased]`: "The Workspace remembers recent prompts and the last rewrites."
 - The Web UI section of `docs/getting-started.md` mentions the clock button and that recents are kept in the browser, like the Workspace settings.
 
 ## Alternatives considered

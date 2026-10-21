@@ -8,7 +8,7 @@ is still decided by :mod:`zvisiongenerator.utils.prompts` (PyYAML), which every 
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import io
 import re
 from typing import Any, Literal
@@ -179,6 +179,53 @@ def render_prompt_document(original_text: str, document: PromptDocument) -> str:
     # Keep the header's own spacing: a blank line before the first key only when the file had one.
     gap = "\n" if root and lines[_key_line(root, next(iter(root))) - 1].strip() == "" else ""
     return "\n".join(header) + "\n" + gap + body
+
+
+def append_entry(document: PromptDocument, set_name: str, prompt: str, *, scene: str | None = None, negative: str | None = None) -> tuple[PromptDocument, str]:
+    """Return *document* with one entry added at the end of the first set called *set_name*.
+
+    The set is added at the end of the document when none has that name. Texts are stripped; a blank *scene* or
+    *negative* is left out. The entry is active and has no ``enhance``, so neither key is written. Ids are
+    positional, so the returned id is the one the entry has after the saved file is loaded again.
+
+    Args:
+        document: The document to extend.
+        set_name: The set to append to.
+        prompt: The entry's prompt text.
+        scene: The entry's scene text, if any.
+        negative: The entry's negative prompt text, if any.
+
+    Returns:
+        The new document and the id of the new entry.
+
+    Raises:
+        ValueError: When *prompt* is blank.
+    """
+    prompt_text = prompt.strip()
+    if not prompt_text:
+        raise ValueError("The prompt is empty.")
+    index = next((position for position, doc_set in enumerate(document.sets) if doc_set.name == set_name), None)
+    if index is None:
+        target = DocumentSet(id=f"s{len(document.sets)}", name=set_name)
+        sets = document.sets + (target,)
+        index = len(sets) - 1
+    else:
+        target = document.sets[index]
+        sets = document.sets
+    entry = DocumentEntry(
+        id=f"{target.id}.e{len(target.entries)}",
+        prompt=PromptValue(kind="text", text=prompt_text),
+        negative=_optional_text_value(negative),
+        scene=_optional_text_value(scene),
+    )
+    updated = replace(target, entries=target.entries + (entry,))
+    return replace(document, sets=sets[:index] + (updated,) + sets[index + 1 :]), entry.id
+
+
+def _optional_text_value(text: str | None) -> PromptValue | None:
+    """Return a text value for *text* stripped, or None when it is missing or blank."""
+    stripped = (text or "").strip()
+    return PromptValue(kind="text", text=stripped) if stripped else None
 
 
 def option_id_map(before: PromptDocument, after: PromptDocument) -> dict[str, str]:

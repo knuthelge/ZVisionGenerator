@@ -196,7 +196,7 @@ zvisiongenerator/
 │   ├── model_inventory.py         Backend model inventory for Web UI contracts
 │   ├── model_status.py            Per-model downloaded / memory-fit status for the SPA
 │   ├── path_browser.py            Host folder listings for the in-app path browser
-│   ├── prompt_builder.py          Prompts page API: load, preview, save (revision-checked) and create prompt files
+│   ├── prompt_builder.py          Prompts page API: load, preview, save (revision-checked), create prompt files, and append a Workspace prompt
 │   ├── prompt_files.py            Read and atomically update host-local prompt files
 │   ├── request_guard.py           DNS-rebinding and cross-site request protection
 │   ├── upscale_api.py             Plan a viewer upscale job: refinement model, carried settings, limits

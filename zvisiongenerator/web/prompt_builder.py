@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import hashlib
 from pathlib import Path
+import threading
 from typing import Any
 import warnings
 
@@ -14,6 +15,7 @@ from zvisiongenerator.utils.prompt_document import (
     DocumentSnippet,
     PromptDocument,
     PromptValue,
+    append_entry,
     load_prompt_document,
     option_id_map,
     render_prompt_document,
@@ -23,6 +25,10 @@ from zvisiongenerator.utils.prompt_document_check import EntryPreview, has_error
 from zvisiongenerator.utils.prompts import inspect_prompts_text
 from zvisiongenerator.utils.atomic_write import write_text_atomic
 from zvisiongenerator.web.prompt_files import host_local_path, normalize_prompt_file_path
+
+SAVE_SET_NAME = "prompts"
+# Web handlers run in worker threads; this serialises the read-modify-write of prompt files.
+_PROMPT_FILE_LOCK = threading.Lock()
 
 
 class PromptFileChangedError(Exception):
@@ -75,28 +81,22 @@ def save_document_payload(
         ValueError: When the document is malformed or has errors, or the result would not load.
     """
     normalized = normalize_prompt_file_path(path, accepted_extensions=accepted_extensions)
-    if force:
-        if base_text is None or file_revision(base_text.encode("utf-8")) != revision:
-            raise ValueError("Overwriting needs the text the builder loaded.")
-        original_text = base_text
-    else:
-        current = normalized.read_bytes()
-        if file_revision(current) != revision:
-            raise PromptFileChangedError("The prompt file changed on disk since it was opened.")
-        original_text = current.decode("utf-8")
+    with _PROMPT_FILE_LOCK:
+        if force:
+            if base_text is None or file_revision(base_text.encode("utf-8")) != revision:
+                raise ValueError("Overwriting needs the text the builder loaded.")
+            original_text = base_text
+        else:
+            current = normalized.read_bytes()
+            if file_revision(current) != revision:
+                raise PromptFileChangedError("The prompt file changed on disk since it was opened.")
+            original_text = current.decode("utf-8")
 
-    document = _document_from_payload(document_payload)
-    _previews, problems = preview_document(document)
-    if has_errors(problems):
-        messages = "; ".join(dict.fromkeys(problem.message for problem in problems if problem.severity == "error"))
-        raise ValueError(f"Fix these problems before saving: {messages}")
-
-    before = load_prompt_document(original_text)
-    new_text = render_prompt_document(original_text, document)
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        inspect_prompts_text(new_text, source_name=str(normalized))
-    write_text_atomic(normalized, new_text)
+        document = _document_from_payload(document_payload)
+        _require_no_errors(document, "Fix these problems before saving")
+        before = load_prompt_document(original_text)
+        new_text, warning_messages = _render_checked(original_text, document, str(normalized))
+        write_text_atomic(normalized, new_text)
 
     return {
         "path": str(normalized),
@@ -105,8 +105,66 @@ def save_document_payload(
         "document": _document_to_payload(load_prompt_document(new_text)),
         "ids": _positional_ids(document),
         "option_id_map": option_id_map(before, document),
-        "warnings": list(dict.fromkeys(str(warning.message) for warning in caught)),
+        "warnings": warning_messages,
     }
+
+
+def append_entry_payload(
+    path: str,
+    prompt: str,
+    *,
+    scene: str | None = None,
+    negative: str | None = None,
+    accepted_extensions: tuple[str, ...],
+) -> dict[str, Any]:
+    """Append one entry to the ``prompts`` set of a prompt file (adding the set at the end when missing) and write it atomically.
+
+    Comments and layout are kept as on a builder save. Errors anywhere in the resulting file block the write.
+
+    Args:
+        path: The prompt file.
+        prompt: The entry's prompt text.
+        scene: The entry's scene text, if any.
+        negative: The entry's negative prompt text, if any.
+        accepted_extensions: Allowed prompt-file extensions.
+
+    Returns:
+        ``{path, revision, entry_id, set_name}``, where ``entry_id`` is the entry's id when the file is loaded again.
+
+    Raises:
+        ValueError: When the path is not a usable prompt file, the file does not load, the prompt is blank, the
+            file would have errors, or the result would not load. Nothing is written then.
+    """
+    normalized = normalize_prompt_file_path(path, accepted_extensions=accepted_extensions)
+    with _PROMPT_FILE_LOCK:
+        original_text = normalized.read_bytes().decode("utf-8")
+        document, new_id = append_entry(load_prompt_document(original_text), SAVE_SET_NAME, prompt, scene=scene, negative=negative)
+        _require_no_errors(document, "Can't save the prompt to this file")
+        new_text, _warnings = _render_checked(original_text, document, str(normalized))
+        write_text_atomic(normalized, new_text)
+    return {
+        "path": str(normalized),
+        "revision": file_revision(new_text.encode("utf-8")),
+        "entry_id": _positional_ids(document)[new_id],
+        "set_name": SAVE_SET_NAME,
+    }
+
+
+def _require_no_errors(document: PromptDocument, lead: str) -> None:
+    """Raise ``ValueError("<lead>: <errors>")`` when the document has error-level problems."""
+    _previews, problems = preview_document(document)
+    if has_errors(problems):
+        messages = "; ".join(dict.fromkeys(problem.message for problem in problems if problem.severity == "error"))
+        raise ValueError(f"{lead}: {messages}")
+
+
+def _render_checked(original_text: str, document: PromptDocument, source_name: str) -> tuple[str, list[str]]:
+    """Render *document* onto *original_text* and check the result loads as a prompt file; return the text and the warnings."""
+    new_text = render_prompt_document(original_text, document)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        inspect_prompts_text(new_text, source_name=source_name)
+    return new_text, list(dict.fromkeys(str(warning.message) for warning in caught))
 
 
 def preview_document_payload(document_payload: Any, *, roll_entry_id: str | None = None) -> dict[str, Any]:

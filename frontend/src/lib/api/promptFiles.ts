@@ -4,6 +4,8 @@ import type {
   PromptDocumentLoad,
   PromptDocumentPreview,
   PromptDocumentSaved,
+  PromptEntryAppended,
+  PromptEntryText,
   PromptFileInspection,
 } from '$lib/types';
 
@@ -36,4 +38,9 @@ export function previewPromptDocument(document: PromptDocument, rollEntryId: str
 
 export function createPromptFile(directory: string, name: string): Promise<{ path: string }> {
   return api.post<{ path: string }>('/api/prompt-files/create', { directory, name });
+}
+
+/** Append one entry to the `prompts` set of a prompt file. */
+export function appendPromptEntry(data: { path: string } & PromptEntryText): Promise<PromptEntryAppended> {
+  return api.post<PromptEntryAppended>('/api/prompt-files/append', data);
 }

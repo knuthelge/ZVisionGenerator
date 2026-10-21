@@ -1,7 +1,8 @@
 <script lang="ts">
   import { createPromptFile } from '$lib/api/promptFiles';
   import { errorText } from '$lib/api/client';
-  import { Modal, PathField } from '$lib/components/molecules';
+  import Modal from './Modal.svelte';
+  import PathField from './PathField.svelte';
 
   interface Props {
     open?: boolean;

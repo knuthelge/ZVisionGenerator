@@ -109,7 +109,7 @@ from zvisiongenerator.web.path_browser import BrowsePlace, BrowsePurpose, Direct
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
 from zvisiongenerator.web.upscale_api import plan_seedvr2_upscale, plan_upscale, upscale_json_request, upscale_size_label
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
-from zvisiongenerator.web.prompt_builder import PromptFileChangedError, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
+from zvisiongenerator.web.prompt_builder import PromptFileChangedError, append_entry_payload, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
 from zvisiongenerator.web.model_delete import DeleteTarget, delete_lora, delete_model, delete_scope, enhancer_delete_target, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.review import review_enabled
@@ -394,6 +394,20 @@ async def api_prompt_file_create(request: Request) -> dict[str, Any]:
             accepted_extensions=_PROMPT_FILE_EXTENSIONS,
         )
     except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/prompt-files/append")
+async def api_prompt_file_append(request: Request) -> dict[str, Any]:
+    """Append a prompt to the ``prompts`` set of a prompt file (the set is added at the end when missing)."""
+    payload = await request.json()
+    path = _required_json_string(payload, "path")
+    try:
+        prompt = json_field(payload, "prompt", str, "a string") or ""
+        scene = json_field(payload, "scene", str, "a string")
+        negative = json_field(payload, "negative", str, "a string")
+        return await run_in_threadpool(append_entry_payload, path, prompt, scene=scene, negative=negative, accepted_extensions=_PROMPT_FILE_EXTENSIONS)
+    except (ValueError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 

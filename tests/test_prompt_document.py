@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+import yaml
 
 from zvisiongenerator.utils.prompt_document import (
     DocumentEntry,
@@ -12,6 +13,7 @@ from zvisiongenerator.utils.prompt_document import (
     DocumentSnippet,
     PromptDocument,
     PromptValue,
+    append_entry,
     is_active,
     load_prompt_document,
     minimal_enhance,
@@ -425,3 +427,151 @@ class TestScene:
 
         assert edited == text.replace("scene: old", "scene: new")
         assert removed == "# top\ns:\n  - negative: n  # nn\n    prompt: p\n    active: true\n\n  - prompt: q\n"
+
+
+COMMENTED = """\
+# Header comment
+snippets:
+  diner: a cozy diner  # x
+
+# Above portrait
+portrait:
+  - prompt: first  # inline
+    negative: blurry
+
+# Above prompts
+prompts:
+  - prompt: existing
+
+# Footer comment
+"""
+
+
+class TestAppendEntry:
+    def test_appends_to_an_existing_set(self):
+        document = load_prompt_document(SAMPLE)
+        before = document.sets[0].entries
+
+        updated, entry_id = append_entry(document, "portrait", "new one")
+
+        assert entry_id == f"{document.sets[0].id}.e{len(before)}"
+        assert updated.sets[0].entries[:-1] == before
+        assert updated.sets[0].entries[-1].id == entry_id
+        assert updated.sets[0].entries[-1].prompt == _text("new one")
+        assert updated.sets[1:] == document.sets[1:]
+        assert updated.snippets == document.snippets
+
+    def test_adds_a_missing_set_at_the_end(self):
+        document = load_prompt_document(SAMPLE)
+
+        updated, entry_id = append_entry(document, "prompts", "new")
+
+        assert entry_id == f"s{len(document.sets)}.e0"
+        assert updated.sets[:-1] == document.sets
+        assert updated.sets[-1].id == f"s{len(document.sets)}"
+        assert updated.sets[-1].name == "prompts"
+        assert len(updated.sets[-1].entries) == 1
+
+    def test_empty_file_gets_one_set_with_one_entry(self):
+        updated, entry_id = append_entry(load_prompt_document(""), "prompts", "new")
+
+        assert [doc_set.name for doc_set in updated.sets] == ["prompts"]
+        assert len(updated.sets[0].entries) == 1
+        assert entry_id == "s0.e0"
+
+    def test_scene_and_negative_are_included_and_stripped(self):
+        updated, _ = append_entry(load_prompt_document(""), "prompts", "  new \n", scene="  a room ", negative=" ugly\n")
+
+        entry = updated.sets[0].entries[0]
+        assert (entry.prompt, entry.scene, entry.negative) == (_text("new"), _text("a room"), _text("ugly"))
+
+    @pytest.mark.parametrize("blank", [None, "", "  ", "\n"])
+    def test_blank_scene_and_negative_are_left_out(self, blank):
+        updated, _ = append_entry(load_prompt_document(""), "prompts", "new", scene=blank, negative=blank)
+
+        entry = updated.sets[0].entries[0]
+        assert entry.scene is None
+        assert entry.negative is None
+
+    @pytest.mark.parametrize("blank", ["", "   ", "\n\t"])
+    def test_blank_prompt_raises(self, blank):
+        with pytest.raises(ValueError):
+            append_entry(load_prompt_document(SAMPLE), "prompts", blank)
+
+    def test_new_entry_is_active_without_enhance(self):
+        updated, _ = append_entry(load_prompt_document(""), "prompts", "new")
+
+        entry = updated.sets[0].entries[0]
+        assert entry.active is True
+        assert entry.enhance is None
+
+    def test_uses_the_first_of_duplicate_set_names(self):
+        document = load_prompt_document("a:\n  - prompt: x\nb:\n  - prompt: y\n")
+        document = replace(document, sets=(document.sets[0], replace(document.sets[1], name="a")))
+
+        updated, entry_id = append_entry(document, "a", "new")
+
+        assert entry_id == "s0.e1"
+        assert len(updated.sets[1].entries) == 1
+
+
+class TestAppendRender:
+    def _render(self, text: str, **kwargs) -> tuple[str, str]:
+        updated, entry_id = append_entry(load_prompt_document(text), "prompts", "new", **kwargs)
+        return render_prompt_document(text, updated), entry_id
+
+    def test_new_entry_is_last_with_scene_prompt_negative_order(self):
+        rendered, entry_id = self._render(COMMENTED, scene="a room", negative="ugly")
+
+        reloaded = load_prompt_document(rendered)
+        assert reloaded.sets[-1].entries[-1].id == entry_id
+        assert reloaded.sets[-1].entries[-1].prompt == _text("new")
+        tail = rendered[rendered.index("  - prompt: existing") :]
+        assert tail.index("scene: a room") < tail.index("prompt: new") < tail.index("negative: ugly")
+
+    def test_no_active_or_enhance_key_is_written(self):
+        rendered, _ = self._render(COMMENTED, scene="a room", negative="ugly")
+
+        assert yaml.safe_load(rendered)["prompts"][-1] == {"scene": "a room", "prompt": "new", "negative": "ugly"}
+
+    def test_comments_and_other_sets_survive(self):
+        rendered, _ = self._render(COMMENTED)
+
+        for line in ("# Header comment", "diner: a cozy diner  # x", "# Above portrait", "prompt: first  # inline", "# Above prompts"):
+            assert line in rendered
+        assert rendered.rstrip().endswith("# Footer comment")
+        before, after = load_prompt_document(COMMENTED), load_prompt_document(rendered)
+        assert after.sets[0] == before.sets[0]
+        assert after.snippets == before.snippets
+
+    def test_missing_set_is_created_before_the_footer(self):
+        text = "portrait:\n  - prompt: a\n# footer\n"
+
+        rendered, entry_id = self._render(text)
+
+        assert entry_id == "s1.e0"
+        assert rendered.index("prompts:") < rendered.index("# footer")
+        assert rendered.rstrip().endswith("# footer")
+
+    def test_indented_trailing_comment_stays_before_the_new_entry(self):
+        text = "prompts:\n  - prompt: a\n  # - prompt: idea\n\n# above other\nother:\n  - prompt: b\n# footer\n"
+
+        rendered, _ = self._render(text)
+
+        assert rendered.index("# - prompt: idea") < rendered.index("prompt: new")
+        assert "# above other\nother:" in rendered
+        assert rendered.rstrip().endswith("# footer")
+        inspect_prompts_text(rendered, source_name="test")
+
+    def test_multi_line_prompt_renders_as_a_block_and_reloads_equal(self):
+        updated, _ = append_entry(load_prompt_document(SAMPLE), "prompts", "line one\nline two\n")
+
+        rendered = render_prompt_document(SAMPLE, updated)
+
+        assert "prompt: |-\n" in rendered
+        assert load_prompt_document(rendered).sets[-1].entries[-1].prompt == _text("line one\nline two")
+
+    def test_yaml11_ambiguous_text_is_quoted(self):
+        rendered, _ = self._render("", negative="no")
+
+        assert yaml.safe_load(rendered)["prompts"][0]["negative"] == "no"

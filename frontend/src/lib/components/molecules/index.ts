@@ -30,3 +30,4 @@ export { default as PageHeader } from './PageHeader.svelte';
 export { default as KeyValueList, type KeyValueItem } from './KeyValueList.svelte';
 export { default as PathBrowser } from './PathBrowser.svelte';
 export { default as PathInput } from './PathInput.svelte';
+export { default as NewPromptFileDialog } from './NewPromptFileDialog.svelte';

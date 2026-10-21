@@ -62,6 +62,16 @@ Saving (`⌘S`) is blocked while the file has errors that would stop it from loa
 
 A file that isn't valid YAML, or isn't shaped like a prompt file, opens in a repair view with the error and the raw text to fix. **New file…** in the file menu creates an empty prompt file in a folder you choose.
 
+### Save a Workspace prompt
+
+**Save…** in the prompt box's tools row of the Workspace appends the prompt you are looking at to a prompt file. It shows when the prompt source is **Inline** and is hidden in JSON mode; it is disabled while the prompt is being enhanced or when there is nothing to save.
+
+- **What is saved:** the text in the prompt box. In the **Prompt** tab (**Your text** for video) that is your own text; in the **Enhanced** tab it is the rewrite, and a part with no enhanced text (the prompt, or the scene for video) uses your own text, as Generate does. Video also saves the scene, and the negative prompt is saved when it is shown. No `enhance:` or `active:` field is written.
+- **Where it goes:** the end of the set named `prompts`, which is added at the end of the file when it is missing. Choose a **Recent** file, **Browse…** for one, or create one with **New file…**.
+- **The file:** comments are kept and the layout is tidied, as when you save on the Prompts page. A file with errors (for example an undefined `$snippet`) is left unchanged, and the message says what to fix.
+
+The toast that confirms the save has **Open in Prompts**, which opens the file on the Prompts page and adds it to that page's Recent list. Unsaved Prompts-page edits to a file are dropped the next time that file opens, because the file has changed.
+
 ## Prompt Variables
 
 Use `{option1|option2|option3}` syntax for random selection each run:

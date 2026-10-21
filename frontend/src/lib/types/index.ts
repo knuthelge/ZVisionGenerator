@@ -498,6 +498,20 @@ export interface PromptDocumentSaved {
   warnings: string[];
 }
 
+/** The text of one prompt-file entry the Workspace saves. */
+export interface PromptEntryText {
+  prompt: string;
+  scene?: string;
+  negative?: string;
+}
+
+export interface PromptEntryAppended {
+  path: string;
+  revision: string;
+  entry_id: string;
+  set_name: string;
+}
+
 export interface DocumentProblem {
   target: string;
   severity: 'error' | 'warning';

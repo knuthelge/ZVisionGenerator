@@ -1,13 +1,17 @@
-"""Tests for the prompt-builder routes: load, save, preview and create."""
+"""Tests for the prompt-builder routes: load, save, preview, create and append."""
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import Any
 
 from fastapi.testclient import TestClient
+import pytest
 
+from zvisiongenerator.web import prompt_builder
 from zvisiongenerator.web import server as web_server
-from zvisiongenerator.web.prompt_builder import file_revision
+from zvisiongenerator.web.prompt_builder import PromptFileChangedError, append_entry_payload, file_revision, save_document_payload
 
 SAMPLE = """\
 snippets:
@@ -313,3 +317,192 @@ class TestScene:
         assert payload["entries"]["s0.e1"] == {"prompt": "A dog barks.", "negative": None}
         assert payload["snippet_uses"] == {"n0": 1}
         assert payload["problems"] == []
+
+
+_EXTENSIONS = (".yaml", ".yml")
+
+
+def _append(client: TestClient, path, **fields: Any):
+    return client.post("/api/prompt-files/append", json={"path": str(path), **fields})
+
+
+def _slow(monkeypatch, name: str, delay: float) -> None:
+    """Make ``prompt_builder.<name>`` sleep *delay* seconds before it runs, to widen a race window."""
+    original = getattr(prompt_builder, name)
+
+    def slowed(*args: Any, **kwargs: Any) -> Any:
+        time.sleep(delay)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(prompt_builder, name, slowed)
+
+
+class TestAppendRoute:
+    def test_appends_to_a_new_prompts_set_and_keeps_the_rest(self, tmp_path):
+        path = _write(tmp_path)
+
+        with TestClient(web_server.app) as client:
+            response = _append(client, path, prompt="a harbour at night", scene="the quay", negative="blurry")
+            loaded = _load(client, path)
+
+        body = response.json()
+        assert response.status_code == 200
+        assert set(body) == {"path", "revision", "entry_id", "set_name"}
+        assert body["path"] == str(path.resolve())
+        assert body["set_name"] == "prompts"
+        assert body["entry_id"] == "s1.e0"
+        assert body["revision"] == file_revision(path.read_bytes()) == loaded["revision"]
+        last = loaded["document"]["sets"][-1]
+        assert last["name"] == "prompts"
+        assert [entry["id"] for entry in last["entries"]] == ["s1.e0"]
+        assert last["entries"][0]["prompt"] == {"kind": "text", "text": "a harbour at night"}
+        assert last["entries"][0]["scene"] == {"kind": "text", "text": "the quay"}
+        text = path.read_text(encoding="utf-8")
+        assert "# Portraits" in text
+        assert "light: soft light" in text
+
+    def test_a_second_append_lands_after_the_first(self, tmp_path):
+        path = _write(tmp_path)
+
+        with TestClient(web_server.app) as client:
+            first = _append(client, path, prompt="one")
+            second = _append(client, path, prompt="two")
+            loaded = _load(client, path)
+
+        assert first.json()["entry_id"] == "s1.e0"
+        assert second.json()["entry_id"] == "s1.e1"
+        texts = [entry["prompt"]["text"] for entry in loaded["document"]["sets"][-1]["entries"]]
+        assert texts == ["one", "two"]
+
+    def test_appends_to_a_file_made_by_the_create_route(self, tmp_path):
+        with TestClient(web_server.app) as client:
+            created = client.post("/api/prompt-files/create", json={"directory": str(tmp_path), "name": "fresh"}).json()["path"]
+            response = _append(client, created, prompt="first words")
+            loaded = _load(client, created)
+
+        assert response.status_code == 200
+        assert response.json()["entry_id"] == "s0.e0"
+        assert [doc_set["name"] for doc_set in loaded["document"]["sets"]] == ["prompts"]
+        assert len(loaded["document"]["sets"][0]["entries"]) == 1
+
+    def test_no_active_or_enhance_key_is_written(self, tmp_path):
+        path = _write(tmp_path, "")
+
+        with TestClient(web_server.app) as client:
+            _append(client, path, prompt="plain", negative="  ")
+
+        assert path.read_text(encoding="utf-8") == "prompts:\n  - prompt: plain\n"
+
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {"prompt": ""},
+            {"prompt": "   "},
+            {},
+            {"prompt": 5},
+            {"prompt": "ok", "scene": []},
+            {"prompt": "ok", "negative": 3},
+            {"prompt": "uses $bill"},
+        ],
+    )
+    def test_bad_input_is_a_422_and_leaves_the_file_unchanged(self, tmp_path, fields):
+        path = _write(tmp_path)
+        before = path.read_bytes()
+
+        with TestClient(web_server.app) as client:
+            response = _append(client, path, **fields)
+
+        assert response.status_code == 422
+        assert path.read_bytes() == before
+        assert response.json()["detail"]
+
+    def test_missing_path_nonexistent_file_and_wrong_extension_are_422(self, tmp_path):
+        text_file = tmp_path / "notes.txt"
+        text_file.write_text("keep", encoding="utf-8")
+
+        with TestClient(web_server.app) as client:
+            no_path = client.post("/api/prompt-files/append", json={"prompt": "x"})
+            missing = _append(client, tmp_path / "nope.yaml", prompt="x")
+            wrong_extension = _append(client, text_file, prompt="x")
+
+        assert [no_path.status_code, missing.status_code, wrong_extension.status_code] == [422, 422, 422]
+        assert not (tmp_path / "nope.yaml").exists()
+        assert text_file.read_text(encoding="utf-8") == "keep"
+
+    def test_a_file_that_is_not_yaml_is_a_422_and_unchanged(self, tmp_path):
+        path = _write(tmp_path, "a: [\n")
+
+        with TestClient(web_server.app) as client:
+            response = _append(client, path, prompt="x")
+
+        assert response.status_code == 422
+        assert path.read_text(encoding="utf-8") == "a: [\n"
+
+    def test_prompts_that_is_not_a_list_is_a_422_and_unchanged(self, tmp_path):
+        path = _write(tmp_path, "prompts:\n")
+
+        with TestClient(web_server.app) as client:
+            response = _append(client, path, prompt="x")
+
+        assert response.status_code == 422
+        assert response.json()["detail"]
+        assert path.read_text(encoding="utf-8") == "prompts:\n"
+
+    def test_an_error_elsewhere_in_the_file_blocks_the_append(self, tmp_path):
+        path = _write(tmp_path, "portrait:\n  - prompt: ''\n")
+        before = path.read_bytes()
+
+        with TestClient(web_server.app) as client:
+            response = _append(client, path, prompt="fine")
+
+        assert response.status_code == 422
+        assert response.json()["detail"]
+        assert path.read_bytes() == before
+
+    def test_route_is_in_the_openapi_schema(self):
+        with TestClient(web_server.app) as client:
+            paths = client.get("/openapi.json").json()["paths"]
+
+        assert "post" in paths["/api/prompt-files/append"]
+
+
+class TestAppendLocking:
+    def test_two_concurrent_appends_both_land(self, tmp_path, monkeypatch):
+        path = _write(tmp_path)
+        _slow(monkeypatch, "load_prompt_document", 0.05)
+        threads = [threading.Thread(target=append_entry_payload, args=(str(path), text), kwargs={"accepted_extensions": _EXTENSIONS}) for text in ("one", "two")]
+
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        text = path.read_text(encoding="utf-8")
+        assert "prompt: one" in text
+        assert "prompt: two" in text
+
+    def test_a_save_racing_an_append_does_not_lose_the_append(self, tmp_path, monkeypatch):
+        path = _write(tmp_path)
+        with TestClient(web_server.app) as client:
+            loaded = _load(client, path)
+        document = loaded["document"]
+        document["sets"][0]["entries"][0]["prompt"]["text"] = "edited"
+        outcome: dict[str, PromptFileChangedError] = {}
+
+        def save() -> None:
+            try:
+                save_document_payload(str(path), loaded["revision"], document, accepted_extensions=_EXTENSIONS)
+            except PromptFileChangedError as exc:
+                outcome["save"] = exc
+
+        _slow(monkeypatch, "_document_from_payload", 0.1)  # only the save calls it
+        saver = threading.Thread(target=save)
+        appender = threading.Thread(target=append_entry_payload, args=(str(path), "added"), kwargs={"accepted_extensions": _EXTENSIONS})
+        saver.start()
+        time.sleep(0.01)
+        appender.start()
+        saver.join()
+        appender.join()
+
+        text = path.read_text(encoding="utf-8")
+        assert ("prompt: edited" in text and "prompt: added" in text) or isinstance(outcome.get("save"), PromptFileChangedError)

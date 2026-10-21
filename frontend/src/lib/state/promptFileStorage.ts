@@ -4,6 +4,7 @@ import type { PromptDocument } from '$lib/types';
 export const UNSAVED_KEY = 'ziv.promptBuilder.unsaved';
 export const RECENT_KEY = 'ziv.promptBuilder.recent';
 const RECENT_LIMIT = 8;
+const SAVE_TARGET_KEY = 'ziv.workspace.savePromptFile';
 
 export interface UnsavedDocument {
   revision: string;
@@ -55,4 +56,14 @@ export function rememberRecent(path: string): void {
 
 export function forgetRecent(path: string): void {
   write(RECENT_KEY, recentFiles().filter((item) => item !== path));
+}
+
+/** The prompt file the Workspace last saved a prompt to. */
+export function lastSaveTarget(): string | null {
+  const path = read<unknown>(SAVE_TARGET_KEY, null);
+  return typeof path === 'string' && path ? path : null;
+}
+
+export function rememberSaveTarget(path: string): void {
+  write(SAVE_TARGET_KEY, path);
 }

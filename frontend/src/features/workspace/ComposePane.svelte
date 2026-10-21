@@ -9,6 +9,8 @@
   import { PromptFileField, Segmented } from '$lib/components/molecules';
   import type { DraftState, PromptSource, WorkspaceContext } from '$lib/types';
   import PromptEnhancer from './PromptEnhancer.svelte';
+  import SavePromptMenu from './SavePromptMenu.svelte';
+  import { promptToSave } from './savePrompt';
   import { workspaceCapabilities } from './capabilities';
 
   interface Props {
@@ -57,6 +59,9 @@
   const visibleText = $derived(jsonMode ? s.jsonPrompt : showingEnhanced ? enhancedValue : s.prompt);
   const visibleScene = $derived(pairMode ? (showingEnhanced ? enhancedSceneValue : s.scene) : '');
   const wordCount = $derived(countWords(`${visibleScene} ${visibleText}`));
+  const saveSelection = $derived(
+    promptToSave(s, { enhancedView: showingEnhanced, enhancing, jsonMode, pairMode, showNegative: caps.showNegativePrompt })
+  );
   const hasEnhanced = $derived(s.enhancedPrompt !== '' || (pairMode && s.enhancedScene !== ''));
   // A video needs a scene or an action; Enhanced text in either box stands in for both.
   const textMissing = $derived(!enhancedUsed && !canSubmitText(s));
@@ -341,6 +346,9 @@
         title="Structured JSON caption: replaces the normal prompt"
         onclick={() => draft.update('jsonPromptEnabled', !s.jsonPromptEnabled)}
       >{'{ }'} JSON</button>
+    {/if}
+    {#if !jsonMode}
+      <SavePromptMenu selection={saveSelection} workspaceFile={s.promptFilePath} enhancedView={showingEnhanced} />
     {/if}
     {#if showingEnhanced && !s.enhanceAuto}
       {#if stale}

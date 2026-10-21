@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearUnsaved, forgetRecent, loadUnsaved, recentFiles, rememberRecent, saveUnsaved } from './storage';
+import {
+  clearUnsaved,
+  forgetRecent,
+  lastSaveTarget,
+  loadUnsaved,
+  recentFiles,
+  rememberRecent,
+  rememberSaveTarget,
+  saveUnsaved,
+} from './promptFileStorage';
 
 describe('prompt builder storage', () => {
   beforeEach(() => localStorage.clear());
@@ -27,5 +36,20 @@ describe('prompt builder storage', () => {
   it('survives unreadable storage', () => {
     localStorage.setItem('ziv.promptBuilder.recent', '{not json');
     expect(recentFiles()).toEqual([]);
+  });
+
+  it('remembers the last save target', () => {
+    expect(lastSaveTarget()).toBeNull();
+    rememberSaveTarget('/a.yaml');
+    expect(lastSaveTarget()).toBe('/a.yaml');
+    rememberSaveTarget('/b.yaml');
+    expect(lastSaveTarget()).toBe('/b.yaml');
+  });
+
+  it('ignores an unreadable or non-string save target', () => {
+    localStorage.setItem('ziv.workspace.savePromptFile', '{bad');
+    expect(lastSaveTarget()).toBeNull();
+    localStorage.setItem('ziv.workspace.savePromptFile', '42');
+    expect(lastSaveTarget()).toBeNull();
   });
 });

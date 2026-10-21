@@ -6,7 +6,7 @@ import { draft } from '$lib/state/draft.svelte';
 import { takePromptRun } from '$lib/state/pendingPromptRun';
 import { router } from '$lib/state/router.svelte';
 import type { PromptDocument, PromptDocumentLoad, PromptDocumentPreview, PromptDocumentSaved } from '$lib/types';
-import { loadUnsaved, saveUnsaved } from './storage';
+import { loadUnsaved, saveUnsaved } from '$lib/state/promptFileStorage';
 
 const api = vi.hoisted(() => ({
   loadPromptDocument: vi.fn(),
