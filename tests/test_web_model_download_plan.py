@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -14,6 +15,7 @@ from zvisiongenerator.backends.cuda import download_plan as cuda_plan
 from zvisiongenerator.downloads.space import SpaceNeed
 from zvisiongenerator.downloads.target import DownloadTarget, TargetCheck
 from zvisiongenerator.utils.ideogram4_instant import instant_source, write_build_record
+from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
 from zvisiongenerator.web import model_download_plan as plan_module
 from zvisiongenerator.web import workspace_api as workspace_api_module
@@ -365,3 +367,50 @@ class TestPlanSummary:
 
         with pytest.raises(RuntimeError, match="owner/a"):
             plan_summary(self._plan(DownloadTarget("owner/a")), check=_refuse, present=lambda t: False, cache_dir=lambda: tmp_path)
+
+
+class TestInstantStatus:
+    """The Workspace counts an unbuilt Ideogram 4 Instant folder as downloaded once its sources are on disk."""
+
+    @pytest.fixture
+    def present(self, monkeypatch):
+        repos: set[str] = set()
+        real = workspace_api_module.row_download_needed
+        monkeypatch.setattr(workspace_api_module, "row_download_needed", lambda *a, **k: real(*a, present=lambda target: target.repo_id in repos, **k))
+        monkeypatch.setattr(workspace_api_module, "memory_budget", lambda: MemoryBudget(10 * 1024**3))
+        return repos
+
+    def _status(self, env, *, instant_sources_count: bool = True) -> dict:
+        folder = env.models_dir / "ideo"
+        web_config = _web_config(env, image=[_image("ideo", str(folder), family="ideogram4", source="installed")])
+        resolve = workspace_api_module._status_resolver(web_config, {}, lambda path: Path(path) if Path(path).is_dir() else None, instant_sources_count=instant_sources_count)
+        return resolve(web_config.image_inventory[0], "image")
+
+    def test_complete_sources_without_a_built_folder_read_as_downloaded_without_a_memory_fit(self, env, present):
+        present.update({"owner/base", "owner/instant"})
+
+        assert self._status(env) == {"downloaded": True, "memory_fit": None}
+
+    def test_missing_sources_read_as_not_downloaded(self, env, present):
+        present.add("owner/base")
+
+        assert self._status(env) == {"downloaded": False, "memory_fit": None}
+
+    def test_the_models_page_resolver_keeps_reporting_an_unbuilt_folder_as_not_downloaded(self, env, present):
+        present.update({"owner/base", "owner/instant"})
+
+        assert self._status(env, instant_sources_count=False) == {"downloaded": False, "memory_fit": None}
+
+    def test_a_built_folder_is_reported_from_its_files(self, env, present):
+        folder = env.models_dir / "ideo"
+        folder.mkdir()
+        write_build_record(folder, instant_source(_CONFIG, sys.platform))
+
+        assert self._status(env)["downloaded"] is True
+
+    def test_other_models_are_unaffected(self, env, present):
+        present.add("owner/zit")
+        web_config = _web_config(env, image=[_image("zit", "owner/zit")])
+        resolve = workspace_api_module._status_resolver(web_config, {}, lambda path: None, instant_sources_count=True)
+
+        assert resolve(web_config.image_inventory[0], "image")["downloaded"] is False

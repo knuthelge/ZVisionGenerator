@@ -23,6 +23,7 @@ from zvisiongenerator.utils.config import (
     smart_enhancer_model,
     smart_unavailable,
 )
+from zvisiongenerator.utils.ideogram4_instant import is_instant_dir
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.hf_cache import CachedRepo, cached_model_repos, repo_disk_bytes, stranded_shared_files
@@ -107,7 +108,7 @@ def build_workspace_response(
     image_model_defaults_map = form_view["image_model_defaults"]
     video_model_defaults_map = form_view["video_model_defaults"]
 
-    status = _status_resolver(web_config, image_model_defaults_map)
+    status = _status_resolver(web_config, image_model_defaults_map, instant_sources_count=True)
     image_entries = {entry.name: entry for entry in web_config.image_inventory}
     video_entries = {entry.name: entry for entry in web_config.video_inventory}
     model_labels = web_config.app_config.get("model_labels") or {}
@@ -427,11 +428,17 @@ def _status_resolver(
     web_config: WebUiConfig,
     image_model_defaults: dict[str, dict[str, Any]],
     find_local_dir: Callable[[str], Path | None] | None = None,
+    *,
+    instant_sources_count: bool = False,
 ) -> Callable[[ImageInventoryEntry | VideoInventoryEntry | None, str], dict[str, Any]]:
     """Return a per-request resolver for each model's ``downloaded``/``memory_fit`` fields.
 
     Image quantize levels come from the same bootstrap defaults that drive the workspace quantize picker, and
     download lookups are memoised for the request (LTX MLX models share one Gemma text-encoder lookup).
+
+    With *instant_sources_count*, an Ideogram 4 Instant folder that is not built yet reads as downloaded once all
+    its sources are on disk (the first job builds the folder from them), with ``memory_fit`` still ``None``.
+    The Models page leaves it off so a row shows it still has to be built.
     """
     budget = memory_budget()
     find_local_dir = find_local_dir or functools.cache(find_local_model_dir)
@@ -441,9 +448,12 @@ def _status_resolver(
             return dict(_UNKNOWN_STATUS)
         quantize_options = _image_quantize_levels(web_config, image_model_defaults.get(entry.name, {})) if kind == "image" else ()
         try:
-            return describe_model_status(
+            described = describe_model_status(
                 entry.resolved_path, kind=kind, quantize_options=quantize_options, budget=budget, find_local_dir=find_local_dir, model_name=entry.name, app_config=web_config.app_config
             )
+            if instant_sources_count and not described["downloaded"] and is_instant_dir(entry.resolved_path):
+                described["downloaded"] = not row_download_needed(KIND_MODEL, entry.name, web_config, downloaded=False)
+            return described
         except Exception as exc:  # noqa: BLE001 - one unreadable model must not break the whole listing
             warnings.warn(f"Could not determine status for model '{entry.name}': {exc}", stacklevel=2)
             return dict(_UNKNOWN_STATUS)

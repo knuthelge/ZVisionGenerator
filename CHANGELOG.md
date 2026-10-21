@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 ## [Unreleased]
 
 ### Added
-- **Web UI: pick a model on first run.** When no image model is downloaded yet, the Workspace opens a welcome dialog listing the image models with the size of each download, with one preselected for your machine (FLUX.2 Klein 9B from 32 GB of memory, FLUX.2 Klein 4B below). **Download** starts it, makes it your default image model and selects it; **Skip** closes the dialog for good. If you only have the old `black-forest-labs/FLUX.2-klein-9B` download, `klein9b` counts as not downloaded and the dialog opens; delete the old copy under Models → Other downloads
+- **Web UI: pick a model on first run.** When no image model is downloaded yet, the Workspace opens a welcome dialog listing the image models with the size of each download, with one preselected for your machine (FLUX.2 Klein 9B from 32 GB of memory, FLUX.2 Klein 4B below). **Download** starts it, makes it your default image model and selects it; **Skip** closes the dialog for good. If you only have the old `black-forest-labs/FLUX.2-klein-9B` download, `klein9b` counts as not downloaded and the dialog opens; delete the old copy under Models → Other downloads. `ideo` counts as downloaded in the Workspace once its source files are on disk, so the dialog doesn't reopen before the first image builds it
 
 ### Fixed
 - **Web UI: no "not downloaded" note on a model that is downloading.** The model picker's note under the list now goes away while that model's download is queued or running
