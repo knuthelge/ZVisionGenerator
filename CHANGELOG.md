@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ## [Unreleased]
 
+### Changed
+- **`klein9b` downloads from an ungated mirror.** It needs no Hugging Face token or license step any more. A copy downloaded before this update isn't used: `klein9b` downloads again (about 35 GB) and its `klein9b@q8` copy is made again once. Delete the old copy under Models → Other downloads (`black-forest-labs/FLUX.2-klein-9B`). Converting a Klein 9B checkpoint uses the mirror as its base too
+
 ## [0.13.0b25] - 2026-10-21
 
 ### Added

@@ -34,7 +34,7 @@ from zvisiongenerator.utils.stored_quant import parse_stored_quant_name
 
 FLUX2_KLEIN_REPOS = {
     "flux2-klein-4b": "black-forest-labs/FLUX.2-klein-4B",
-    "flux2-klein-9b": "black-forest-labs/FLUX.2-klein-9B",
+    "flux2-klein-9b": "unsloth/FLUX.2-klein-9B",
 }
 
 # ── Krea 2 HuggingFace repos ────────────────────────────────────────────────

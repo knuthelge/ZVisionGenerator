@@ -7,12 +7,23 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from zvisiongenerator.converters.convert_checkpoint import (  # noqa: E402
+    FLUX2_KLEIN_REPOS,
     TRANSFORMER_PREFIX,
     _dequantize_scaled_fp8,
     convert_transformer_keys,
     convert_flux2_transformer_keys,
     convert_krea2_transformer_keys,
 )
+
+
+# ── Klein base repos ─────────────────────────────────────────────────────────
+
+
+def test_flux2_klein_base_repos():
+    assert FLUX2_KLEIN_REPOS == {
+        "flux2-klein-4b": "black-forest-labs/FLUX.2-klein-4B",
+        "flux2-klein-9b": "unsloth/FLUX.2-klein-9B",
+    }
 
 
 # ── ZImage key conversion ────────────────────────────────────────────────────

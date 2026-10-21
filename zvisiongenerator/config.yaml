@@ -101,7 +101,8 @@ model_aliases:
     win32: "${video_model_presets.ltx.diffusers.default_repo}"
     linux: "${video_model_presets.ltx.diffusers.default_repo}"
   zit: "Tongyi-MAI/Z-Image-Turbo"
-  klein9b: "black-forest-labs/FLUX.2-klein-9B"
+  # klein9b: ungated mirror of black-forest-labs/FLUX.2-klein-9B, weights checked by sha256.
+  klein9b: "unsloth/FLUX.2-klein-9B"
   klein4b: "black-forest-labs/FLUX.2-klein-4B"
   krea2: "unsloth/Krea-2-Turbo"
   # Ideogram 4 Instant: the models-folder entry of the same name, built on first use from ideogram4_instant below.

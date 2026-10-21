@@ -140,6 +140,11 @@ class TestDetectKleinSize:
         model_dir.mkdir()
         assert _detect_klein_size(str(model_dir), is_local=True) == "9b"
 
+    def test_hub_cache_dir_of_ungated_mirror_is_9b(self, tmp_path):
+        model_dir = tmp_path / "models--unsloth--FLUX.2-klein-9B"
+        model_dir.mkdir()
+        assert _detect_klein_size(str(model_dir), is_local=True) == "9b"
+
     def test_path_case_insensitive(self, tmp_path):
         model_dir = tmp_path / "flux2-klein-4B"
         model_dir.mkdir()

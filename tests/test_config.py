@@ -284,6 +284,19 @@ def test_packaged_config_ships_krea2_alias_and_defaults(monkeypatch, tmp_path):
         assert defaults["supports_scheduler"] is False
 
 
+def test_packaged_config_klein9b_uses_ungated_mirror(monkeypatch, tmp_path):
+    from zvisiongenerator.utils import config as config_module
+
+    monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+
+    aliases = load_config()["model_aliases"]
+
+    assert aliases["klein9b"] == "unsloth/FLUX.2-klein-9B"
+    for platform_key in ("darwin", "win32", "linux"):
+        resolved = {resolve_model_path(name, aliases=aliases, platform_key=platform_key) for name in aliases}
+        assert "black-forest-labs/FLUX.2-klein-9B" not in resolved
+
+
 def test_packaged_config_krea2_capabilities(monkeypatch, tmp_path):
     from zvisiongenerator.utils import config as config_module
 

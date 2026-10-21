@@ -12,9 +12,11 @@ Built-in shorthands for common image models.
 |-------|------------|
 | `zit` | `Tongyi-MAI/Z-Image-Turbo` |
 | `klein4b` | `black-forest-labs/FLUX.2-klein-4B` |
-| `klein9b` | `black-forest-labs/FLUX.2-klein-9B` |
+| `klein9b` | `unsloth/FLUX.2-klein-9B` |
 | `ideo` | Ideogram 4 Instant, built in `~/.ziv/models/ideo` on first use from `Hippotes/Ideogram4-Fal-ComfyUI` (transformer) plus `unsloth/ideogram-4-fp8` on macOS or `unsloth/ideogram-4-nf4-diffusers` on Windows and Linux (text encoder, VAE, tokenizer); see [Ideogram 4](#ideogram-4) |
 | `krea2` | `unsloth/Krea-2-Turbo` |
+
+`klein9b` points to unsloth's ungated mirror of Black Forest Labs' repo, so no Hugging Face token is needed.
 
 For video aliases, see [Video Guide → Supported Models](video.md#supported-models).
 
