@@ -14,6 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Web UI: no "not downloaded" note on a model that is downloading.** The model picker's note under the list now goes away while that model's download is queued or running
 - **Gated models say what to do.** When Hugging Face refuses a model (it is gated, or your token has no access to it), the Models page, the job card, the download list and `ziv-image` / `ziv-video` show one line that names the model, links to its page and says whether to accept its license, run `hf auth login` or sign in again, instead of Hugging Face's multi-line error. On Windows and Linux the Download button now shows this refusal too, where it showed "Could not reach Hugging Face"
 - **A token saved with `hf auth login` is found.** The Config page and Models page showed "Not set" unless `HF_TOKEN` was in the environment, even though downloads already used the saved token. They now report any token Hugging Face's tools find and where it comes from. The unsupported `HF_HUB_TOKEN` and `HUGGINGFACE_HUB_TOKEN` variables no longer count as a token
+- **Web UI: Blob is back beside a running job.** On a computer, Blob stood small in the live preview's corner, over the "Live preview" label. It now stands on top of the job card at full size, clear of the forming image
+- **Web UI: the live preview keeps its shape after a reload.** Reloading the page while a job ran showed the live preview as a square and cut off a portrait or landscape image
 - **Web UI: no half-saved video in the Gallery.** While a video's settings were being saved, a `.tmp.mp4` copy could show up next to it.
 
 ### Changed

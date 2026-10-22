@@ -831,6 +831,13 @@ describe('WorkspacePage', () => {
       expect(panel.textContent).toContain('2:3 · m · 8 steps');
     });
 
+    it('puts the mascot on the job card, clear of the live preview', async () => {
+      await mountWorkspace(queueContext([]));
+      const view = target.querySelector('[data-testid="job-view"]') as HTMLElement;
+      expect(view.querySelector('.job-view-card svg.mascot')).not.toBeNull();
+      expect(view.querySelector('.job-view-preview svg.mascot')).toBeNull();
+    });
+
     it('submits once for a held Cmd+Enter', async () => {
       draft.update('prompt', 'Once');
       await mountWorkspace(makeContext());

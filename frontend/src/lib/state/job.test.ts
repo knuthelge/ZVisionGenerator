@@ -252,6 +252,15 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current?.previewUrl).toBe('/jobs/restore-preview/preview?v=2');
   });
 
+  it('keeps the size label from the snapshot, so the live preview keeps the output shape', async () => {
+    await jobStore.reconnectActiveJob({ snapshot: {
+      id: 'restore-meta', job_id: 'restore-meta', workflow: 'txt2img', job_type: 'txt2img', status: 'running',
+      prompt: 'P', model: 'zit', runs: 1, created_at: '', event_count: 10, paused: false, meta: '2:3 · m · 8 steps',
+      last_event: { type: 'step_progress', current_step: 5, total_steps: 8 },
+    } });
+    expect(jobStore.current?.meta).toBe('2:3 · m · 8 steps');
+  });
+
   it('restores the current prompt and counter from a step snapshot', async () => {
     await jobStore.reconnectActiveJob({ snapshot: {
       id: 'restore-prompts', job_id: 'restore-prompts', workflow: 'txt2img', job_type: 'txt2img', status: 'running',

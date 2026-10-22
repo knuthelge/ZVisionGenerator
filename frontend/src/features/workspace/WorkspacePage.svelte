@@ -1361,7 +1361,6 @@
           <div class="job-view" class:job-view-compact={compact} data-testid="job-view">
             <div class="job-view-preview">
               <JobPreview job={jobStore.current!} />
-              {#if !compact}<MascotSpot mood={mascotMood} tool={mascotTool} size={64} class="job-view-mascot" />{/if}
             </div>
             {#if compact}
               <JobBar
@@ -1373,6 +1372,8 @@
               />
             {:else}
             <div class="job-view-card">
+              <!-- Blob hosts the job: it stands on the card, clear of the forming image. -->
+              <MascotSpot mood={mascotMood} tool={mascotTool} size={112} class="job-view-mascot" />
               <JobCard
                 job={jobStore.current!}
                 preview={false}
@@ -1702,7 +1703,8 @@
      edges (and the phone's job bar) off the screen. The preview is a size container that the live image fits. */
   .job-view { display: flex; width: 100%; min-width: 0; height: 100%; align-items: stretch; gap: 16px; padding: 16px; }
   .job-view-preview { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; container-type: size; }
-  .job-view :global(.job-view-mascot) { position: absolute; top: 0; left: 0; pointer-events: none; }
+  /* Blob peeks over the card's top edge; its foot overlaps the card by a little. */
+  .job-view :global(.job-view-mascot) { position: relative; z-index: 1; flex: none; align-self: center; margin: 4px 0 -26px; pointer-events: none; }
   .job-view-card { display: flex; flex: none; width: 400px; max-width: 46%; flex-direction: column; gap: 12px; overflow-y: auto; }
   /* A drag moves what the stage shows with the finger, and lets it settle back or away when it lifts. */
   .stage-body > :global(:not(.gallery-pull)) { transition: translate 260ms cubic-bezier(0.32, 0.72, 0, 1); }
