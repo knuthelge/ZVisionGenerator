@@ -2,7 +2,7 @@
   import { draft, offeredSizes, settingDefaultsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
   import { rangeFill, SPEC } from './settingsSpec';
   import { Icon, InspectorNumber, Toggle } from '$lib/components/atoms';
-  import { ActionBar, InspectorRow, InspectorSection, PathBrowser, PathInput } from '$lib/components/molecules';
+  import { ActionBar, InspectorRow, InspectorSection, PathBrowser, PathInput, Select } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { extendGuard } from '$lib/state/extend';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
@@ -362,18 +362,17 @@
       {/if}
       {#if caps.showScheduler}
         <InspectorRow label="Scheduler" forId="ws-scheduler" changed={changed('scheduler')} onreset={() => reset('scheduler')}>
-          <select
+          <Select
             id="ws-scheduler"
             name="scheduler"
-            class="inspector-select"
+            variant="bare"
+            class="flex-1"
+            triggerClass="inspector-select"
+            label="Scheduler"
             value={s.scheduler ?? ''}
-            onchange={(e) => draft.update('scheduler', e.currentTarget.value || null)}
-          >
-            <option value="">Auto (model default)</option>
-            {#each context.scheduler_options as option (option)}
-              <option value={option}>{option}</option>
-            {/each}
-          </select>
+            options={[{ value: '', label: 'Auto (model default)' }, ...context.scheduler_options.map((option) => ({ value: option, label: option }))]}
+            onchange={(v) => draft.update('scheduler', v || null)}
+          />
         </InspectorRow>
       {/if}
       {#if caps.supportsFirstSigma}
@@ -566,15 +565,16 @@
             <Toggle id="ws-video-upscale" ariaLabel="Video upscale" checked={s.videoUpscaleEnabled} disabled={busy} onchange={(e) => draft.update('videoUpscaleEnabled', (e.currentTarget as HTMLInputElement).checked)} />
             {#if s.videoUpscaleEnabled}
               {#if caps.showVideoUpscaleFactor}
-                <select
+                <Select
                   id="ws-video-upscale-factor"
-                  class="inspector-select factor"
-                  aria-label="Video upscale factor"
+                  variant="bare"
+                  class="factor"
+                  triggerClass="inspector-select"
+                  ariaLabel="Video upscale factor"
                   value={String(s.videoUpscaleFactor)}
-                  onchange={(e) => draft.update('videoUpscaleFactor', Number(e.currentTarget.value))}
-                >
-                  <option value="2">2×</option>
-                </select>
+                  options={[{ value: '2', label: '2×' }]}
+                  onchange={(v) => draft.update('videoUpscaleFactor', Number(v))}
+                />
               {/if}
               <input type="hidden" name="upscale" value={String(s.videoUpscaleFactor)}>
               <input type="hidden" name="video_upscale_factor" value={String(s.videoUpscaleFactor)}>
@@ -651,10 +651,9 @@
   .settings-head { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 8px; border-bottom: 1px solid var(--color-border-subtle); }
   .settings-head-end { display: flex; align-items: center; gap: 6px; }
   .settings-hint { font-size: var(--text-meta); color: var(--color-text-muted); }
-  /* Touch: no scrubbing to hint at; selects fill like the steppers beside them. */
+  /* Touch: no scrubbing to hint at. */
   @media (pointer: coarse) {
     .settings-hint { display: none; }
-    .inspector-select { height: 32px; padding: 0 8px; background: var(--color-bg-surface-hover); font-size: 14px; }
     .mini-range { width: 72px; }
   }
   .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; }
@@ -667,11 +666,14 @@
   .frame-count { flex: none; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); white-space: nowrap; }
   .dim-times { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
 
-  .inspector-select { width: 100%; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: var(--text-ui); color: var(--color-text-primary); }
-  .inspector-select.factor { flex: none; width: 70px; }
-  @media (hover: hover) { .inspector-select:hover { background: var(--color-bg-surface-hover); } }
-  .inspector-select:focus { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-surface); }
-  .inspector-select option { background: var(--color-bg-surface); }
+  .settings-pane :global(.inspector-select) { height: 24px; padding: 0 6px; border: 1px solid transparent; border-radius: 4px; background: transparent; font-size: var(--text-ui); color: var(--color-text-primary); }
+  .settings-pane :global(.ui-select.factor) { flex: none; width: 70px; }
+  @media (hover: hover) { .settings-pane :global(.inspector-select:hover) { background: var(--color-bg-surface-hover); } }
+  .settings-pane :global(.inspector-select:focus-visible), .settings-pane :global(.inspector-select[aria-expanded='true']) { outline: 2px solid var(--color-primary-main); outline-offset: 2px; background: var(--color-bg-surface); }
+  /* Touch: selects fill like the steppers beside them. After the base rule, so it wins. */
+  @media (pointer: coarse) {
+    .settings-pane :global(.inspector-select) { height: 32px; padding: 0 8px; background: var(--color-bg-surface-hover); font-size: 14px; }
+  }
   .row-hint { padding: 0 12px 6px 116px; font-size: var(--text-meta); color: var(--color-text-muted); }
 
   /* The row hint's muted colour is scoped to this pane and would otherwise outrank the warning colour. */

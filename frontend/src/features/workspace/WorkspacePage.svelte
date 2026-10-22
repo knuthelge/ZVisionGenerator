@@ -16,7 +16,7 @@
   import { updateConfig } from '$lib/api/config';
   import { deleteAsset } from '$lib/api/gallery';
   import { canExtend, extendParams, referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
-  import { Icon, MascotSpot, ToolbarSelectShell } from '$lib/components/atoms';
+  import { Icon, MascotSpot } from '$lib/components/atoms';
   import { rememberMascotSpots } from '$lib/components/atoms/MascotSpot.svelte';
   import {
     DROWSY_AFTER_MS,
@@ -27,7 +27,7 @@
     mascotTool as pickMascotTool,
     type MascotReaction,
   } from '$lib/state/mascot';
-  import { ActionMenu, AssetTile, AssetViewer, JobBar, JobCard, JobPreview, ModelStatusBadges, ReviewStage, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
+  import { ActionMenu, AssetTile, AssetViewer, JobBar, JobCard, JobPreview, ModelStatusBadges, ReviewStage, Select, requestConfirm, type ActionMenuEntry } from '$lib/components/molecules';
   import { compactUi } from '$lib/state/compactUi.svelte';
   import { failureToastText, isReviewing } from '$lib/state/jobView';
   import { jobSettingsPrefill } from '$lib/state/jobSettings';
@@ -322,6 +322,7 @@
   const imageModels = $derived(context?.image_models ?? []);
   const videoModels = $derived(context?.video_models ?? []);
   const currentModels = $derived(isImageMode ? imageModels : videoModels);
+  const modelOptions = $derived(currentModels.map((m) => ({ value: m.id, label: modelOptionText(m) })));
   // Matches the toolbar label, which falls back to the first model when the draft has none.
   const selectedModel = $derived(currentModels.find((m) => m.id === (draft.state.model || currentModels[0]?.id)) ?? null);
   const loraOptions = $derived(context?.loras ?? []);
@@ -1093,10 +1094,6 @@
       addToast(errorText(e, 'Could not remember that you skipped.'), 'error');
     }
   }
-
-  function onModelChange(e: Event): void {
-    switchModel((e.currentTarget as HTMLSelectElement).value);
-  }
 </script>
 
 {#snippet assetMeta(asset: GalleryAsset)}
@@ -1128,16 +1125,18 @@
       <!-- Model selector -->
       <div class="flex items-center gap-2 min-w-0 {stacked ? 'flex-nowrap' : 'flex-wrap'}">
         <label class="ui-label {stacked ? 'sr-only' : ''}" for="ws-model">Model</label>
-        <ToolbarSelectShell
+        <Select
           id="ws-model"
           name="model"
           testId="model-shell"
+          variant="shell"
           class={stacked ? 'min-w-0 flex-1' : 'w-48'}
           value={draft.state.model}
+          options={modelOptions}
           disabled={!authorityReady || currentModels.length === 0}
-          onchange={onModelChange}
+          onchange={switchModel}
         >
-          {#snippet children()}
+          {#snippet trigger()}
             <span class="flex min-w-0 items-center gap-2 truncate pointer-events-none">
               <svg class="text-primary-main h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"></path>
@@ -1145,36 +1144,21 @@
               <span class="truncate">{authorityReady ? (selectedModel?.label ?? (draft.state.model || 'No models')) : 'Loading models…'}</span>
             </span>
           {/snippet}
-          {#snippet options()}
-            {#each currentModels as m}
-              <option value={m.id}>{modelOptionText(m)}</option>
-            {/each}
-          {/snippet}
-        </ToolbarSelectShell>
+        </Select>
 
         <!-- Quantize selector (image workflows only, when model supports it) -->
         {#if supportsQuantize}
-          <ToolbarSelectShell
+          <Select
             name="quantize"
             testId="quantize-shell"
+            variant="shell"
+            ariaLabel="Quantize"
             class={stacked ? 'w-auto shrink-0' : 'w-40'}
             value={draft.state.quantize !== null ? String(draft.state.quantize) : ''}
+            options={[{ value: '', label: 'Quant: None' }, ...quantizeOptions.map((opt) => ({ value: String(opt), label: `Quant: q${opt}` }))]}
             disabled={!authorityReady}
-            onchange={(e) => {
-              const v = (e.currentTarget as HTMLSelectElement).value;
-              draft.update('quantize', v ? Number(v) : null);
-            }}
-          >
-            {#snippet children()}
-              <span class="truncate pointer-events-none">{draft.state.quantize !== null ? `Quant: q${draft.state.quantize}` : 'Quant: None'}</span>
-            {/snippet}
-            {#snippet options()}
-              <option value="">Quant: None</option>
-              {#each quantizeOptions as opt}
-                <option value={String(opt)}>Quant: q{opt}</option>
-              {/each}
-            {/snippet}
-          </ToolbarSelectShell>
+            onchange={(v) => draft.update('quantize', v ? Number(v) : null)}
+          />
         {/if}
 
         {#if authorityReady && selectedModel}

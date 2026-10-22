@@ -124,6 +124,7 @@ vi.mock('$lib/api/promptFiles', () => ({
 import WorkspacePage from './WorkspacePage.svelte';
 import ControlsSidebar from './ControlsSidebar.svelte';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
+import { optionLabels, optionValues, pickOption } from '../../test-utils/select';
 
 let target: HTMLDivElement;
 let app: Record<string, unknown> | null = null;
@@ -534,7 +535,7 @@ describe('WorkspacePage', () => {
 
     expect(target.querySelector('#ws-prompt')).toBeNull();
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(true);
-    expect((target.querySelector('#ws-model') as HTMLSelectElement | null)?.disabled).toBe(true);
+    expect((target.querySelector('#ws-model') as HTMLButtonElement | null)?.disabled).toBe(true);
     expect(target.textContent).not.toContain('stale-model');
   });
 
@@ -2040,6 +2041,7 @@ describe('WorkspacePage', () => {
     expect(duration.value).toBe('20');
 
     duration.value = '2.2';
+
     duration.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
     expect(frames()).toBe('57');
@@ -2193,10 +2195,9 @@ describe('WorkspacePage', () => {
     expect(target.querySelector('input[name="image_path"]')).toBeNull();
     expect(target.querySelector('#ws-upscale-enabled')).toBeNull();
 
-    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement | null;
+    const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement | null;
     expect(modelSelect).not.toBeNull();
-    modelSelect!.value = 'zit';
-    modelSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    pickOption(modelSelect!, 'zit');
     await settle();
 
     expect(target.querySelector('#ws-image-file')).not.toBeNull();
@@ -2231,16 +2232,14 @@ describe('WorkspacePage', () => {
     expect(fitBadge()?.getAttribute('data-status')).toBe('too_large');
     expect(target.querySelector('[data-testid="model-download-status"]')).toBeNull();
 
-    const quantizeSelect = target.querySelector('select[name="quantize"]') as HTMLSelectElement;
-    quantizeSelect.value = '8';
-    quantizeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    const quantizeSelect = target.querySelector('[data-testid="quantize-shell"] [role="combobox"]') as HTMLButtonElement;
+    pickOption(quantizeSelect, '8');
     await settle();
     expect(fitBadge()?.getAttribute('data-status')).toBe('tight');
 
-    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement;
-    expect(Array.from(modelSelect.options).map((option) => option.textContent)).toEqual(['zit', 'flux-lite (not downloaded)']);
-    modelSelect.value = 'flux-lite';
-    modelSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement;
+    expect(optionLabels(modelSelect)).toEqual(['zit', 'flux-lite (not downloaded)']);
+    pickOption(modelSelect, 'flux-lite');
     await settle();
     expect(target.querySelector('[data-testid="model-download-status"]')?.textContent).toContain('Not downloaded');
     expect(fitBadge()).toBeNull();
@@ -2261,11 +2260,10 @@ describe('WorkspacePage', () => {
       modelApiMocks.getDownloads.mockResolvedValue({ items: [lane()] });
       await mountWorkspace(downloadContext());
 
-      const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement;
-      expect(Array.from(modelSelect.options).map((option) => option.textContent)).toEqual(['zit', 'flux-lite (downloading 42%)']);
+      const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement;
+      expect(optionLabels(modelSelect)).toEqual(['zit', 'flux-lite (downloading 42%)']);
 
-      modelSelect.value = 'flux-lite';
-      modelSelect.dispatchEvent(new Event('change', { bubbles: true }));
+      pickOption(modelSelect, 'flux-lite');
       await settle();
       const status = target.querySelector('[data-testid="model-download-status"]');
       expect(status?.textContent).toContain('Downloading 42%');
@@ -2276,8 +2274,8 @@ describe('WorkspacePage', () => {
       modelApiMocks.getDownloads.mockResolvedValue({ items: [lane({ state: 'queued' })] });
       await mountWorkspace(downloadContext());
 
-      const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement;
-      expect(modelSelect.options[1].textContent).toBe('flux-lite (download queued)');
+      const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement;
+      expect(optionLabels(modelSelect)[1]).toBe('flux-lite (download queued)');
     });
 
     it('reads the model status again when a download that was running finishes', async () => {
@@ -2296,8 +2294,8 @@ describe('WorkspacePage', () => {
       await settle();
 
       expect(workspaceApiMocks.getWorkspaceCoreContext).toHaveBeenCalledTimes(2);
-      const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement;
-      expect(Array.from(modelSelect.options).map((option) => option.textContent)).toEqual(['zit', 'flux-lite']);
+      const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement;
+      expect(optionLabels(modelSelect)).toEqual(['zit', 'flux-lite']);
     });
   });
 
@@ -2314,8 +2312,9 @@ describe('WorkspacePage', () => {
     const shell = target.querySelector('[data-testid="model-shell"]');
     expect(shell?.textContent).toContain('FLUX.2 Klein 9B');
     expect(shell?.textContent).not.toContain('klein9b');
-    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement;
-    expect(Array.from(modelSelect.options).map((option) => [option.value, option.textContent])).toEqual([['klein9b', 'FLUX.2 Klein 9B'], ['zit', 'zit']]);
+    const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement;
+    expect(optionValues(modelSelect)).toEqual(['klein9b', 'zit']);
+    expect(optionLabels(modelSelect)).toEqual(['FLUX.2 Klein 9B', 'zit']);
     expect(draft.state.model).toBe('klein9b');
   });
 
@@ -2335,9 +2334,8 @@ describe('WorkspacePage', () => {
     draft.update('steps', 5);
     await settle();
 
-    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement;
-    modelSelect.value = 'flux-lite';
-    modelSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement;
+    pickOption(modelSelect, 'flux-lite');
     await settle();
 
     expect(draft.state).toMatchObject({ model: 'flux-lite', steps: 5, guidance: 3.5 });
@@ -2396,10 +2394,9 @@ describe('WorkspacePage', () => {
     expect(heightInput?.value).toBe('2048');
     expect(heightInput?.min).toBe('');
 
-    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement | null;
+    const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement | null;
     expect(modelSelect).not.toBeNull();
-    modelSelect!.value = 'zit';
-    modelSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    pickOption(modelSelect!, 'zit');
     await settle();
 
     const ratioButton = target.querySelector('[role="group"][aria-label="Aspect ratio"] button') as HTMLButtonElement | null;
@@ -2469,10 +2466,9 @@ describe('WorkspacePage', () => {
     expect(submittedFormData.get('json_prompt')).toBe('{"high_level_description":"json caption"}');
     expect(submittedFormData.has('prompt')).toBe(false);
 
-    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement | null;
+    const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement | null;
     expect(modelSelect).not.toBeNull();
-    modelSelect!.value = 'zit';
-    modelSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    pickOption(modelSelect!, 'zit');
     await settle();
 
     expect(target.querySelector('#ws-json-prompt-toggle')).toBeNull();
@@ -2525,10 +2521,9 @@ describe('WorkspacePage', () => {
     expect(submittedFormData).toBeInstanceOf(FormData);
     expect(submittedFormData.get('first_sigma')).toBe('1.005');
 
-    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement | null;
+    const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement | null;
     expect(modelSelect).not.toBeNull();
-    modelSelect!.value = 'zit';
-    modelSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    pickOption(modelSelect!, 'zit');
     await settle();
 
     expect(target.querySelector('#ws-first-sigma')).toBeNull();
@@ -2592,9 +2587,9 @@ describe('WorkspacePage', () => {
       expect(target.querySelector('#ws-video-upscale')).not.toBeNull();
       expect(target.querySelector('input[name="video_upscale_factor"]')).not.toBeNull();
 
-      const factorSelect = target.querySelector('#ws-video-upscale-factor') as HTMLSelectElement | null;
+      const factorSelect = target.querySelector('#ws-video-upscale-factor') as HTMLButtonElement | null;
       expect(factorSelect).not.toBeNull();
-      expect(Array.from(factorSelect!.options).map((option) => option.value)).toEqual(['2']);
+      expect(optionValues(factorSelect!)).toEqual(['2']);
 
       const form = target.querySelector('form');
       expect(form).not.toBeNull();
@@ -2711,13 +2706,13 @@ describe('WorkspacePage', () => {
     const context = makeContext();
     await mountWorkspace(context);
 
-    const modelSelect = target.querySelector('#ws-model') as HTMLSelectElement | null;
+    const modelSelect = target.querySelector('#ws-model') as HTMLButtonElement | null;
     expect(modelSelect, 'Model select must be rendered').not.toBeNull();
     expect(modelSelect!.disabled, 'Model select must be enabled after context loads').toBe(false);
 
     // Wait for the quantize block (requires async context to load and supportsQuantize=true).
     await settle();
-    const quantizeSelect = target.querySelector('select[name="quantize"]') as HTMLSelectElement | null;
+    const quantizeSelect = target.querySelector('[data-testid="quantize-shell"] [role="combobox"]') as HTMLButtonElement | null;
     expect(quantizeSelect, 'Quantize select must be rendered for zit model (supports_quantize: true)').not.toBeNull();
     expect(quantizeSelect!.disabled, 'Quantize select must be enabled after context loads').toBe(false);
   });

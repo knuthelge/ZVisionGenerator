@@ -1,5 +1,6 @@
 <script lang="ts">
   import { Icon } from '$lib/components/atoms';
+  import { Select } from '$lib/components/molecules';
   import { draft } from '$lib/state/draft.svelte';
   import { jobStore } from '$lib/state/job.svelte';
   import { jobStatusLine } from '$lib/state/jobStatusLine';
@@ -41,16 +42,22 @@
 <header class="top-strip" data-testid="top-strip">
   <button type="button" class="strip-btn" aria-label="Menu" onclick={onmenu}><Icon name="menu" size={20} /></button>
   {#if onWorkspace}
-    <label class="strip-select ui-select-shell">
-      <img src={logoSrc} alt="" class="h-5 w-5 shrink-0">
-      <span class="truncate">{workflowLabel}</span>
-      <Icon name="chevdown" size={12} class="opacity-70" />
-      <select class="strip-native" aria-label="Workflow" value={draft.state.workflow} onchange={(event) => draft.update('workflow', (event.currentTarget as HTMLSelectElement).value as Workflow)}>
-        {#each visibleWorkflows as item (item.id)}
-          <option value={item.id}>{item.label}</option>
-        {/each}
-      </select>
-    </label>
+    <Select
+      variant="bare"
+      class="strip-select-box"
+      triggerClass="strip-select ui-select-shell"
+      ariaLabel="Workflow"
+      value={draft.state.workflow}
+      options={visibleWorkflows.map((item) => ({ value: item.id, label: item.label }))}
+      onchange={(next) => draft.update('workflow', next as Workflow)}
+    >
+      {#snippet trigger()}
+        <span class="flex min-w-0 items-center gap-1.5">
+          <img src={logoSrc} alt="" class="h-5 w-5 shrink-0">
+          <span class="truncate">{workflowLabel}</span>
+        </span>
+      {/snippet}
+    </Select>
     <button type="button" class="strip-status" data-tone={status.tone} data-testid="strip-status" onclick={onstatus}>
       <i class="strip-dot" aria-hidden="true"></i>{status.text}
     </button>
@@ -71,8 +78,8 @@
   .top-strip { display: flex; flex-shrink: 0; align-items: center; gap: 6px; height: calc(44px + env(safe-area-inset-top, 0px)); padding: env(safe-area-inset-top, 0px) max(8px, env(safe-area-inset-right, 0px)) 0 max(8px, env(safe-area-inset-left, 0px)); background: color-mix(in srgb, var(--color-bg-overlay) 70%, black); }
   .strip-btn { display: grid; flex: none; place-items: center; width: 40px; height: 40px; border-radius: var(--radius-sm); color: var(--color-text-primary); }
   .strip-btn:active { background: var(--color-bg-surface-hover); }
-  .strip-select { position: relative; display: inline-flex; min-width: 0; max-width: 48vw; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 6px; border-radius: 16px; font-size: var(--text-content); font-weight: 700; color: var(--color-text-primary); }
-  .strip-native { position: absolute; inset: 0; width: 100%; opacity: 0; }
+  .top-strip :global(.strip-select-box) { flex: none; max-width: 48vw; }
+  .top-strip :global(.strip-select) { gap: 6px; height: 32px; padding: 0 8px 0 6px; border-radius: 16px; font-size: var(--text-content); font-weight: 700; color: var(--color-text-primary); }
   .strip-status { display: inline-flex; flex: 1; min-width: 0; align-items: center; justify-content: flex-end; gap: 6px; margin-left: auto; padding: 0 4px; overflow: hidden; white-space: nowrap; font-size: var(--text-meta); font-weight: 600; color: var(--color-text-muted); text-overflow: ellipsis; }
   .strip-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--color-text-muted); }
   .strip-status[data-tone='running'] { color: var(--color-primary-main); }

@@ -16,6 +16,7 @@ describe('keyboard', () => {
     ['<input>', true],
     ['<textarea></textarea>', true],
     ['<select></select>', true],
+    ['<button role="combobox"></button>', true],
     ['<input type="checkbox">', false],
     ['<button></button>', false],
   ])('treats %s as typing: %s', (html, expected) => {

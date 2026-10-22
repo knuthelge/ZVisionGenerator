@@ -6,8 +6,8 @@
   import { downloadStore } from '$lib/state/downloads.svelte';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { ConversionStatus, DownloadItem, EnhancerModelEntry, LtxCheckpointInspection, ModelDeleteInfo, ModelInventory, ModelOperationResult, ModelStatusFields } from '$lib/types';
-  import { Badge, Button, Icon, Input, Select, StepProgress, Tooltip } from '$lib/components/atoms';
-  import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField } from '$lib/components/molecules';
+  import { Badge, Button, Icon, Input, StepProgress, Tooltip } from '$lib/components/atoms';
+  import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField, Select } from '$lib/components/molecules';
   import { DOWNLOADABLE_TOOLTIP, DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
 
@@ -30,6 +30,7 @@
   let convertType = $state('');
   let ltxQuantize = $state('4');
   let ltxDistill = $state(false);
+  let convertQuantize = $state('');
   let ltxInspection = $state<LtxCheckpointInspection | null>(null);
   let ltxInspectError = $state<string | null>(null);
   let conversion = $state<ConversionStatus | null>(null);
@@ -229,6 +230,8 @@
         notice = { tone: 'success', message: result.message || 'Checkpoint converted successfully.' };
         checkpointPath = '';
         checkpointPathReset += 1;
+        convertType = '';
+        convertQuantize = '';
         form.reset();
         const pathControl = form.elements.namedItem('input_path');
         if (pathControl instanceof HTMLInputElement) pathControl.value = '';
@@ -758,8 +761,8 @@
               required
               bind:value={convertType}
               onchange={scheduleInspect}
+              placeholder="Choose a type"
               options={[
-                { value: '', label: 'Choose a type', disabled: true },
                 { value: 'zimage', label: 'zimage' },
                 { value: 'flux2-klein-4b', label: 'flux2-klein-4b' },
                 { value: 'flux2-klein-9b', label: 'flux2-klein-9b' },
@@ -805,6 +808,7 @@
               <Select
                 id="convert-quantize"
                 name="quantize"
+                bind:value={convertQuantize}
                 options={[
                   { value: '', label: 'None' },
                   { value: '8', label: 'q8' },

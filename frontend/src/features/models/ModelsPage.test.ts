@@ -59,6 +59,7 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 import { DOWNLOADABLE_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
 import ModelsPage from './ModelsPage.svelte';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
+import { pickOption } from '../../test-utils/select';
 
 function makeInventory(): ModelInventory {
   return {
@@ -160,9 +161,8 @@ describe('ModelsPage Browse buttons', () => {
     await settle();
     chooseInBrowser('first-checkpoint.safetensors');
     await settle();
-    const modelType = target.querySelector('#convert-model-type') as HTMLSelectElement;
-    modelType.value = 'zimage';
-    modelType.dispatchEvent(new Event('change', { bubbles: true }));
+    const modelType = target.querySelector('#convert-model-type') as HTMLButtonElement;
+    pickOption(modelType, 'zimage');
     (target.querySelector('#convert-input-path') as HTMLInputElement).closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
 
@@ -218,9 +218,8 @@ describe('ModelsPage Browse buttons', () => {
     expect(pathInput.value).toBe('/models/to-convert.safetensors');
     expect(target.textContent).toContain('Path loaded from the host machine.');
 
-    const modelType = target.querySelector('#convert-model-type') as HTMLSelectElement;
-    modelType.value = 'zimage';
-    modelType.dispatchEvent(new Event('change', { bubbles: true }));
+    const modelType = target.querySelector('#convert-model-type') as HTMLButtonElement;
+    pickOption(modelType, 'zimage');
     pathInput.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
 
@@ -228,6 +227,10 @@ describe('ModelsPage Browse buttons', () => {
     expect.soft(pathInput.value).toBe('');
     expect.soft(new FormData(pathInput.closest('form')!).get('input_path')).toBe('');
     expect.soft(target.textContent).not.toContain('Path loaded from the host machine.');
+    // The model type is cleared too, and the submitted value follows what is shown.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect((target.querySelector('#convert-model-type') as HTMLButtonElement).dataset.value).toBe('');
+    expect((target.querySelector('select[name="model_type"]') as HTMLSelectElement).value).toBe('');
 
     browseButtonFor(target, 'convert-input-path').click();
     await settle();
@@ -241,9 +244,8 @@ describe('ModelsPage Browse buttons', () => {
 
     const { input, form } = pathAndForm(target, 'convert-input-path');
     typePath(input, '/models/retry-checkpoint.safetensors');
-    const modelType = target.querySelector('#convert-model-type') as HTMLSelectElement;
-    modelType.value = 'zimage';
-    modelType.dispatchEvent(new Event('change', { bubbles: true }));
+    const modelType = target.querySelector('#convert-model-type') as HTMLButtonElement;
+    pickOption(modelType, 'zimage');
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
 
@@ -302,21 +304,21 @@ describe('ModelsPage Browse buttons', () => {
     await settle();
 
     const checkpoint = pathAndForm(target, 'convert-input-path');
-    const modelType = target.querySelector('#convert-model-type') as HTMLSelectElement;
+    const modelType = target.querySelector('#convert-model-type') as HTMLButtonElement;
     typePath(checkpoint.input, '/models/valid-checkpoint.safetensors');
 
-    expect(modelType.required).toBe(true);
-    expect(modelType.value).toBe('');
-    expect(modelType.validity.valueMissing).toBe(true);
+    const modelTypeField = target.querySelector('select[name="model_type"]') as HTMLSelectElement;
+    expect(modelTypeField.required).toBe(true);
+    expect(modelTypeField.value).toBe('');
+    expect(modelTypeField.validity.valueMissing).toBe(true);
     expect(checkpoint.form.checkValidity()).toBe(false);
 
     checkpoint.form.requestSubmit();
     await settle();
     expect(modelApiMocks.convertCheckpoint).not.toHaveBeenCalled();
 
-    modelType.value = 'zimage';
-    modelType.dispatchEvent(new Event('change', { bubbles: true }));
-    expect(modelType.validity.valid).toBe(true);
+    pickOption(modelType, 'zimage');
+    expect(modelTypeField.validity.valid).toBe(true);
     expect(checkpoint.form.checkValidity()).toBe(true);
 
     checkpoint.form.requestSubmit();
@@ -394,12 +396,10 @@ describe('ModelsPage Browse buttons', () => {
 
     const { input, form } = pathAndForm(target, 'convert-input-path');
     typePath(input, '/models/checkpoint.safetensors');
-    const modelType = target.querySelector('#convert-model-type') as HTMLSelectElement;
-    modelType.value = 'zimage';
-    modelType.dispatchEvent(new Event('change', { bubbles: true }));
-    const quantize = target.querySelector('#convert-quantize') as HTMLSelectElement;
-    quantize.value = '8';
-    quantize.dispatchEvent(new Event('change', { bubbles: true }));
+    const modelType = target.querySelector('#convert-model-type') as HTMLButtonElement;
+    pickOption(modelType, 'zimage');
+    const quantize = target.querySelector('#convert-quantize') as HTMLButtonElement;
+    pickOption(quantize, '8');
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     await settle();
 
@@ -416,15 +416,14 @@ describe('ModelsPage Browse buttons', () => {
 
     const { input, form } = pathAndForm(target, 'convert-input-path');
     typePath(input, '/models/ltx-finetune.safetensors');
-    const modelType = target.querySelector('#convert-model-type') as HTMLSelectElement;
-    modelType.value = 'ltx-2.3';
-    modelType.dispatchEvent(new Event('change', { bubbles: true }));
+    const modelType = target.querySelector('#convert-model-type') as HTMLButtonElement;
+    pickOption(modelType, 'ltx-2.3');
     await new Promise((resolve) => setTimeout(resolve, 450));
     await settle();
 
     expect(modelApiMocks.inspectLtxCheckpoint).toHaveBeenCalledWith('/models/ltx-finetune.safetensors');
     expect(target.querySelector('#convert-base-model')).toBeNull();
-    expect((target.querySelector('#convert-ltx-quantize') as HTMLSelectElement).value).toBe('8');
+    expect((target.querySelector('#convert-ltx-quantize') as HTMLButtonElement).dataset.value).toBe('8');
     expect((target.querySelector('#convert-distill') as HTMLInputElement).checked).toBe(true);
 
     let answerStatus: (value: unknown) => void = () => {};
@@ -450,9 +449,8 @@ describe('ModelsPage Browse buttons', () => {
     await settle();
 
     const { input } = pathAndForm(target, 'convert-input-path');
-    const modelType = target.querySelector('#convert-model-type') as HTMLSelectElement;
-    modelType.value = 'ltx-2.3';
-    modelType.dispatchEvent(new Event('change', { bubbles: true }));
+    const modelType = target.querySelector('#convert-model-type') as HTMLButtonElement;
+    pickOption(modelType, 'ltx-2.3');
     typePath(input, '/models/dev.safetensors');
     await new Promise((resolve) => setTimeout(resolve, 450));
     typePath(input, '/models/other.safetensors');

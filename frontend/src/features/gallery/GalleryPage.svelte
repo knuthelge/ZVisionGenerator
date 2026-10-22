@@ -10,8 +10,8 @@
   import { extendParams, referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { startUpscale } from '$lib/state/upscale';
   import type { GalleryAsset, UpscaleFactor, UpscaleMethod } from '$lib/types';
-  import { Button, Select, Spinner } from '$lib/components/atoms';
-  import { Alert, AssetTile, AssetViewer, EmptyState, PageHeader, requestConfirm } from '$lib/components/molecules';
+  import { Button, Spinner } from '$lib/components/atoms';
+  import { Alert, AssetTile, AssetViewer, EmptyState, PageHeader, Select, requestConfirm } from '$lib/components/molecules';
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import { hasOpenModal, isCommandKey, isPlainKey, isTyping } from '$lib/keyboard';
   import { gridColumns, moveInGrid } from './gridNav';
@@ -513,7 +513,7 @@
           { value: 'image', label: 'Images only' },
           { value: 'video', label: 'Videos only' },
         ]}
-        onchange={(event) => onFilterChange((event.currentTarget as HTMLSelectElement).value as 'all' | 'image' | 'video')}
+        onchange={(next) => onFilterChange(next as 'all' | 'image' | 'video')}
       />
       <Select
         ariaLabel="Sort gallery assets"
@@ -523,7 +523,7 @@
           { value: 'newest', label: 'Newest first' },
           { value: 'oldest', label: 'Oldest first' },
         ]}
-        onchange={(event) => onSortChange((event.currentTarget as HTMLSelectElement).value as 'newest' | 'oldest')}
+        onchange={(next) => onSortChange(next as 'newest' | 'oldest')}
       />
       {#if compact}
         <Button aria-pressed={selectMode} onclick={() => { selectMode = !selectMode; if (!selectMode) selected = new Set(); }}>{selectMode ? 'Done' : 'Select'}</Button>

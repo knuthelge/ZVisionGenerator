@@ -1,11 +1,9 @@
 export { default as Button } from './Button.svelte';
 export { default as Input } from './Input.svelte';
-export { default as Select } from './Select.svelte';
 export { default as Toggle } from './Toggle.svelte';
 export { default as Badge } from './Badge.svelte';
 export { default as Spinner } from './Spinner.svelte';
 export { default as Label } from './Label.svelte';
-export { default as ToolbarSelectShell } from './ToolbarSelectShell.svelte';
 export { default as Mascot } from './Mascot.svelte';
 export { default as MascotSpot } from './MascotSpot.svelte';
 export { default as Tooltip } from './Tooltip.svelte';

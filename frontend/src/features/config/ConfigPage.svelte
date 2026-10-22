@@ -4,8 +4,8 @@
   import { getConfig, updateConfig } from '$lib/api/config';
   import { addToast, dismissToast } from '$lib/state/toasts.svelte';
   import type { AppConfig, WritableConfigField, WritableConfigValue } from '$lib/types';
-  import { Button, Icon, Input, Select } from '$lib/components/atoms';
-  import { Alert, FormField, KeyValueList, Panel, PathField, type KeyValueItem } from '$lib/components/molecules';
+  import { Button, Icon, Input } from '$lib/components/atoms';
+  import { Alert, FormField, KeyValueList, Panel, PathField, Select, type KeyValueItem } from '$lib/components/molecules';
   import { AdminPageShell } from '$lib/components/organisms';
 
   type SelectOption = { value: string; label: string; disabled?: boolean };

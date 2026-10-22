@@ -8,6 +8,11 @@ export interface PopoverOptions {
   align?: PopoverAlign;
   /** Called when the popover should close: outside click, Escape, or the page scrolling or resizing. */
   onclose: () => void;
+  /**
+   * Stay open when the page scrolls or resizes and move with the anchor instead. For a popover opened by a tap, where
+   * the phone's keyboard sliding away (it resizes and scrolls the page) would otherwise close it as it opens.
+   */
+  followViewport?: boolean;
 }
 
 interface Box {
@@ -81,6 +86,10 @@ export function popover(node: HTMLElement, initial: PopoverOptions): { update: (
   function onViewportChange(event: Event): void {
     // Scrolling inside this popover, or inside a menu opened from it, moves nothing it is anchored to.
     if (event.type === 'scroll' && (node.contains(event.target as Node) || inNested(event.target as Node))) return;
+    if (options.followViewport) {
+      place();
+      return;
+    }
     options.onclose();
   }
 

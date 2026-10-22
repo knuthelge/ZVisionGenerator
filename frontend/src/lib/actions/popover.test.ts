@@ -47,4 +47,24 @@ describe('popover', () => {
     menu.remove();
     panel.remove();
   });
+
+  it('closes on a resize or scroll unless it follows the viewport, as a dropdown list does', () => {
+    const anchor = document.createElement('button');
+    document.body.append(anchor);
+    const closing = document.createElement('div');
+    const following = document.createElement('div');
+    const closeOnResize = vi.fn();
+    const keepOnResize = vi.fn();
+    const first = popover(closing, { anchor, onclose: closeOnResize });
+    const second = popover(following, { anchor, followViewport: true, onclose: keepOnResize });
+
+    window.dispatchEvent(new Event('resize'));
+    document.dispatchEvent(new Event('scroll'));
+    expect(closeOnResize).toHaveBeenCalledTimes(2);
+    expect(keepOnResize).not.toHaveBeenCalled();
+
+    first.destroy();
+    second.destroy();
+    anchor.remove();
+  });
 });

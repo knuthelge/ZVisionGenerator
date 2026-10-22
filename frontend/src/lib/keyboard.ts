@@ -9,7 +9,8 @@ const NON_TEXT_INPUTS = new Set(['checkbox', 'radio', 'button', 'submit', 'reset
 export function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target instanceof HTMLInputElement) return !NON_TEXT_INPUTS.has(target.type);
-  return target.isContentEditable || ['TEXTAREA', 'SELECT'].includes(target.tagName);
+  // A dropdown (lib Select) is a button with role combobox; keys there belong to it, as they did to a native select.
+  return target.isContentEditable || ['TEXTAREA', 'SELECT'].includes(target.tagName) || target.getAttribute('role') === 'combobox';
 }
 
 /** Return whether a key press carries no ⌘, Ctrl or Alt modifier; Shift is allowed (it makes `?`). */

@@ -58,6 +58,7 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 }));
 
 import GalleryPage from './GalleryPage.svelte';
+import { pickOption } from '../../test-utils/select';
 
 class MockIntersectionObserver {
   static instances: MockIntersectionObserver[] = [];
@@ -234,23 +235,21 @@ describe('GalleryPage regressions', () => {
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
 
-    const filterSelect = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement | null;
-    const sortSelect = target.querySelector('select[aria-label="Sort gallery assets"]') as HTMLSelectElement | null;
+    const filterSelect = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement | null;
+    const sortSelect = target.querySelector('[role="combobox"][aria-label="Sort gallery assets"]') as HTMLButtonElement | null;
     expect(filterSelect).not.toBeNull();
     expect(sortSelect).not.toBeNull();
     expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(1, 1, 'all', 'newest');
 
-    filterSelect!.value = 'video';
-    filterSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    pickOption(filterSelect!, 'video');
     await settle();
     expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'video', 'newest');
-    expect(filterSelect!.value).toBe('video');
+    expect(filterSelect!.dataset.value).toBe('video');
 
-    sortSelect!.value = 'oldest';
-    sortSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    pickOption(sortSelect!, 'oldest');
     await settle();
     expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'video', 'oldest');
-    expect(sortSelect!.value).toBe('oldest');
+    expect(sortSelect!.dataset.value).toBe('oldest');
 
     MockIntersectionObserver.instances.at(-1)?.trigger(true);
     await settle();
@@ -432,9 +431,8 @@ describe('GalleryPage regressions', () => {
     app = flushSync(() => mount(GalleryPage, { target }));
     await settle();
 
-    const filterSelect = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement | null;
-    filterSelect!.value = 'video';
-    filterSelect!.dispatchEvent(new Event('change', { bubbles: true }));
+    const filterSelect = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement | null;
+    pickOption(filterSelect!, 'video');
     await settle();
 
     expect(target.textContent).toContain('No matching assets');
@@ -445,7 +443,7 @@ describe('GalleryPage regressions', () => {
     await settle();
 
     expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'all', 'newest');
-    expect(filterSelect!.value).toBe('all');
+    expect(filterSelect!.dataset.value).toBe('all');
   });
 
   it('shows a workspace recovery action when the gallery is genuinely empty', async () => {
@@ -815,9 +813,8 @@ describe('GalleryPage request ownership (F07)', () => {
     galleryApiMocks.getGallery.mockReturnValueOnce(initial.promise).mockReturnValueOnce(filtered.promise);
 
     app = flushSync(() => mount(GalleryPage, { target }));
-    const filterSelect = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
-    filterSelect.value = 'video';
-    filterSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    const filterSelect = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
+    pickOption(filterSelect, 'video');
 
     filtered.resolve({ assets: [currentAsset], page: 1, total_pages: 1, total_count: 1 });
     await settle();
@@ -848,9 +845,8 @@ describe('GalleryPage request ownership (F07)', () => {
     MockIntersectionObserver.instances.at(-1)?.trigger(true);
     await settle();
 
-    const filterSelect = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
-    filterSelect.value = 'video';
-    filterSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    const filterSelect = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
+    pickOption(filterSelect, 'video');
     filteredPage.resolve({ assets: [filteredAsset], page: 1, total_pages: 2, total_count: 2 });
     await settle();
     stalePage.resolve({ assets: [makeAsset({ id: 'old-page-2.png', filename: 'old-page-2.png' })], page: 2, total_pages: 2, total_count: 2 });
@@ -1032,11 +1028,10 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     await settle();
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
 
-    const filter = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
-    const sort = target.querySelector('select[aria-label="Sort gallery assets"]') as HTMLSelectElement;
+    const filter = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
+    const sort = target.querySelector('[role="combobox"][aria-label="Sort gallery assets"]') as HTMLButtonElement;
     routerMocks.replace.mockReset();
-    filter.value = 'video';
-    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    pickOption(filter, 'video');
     await settle();
 
     expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'video', 'newest');
@@ -1045,15 +1040,13 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     expect(getViewer()).toBeNull();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
 
-    sort.value = 'oldest';
-    sort.dispatchEvent(new Event('change', { bubbles: true }));
+    pickOption(sort, 'oldest');
     await settle();
     expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(3, 1, 'video', 'oldest');
 
     // The empty filtered view exposes the clear-filter path, which must use the
     // same reset and retain the selected sort order.
-    filter.value = 'image';
-    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    pickOption(filter, 'image');
     await settle();
     queryButtonByName(target, 'Show all media')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
@@ -1070,9 +1063,8 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     routerMocks.params = { selected: pendingAsset.id };
 
     app = flushSync(() => mount(GalleryPage, { target }));
-    const filter = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
-    filter.value = 'video';
-    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    const filter = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
+    pickOption(filter, 'video');
     await settle();
     initial.resolve({ assets: [pendingAsset], page: 1, total_pages: 1, total_count: 1 });
     await settle();
@@ -1100,9 +1092,8 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     deleteAssetFromCard(target, deleted);
     await settle();
 
-    const sort = target.querySelector('select[aria-label="Sort gallery assets"]') as HTMLSelectElement;
-    sort.value = 'oldest';
-    sort.dispatchEvent(new Event('change', { bubbles: true }));
+    const sort = target.querySelector('[role="combobox"][aria-label="Sort gallery assets"]') as HTMLButtonElement;
+    pickOption(sort, 'oldest');
     await settle();
     expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'all', 'oldest');
 
@@ -1134,13 +1125,11 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     deleteAssetFromCard(target, deletedImage);
     await settle();
 
-    const filter = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
-    const sort = target.querySelector('select[aria-label="Sort gallery assets"]') as HTMLSelectElement;
-    filter.value = 'image';
-    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    const filter = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
+    const sort = target.querySelector('[role="combobox"][aria-label="Sort gallery assets"]') as HTMLButtonElement;
+    pickOption(filter, 'image');
     await settle();
-    sort.value = 'oldest';
-    sort.dispatchEvent(new Event('change', { bubbles: true }));
+    pickOption(sort, 'oldest');
     await settle();
 
     deleteRequest.resolve();
@@ -1166,9 +1155,8 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     deleteAssetFromCard(target, deletedImage);
     await settle();
 
-    const filter = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
-    filter.value = 'video';
-    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    const filter = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
+    pickOption(filter, 'video');
     await settle();
 
     deleteRequest.resolve();
@@ -1338,9 +1326,8 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     await settle();
     deleteAssetFromCard(target, deleted);
     await settle();
-    const sort = target.querySelector('select[aria-label="Sort gallery assets"]') as HTMLSelectElement;
-    sort.value = 'oldest';
-    sort.dispatchEvent(new Event('change', { bubbles: true }));
+    const sort = target.querySelector('[role="combobox"][aria-label="Sort gallery assets"]') as HTMLButtonElement;
+    pickOption(sort, 'oldest');
     await settle();
     staleReplacement.reject(new Error('oldest view unavailable'));
     await settle();
@@ -1378,9 +1365,8 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     await settle();
     deleteAssetFromCard(target, deletedImage);
     await settle();
-    const filter = target.querySelector('select[aria-label="Filter gallery media"]') as HTMLSelectElement;
-    filter.value = 'image';
-    filter.dispatchEvent(new Event('change', { bubbles: true }));
+    const filter = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
+    pickOption(filter, 'image');
     await settle();
     expect(target.textContent).toContain('visible-image.png');
     expect(target.textContent).not.toContain('off-page-image.png');
