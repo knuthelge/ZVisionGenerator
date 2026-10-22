@@ -22,7 +22,7 @@ lock: ## Regenerate uv.lock
 
 # ——— Quality ——————————————————————————————————————————————
 
-.PHONY: lint lint-fix format format-check test docs-check check
+.PHONY: lint lint-fix format format-check test docs-check docs-serve check
 
 lint: ## Run ruff linter
 	uv run --frozen ruff check zvisiongenerator/ tests/ bench/
@@ -39,8 +39,11 @@ format-check: ## Check formatting without changes
 test: ## Run tests with pytest, one worker per CPU core
 	uv run --frozen pytest -n auto
 
-docs-check: ## Build documentation strictly with MkDocs
-	uv run --frozen mkdocs build --strict
+docs-check: ## Build documentation strictly with Zensical
+	uv run --frozen zensical build --clean --strict
+
+docs-serve: ## Serve documentation with live reload on localhost:8000
+	uv run --frozen zensical serve
 
 check: lint format-check test frontend-test frontend-palette-check frontend-hover-check frontend-static-check docs-check ## Run lint + format-check + pytest + frontend checks + docs build + packaged SPA static gate (full CI gate)
 

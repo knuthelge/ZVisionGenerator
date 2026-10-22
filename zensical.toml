@@ -1,0 +1,49 @@
+[project]
+site_name = "Z-Vision Generator"
+site_url = "https://knuthelge.github.io/ZVisionGenerator/"
+repo_url = "https://github.com/knuthelge/ZVisionGenerator"
+repo_name = "knuthelge/ZVisionGenerator"
+
+extra_css = ["stylesheets/brand.css"]
+
+nav = [
+  { "Home" = "index.md" },
+  { "Getting Started" = "getting-started.md" },
+  { "Guides" = [
+    { "Image Generation" = "guides/image.md" },
+    { "Video Generation" = "guides/video.md" },
+    { "Prompts" = "guides/prompts.md" },
+    { "Model & LoRA Management" = "guides/model.md" },
+  ] },
+  { "Reference" = [
+    { "CLI Reference" = "reference/cli.md" },
+  ] },
+  { "Development" = "development.md" },
+]
+
+[project.theme]
+logo = "assets/ziv-icon.svg"
+favicon = "assets/ziv-icon.png"
+features = [
+  "content.code.copy",
+  "navigation.sections",
+  "navigation.tabs",
+  "navigation.top",
+]
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+
+[[project.theme.palette]]
+scheme = "default"
+primary = "teal"
+accent = "pink"
+toggle.icon = "material/brightness-7"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+primary = "teal"
+accent = "pink"
+toggle.icon = "material/brightness-4"
+toggle.name = "Switch to light mode"

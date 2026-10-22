@@ -5,25 +5,42 @@ on:
     branches: [main]
     paths:
       - "docs/**"
-      - "mkdocs.yml"
+      - "zensical.toml"
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/configure-pages@v5
+
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v7
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.x"
+          python-version: "3.14"
+          allow-prereleases: true
 
-      - name: Install MkDocs
-        run: pip install mkdocs-material
+      - name: Build docs
+        run: uv run --frozen --only-group dev zensical build --clean --strict
 
-      - name: Deploy to GitHub Pages
-        run: mkdocs gh-deploy --force
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

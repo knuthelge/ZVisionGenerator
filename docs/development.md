@@ -20,6 +20,8 @@ make install
 | `make format-check` | Check formatting without changes |
 | `make test` | Run tests with pytest, one worker per CPU core |
 | `make docs-check` | Build documentation with `mkdocs build --strict` |
+| `make docs-check` | Build documentation with `zensical build --clean --strict`; fails on broken links and anchors |
+| `make docs-serve` | Serve documentation with live reload on `localhost:8000` |
 | `make check` | Full CI gate: lint + format-check + pytest + frontend checks + docs build + packaged SPA static gate |
 | `make frontend-dev` | Start the Vite dev server |
 | `make frontend-build` | Build the Svelte app into `zvisiongenerator/web/static/app/` |
