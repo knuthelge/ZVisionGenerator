@@ -1,6 +1,6 @@
 # Prompt enhancer v3: a test bench, sharper rules, better options
 
-**Status:** In progress (2026-10-20). Phases 1 and 2 are done, and phase 3's option set and popover have shipped (unreleased). Open: per-model hints, worked examples and the bench's local judge.
+**Status:** Done (2026-10-22, unreleased). Phases 1 and 2 and phase 3's option set and popover shipped. Per-model hints, worked examples and the bench's local judge moved to [Prompt enhancer: model hints, worked examples and a local judge](../prompt-enhancer-hints.md).
 
 Three phases, each shippable on its own:
 
@@ -22,7 +22,7 @@ It runs on demand in the Web UI (streamed, unloaded after 120 idle seconds) or f
 
 What already works well, and must stay: one source of truth for the options; code owning structure while the model writes prose; context awareness; the enhancer and the generation model never loaded together; retries, refusal and echo detection and the scene/action fallback; the per-part Enhanced tab with Out of date and Use mine.
 
-[prompt-enhancer-v2](archive/prompt-enhancer-v2.md) shipped Sound, clip length and framing, the reference-image rule and Direction. It rejected vision input, per-model hints (item 4, "not for now") and trimming output to length. Phase 3 reopens per-model hints; trimming stays rejected.
+[prompt-enhancer-v2](prompt-enhancer-v2.md) shipped Sound, clip length and framing, the reference-image rule and Direction. It rejected vision input, per-model hints (item 4, "not for now") and trimming output to length. Phase 3 reopens per-model hints; trimming stays rejected.
 
 ---
 
@@ -95,7 +95,7 @@ The scoring functions are pure and get unit tests with canned outputs (`tests/te
 
 ### Shipped (step 1, 2026-10-19)
 
-Step 1 is done (`592935d`, `9241510`): 63 cases, the runner, the checks, `rescore` (recompute checks from stored outputs, no model) and `compare`, under `make enhance-bench`. Steps 2 and 3 moved to phase 3, which is the first phase that needs them.
+Step 1 is done (`592935d`, `9241510`): 63 cases, the runner, the checks, `rescore` (recompute checks from stored outputs, no model) and `compare`, under `make enhance-bench`. Step 3 (the picture sheet, `sheet`) shipped with phase 3; step 2 (the local judge) moved to [the hints proposal](../prompt-enhancer-hints.md).
 
 - **Decisions.** The length check stays strict (the planner's own range); the per-Length median ratio in the report shows how far off each choice is. Only one platform's baseline is needed: the bench is a harness for comparing changes, not a portable score.
 - **Tuned on the first runs.** `keep` matches word stems, up to two words apart, with `a|b` alternatives; `count` allows adjectives before the noun; the caption format check covers structure only, since a design caption moves its lettering lines into text elements.
@@ -159,7 +159,7 @@ What it showed, as input to phase 2:
 - Image and video payloads gain an `enhance` block when a rewrite was used: `settings` (from `settings_to_mapping`), `model` (`repo@revision`), `tier` (`fast`, `smart` or `custom`) and `format` (`text` or `json`). Images also gain `prompt_input`, as videos have.
 - The asset viewer shows "Enhanced with Fast · Cinematic, Dramatic, Longer" and both texts.
 - **Reuse settings** puts the user's text in Your text and the rewrite in Enhanced (used as before; Out of date if edited), and restores the enhance options. Older assets behave as today.
-- [Copy a CLI command](asset-cli-command.md) can emit `--enhance <spec>` and `--enhance-model` from this block.
+- [Copy a CLI command](../asset-cli-command.md) can emit `--enhance <spec>` and `--enhance-model` from this block.
 
 **5. Tidy the builders.**
 - `build_pair_messages` uses `PRESERVATION_RULES`. The softer opening of action-only rewrites ("Keep the user's intent …") becomes a named constant, since it is deliberate: the action must not repeat the scene's elements.
@@ -202,7 +202,7 @@ What it showed, as input to phase 2:
 
 ### Agreed design (2026-10-19), shipped 2026-10-20
 
-Settled in a present-and-feedback review, section by section, then a clickable mockup (five rounds; the last one is the design below). Shipped in `a463979` (options, realism core) and `7d2e2e4` (the popover), with review fixes in `aaf0056`. Model hints and worked examples (items 5 and 6 above) are not part of it and stay open, as does the bench's local judge (phase 1, step 2).
+Settled in a present-and-feedback review, section by section, then a clickable mockup (five rounds; the last one is the design below). Shipped in `a463979` (options, realism core) and `7d2e2e4` (the popover), with review fixes in `aaf0056`. Model hints and worked examples (items 5 and 6 above) and the bench's local judge (phase 1, step 2) are not part of it; they moved to [the hints proposal](../prompt-enhancer-hints.md).
 
 - **Realism core, measured.** The first version listed "pores, fine lines, wear, dust" as examples; the bench's picture sheet showed it aged people and dirtied scenes. The shipped version names the look to avoid (airbrushed, waxy) and forbids making people older, dirtier or more worn than written.
 - **Changed after review.** An image run does not enhance a prompt-file entry that sets only video options (with a warning); `enhance: true` still gives the general rewrite.
@@ -264,8 +264,8 @@ Enhancer [Fast | Smart]                [ Enhance prompt ]
 - About 460px tall for an image, 720px for a video with audio; on a phone it is the existing bottom sheet.
 
 **Related work in other proposals.**
-- **Alternatives.** Once [rewrite history](workspace-prompt-recents.md) lands, an **Alternatives** button can fill it with three rewrites (seeds s, s+1, s+2) from one model load.
-- **Presets.** [Named presets](settings-presets.md) asks whether a preset should store enhance options; the answer here is yes, as an optional block.
+- **Alternatives.** Moved to [rewrite history](../workspace-prompt-recents.md): an **Alternatives** button that fills it with three rewrites (seeds s, s+1, s+2) from one model load.
+- **Presets.** [Named presets](../settings-presets.md) asks whether a preset should store enhance options; the answer here is yes, as an optional block.
 
 ---
 
@@ -286,4 +286,4 @@ Enhancer [Fast | Smart]                [ Enhance prompt ]
 
 ## Open questions
 
-- Whether a hint may name the target model, or only describe the prose it wants.
+- Whether a hint may name the target model, or only describe the prose it wants. Moved to [the hints proposal](../prompt-enhancer-hints.md).

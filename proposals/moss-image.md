@@ -105,7 +105,7 @@ Add a `moss` preset with two variants, the same way `flux2_klein` has `distilled
 - **Out, and why:**
   - **img2img and upscale refine** (`supports_img2img: false`, `supports_upscale: false`): the pipeline has no image input. Adding one means encoding with the FLUX.2 VAE encoder and starting part-way down the sigmas, like the Klein path. That is a follow-up once the base works.
   - **JSON layout prompts** (`supports_json_prompt: false`): MOSS's layout schema (bounding boxes, text elements) is not Ideogram's. Mapping the enhancer's JSON format and the Web UI's JSON toggle onto it is its own proposal.
-  - **Prompt-enhancer hints:** the per-model hints in [prompt-enhancer-v3.md](prompt-enhancer-v3.md) should get a MOSS entry stressing quoted text and long prompts.
+  - **Prompt-enhancer hints:** the per-model hints in [prompt-enhancer-hints.md](prompt-enhancer-hints.md) should get a MOSS entry stressing quoted text and long prompts.
 
 ### 5. macOS: wait for mflux
 

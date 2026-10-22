@@ -46,7 +46,7 @@ LoRAs themselves show only a file name and a weight. Many LoRAs need a trigger w
 ## Open questions
 
 - Which metadata keys hold trigger words reliably? A spike over the LoRAs on hand decides, and the `.txt` sidecar covers the rest.
-- Should a preset store the enhance settings too? Probably yes, as an optional block, since the enhancer options are part of a "look".
+- Should a preset store the enhance settings too? Yes, as an optional block, since the enhancer options are part of a "look" (agreed in [prompt enhancer v3](archive/prompt-enhancer-v3.md)).
 
 ## Out of scope
 

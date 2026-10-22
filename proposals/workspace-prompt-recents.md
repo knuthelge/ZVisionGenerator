@@ -35,6 +35,7 @@ The Workspace remembers one prompt: the one in the box. Typing a new one loses t
 
 - The draft keeps the last five rewrites of the current text (`enhancedHistory: {prompt, scene, settings, at}[]`) instead of one. The Enhanced tab gets a `‹ 2 of 3 ›` stepper; the shown rewrite is the one Generate uses.
 - The history is cleared when the source text changes, which is when the existing "Out of date" badge appears, so the two rules match.
+- **Alternatives** (moved from [prompt enhancer v3](archive/prompt-enhancer-v3.md)): a button in the Enhanced tab fills the history with three rewrites (seeds s, s+1, s+2) from one enhancer load.
 
 ### Docs and changelog
 
