@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import stat
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -15,13 +17,16 @@ from PIL import Image, UnidentifiedImageError
 
 from zvisiongenerator.backends import supports_video_extend
 from zvisiongenerator.core.ideogram4 import is_json_caption
+from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.enhance_record import enhance_record_summary
+from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX
 from zvisiongenerator.utils.provenance import image_prompt_text, optional_float, optional_int, optional_text, read_mp4_config, read_png_config, recorded_settings
 from zvisiongenerator.utils.config import model_capabilities
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label, seedvr2_tier_label
 from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, seedvr2_options, upscale_options, upscale_output_size
 from zvisiongenerator.utils.video_splice import SPLICE_DIR_PREFIX
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
+from zvisiongenerator.web.gallery_index import FactsRead, GalleryIndex, ScannedFile
 from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canonicalize_workflow, default_workflow_for_mode, workflow_mode
 
 
@@ -29,10 +34,12 @@ _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 _VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".mkv"})
 GALLERY_MEDIA_EXTENSIONS = _IMAGE_EXTENSIONS | _VIDEO_EXTENSIONS
 _STAGING_DIR_NAMES = frozenset({".web_uploads"})
-# Scratch directories the video splice creates beside the finished outputs (see ``video_splice``).
-_STAGING_DIR_PREFIXES = (SPLICE_DIR_PREFIX,)
+# Scratch names the video tools create beside the finished outputs: the splice's directories (see ``video_splice``)
+# and the hidden temp files of an in-place MP4 rewrite (see ``ffmpeg.staging_path``).
+_STAGING_PREFIXES = (SPLICE_DIR_PREFIX, STAGING_FILE_PREFIX)
 EXTEND_UPSCALED_REASON = "Upscaled videos can't be extended yet."
 EXTEND_MISSING_FILE_REASON = "The file is missing."
+_GALLERY_INDEX = GalleryIndex(app_db.app_db_path)
 
 
 @dataclass(frozen=True)
@@ -87,26 +94,27 @@ class GalleryAsset:
 
 
 def list_gallery_assets(output_dir: str) -> list[GalleryAsset]:
-    """Scan an output directory for renderable image and video assets."""
+    """Scan an output directory for renderable image and video assets.
+
+    The walk only stats files; the facts read from each file come from the gallery index, which reads a file again
+    only when it is new or changed.
+    """
     root = Path(output_dir)
-    if not root.exists():
+    if not root.is_dir():
         return []
 
-    assets: list[GalleryAsset] = []
-    for candidate in root.rglob("*"):
-        if not candidate.is_file():
-            continue
-        if _is_hidden_from_inventory(root, candidate):
-            continue
-        asset = _build_gallery_asset(root, candidate)
-        if asset is not None:
-            assets.append(asset)
-    assets.sort(key=lambda item: item.modified_at, reverse=True)
+    files, walk_complete = _scan_output_root(root)
+    facts = _GALLERY_INDEX.facts_for(_index_root_key(root), files, _read_scanned_facts, prune=walk_complete and bool(files))
+    assets = [asset for file in files if (asset := _build_gallery_asset(root, file, facts[file.rel_path])) is not None]
+    assets.sort(key=lambda item: (item.modified_at, item.id), reverse=True)
     return assets
 
 
 def gallery_asset_for_output_path(output_dir: str, output_path: str) -> GalleryAsset | None:
-    """Build gallery metadata for one generated output under the configured output root."""
+    """Build gallery metadata for one generated output under the configured output root.
+
+    The file is read directly: the gallery index is neither consulted nor written.
+    """
     root = Path(output_dir).expanduser().resolve()
     candidate = Path(output_path).expanduser()
     if not candidate.is_absolute():
@@ -116,7 +124,49 @@ def gallery_asset_for_output_path(output_dir: str, output_path: str) -> GalleryA
         return None
     if _is_hidden_from_inventory(root, resolved):
         return None
-    return _build_gallery_asset(root, resolved)
+    file = _scanned_file(root, resolved)
+    if file is None:
+        return None
+    return _build_gallery_asset(root, file, _read_scanned_facts(file).facts)
+
+
+def _index_root_key(root: Path) -> str:
+    """Return the key the gallery index stores *root* under: its resolved path."""
+    try:
+        return str(root.expanduser().resolve())
+    except OSError:
+        return str(root.expanduser().absolute())
+
+
+def _scanned_file(root: Path, path: Path) -> ScannedFile | None:
+    """Stat *path* and describe it as a media file under *root*; ``None`` when it vanished or is not a regular file."""
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(st.st_mode):
+        return None
+    return ScannedFile(path.relative_to(root).as_posix(), path, st.st_mtime_ns, st.st_ctime_ns, st.st_mtime, st.st_size)
+
+
+def _scan_output_root(root: Path) -> tuple[list[ScannedFile], bool]:
+    """Walk *root* with stat only and return its media files and whether the walk was error-free.
+
+    Staging directories are never descended into and staging or non-media names are skipped before any stat.
+    A file that vanishes during the walk is skipped.
+    """
+    errors: list[OSError] = []
+    files: list[ScannedFile] = []
+    for dirpath, dirnames, filenames in os.walk(root, onerror=errors.append):
+        dirnames[:] = [name for name in dirnames if not _is_staging_part(name)]
+        for name in filenames:
+            path = Path(dirpath, name)
+            if _is_staging_part(name) or _asset_kind(path) is None:
+                continue
+            file = _scanned_file(root, path)
+            if file is not None:
+                files.append(file)
+    return files, not errors
 
 
 def filter_and_sort_assets(assets: list[GalleryAsset], *, media_filter: str, sort_order: str) -> list[GalleryAsset]:
@@ -366,11 +416,15 @@ def _reuse_enhance_params(asset: GalleryAsset) -> dict[str, str]:
 def delete_gallery_assets(output_dir: str, selected_paths: list[str]) -> None:
     """Delete selected gallery media assets."""
     root = Path(output_dir).resolve()
+    removed: list[str] = []
     for asset_id in dict.fromkeys(path for path in selected_paths if path.strip()):
+        rel_path = normalize_asset_id(asset_id)
         candidate = resolve_output_asset_path(root, asset_id)
-        if candidate is None or not candidate.is_file():
+        if rel_path is None or candidate is None or not candidate.is_file():
             continue
         candidate.unlink(missing_ok=True)
+        removed.append(rel_path)
+    _GALLERY_INDEX.forget(_index_root_key(root), removed)
 
 
 def resolve_output_asset_path(root: Path, asset_id: str) -> Path | None:
@@ -398,20 +452,22 @@ def normalize_asset_id(asset_id: str) -> str | None:
     return path.as_posix()
 
 
-def _build_gallery_asset(root: Path, candidate: Path) -> GalleryAsset | None:
+def _build_gallery_asset(root: Path, file: ScannedFile, facts: dict[str, Any]) -> GalleryAsset | None:
+    """Build the asset of one scanned file from its facts; per-request fields are computed here, never stored."""
+    candidate = file.path
     kind = _asset_kind(candidate)
     if kind is None:
         return None
-    asset_id = candidate.relative_to(root).as_posix()
-    metadata = _read_asset_metadata(candidate, kind)
+    asset_id = file.rel_path
+    metadata = _asset_metadata(candidate, kind, facts)
     return GalleryAsset(
         id=asset_id,
         name=candidate.name,
         kind=kind,
         extension=candidate.suffix.lower().lstrip("."),
         filesystem_path=str(candidate),
-        modified_at=candidate.stat().st_mtime,
-        modified_label=_format_age(candidate.stat().st_mtime),
+        modified_at=file.mtime,
+        modified_label=_format_age(file.mtime),
         path_label=asset_id,
         media_url=f"/media/{quote(asset_id, safe='/')}",
         detail_url="",
@@ -451,12 +507,13 @@ def _build_gallery_asset(root: Path, candidate: Path) -> GalleryAsset | None:
     )
 
 
-def _read_asset_metadata(asset_path: Path, kind: str) -> dict[str, Any]:
+def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[str, Any]:
+    """Derive the display and reuse metadata of an asset from the facts read from its file."""
     # Embedded config (PNG tEXt chunk / MP4 container tag) is the only reusable generation settings source.
-    config = _read_embedded_config(asset_path, kind) or {}
+    config = facts.get("config") or {}
     recorded = recorded_settings(config)
     filename_metadata = _parse_generated_filename(asset_path)
-    image_metadata = _read_image_metadata(asset_path) if kind == "image" else {}
+    image_metadata = facts.get("image") or {}
 
     prompt = recorded.prompt or image_metadata.get("prompt")
     if not prompt and (recorded.scene or (kind == "video" and config)):
@@ -564,27 +621,34 @@ def _source_with_asset_id(root: Path, source: dict[str, Any] | None) -> dict[str
     return {**source, "id": asset_id}
 
 
-def _read_embedded_config(asset_path: Path, kind: str) -> dict[str, Any] | None:
-    """Read the embedded zvisiongenerator.config payload from a PNG or MP4 asset.
+# Changing what this reads requires bumping ``gallery_index.GALLERY_INDEX_VERSION``.
+def _read_asset_facts(asset_path: Path, kind: str | None) -> FactsRead:
+    """Read the raw facts of a media file: the embedded config and, for an image, its size and prompt text.
 
-    Returns the parsed dict when present, or None for all other formats and all errors.
+    The facts are incomplete when a reader failed, so the index does not store them.
     """
+    complete = True
+    config: dict[str, Any] | None = None
     try:
         if kind == "image" and asset_path.suffix.lower() == ".png":
-            return read_png_config(asset_path)
-        if kind == "video" and asset_path.suffix.lower() == ".mp4":
-            return read_mp4_config(asset_path)
+            config = read_png_config(asset_path)
+        elif kind == "video" and asset_path.suffix.lower() == ".mp4":
+            config = read_mp4_config(asset_path)
     except Exception:
-        return None
-    return None
+        complete = False
+    image: dict[str, Any] = {}
+    if kind == "image":
+        try:
+            with Image.open(asset_path) as opened:
+                image = {"width": opened.width, "height": opened.height, "prompt": image_prompt_text(opened)}
+        except FileNotFoundError, OSError, UnidentifiedImageError, ValueError:
+            complete = False
+    return FactsRead({"config": config, "image": image}, complete)
 
 
-def _read_image_metadata(asset_path: Path) -> dict[str, Any]:
-    try:
-        with Image.open(asset_path) as image:
-            return {"width": image.width, "height": image.height, "prompt": image_prompt_text(image)}
-    except FileNotFoundError, OSError, UnidentifiedImageError, ValueError:
-        return {}
+def _read_scanned_facts(file: ScannedFile) -> FactsRead:
+    """Read the facts of a scanned file; the reader the gallery index calls for new or changed files."""
+    return _read_asset_facts(file.path, _asset_kind(file.path))
 
 
 def _parse_generated_filename(asset_path: Path) -> dict[str, Any]:
@@ -636,7 +700,7 @@ def _is_hidden_from_inventory(root: Path, candidate: Path) -> bool:
 
 def _is_staging_part(part: str) -> bool:
     """Return whether a path component names an upload or scratch directory that never holds gallery assets."""
-    return part in _STAGING_DIR_NAMES or part.startswith(_STAGING_DIR_PREFIXES)
+    return part in _STAGING_DIR_NAMES or part.startswith(_STAGING_PREFIXES)
 
 
 def _format_age(timestamp: float) -> str:

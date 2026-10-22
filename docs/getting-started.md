@@ -277,6 +277,8 @@ Each command records warnings and errors, with full tracebacks, in `~/.ziv/logs/
 
 The Web UI also keeps a record of finished jobs, with the reason each failed, in `jobs.jsonl` in the data folder (`~/.ziv/` unless `ZIV_DATA_DIR` is set). Unlike the error log it is kept across restarts. Once it holds more than 2000 jobs, only the newest 1500 are kept. Clear it with **Clear log** in the Web UI's Job log, or delete the file while the server is stopped.
 
+The Web UI also keeps an app database, `ziv.sqlite3`, in the same folder. While the server runs, `ziv.sqlite3-wal` and `ziv.sqlite3-shm` files sit beside it. It holds the Gallery index: what was read from each image and video in your output folder, so History and the Gallery open fast after a restart. The index is rebuilt automatically, so deleting the database while the server is stopped is safe; the next Gallery load reads every file once. Files you delete, in the app or in the output folder, are never shown. Their entries are removed the next time the folder is listed with at least one file in it. Files that the CLI writes to the output folder are picked up on the next load. Several Web UIs, including different versions of ziv, can share the database. If the file is ever found damaged, it is moved aside as `ziv.sqlite3.corrupt-<date>-<time>` and a new one is started; delete those copies when you don't need them.
+
 ## Troubleshooting
 
 ### Linux: the terminal or editor closes while a model loads

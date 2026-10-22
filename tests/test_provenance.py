@@ -15,6 +15,7 @@ from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.video_types import ExtendSource, ExtendSpec, VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX, staging_path
 from zvisiongenerator.utils.provenance import (
     IMAGE_CONFIG_SCHEMA,
     VIDEO_CONFIG_SCHEMA,
@@ -465,7 +466,7 @@ class TestEmbedMp4Config:
         payload = {"schema": VIDEO_CONFIG_SCHEMA, "prompt": "test prompt"}
 
         def _side_effect(cmd, **kwargs):
-            tmp = video_path.with_suffix(".tmp.mp4")
+            tmp = staging_path(video_path)
             tmp.write_bytes(b"processed")
             return MagicMock(returncode=0)
 
@@ -487,7 +488,7 @@ class TestEmbedMp4Config:
         video_path.write_bytes(b"fake-mp4")
 
         def _side_effect(cmd, **kwargs):
-            video_path.with_suffix(".tmp.mp4").write_bytes(b"processed")
+            staging_path(video_path).write_bytes(b"processed")
             return MagicMock(returncode=0)
 
         with patch("zvisiongenerator.utils.provenance.subprocess.run", side_effect=_side_effect) as mock_run:
@@ -501,7 +502,7 @@ class TestEmbedMp4Config:
         video_path.write_bytes(b"fake-mp4")
 
         def _side_effect(cmd, **kwargs):
-            video_path.with_suffix(".tmp.mp4").write_bytes(b"processed")
+            staging_path(video_path).write_bytes(b"processed")
             return MagicMock(returncode=0)
 
         with patch("zvisiongenerator.utils.provenance.subprocess.run", side_effect=_side_effect) as mock_run:
@@ -516,7 +517,7 @@ class TestEmbedMp4Config:
         payload = {"schema": VIDEO_CONFIG_SCHEMA, "prompt": "test prompt"}
 
         def _side_effect(cmd, **kwargs):
-            tmp = video_path.with_suffix(".tmp.mp4")
+            tmp = staging_path(video_path)
             tmp.write_bytes(b"processed")
             return MagicMock(returncode=0)
 
@@ -526,20 +527,40 @@ class TestEmbedMp4Config:
         assert not video_path.with_suffix(".json").exists()
         assert not video_path.with_name(f"{video_path.name}.json").exists()
 
+    def test_writes_hidden_staging_file_and_replaces_original(self, tmp_path):
+        video_path = tmp_path / "out.mp4"
+        video_path.write_bytes(b"fake-mp4")
+
+        def _side_effect(cmd, **kwargs):
+            Path(cmd[-1]).write_bytes(b"processed")
+            return MagicMock(returncode=0)
+
+        with patch("zvisiongenerator.utils.provenance.subprocess.run", side_effect=_side_effect) as mock_run:
+            embed_mp4_config(video_path, {"schema": VIDEO_CONFIG_SCHEMA})
+
+        staged = Path(mock_run.call_args[0][0][-1])
+        assert staged == tmp_path / f"{STAGING_FILE_PREFIX}out.mp4"
+        assert staged.suffix == ".mp4"
+        assert video_path.read_bytes() == b"processed"
+        assert not staged.exists()
+
     def test_raises_on_ffmpeg_failure_and_cleans_tmp(self, tmp_path):
         video_path = tmp_path / "out.mp4"
         video_path.write_bytes(b"fake-mp4")
         payload = {"schema": VIDEO_CONFIG_SCHEMA}
 
-        with patch("zvisiongenerator.utils.provenance.subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(1, "ffmpeg", stderr=b"some error")
+        def _fail_after_partial_write(cmd, **kwargs):
+            Path(cmd[-1]).write_bytes(b"partial")
+            raise subprocess.CalledProcessError(1, "ffmpeg", stderr=b"some error")
+
+        with patch("zvisiongenerator.utils.provenance.subprocess.run", side_effect=_fail_after_partial_write):
             import pytest
 
             with pytest.raises(subprocess.CalledProcessError):
                 embed_mp4_config(video_path, payload)
 
         assert video_path.exists()
-        assert not video_path.with_suffix(".tmp.mp4").exists()
+        assert not staging_path(video_path).exists()
 
 
 class TestReadMp4Config:

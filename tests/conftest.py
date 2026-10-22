@@ -230,3 +230,11 @@ def _isolated_job_log(monkeypatch, tmp_path_factory):
     data_dir = tmp_path_factory.mktemp("ziv-data")
     monkeypatch.setattr("zvisiongenerator.web.job_log.get_ziv_data_dir", lambda: data_dir)
     return data_dir
+
+
+@pytest.fixture(autouse=True)
+def _isolated_app_db(monkeypatch, tmp_path_factory):
+    """Point the app database at a throwaway data dir so no test reads or writes the real ``ziv.sqlite3``."""
+    data_dir = tmp_path_factory.mktemp("ziv-app-db")
+    monkeypatch.setattr("zvisiongenerator.utils.app_db.get_ziv_data_dir", lambda: data_dir)
+    return data_dir

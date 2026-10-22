@@ -1,6 +1,8 @@
 # Search and favourites in the Gallery
 
-**Status:** Proposed (2026-10-17)
+**Status:** In progress (2026-10-21)
+
+**Shipped:** the asset index (§1) is in the Gallery as a persistent index in the app database `ziv.sqlite3`, replacing the in-memory index first proposed here. Search, filters and favourites remain.
 
 ## Problem
 
@@ -11,7 +13,7 @@ The Workspace history strip has the same limits, so the problem shows on both pa
 ## Evidence
 
 - Every asset the server returns already carries `prompt`, `scene`, `model`, `workflow`, `seed`, `lora`, `width`, `height`, `ratio`, `size`, `created_at` and the recorded `details` (`gallery_asset_to_json`). Searching needs no new metadata.
-- `list_gallery_assets` walks the output folder with `rglob` and reads the embedded config of **every** file (PNG `tEXt` chunk or MP4 tag, `_read_embedded_config`) on **every** request. `/api/gallery` and `/api/history` both call it once per page. Nothing is cached, so a search that fires per keystroke would re-read every file each time.
+- Before the persistent gallery index shipped, `list_gallery_assets` walked the output folder with `rglob` and read the embedded config of **every** file (PNG `tEXt` chunk or MP4 tag) on **every** request. `/api/gallery` and `/api/history` both called it once per page. Nothing was cached, so a search that fired per keystroke would have re-read every file each time.
 - `GalleryPage.svelte` has the two selects in its `PageHeader`, arrow-key grid navigation (`gridNav.ts`) and multi-select delete. The router keeps `#/gallery?…` params, so filters can live in the URL.
 - There is no favourite, rating or tag anywhere in the server or the SPA.
 
@@ -19,11 +21,11 @@ The Workspace history strip has the same limits, so the problem shows on both pa
 
 ### 1. An asset index on the server
 
-A small in-memory index in `web/gallery.py`, keyed by `(path, mtime, size)`:
+**Shipped.** `web/gallery_index.py` keeps the facts read from each gallery file in the app database `ziv.sqlite3` (table `gallery_assets_v{N}`), keyed by `(root, rel_path)` and validated by `(mtime_ns, ctime_ns, size)`:
 
-- `list_gallery_assets` still discovers files with `rglob`, but reads embedded metadata only for files whose key changed since the last scan. Unchanged files come from the index. A deleted file drops out because it is no longer discovered.
-- The index is a module-level dict behind a lock, built lazily on the first request. No persistence: a restart rebuilds it on the next request, which is what happens today on every request.
-- A spike measures the scan on a folder of 2 000 mixed assets before and after, so the numbers go into this section when the work starts.
+- `list_gallery_assets` walks the output folder with `stat` only and reads embedded metadata only for new or changed files. Unchanged files come from the index, including after a restart. A deleted file is never shown, and its row is dropped by the next error-free listing that finds a file.
+- Rows hold the raw facts (embedded config and image size), not the derived asset fields, so per-request fields stay live and search can build on the same rows.
+- Search filters the full list that `list_gallery_assets` returns, so it needs no further index. If a folder grows large enough for that to be slow, filtering can move into SQL over the same table.
 
 ### 2. Search and filters in the API
 
@@ -45,6 +47,7 @@ Matching runs over the full indexed list before paging, so `total_count` and `ha
 - Stored in a hidden JSON file in the output folder, `.ziv-gallery.json`, as `{"favourites": ["sub/file.png", …]}` with paths relative to the folder, written with `utils/atomic_write.py`. The file travels with the folder, needs no rewrite of the media files (which would change their modification time and so their order), and is ignored by the scan because `_asset_kind` only accepts media extensions.
 - `PUT /api/gallery/{asset_path}/favourite` with `{"favourite": true|false}`. Deleting an asset removes its entry.
 - Each asset JSON gains `favourite: boolean`, so the Workspace strip, the viewer and the Gallery agree without a second request.
+- Favourites could instead become a component of the app database (a `favourites_*` table next to the gallery index); the sidecar file above is kept because it travels with the folder.
 
 ### 4. Gallery page
 
@@ -65,7 +68,7 @@ The strip shows the star on each tile and keeps the full list; no search there. 
 ## Alternatives considered
 
 - **Search on the client over loaded pages.** No server change, but it would only search the pages already scrolled into view, which is exactly the case where search is needed. Rejected.
-- **A SQLite index on disk.** Survives restarts and scales to tens of thousands of files. Rejected for now: the in-memory index removes the per-request metadata reads, which is the real cost; a database can replace it later behind the same functions if folders grow that large.
+- **An in-memory index.** Removes the per-request reads, but a restart rebuilds it, and the Web UI is restarted often while a cold scan of a large video folder takes minutes. The models also need the RAM. Rejected; the shipped index is persistent.
 - **Tags instead of a star.** More expressive, but a star covers the first need (find the keepers) and the same sidecar file can hold tags later.
 - **Storing the star inside the media file.** Rewriting a PNG or MP4 changes its modification time and reorders the Gallery, and MP4 rewrites copy the whole file (`embed_mp4_config`). Rejected.
 

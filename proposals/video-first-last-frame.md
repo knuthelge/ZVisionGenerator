@@ -78,7 +78,7 @@ The CLI and the Web server snap frame counts to `8k + 1` before they reach the b
 | Web runner | `web/web_runner.py` | `mode="i2v" if request.image_path` |
 | Workflow contract | `web/workspace_contract.py` | `visible_controls` holds control ids (`reference_image`, `reference_image_path`, `reference_image_clear` for `img2vid`). `clear_fields` holds form fields, which the frontend maps to draft state |
 | Recorded settings | `utils/provenance.py` | `build_video_config_payload` records `workflow: "img2vid"` and `image_path`. `RecordedSettings` reads it back through `_local_path` |
-| Gallery | `web/gallery.py` | `GalleryAsset.reference_image_path`, `_read_asset_metadata`, `gallery_asset_to_json`, and `reuse_params["image_path"]` |
+| Gallery | `web/gallery.py` | `GalleryAsset.reference_image_path`, `_asset_metadata`, `gallery_asset_to_json`, and `reuse_params["image_path"]` |
 | Prompt enhancer | `utils/prompt_enhance.py`, `preflight.py`, `web/server.py` | The `enhance_context()` factory, `preflight._job_context` (CLI and Web generation), and the server's enhance-preview parser build `EnhanceContext.reference_image`. `_context_rules` picks the "first frame is supplied" rule in video mode |
 | Frontend | `frontend/src/` | `SettingsPane.svelte` (inline picker), `WorkspacePage.svelte` (upload state sent as `image_file`, the CLI warning for uploads, clearing the draft image when its asset is deleted), `GalleryPage.svelte` (the same clearing), `draft.svelte.ts` (control map, `_CLEAR_FIELD_STATE_UPDATES`, route prefill), `jobSettings.ts` (`PREFILL_KEYS`), `capabilities.ts`, `assetDetails.ts`, `assetActions.ts`, `cliCommand.ts`, `promptEnhance.ts` (decides from the workflow, not from which images are set), and the `GalleryAsset` / `JobSettings` types |
 
@@ -158,7 +158,7 @@ Write the numbers into this proposal's Evidence section before step 1.
 - `build_video_config_payload` records `end_image_path` (through `_portable_path`, so home paths become `~`) when it's set. The workflow stays `img2vid`. `RecordedSettings` gets `end_image_path`, read back through `_local_path`.
 - Gallery:
   - `GalleryAsset` gets `end_image_path`.
-  - `_read_asset_metadata` fills it, and `gallery_asset_to_json` returns it.
+  - `_asset_metadata` fills it, and `gallery_asset_to_json` returns it.
   - Reuse adds `reuse_params["end_image_path"]` only when the resolved workflow is `img2vid` and the file still exists. When a missing start image makes reuse fall back to `txt2vid`, the end image isn't carried along. If it doesn't, Reuse drops the field and reports a `missing_end_image` fallback reason, instead of letting `_optional_path` reject the whole submission.
 - Tests:
   - CLI validation: a missing file, no `--image`, a T2V-only model, and a backend without end-image support.

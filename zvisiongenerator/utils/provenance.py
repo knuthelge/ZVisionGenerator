@@ -13,6 +13,7 @@ from PIL.PngImagePlugin import PngInfo
 from zvisiongenerator.core.image_types import ImageGenerationRequest, ImageWorkingArtifacts
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
 from zvisiongenerator.utils.enhance_record import parse_enhance_record
+from zvisiongenerator.utils.ffmpeg import staging_path
 from zvisiongenerator.utils.paths import collapse_home, display_stem, expand_home
 
 IMAGE_CONFIG_SCHEMA = "zvisiongenerator.config.v1"
@@ -187,7 +188,7 @@ def embed_mp4_config(video_path: str | Path, payload: dict[str, Any]) -> None:
         subprocess.CalledProcessError: If ffmpeg exits with a non-zero status.
     """
     video_path = Path(video_path)
-    tmp = video_path.with_suffix(".tmp.mp4")
+    tmp = staging_path(video_path)
     value = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     try:
         subprocess.run(

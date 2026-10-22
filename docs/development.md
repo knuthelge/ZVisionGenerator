@@ -44,6 +44,7 @@ make install
 - Mock backend pattern: a MagicMock with `.text_to_image.return_value = Image.new("RGB", (64, 64))` (see `_make_mock_backend()` in `tests/test_workflow.py`).
 - Use `conftest.py::_make_args(**overrides)` to build minimal `argparse.Namespace` objects.
 - Use `tmp_path` fixture for filesystem operations.
+- An autouse fixture, `_isolated_app_db`, points `zvisiongenerator.utils.app_db.get_ziv_data_dir` at a per-test temporary directory, so no test touches the real `ziv.sqlite3`. Files a test creates are under 2 seconds old and the gallery index never persists them; to test caching, backdate them with `os.utime` (or pass `clock=` to `GalleryIndex`) and count reader calls.
 - Use `@pytest.mark.parametrize` for data-driven tests with many input/output pairs.
 - Tests that run the real `ffmpeg` and `ffprobe` (in `tests/test_video_probe.py`, `tests/test_video_splice.py` and `tests/test_video_tail.py`) are marked to skip when the tools are missing and are meant to be run locally with ffmpeg installed; run them before changing the extend join. Everything else mocks ffmpeg.
 - Skip heavy dependencies: `pytest.importorskip("torch")`, `@pytest.mark.skipif(sys.platform == ...)` for platform-specific tests.
@@ -146,11 +147,12 @@ zvisiongenerator/
 │   └── beta_scheduler.py          Beta-distribution sigma scheduler
 ├── utils/
 │   ├── alignment.py               Pixel-alignment helpers for resolution, and the size and frame alignment of a video job
+│   ├── app_db.py                  The app database `ziv.sqlite3`: path, connections with the standard pragmas, per-component schema versions, corruption quarantine
 │   ├── app_log.py                 Error log file, cleared on every start
 │   ├── atomic_write.py            Atomic file replacement for config and prompt-file writers
 │   ├── config.py                  Config loading (image + video)
 │   ├── console.py                 Console formatting
-│   ├── ffmpeg.py                  ffmpeg availability check and install, and the error for a failed ffmpeg or ffprobe run
+│   ├── ffmpeg.py                  ffmpeg availability check and install, the error for a failed ffmpeg or ffprobe run, and the hidden temp path of in-place rewrites
 │   ├── file_links.py              Hard-link model files into a new folder, copying where linking fails
 │   ├── filename.py                Output filenames ({set}_{timestamp}) and collision counters
 │   ├── ideogram4_instant.py       Ideogram 4 Instant's pinned build sources, model folder and build record
@@ -188,6 +190,7 @@ zvisiongenerator/
 │   ├── extend_api.py              Extend routes: check and describe a source video, fit its window to memory, build the rewrite context of an extension
 │   ├── first_run.py               The model the first-run dialog preselects, and the dialog's payload block
 │   ├── gallery.py                 Gallery inventory and response serialization
+│   ├── gallery_index.py           Gallery component of the app database: facts read from gallery files, reconciled with the folder on each listing
 │   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
 │   ├── job_log.py                 Persisted log of finished jobs: entry builder, filters, paging and the capped JSON-lines store
 │   ├── json_fields.py             Typed reads of optional fields in a JSON request body
@@ -310,6 +313,32 @@ Downloads started from the Models page take a second path: `DownloadLane` (`web/
 - **Best effort.** Two `ziv ui` servers on one data directory race on the rewrite and can lose an entry. A server stopped while a job runs may exit before the worker writes that job's line.
 - **Routes.** `GET /api/jobs/log` (50 per page, newest first, `status` filter), `DELETE /api/jobs/log/{job_id}` and `DELETE /api/jobs/log` are declared before the `/api/jobs/{job_id}/...` routes. A file system error from the store is a 500 with a `detail`.
 - **Tests.** An autouse fixture in `tests/conftest.py` points `job_log.get_ziv_data_dir` at a temporary directory, so no test writes the real log.
+
+### App Database
+
+`ziv.sqlite3` in the ZIV data directory is one shared SQLite file for features that need to keep data between runs. `utils/app_db.py` is stdlib only, so the CLI and the web layer can both use it; it holds no lock and no module-level connection, and never creates, alters or drops a feature's tables.
+
+- **Path and connections.** `app_db_path()` returns `get_ziv_data_dir() / APP_DB_FILENAME`, resolved at call time so tests can patch `app_db.get_ziv_data_dir`. `connect(path=None, *, components=())` returns a fresh `AppConnection` (a `sqlite3.Connection` that remembers `db_path` and `db_identity`, the `(st_dev, st_ino)` of the file recorded before opening). It sets WAL, a `busy_timeout` of 5 s, `foreign_keys=ON` and `synchronous=NORMAL`, uses autocommit, creates `schema_versions` and brings each listed component to its version. WAL keeps `ziv.sqlite3-wal` and `ziv.sqlite3-shm` beside the file while it is open.
+- **Components.** A feature declares `Component(name, version, migrate)`. Its tables are named `<name>_*`, and it never reads or writes another component's tables.
+- **`schema_versions`.** The table `schema_versions(component, version)` stores, per component, the highest version that has run on this file, and that number is never lowered. When the stored version (0 if there is no row) differs from the component's, `connect` runs `BEGIN IMMEDIATE`, re-reads the stored version, calls `migrate(conn, stored)`, stores `max(stored, version)` and commits. If `migrate` raises, the transaction rolls back, the row is unchanged and the error propagates. `migrate` also receives a stored version higher than its own, which means a newer ziv wrote the file; each component decides what that means. A data component upgrades step by step and raises, so its data is left alone. The gallery is a cache and keeps a table per version (see [Gallery Index](#gallery-index)).
+- **Corruption.** `recover_if_corrupt(conn, exc)` is the one place the policy lives. When `is_corruption(exc)` (`SQLITE_CORRUPT` or `SQLITE_NOTADB`), it closes the connection, calls `quarantine(path, identity)` and warns. `quarantine` moves the file only if the file at the path still has the identity recorded before the connection opened, so a file another process has already replaced is left alone. It renames `-wal`, then `-shm`, then the main file to `ziv.sqlite3.corrupt-<YYYYmmdd-HHMMSS>[-n]` plus the same suffixes, so a new main file is never paired with an old WAL. The app never deletes the database. Errors that do not mean a damaged file (cannot open, read-only, busy or locked, I/O error, a directory at the path) never rename anything. `connect` uses the helper while opening and migrating, then retries once.
+- **Connection rules for a feature.** Open one short-lived connection per operation, `with closing(app_db.connect(components=(MY_COMPONENT,))) as conn:`; never keep a module-global connection and never share one across threads. Keep `BEGIN IMMEDIATE ... COMMIT` writes short and free of slow I/O. A lock belongs to the feature that needs it. When an operation fails, pass the exception to `recover_if_corrupt` before deciding what to do. `rollback(conn)` ends an open transaction and ignores a failure to do so; use it in the `except` path of a write.
+
+A future feature, such as the job log, would define `JOBS = app_db.Component("jobs", 1, _migrate_jobs)`, where `_migrate_jobs` raises `RuntimeError` for a `from_version` above 1 and creates `jobs_entries` when it is 0. A gallery rebuild never touches `jobs_entries`, and a quarantine keeps its data in the `.corrupt-*` file.
+
+### Gallery Index
+
+`web/gallery_index.py` is the gallery component of the app database. `list_gallery_assets` calls it on every listing, so `/api/history`, `/api/gallery` and `/api/workspace?include_history=true` read a file's embedded metadata once per file version instead of once per request, including the first request after a restart.
+
+- **Raw facts.** A row stores what was read from the file, `{"config": <embedded payload or null>, "image": {width, height, prompt} or {}}`, not the derived `GalleryAsset` fields. The derivation (recorded settings, filename parsing, prompt fallback) runs on every request, so fields that depend on other files or on the clock (`source.id`, `reuse_state`, `missing_source_video`, `modified_label`) are never stale, and a change to the derivation needs no migration. `gallery._read_asset_facts` is the only metadata I/O.
+- **Reconciliation.** `_scan_output_root` walks the root with `stat` only, never descending into staging directories, and `GalleryIndex.facts_for` matches each `ScannedFile` against the rows of that root. A row is used only when its `(mtime_ns, ctime_ns, size)` equals the walked stat, so a stale or orphan row costs at most one re-read and can never show a file or wrong metadata. Only walked files are returned. A change of ctime alone (a backup tool, chmod) causes one re-read.
+- **When a read is persisted.** Only when no reader failed, the file's mtime is at least 2 s before now, and a re-stat after the read returns the same key. A read that is not persisted is still used in the response and is tried again on the next listing. Persisted reads are committed every 64 files, so an interrupted cold scan keeps its progress.
+- **Pruning.** A missing root returns `[]` and keeps its rows. Rows for files the walk did not see are deleted only by a walk without errors that found at least one media file, because `resolve_output_dir` creates the folder and an unmounted drive looks like an empty folder. The delete is conditional on the key the call loaded. A deleted file is therefore never shown, and its row is removed by the next error-free listing of that root that finds at least one file, including when it was deleted while the app was not running. `delete_gallery_assets` calls `GalleryIndex.forget()`, which removes the rows at once.
+- **Versioned table.** The table is `gallery_assets_v{N}`, with `N = GALLERY_INDEX_VERSION`. Bump the constant when the columns change or when `_read_asset_facts` reads something different. `_migrate_gallery` always runs `CREATE TABLE IF NOT EXISTS` for its own table, and drops the lower-versioned gallery tables only when the stored highest version is below `N`; it never drops a higher one. Two ziv versions sharing a data folder (a development checkout and an installed one) each keep their own table, so they do not rebuild each other's: the older one re-reads once after the first bump and is then stable.
+- **Fallback.** The gallery never fails because of the database. An error while opening or loading falls back to reading every file uncached, with a warning and without touching the file (a corrupt file is first quarantined by `recover_if_corrupt`). A write error keeps the results already read and stops writing for that call.
+- **Locking.** `GalleryIndex` holds one `threading.Lock` around a whole reconciliation, so concurrent cold requests read each file once. `forget()` does not take it, so a delete never waits behind a scan.
+- **Job completion.** A finished job does not write a row. The next listing picks the output up, and `gallery_asset_for_output_path` reads uncached and never touches the database.
+- **Hidden temp.** `embed_mp4_config` and `strip_audio` write their temporary copy as `.ziv-tmp-<name>` (`staging_path()` in `utils/ffmpeg.py`), which the gallery staging rules hide from listings, the walk and `/media`.
 
 ### Model Downloads
 

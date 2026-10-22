@@ -12,7 +12,7 @@ import pytest
 
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.video_types import VideoGenerationRequest, VideoWorkingArtifacts
-from zvisiongenerator.utils.ffmpeg import strip_audio
+from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX, staging_path, strip_audio
 from zvisiongenerator.workflows import build_video_workflow
 from zvisiongenerator.workflows.video_stages import strip_audio_stage
 
@@ -91,7 +91,7 @@ class TestStripAudioUtility:
         """strip_audio() calls subprocess with the expected ffmpeg arguments."""
         video = tmp_path / "output.mp4"
         video.write_bytes(b"fake video data")
-        expected_tmp = video.with_suffix(".tmp.mp4")
+        expected_tmp = staging_path(video)
 
         # Make subprocess.run create the tmp file (simulating ffmpeg)
         def fake_run(cmd, **kwargs):
@@ -113,7 +113,7 @@ class TestStripAudioUtility:
         """strip_audio() replaces the original file with the temp file."""
         video = tmp_path / "output.mp4"
         video.write_bytes(b"original data")
-        expected_tmp = video.with_suffix(".tmp.mp4")
+        expected_tmp = staging_path(video)
 
         def fake_run(cmd, **kwargs):
             # Simulate ffmpeg creating the tmp file
@@ -128,6 +128,42 @@ class TestStripAudioUtility:
         assert video.read_bytes() == b"stripped data"
         # The tmp file should be gone (replaced via rename)
         assert not expected_tmp.exists()
+
+    @patch("zvisiongenerator.utils.ffmpeg.subprocess.run")
+    def test_writes_to_hidden_staging_file(self, mock_run, tmp_path):
+        """strip_audio() writes to a hidden .ziv-tmp- sibling that still ends in .mp4."""
+        video = tmp_path / "output.mp4"
+        video.write_bytes(b"original data")
+
+        def fake_run(cmd, **kwargs):
+            Path(cmd[-1]).write_bytes(b"stripped data")
+            return MagicMock(returncode=0)
+
+        mock_run.side_effect = fake_run
+
+        strip_audio(video)
+
+        staged = Path(mock_run.call_args[0][0][-1])
+        assert staged == tmp_path / f"{STAGING_FILE_PREFIX}output.mp4"
+        assert staged.suffix == ".mp4"
+
+    @patch("zvisiongenerator.utils.ffmpeg.subprocess.run")
+    def test_failure_removes_staging_file(self, mock_run, tmp_path):
+        """strip_audio() removes a partial staging file when ffmpeg fails."""
+        video = tmp_path / "output.mp4"
+        video.write_bytes(b"original data")
+
+        def fake_run(cmd, **kwargs):
+            Path(cmd[-1]).write_bytes(b"partial")
+            raise RuntimeError("ffmpeg failed")
+
+        mock_run.side_effect = fake_run
+
+        with pytest.raises(RuntimeError, match="ffmpeg failed"):
+            strip_audio(video)
+
+        assert video.read_bytes() == b"original data"
+        assert not staging_path(video).exists()
 
     @patch("zvisiongenerator.utils.ffmpeg.subprocess.run", side_effect=Exception("ffmpeg failed"))
     def test_ffmpeg_failure_propagates(self, mock_run, tmp_path):

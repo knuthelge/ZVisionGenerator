@@ -46,13 +46,22 @@ def tool_error(message: str, stderr: bytes | str | None, *, limit: int = 1500) -
     return RuntimeError(f"{message}: {strip_ffmpeg_banner(text)[-limit:]}")
 
 
+# Prefix of the hidden temporary file an in-place rewrite writes beside its target.
+STAGING_FILE_PREFIX = ".ziv-tmp-"
+
+
+def staging_path(path: Path) -> Path:
+    """Return the hidden temporary path an in-place rewrite of *path* writes first."""
+    return path.with_name(STAGING_FILE_PREFIX + path.name)
+
+
 def strip_audio(video_path: Path) -> None:
     """Remove audio track from video in-place using ffmpeg.
 
     Copies the video stream without re-encoding, discards audio.
     Replaces the original file.
     """
-    tmp = video_path.with_suffix(".tmp.mp4")
+    tmp = staging_path(video_path)
     try:
         subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-i", str(video_path), "-an", "-c:v", "copy", str(tmp)],
