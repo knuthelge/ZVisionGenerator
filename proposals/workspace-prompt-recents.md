@@ -50,7 +50,7 @@ The Workspace remembers one prompt: the one in the box. Typing a new one loses t
 
 ## Open questions
 
-- Should a prompt picked from recents also restore the settings used with it? Not in the first version; presets ([Settings presets](settings-presets.md)) are the place for settings.
+- Should a prompt picked from recents also restore the settings used with it? Not in the first version; presets ([Settings presets](archive/settings-presets.md)) are the place for settings.
 
 ## Out of scope
 
