@@ -112,6 +112,8 @@ Workspace settings are remembered in the browser between visits and restarts, as
 
 The Add LoRA menu lists the LoRAs made for the selected model first (the ones you used with it recently on top) and folds all others, including ones whose model can't be detected, under **Other models (n)**. Which model a LoRA was made for is read from the file's header the first time the file is seen, and remembered.
 
+**Presets** save a working setup under a name. On a computer, the **Preset** control is the first item of the Workspace toolbar, before the model; on a phone, it is the first chip of the settings strip and the top row of the **All** sheet. Choosing a preset applies every selection of the Workspace in one step: model, quantization, LoRAs and their weights, size, number of runs, steps, guidance, image strength, scheduler, post-processing and upscale settings including review (for video: length, audio, low memory and upscale), the same way in every workflow. The prompt, seed, reference image and workflow stay as they are. A preset of the other mode, image or video, is not listed, and a LoRA or model that is no longer installed is skipped silently. While the form differs from the applied preset, a dot marks the control. The menu has **Update** (writes the current settings into the preset), **Save as…** (stores them under a new name), **Rename…** and **Delete**. Switching between image and video, **Reset**, starting an extend and reusing a job's settings deselect the preset; pick one again afterwards. Presets are kept as files in the `presets` folder of the ZIV data directory, so they follow you across browsers, and they are not part of the command line.
+
 If the server can't start a job with the current settings, for example image-to-image without a reference image, the reason shows above the Generate button and in a notice. It goes away when you change a setting.
 
 To run the same job from a terminal, press the terminal button in the *Settings* header. It copies a `ziv image` or `ziv video` command with the current model, prompt, LoRAs and settings, writing to the Web UI's output folder. The CLI has no inline negative prompt and runs every prompt in a prompts file rather than only the selected ones, so a notice says when the copied command differs from what Generate would run; an uploaded reference image is named by its file name, so replace it with the file's path.
@@ -216,7 +218,8 @@ Z-Vision Generator uses a central data directory for models and LoRAs:
 ```
 ~/.ziv/
 ├── models/    # Diffusers-format model directories
-└── loras/     # LoRA .safetensors files
+├── loras/     # LoRA .safetensors files
+└── presets/   # Saved presets: one folder per mode (image, video), one .yaml file each
 ```
 
 **To add a model**, copy (or symlink) the model directory into `~/.ziv/models/`:

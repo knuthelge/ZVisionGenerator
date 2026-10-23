@@ -818,9 +818,36 @@ export interface DraftState {
   missingSourceVideo: boolean;
   /** Extend: the source whose Scene and Prompt were settled, and the text its prefill put there (to tell edits from prefill). */
   extendPrefill: { path: string; scene: string; prompt: string } | null;
+  /** The slug of the settings preset the form started from; null when none. Cleared on a mode switch, Reset, a loaded source's settings and when the preset is deleted. */
+  appliedPreset: string | null;
 }
 
 export type WorkspacePrefill = Partial<Omit<DraftState, 'historyCollapsed' | 'sidebarCollapsed' | 'lastGeneratedAt' | 'version'>>;
+
+// ── Settings presets ──────────────────────────────────────────────────────────
+
+export type PresetMode = 'image' | 'video';
+
+/** One preset setting: a form field's value, or null for "not set" (off or automatic). */
+export type PresetValue = string | number | boolean | null;
+
+/** Every setting of a mode, by Web form field name; keys the preset does not set are null. */
+export type PresetSettings = Record<string, PresetValue>;
+
+/** A saved working setup, as `/api/presets` sends it. */
+export interface SettingsPreset {
+  slug: string;
+  name: string;
+  mode: PresetMode;
+  model: string | null;
+  settings: PresetSettings;
+}
+
+/** What creating a preset takes. */
+export type SettingsPresetBody = Omit<SettingsPreset, 'slug'>;
+
+/** What updating a preset takes; its mode and slug are in the route. */
+export type SettingsPresetUpdate = Omit<SettingsPreset, 'slug' | 'mode'>;
 
 // ── Job / SSE types ────────────────────────────────────────────────────────────
 

@@ -201,6 +201,7 @@ zvisiongenerator/
 │   ├── model_inventory.py         Backend model inventory for Web UI contracts
 │   ├── model_status.py            Per-model downloaded / memory-fit status for the SPA
 │   ├── path_browser.py            Host folder listings for the in-app path browser
+│   ├── presets.py                 Settings presets for the Web UI: file format, slugs, validation, and the store (list, write, rename, delete under one lock)
 │   ├── prompt_builder.py          Prompts page API: load, preview, save (revision-checked), create prompt files, and append a Workspace prompt
 │   ├── prompt_files.py            Read and atomically update host-local prompt files
 │   ├── request_guard.py           DNS-rebinding and cross-site request protection
@@ -352,6 +353,17 @@ A future feature, such as the job log, would define `JOBS = app_db.Component("jo
 - **Versioning.** The table is `loras_entries_v{N}` with `N = LORA_FAMILY_VERSION`. Bump the constant when the detection rules or the columns change; the next lookup creates the new table, drops lower-versioned `loras_entries_v*` tables and re-detects.
 - **Payload.** `build_workspace_response` adds `family` and `size_variant` to each `loras` entry; the SPA groups them in `lib/state/loras.ts` (`groupLorasForModel`).
 - **Tests.** The autouse `_isolated_app_db` fixture in `tests/conftest.py` gives every test a throwaway database, so no test touches the real `ziv.sqlite3`.
+
+### Settings Presets
+
+Presets are a Web UI feature; the CLI does not know them. A preset is one YAML file, `<data dir>/presets/<mode>/<slug>.yaml` (`mode` is `image` or `video`), with the top-level keys `name`, `model` (or null) and `settings`; the folder decides the mode, so the file does not repeat it. `web/presets.py` owns the format, the slug rules and the store (writes under one lock with `write_text_atomic`).
+
+- **Settings.** The `settings` keys are the Workspace form field names. Unknown keys are ignored when reading and writing, and missing keys count as not set. Prompt, seed, reference image and the workflow are never stored.
+- **Routes.** `GET /api/presets` lists both modes sorted by name and skips invalid files. `POST /api/presets` creates one: the server derives the slug from the name and answers 409 when it is taken. `PUT /api/presets/{mode}/{slug}` overwrites (a `mode` in the body is ignored), `POST /api/presets/{mode}/{slug}/rename` renames, `DELETE /api/presets/{mode}/{slug}` removes; an unknown mode or a malformed slug in the path is 422. `POST` takes the mode in its body. Names and slugs are unique within a mode, so image and video presets can share a name.
+- **Web apply.** `draft.applyPreset(ctx, preset)` (helpers in `lib/state/presets.ts`) applies a preset the same way in every workflow: keys outside the preset (prompt, seed, reference image, workflow) are untouched, and the capability gates re-run so the new model clears what it cannot use, as a manual model switch does. A model or LoRA that is not installed is skipped without a message.
+- **Deselect.** A mode switch, Reset, and an extend or reuse that loads a source's settings clear the applied preset; a preset can be picked again afterwards. The applied slug is a single value in the draft (not per mode); it moves on rename and clears on delete.
+- **UI parts.** `PresetMenu.svelte` is the toolbar control and, on a phone, the sheet behind the first chip; `PresetNameDialog.svelte` is the Save as and Rename dialog; `lib/state/presets.svelte.ts` is the list store.
+- **Tests.** An autouse fixture in `tests/conftest.py` points the presets folder at a temporary directory, so no test reads or writes the real one.
 
 ### Model Downloads
 

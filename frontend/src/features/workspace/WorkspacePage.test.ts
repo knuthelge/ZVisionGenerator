@@ -8,6 +8,7 @@ import { lastSaveTarget, recentFiles, rememberRecent } from '$lib/state/promptFi
 import { reactiveProps } from '../../test-utils/reactiveProps.svelte';
 import { draft } from '$lib/state/draft.svelte';
 import { downloadStore } from '$lib/state/downloads.svelte';
+import { presetsStore } from '$lib/state/presets.svelte';
 import { firstRun } from './firstRun.svelte';
 import { clipMemory } from '$lib/state/clipMemory.svelte';
 import { extendInspection } from '$lib/state/extendInspection.svelte';
@@ -18,7 +19,7 @@ import { hasPendingJobSettings, requestJobSettings } from '$lib/state/pendingJob
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { router } from '$lib/state/router.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
-import type { DownloadItem, EnhanceFrame, ImageModelDefaults, JobContext, JobSnapshot, PromptEnhancerContract, VideoModelDefaults, WorkspaceContext, GalleryAsset, GalleryPage } from '$lib/types';
+import type { DownloadItem, EnhanceFrame, SettingsPreset, ImageModelDefaults, JobContext, JobSnapshot, PromptEnhancerContract, VideoModelDefaults, WorkspaceContext, GalleryAsset, GalleryPage } from '$lib/types';
 
 const workspaceApiMocks = vi.hoisted(() => ({
   getWorkspaceContext: vi.fn<() => Promise<WorkspaceContext>>(),
@@ -32,6 +33,21 @@ const workspaceApiMocks = vi.hoisted(() => ({
   cancelJob: vi.fn(async () => undefined),
   skipFirstRun: vi.fn(async () => ({ skipped: true })),
 }));
+
+// Lets a test pick the phone layout; the page reads `layout.compact` once when it mounts.
+const layoutProbe = vi.hoisted(() => ({ compact: false }));
+
+vi.mock('$lib/state/layoutMode.svelte', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('$lib/state/layoutMode.svelte')>();
+  return {
+    ...actual,
+    layout: {
+      get mode() { return layoutProbe.compact ? 'compact' : 'wide'; },
+      get compact() { return layoutProbe.compact; },
+      get coarse() { return layoutProbe.compact; },
+    },
+  };
+});
 
 const configApiMocks = vi.hoisted(() => ({
   updateConfig: vi.fn(async () => ({})),
@@ -105,6 +121,16 @@ vi.mock('$lib/api/promptEnhance', async (importOriginal) => {
 
 vi.mock('$lib/api/browse', () => browseApiMocks);
 
+const presetApiMocks = vi.hoisted(() => ({
+  listPresets: vi.fn<() => Promise<SettingsPreset[]>>(),
+  createPreset: vi.fn<(body: unknown) => Promise<SettingsPreset>>(),
+  updatePreset: vi.fn<(mode: SettingsPreset['mode'], slug: string, body: unknown) => Promise<SettingsPreset>>(),
+  renamePreset: vi.fn<(mode: SettingsPreset['mode'], slug: string, name: string) => Promise<SettingsPreset>>(),
+  deletePreset: vi.fn<(mode: SettingsPreset['mode'], slug: string) => Promise<{ status: string }>>(),
+}));
+
+vi.mock('$lib/api/presets', () => presetApiMocks);
+
 const modelApiMocks = vi.hoisted(() => ({
   getDownloads: vi.fn<() => Promise<{ items: DownloadItem[] }>>(),
 }));
@@ -131,6 +157,7 @@ let app: Record<string, unknown> | null = null;
 
 // Every test starts from empty stores, reset API mocks, an empty server-side queue and a fresh host element.
 beforeEach(() => {
+  layoutProbe.compact = false;
   localStorage.clear();
   sessionStorage.clear();
   draft.reset();
@@ -139,6 +166,8 @@ beforeEach(() => {
   historyStore.seedHistory([]);
   jobStore.clearJob();
   downloadStore.reset();
+  for (const mock of Object.values(presetApiMocks)) mock.mockReset();
+  presetApiMocks.listPresets.mockResolvedValue([]);
   firstRun.reset();
   configApiMocks.updateConfig.mockClear();
   workspaceApiMocks.skipFirstRun.mockClear();
@@ -3979,7 +4008,8 @@ describe('WorkspacePage asset actions and settings', () => {
     expect(document.activeElement?.id).toBe('ws-history-toggle');
   });
 
-  it('reuses the settings of an asset in place without leaving the workspace', async () => {
+  it('reuses the settings of an asset in place without leaving the workspace, and forgets the applied preset', async () => {
+    draft.setAppliedPreset('look');
     const asset = makeAsset({
       id: 'out/first.png',
       filename: 'first.png',
@@ -3994,6 +4024,7 @@ describe('WorkspacePage asset actions and settings', () => {
     expect(draft.state).toMatchObject({ workflow: 'txt2img', prompt: 'reused prompt', steps: 17, seed: 99 });
     expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('reused prompt');
     expect((target.querySelector('#ws-steps') as HTMLInputElement).value).toBe('17');
+    expect(draft.state.appliedPreset).toBeNull();
   });
 
   it('makes an image the img2img reference and submits its host path', async () => {
@@ -4830,6 +4861,56 @@ describe('WorkspacePage extend', () => {
     });
   });
 
+  describe('with a settings preset', () => {
+    const CLIP_PRESET: SettingsPreset = {
+      slug: 'clip', name: 'Clip', mode: 'video', model: 'ltx-8',
+      settings: { lora: '', ratio: '9:16', size: 's', width: null, height: null, runs: 1, steps: 6, frames: 49, audio: false, low_memory: true, video_upscale_factor: 2, review: true },
+    };
+    const presetButton = () => target.querySelector('[data-testid="preset-button"]') as HTMLButtonElement;
+
+    async function applyClip(): Promise<void> {
+      flushSync(() => presetButton().click());
+      await settle();
+      flushSync(() => (document.querySelector('[role="menu"][aria-label="Preset"] [data-action="preset:clip"]') as HTMLButtonElement).click());
+      await settle();
+    }
+
+    it('applies every key of the preset, and the job is submitted with the same fields as without one', async () => {
+      presetApiMocks.listPresets.mockResolvedValue([CLIP_PRESET]);
+      const context = makeExtendContext();
+      context.video_ratios = ['16:9', '9:16'];
+      context.video_size_options = { '16:9': ['s', 'm'], '9:16': ['s', 'm'] };
+      context.video_size_dimensions = { '16:9': { m: [704, 448], s: [512, 320] }, '9:16': { m: [448, 704], s: [320, 512] } };
+      await mountExtend({ context });
+      await chooseSource(sceneSource());
+      type('ws-prompt', 'She waves.');
+      await settle();
+
+      await applyClip();
+
+      expect(draft.state).toMatchObject({ steps: 6, ratio: '9:16', size: 's', audio: false, lowMemory: true, videoUpscaleEnabled: true, videoUpscaleReview: true, appliedPreset: 'clip' });
+      const form = await submit();
+      expect(form?.get('workflow')).toBe('extend');
+      expect(form?.get('source_video')).toBe(SOURCE);
+      expect(form?.get('prompt')).toBe('She waves.');
+      expect(form?.get('steps')).toBe('6');
+      for (const name of ['ratio', 'size', 'width', 'height', 'frames', 'image_path', 'upscale', 'video_upscale_factor']) expect(form?.has(name)).toBe(false);
+    });
+
+    it('is forgotten when another source video is chosen, so its settings are used', async () => {
+      presetApiMocks.listPresets.mockResolvedValue([CLIP_PRESET]);
+      await mountExtend();
+      await chooseSource(sceneSource());
+      await applyClip();
+      expect(draft.state.appliedPreset).toBe('clip');
+
+      await chooseSource(sceneSource(), '/clips/other.mp4');
+
+      expect(draft.state.appliedPreset).toBeNull();
+      expect(presetButton().dataset.applied).toBe('');
+    });
+  });
+
   describe('Enhance', () => {
     it('is enabled with both boxes empty once a source can be extended, and sends the source and its audio', async () => {
       enhanceApiMocks.enhancePrompt.mockResolvedValue();
@@ -5109,6 +5190,26 @@ describe('WorkspacePage extend', () => {
       expect(toasts.map((toast) => toast.message)).toContain('walk.mp4 is now the source video');
     });
 
+    it('forgets the applied preset when the Gallery makes the clip the source, from either workflow', async () => {
+      const asset = clip();
+      for (const workflow of ['txt2vid', 'extend'] as const) {
+        draft.reset();
+        document.body.innerHTML = '';
+        target = document.createElement('div');
+        document.body.appendChild(target);
+        draft.update('workflow', workflow);
+        draft.setAppliedPreset('clip');
+        await mountWithClip(asset, workflow);
+        expect(draft.state.appliedPreset).toBe('clip');
+        openMenu(asset);
+        (document.querySelector('[role="menu"] [data-action="extend"]') as HTMLButtonElement).click();
+        await settle();
+        expect(draft.state.appliedPreset).toBeNull();
+        await unmount(app!);
+        app = null;
+      }
+    });
+
     it('replaces the text of an earlier source when already on Extend Video', async () => {
       const asset = clip();
       await mountWithClip(asset, 'extend');
@@ -5385,6 +5486,381 @@ describe('WorkspacePage clip memory note', () => {
       await mountWorkspace(context);
 
       expect(dialog()).toBeNull();
+    });
+  });
+});
+
+describe('WorkspacePage settings presets', () => {
+  const IMAGE_SETTINGS: SettingsPreset['settings'] = {
+    quantize: null, lora: 'style-a:0.8', ratio: '16:9', size: 'l', width: null, height: null, runs: 2, steps: 12, guidance: 3.5, image_strength: 0.4, scheduler: 'beta', first_sigma: null,
+    sharpen_enabled: true, sharpen_amount: null, contrast_enabled: false, contrast_amount: null, saturation_enabled: false, saturation_amount: null,
+    upscale: null, upscale_denoise: null, upscale_steps: null, upscale_guidance: null, upscale_sharpen: null, review: null,
+  };
+  const LOOK: SettingsPreset = { slug: 'look', name: 'Look', mode: 'image', model: 'flux-lite', settings: IMAGE_SETTINGS };
+  const PORTRAIT: SettingsPreset = { slug: 'portrait', name: 'Portrait', mode: 'image', model: null, settings: { ...IMAGE_SETTINGS, steps: 20 } };
+  const CLIP: SettingsPreset = {
+    slug: 'clip', name: 'Clip', mode: 'video', model: 'ltx-8',
+    settings: { lora: '', ratio: '16:9', size: 'm', width: null, height: null, runs: 1, steps: 8, frames: 49, audio: false, low_memory: true, video_upscale_factor: null, review: null },
+  };
+
+  function presetContext(): WorkspaceContext {
+    const context = makeContext();
+    context.loras = [{ name: 'style-a', path: '/loras/style-a.safetensors' }, { name: 'detail-b', path: '/loras/detail-b.safetensors' }];
+    return context;
+  }
+
+  const presetButton = () => target.querySelector('[data-testid="preset-button"]') as HTMLButtonElement;
+  const presetMenu = () => document.querySelector('[role="menu"][aria-label="Preset"]') as HTMLElement | null;
+  const menuActions = () => Array.from(presetMenu()?.querySelectorAll('[data-action]') ?? []).map((el) => el.getAttribute('data-action'));
+  const menuItem = (action: string) => presetMenu()?.querySelector(`[data-action="${action}"]`) as HTMLButtonElement;
+
+  async function openMenu(): Promise<void> {
+    flushSync(() => presetButton().click());
+    await settle();
+  }
+
+  async function choose(action: string): Promise<void> {
+    await openMenu();
+    flushSync(() => menuItem(action).click());
+    await settle();
+  }
+
+  /** Mount with presets saved; the page reads them when it mounts. */
+  async function mountWithPresets(presets: SettingsPreset[] = [LOOK, PORTRAIT, CLIP], context: WorkspaceContext = presetContext()): Promise<void> {
+    presetApiMocks.listPresets.mockResolvedValue(presets);
+    await mountWorkspace(context);
+    await settle();
+  }
+
+  function typeName(value: string): void {
+    const input = document.querySelector('#preset-name') as HTMLInputElement;
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  }
+
+  const nameDialogError = () => document.querySelector('[role="dialog"] [role="alert"]');
+  const confirmName = () => document.querySelector('[data-action="confirm-preset-name"]') as HTMLButtonElement;
+  const dot = () => presetButton().dataset.changed === 'true';
+
+  beforeEach(() => {
+    workspaceApiMocks.submitGenerate.mockResolvedValue({ job_id: 'job-1', workflow: 'txt2img', prompt: 'p', model: 'zit', runs: 1, created_at: '2026-04-23T10:00:00Z' });
+    window.location.hash = '#/workspace';
+    window.history.replaceState({}, '', '/');
+  });
+
+  describe('the toolbar control', () => {
+    it('comes first, before the Model select, and says none until a preset is applied', async () => {
+      await mountWithPresets();
+
+      expect(presetButton()).not.toBeNull();
+      expect(presetButton().compareDocumentPosition(target.querySelector('#ws-model') as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(presetButton().getAttribute('aria-haspopup')).toBe('menu');
+      expect(presetButton().dataset.applied).toBe('');
+      expect(dot()).toBe(false);
+    });
+
+    it('is disabled until the workspace has loaded', async () => {
+      workspaceApiMocks.getWorkspaceCoreContext.mockImplementation(() => new Promise<WorkspaceContext>(() => undefined));
+      app = flushSync(() => mount(WorkspacePage, { target }));
+      await settle();
+
+      expect(presetButton().disabled).toBe(true);
+    });
+
+    it('names the applied preset and shows the changed dot only while the form differs from it', async () => {
+      await mountWithPresets();
+      await choose('preset:look');
+
+      expect(presetButton().dataset.applied).toBe('look');
+      expect(dot()).toBe(false);
+      draft.update('steps', 99);
+      flushSync();
+      expect(dot()).toBe(true);
+      draft.update('steps', 12);
+      flushSync();
+      expect(dot()).toBe(false);
+    });
+  });
+
+  describe('the menu', () => {
+    it('lists the current mode\'s presets with only Save as when none is applied', async () => {
+      await mountWithPresets();
+      await openMenu();
+
+      expect(menuActions()).toEqual(['preset:look', 'preset:portrait', 'preset-save-as']);
+      expect(presetMenu()?.querySelectorAll('[role="menuitemradio"][aria-checked="true"]')).toHaveLength(0);
+    });
+
+    it('offers only Save as when the mode has no presets, and lists video presets in a video workflow', async () => {
+      await mountWithPresets([CLIP], presetContext());
+      await openMenu();
+      expect(menuActions()).toEqual(['preset-save-as']);
+
+      await unmount(app!);
+      app = null;
+      document.body.innerHTML = '';
+      target = document.createElement('div');
+      document.body.appendChild(target);
+      draft.update('workflow', 'txt2vid');
+      await mountWithPresets([CLIP, LOOK]);
+      await openMenu();
+      expect(menuActions()).toEqual(['preset:clip', 'preset-save-as']);
+    });
+
+    it('checks the applied preset and adds Rename and Delete, but Update only once the form differs', async () => {
+      await mountWithPresets();
+      await choose('preset:look');
+      await openMenu();
+
+      expect(menuActions()).toEqual(['preset:look', 'preset:portrait', 'preset-save-as', 'preset-rename', 'preset-delete']);
+      expect(menuItem('preset:look').getAttribute('aria-checked')).toBe('true');
+      expect(menuItem('preset:portrait').getAttribute('aria-checked')).toBe('false');
+
+      draft.update('steps', 30);
+      flushSync();
+      await settle();
+      expect(menuActions()).toContain('preset-update');
+      expect(menuActions().indexOf('preset-update')).toBeLessThan(menuActions().indexOf('preset-save-as'));
+    });
+
+    it('reads the list again each time it opens', async () => {
+      await mountWithPresets();
+      const reads = presetApiMocks.listPresets.mock.calls.length;
+      await openMenu();
+      flushSync(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+      await openMenu();
+
+      expect(presetApiMocks.listPresets.mock.calls.length).toBeGreaterThanOrEqual(reads + 2);
+    });
+
+    it('shows none for an applied preset that a fresh list no longer holds', async () => {
+      draft.setAppliedPreset('look');
+      await mountWithPresets([PORTRAIT]);
+
+      expect(presetButton().dataset.applied).toBe('');
+    });
+  });
+
+  describe('applying a preset', () => {
+    it('sets the preset\'s settings and model, and keeps the prompt and seed', async () => {
+      draft.update('prompt', 'A lighthouse at dusk');
+      draft.update('seed', 77);
+      await mountWithPresets();
+
+      await choose('preset:look');
+
+      expect(draft.state).toMatchObject({ model: 'flux-lite', steps: 12, runs: 2, referenceImageStrength: 0.4, ratio: '16:9', size: 'l', loraString: 'style-a:0.8', prompt: 'A lighthouse at dusk', seed: 77 });
+      expect(draft.state.appliedPreset).toBe('look');
+      expect((target.querySelector('#ws-prompt') as HTMLTextAreaElement).value).toBe('A lighthouse at dusk');
+    });
+
+    it('skips LoRAs that are not installed and a model that is not offered, and applies the rest', async () => {
+      const gone: SettingsPreset = { ...LOOK, slug: 'gone', name: 'Gone', model: 'removed-model', settings: { ...IMAGE_SETTINGS, lora: 'style-a:1,missing-one:1' } };
+      await mountWithPresets([gone]);
+      toasts.splice(0, toasts.length);
+
+      await choose('preset:gone');
+
+      expect(toasts).toHaveLength(0);
+      expect(draft.state).toMatchObject({ model: 'zit', loraString: 'style-a:1', steps: 12 });
+    });
+
+    it('forgets the applied preset when a job\'s settings are loaded', async () => {
+      draft.update('prompt', 'A lighthouse');
+      await mountWithPresets();
+      await choose('preset:look');
+      expect(draft.state.appliedPreset).toBe('look');
+
+      requestJobSettings({ mode: 'image', workflow: 'txt2img', model: 'zit', prompt_source: 'inline', prompt: 'from the job log', steps: '7' });
+      await settle();
+
+      expect(draft.state.appliedPreset).toBeNull();
+      expect(presetButton().dataset.applied).toBe('');
+    });
+
+    it('forgets the applied preset when the top nav switches to the other mode, but not within a mode', async () => {
+      await mountWithPresets();
+      await choose('preset:look');
+
+      // The top nav only updates the workflow; the page's own handler follows.
+      draft.update('workflow', 'img2img');
+      await settle();
+      expect(draft.state.appliedPreset).toBe('look');
+
+      draft.update('workflow', 'txt2vid');
+      await settle();
+      expect(draft.state.appliedPreset).toBeNull();
+    });
+  });
+
+  describe('Save as', () => {
+    it('saves the form under the typed name, applies it and closes', async () => {
+      await mountWithPresets();
+      draft.update('steps', 14);
+      flushSync();
+      presetApiMocks.createPreset.mockImplementation(async (body) => ({ slug: 'my-new-look', ...(body as Omit<SettingsPreset, 'slug'>) }));
+
+      await choose('preset-save-as');
+      typeName('  My new look ');
+      flushSync(() => confirmName().click());
+      await settle();
+
+      expect(presetApiMocks.createPreset).toHaveBeenCalledTimes(1);
+      const [body] = presetApiMocks.createPreset.mock.calls[0] as [SettingsPreset];
+      expect(body).toMatchObject({ name: 'My new look', mode: 'image', model: 'zit', settings: { steps: 14 } });
+      expect(Object.keys(body.settings)).toHaveLength(24);
+      expect(draft.state.appliedPreset).toBe('my-new-look');
+      expect(document.querySelector('[role="dialog"]')).toBeNull();
+      expect(presetButton().dataset.applied).toBe('my-new-look');
+    });
+
+    it('shows the server\'s reason in the dialog and keeps it open', async () => {
+      await mountWithPresets();
+      presetApiMocks.createPreset.mockRejectedValue(new ApiError('POST 409', 409, 'That name belongs to a video preset.'));
+      await choose('preset-save-as');
+      typeName('Fresh');
+
+      flushSync(() => confirmName().click());
+      await settle();
+
+      expect(nameDialogError()?.textContent).toContain('That name belongs to a video preset.');
+      expect(draft.state.appliedPreset).toBeNull();
+    });
+  });
+
+  describe('Update', () => {
+    it('writes the form back under the applied preset\'s slug', async () => {
+      await mountWithPresets();
+      await choose('preset:look');
+      draft.update('steps', 30);
+      flushSync();
+      presetApiMocks.updatePreset.mockImplementation(async (mode, slug, body) => ({ slug, mode, ...(body as Omit<SettingsPreset, 'slug' | 'mode'>) }));
+
+      await choose('preset-update');
+
+      const [mode, slug, body] = presetApiMocks.updatePreset.mock.calls[0] as [string, string, SettingsPreset];
+      expect([mode, slug]).toEqual(['image', 'look']);
+      expect(body).toMatchObject({ name: 'Look', model: 'flux-lite', settings: { steps: 30 } });
+      expect(dot()).toBe(false);
+    });
+  });
+
+  describe('Rename', () => {
+    it('starts from the current name and moves the applied slug to the returned one', async () => {
+      await mountWithPresets();
+      await choose('preset:look');
+      presetApiMocks.renamePreset.mockResolvedValue({ ...LOOK, slug: 'better-look', name: 'Better look' });
+
+      await choose('preset-rename');
+      expect((document.querySelector('#preset-name') as HTMLInputElement).value).toBe('Look');
+      typeName('Better look');
+      flushSync(() => confirmName().click());
+      await settle();
+
+      expect(presetApiMocks.renamePreset).toHaveBeenCalledWith('image', 'look', 'Better look');
+      expect(draft.state.appliedPreset).toBe('better-look');
+      expect(presetButton().dataset.applied).toBe('better-look');
+    });
+  });
+
+  describe('Delete', () => {
+    it('asks first, and does nothing when declined', async () => {
+      await mountWithPresets();
+      await choose('preset:look');
+
+      await choose('preset-delete');
+      expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+      await answerConfirm(false);
+
+      expect(presetApiMocks.deletePreset).not.toHaveBeenCalled();
+      expect(draft.state.appliedPreset).toBe('look');
+    });
+
+    it('deletes the preset and clears the applied slug when confirmed', async () => {
+      await mountWithPresets();
+      await choose('preset:look');
+      presetApiMocks.deletePreset.mockResolvedValue({ status: 'ok' });
+
+      await choose('preset-delete');
+      presetApiMocks.listPresets.mockResolvedValue([PORTRAIT, CLIP]);
+      await answerConfirm(true);
+
+      expect(presetApiMocks.deletePreset).toHaveBeenCalledWith('image', 'look');
+      expect(draft.state.appliedPreset).toBeNull();
+      expect(presetButton().dataset.applied).toBe('');
+      await openMenu();
+      expect(menuActions()).toEqual(['preset:portrait', 'preset-save-as']);
+    });
+
+    it('says so, and keeps the preset, when the server refuses', async () => {
+      await mountWithPresets();
+      await choose('preset:look');
+      presetApiMocks.deletePreset.mockRejectedValue(new ApiError('DELETE 500', 500, 'Disk is read-only.'));
+      toasts.splice(0, toasts.length);
+
+      await choose('preset-delete');
+      await answerConfirm(true);
+
+      expect(toasts.some((toast) => toast.type === 'error' && toast.message.includes('Disk is read-only.'))).toBe(true);
+      expect(draft.state.appliedPreset).toBe('look');
+    });
+  });
+
+  describe('on a phone', () => {
+    const chips = () => Array.from(target.querySelectorAll('.strip-chips [data-chip]')) as HTMLButtonElement[];
+    const presetChip = () => target.querySelector('[data-chip="preset"]') as HTMLButtonElement;
+    const sheetMenu = () => document.querySelector('[data-testid="action-sheet"]') as HTMLElement | null;
+
+    beforeEach(() => {
+      layoutProbe.compact = true;
+      // jsdom has no Web Animations; the sheets' transitions need it.
+      Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
+    });
+    afterEach(() => { delete (Element.prototype as Partial<Element>).animate; });
+
+    it('puts the Preset chip first, saying none, and opens the preset menu as an action sheet', async () => {
+      await mountWithPresets();
+
+      expect(chips()[0].dataset.chip).toBe('preset');
+      expect(presetChip().dataset.applied).toBe('');
+      flushSync(() => presetChip().click());
+      await settle();
+
+      expect(sheetMenu()).not.toBeNull();
+      expect(sheetMenu()?.querySelector('[data-action="preset:look"]')).not.toBeNull();
+      expect(sheetMenu()?.querySelector('[data-action="preset-save-as"]')).not.toBeNull();
+      // The chip opens a menu, never a settings popover.
+      expect(document.querySelector('.pop-list')).toBeNull();
+    });
+
+    it('shows the applied name on the chip with the changed dot, which the All badge does not count', async () => {
+      await mountWithPresets();
+      flushSync(() => presetChip().click());
+      await settle();
+      flushSync(() => (sheetMenu()?.querySelector('[data-action="preset:look"]') as HTMLButtonElement).click());
+      await settle();
+
+      expect(presetChip().dataset.applied).toBe('look');
+      expect(presetChip().dataset.changed).toBe('false');
+      draft.update('runs', 2);
+      draft.update('steps', 99);
+      flushSync();
+      await settle();
+
+      expect(presetChip().dataset.changed).toBe('true');
+      const badge = target.querySelector('.setchip-all .setchip-n');
+      // Steps and Batch count; the preset chip does not.
+      expect(badge?.textContent).toBe(String(chips().filter((chip) => chip.dataset.changed === 'true' && chip.dataset.chip !== 'preset').length));
+    });
+
+    it('starts the All sheet\'s toolbar with a full-width Preset row', async () => {
+      await mountWithPresets();
+      const rowButton = target.querySelector('.sheet-model [data-testid="preset-button"]') as HTMLButtonElement | null;
+
+      expect(rowButton).not.toBeNull();
+      const toolbarChildren = Array.from(rowButton!.closest('.toolbar-stacked > div')!.children);
+      expect(toolbarChildren[0]).toBe(rowButton);
     });
   });
 });

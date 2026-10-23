@@ -53,6 +53,12 @@ def _no_hugging_face_token(monkeypatch):
         monkeypatch.delenv(name, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _presets_in_tmp(tmp_path, monkeypatch):
+    """Keep every test's presets in a temporary data directory, never the real ``~/.ziv/presets``."""
+    monkeypatch.setattr("zvisiongenerator.web.presets.get_ziv_data_dir", lambda: tmp_path / "ziv-data")
+
+
 def _make_args(**overrides):
     """Return a minimal argparse Namespace for run_batch()."""
     defaults = dict(

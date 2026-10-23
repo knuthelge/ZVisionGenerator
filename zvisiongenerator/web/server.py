@@ -111,6 +111,7 @@ from zvisiongenerator.web.upscale_api import plan_seedvr2_upscale, plan_upscale,
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, append_entry_payload, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
+from zvisiongenerator.web.presets import create_preset, delete_preset, list_presets, rename_preset, update_preset
 from zvisiongenerator.web.model_delete import DeleteTarget, delete_lora, delete_model, delete_scope, enhancer_delete_target, model_delete_target, seedvr2_delete_target
 from zvisiongenerator.review import review_enabled
 from zvisiongenerator.web.job_contract import UPSCALE_SUPPORTED_CONTROLS, image_supported_controls, video_supported_controls
@@ -1872,6 +1873,56 @@ async def api_first_run_skip() -> dict[str, bool]:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"skipped": True}
+
+
+@contextmanager
+def _preset_http_errors() -> Iterator[None]:
+    """Map the preset store's errors to HTTP statuses: 409 taken, 404 missing, 422 invalid, 500 unwritable."""
+    try:
+        yield
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Could not access the presets: {exc}") from exc
+
+
+@app.get("/api/presets")
+def api_presets_list() -> dict[str, Any]:
+    """Return the saved settings presets of both modes, sorted by name."""
+    return {"presets": [preset.to_dict() for preset in list_presets()]}
+
+
+@app.post("/api/presets")
+def api_presets_create(body: dict[str, Any]) -> dict[str, Any]:
+    """Create a preset from a JSON body ``{name, mode, model, settings}``; the slug follows the name."""
+    with _preset_http_errors():
+        return create_preset(body).to_dict()
+
+
+@app.put("/api/presets/{mode}/{slug}")
+def api_presets_update(mode: str, slug: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Overwrite the preset *slug* of *mode* from a JSON body ``{name, model, settings}`` whose name keeps the slug."""
+    with _preset_http_errors():
+        return update_preset(mode, slug, body).to_dict()
+
+
+@app.post("/api/presets/{mode}/{slug}/rename")
+def api_presets_rename(mode: str, slug: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Rename the preset *slug* of *mode* from a JSON body ``{name}``; its slug follows the new name."""
+    with _preset_http_errors():
+        return rename_preset(mode, slug, body.get("name")).to_dict()
+
+
+@app.delete("/api/presets/{mode}/{slug}")
+def api_presets_delete(mode: str, slug: str) -> dict[str, str]:
+    """Delete the preset *slug* of *mode*."""
+    with _preset_http_errors():
+        delete_preset(mode, slug)
+    return {"status": "ok"}
 
 
 @app.get("/api/models")

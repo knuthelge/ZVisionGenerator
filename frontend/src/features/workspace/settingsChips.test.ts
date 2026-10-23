@@ -18,18 +18,19 @@ function facts(overrides: Partial<ChipFacts> = {}): ChipFacts {
   return {
     caps: imageCaps, state, changed: () => false, width: 1024, height: 1024, seconds: null, extendSeconds: null, extendChanged: false,
     loraNames: [], modelLabel: 'Z-Image Turbo', modelDownloaded: true, referenceName: null, sourceName: null, memoryWarn: false,
+    presetName: null, presetSlug: null, presetChanged: false,
     ...overrides,
   };
 }
 
 describe('settingsChips', () => {
   it('orders an image workflow by how often each setting changes, model last', () => {
-    expect(settingsChips(facts()).map((chip) => chip.key)).toEqual(['steps', 'guidance', 'seed', 'runs', 'size', 'loras', 'upscale', 'model']);
+    expect(settingsChips(facts()).map((chip) => chip.key)).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'size', 'loras', 'upscale', 'model']);
   });
 
   it('puts the clip length first and audio after size for video, without the image upscale', () => {
     const caps = { ...imageCaps, isImageMode: false, showFrameCount: true, showGuidance: false, showImageUpscale: false, showAudio: true, showLowMemory: true, showVideoUpscale: true } as WorkspaceCapabilities;
-    expect(settingsChips(facts({ caps, seconds: 5 })).map((chip) => chip.key)).toEqual(['seconds', 'steps', 'seed', 'runs', 'size', 'audio', 'loras', 'model']);
+    expect(settingsChips(facts({ caps, seconds: 5 })).map((chip) => chip.key)).toEqual(['preset', 'seconds', 'steps', 'seed', 'runs', 'size', 'audio', 'loras', 'model']);
   });
 
   it('adds Strength and Reference for image to image, and Source and Extend for an extension', () => {
@@ -38,7 +39,7 @@ describe('settingsChips', () => {
     expect(settingsChips(facts({ caps: i2i })).map((chip) => chip.key)).toContain('reference');
     const extend = { ...imageCaps, isImageMode: false, showExtendLength: true, showSourceVideo: true, showGuidance: false, showImageUpscale: false, showDimensions: false } as WorkspaceCapabilities;
     const keys = settingsChips(facts({ caps: extend, extendSeconds: 3, sourceName: 'harbour.mp4' })).map((chip) => chip.key);
-    expect(keys[0]).toBe('extendSeconds');
+    expect(keys.slice(0, 2)).toEqual(['preset', 'extendSeconds']);
     expect(keys).toContain('source');
   });
 
@@ -50,6 +51,12 @@ describe('settingsChips', () => {
     expect(byKey.loras).toMatchObject({ value: 'detail-tweaker', on: true });
     expect(byKey.size.value).toBe('1024×1024');
     expect(byKey.runs.value).toBe('×1');
+  });
+
+  it('puts the preset first with its name, or none, and the changed flag', () => {
+    expect(settingsChips(facts())[0]).toMatchObject({ key: 'preset', applied: '', changed: false, on: false });
+    const applied = settingsChips(facts({ presetName: 'Soft portrait', presetSlug: 'soft-portrait', presetChanged: true }))[0];
+    expect(applied).toMatchObject({ key: 'preset', applied: 'soft-portrait', changed: true, on: true });
   });
 
   it('warns on a model that is not downloaded and a clip that may not fit', () => {

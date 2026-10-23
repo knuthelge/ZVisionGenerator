@@ -40,10 +40,13 @@
         class:warn={chip.warn}
         data-chip={chip.key}
         data-changed={chip.changed}
+        data-applied={chip.applied}
         aria-expanded={activeKey === chip.key}
+        aria-haspopup={chip.key === 'preset' ? 'menu' : undefined}
         aria-label="{chip.label || chip.key}: {chip.value}"
         onclick={() => onopen(chip.key)}
       >
+        {#if chip.key === 'preset'}<Icon name="list" size={14} />{/if}
         {#if chip.key === 'model'}<Icon name="cube" size={14} />{/if}
         {#if chip.key === 'reference'}<Icon name="reference" size={14} />{/if}
         {#if chip.key === 'source'}<Icon name="film" size={14} />{/if}

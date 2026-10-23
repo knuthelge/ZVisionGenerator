@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { legacySource, sceneSource, sourceInfo } from './extend.fixtures';
 import { anyEnhancedUsed } from './promptEnhance';
+import { presetDiffers } from './presets';
 import { changedSettings, draft, fitDimensions, offeredSizes, settingDefaultsFor, snapDimension, videoTimingFor } from './draft.svelte';
-import type { WorkspaceContext, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
+import type { DraftState, WorkspaceContext, ImageModelDefaults, SettingsPreset, VideoModelDefaults } from '$lib/types';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1628,5 +1629,299 @@ describe('hydrateFromContext – keepChangedSettings', () => {
 
       expect(draft.state.frameCount).toBe(49);
     });
+  });
+});
+
+describe('applyPreset', () => {
+  const LORAS = [{ name: 'style-a', path: '/loras/style-a.safetensors' }, { name: 'detail-b', path: '/loras/detail-b.safetensors' }];
+
+  /** A context whose workflows show every control a preset sets, with two image and two video models. */
+  const presetContext = (overrides: Partial<WorkspaceContext> = {}): WorkspaceContext => {
+    const json = makeImageDefaults({ family: 'zimage', supports_negative_prompt: true, supports_json_prompt: true, supports_first_sigma: true, steps: 9, guidance: 0 });
+    const plain = makeImageDefaults({ family: 'flux1', supports_negative_prompt: false, supports_json_prompt: false, supports_first_sigma: false, steps: 28, guidance: 3.5 });
+    const ctx = makeContext({
+      image_models: [{ id: 'json-model', label: 'JSON', type: 'image' }, { id: 'plain-model', label: 'Plain', type: 'image' }, { id: 'twin-model', label: 'Twin', type: 'image' }],
+      image_model_defaults: { 'json-model': json, 'plain-model': plain, 'twin-model': { ...json } },
+      current_image_model: 'json-model',
+      video_models: [{ id: 'ltx-v-0.9', label: 'LTX Video', type: 'video' }, { id: 'ltx-2', label: 'LTX 2', type: 'video' }],
+      video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ family: 'ltx' }), 'ltx-2': makeVideoDefaults({ family: 'ltx', steps: 6, max_steps: 8, frame_alignment: 8 }) },
+      loras: LORAS,
+      ...overrides,
+    });
+    ctx.workflow_contract.values = ['txt2img', 'img2img', 'txt2vid', 'img2vid', 'extend'];
+    for (const definition of Object.values(ctx.workflow_contract.definitions)) definition.visible_controls.push('loras', 'quantize', 'scheduler');
+    return ctx;
+  };
+
+  const IMAGE_PRESET: SettingsPreset = {
+    slug: 'look', name: 'Look', mode: 'image', model: 'twin-model',
+    settings: {
+      quantize: 8, lora: 'style-a:0.8', ratio: '16:9', size: 'l', width: null, height: null, runs: 4, steps: 17, guidance: 2.5, image_strength: 0.7, scheduler: 'dpm', first_sigma: 0.4,
+      sharpen_enabled: true, sharpen_amount: 0.6, contrast_enabled: true, contrast_amount: 1.3, saturation_enabled: false, saturation_amount: null,
+      upscale: 4, upscale_denoise: 0.3, upscale_steps: 12, upscale_guidance: 1.5, upscale_sharpen: false, review: true,
+    },
+  };
+
+  /** The draft keys an image preset sets, with the values IMAGE_PRESET gives them. */
+  const IMAGE_PRESET_DRAFT: Partial<DraftState> = {
+    model: 'twin-model', quantize: 8, loraString: 'style-a:0.8', ratio: '16:9', size: 'l', dimensionMode: 'ratio', runs: 4, steps: 17, guidance: 2.5, referenceImageStrength: 0.7, scheduler: 'dpm', firstSigma: 0.4,
+    postprocessSharpenEnabled: true, postprocessSharpenAmount: 0.6, postprocessContrastEnabled: true, postprocessContrastAmount: 1.3,
+    postprocessSaturationEnabled: false, postprocessSaturationAmount: 1, upscaleEnabled: true, upscaleFactor: 4, upscaleDenoise: 0.3, upscaleSteps: 12, upscaleGuidance: 1.5, upscaleSharpen: false, upscaleReview: true,
+  };
+
+  /** A distinctive value for each draft key that is not a preset key. */
+  const MARKED: Partial<DraftState> = {
+    workflow: 'img2img', promptSource: 'file', prompt: 'a prompt', scene: 'a scene', jsonPromptEnabled: true, jsonPrompt: '{"a":1}', negativePrompt: 'blurry',
+    promptFilePath: '/prompts/set.yaml', promptFileOptionIds: ['one', 'two'], promptFileLoaded: { path: '/prompts/set.yaml', count: 2 },
+    seed: 42, referenceImagePath: '/refs/ref.png', frameCount: 33, fps: 30, audio: true, lowMemory: true,
+    historyCollapsed: true, sidebarCollapsed: true, lastGeneratedAt: '2026-01-01T00:00:00Z',
+    enhancedPrompt: '{"caption":"x"}', enhancedScene: 'enhanced scene', enhancedFrom: { prompt: 'a prompt', scene: 'a scene', mode: 'image' },
+    enhanceSettings: { style: 'cinematic' } as DraftState['enhanceSettings'], enhanceSettingsVideo: { style: 'dreamy' } as DraftState['enhanceSettingsVideo'],
+    enhanceAuto: true, enhanceModel: 'smart', enhanceFormat: 'json',
+    extendSourcePath: '/clips/source.mp4', extendFrames: 16, missingSourceVideo: true, extendPrefill: { path: '/clips/source.mp4', scene: 's', prompt: 'p' },
+    videoUpscaleEnabled: true, videoUpscaleFactor: 2, videoUpscaleReview: true,
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+  });
+
+  it('changes only the preset keys, and the capability gates of the model it brings', () => {
+    const ctx = presetContext();
+    draft.hydrateFromContext(ctx, 'json-model');
+    draft.patch({ ...MARKED, loraString: 'detail-b:1', quantize: 4, lorasByFamily: { flux1: 'detail-b:2' } });
+    const before = { ...draft.state };
+
+    draft.applyPreset(ctx, IMAGE_PRESET);
+
+    const after = draft.state;
+    expect(after).toMatchObject(IMAGE_PRESET_DRAFT);
+    const presetOwned = new Set([...Object.keys(IMAGE_PRESET_DRAFT), 'lorasByFamily', 'appliedPreset', 'width', 'height', 'upscaleFactor']);
+    // Every key is either marked above or a preset key, so a new draft key must be classified here.
+    const unclassified = Object.keys(after).filter((key) => !(key in MARKED) && !presetOwned.has(key) && key !== 'version');
+    expect(unclassified).toEqual([]);
+    for (const key of Object.keys(MARKED) as (keyof DraftState)[]) expect(after[key], `${key} must be left alone`).toEqual(before[key]);
+    expect(after.version).toBe(before.version);
+    expect(after.appliedPreset).toBe('look');
+  });
+
+  it('clears what a model that cannot use it, but only that, when the preset switches from a JSON model to a plain one', () => {
+    const ctx = presetContext();
+    draft.hydrateFromContext(ctx, 'json-model');
+    draft.patch({ ...MARKED });
+    const before = { ...draft.state };
+
+    draft.applyPreset(ctx, { ...IMAGE_PRESET, model: 'plain-model' });
+
+    const after = draft.state;
+    expect(after.model).toBe('plain-model');
+    // The gates of a manual model switch: the JSON caption and box, the negative prompt, the first sigma.
+    expect(after).toMatchObject({ enhancedPrompt: '', enhancedFrom: null, jsonPromptEnabled: false, jsonPrompt: '', negativePrompt: '', firstSigma: null });
+    // Everything else stays: prompt, scene, seed, prompt source, enhance options, workflow, reference, extend source.
+    for (const key of ['prompt', 'scene', 'seed', 'promptSource', 'promptFilePath', 'promptFileOptionIds', 'enhancedScene', 'enhanceSettings', 'enhanceSettingsVideo', 'enhanceAuto',
+      'enhanceModel', 'enhanceFormat', 'workflow', 'referenceImagePath', 'extendSourcePath', 'extendFrames', 'sidebarCollapsed'] as (keyof DraftState)[]) {
+      expect(after[key], `${key} must be left alone`).toEqual(before[key]);
+    }
+  });
+
+  it('never replaces the prompt, seed, workflow or reference image', () => {
+    const ctx = presetContext();
+    draft.hydrateFromContext(ctx, 'json-model');
+    draft.patch({ prompt: 'keep me', seed: 7, referenceImagePath: '/refs/r.png' });
+    draft.update('workflow', 'img2img');
+
+    draft.applyPreset(ctx, IMAGE_PRESET);
+
+    expect(draft.state).toMatchObject({ prompt: 'keep me', seed: 7, referenceImagePath: '/refs/r.png', workflow: 'img2img' });
+  });
+
+  it('clears the LoRAs and quantization when the preset has none, and the LoRAs remembered for the family stay out', () => {
+    const ctx = presetContext();
+    draft.hydrateFromContext(ctx, 'json-model');
+    draft.patch({ loraString: 'style-a:1', quantize: 8, lorasByFamily: { flux1: 'detail-b:0.5' } });
+
+    draft.applyPreset(ctx, { ...IMAGE_PRESET, model: 'plain-model', settings: { ...IMAGE_PRESET.settings, lora: '', quantize: null } });
+
+    expect(draft.state).toMatchObject({ model: 'plain-model', loraString: '', quantize: null });
+    // The family left behind is remembered, as on a manual switch.
+    expect(draft.state.lorasByFamily).toMatchObject({ zimage: 'style-a:1' });
+  });
+
+  it('leaves LoRAs that are not installed out, and keeps the current model when the preset names one that is not offered', () => {
+    const ctx = presetContext();
+    draft.hydrateFromContext(ctx, 'plain-model');
+
+    draft.applyPreset(ctx, { ...IMAGE_PRESET, model: 'removed-model', settings: { ...IMAGE_PRESET.settings, lora: 'style-a:0.8,gone-one:1,gone-two:0.5' } });
+
+    expect(draft.state).toMatchObject({ model: 'plain-model', loraString: 'style-a:0.8', steps: 17, ratio: '16:9' });
+  });
+
+  it('applies a custom size as a custom size', () => {
+    const ctx = presetContext();
+    draft.hydrateFromContext(ctx, 'json-model');
+
+    draft.applyPreset(ctx, { ...IMAGE_PRESET, settings: { ...IMAGE_PRESET.settings, size: 'custom', ratio: '16:9', width: 640, height: 960 } });
+
+    expect(draft.state).toMatchObject({ dimensionMode: 'custom', width: 640, height: 960 });
+  });
+
+  it('sets every video key and leaves the image keys alone', () => {
+    const ctx = presetContext();
+    draft.update('workflow', 'txt2vid');
+    draft.hydrateFromContext(ctx, 'ltx-v-0.9');
+    draft.patch({ prompt: 'a clip', scene: 'a street', seed: 5, guidance: 9, quantize: 4, scheduler: 'dpm', upscaleEnabled: true, upscaleFactor: 4, postprocessSharpenAmount: 0.9, referenceImagePath: '/refs/r.png' });
+    const before = { ...draft.state };
+    const preset: SettingsPreset = {
+      slug: 'clip', name: 'Clip', mode: 'video', model: 'ltx-2',
+      settings: { lora: 'detail-b:0.4', ratio: '9:16', size: 's', width: null, height: null, runs: 2, steps: 20, frames: 50, audio: false, low_memory: false, video_upscale_factor: 2, review: true },
+    };
+
+    draft.applyPreset(ctx, preset);
+
+    const after = draft.state;
+    expect(after).toMatchObject({
+      model: 'ltx-2', loraString: 'detail-b:0.4', ratio: '9:16', size: 's', dimensionMode: 'ratio', audio: false, lowMemory: false,
+      videoUpscaleEnabled: true, videoUpscaleFactor: 2, videoUpscaleReview: true, runs: 2, appliedPreset: 'clip',
+    });
+    // The new model's frame grid and step limit apply, as on a manual switch.
+    expect(after.frameCount).toBe(49);
+    expect(after.steps).toBe(8);
+    for (const key of ['prompt', 'scene', 'seed', 'guidance', 'scheduler', 'upscaleEnabled', 'upscaleFactor', 'postprocessSharpenAmount', 'referenceImagePath', 'workflow'] as (keyof DraftState)[]) {
+      expect(after[key], `${key} must be left alone`).toEqual(before[key]);
+    }
+    expect(after.quantize).toBeNull();
+  });
+
+  it('in an extension sets every preset key too, and leaves the source, prompt and extend length alone', () => {
+    const ctx = presetContext();
+    draft.update('workflow', 'extend');
+    draft.hydrateFromContext(ctx, 'ltx-2');
+    draft.patch({ prompt: 'p', scene: 's', seed: 7, extendSourcePath: '/clips/source.mp4', extendFrames: 24 });
+    const before = { ...draft.state };
+    const preset: SettingsPreset = {
+      slug: 'clip', name: 'Clip', mode: 'video', model: 'ltx-v-0.9',
+      settings: { lora: 'style-a:0.4', ratio: '9:16', size: 's', width: null, height: null, runs: 1, steps: 5, frames: 97, audio: false, low_memory: false, video_upscale_factor: 2, review: true },
+    };
+
+    draft.applyPreset(ctx, preset);
+
+    expect(draft.state).toMatchObject({
+      model: 'ltx-v-0.9', loraString: 'style-a:0.4', ratio: '9:16', size: 's', steps: 5, audio: false, lowMemory: false,
+      videoUpscaleEnabled: true, videoUpscaleFactor: 2, videoUpscaleReview: true, appliedPreset: 'clip',
+    });
+    for (const key of ['prompt', 'scene', 'seed', 'extendSourcePath', 'extendFrames', 'workflow'] as (keyof DraftState)[]) {
+      expect(draft.state[key], `${key} must be left alone`).toEqual(before[key]);
+    }
+  });
+
+  it('fits a custom size and the steps to the model it ends on, as after a manual switch', () => {
+    const ctx = presetContext({ image_model_defaults: { 'json-model': makeImageDefaults({ supports_json_prompt: true, dimension_max: 1024 }), 'plain-model': makeImageDefaults({ dimension_max: 1024 }), 'twin-model': makeImageDefaults({ dimension_max: 1024 }) } });
+    draft.hydrateFromContext(ctx, 'plain-model');
+
+    // The preset's model is not installed, so the current model stays and its limits apply.
+    draft.applyPreset(ctx, { ...IMAGE_PRESET, model: 'removed-model', settings: { ...IMAGE_PRESET.settings, size: 'custom', width: 2048, height: 1024 } });
+
+    expect(draft.state.model).toBe('plain-model');
+    expect(draft.state.dimensionMode).toBe('custom');
+    expect(Math.max(draft.state.width, draft.state.height)).toBeLessThanOrEqual(1024);
+    expect(draft.state.width / draft.state.height).toBeCloseTo(2, 1);
+  });
+
+  it('remembers the applied slug, persisted with the draft', () => {
+    const ctx = presetContext();
+    draft.hydrateFromContext(ctx, 'json-model');
+    draft.applyPreset(ctx, IMAGE_PRESET);
+
+    expect(draft.state.appliedPreset).toBe('look');
+    draft.loadDraft();
+    expect(draft.state.appliedPreset).toBe('look');
+  });
+
+  it('moves and clears the applied slug', () => {
+    draft.setAppliedPreset('look');
+    draft.setAppliedPreset('new-look');
+    expect(draft.state.appliedPreset).toBe('new-look');
+    draft.setAppliedPreset(null);
+    expect(draft.state.appliedPreset).toBeNull();
+  });
+
+  it('forgets the preset when a new extend source is chosen, not when the same one is set again', () => {
+    const ctx = presetContext();
+    draft.update('workflow', 'extend');
+    draft.hydrateFromContext(ctx, 'ltx-2');
+    draft.setAppliedPreset('clip');
+    draft.setExtendSourcePath('/clips/b.mp4');
+    expect(draft.state.appliedPreset).toBeNull();
+
+    draft.setAppliedPreset('clip');
+    draft.setExtendSourcePath('/clips/b.mp4');
+    expect(draft.state.appliedPreset).toBe('clip');
+  });
+
+  it('writes a saved auto upscale denoise, steps and guidance over the model default', () => {
+    const base = makeImageDefaults({ family: 'zimage', upscale: { enabled: false, factor: 2, denoise: 0.4, steps: 10, guidance: 1, sharpen: true, save_pre: false } });
+    const ctx = presetContext({ image_model_defaults: { 'json-model': base } });
+    draft.hydrateFromContext(ctx, 'json-model');
+    expect(draft.state.upscaleDenoise).toBe(0.4);
+
+    const preset: SettingsPreset = {
+      ...IMAGE_PRESET, model: 'json-model',
+      settings: { ...IMAGE_PRESET.settings, first_sigma: null, upscale: 2, upscale_denoise: null, upscale_steps: null, upscale_guidance: null },
+    };
+    draft.applyPreset(ctx, preset);
+
+    expect(draft.state).toMatchObject({ upscaleEnabled: true, upscaleDenoise: null, upscaleSteps: null, upscaleGuidance: null });
+    expect(presetDiffers(preset, draft.state, ctx)).toBe(false);
+  });
+
+  it('keeps the preset when the same extend source is chosen again, when params carry no source settings, and when the source is inspected', () => {
+    const ctx = presetContext();
+    draft.update('workflow', 'extend');
+    draft.hydrateFromContext(ctx, 'ltx-2');
+    draft.setExtendSourcePath('/clips/a.mp4');
+    draft.setAppliedPreset('clip');
+
+    draft.setExtendSourcePath('/clips/a.mp4');
+    draft.loadFromUrl({ prompt: 'p' }, ctx);
+    draft.applyExtendSource(sourceInfo({ model: 'ltx-2', lora: 'style-a:1' }), ctx, { replaceText: true });
+
+    expect(draft.state.appliedPreset).toBe('clip');
+  });
+
+  it('forgets the preset on a switch between image and video, not between workflows of one mode, in the order the top nav makes it', () => {
+    const ctx = presetContext();
+    draft.hydrateFromContext(ctx, 'json-model');
+    draft.setAppliedPreset('look');
+
+    // The top nav updates the workflow first; the workspace's workflow-change handler runs after.
+    draft.update('workflow', 'img2img');
+    draft.onWorkflowChange('img2img', ctx);
+    expect(draft.state.appliedPreset).toBe('look');
+    draft.update('workflow', 'txt2vid');
+    draft.onWorkflowChange('txt2vid', ctx);
+    expect(draft.state.appliedPreset).toBeNull();
+  });
+
+  it('keeps the preset when workflow and mode stay put, and when loadFromUrl names anything', () => {
+    const ctx = presetContext();
+    draft.hydrateFromContext(ctx, 'json-model');
+    draft.setAppliedPreset('look');
+    draft.loadFromUrl({ workflow: 'txt2vid', model: 'plain-model', steps: '9', source_video: '/clips/a.mp4' }, ctx);
+    expect(draft.state.appliedPreset).toBe('look');
+  });
+
+  it('clears the applied preset on Reset', () => {
+    const ctx = presetContext();
+    draft.hydrateFromContext(ctx, 'json-model');
+    draft.setAppliedPreset('look');
+    draft.resetSelections(ctx);
+    expect(draft.state.appliedPreset).toBeNull();
+  });
+
+  it('ignores the per-mode map an older draft stored', () => {
+    localStorage.setItem('ziv-workspace-draft-v1', JSON.stringify({ version: 3, prompt: 'old draft', appliedPresets: { image: 'look', video: null } }));
+    draft.loadDraft();
+    expect(draft.state).toMatchObject({ prompt: 'old draft', appliedPreset: null });
   });
 });

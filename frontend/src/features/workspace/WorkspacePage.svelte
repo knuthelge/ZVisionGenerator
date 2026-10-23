@@ -32,6 +32,8 @@
   import { failureToastText, isReviewing } from '$lib/state/jobView';
   import { jobSettingsPrefill } from '$lib/state/jobSettings';
   import { cliCommand, formSettings, type CliCaveat, type CliCommand } from '$lib/state/cliCommand';
+  import { appliedPreset, presetDiffersFrom, presetSettingsFromDraft } from '$lib/state/presets';
+  import { presetsStore } from '$lib/state/presets.svelte';
   import { extendGuard, finalizeSceneFields, type ExtendGuard } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
@@ -47,6 +49,7 @@
   import HistoryStrip from './HistoryStrip.svelte';
   import SettingsStrip from './SettingsStrip.svelte';
   import SettingPopover from './SettingPopover.svelte';
+  import PresetMenu from './PresetMenu.svelte';
   import { settingsChips, type ChipKey } from './settingsChips';
   import { Sheet } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
@@ -74,6 +77,8 @@
   // Phone: the stage is the screen; settings are a strip of chips that open one control each, the prompt a composer.
   const compact = $derived(layout.mode === 'compact');
   let activeChip = $state<ChipKey | null>(null);
+  // The phone's Preset chip opens the preset menu (an action sheet), not a popover.
+  let presetMenuOpen = $state(false);
   let sheetOpen = $state(false);
   let composerOpen = $state(false);
   // The running job's full card and the queue, as a sheet on a phone; the strip's job state asks for it too.
@@ -338,6 +343,13 @@
       : false
   );
 
+  // The settings preset the form started from, once the list knows it, and whether the form has moved off it.
+  const activePreset = $derived(appliedPreset(presetsStore.list, draft.state));
+  // The form's preset settings as one string: it only changes when a preset setting does, so typing the prompt leaves `presetChanged` alone.
+  const presetSettingsJson = $derived(activePreset !== null && context !== null ? JSON.stringify(presetSettingsFromDraft(draft.state, context)) : null);
+  // The applied preset is always of the form's mode, so its own mode is the one compared in.
+  const presetChanged = $derived(activePreset !== null && context !== null && presetSettingsJson !== null && presetDiffersFrom(activePreset, activePreset.mode, JSON.parse(presetSettingsJson), context));
+
   // Active lora chips parsed from draft.state.loraString; reused settings record paths, shown by LoRA name.
   const loraChips = $derived<LoraChip[]>(parseLoraString(draft.state.loraString, loraOptions));
 
@@ -366,9 +378,13 @@
       referenceName: imageFile?.name ?? (s.referenceImagePath ? fileName(s.referenceImagePath) : null),
       sourceName: s.extendSourcePath ? fileName(s.extendSourcePath) : null,
       memoryWarn: memoryStatus === 'tight' || memoryStatus === 'too_large',
+      presetName: activePreset?.name ?? null,
+      presetSlug: activePreset?.slug ?? null,
+      presetChanged,
     });
   });
-  const changedCount = $derived(chips.filter((chip) => chip.changed).length);
+  // The preset chip is left out: it says where the settings started, and counts none of them.
+  const changedCount = $derived(chips.filter((chip) => chip.changed && chip.key !== 'preset').length);
   // What the folded composer reads: the prompt file and its count, the Enhanced text, or the prompt.
   const composerSummary = $derived.by(() => {
     const s = draft.state;
@@ -427,6 +443,16 @@
     }
     return entries;
   });
+
+  /** Open a phone setting chip's popover, or close it when it is already open. */
+  function toggleChip(key: ChipKey): void {
+    if (key === 'preset') {
+      activeChip = null;
+      presetMenuOpen = true;
+      return;
+    }
+    activeChip = activeChip === key ? null : key;
+  }
 
   function addLora(name: string): void {
     const existing = loraChips.find((c) => c.name === name);
@@ -530,7 +556,8 @@
     draft.loadFromUrl(params, context);
     // The prefill already re-hydrated for its workflow; the workflow-change effect must not redo it.
     _prevWorkflow = draft.state.workflow;
-    draft.saveDraft();
+    // The source brings its own settings, so the form no longer starts from a preset.
+    draft.setAppliedPreset(null);
   }
 
   /** Refill the form from the settings a job was submitted with. */
@@ -624,7 +651,7 @@
     const params = extendParams(asset);
     if (draft.state.workflow === params.workflow) {
       draft.loadFromUrl(params, context);
-      draft.saveDraft();
+      draft.setAppliedPreset(null);
     } else applyPrefill(params, { keepSettings: true });
     imageFile = null;
     closeLightbox();
@@ -786,6 +813,7 @@
 
     // Load stored draft as the baseline state.
     draft.loadDraft();
+    void presetsStore.load();
     extendInspection.reset();
     clipMemory.reset();
 
@@ -813,6 +841,8 @@
         // explicit URL values (prompt, steps, ratio, etc.) take precedence.
         if (hasUrlParams) {
           draft.loadFromUrl(urlParams, ctx);
+          // A link into the workspace loads a source's settings, so the form no longer starts from a preset.
+          draft.setAppliedPreset(null);
         }
 
         // After full hydration, sync _prevWorkflow so the workflow-change $effect
@@ -1147,6 +1177,9 @@
   <!-- Toolbar bar: model, quantize, loras. Stacked, it heads the phone's All sheet. -->
   <div class="ui-pane-toolbar z-10 shrink-0" class:toolbar-stacked={stacked}>
     <div class="flex items-center px-3 py-2 gap-3 {stacked ? 'flex-col items-stretch' : 'flex-wrap'}">
+
+      <!-- Settings presets -->
+      <PresetMenu {context} {stacked} applied={activePreset} changed={presetChanged} />
 
       <!-- Model selector -->
       <div class="flex items-center gap-2 min-w-0 {stacked ? 'flex-nowrap' : 'flex-wrap'}">
@@ -1505,7 +1538,8 @@
               onclose={() => { activeChip = null; }}
             />
           {/if}
-          <SettingsStrip {chips} activeKey={activeChip} {changedCount} onopen={(key) => { activeChip = activeChip === key ? null : key; }} onall={() => { activeChip = null; sheetOpen = true; }} />
+          <PresetMenu {context} applied={activePreset} changed={presetChanged} button={false} bind:open={presetMenuOpen} />
+          <SettingsStrip {chips} activeKey={activeChip} {changedCount} onopen={toggleChip} onall={() => { activeChip = null; sheetOpen = true; }} />
           <div class="composer" class:expanded={composerOpen} data-testid="composer">
             {#if generateError}<p class="ui-alert ui-alert-error composer-error" role="alert"><Icon name="alert" size={14} /><span class="min-w-0 break-words">{generateError}</span></p>{/if}
             <div class="composer-row" hidden={composerOpen}>

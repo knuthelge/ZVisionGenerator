@@ -1,8 +1,9 @@
 import { extendPrefillFor } from './extend';
 import { keepInstalledLoras, modelLoraFamily } from './loras';
+import { presetDraftKeys, presetPrefill } from './presets';
 import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
 import { alignFrameCount, defaultExtendFrames, snapExtendFrames } from './videoDuration';
-import type { DraftState, ExtendSourceInfo, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
+import type { DraftState, ExtendSourceInfo, SettingsPreset, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
 
 const STORAGE_KEY = 'ziv-workspace-draft-v1';
 const SCHEMA_VERSION = 3;
@@ -80,6 +81,7 @@ const DEFAULT_DRAFT: DraftState = {
   extendFrames: null,
   missingSourceVideo: false,
   extendPrefill: null,
+  appliedPreset: null,
 };
 
 const _URL_PARAM_CONTROL_IDS: Partial<Record<string, string>> = {
@@ -453,9 +455,10 @@ export const draft = {
 
   /**
   * Apply URL query/hash params to the draft using canonical workflow values only.
-   * Only fields present in params are updated; absent fields are left unchanged.
+   * Only fields present in params are updated; absent fields are left unchanged. A param whose control the workflow
+   * does not show is skipped, unless `ungated` is set.
    */
-  loadFromUrl(params: Record<string, string>, ctx: WorkspaceContext | null = null): void {
+  loadFromUrl(params: Record<string, string>, ctx: WorkspaceContext | null = null, options: { ungated?: boolean } = {}): void {
     const prefill: WorkspacePrefill = {};
     let workflow = _draft.workflow;
     if (params.workflow && ctx) {
@@ -469,7 +472,7 @@ export const draft = {
     const visibleControls = ctx ? _visibleControlsForWorkflow(ctx, workflow) : null;
     const canApply = (paramKey: string): boolean => {
       const controlId = _URL_PARAM_CONTROL_IDS[paramKey];
-      return !controlId || visibleControls === null || visibleControls.has(controlId);
+      return options.ungated === true || !controlId || visibleControls === null || visibleControls.has(controlId);
     };
 
     // An extension names its source: the URL then describes the whole job, so its text replaces whatever the boxes held.
@@ -630,7 +633,8 @@ export const draft = {
   /**
    * Reset all generation selections to the model's defaults, keeping the
    * workflow, model, LoRAs, quantization, and prompt inputs (including the
-   * Enhanced prompt) untouched. Enhancement options and auto-enhance reset.
+   * Enhanced prompt) untouched. Enhancement options and auto-enhance reset. The applied preset clears, since its
+   * settings are gone.
    */
   resetSelections(ctx: WorkspaceContext): void {
     const s = _draft;
@@ -670,6 +674,37 @@ export const draft = {
     this.saveDraft();
   },
 
+  /**
+   * Apply a settings preset on top of the chosen model's defaults.
+   *
+   * Every key of the preset is set, in every workflow. Everything else (prompt, scene, negative prompt, seed,
+   * prompt source, enhance options, workflow, reference image and extend source) keeps its value, except what the new
+   * model's capability gates clear, as on a manual model switch. A preset's model that is not in the model list, and
+   * LoRAs that are not installed, are left out. Never goes through `jobSettingsPrefill`, which would replace the
+   * prompt and seed.
+   */
+  applyPreset(ctx: WorkspaceContext, preset: SettingsPreset): void {
+    const before = _draft;
+    const touched = presetDraftKeys(before);
+    const kept = Object.fromEntries(Object.entries(before).filter(([key]) => !touched.has(key as keyof DraftState) && key !== 'appliedPreset')) as Partial<DraftState>;
+    const { model, params, patch } = presetPrefill(preset, before, ctx);
+    this.hydrateFromContext(ctx, model);
+    // Every preset key lands, whether or not the workflow shows its control.
+    this.loadFromUrl(params, ctx, { ungated: true });
+    _draft = { ..._draft, ...patch, ...kept };
+    // The restored text and options meet the new model again, as they do when it is picked by hand.
+    _draft = _applyCapabilityGates(ctx, _draft);
+    // A custom size or step count the preset carried may exceed the kept model's limits, as after a manual model switch.
+    _draft = { ..._fitToModel(ctx, _draft), appliedPreset: preset.slug };
+    this.saveDraft();
+  },
+
+  /** Remember which preset (by slug) the form started from, or none with null. */
+  setAppliedPreset(slug: string | null): void {
+    _draft = { ..._draft, appliedPreset: slug };
+    this.saveDraft();
+  },
+
   saveDraft(): void {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(_draft));
@@ -685,7 +720,9 @@ export const draft = {
   },
 
   update<K extends keyof DraftState>(key: K, value: DraftState[K]): void {
-    _draft = { ..._draft, [key]: value };
+    // Switching between image and video ends the applied preset's hold; presets belong to one mode.
+    const leavesMode = key === 'workflow' && workflowMode(value as Workflow) !== workflowMode(_draft.workflow);
+    _draft = { ..._draft, [key]: value, ...(leavesMode ? { appliedPreset: null } : {}) };
     this.saveDraft();
   },
 
@@ -694,8 +731,10 @@ export const draft = {
    * Forgets what was known about the previous source and any "source moved" notice.
    */
   setExtendSourcePath(path: string | null): void {
-    if (path !== _draft.extendSourcePath) _extendSource = null;
-    _draft = { ..._draft, extendSourcePath: path, missingSourceVideo: false };
+    const changed = path !== _draft.extendSourcePath;
+    if (changed) _extendSource = null;
+    // A newly chosen source brings its own settings, so the form no longer starts from a preset.
+    _draft = { ..._draft, extendSourcePath: path, missingSourceVideo: false, ...(changed && path !== null ? { appliedPreset: null } : {}) };
     this.saveDraft();
   },
 

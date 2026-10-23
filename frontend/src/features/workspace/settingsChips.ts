@@ -3,7 +3,7 @@ import type { DraftState } from '$lib/types';
 
 /** The settings a phone shows as chips, each opening one control. */
 export type ChipKey =
-  | 'seconds' | 'extendSeconds' | 'steps' | 'guidance' | 'strength' | 'seed' | 'runs'
+  | 'preset' | 'seconds' | 'extendSeconds' | 'steps' | 'guidance' | 'strength' | 'seed' | 'runs'
   | 'reference' | 'source' | 'size' | 'audio' | 'loras' | 'upscale' | 'model';
 
 export interface SettingChip {
@@ -17,6 +17,8 @@ export interface SettingChip {
   on?: boolean;
   /** Something to look at: a clip that may not fit, a model not downloaded. */
   warn?: boolean;
+  /** The preset chip's applied preset slug, empty when none is applied. */
+  applied?: string;
 }
 
 export interface ChipFacts {
@@ -42,17 +44,25 @@ export interface ChipFacts {
   sourceName: string | null;
   /** The clip or extension may not fit memory. */
   memoryWarn: boolean;
+  /** The applied settings preset's name, or null when none is applied. */
+  presetName: string | null;
+  /** The applied settings preset's slug, or null. */
+  presetSlug: string | null;
+  /** The form differs from the applied preset. */
+  presetChanged: boolean;
 }
 
 const fmt = (value: number): string => (Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2))));
 
 /**
  * Chips in the order their settings change in the loop: every run (length, steps, guidance, strength, seed, batch),
- * per series (reference or source, size, audio, LoRAs), at the end (upscale), at the start (model).
+ * per series (reference or source, size, audio, LoRAs), at the end (upscale), at the start (model). The preset, which
+ * sets many of them at once, comes before all.
  */
 export function settingsChips(f: ChipFacts): SettingChip[] {
   const { caps, state: s } = f;
   const chips: (SettingChip | null)[] = [
+    { key: 'preset', label: 'Preset', value: f.presetName ?? 'none', changed: f.presetChanged, on: f.presetName !== null, applied: f.presetSlug ?? '' },
     caps.showFrameCount && f.seconds !== null ? { key: 'seconds', label: 'Length', value: `${fmt(f.seconds)} s`, changed: f.changed('frameCount'), warn: f.memoryWarn } : null,
     caps.showExtendLength ? { key: 'extendSeconds', label: 'Extend', value: f.extendSeconds === null ? '—' : `+${fmt(f.extendSeconds)} s`, changed: f.extendChanged, warn: f.memoryWarn } : null,
     caps.showSteps ? { key: 'steps', label: 'Steps', value: fmt(s.steps), changed: f.changed('steps') } : null,
