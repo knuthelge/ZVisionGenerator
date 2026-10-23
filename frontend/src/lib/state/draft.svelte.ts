@@ -1,5 +1,5 @@
 import { extendPrefillFor } from './extend';
-import { keepInstalledLoras } from './loras';
+import { keepInstalledLoras, modelLoraFamily } from './loras';
 import { enhanceSettingsKey, isJsonCaption, prettyCaption, reusedEnhance, workflowMode } from './promptEnhance';
 import { alignFrameCount, defaultExtendFrames, snapExtendFrames } from './videoDuration';
 import type { DraftState, ExtendSourceInfo, WorkspacePrefill, WorkspaceContext, Workflow, ImageModelDefaults, VideoModelDefaults } from '$lib/types';
@@ -220,10 +220,11 @@ function _modelDefaultsFor(ctx: WorkspaceContext, workflow: Workflow, model: str
   return (defaultsMap?.[model] ?? (model === currentModel ? fallback : null)) as ImageModelDefaults | VideoModelDefaults | null;
 }
 
-/** Return the key a model's LoRAs are remembered under: its family, or the model itself when the family is unknown. */
+/** Return the key a model's LoRAs are remembered under: `family:size` when the model has a size, else its family, else the model itself. */
 function _loraFamilyKey(ctx: WorkspaceContext, model: string): string {
-  const family = (ctx.image_model_defaults?.[model] ?? ctx.video_model_defaults?.[model])?.family;
-  return family ? family : `model:${model}`;
+  const found = modelLoraFamily(ctx, model);
+  if (!found?.family) return `model:${model}`;
+  return found.sizeVariant ? `${found.family}:${found.sizeVariant}` : found.family;
 }
 
 /**

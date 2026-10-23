@@ -102,3 +102,91 @@ describe('SettingPopover model list', () => {
     });
   });
 });
+
+describe('SettingPopover LoRA list', () => {
+  let target: HTMLDivElement;
+  let app: Record<string, unknown> | null = null;
+
+  const loraContext = {
+    ...context,
+    image_model_defaults: { zit: { family: 'zimage' } },
+    loras: [
+      { name: 'b-match', path: '/l/b', family: 'zimage', size_variant: null },
+      { name: 'a-match', path: '/l/a', family: 'zimage', size_variant: null },
+      { name: 'c-unknown', path: '/l/c', family: null, size_variant: null },
+      { name: 'd-ltx', path: '/l/d', family: 'ltx', size_variant: null },
+    ],
+  } as unknown as WorkspaceContext;
+
+  beforeEach(() => {
+    localStorage.clear();
+    draft.reset();
+    draft.update('model', 'zit');
+    Element.prototype.animate = vi.fn(() => ({ cancel: vi.fn(), finished: Promise.resolve(), onfinish: null })) as unknown as Element['animate'];
+    target = document.createElement('div');
+    document.body.appendChild(target);
+  });
+
+  afterEach(async () => {
+    if (app) {
+      await unmount(app);
+      app = null;
+    }
+    target.remove();
+    delete (Element.prototype as Partial<Element>).animate;
+  });
+
+  function mountLoras(ctx: WorkspaceContext = loraContext): void {
+    app = flushSync(() => mount(SettingPopover, {
+      target,
+      props: {
+        key: 'loras', context: ctx, busy: false, models, quantizeOptions: null, imageFile: null, referencePreviewUrl: null, lastSeed: null,
+        onImageFileChange: vi.fn(), onModelChange: vi.fn(), onUseLatestAsReference: vi.fn(), onclose: vi.fn(),
+      },
+    }));
+  }
+
+  const addRows = () => Array.from(target.querySelectorAll('.pop-list .pop-item')).map((el) => el.textContent?.trim() ?? '');
+  const fold = () => target.querySelector('[data-action="other-models"]') as HTMLButtonElement;
+
+  it('lists only the matches by name, then a collapsed Other models row', () => {
+    mountLoras();
+
+    expect(addRows().slice(0, 2)).toEqual(['a-match', 'b-match']);
+    expect(fold().getAttribute('aria-expanded')).toBe('false');
+    expect(target.textContent).not.toContain('d-ltx');
+    expect(target.textContent).not.toContain('c-unknown');
+  });
+
+  it('expands the fold in place and shows the family label beside each folded LoRA', () => {
+    mountLoras();
+    flushSync(() => fold().click());
+
+    expect(fold().getAttribute('aria-expanded')).toBe('true');
+    const row = Array.from(target.querySelectorAll('.pop-item')).find((el) => el.textContent?.includes('d-ltx'));
+    expect(row?.textContent).toContain('LTX');
+    const unknown = Array.from(target.querySelectorAll('.pop-item')).find((el) => el.textContent?.includes('c-unknown'));
+    expect(unknown?.querySelector('small')).toBeNull();
+  });
+
+  it('starts with the fold open when nothing matches', () => {
+    mountLoras({ ...loraContext, loras: [{ name: 'd-ltx', path: '/l/d', family: 'ltx', size_variant: null }] } as WorkspaceContext);
+
+    expect(fold().getAttribute('aria-expanded')).toBe('true');
+    expect(target.textContent).toContain('d-ltx');
+  });
+
+  it('adds the chosen LoRA to the draft', () => {
+    mountLoras();
+    (Array.from(target.querySelectorAll('.pop-item')).find((el) => el.textContent?.includes('b-match')) as HTMLButtonElement).click();
+
+    expect(draft.state.loraString).toBe('b-match:1');
+  });
+
+  it('shows no fold row when every LoRA fits the model', () => {
+    mountLoras({ ...loraContext, loras: loraContext.loras.slice(0, 2) } as WorkspaceContext);
+
+    expect(fold()).toBeNull();
+  });
+});
+

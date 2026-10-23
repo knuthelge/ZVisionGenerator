@@ -1176,6 +1176,25 @@ describe('LoRAs remembered per model family', () => {
     expect(draft.state.loraString).toBe('flux-style:1');
   });
 
+  it('remembers LoRAs per Klein size, so 4B and 9B swap them', () => {
+    const ctx = familyContext();
+    ctx.image_models.push({ id: 'klein-4b', label: 'Klein 4B', type: 'image' }, { id: 'klein-9b', label: 'Klein 9B', type: 'image' });
+    ctx.image_model_defaults = {
+      ...ctx.image_model_defaults,
+      'klein-4b': makeImageDefaults({ family: 'flux2_klein', size_variant: '4b' }),
+      'klein-9b': makeImageDefaults({ family: 'flux2_klein', size_variant: '9b' }),
+    };
+    draft.hydrateFromContext(ctx, 'klein-4b');
+    draft.update('loraString', 'zi-style:0.5');
+    draft.hydrateFromContext(ctx, 'klein-9b');
+    expect(draft.state.loraString).toBe('');
+    draft.update('loraString', 'flux-style:1');
+    draft.hydrateFromContext(ctx, 'klein-4b');
+    expect(draft.state.loraString).toBe('zi-style:0.5');
+    draft.hydrateFromContext(ctx, 'klein-9b');
+    expect(draft.state.loraString).toBe('flux-style:1');
+  });
+
   it('keeps the LoRAs when switching between models of the same family', () => {
     const ctx = familyContext();
     draft.hydrateFromContext(ctx, 'zit');

@@ -37,7 +37,7 @@
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { INPUT_DEBOUNCE_MS } from '$lib/state/debounce';
   import { clipMemoryRequest } from '$lib/state/memoryFit';
-  import { formatLoraString, loraLabel, parseLoraString, type LoraChip } from '$lib/state/loras';
+  import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, modelLoraFamily, parseLoraString, recentLoraNames, type LoraChip } from '$lib/state/loras';
   import QueuePanel from './QueuePanel.svelte';
   import FirstRunDialog from './FirstRunDialog.svelte';
   import { firstRun, shouldOfferFirstRun } from './firstRun.svelte';
@@ -397,10 +397,36 @@
 
   let loraPopoverOpen = $state(false);
   let loraButtonEl = $state<HTMLButtonElement | null>(null);
-  const loraMenuItems = $derived<ActionMenuEntry[]>([
-    { kind: 'heading', label: 'Available LoRAs' },
-    ...loraOptions.map((lora): ActionMenuEntry => ({ kind: 'item', id: lora.name, label: lora.name, onselect: () => addLora(lora.name) })),
-  ]);
+  // The picker leads with the LoRAs that fit the selected model; the rest fold away under "Other models".
+  // Reading the model through its own derived keeps the groups from being rebuilt on every other draft edit.
+  const draftModel = $derived(draft.state.model);
+  const loraGroups = $derived.by(() => {
+    const model = context ? modelLoraFamily(context, selectedModel?.id ?? draftModel) : null;
+    return groupLorasForModel(loraOptions, model, recentLoraNames(historyStore.assets, model?.family ?? null, loraOptions));
+  });
+  const loraMenuItems = $derived.by<ActionMenuEntry[]>(() => {
+    const { main, other } = loraGroups;
+    const entries: ActionMenuEntry[] = [
+      { kind: 'heading', label: 'Available LoRAs' },
+      ...main.map((lora): ActionMenuEntry => ({ kind: 'item', id: lora.name, label: lora.name, onselect: () => addLora(lora.name) })),
+    ];
+    if (other.length > 0) {
+      entries.push({
+        kind: 'group',
+        id: 'other-models',
+        label: `Other models (${other.length})`,
+        defaultOpen: main.length === 0,
+        items: other.map((lora) => ({
+          kind: 'item',
+          id: lora.name,
+          label: lora.name,
+          hint: lora.family ? familyLabel(lora.family, lora.size_variant) : undefined,
+          onselect: () => addLora(lora.name),
+        })),
+      });
+    }
+    return entries;
+  });
 
   function addLora(name: string): void {
     const existing = loraChips.find((c) => c.name === name);

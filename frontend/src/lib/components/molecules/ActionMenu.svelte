@@ -1,24 +1,33 @@
 <script lang="ts" module>
+  export interface ActionMenuItem {
+    kind: 'item';
+    id: string;
+    label: string;
+    danger?: boolean;
+    disabled?: boolean;
+    /** Tooltip, e.g. why the item is disabled. */
+    title?: string;
+    /** Renders the item as a link (e.g. a download) instead of a button. */
+    href?: string;
+    download?: string;
+    /** Makes the item a radio: it shows a check while true and keeps the label's place while false. */
+    checked?: boolean;
+    /** Muted text after the label. */
+    hint?: string;
+    onselect?: () => void;
+  }
+
   export type ActionMenuEntry =
     | { kind: 'heading'; label: string }
     | { kind: 'separator' }
-    | {
-        kind: 'item';
-        id: string;
-        label: string;
-        danger?: boolean;
-        disabled?: boolean;
-        /** Tooltip, e.g. why the item is disabled. */
-        title?: string;
-        /** Renders the item as a link (e.g. a download) instead of a button. */
-        href?: string;
-        download?: string;
-        onselect?: () => void;
-      };
+    | ActionMenuItem
+    /** A row that shows or hides its items in place; the menu stays open. The state resets each time the menu opens. */
+    | { kind: 'group'; id: string; label: string; items: ActionMenuItem[]; defaultOpen?: boolean };
 </script>
 
 <script lang="ts">
   import { popover, type PopoverAlign } from '$lib/actions/popover';
+  import Icon from '../atoms/Icon.svelte';
   import { layout } from '$lib/state/layoutMode.svelte';
   import Sheet from './Sheet.svelte';
 
@@ -35,12 +44,26 @@
   let { open, anchor, items, label, align = 'end', onclose }: Props = $props();
 
   let menuEl = $state<HTMLDivElement | null>(null);
+  // Groups the person toggled since the menu opened; a group not listed here follows its `defaultOpen`.
+  let toggled = $state<Record<string, boolean>>({});
 
-  function menuItems(): HTMLElement[] {
-    return Array.from(menuEl?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])') ?? []);
+  // Every opening starts from the groups' defaults.
+  $effect(() => {
+    void open;
+    toggled = {};
+  });
+
+  function isExpanded(group: Extract<ActionMenuEntry, { kind: 'group' }>): boolean {
+    return toggled[group.id] ?? group.defaultOpen ?? false;
   }
 
-  function select(entry: Extract<ActionMenuEntry, { kind: 'item' }>): void {
+  function menuItems(): HTMLElement[] {
+    return Array.from(
+      menuEl?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"]), [role="menuitemradio"]:not([aria-disabled="true"])') ?? [],
+    );
+  }
+
+  function select(entry: ActionMenuItem): void {
     if (entry.disabled) return;
     onclose();
     entry.onselect?.();
@@ -66,34 +89,68 @@
 
 </script>
 
+{#snippet row(entry: ActionMenuItem)}
+  {#snippet content()}
+    {#if entry.checked !== undefined}
+      <span class="action-menu-check" aria-hidden="true">{#if entry.checked}<Icon name="check" size={14} />{/if}</span>
+    {/if}
+    <span class="action-menu-label">{entry.label}</span>
+    {#if entry.hint}<span class="action-menu-hint">{entry.hint}</span>{/if}
+  {/snippet}
+  {#if entry.href}
+    <a
+      role="menuitem"
+      tabindex="-1"
+      class="action-menu-item"
+      href={entry.href}
+      download={entry.download}
+      data-action={entry.id}
+      onclick={() => select(entry)}
+    >{@render content()}</a>
+  {:else}
+    <button
+      type="button"
+      role={entry.checked === undefined ? 'menuitem' : 'menuitemradio'}
+      aria-checked={entry.checked === undefined ? undefined : entry.checked}
+      tabindex="-1"
+      class="action-menu-item"
+      class:danger={entry.danger}
+      aria-disabled={entry.disabled ? 'true' : undefined}
+      title={entry.title}
+      data-action={entry.id}
+      onclick={() => select(entry)}
+    >{@render content()}</button>
+  {/if}
+{/snippet}
+
 {#snippet entries()}
     {#each items as entry, index (index)}
       {#if entry.kind === 'heading'}
         <p class="action-menu-heading ui-area-label" role="presentation">{entry.label}</p>
       {:else if entry.kind === 'separator'}
         <div class="action-menu-separator" role="separator"></div>
-      {:else if entry.href}
-        <a
-          role="menuitem"
-          tabindex="-1"
-          class="action-menu-item"
-          href={entry.href}
-          download={entry.download}
-          data-action={entry.id}
-          onclick={() => select(entry)}
-        >{entry.label}</a>
-      {:else}
+      {:else if entry.kind === 'group'}
         <button
           type="button"
           role="menuitem"
           tabindex="-1"
-          class="action-menu-item"
-          class:danger={entry.danger}
-          aria-disabled={entry.disabled ? 'true' : undefined}
-          title={entry.title}
+          class="action-menu-item action-menu-group"
+          aria-expanded={isExpanded(entry)}
           data-action={entry.id}
-          onclick={() => select(entry)}
-        >{entry.label}</button>
+          onclick={() => { toggled = { ...toggled, [entry.id]: !isExpanded(entry) }; }}
+        >
+          <span class="action-menu-label">{entry.label}</span>
+          <Icon name={isExpanded(entry) ? 'chevdown' : 'chevright'} size={12} />
+        </button>
+        {#if isExpanded(entry)}
+          <div class="action-menu-group-items" role="group" aria-label={entry.label}>
+            {#each entry.items as child (child.id)}
+              {@render row(child)}
+            {/each}
+          </div>
+        {/if}
+      {:else}
+        {@render row(entry)}
       {/if}
     {/each}
 {/snippet}
@@ -130,6 +187,11 @@
   .action-menu-item:focus { background: var(--color-bg-surface-hover); color: var(--color-text-primary); outline: none; }
   @media (hover: hover) { .action-menu-item:hover { background: var(--color-bg-surface-hover); color: var(--color-text-primary); outline: none; } }
   .action-menu-item:focus-visible { box-shadow: inset 0 0 0 2px var(--color-primary-main); }
+  .action-menu-label { flex: 1; min-width: 0; }
+  .action-menu-hint { flex: none; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-meta); color: var(--color-text-muted); }
+  .action-menu-check { display: inline-grid; flex: none; place-items: center; width: 14px; height: 14px; color: var(--color-primary-main); }
+  .action-menu-group { color: var(--color-text-muted); }
+  .action-menu-group-items { padding-left: 12px; }
   .action-menu-item.danger { color: var(--color-error); }
   .action-menu-item.danger:focus { background: var(--color-error-surface); color: var(--color-error); }
   @media (hover: hover) { .action-menu-item.danger:hover { background: var(--color-error-surface); color: var(--color-error); } }

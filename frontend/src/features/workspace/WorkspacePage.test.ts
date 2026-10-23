@@ -2699,6 +2699,72 @@ describe('WorkspacePage', () => {
     expect(draft.state.loraString).toBe('krea-flat:1');
   });
 
+  describe('Add LoRA menu grouping', () => {
+    const picker = () => document.querySelector('[role="menu"][aria-label="Available LoRAs"]') as HTMLElement | null;
+    const openPicker = () => {
+      const addButton = Array.from(target.querySelectorAll('button')).find((b) => b.textContent?.includes('Add LoRA')) as HTMLButtonElement;
+      flushSync(() => addButton.click());
+    };
+    const actions = () => Array.from(picker()?.querySelectorAll('[data-action]') ?? []).map((el) => el.getAttribute('data-action'));
+
+    function loraContext(loras: WorkspaceContext['loras'], assets: GalleryAsset[] = []): WorkspaceContext {
+      workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage(assets));
+      const context = makeContext();
+      context.image_model_defaults = { ...context.image_model_defaults, zit: makeImageDefaults({ family: 'zimage' }) };
+      context.loras = loras;
+      return context;
+    }
+
+    beforeEach(() => {
+      draft.update('workflow', 'txt2img');
+      draft.update('model', 'zit');
+    });
+
+    it('lists the model matches first, recent ones leading, and folds the others, unknown LoRAs included', async () => {
+      const context = loraContext(
+        [
+          { name: 'a-match', path: '/l/a', family: 'zimage', size_variant: null },
+          { name: 'b-recent', path: '/l/b', family: 'zimage', size_variant: null },
+          { name: 'c-unknown', path: '/l/c', family: null, size_variant: null },
+          { name: 'd-ltx', path: '/l/d', family: 'ltx', size_variant: null },
+        ],
+        [makeAsset({ lora: 'b-recent:1', details: { model_family: 'zimage' } })],
+      );
+      await mountWorkspace(context);
+      await settle();
+      openPicker();
+
+      expect(actions()).toEqual(['b-recent', 'a-match', 'other-models']);
+      const fold = picker()?.querySelector('[data-action="other-models"]') as HTMLElement;
+      expect(fold.getAttribute('aria-expanded')).toBe('false');
+
+      flushSync(() => fold.click());
+      expect(picker()).not.toBeNull();
+      expect(fold.getAttribute('aria-expanded')).toBe('true');
+      expect(picker()?.querySelector('[data-action="d-ltx"]')?.textContent).toContain('LTX');
+      expect(picker()?.querySelector('[data-action="c-unknown"]')).not.toBeNull();
+    });
+
+    it('opens the fold from the start when nothing matches and nothing is unknown', async () => {
+      await mountWorkspace(loraContext([{ name: 'd-ltx', path: '/l/d', family: 'ltx', size_variant: null }]));
+      await settle();
+      openPicker();
+
+      expect(picker()?.querySelector('[data-action="other-models"]')?.getAttribute('aria-expanded')).toBe('true');
+      expect(picker()?.querySelector('[data-action="d-ltx"]')).not.toBeNull();
+    });
+
+    it('adds a LoRA chosen from the fold', async () => {
+      await mountWorkspace(loraContext([{ name: 'd-ltx', path: '/l/d', family: 'ltx', size_variant: null }]));
+      await settle();
+      openPicker();
+      flushSync(() => (picker()?.querySelector('[data-action="d-ltx"]') as HTMLElement).click());
+
+      expect(picker()).toBeNull();
+      expect(draft.state.loraString).toBe('d-ltx:1');
+    });
+  });
+
   it('renders model and quantize selects enabled for txt2img with zit model', async () => {
     draft.update('workflow', 'txt2img');
     draft.update('model', 'zit');

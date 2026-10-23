@@ -8,7 +8,7 @@
   import { historyStore } from '$lib/state/history.svelte';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { memoryFitNote } from '$lib/state/memoryFit';
-  import { formatLoraString, loraLabel, parseLoraString } from '$lib/state/loras';
+  import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, modelLoraFamily, parseLoraString, recentLoraNames } from '$lib/state/loras';
   import { extendGuard, extendSourceFacts } from '$lib/state/extend';
   import { extendInspection } from '$lib/state/extendInspection.svelte';
   import { defaultExtendFrames, durationSpec, EXTEND_FRAME_STEP, extendFramesFromSeconds, extendTotal, framesToSeconds, roundSeconds, secondsToFrames } from '$lib/state/videoDuration';
@@ -117,6 +117,19 @@
   const loraOptions = $derived(context.loras);
   const loraChips = $derived(parseLoraString(s.loraString, loraOptions));
   const addable = $derived(loraOptions.filter((lora) => !loraChips.some((chip) => chip.name === lora.name)));
+  // The LoRAs that fit the model lead; the rest fold under "Other models", open from the start only when nothing else is offered.
+  const loraModel = $derived(modelLoraFamily(context, s.model));
+  const loraGroups = $derived(groupLorasForModel(addable, loraModel, recentLoraNames(historyStore.assets, loraModel?.family ?? null, loraOptions)));
+  let otherToggled = $state<boolean | null>(null);
+  const otherOpen = $derived(otherToggled ?? loraGroups.main.length === 0);
+  $effect(() => {
+    void key;
+    otherToggled = null;
+  });
+
+  function addLora(name: string): void {
+    draft.update('loraString', formatLoraString([...loraChips, { name, weight: 1.0 }]));
+  }
 
   function setLoraWeight(name: string, weight: number | null): void {
     if (weight === null) return;
@@ -264,9 +277,22 @@
       {#if loraChips.length === 0}<p class="ui-help">No LoRA in use.</p>{/if}
       {#if addable.length}
         <div class="pop-list">
-          {#each addable as lora (lora.name)}
-            <button type="button" class="pop-item" onclick={() => draft.update('loraString', formatLoraString([...loraChips, { name: lora.name, weight: 1.0 }]))}><Icon name="plus" size={16} />{lora.name}</button>
+          {#each loraGroups.main as lora (lora.name)}
+            <button type="button" class="pop-item" onclick={() => addLora(lora.name)}><Icon name="plus" size={16} />{lora.name}</button>
           {/each}
+          {#if loraGroups.other.length > 0}
+            <button type="button" class="pop-item pop-fold" aria-expanded={otherOpen} data-action="other-models" onclick={() => { otherToggled = !otherOpen; }}>
+              <span class="pop-item-text">Other models ({loraGroups.other.length})</span>
+              <Icon name={otherOpen ? 'chevdown' : 'chevright'} size={14} />
+            </button>
+            {#if otherOpen}
+              {#each loraGroups.other as lora (lora.name)}
+                <button type="button" class="pop-item" onclick={() => addLora(lora.name)}>
+                  <Icon name="plus" size={16} /><span class="pop-item-text">{lora.name}</span>{#if lora.family}<small>{familyLabel(lora.family, lora.size_variant)}</small>{/if}
+                </button>
+              {/each}
+            {/if}
+          {/if}
         </div>
       {:else if loraOptions.length === 0}
         <p class="ui-help">No LoRA files in the LoRA folder.</p>
@@ -355,6 +381,7 @@
   .pop-thumb img, .pop-thumb video { width: 100%; height: 100%; object-fit: cover; }
   .pop-facts { font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
   .pop-item:disabled { opacity: 0.5; }
+  .pop-fold { color: var(--color-text-muted); }
   .pop-body :global(.pop-path) { height: 40px; font-family: var(--font-mono); font-size: 13px; }
   .ui-help-warning { display: flex; gap: 4px; align-items: flex-start; }
   .ui-help-warning :global(svg) { flex: none; margin-top: 2px; }

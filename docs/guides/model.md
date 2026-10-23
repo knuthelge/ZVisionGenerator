@@ -77,6 +77,8 @@ ziv-model lora --hf user/lora-repo --name my-lora
 ziv-model lora --hf user/lora-repo --file model.safetensors
 ```
 
+The Web UI Workspace lists the LoRAs made for the selected model first and folds all others, including ones whose model can't be detected, under **Other models**; it reads which model a LoRA was made for from the file's header the first time it sees the file.
+
 ### `lora` Flags
 
 | Flag | Default | Description |
