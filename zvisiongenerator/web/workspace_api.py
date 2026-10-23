@@ -43,6 +43,7 @@ from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.model_download_plan import KIND_MODEL, enhancer_download_needed, row_download_needed
 from zvisiongenerator.web.first_run import first_run_payload
+from zvisiongenerator.web.lora_index import lookup as lookup_lora_families
 from zvisiongenerator.web.defaults import resolve_image_ratio_size_defaults, resolve_video_ratio_size_defaults
 from zvisiongenerator.web.model_delete import cache_repos_linked_from, delete_scope, enhancer_delete_target, installed_models_linking_to, model_delete_target, seedvr2_delete_target, used_repo_ids
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry, VideoInventoryEntry, declared_image_family, stored_quant_of
@@ -123,7 +124,7 @@ def build_workspace_response(
         for name in web_config.image_model_options
     ]
     video_models = [{"id": name, "label": model_display_name(web_config.app_config, name), "type": "video", **status(video_entries.get(name), "video")} for name in web_config.video_model_options]
-    loras = [{"name": name, "path": str(Path(web_config.loras_dir) / f"{name}.safetensors")} for name in web_config.lora_options]
+    loras = _lora_rows(web_config)
     image_defaults = image_model_defaults_map.get(image_default_model) or _build_image_bootstrap_defaults(image_default_model or "", web_config)
     video_defaults = video_model_defaults_map.get(video_default_model) or _build_video_bootstrap_defaults(video_default_model or "", web_config)
 
@@ -596,10 +597,25 @@ def _video_bootstrap_upscale() -> dict[str, Any]:
     return dict(_VIDEO_BOOTSTRAP_UPSCALE)
 
 
+def _lora_rows(web_config: WebUiConfig) -> list[dict[str, Any]]:
+    """Return one ``{name, path, family, size_variant}`` row per LoRA."""
+    families = lookup_lora_families(web_config.loras_dir, web_config.lora_options)
+    return [
+        {
+            "name": name,
+            "path": str(Path(web_config.loras_dir) / f"{name}.safetensors"),
+            "family": families[name].family,
+            "size_variant": families[name].size_variant,
+        }
+        for name in web_config.lora_options
+    ]
+
+
 def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) -> dict[str, Any]:
     app_config = web_config.app_config
     preferred_ratio, preferred_size = resolve_image_ratio_size_defaults(web_config)
     family: str | None = None
+    size_variant: str | None = None
     try:
         resolved_model = resolve_model_path(model_name, aliases=app_config.get("model_aliases", {}), platform_key=sys.platform)
         declared = declared_image_family(app_config, model_name)
@@ -609,6 +625,7 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
             model_info = detect_image_model(resolved_model)
         defaults = resolve_defaults(model_info, app_config, {}, get_backend_name())
         family = _known_family(model_info.family)
+        size_variant = model_info.size
         enhance_max_words = resolve_enhance_ceiling(app_config, family=model_info.family, mode="image")
     except Exception:
         enhance_max_words = resolve_enhance_ceiling(app_config, family=None, mode="image")
@@ -652,6 +669,7 @@ def _build_image_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         "dimension_step": int(defaults.get("dimension_step", 16)),
         "enhance_max_words": enhance_max_words,
         "family": family,
+        "size_variant": size_variant,
     }
 
 

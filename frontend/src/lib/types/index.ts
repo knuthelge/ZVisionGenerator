@@ -253,6 +253,10 @@ export interface FirstRunContext {
 export interface LoraInfo {
   name: string;
   path: string;
+  /** The model family the LoRA was trained for; null or absent when unknown. */
+  family?: string | null;
+  /** The model size the LoRA fits within its family (for example `4b`); null or absent when it fits any. */
+  size_variant?: string | null;
 }
 
 export interface WorkspaceContext {
@@ -637,6 +641,8 @@ export interface ImageModelDefaults {
   enhance_max_words?: number;
   /** The detected model family; null when it could not be detected. */
   family?: string | null;
+  /** The model's size within its family (for example `4b`); null when it has none or is unknown. */
+  size_variant?: string | null;
 }
 
 export interface VideoModelDefaults {

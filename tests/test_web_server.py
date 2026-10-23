@@ -3809,3 +3809,52 @@ class TestJobLogRoutes:
 
     def test_the_server_runner_writes_to_the_server_job_log(self):
         assert web_server.web_runner._job_log is web_server.job_log
+
+
+class TestLoraFamilies:
+    """/api/workspace lists each LoRA with its detected family."""
+
+    @staticmethod
+    def _write_lora(path: Path) -> Path:
+        import struct
+
+        header = {"layer.lora_A.weight": {"dtype": "F16", "shape": [4, 8], "data_offsets": [0, 0]}, "__metadata__": {"ss_base_model_version": "klein_4b"}}
+        payload = json.dumps(header).encode("utf-8")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(struct.pack("<Q", len(payload)) + payload)
+        return path
+
+    @pytest.fixture
+    def workspace_client(self, tmp_path, monkeypatch):
+        web_config = _make_web_config()
+        web_config.loras_dir = str(tmp_path / "loras")
+        monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
+        monkeypatch.setattr(web_server, "_build_workspace_bootstrap_view", lambda _cfg: _make_workspace_bootstrap_view())
+        monkeypatch.setattr(web_server.web_runner, "list_jobs", lambda: {"active_job": None, "queued_jobs": []})
+        with TestClient(web_server.app) as client:
+            yield client
+
+    def test_workspace_rows_carry_the_detected_family(self, tmp_path, workspace_client):
+        path = self._write_lora(tmp_path / "loras" / "style.safetensors")
+
+        rows = workspace_client.get("/api/workspace", params={"include_history": "false"}).json()["loras"]
+
+        assert rows == [{"name": "style", "path": str(path), "family": "flux2_klein", "size_variant": "4b"}]
+
+    def test_a_lora_without_a_file_has_no_family(self, workspace_client):
+        row = workspace_client.get("/api/workspace", params={"include_history": "false"}).json()["loras"][0]
+
+        assert (row["family"], row["size_variant"]) == (None, None)
+
+    def test_image_defaults_carry_the_size_variant(self, monkeypatch):
+        web_config = _make_web_config()
+        monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: model)
+        monkeypatch.setattr(workspace_api_module, "detect_image_model", lambda _model: ImageModelInfo(family="flux2_klein", is_distilled=True, size="4b"))
+        monkeypatch.setattr(workspace_api_module, "resolve_defaults", lambda *_args: {"steps": 4, "guidance": 1.0})
+
+        klein = workspace_api_module._build_image_bootstrap_defaults("zit", web_config)
+        monkeypatch.setattr(workspace_api_module, "detect_image_model", lambda _model: (_ for _ in ()).throw(ValueError("no model")))
+        failed = workspace_api_module._build_image_bootstrap_defaults("zit", web_config)
+
+        assert (klein["size_variant"], klein["size"]) == ("4b", "m")
+        assert (failed["size_variant"], failed["size"]) == (None, "m")

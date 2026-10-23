@@ -159,6 +159,7 @@ zvisiongenerator/
 │   ├── image_model_detect.py      Image model type detection
 │   ├── interactive.py             Keyboard interrupt handling and review state
 │   ├── lora.py                    LoRA CLI argument parsing
+│   ├── lora_family.py             Pure detector of the model family a LoRA was trained for, from its safetensors header and metadata (`LORA_FAMILY_VERSION`)
 │   ├── model_files.py             Offline check for fully downloaded model weights
 │   ├── model_memory.py            Header-only memory estimates (MLX unified memory, with a per-stage LTX clip estimate by size and length; CUDA GPU and system memory)
 │   ├── page_cache.py              Drop model files from the page cache once written or read
@@ -194,6 +195,7 @@ zvisiongenerator/
 │   ├── job_contract.py            Web job lifecycle, terminal event, and control contract
 │   ├── job_log.py                 Persisted log of finished jobs: entry builder, filters, paging and the capped JSON-lines store
 │   ├── json_fields.py             Typed reads of optional fields in a JSON request body
+│   ├── lora_index.py              LoRA component of the app database: the cached family of each LoRA file, detected from its header when first seen
 │   ├── model_delete.py            Delete installed models, LoRAs, and HF downloads
 │   ├── model_download_plan.py     Plan a Models-page row's downloads: targets, whether it needs any, sizes and free space
 │   ├── model_inventory.py         Backend model inventory for Web UI contracts
@@ -339,6 +341,17 @@ A future feature, such as the job log, would define `JOBS = app_db.Component("jo
 - **Locking.** `GalleryIndex` holds one `threading.Lock` around a whole reconciliation, so concurrent cold requests read each file once. `forget()` does not take it, so a delete never waits behind a scan.
 - **Job completion.** A finished job does not write a row. The next listing picks the output up, and `gallery_asset_for_output_path` reads uncached and never touches the database.
 - **Hidden temp.** `embed_mp4_config` and `strip_audio` write their temporary copy as `.ziv-tmp-<name>` (`staging_path()` in `utils/ffmpeg.py`), which the gallery staging rules hide from listings, the walk and `/media`.
+
+### LoRA Index
+
+`web/lora_index.py` is the LoRA component of the app database. It caches which model family each LoRA file was trained for, so the Workspace can list the LoRAs made for the selected model first. `utils/lora_family.py` holds the pure detector (`detect_lora_family(header, metadata)`: metadata first, then a key and shape fingerprint); `utils/safetensors_stream.read_header_and_metadata` reads a header in one read and refuses a declared length above `min(100 MiB, file_size - 8)` before reading it, so no tensor data is read.
+
+- **Table and stat key.** The index is declared as `Component("loras", LORA_FAMILY_VERSION, ...)` on `app_db.app_db_path`. A row of `loras_entries_v{N}` is keyed by `(root, name)` and holds `family` and `size_variant` beside the stat key `(mtime_ns, ctime_ns, size)`; a row is used only when that key equals the file's current stat.
+- **Lookup.** `lookup(loras_dir, names)` does one `os.stat` per name and one database read. A file with no row or a stale key is detected inline from its header and stored, so each file is read once until it changes; a header that cannot be read or classified is stored as an unknown family. The same write deletes the folder's rows for LoRAs no longer listed, unless the list is empty: an empty list returns at once without opening the database, so an unreadable folder does not wipe the cache.
+- **Cache only.** A database error in a lookup warns once and every LoRA is reported with an unknown family, so the picker falls back to a flat list. Requests never fail because of the index.
+- **Versioning.** The table is `loras_entries_v{N}` with `N = LORA_FAMILY_VERSION`. Bump the constant when the detection rules or the columns change; the next lookup creates the new table, drops lower-versioned `loras_entries_v*` tables and re-detects.
+- **Payload.** `build_workspace_response` adds `family` and `size_variant` to each `loras` entry; the SPA groups them in `lib/state/loras.ts` (`groupLorasForModel`).
+- **Tests.** The autouse `_isolated_app_db` fixture in `tests/conftest.py` gives every test a throwaway database, so no test touches the real `ziv.sqlite3`.
 
 ### Model Downloads
 
