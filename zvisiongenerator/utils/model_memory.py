@@ -9,10 +9,8 @@ curves measured over the clip's size and length. LoRAs are not counted.
 from __future__ import annotations
 
 import functools
-import json
 import math
 import os
-import struct
 from dataclasses import dataclass
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -29,6 +27,7 @@ from zvisiongenerator.utils.model_files import (
     ltx_mlx_upsampler_file,
     model_weight_files,
 )
+from zvisiongenerator.utils.safetensors_stream import read_header
 from zvisiongenerator.utils.stored_quant import stored_quant_bits
 
 GIB = 1024**3
@@ -42,7 +41,6 @@ _FITS_RATIO = 1.1
 # MLX's own default memory limit is 1.5x Apple's recommended working set: up to there it keeps allocating and
 # lets macOS compress and swap, so models in that range run, at the cost of slowing the rest of the Mac.
 _TIGHT_LIMIT_RATIO = 1.5
-_MAX_HEADER_BYTES = 100 * 1024 * 1024
 # CUDA (diffusers backend). Unquantized and q8 weights stay in system memory and stream to the GPU block by
 # block; the GPU holds the blocks in flight plus activations (up to about 4 GB at 1024x1024).
 _CUDA_STREAMED_GPU_BYTES = 4 * GIB
@@ -182,20 +180,11 @@ def read_safetensors_totals(path: Path, skipped_prefixes: tuple[str, ...] = ()) 
 @functools.lru_cache(maxsize=512)
 def _read_totals_cached(path: str, size: int, mtime_ns: int, skipped_prefixes: tuple[str, ...]) -> WeightTotals:
     del size, mtime_ns  # Cache-key only: a rewritten file gets a fresh read.
-    with open(path, "rb") as handle:
-        prefix = handle.read(8)
-        if len(prefix) != 8:
-            raise ValueError(f"Not a safetensors file: {path}")
-        (header_len,) = struct.unpack("<Q", prefix)
-        if header_len > _MAX_HEADER_BYTES:
-            raise ValueError(f"Safetensors header too large in {path}")
-        header = json.loads(handle.read(header_len))
-    if not isinstance(header, dict):
-        raise ValueError(f"Malformed safetensors header in {path}")
+    _, header = read_header(Path(path))
     matrix = other = packed = fp8_matrix = 0
     prequantized = False
     for name, spec in header.items():
-        if name == "__metadata__" or name.startswith(skipped_prefixes):
+        if name.startswith(skipped_prefixes):
             continue
         dtype = str(spec["dtype"])
         if dtype not in _DTYPE_BYTES:

@@ -22,9 +22,21 @@ from zvisiongenerator.utils.page_cache import drop_cached_file
 if TYPE_CHECKING:
     import torch
 
-__all__ = ["ShardWriter", "SingleFileWriter", "TensorFile", "iter_tensors", "read_header", "read_metadata", "shard_files"]
+__all__ = [
+    "MAX_HEADER_BYTES",
+    "ShardWriter",
+    "SingleFileWriter",
+    "TensorFile",
+    "iter_tensors",
+    "read_header",
+    "read_header_and_metadata",
+    "read_metadata",
+    "shard_files",
+]
 
 _HEADER_LENGTH_BYTES = 8
+# Real checkpoint headers are a few MB; anything larger is refused before it is read into memory.
+MAX_HEADER_BYTES = 100 * 1024**2
 _DEFAULT_SHARD_BYTES = 2 * 1024**3
 # Bytes per element of each safetensors dtype the writer accepts.
 _DTYPE_BYTES = {"BF16": 2, "F16": 2, "F32": 4, "F64": 8, "U8": 1, "I8": 1, "I16": 2, "U32": 4, "I32": 4, "I64": 8}
@@ -38,8 +50,7 @@ def read_header(path: Path) -> tuple[int, dict[str, dict]]:
     Raises:
         ValueError: If *path* is not a safetensors file.
     """
-    data_start, header = _raw_header(path)
-    header.pop("__metadata__", None)
+    data_start, header, _ = _read_all(path)
     return data_start, header
 
 
@@ -49,8 +60,26 @@ def read_metadata(path: Path) -> dict[str, str]:
     Raises:
         ValueError: If *path* is not a safetensors file.
     """
-    metadata = _raw_header(path)[1].get("__metadata__")
-    return metadata if isinstance(metadata, dict) else {}
+    return _read_all(path)[2]
+
+
+def read_header_and_metadata(path: Path) -> tuple[dict[str, dict], dict[str, str]]:
+    """Return *path*'s header without the metadata entry, and its metadata (empty when missing or not a dict).
+
+    The file is opened once and its header read once.
+
+    Raises:
+        ValueError: If *path* is not a safetensors file, or its header is larger than the file or the size cap.
+    """
+    _, header, metadata = _read_all(path)
+    return header, metadata
+
+
+def _read_all(path: Path) -> tuple[int, dict[str, dict], dict[str, str]]:
+    """Return where *path*'s tensor data starts, its header without the metadata entry, and its metadata."""
+    data_start, header = _raw_header(path)
+    metadata = header.pop("__metadata__", None)
+    return data_start, header, metadata if isinstance(metadata, dict) else {}
 
 
 def _raw_header(path: Path) -> tuple[int, dict]:
@@ -60,6 +89,8 @@ def _raw_header(path: Path) -> tuple[int, dict]:
         if len(prefix) != _HEADER_LENGTH_BYTES:
             raise ValueError(f"{path} is not a safetensors file.")
         (length,) = struct.unpack("<Q", prefix)
+        if length > min(MAX_HEADER_BYTES, os.fstat(handle.fileno()).st_size - _HEADER_LENGTH_BYTES):
+            raise ValueError(f"{path} is not a safetensors file: its header length {length} is out of range.")
         try:
             header = json.loads(handle.read(length))
         except ValueError as exc:

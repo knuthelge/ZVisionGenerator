@@ -16,8 +16,6 @@ Rules the index follows:
 from __future__ import annotations
 
 import json
-import os
-import re
 import sqlite3
 import threading
 import time
@@ -36,10 +34,8 @@ GALLERY_COMPONENT_NAME = "gallery"
 GALLERY_INDEX_VERSION = 1
 
 _TABLE_PREFIX = "gallery_assets_v"
-_TABLE_NAME_PATTERN = re.compile(rf"{_TABLE_PREFIX}(\d+)")
 
 type Facts = dict[str, Any]
-type StatKey = tuple[int, int, int]
 type _Upsert = tuple[str, int, int, int, str]
 type _Delete = tuple[str, int, int, int]
 
@@ -78,7 +74,7 @@ class ScannedFile:
     size: int
 
     @property
-    def stat_key(self) -> StatKey:
+    def stat_key(self) -> app_db.StatKey:
         """Return ``(mtime_ns, ctime_ns, size)``, the key a stored row must match."""
         return (self.mtime_ns, self.ctime_ns, self.size)
 
@@ -114,23 +110,10 @@ def _migrate_gallery(conn: sqlite3.Connection, from_version: int, *, version: in
     )
     if from_version >= version:
         return
-    names = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name GLOB ?", (f"{_TABLE_PREFIX}[0-9]*",))]
-    for name in names:
-        match = _TABLE_NAME_PATTERN.fullmatch(name)
-        if match is not None and int(match.group(1)) < version:
-            conn.execute(f"DROP TABLE {_TABLE_PREFIX}{int(match.group(1))}")
+    app_db.drop_lower_versioned_tables(conn, _TABLE_PREFIX, version)
 
 
-def _restat(path: Path) -> StatKey | None:
-    """Return the current ``(mtime_ns, ctime_ns, size)`` of *path*, or ``None`` when it cannot be read."""
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return (st.st_mtime_ns, st.st_ctime_ns, st.st_size)
-
-
-def _should_persist(file: ScannedFile, result: FactsRead, *, after: StatKey | None, now: float, settle_seconds: float) -> bool:
+def _should_persist(file: ScannedFile, result: FactsRead, *, after: app_db.StatKey | None, now: float, settle_seconds: float) -> bool:
     """Return whether a read is safe to store: complete, settled, and the file unchanged since the walk."""
     if not result.complete or now - file.mtime < settle_seconds:
         return False
@@ -154,7 +137,7 @@ def _parse_facts(text: str) -> Facts | None:
     return facts if isinstance(facts, dict) else None
 
 
-def _load_rows(conn: sqlite3.Connection, table: str, root_key: str) -> dict[str, tuple[StatKey, str]]:
+def _load_rows(conn: sqlite3.Connection, table: str, root_key: str) -> dict[str, tuple[app_db.StatKey, str]]:
     """Return ``{rel_path: (stat_key, facts_text)}`` for every row stored under *root_key*."""
     cursor = conn.execute(f"SELECT rel_path, mtime_ns, ctime_ns, size, facts FROM {table} WHERE root = ?", (root_key,))
     return {rel_path: ((mtime_ns, ctime_ns, size), facts) for rel_path, mtime_ns, ctime_ns, size, facts in cursor}
@@ -307,7 +290,7 @@ class GalleryIndex:
             if conn is not None:
                 conn.close()
 
-    def _open_and_load(self, root_key: str) -> tuple[app_db.AppConnection | None, dict[str, tuple[StatKey, str]]]:
+    def _open_and_load(self, root_key: str) -> tuple[app_db.AppConnection | None, dict[str, tuple[app_db.StatKey, str]]]:
         """Open a connection and load the root's rows; return ``(None, {})`` when the database is unusable."""
         conn: app_db.AppConnection | None = None
         try:
@@ -331,7 +314,7 @@ class GalleryIndex:
     def _reconcile(
         self,
         conn: app_db.AppConnection,
-        rows: dict[str, tuple[StatKey, str]],
+        rows: dict[str, tuple[app_db.StatKey, str]],
         root_key: str,
         files: Sequence[ScannedFile],
         read: FactsReader,
@@ -349,7 +332,7 @@ class GalleryIndex:
             fresh = read(file)
             result[file.rel_path] = fresh.facts
             text = _serialize(fresh.facts)
-            if text is not None and _should_persist(file, fresh, after=_restat(file.path), now=self._clock(), settle_seconds=self._settle_seconds):
+            if text is not None and _should_persist(file, fresh, after=app_db.stat_key(file.path), now=self._clock(), settle_seconds=self._settle_seconds):
                 buffer.add_upsert((file.rel_path, file.mtime_ns, file.ctime_ns, file.size, text))
         if prune:
             buffer.add_deletes((rel_path, *key) for rel_path, (key, _) in rows.items() if rel_path not in result)

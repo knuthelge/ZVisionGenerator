@@ -229,7 +229,7 @@ def test_g8_restat_failure_is_not_persisted_and_does_not_raise(tmp_path: Path, r
 
 
 def test_g8_restat_returns_none_for_an_oserror(tmp_path: Path) -> None:
-    assert gallery_index._restat(tmp_path / "missing.png") is None
+    assert app_db.stat_key(tmp_path / "missing.png") is None
 
 
 def test_g9_batches_flushed_before_a_reader_error_stay_committed(tmp_path: Path, root: Path) -> None:

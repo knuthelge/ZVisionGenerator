@@ -55,7 +55,7 @@ class TestReadSafetensorsTotals:
         path = tmp_path / "list.safetensors"
         path.write_bytes(struct.pack("<Q", len(payload)) + payload)
 
-        with pytest.raises(ValueError, match="Malformed"):
+        with pytest.raises(ValueError, match="not a safetensors file"):
             read_safetensors_totals(path)
 
     def test_rejects_unknown_dtypes_instead_of_guessing(self, tmp_path):

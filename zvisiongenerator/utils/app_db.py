@@ -19,6 +19,7 @@ when that version is higher than its own.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import time
 import warnings
@@ -35,18 +36,22 @@ _CORRUPTION_CODES = frozenset({sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB})
 _SIDECAR_SUFFIXES = ("-wal", "-shm")
 
 type FileIdentity = tuple[int, int]
+type StatKey = tuple[int, int, int]
 
 __all__ = [
     "APP_DB_FILENAME",
     "BUSY_TIMEOUT_SECONDS",
     "AppConnection",
     "Component",
+    "StatKey",
     "app_db_path",
     "connect",
+    "drop_lower_versioned_tables",
     "is_corruption",
     "quarantine",
     "recover_if_corrupt",
     "rollback",
+    "stat_key",
 ]
 
 
@@ -250,3 +255,28 @@ def recover_if_corrupt(conn: AppConnection, exc: BaseException) -> bool:
         outcome = f"it was moved to {moved}" if moved is not None else "nothing was moved because the file had changed"
     warnings.warn(f"The app database {conn.db_path} is damaged ({exc}); {outcome}.", stacklevel=2)
     return True
+
+
+def stat_key(path: Path) -> StatKey | None:
+    """Return ``(mtime_ns, ctime_ns, size)`` of *path*, or ``None`` when it cannot be stat'ed."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_ctime_ns, st.st_size)
+
+
+def drop_lower_versioned_tables(conn: sqlite3.Connection, prefix: str, version: int) -> None:
+    """Drop every table named ``<prefix><n>`` with ``n`` below *version*, leaving equal and higher versions alone.
+
+    Args:
+        conn: Connection inside a transaction, typically a component's migration.
+        prefix: Table name prefix up to the version number, for example ``"gallery_assets_v"``.
+        version: Lowest version to keep.
+    """
+    pattern = re.compile(rf"{re.escape(prefix)}(\d+)")
+    names = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name GLOB ?", (f"{prefix}[0-9]*",))]
+    for name in names:
+        match = pattern.fullmatch(name)
+        if match is not None and int(match.group(1)) < version:
+            conn.execute(f"DROP TABLE {name}")

@@ -172,7 +172,7 @@ zvisiongenerator/
 │   ├── prompt_enhance_caption.py  Ideogram 4 JSON captions: the model writes labelled lines, code builds the caption (no model I/O)
 │   ├── prompts.py                 Prompt file loading
 │   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
-│   ├── safetensors_stream.py      Read and write safetensors one tensor at a time, keeping them out of the page cache
+│   ├── safetensors_stream.py      Read and write safetensors one tensor at a time, keeping them out of the page cache; reads a header and its metadata in one bounded read
 │   ├── seedvr2.py                 SeedVR2 weight layouts, settings, memory estimate and tier choice
 │   ├── stored_quant.py            Stored-quant naming, manifests and folder handling
 │   ├── upscale.py                 Upscale output sizes, size limits, SeedVR2 options and denoise defaults
