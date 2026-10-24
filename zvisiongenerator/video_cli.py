@@ -292,7 +292,7 @@ def _apply_ratio_size_defaults(parser: argparse.ArgumentParser, args: argparse.N
 def _unknown_video_model_guidance() -> str:
     """Return guidance for unknown video model selections."""
 
-    return "Use a supported LTX model: 'ltx-4' or 'ltx-8', a converted LTX model (ziv model model --model-type ltx-2.3), known LTX repo prefixes, supported/configured HuggingFace LTX repo IDs, or a local path containing 'ltx'."
+    return "Use a supported LTX model: 'ltx-4' or 'ltx-8' (or 'ltx25-4' on Windows/Linux), a converted LTX model (ziv model model --model-type ltx-2.3), known LTX repo prefixes, supported/configured HuggingFace LTX repo IDs, or a local path containing 'ltx'."
 
 
 def main(*, prog: str = "ziv-video") -> None:

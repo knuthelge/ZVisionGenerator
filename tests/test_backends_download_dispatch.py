@@ -32,6 +32,43 @@ def test_cuda_platforms_dispatch_to_the_cuda_planner(monkeypatch: pytest.MonkeyP
     assert enhancer == (DownloadTarget("owner/llm", "rev", cuda_plan.TRANSFORMERS_ALLOW_PATTERNS),)
 
 
+def test_cuda_dispatch_forwards_the_repo_ignore_and_keeps_the_revision(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(backends.sys, "platform", "linux")
+    ignore = ("LTX-2.5-*.safetensors", "samples/*")
+
+    plan = backends.video_download_plan("owner/ltx@abc", family="ltx", repo_ignore=ignore)
+
+    assert plan == (DownloadTarget("owner/ltx", "abc", ignore_patterns=ignore),)
+
+
+def test_cuda_dispatch_without_a_repo_ignore_is_the_plain_2_3_plan(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2.3 guard: no ``repo_ignore`` gives the plan the dispatch always gave."""
+    monkeypatch.setattr(backends.sys, "platform", "linux")
+
+    assert backends.video_download_plan("owner/ltx", family="ltx", transformer_source=("a/b", "t.safetensors"), upscale=False) == (
+        DownloadTarget("owner/ltx", None, None, cuda_plan.SEPARATE_TRANSFORMER_IGNORE),
+        DownloadTarget("a/b", None, ("t.safetensors",)),
+    )
+
+
+def test_the_planner_receives_the_repo_ignore(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[dict[str, Any]] = []
+    monkeypatch.setattr(backends.sys, "platform", "linux")
+    monkeypatch.setattr(cuda_plan, "video_download_plan", lambda model_ref, **kwargs: (seen.append(kwargs), ())[1])
+
+    backends.video_download_plan("owner/ltx", family="ltx", repo_ignore=("x/*",))
+    backends.video_download_plan("owner/ltx", family="ltx")
+
+    assert [kwargs["repo_ignore"] for kwargs in seen] == [("x/*",), ()]
+
+
+def test_macos_dispatch_accepts_the_repo_ignore(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(backends.sys, "platform", "darwin")
+    monkeypatch.setattr(mac_plan, "ltx_mlx_text_encoder_repo", lambda: "owner/gemma")
+
+    assert backends.video_download_plan("owner/ltx", family="ltx", repo_ignore=("x/*",)) == (DownloadTarget("owner/ltx"), DownloadTarget("owner/gemma", allow_patterns=mac_plan.MLX_LM_ALLOW_PATTERNS))
+
+
 def test_macos_dispatches_to_the_mac_planner(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(backends.sys, "platform", "darwin")
     monkeypatch.setattr(mac_plan, "ltx_mlx_text_encoder_repo", lambda: "owner/gemma")

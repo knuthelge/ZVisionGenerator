@@ -30,8 +30,8 @@ Z-Vision Generator gives you a unified CLI for both image and video generation, 
 | Platform | Image Generation | Video Generation |
 |----------|------------------|------------------|
 | macOS (Apple Silicon) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`) |
-| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 models via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`) |
-| Linux (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 models via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`) |
+| Windows (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 models via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`, `ltx25-4`) |
+| Linux (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 models via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`, `ltx25-4`) |
 
 ## Quick Links
 

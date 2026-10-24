@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 
 import pytest
 
 from zvisiongenerator.utils.config import (
+    EULER_ANCESTRAL,
+    LTX_SAMPLERS,
     _deep_merge,
     get_variant_key,
     load_config,
@@ -19,6 +22,7 @@ from zvisiongenerator.utils.config import (
     resolve_defaults,
     resolve_video_defaults,
     validate_video_size_choice,
+    video_preset,
 )
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.paths import resolve_model_path
@@ -294,7 +298,12 @@ def test_packaged_config_klein9b_uses_ungated_mirror(monkeypatch, tmp_path):
 
     assert aliases["klein9b"] == "unsloth/FLUX.2-klein-9B"
     for platform_key in ("darwin", "win32", "linux"):
-        resolved = {resolve_model_path(name, aliases=aliases, platform_key=platform_key) for name in aliases}
+        resolved = set()
+        for name in aliases:
+            try:
+                resolved.add(resolve_model_path(name, aliases=aliases, platform_key=platform_key))
+            except ValueError:  # an alias that is not available on this platform
+                continue
         assert "black-forest-labs/FLUX.2-klein-9B" not in resolved
 
 
@@ -1199,6 +1208,289 @@ class TestLtxLoadOptions:
         assert options["quantize"] is None
         assert options["upscale"] is True
         assert options["latent_upsampler"] == ("org/up", "up.safetensors")
+
+
+_LTX25_PIN = "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2"
+_LTX25_UPSAMPLER = (_LTX25_PIN, "latent_upsampler/diffusion_pytorch_model.safetensors")
+_LTX23_REPO = "diffusers/LTX-2.3-Distilled-Diffusers"
+_LTX23_TRANSFORMER = ("Lightricks/LTX-2.3", "ltx-2.3-22b-distilled-1.1.safetensors")
+_LTX23_UPSAMPLER = ("Lightricks/LTX-2.3", "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
+
+
+def _packaged_config(monkeypatch, tmp_path):
+    """Load the packaged config with no user override."""
+    from zvisiongenerator.utils import config as config_module
+
+    monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+    monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path / ".ziv")
+    return load_config()
+
+
+def _versioned(**version):
+    """Return a config whose ``ltx`` family has a ``v`` version (listing ``alias-v``) holding *version*."""
+    return {
+        "video_model_presets": {
+            "ltx": {
+                "default_steps": 8,
+                "diffusers": {"default_repo": "org/family", "quantize": {"ltx-4": 4}, "transformer": {"repo": "org/ltx", "filename": "ltx.safetensors"}},
+                "versions": {"v": {"aliases": ["alias-v"], **version}},
+            }
+        }
+    }
+
+
+class TestVideoPreset:
+    """R1: a version's block is merged over the family preset for the aliases it lists."""
+
+    def test_version_merges_nested_dicts_and_replaces_scalars_and_none(self):
+        config = _versioned(default_steps=4, diffusers={"default_repo": "org/v", "transformer": None, "quantize": {"alias-v": 8}})
+
+        preset = video_preset(config, "ltx", "alias-v")
+
+        assert preset["default_steps"] == 4
+        assert preset["diffusers"] == {"default_repo": "org/v", "transformer": None, "quantize": {"ltx-4": 4, "alias-v": 8}}
+        assert "versions" not in preset
+        assert "aliases" not in preset
+
+    @pytest.mark.parametrize("model_name", [None, "ltx-4", "unknown"])
+    def test_an_unlisted_name_or_none_returns_the_family_preset(self, model_name):
+        config = _versioned(default_steps=4)
+
+        preset = video_preset(config, "ltx", model_name)
+
+        assert preset == {"default_steps": 8, "diffusers": config["video_model_presets"]["ltx"]["diffusers"]}
+
+    def test_the_result_is_independent_of_the_config(self):
+        config = _versioned(diffusers={"quantize": {"alias-v": 8}})
+        before = deepcopy(config)
+
+        for name in ("alias-v", "ltx-4"):
+            preset = video_preset(config, "ltx", name)
+            preset["diffusers"]["quantize"]["mutated"] = 1
+            preset["diffusers"]["default_repo"] = "mutated"
+
+        assert config == before
+
+    def test_it_is_family_generic(self):
+        config = {"video_model_presets": {"other": {"default_steps": 6, "versions": {"b": {"aliases": ["o-b"], "default_steps": 9}}}}}
+
+        assert video_preset(config, "other", "o-b") == {"default_steps": 9}
+        assert video_preset(config, "other", "o-a") == {"default_steps": 6}
+        assert video_preset(config, "missing", "o-b") == {}
+
+    @pytest.mark.parametrize("config", [{}, {"video_model_presets": None}, {"video_model_presets": {"ltx": {"default_steps": 8}}}])
+    def test_no_versions_returns_the_family_preset(self, config):
+        assert video_preset(config, "ltx", "ltx-4") == (config.get("video_model_presets") or {}).get("ltx", {})
+
+    def test_an_alias_in_two_versions_raises_naming_both(self):
+        config = _versioned()
+        config["video_model_presets"]["ltx"]["versions"]["w"] = {"aliases": ["alias-v"]}
+
+        with pytest.raises(ValueError, match=r"alias-v.*'v'.*'w'"):
+            video_preset(config, "ltx", "alias-v")
+
+    @pytest.mark.parametrize("versions", ["x", ["v"], {"v": "x"}, {"v": None}])
+    def test_versions_that_are_not_a_mapping_of_mappings_raise(self, versions):
+        config = {"video_model_presets": {"ltx": {"versions": versions}}}
+
+        with pytest.raises(ValueError, match=r"video_model_presets\.ltx\.versions"):
+            video_preset(config, "ltx", "x")
+
+    @pytest.mark.parametrize("aliases", [None, "alias-v", ["alias-v", " "], ["alias-v", 3], [["alias-v"]]])
+    def test_aliases_that_are_not_a_list_of_strings_raise(self, aliases):
+        config = _versioned()
+        config["video_model_presets"]["ltx"]["versions"]["v"]["aliases"] = aliases
+
+        with pytest.raises(ValueError, match=r"versions\.v\.aliases"):
+            video_preset(config, "ltx", "alias-v")
+
+    def test_a_version_missing_its_aliases_raises(self):
+        config = {"video_model_presets": {"ltx": {"versions": {"v": {"default_steps": 4}}}}}
+
+        with pytest.raises(ValueError, match=r"versions\.v\.aliases"):
+            video_preset(config, "ltx", None)
+
+
+class TestPackagedLtx25Config:
+    """R2: the packaged ``ltx25-4`` entries, and the LTX-2.3 entries left as they were."""
+
+    @pytest.mark.parametrize("platform_key", ["win32", "linux"])
+    def test_ltx25_4_resolves_to_the_pinned_repo(self, monkeypatch, tmp_path, platform_key):
+        config = _packaged_config(monkeypatch, tmp_path)
+
+        assert resolve_model_path("ltx25-4", aliases=config["model_aliases"], platform_key=platform_key) == _LTX25_PIN
+
+    def test_ltx25_4_on_macos_raises_the_alias_message(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+
+        with pytest.raises(ValueError, match=r"LTX-2\.5 \(ltx25-4\) is not available on macOS yet\. Use ltx-4 or ltx-8\."):
+            resolve_model_path("ltx25-4", aliases=config["model_aliases"], platform_key="darwin")
+
+    def test_ltx25_4_is_labelled(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+
+        assert model_display_name(config, "ltx25-4") == "LTX-2.5 4-bit"
+
+    def test_the_pin_is_written_once_and_referenced(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+        version = config["video_model_presets"]["ltx"]["versions"]["ltx25"]
+
+        assert version["aliases"] == ["ltx25-4"]
+        assert version["diffusers"]["default_repo"] == _LTX25_PIN
+        assert version["diffusers"]["latent_upsampler"]["repo"] == _LTX25_PIN
+        assert config["model_aliases"]["ltx25-4"]["win32"] == config["model_aliases"]["ltx25-4"]["linux"] == _LTX25_PIN
+        assert config["video_model_presets"]["ltx"]["diffusers"]["default_repo"] == _LTX23_REPO
+
+    def test_the_version_block_carries_the_2_5_settings(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+        diffusers = config["video_model_presets"]["ltx"]["versions"]["ltx25"]["diffusers"]
+
+        assert "transformer" in diffusers and diffusers["transformer"] is None
+        assert diffusers["quantize"] == {"ltx25-4": 4}
+        assert diffusers["repo_ignore"] == ["LTX-2.5-*.safetensors", "samples/*"]
+        assert (diffusers["image_crf"], diffusers["sampler"]) == (18, EULER_ANCESTRAL)
+
+    def test_the_ltx_2_3_aliases_labels_and_family_block_are_unchanged(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+        assert config["model_aliases"]["ltx-8"] == {"darwin": "dgrauet/ltx-2.3-mlx-q8", "win32": _LTX23_REPO, "linux": _LTX23_REPO}
+        assert config["model_aliases"]["ltx-4"] == {"darwin": "dgrauet/ltx-2.3-mlx-q4", "win32": _LTX23_REPO, "linux": _LTX23_REPO}
+        assert config["model_labels"]["ltx-8"] == {"name": "LTX-2.3 8-bit"}
+        assert config["model_labels"]["ltx-4"] == {"name": "LTX-2.3 4-bit"}
+        family = config["video_model_presets"]["ltx"]
+        assert family["diffusers"] == {
+            "default_repo": _LTX23_REPO,
+            "transformer": {"repo": "Lightricks/LTX-2.3", "filename": "ltx-2.3-22b-distilled-1.1.safetensors"},
+            "quantize": {"ltx-4": 4, "ltx-8": 8},
+            "latent_upsampler": {"repo": "Lightricks/LTX-2.3", "filename": "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"},
+        }
+
+    def test_the_first_run_and_default_models_are_untouched(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+
+        assert config["ui"]["default_models"]["video"] == "ltx-8"
+        assert "ltx25-4" not in str(config["first_run"])
+
+
+class TestLtxVersionAwareAccessors:
+    """R3: the ``ltx_*`` accessors and load options read the version that lists the model."""
+
+    def test_ltx25_4_load_options_with_upscale(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+
+        assert ltx_load_options(config, "ltx25-4", upscale=True) == {
+            "quantize": 4,
+            "transformer_source": None,
+            "model_name": "ltx25-4",
+            "repo_ignore": ("LTX-2.5-*.safetensors", "samples/*"),
+            "sampler": "euler_ancestral",
+            "image_crf": 18,
+            "upscale": True,
+            "latent_upsampler": _LTX25_UPSAMPLER,
+        }
+
+    def test_ltx25_4_load_options_without_upscale_have_no_upsampler(self, monkeypatch, tmp_path):
+        options = ltx_load_options(_packaged_config(monkeypatch, tmp_path), "ltx25-4", upscale=False)
+
+        assert "upscale" not in options and "latent_upsampler" not in options
+        assert options["transformer_source"] is None
+
+    @pytest.mark.parametrize("name", ["ltx-4", "ltx-8"])
+    def test_ltx_2_3_load_options_are_unchanged(self, monkeypatch, tmp_path, name):
+        """2.3 guard: the options of ``ltx-4`` and ``ltx-8`` carry no version key."""
+        config = _packaged_config(monkeypatch, tmp_path)
+        bits = {"ltx-4": 4, "ltx-8": 8}[name]
+        plain = {"quantize": bits, "transformer_source": _LTX23_TRANSFORMER, "model_name": name}
+
+        assert ltx_load_options(config, name, upscale=False) == plain
+        assert ltx_load_options(config, name, upscale=True) == {**plain, "upscale": True, "latent_upsampler": _LTX23_UPSAMPLER}
+
+    def test_ltx_2_3_sources_do_not_see_the_version(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+
+        for name in (None, "ltx-4", "ltx-8", "unknown"):
+            assert ltx_transformer_source(config, name) == _LTX23_TRANSFORMER
+            assert ltx_latent_upsampler_source(config, name) == _LTX23_UPSAMPLER
+        assert ltx_transformer_source(config) == _LTX23_TRANSFORMER
+        assert ltx_latent_upsampler_source(config) == _LTX23_UPSAMPLER
+
+    def test_ltx25_4_sources_and_quantize_come_from_the_version(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+
+        assert ltx_transformer_source(config, "ltx25-4") is None
+        assert ltx_latent_upsampler_source(config, "ltx25-4") == _LTX25_UPSAMPLER
+        assert ltx_diffusers_quantize(config, "ltx25-4") == 4
+        assert [ltx_diffusers_quantize(config, name) for name in ("ltx-4", "ltx-8")] == [4, 8]
+
+    def test_a_family_transformer_override_does_not_reach_ltx25_4(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+        config["video_model_presets"]["ltx"]["diffusers"]["transformer"] = {"repo": "me/ltx", "filename": "mine.safetensors"}
+
+        assert ltx_transformer_source(config, "ltx-4") == ("me/ltx", "mine.safetensors")
+        assert ltx_transformer_source(config, "ltx25-4") is None
+        assert ltx_load_options(config, "ltx25-4", upscale=False)["transformer_source"] is None
+
+    def test_a_version_without_the_new_keys_adds_none(self):
+        config = _versioned(diffusers={"quantize": {"alias-v": 4}})
+
+        assert ltx_load_options(config, "alias-v", upscale=False) == {"quantize": 4, "transformer_source": ("org/ltx", "ltx.safetensors"), "model_name": "alias-v"}
+
+    def test_a_null_new_key_is_unset(self):
+        config = _versioned(diffusers={"sampler": None, "image_crf": None, "repo_ignore": None})
+
+        assert set(ltx_load_options(config, "alias-v", upscale=False)) == {"quantize", "transformer_source", "model_name"}
+
+    def test_image_crf_zero_and_the_bounds_are_valid(self):
+        for crf in (0, 51):
+            assert ltx_load_options(_versioned(diffusers={"image_crf": crf}), "alias-v", upscale=False)["image_crf"] == crf
+
+    def test_the_sampler_names_are_defined_once(self):
+        assert EULER_ANCESTRAL == "euler_ancestral"
+        assert LTX_SAMPLERS == frozenset({EULER_ANCESTRAL})
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("sampler", "ddim"),
+            ("sampler", 3),
+            ("image_crf", True),
+            ("image_crf", 52),
+            ("image_crf", -1),
+            ("image_crf", "18"),
+            ("image_crf", 18.0),
+            ("repo_ignore", "samples/*"),
+            ("repo_ignore", ["samples/*", " "]),
+            ("repo_ignore", ["samples/*", 3]),
+        ],
+    )
+    def test_an_invalid_version_value_raises_naming_the_key(self, key, value):
+        config = _versioned(diffusers={key: value})
+
+        with pytest.raises(ValueError, match=rf"video_model_presets\.ltx\.versions\.v\.diffusers\.{key}"):
+            ltx_load_options(config, "alias-v", upscale=False)
+
+    def test_a_malformed_version_source_names_the_version_key(self):
+        config = _versioned(diffusers={"latent_upsampler": {"repo": "org/up"}})
+
+        with pytest.raises(ValueError, match=r"video_model_presets\.ltx\.versions\.v\.diffusers\.latent_upsampler\.filename"):
+            ltx_latent_upsampler_source(config, "alias-v")
+        assert ltx_latent_upsampler_source(config, "ltx-4") is None
+
+    def test_a_malformed_family_source_still_names_the_family_key(self):
+        config = _versioned()
+        config["video_model_presets"]["ltx"]["diffusers"]["latent_upsampler"] = "x"
+
+        with pytest.raises(ValueError, match=r"^video_model_presets\.ltx\.diffusers\.latent_upsampler "):
+            ltx_latent_upsampler_source(config, "ltx-4")
+
+    def test_distilled_lora_and_family_helpers_stay_family_level(self, monkeypatch, tmp_path):
+        from zvisiongenerator.utils.config import ltx_companion_repos, ltx_diffusers_repo, ltx_distilled_lora_source
+
+        config = _packaged_config(monkeypatch, tmp_path)
+
+        assert ltx_distilled_lora_source(config) == ("Lightricks/LTX-2.3", "ltx-2.3-22b-distilled-lora-384-1.1.safetensors")
+        assert ltx_diffusers_repo(config) == _LTX23_REPO
+        assert ltx_companion_repos(config, _LTX25_PIN) == ()
+        assert ltx_companion_repos(config, _LTX23_REPO) == ("Lightricks/LTX-2.3",)
 
 
 class TestModelDisplayName:

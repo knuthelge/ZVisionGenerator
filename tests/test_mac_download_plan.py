@@ -38,6 +38,12 @@ def test_video_plan_ignores_diffusers_arguments(gemma: DownloadTarget) -> None:
     assert plan == (DownloadTarget("dgrauet/ltx-2.3-mlx-q4"), gemma)
 
 
+def test_video_plan_ignores_the_repo_ignore_patterns(gemma: DownloadTarget) -> None:
+    plan = video_download_plan("dgrauet/ltx-2.3-mlx-q4", family="ltx", repo_ignore=("LTX-2.5-*.safetensors", "samples/*"))
+
+    assert plan == (DownloadTarget("dgrauet/ltx-2.3-mlx-q4"), gemma)
+
+
 def test_video_plan_local_mlx_layout_needs_only_gemma(tmp_path: Path, gemma: DownloadTarget) -> None:
     (tmp_path / "connector.safetensors").write_bytes(b"")
 

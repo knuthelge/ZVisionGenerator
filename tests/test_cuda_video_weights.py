@@ -294,3 +294,94 @@ class TestTextEncoderWeights:
         embed = model.model.language_model.embed_tokens.weight
         assert embed.dtype == torch.bfloat16  # embeddings keep the compute dtype
         assert model.lm_head.weight is embed
+
+
+# The tensors of the LTX-2.5 text encoder that are not language-model weights, as the checkpoint names them (read from the
+# header of unsloth/LTX-2.5-FP8), and the Gemma4UnifiedForConditionalGeneration names transformers 5.19 gives them.
+_GEMMA4_CHECKPOINT_TO_MODEL = {
+    "model.embed_audio.embedding_projection.weight": "model.embed_audio.embedding_projection.weight",
+    "model.embed_vision.embedding_projection.weight": "model.embed_vision.multimodal_embedder.embedding_projection.weight",
+    "model.vision_embedder.patch_dense.bias": "model.embed_vision.patch_dense.bias",
+    "model.vision_embedder.patch_dense.weight": "model.embed_vision.patch_dense.weight",
+    "model.vision_embedder.patch_ln1.bias": "model.embed_vision.patch_ln1.bias",
+    "model.vision_embedder.patch_ln1.weight": "model.embed_vision.patch_ln1.weight",
+    "model.vision_embedder.patch_ln2.bias": "model.embed_vision.patch_ln2.bias",
+    "model.vision_embedder.patch_ln2.weight": "model.embed_vision.patch_ln2.weight",
+    "model.vision_embedder.pos_embedding": "model.embed_vision.pos_embedding",
+    "model.vision_embedder.pos_norm.bias": "model.embed_vision.pos_norm.bias",
+    "model.vision_embedder.pos_norm.weight": "model.embed_vision.pos_norm.weight",
+}
+_GEMMA4_CLASS = "Gemma4UnifiedForConditionalGeneration"
+
+
+def _write_model_index(repo, text_encoder_class):
+    repo.mkdir(parents=True, exist_ok=True)
+    index = {"_class_name": "LTX2Pipeline", "text_encoder": ["transformers", text_encoder_class]}
+    (repo / "model_index.json").write_text(json.dumps(index))
+
+
+def _written_names(repo, known):
+    return sorted(name for name, _ in weights._source_text_encoder_tensors(repo, known))
+
+
+class TestGemma4TextEncoderNames:
+    _renames = weights._TEXT_ENCODER_RENAMES[_GEMMA4_CLASS]
+
+    def test_the_vision_embedder_and_projection_are_renamed_and_known_names_stay(self):
+        known = {"model.embed_vision.c", "model.embed_vision.a", "model.language_model.layers.0.weight"}
+
+        assert weights._text_encoder_name("model.vision_embedder.a", known, self._renames) == "model.embed_vision.a"
+        assert weights._text_encoder_name("model.embed_vision.b", known, self._renames) == "model.embed_vision.multimodal_embedder.b"
+        assert weights._text_encoder_name("model.embed_vision.c", known, self._renames) == "model.embed_vision.c"
+        assert weights._text_encoder_name("model.language_model.layers.0.weight", known, self._renames) == "model.language_model.layers.0.weight"
+        assert weights._text_encoder_name("language_model.model.layers.0.weight", known, self._renames) == "model.language_model.layers.0.weight"
+
+    def test_renaming_is_a_single_pass(self):
+        # vision_embedder -> embed_vision must not be renamed again by the broad embed_vision rule.
+        assert weights._text_encoder_name("model.vision_embedder.a", set(), self._renames) == "model.embed_vision.a"
+
+    def test_the_gemma4_rules_come_ahead_of_the_gemma3_set(self):
+        assert self._renames == weights._GEMMA4_TEXT_ENCODER_PREFIXES + weights._LEGACY_TEXT_ENCODER_PREFIXES
+        assert len(weights._GEMMA4_TEXT_ENCODER_PREFIXES) == 2
+
+    def test_the_default_table_leaves_the_gemma4_names_alone(self):
+        assert weights._text_encoder_name("model.vision_embedder.a", set()) == "model.vision_embedder.a"
+        assert weights._text_encoder_name("model.embed_vision.b", set()) == "model.embed_vision.b"
+
+    def test_the_ltx25_checkpoint_covers_the_model_exactly(self):
+        language = {f"model.language_model.layers.{i}.mlp.up_proj.weight" for i in range(3)}
+        known = language | set(_GEMMA4_CHECKPOINT_TO_MODEL.values()) | {"lm_head.weight"}
+        checkpoint = language | set(_GEMMA4_CHECKPOINT_TO_MODEL)
+
+        mapped = {weights._text_encoder_name(name, known, self._renames) for name in checkpoint}
+
+        assert known - mapped == {"lm_head.weight"}  # the tied head is not stored
+        assert mapped - known == set()
+        assert {name: weights._text_encoder_name(name, known, self._renames) for name in _GEMMA4_CHECKPOINT_TO_MODEL} == _GEMMA4_CHECKPOINT_TO_MODEL
+
+
+class TestTextEncoderTableChoice:
+    def _repo_with(self, repo, names):
+        (repo / "text_encoder").mkdir(parents=True)
+        save_file({name: torch.zeros(1) for name in names}, str(repo / "text_encoder" / "model-00001-of-00001.safetensors"))
+        index = {"weight_map": dict.fromkeys(names, "model-00001-of-00001.safetensors")}
+        (repo / "text_encoder" / "model.safetensors.index.json").write_text(json.dumps(index))
+
+    def test_a_gemma4_index_selects_the_gemma4_table(self, tmp_path):
+        self._repo_with(tmp_path, ["model.vision_embedder.a", "model.embed_vision.b", "language_model.model.x"])
+        _write_model_index(tmp_path, _GEMMA4_CLASS)
+
+        names = _written_names(tmp_path, {"model.embed_vision.a", "model.language_model.x"})
+
+        assert names == ["model.embed_vision.a", "model.embed_vision.multimodal_embedder.b", "model.language_model.x"]
+
+    def test_a_gemma3_index_selects_the_legacy_table(self, tmp_path):
+        self._repo_with(tmp_path, ["model.vision_embedder.a", "model.embed_vision.b", "language_model.model.x"])
+        _write_model_index(tmp_path, "Gemma3ForConditionalGeneration")
+
+        assert _written_names(tmp_path, set()) == ["model.embed_vision.b", "model.language_model.x", "model.vision_embedder.a"]
+
+    def test_a_missing_index_selects_the_legacy_table(self, tmp_path):
+        self._repo_with(tmp_path, ["model.vision_embedder.a", "model.embed_vision.b", "language_model.model.x"])
+
+        assert _written_names(tmp_path, set()) == ["model.embed_vision.b", "model.language_model.x", "model.vision_embedder.a"]

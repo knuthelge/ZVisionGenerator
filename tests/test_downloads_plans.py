@@ -142,7 +142,16 @@ class TestVideoPlan:
             transformer_source=("owner/ltx-transformer", "t.safetensors"),
             latent_upsampler=("owner/ltx-up", "u.safetensors"),
             upscale=True,
+            repo_ignore=(),
         )
+
+    def test_the_versions_repo_ignore_is_passed_to_the_backend(self, monkeypatch):
+        backend = _patch_backend(monkeypatch, "video_download_plan", ())
+        config = {"video_model_presets": {"ltx": {"versions": {"v": {"aliases": ["ltx-v"], "diffusers": {"repo_ignore": ["a/*", "b"]}}}}}}
+
+        video_plan("owner/ltx", family="ltx", config=config, model_name="ltx-v", upscale=False)
+
+        assert backend.call_args.kwargs["repo_ignore"] == ("a/*", "b")
 
     def test_without_upscale_no_upsampler_is_requested(self, monkeypatch):
         backend = _patch_backend(monkeypatch, "video_download_plan", ())
@@ -306,6 +315,41 @@ class TestThroughTheRealDispatch:
 
         assert plan is not None
         assert [target.repo_id for target in plan] == ["owner/ltx", "owner/ltx-transformer"]
+
+    def test_the_ltx25_plan_is_the_pinned_repo_alone_with_and_without_upscale(self, monkeypatch, tmp_path):
+        from zvisiongenerator.utils import config as config_module
+        from zvisiongenerator.utils.config import load_config
+
+        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+        monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path / ".ziv")
+        monkeypatch.setattr("zvisiongenerator.backends.sys.platform", "linux")
+        config = load_config()
+        pin = config["model_aliases"]["ltx25-4"]["linux"]
+        expected = (DownloadTarget("unsloth/LTX-2.5-FP8", "7b40724fc39bbb01d9b4d72638c0d263531c88c2", None, ("LTX-2.5-*.safetensors", "samples/*")),)
+
+        assert pin == "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2"
+        assert video_plan(pin, family="ltx", config=config, model_name="ltx25-4", upscale=False) == expected
+        assert video_plan(pin, family="ltx", config=config, model_name="ltx25-4", upscale=True) == expected
+
+    @pytest.mark.parametrize(("name", "bits"), [("ltx-4", 4), ("ltx-8", 8)])
+    def test_the_ltx_2_3_plan_is_unchanged(self, monkeypatch, tmp_path, name, bits):
+        """2.3 guard: the packaged ``ltx-4`` and ``ltx-8`` plans are the repo, the transformer and the upsampler, with no revision."""
+        from zvisiongenerator.utils import config as config_module
+        from zvisiongenerator.utils.config import load_config
+
+        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+        monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path / ".ziv")
+        monkeypatch.setattr("zvisiongenerator.backends.sys.platform", "linux")
+        config = load_config()
+        repo = config["model_aliases"][name]["linux"]
+
+        plan = video_plan(repo, family="ltx", config=config, model_name=name, upscale=True)
+
+        assert plan == (
+            DownloadTarget(repo, None, None, ("transformer/*.safetensors", "transformer/*.safetensors.index.json"), None),
+            DownloadTarget("Lightricks/LTX-2.3", None, ("ltx-2.3-22b-distilled-1.1.safetensors",), None, None),
+            DownloadTarget("Lightricks/LTX-2.3", None, ("ltx-2.3-spatial-upscaler-x2-1.1.safetensors",), None, None),
+        )
 
     def test_the_enhancer_plan_uses_the_transformers_patterns(self):
         from zvisiongenerator.backends.cuda.download_plan import TRANSFORMERS_ALLOW_PATTERNS

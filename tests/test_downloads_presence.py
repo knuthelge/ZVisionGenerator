@@ -142,6 +142,54 @@ class TestWholeRepoTargets:
         assert target_present_offline(DownloadTarget("owner/repo", revision="unknown")) is False
 
 
+_LTX25_PIN = "7b40724fc39bbb01d9b4d72638c0d263531c88c2"
+_LTX25_SHARDS = {"audio_vae": 1, "connectors": 2, "text_encoder": 5, "transformer": 4, "vae": 1, "vocoder": 1}
+
+
+def _ltx25_snapshot(snapshot: Path) -> Path:
+    """Lay out a complete LTX-2.5 diffusers snapshot (the Gemma-4 text encoder, sharded weights, an unlisted upsampler)."""
+    classes = {
+        "audio_vae": ["diffusers", "AutoencoderKLLTX2Audio"],
+        "connectors": ["ltx2", "LTX2TextConnectors"],
+        "duration_head": ["ltx2", "LTX2DurationHead"],
+        "processor": ["transformers", "Gemma4Processor"],
+        "scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler"],
+        "text_encoder": ["transformers", "Gemma4UnifiedForConditionalGeneration"],
+        "tokenizer": ["transformers", "GemmaTokenizer"],
+        "transformer": ["diffusers", "LTX2VideoTransformer3DModel"],
+        "vae": ["diffusers", "AutoencoderKLLTX2Video"],
+        "vocoder": ["ltx2", "LTX2VocoderWithBWE"],
+    }
+    _touch(snapshot / "model_index.json", json.dumps({"_class_name": "LTX2Pipeline", **classes}))
+    for component, shards in _LTX25_SHARDS.items():
+        _touch(snapshot / component / "config.json")
+        names = ["diffusion_pytorch_model.safetensors"] if shards == 1 else [f"model-{n:05d}-of-{shards:05d}.safetensors" for n in range(1, shards + 1)]
+        for name in names:
+            _touch(snapshot / component / name)
+    _touch(snapshot / "latent_upsampler" / "diffusion_pytorch_model.safetensors")
+    return snapshot
+
+
+class TestPinnedLtx25Target:
+    _TARGET = DownloadTarget("unsloth/LTX-2.5-FP8", _LTX25_PIN, None, ("LTX-2.5-*.safetensors", "samples/*"))
+
+    def test_the_complete_snapshot_at_the_pin_is_present(self, cache):
+        _ltx25_snapshot(_snapshot(cache, "unsloth/LTX-2.5-FP8", _LTX25_PIN))
+
+        assert target_present_offline(self._TARGET) is True
+
+    def test_a_missing_transformer_shard_is_absent(self, cache):
+        snapshot = _ltx25_snapshot(_snapshot(cache, "unsloth/LTX-2.5-FP8", _LTX25_PIN))
+        (snapshot / "transformer" / "model-00004-of-00004.safetensors").unlink()
+
+        assert target_present_offline(self._TARGET) is False
+
+    def test_a_complete_snapshot_at_another_commit_does_not_count(self, cache):
+        _ltx25_snapshot(_snapshot(cache, "unsloth/LTX-2.5-FP8", "f" * 40))
+
+        assert target_present_offline(self._TARGET) is False
+
+
 class TestGlobCacheTargets:
     def test_instant_components_present_without_transformer_weights(self, cache):
         _components_snapshot(_snapshot(cache))

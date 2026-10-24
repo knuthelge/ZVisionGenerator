@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import functools
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -251,13 +251,25 @@ def supports_video_upscale_review() -> bool:
     return sys.platform in _VIDEO_BACKENDS_MAP
 
 
-def estimate_ltx_system_memory(config: dict[str, Any], resolved_model: str, quantize: int, *, find_local_dir: Callable[[str], Path | None]) -> "LtxCudaMemoryEstimate | None":
-    """Return the CUDA video backend's system-memory estimate of LTX from files on disk, or ``None`` elsewhere or when files are missing."""
+def estimate_ltx_system_memory(
+    config: dict[str, Any],
+    resolved_model: str,
+    quantize: int,
+    *,
+    find_local_dir: Callable[[str], Path | None],
+    model_name: str | None = None,
+) -> "LtxCudaMemoryEstimate | None":
+    """Return the CUDA video backend's system-memory estimate of LTX from files on disk, or ``None`` elsewhere or when files are missing.
+
+    *model_name* selects the model version whose sources are read; it is forwarded only when given.
+    """
     if sys.platform not in ("win32", "linux"):
         return None
     from zvisiongenerator.backends.cuda.video.memory_estimate import cached_ltx_system_estimate
 
-    return cached_ltx_system_estimate(config, resolved_model, quantize, find_local_dir=find_local_dir)
+    if model_name is None:
+        return cached_ltx_system_estimate(config, resolved_model, quantize, find_local_dir=find_local_dir)
+    return cached_ltx_system_estimate(config, resolved_model, quantize, find_local_dir=find_local_dir, model_name=model_name)
 
 
 def convert_ltx_checkpoint(
@@ -326,11 +338,13 @@ def video_download_plan(
     transformer_source: tuple[str, str] | None = None,
     latent_upsampler: tuple[str, str] | None = None,
     upscale: bool = False,
+    repo_ignore: Sequence[str] = (),
 ) -> "tuple[DownloadTarget, ...]":
     """Return the downloads this platform's video backend needs for *model_ref* (empty for a local folder).
 
-    macOS lists the model repo and the Gemma text encoder; Windows and Linux list the diffusers repo, the
-    single-file *transformer_source* and, with *upscale*, the *latent_upsampler* (each a ``(repo_id, filename)`` pair).
+    macOS lists the model repo and the Gemma text encoder; Windows and Linux list the diffusers repo (without the
+    *repo_ignore* patterns), the single-file *transformer_source* and, with *upscale*, the *latent_upsampler*
+    (each a ``(repo_id[@revision], filename)`` pair).
 
     Raises:
         RuntimeError: On an unsupported platform.
@@ -341,7 +355,7 @@ def video_download_plan(
         from zvisiongenerator.backends.cuda.download_plan import video_download_plan as plan
     else:
         raise RuntimeError(f"Unsupported video platform: {sys.platform}. Video generation supports macOS, Windows, and Linux.")
-    return plan(model_ref, family=family, transformer_source=transformer_source, latent_upsampler=latent_upsampler, upscale=upscale)
+    return plan(model_ref, family=family, transformer_source=transformer_source, latent_upsampler=latent_upsampler, upscale=upscale, repo_ignore=repo_ignore)
 
 
 def enhancer_download_plan(repo: str, revision: str | None) -> "tuple[DownloadTarget, ...]":

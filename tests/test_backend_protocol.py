@@ -25,6 +25,20 @@ class TestBackendRegistryLookup:
         monkeypatch.setattr(backends.sys, "platform", "darwin")
         assert backends.estimate_ltx_system_memory({}, "owner/ltx", 4, find_local_dir=lambda reference: None) is None
 
+    def test_ltx_system_memory_forwards_the_model_name_only_when_given(self, monkeypatch):
+        import zvisiongenerator.backends as backends
+        import zvisiongenerator.backends.cuda.video.memory_estimate as memory_estimate
+
+        calls: list[dict] = []
+        monkeypatch.setattr(memory_estimate, "cached_ltx_system_estimate", lambda config, model, quantize, **kwargs: calls.append(kwargs))
+        monkeypatch.setattr(backends.sys, "platform", "linux")
+
+        backends.estimate_ltx_system_memory({}, "owner/ltx", 4, find_local_dir=lambda reference: None)
+        backends.estimate_ltx_system_memory({}, "owner/ltx", 4, find_local_dir=lambda reference: None, model_name="ltx25-4")
+
+        assert [sorted(kwargs) for kwargs in calls] == [["find_local_dir"], ["find_local_dir", "model_name"]]
+        assert calls[1]["model_name"] == "ltx25-4"
+
     def test_get_backend_name_uses_dict_lookup_for_darwin(self, monkeypatch):
         import zvisiongenerator.backends as backends
 

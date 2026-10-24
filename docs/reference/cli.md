@@ -112,6 +112,7 @@ The `ideo` alias selects Ideogram 4 (`ideogram-ai/ideogram-4-fp8`), an image mod
 Platform-aware aliases:
 
 - `ltx-4` and `ltx-8` (4-bit and 8-bit LTX-2.3) on every platform. On Windows and Linux they need about 20 GB and 27 GB of system memory.
+- `ltx25-4` (4-bit LTX-2.5) on Windows and Linux, which needs about 21 GB of system memory. On macOS it stops with a message pointing to `ltx-4` and `ltx-8`. Extend uses the deterministic sampler (see the [Video Guide](../guides/video.md#ltx-25)).
 
 | Argument | Default | Description |
 |---|---|---|

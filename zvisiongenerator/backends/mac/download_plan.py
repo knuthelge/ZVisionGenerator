@@ -6,6 +6,7 @@ Nothing heavy is imported at module level: mflux's weight definitions are import
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from zvisiongenerator.downloads.target import DownloadTarget
@@ -75,6 +76,7 @@ def video_download_plan(
     transformer_source: tuple[str, str] | None = None,
     latent_upsampler: tuple[str, str] | None = None,
     upscale: bool = False,
+    repo_ignore: Sequence[str] = (),
 ) -> tuple[DownloadTarget, ...]:
     """Return the downloads of the LTX MLX model *model_ref*: its whole repo, then the Gemma text encoder repo.
 
@@ -82,7 +84,7 @@ def video_download_plan(
     encode, so the plan brings Gemma forward. A local folder in the LTX MLX layout needs only Gemma; any other
     local folder needs nothing. The diffusers-only arguments are ignored.
     """
-    del family, transformer_source, latent_upsampler, upscale
+    del family, transformer_source, latent_upsampler, upscale, repo_ignore
     gemma = DownloadTarget(ltx_mlx_text_encoder_repo(), allow_patterns=MLX_LM_ALLOW_PATTERNS)
     local = Path(model_ref).expanduser()
     if local.is_dir():

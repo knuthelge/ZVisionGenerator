@@ -7,6 +7,7 @@ import json
 import os
 import re
 from pathlib import Path
+from typing import Final
 
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 
@@ -20,9 +21,14 @@ _LTX_MLX_DISTILLED_UNVERSIONED = "transformer-distilled.safetensors"
 _LTX_MLX_UPSAMPLER_STEMS = ("spatial_upscaler_x2_v1_0", "ltx-2.3-spatial-upscaler-x2", "spatial_upscaler_x2_v1_1")
 _WEIGHTLESS_CLASS_HINTS = ("Tokenizer", "Scheduler", "Processor", "FeatureExtractor")
 _TRANSFORMER_COMPONENT = "transformer"
-# LTX-2 diffusers repos are downloaded without their transformer weights on Windows/Linux, which load the transformer
-# from a single-file checkpoint (video_model_presets.ltx.diffusers.transformer).
-_SEPARATE_TRANSFORMER_PIPELINES = ("LTX2Pipeline", "LTX2ImageToVideoPipeline")
+# The diffusers pipeline classes of LTX-2 repos. Those with a Gemma 3 text encoder (LTX-2.3) are downloaded without their
+# transformer weights on Windows/Linux, which load the transformer from a single-file checkpoint
+# (video_model_presets.ltx.diffusers.transformer).
+_LTX2_PIPELINES = ("LTX2Pipeline", "LTX2ImageToVideoPipeline")
+# Text-encoder class prefix of the LTX-2.5 layout, whose repos carry their own transformer weights.
+_GEMMA4_PREFIX = "Gemma4"
+# Components of an LTX-2 ``model_index.json`` that the app never loads, so they need no weights on disk.
+LTX2_UNLOADED_COMPONENTS: Final[frozenset[str]] = frozenset({"processor", "prompt_enhancer", "duration_head", "diffusion_decoder"})
 _SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d+)-of-(?P<total>\d+)\.safetensors$")
 # Diffusers precision variants (e.g. ``diffusion_pytorch_model.fp16.safetensors``, optionally sharded).
 _VARIANT_RE = re.compile(r"\.(?:fp16|bf16|fp32|fp8)(?:-\d+-of-\d+)?\.safetensors$")
@@ -59,7 +65,7 @@ def is_ltx_model_dir(model_dir: Path) -> bool:
     if is_ltx_mlx_layout(model_dir):
         return True
     index = _read_model_index(model_dir)
-    return index is not None and index.get("_class_name") in _SEPARATE_TRANSFORMER_PIPELINES
+    return index is not None and index.get("_class_name") in _LTX2_PIPELINES
 
 
 def ltx_mlx_transformer_file(model_dir: Path) -> Path | None:
@@ -145,10 +151,11 @@ def weighted_components(model_dir: Path) -> tuple[str, ...] | None:
     index = _read_model_index(model_dir)
     if index is None:
         return None
+    skipped = LTX2_UNLOADED_COMPONENTS if index.get("_class_name") in _LTX2_PIPELINES else frozenset()
     return tuple(
         name
         for name, spec in index.items()
-        if not name.startswith("_") and isinstance(spec, list) and len(spec) == 2 and all(spec) and not any(hint in str(spec[1]) for hint in _WEIGHTLESS_CLASS_HINTS)
+        if not name.startswith("_") and name not in skipped and isinstance(spec, list) and len(spec) == 2 and all(spec) and not any(hint in str(spec[1]) for hint in _WEIGHTLESS_CLASS_HINTS)
     )
 
 
@@ -198,10 +205,29 @@ def has_complete_weights(model_dir: Path, only: set[str] | None = None) -> bool:
     return all(name in present for name in required) and _shards_complete(files)
 
 
-def _has_separate_transformer(model_dir: Path) -> bool:
-    """Return whether *model_dir* is a pipeline whose transformer may load from a separate checkpoint instead of its folder."""
+def ltx2_text_encoder_class(model_dir: Path) -> str | None:
+    """Return the ``text_encoder`` class name of an LTX-2 diffusers repo, read from its ``model_index.json``.
+
+    Returns:
+        The class name (e.g. ``Gemma3ForConditionalGeneration``), or ``None`` when the index is missing, unreadable or
+        not an LTX-2 pipeline, or when its ``text_encoder`` entry is malformed.
+    """
     index = _read_model_index(model_dir)
-    return index is not None and index.get("_class_name") in _SEPARATE_TRANSFORMER_PIPELINES
+    if index is None or index.get("_class_name") not in _LTX2_PIPELINES:
+        return None
+    spec = index.get("text_encoder")
+    if not isinstance(spec, list) or len(spec) != 2 or not isinstance(spec[1], str) or not spec[1]:
+        return None
+    return spec[1]
+
+
+def _has_separate_transformer(model_dir: Path) -> bool:
+    """Return whether *model_dir* is an LTX-2 pipeline whose transformer may load from a separate checkpoint instead of its folder.
+
+    LTX-2.5 repos (Gemma 4 text encoder) hold their own transformer weights, so they never qualify.
+    """
+    text_encoder = ltx2_text_encoder_class(model_dir)
+    return text_encoder is not None and not text_encoder.startswith(_GEMMA4_PREFIX)
 
 
 def directory_bytes(path: Path) -> int:

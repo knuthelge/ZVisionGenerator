@@ -80,6 +80,7 @@ def video_plan(model_ref: str, *, family: str, config: dict[str, Any], model_nam
             transformer_source=options["transformer_source"],
             latent_upsampler=options.get("latent_upsampler"),
             upscale=upscale,
+            repo_ignore=options.get("repo_ignore", ()),
         )
     )
 

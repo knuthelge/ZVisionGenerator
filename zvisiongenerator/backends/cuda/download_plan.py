@@ -6,13 +6,13 @@ Nothing heavy is imported at module level: no torch, diffusers or transformers.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.downloads.hub_access import describe_refusal
 from zvisiongenerator.downloads.target import DownloadTarget
-from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
+from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, split_huggingface_revision
 
 __all__ = [
     "DIFFUSERS_IGNORE",
@@ -22,6 +22,7 @@ __all__ = [
     "enhancer_download_plan",
     "image_download_plan",
     "video_download_plan",
+    "video_repo_ignore",
 ]
 
 # An LTX diffusers repo is downloaded without its own transformer weights when a single-file transformer replaces them.
@@ -107,6 +108,17 @@ def image_download_plan(
     return (DownloadTarget(reference.repo_id, reference.revision, allow, DIFFUSERS_IGNORE),)
 
 
+def video_repo_ignore(*, separate_transformer: bool, extra: Sequence[str] = ()) -> tuple[str, ...] | None:
+    """Return the patterns an LTX diffusers repo is downloaded without, or ``None`` when it is downloaded whole.
+
+    Args:
+        separate_transformer: Whether a single-file transformer replaces the repo's own transformer weights.
+        extra: Further patterns to skip, such as the root single-file checkpoints of a model version.
+    """
+    patterns = (*(SEPARATE_TRANSFORMER_IGNORE if separate_transformer else ()), *extra)
+    return patterns or None
+
+
 def video_download_plan(
     model_ref: str,
     *,
@@ -114,18 +126,22 @@ def video_download_plan(
     transformer_source: tuple[str, str] | None = None,
     latent_upsampler: tuple[str, str] | None = None,
     upscale: bool = False,
+    repo_ignore: Sequence[str] = (),
 ) -> tuple[DownloadTarget, ...]:
     """Return the downloads of the LTX diffusers model *model_ref*: the repo, the single-file transformer and the latent upsampler.
 
-    The repo skips its own transformer weights when *transformer_source* replaces them (the same patterns the
-    backend downloads with). The latent upsampler is part of the plan only for the two-stage *upscale*. A local folder needs nothing.
+    The repo keeps the revision of *model_ref* and skips its own transformer weights when *transformer_source*
+    replaces them, plus the *repo_ignore* patterns (the same patterns the backend downloads with). The latent
+    upsampler is part of the plan only for the two-stage *upscale*, and not when it lives in the model's own repo
+    at the same revision. A local folder needs nothing.
 
     Args:
-        model_ref: A local path or a Hugging Face repo id.
+        model_ref: A local path or a Hugging Face ``owner/repo[@revision]`` reference.
         family: The model family (``ltx``).
-        transformer_source: ``(repo_id, filename)`` of the single-file transformer, or ``None``.
-        latent_upsampler: ``(repo_id, filename)`` of the latent upsampler weights, or ``None``.
+        transformer_source: ``(repo_id[@revision], filename)`` of the single-file transformer, or ``None``.
+        latent_upsampler: ``(repo_id[@revision], filename)`` of the latent upsampler weights, or ``None``.
         upscale: Whether the run uses the two-stage upscale.
+        repo_ignore: Extra patterns the repo download skips.
     """
     del family
     if Path(model_ref).expanduser().is_dir():
@@ -133,11 +149,15 @@ def video_download_plan(
     reference = parse_huggingface_repo_reference(model_ref)
     if reference is None:
         return ()
-    targets = [DownloadTarget(reference.repo_id, ignore_patterns=SEPARATE_TRANSFORMER_IGNORE if transformer_source else None)]
+    repo_target = DownloadTarget(reference.repo_id, reference.revision, ignore_patterns=video_repo_ignore(separate_transformer=bool(transformer_source), extra=repo_ignore))
+    targets = [repo_target]
     if transformer_source:
-        targets.append(DownloadTarget(transformer_source[0], allow_patterns=(transformer_source[1],)))
+        repo_id, revision = split_huggingface_revision(transformer_source[0])
+        targets.append(DownloadTarget(repo_id, revision, allow_patterns=(transformer_source[1],)))
     if upscale and latent_upsampler:
-        targets.append(DownloadTarget(latent_upsampler[0], allow_patterns=(latent_upsampler[1],)))
+        repo_id, revision = split_huggingface_revision(latent_upsampler[0])
+        if (repo_id, revision) != (repo_target.repo_id, repo_target.revision):
+            targets.append(DownloadTarget(repo_id, revision, allow_patterns=(latent_upsampler[1],)))
     return tuple(targets)
 
 

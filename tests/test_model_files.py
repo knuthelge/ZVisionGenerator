@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from zvisiongenerator.utils import model_files
-from zvisiongenerator.utils.model_files import cached_snapshot_dirs, find_local_model_dir, has_complete_weights
+from zvisiongenerator.utils.model_files import LTX2_UNLOADED_COMPONENTS, cached_snapshot_dirs, find_local_model_dir, has_complete_weights, ltx2_text_encoder_class
 
 
 def _touch(path: Path, content: str = "x") -> Path:
@@ -28,6 +28,45 @@ def _write_model_index(model_dir: Path, class_name: str = "ZImagePipeline") -> N
         "safety_checker": [None, None],
     }
     _touch(model_dir / "model_index.json", json.dumps(index))
+
+
+_PIN = "7b40724fc39bbb01d9b4d72638c0d263531c88c2"
+_LTX25_WEIGHTED = {"audio_vae": 1, "connectors": 2, "text_encoder": 5, "transformer": 4, "vae": 1, "vocoder": 1}
+
+
+def _write_ltx25_index(model_dir: Path, class_name: str = "LTX2Pipeline", text_encoder: str = "Gemma4UnifiedForConditionalGeneration") -> None:
+    """Write a ``model_index.json`` shaped like the LTX-2.5 diffusers repo's."""
+    index = {
+        "_class_name": class_name,
+        "audio_vae": ["diffusers", "AutoencoderKLLTX2Audio"],
+        "connectors": ["ltx2", "LTX2TextConnectors"],
+        "diffusion_decoder": ["diffusers", "LTX2VideoDiffusionDecoderModel"],
+        "duration_head": ["ltx2", "LTX2DurationHead"],
+        "processor": ["transformers", "Gemma4Processor"],
+        "prompt_enhancer": ["transformers", "Gemma4ForConditionalGeneration"],
+        "scheduler": ["diffusers", "FlowMatchEulerDiscreteScheduler"],
+        "text_encoder": ["transformers", text_encoder],
+        "tokenizer": ["transformers", "GemmaTokenizer"],
+        "transformer": ["diffusers", "LTX2VideoTransformer3DModel"],
+        "vae": ["diffusers", "AutoencoderKLLTX2Video"],
+        "vocoder": ["ltx2", "LTX2VocoderWithBWE"],
+    }
+    _touch(model_dir / "model_index.json", json.dumps(index))
+
+
+def _write_ltx25_snapshot(model_dir: Path) -> None:
+    """Lay out a complete LTX-2.5 snapshot: sharded weights, config-only extras and an unlisted ``latent_upsampler``."""
+    _write_ltx25_index(model_dir)
+    for component, shards in _LTX25_WEIGHTED.items():
+        _touch(model_dir / component / "config.json")
+        if shards == 1:
+            _touch(model_dir / component / "diffusion_pytorch_model.safetensors")
+            continue
+        for shard in range(1, shards + 1):
+            _touch(model_dir / component / f"model-{shard:05d}-of-{shards:05d}.safetensors")
+    _touch(model_dir / "latent_upsampler" / "diffusion_pytorch_model.safetensors")
+    for component in ("duration_head", "diffusion_decoder", "scheduler", "tokenizer"):
+        _touch(model_dir / component / "config.json")
 
 
 class TestHasCompleteWeights:
@@ -52,6 +91,59 @@ class TestHasCompleteWeights:
         _touch(tmp_path / "vae" / "model.safetensors")
 
         assert has_complete_weights(tmp_path) is True
+
+    def test_an_ltx_2_3_repo_still_needs_its_other_weighted_components(self, tmp_path):
+        _write_model_index(tmp_path, "LTX2Pipeline")
+        _touch(tmp_path / "transformer" / "config.json")
+        _touch(tmp_path / "vae" / "model.safetensors")
+
+        assert has_complete_weights(tmp_path) is False
+
+    def test_the_complete_ltx_2_5_snapshot_is_complete(self, tmp_path):
+        _write_ltx25_snapshot(tmp_path)
+
+        assert has_complete_weights(tmp_path) is True
+
+    def test_an_ltx_2_5_snapshot_missing_a_transformer_shard_is_incomplete(self, tmp_path):
+        _write_ltx25_snapshot(tmp_path)
+        (tmp_path / "transformer" / "model-00004-of-00004.safetensors").unlink()
+
+        assert has_complete_weights(tmp_path) is False
+
+    def test_an_ltx_2_5_snapshot_with_only_the_transformer_config_is_incomplete(self, tmp_path):
+        _write_ltx25_snapshot(tmp_path)
+        for shard in (tmp_path / "transformer").glob("*.safetensors"):
+            shard.unlink()
+
+        assert has_complete_weights(tmp_path) is False
+
+    def test_an_ltx_2_5_snapshot_missing_another_weighted_component_is_incomplete(self, tmp_path):
+        _write_ltx25_snapshot(tmp_path)
+        (tmp_path / "vocoder" / "diffusion_pytorch_model.safetensors").unlink()
+
+        assert has_complete_weights(tmp_path) is False
+
+    def test_an_ltx_2_5_index_alone_is_not_downloaded(self, tmp_path):
+        _write_ltx25_index(tmp_path)
+
+        assert has_complete_weights(tmp_path) is False
+
+    def test_the_components_an_ltx_2_index_lists_but_the_app_never_loads_need_no_weights(self, tmp_path):
+        _write_ltx25_snapshot(tmp_path)
+
+        components = model_files.weighted_components(tmp_path)
+
+        assert components is not None
+        assert not set(components) & LTX2_UNLOADED_COMPONENTS
+        assert set(components) == set(_LTX25_WEIGHTED)
+
+    def test_a_non_ltx_pipeline_keeps_components_named_like_the_unloaded_ones(self, tmp_path):
+        _write_ltx25_index(tmp_path, class_name="OtherPipeline")
+
+        components = model_files.weighted_components(tmp_path)
+
+        assert components is not None
+        assert {"prompt_enhancer", "duration_head", "diffusion_decoder"} <= set(components)
 
     def test_missing_shard_is_incomplete_even_with_a_stale_index(self, tmp_path):
         _touch(tmp_path / "model-00001-of-00002.safetensors")
@@ -114,6 +206,46 @@ class TestHasCompleteWeights:
         assert has_complete_weights(tmp_path) is False
 
 
+class TestLtx2TextEncoderClass:
+    def test_returns_the_class_of_an_ltx_2_3_index(self, tmp_path):
+        _write_ltx25_index(tmp_path, text_encoder="Gemma3ForConditionalGeneration")
+
+        assert ltx2_text_encoder_class(tmp_path) == "Gemma3ForConditionalGeneration"
+
+    def test_returns_the_class_of_an_ltx_2_5_index(self, tmp_path):
+        _write_ltx25_snapshot(tmp_path)
+
+        assert ltx2_text_encoder_class(tmp_path) == "Gemma4UnifiedForConditionalGeneration"
+
+    def test_accepts_the_image_to_video_pipeline(self, tmp_path):
+        _write_ltx25_index(tmp_path, class_name="LTX2ImageToVideoPipeline")
+
+        assert ltx2_text_encoder_class(tmp_path) == "Gemma4UnifiedForConditionalGeneration"
+
+    def test_is_none_without_an_index(self, tmp_path):
+        assert ltx2_text_encoder_class(tmp_path) is None
+
+    def test_is_none_for_an_unreadable_index(self, tmp_path):
+        _touch(tmp_path / "model_index.json", "{not json")
+
+        assert ltx2_text_encoder_class(tmp_path) is None
+
+    def test_is_none_for_a_non_ltx_2_index(self, tmp_path):
+        _write_model_index(tmp_path, "ZImagePipeline")
+
+        assert ltx2_text_encoder_class(tmp_path) is None
+
+    @pytest.mark.parametrize("entry", [None, "Gemma3", ["transformers"], ["transformers", ""], ["transformers", 3], [None, None]])
+    def test_is_none_for_a_malformed_text_encoder_entry(self, tmp_path, entry):
+        index = {"_class_name": "LTX2Pipeline", "text_encoder": entry}
+        _touch(tmp_path / "model_index.json", json.dumps(index))
+
+        assert ltx2_text_encoder_class(tmp_path) is None
+
+    def test_the_unloaded_components_are_the_four_the_app_never_reads(self):
+        assert LTX2_UNLOADED_COMPONENTS == frozenset({"processor", "prompt_enhancer", "duration_head", "diffusion_decoder"})
+
+
 class TestFindLocalModelDir:
     def test_local_directory_with_weights(self, tmp_path):
         _touch(tmp_path / "model.safetensors")
@@ -165,6 +297,15 @@ class TestFindLocalModelDir:
             _touch(snapshot / component / "model.safetensors")
 
         assert find_local_model_dir("owner/repo@abc123") == snapshot
+
+    def test_the_pinned_ltx_2_5_snapshot_is_found_through_the_cache(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("huggingface_hub.constants.HF_HUB_CACHE", str(tmp_path))
+        snapshot = tmp_path / "models--unsloth--LTX-2.5-FP8" / "snapshots" / _PIN
+        _write_ltx25_snapshot(snapshot)
+
+        assert find_local_model_dir(f"unsloth/LTX-2.5-FP8@{_PIN}") == snapshot
+        (snapshot / "transformer" / "model-00001-of-00004.safetensors").unlink()
+        assert find_local_model_dir(f"unsloth/LTX-2.5-FP8@{_PIN}") is None
 
     def test_a_pinned_tag_resolves_through_its_ref(self, tmp_path, monkeypatch):
         repo = self._cache(tmp_path, monkeypatch)

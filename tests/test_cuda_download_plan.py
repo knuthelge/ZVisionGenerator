@@ -21,6 +21,7 @@ from zvisiongenerator.backends.cuda.download_plan import (
     enhancer_download_plan,
     image_download_plan,
     video_download_plan,
+    video_repo_ignore,
 )
 from zvisiongenerator.downloads.target import DownloadTarget
 
@@ -249,6 +250,75 @@ def test_video_plan_upscale_without_configured_upsampler_skips_it() -> None:
     plan = video_download_plan(LTX_REPO, family="ltx", transformer_source=None, latent_upsampler=None, upscale=True)
 
     assert plan == (DownloadTarget(LTX_REPO),)
+
+
+@pytest.mark.parametrize(
+    ("separate", "extra", "expected"),
+    [
+        (False, (), None),
+        (True, (), SEPARATE_TRANSFORMER_IGNORE),
+        (False, ("a/*",), ("a/*",)),
+        (True, ["a/*", "b"], (*SEPARATE_TRANSFORMER_IGNORE, "a/*", "b")),
+    ],
+)
+def test_video_repo_ignore(separate: bool, extra: tuple[str, ...], expected: tuple[str, ...] | None) -> None:
+    assert video_repo_ignore(separate_transformer=separate, extra=extra) == expected
+
+
+def test_2_3_video_plans_are_pinned_without_a_revision() -> None:
+    """2.3 guard: the plans of ``ltx-4`` and ``ltx-8`` keep their exact targets, with revision ``None`` and no extra ignore."""
+    plan = video_download_plan(LTX_REPO, family="ltx", transformer_source=TRANSFORMER, latent_upsampler=UPSAMPLER, upscale=True, repo_ignore=())
+
+    assert plan == (
+        DownloadTarget("diffusers/LTX-2.3-Distilled-Diffusers", None, None, ("transformer/*.safetensors", "transformer/*.safetensors.index.json"), None),
+        DownloadTarget("Lightricks/LTX-2.3", None, ("ltx-2.3-22b-distilled-1.1.safetensors",), None, None),
+        DownloadTarget("Lightricks/LTX-2.3", None, ("ltx-2.3-spatial-upscaler-x2-1.1.safetensors",), None, None),
+    )
+    assert [target.revision for target in plan] == [None, None, None]
+
+
+LTX25_PIN = "7b40724fc39bbb01d9b4d72638c0d263531c88c2"
+LTX25_REPO = "unsloth/LTX-2.5-FP8"
+LTX25_IGNORE = ("LTX-2.5-*.safetensors", "samples/*")
+LTX25_UPSAMPLER = (f"{LTX25_REPO}@{LTX25_PIN}", "latent_upsampler/diffusion_pytorch_model.safetensors")
+
+
+@pytest.mark.parametrize("upscale", [False, True])
+def test_video_plan_ltx25_is_one_pinned_target_with_the_repo_ignore(upscale: bool) -> None:
+    plan = video_download_plan(f"{LTX25_REPO}@{LTX25_PIN}", family="ltx", transformer_source=None, latent_upsampler=LTX25_UPSAMPLER, upscale=upscale, repo_ignore=LTX25_IGNORE)
+
+    assert plan == (DownloadTarget(LTX25_REPO, LTX25_PIN, None, LTX25_IGNORE),)
+
+
+def test_video_plan_repo_ignore_follows_the_separate_transformer_patterns() -> None:
+    plan = video_download_plan(LTX_REPO, family="ltx", transformer_source=TRANSFORMER, repo_ignore=("x/*",))
+
+    assert plan[0].ignore_patterns == (*SEPARATE_TRANSFORMER_IGNORE, "x/*")
+
+
+def test_video_plan_keeps_the_revision_of_the_reference() -> None:
+    (target,) = video_download_plan(f"{LTX_REPO}@abc123", family="ltx")
+
+    assert (target.repo_id, target.revision) == (LTX_REPO, "abc123")
+
+
+def test_video_plan_splits_the_revision_of_the_transformer_and_upsampler_sources() -> None:
+    plan = video_download_plan(
+        LTX_REPO,
+        family="ltx",
+        transformer_source=("owner/tf@rev1", "t.safetensors"),
+        latent_upsampler=("owner/up@rev2", "u.safetensors"),
+        upscale=True,
+    )
+
+    assert plan[1:] == (DownloadTarget("owner/tf", "rev1", ("t.safetensors",)), DownloadTarget("owner/up", "rev2", ("u.safetensors",)))
+    assert len({target.key for target in plan}) == 3
+
+
+def test_video_plan_keeps_an_upsampler_of_the_same_repo_at_another_revision() -> None:
+    plan = video_download_plan(f"{LTX25_REPO}@{LTX25_PIN}", family="ltx", latent_upsampler=(f"{LTX25_REPO}@other", "u.safetensors"), upscale=True)
+
+    assert plan == (DownloadTarget(LTX25_REPO, LTX25_PIN), DownloadTarget(LTX25_REPO, "other", ("u.safetensors",)))
 
 
 def test_video_plan_local_folder_is_empty(tmp_path: Path) -> None:

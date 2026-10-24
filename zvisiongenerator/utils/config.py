@@ -13,7 +13,7 @@ import importlib.resources
 import warnings
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import yaml
 
@@ -21,6 +21,10 @@ from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, seedvr2_settings
 from zvisiongenerator.utils.upscale import max_megapixels
+
+EULER_ANCESTRAL: Final = "euler_ancestral"
+LTX_SAMPLERS: Final = frozenset({EULER_ANCESTRAL})
+"""The LTX denoising samplers a model version may select; the single definition of the names."""
 
 
 def load_config() -> dict[str, Any]:
@@ -202,6 +206,54 @@ def _deep_merge(base: dict, override: dict) -> None:
             _deep_merge(base[key], value)
         else:
             base[key] = value
+
+
+def video_preset(config: dict[str, Any], family: str, model_name: str | None = None) -> dict[str, Any]:
+    """Return the ``video_model_presets.<family>`` block with the version that lists *model_name* merged over it.
+
+    A version is ``video_model_presets.<family>.versions.<id>``: an ``aliases`` list plus any keys of the family
+    block. Its keys (minus ``aliases``) are deep-merged over the family block (minus ``versions``) the way user
+    config is: dicts merge, every other value, ``None`` included, replaces. When no version lists *model_name*
+    (or it is ``None``), the result is the family block alone. *config* is never mutated.
+
+    Raises:
+        ValueError: If ``versions`` is not a mapping of mappings, a version's ``aliases`` is not a list of
+            non-blank strings, or an alias appears in two versions.
+    """
+    preset = (config.get("video_model_presets") or {}).get(family) or {}
+    merged = {key: deepcopy(value) for key, value in preset.items() if key != "versions"}
+    version = _video_version(config, family, model_name)
+    if version is not None:
+        overlay = {key: deepcopy(value) for key, value in preset["versions"][version].items() if key != "aliases"}
+        _deep_merge(merged, overlay)
+    return merged
+
+
+def _video_version(config: dict[str, Any], family: str, model_name: str | None) -> str | None:
+    """Return the id of the version of *family* that lists *model_name* in its ``aliases``, or ``None``.
+
+    Every version is validated, whatever *model_name* is.
+
+    Raises:
+        ValueError: If ``versions`` is not a mapping of mappings, a version's ``aliases`` is not a list of
+            non-blank strings, or an alias appears in two versions.
+    """
+    versions = ((config.get("video_model_presets") or {}).get(family) or {}).get("versions")
+    if versions is None:
+        return None
+    base = f"video_model_presets.{family}.versions"
+    if not isinstance(versions, dict) or not all(isinstance(block, dict) for block in versions.values()):
+        raise ValueError(f"{base} must be a mapping of version ids to mappings.")
+    owners: dict[str, str] = {}
+    for version, block in versions.items():
+        aliases = block.get("aliases")
+        if not isinstance(aliases, list) or not all(isinstance(alias, str) and alias.strip() for alias in aliases):
+            raise ValueError(f"{base}.{version}.aliases must be a list of non-blank strings.")
+        for alias in aliases:
+            if alias in owners and owners[alias] != version:
+                raise ValueError(f"{base}: alias '{alias}' is listed by both '{owners[alias]}' and '{version}'.")
+            owners[alias] = version
+    return owners.get(model_name) if model_name is not None else None
 
 
 def get_variant_key(model_info: ImageModelInfo) -> str | None:
@@ -450,29 +502,35 @@ def resolve_upscale_steps(defaults: dict[str, Any], steps: int) -> int:
     return preset_steps if preset_steps is not None else max(1, steps // 2)
 
 
-def ltx_latent_upsampler_source(config: dict[str, Any]) -> tuple[str, str] | None:
+def ltx_latent_upsampler_source(config: dict[str, Any], model_name: str | None = None) -> tuple[str, str] | None:
     """Return the configured LTX latent upsampler as ``(repo_id, filename)``, or ``None`` when not configured.
 
+    The upsampler is read from the version that lists *model_name*, else from the family block. The repo
+    string may carry ``@revision``; it is returned as is.
+
     Raises:
-        ValueError: If ``video_model_presets.ltx.diffusers.latent_upsampler`` is set but is not a mapping with
-            non-blank string ``repo`` and ``filename``.
+        ValueError: If ``latent_upsampler`` is set but is not a mapping with non-blank string ``repo`` and ``filename``.
     """
-    return _ltx_hub_file(config, "latent_upsampler")
+    diffusers, path = _ltx_diffusers(config, model_name)
+    if "latent_upsampler" not in diffusers:
+        return None
+    return _ltx_hub_file(diffusers["latent_upsampler"], f"{path}.latent_upsampler")
 
 
-def ltx_transformer_source(config: dict[str, Any]) -> tuple[str, str] | None:
+def ltx_transformer_source(config: dict[str, Any], model_name: str | None = None) -> tuple[str, str] | None:
     """Return the configured single-file LTX transformer checkpoint as ``(repo_id, filename)``, or ``None`` to use the repo's own.
 
-    A ``null`` entry (a user config turning the packaged one off) means the repo's own transformer.
+    The transformer is read from the version that lists *model_name*, else from the family block. A ``null``
+    entry (a user config turning the packaged one off, or a version using the repo's own) means the repo's own
+    transformer.
 
     Raises:
-        ValueError: If ``video_model_presets.ltx.diffusers.transformer`` is set but is not a mapping with
-            non-blank string ``repo`` and ``filename``.
+        ValueError: If ``transformer`` is set but is not a mapping with non-blank string ``repo`` and ``filename``.
     """
-    diffusers = ((config.get("video_model_presets") or {}).get("ltx") or {}).get("diffusers") or {}
+    diffusers, path = _ltx_diffusers(config, model_name)
     if diffusers.get("transformer") is None:
         return None
-    return _ltx_hub_file(config, "transformer")
+    return _ltx_hub_file(diffusers["transformer"], f"{path}.transformer")
 
 
 def ltx_companion_repos(config: dict[str, Any], repo_id: str) -> tuple[str, ...]:
@@ -496,7 +554,10 @@ def ltx_distilled_lora_source(config: dict[str, Any]) -> tuple[str, str] | None:
     Raises:
         ValueError: If the entry is set but is not a mapping with non-blank string ``repo`` and ``filename``.
     """
-    return _ltx_hub_file(config, "distilled_lora", section="video_model_presets.ltx")
+    ltx = (config.get("video_model_presets") or {}).get("ltx") or {}
+    if "distilled_lora" not in ltx:
+        return None
+    return _ltx_hub_file(ltx["distilled_lora"], "video_model_presets.ltx.distilled_lora")
 
 
 def ltx_mlx_base_repo(config: dict[str, Any], bits: int) -> str:
@@ -523,18 +584,23 @@ def ltx_diffusers_repo(config: dict[str, Any]) -> str:
     return repo.strip()
 
 
-def _ltx_hub_file(config: dict[str, Any], name: str, *, section: str = "video_model_presets.ltx.diffusers") -> tuple[str, str] | None:
-    """Return ``<section>.<name>`` as ``(repo_id, filename)``, or ``None`` when not set.
+def _ltx_diffusers(config: dict[str, Any], model_name: str | None) -> tuple[dict[str, Any], str]:
+    """Return the ``diffusers`` block the LTX preset of *model_name* resolves to, and its config key path.
+
+    The path names the version block when one lists *model_name*, so error messages point at the key to fix.
+    """
+    version = _video_version(config, "ltx", model_name)
+    diffusers = video_preset(config, "ltx", model_name).get("diffusers") or {}
+    path = "video_model_presets.ltx" + (f".versions.{version}" if version is not None else "") + ".diffusers"
+    return diffusers, path
+
+
+def _ltx_hub_file(node: Any, key: str) -> tuple[str, str]:
+    """Return the config entry *node* (found at *key*) as ``(repo_id, filename)``.
 
     Raises:
         ValueError: If the entry is not a mapping with non-blank string ``repo`` and ``filename``.
     """
-    key = f"{section}.{name}"
-    node: Any = config
-    for part in key.split("."):
-        if not isinstance(node, dict) or part not in node:
-            return None
-        node = node[part]
     if not isinstance(node, dict):
         raise ValueError(f"{key} must be a mapping with 'repo' and 'filename'.")
     values: list[str] = []
@@ -549,32 +615,80 @@ def _ltx_hub_file(config: dict[str, Any], name: str, *, section: str = "video_mo
 def ltx_diffusers_quantize(config: dict[str, Any], model_name: str | None) -> int | None:
     """Return the quantize level the diffusers LTX backend loads the model picked as *model_name* at, or ``None`` (bfloat16).
 
-    The levels are set per alias in ``video_model_presets.ltx.diffusers.quantize`` (e.g. ``ltx-4: 4``).
+    The levels are set per alias in the ``quantize`` entry of the version that lists *model_name*, merged over
+    the family block's (e.g. ``ltx-4: 4``).
 
     Raises:
         ValueError: If that entry is set but is not a mapping of names to 4 or 8.
     """
-    key = "video_model_presets.ltx.diffusers.quantize"
-    levels = (((config.get("video_model_presets") or {}).get("ltx") or {}).get("diffusers") or {}).get("quantize")
+    diffusers, path = _ltx_diffusers(config, model_name)
+    levels = diffusers.get("quantize")
     if levels is None:
         return None
     if not isinstance(levels, dict) or any(bits not in (4, 8) for bits in levels.values()):
-        raise ValueError(f"{key} must map model names to 4 or 8.")
+        raise ValueError(f"{path}.quantize must map model names to 4 or 8.")
     return levels.get(model_name) if model_name is not None else None
+
+
+def _ltx_repo_ignore(value: Any, key: str) -> tuple[str, ...]:
+    """Return the ``repo_ignore`` entry *value* (found at *key*) as a tuple of stripped patterns.
+
+    Raises:
+        ValueError: If it is not a list of non-blank strings.
+    """
+    if not isinstance(value, list) or not all(isinstance(pattern, str) and pattern.strip() for pattern in value):
+        raise ValueError(f"{key} must be a list of non-blank strings.")
+    return tuple(pattern.strip() for pattern in value)
+
+
+def _ltx_sampler(value: Any, key: str) -> str:
+    """Return the ``sampler`` entry *value* (found at *key*).
+
+    Raises:
+        ValueError: If it is not one of :data:`LTX_SAMPLERS`.
+    """
+    if value not in LTX_SAMPLERS:
+        raise ValueError(f"{key} must be one of {', '.join(sorted(LTX_SAMPLERS))}.")
+    return value
+
+
+def _ltx_image_crf(value: Any, key: str) -> int:
+    """Return the ``image_crf`` entry *value* (found at *key*).
+
+    Raises:
+        ValueError: If it is not an integer (a bool is not) from 0 to 51.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 51:
+        raise ValueError(f"{key} must be an integer from 0 to 51.")
+    return value
+
+
+_LTX_OPTION_VALIDATORS: Final = {"repo_ignore": _ltx_repo_ignore, "sampler": _ltx_sampler, "image_crf": _ltx_image_crf}
 
 
 def ltx_load_options(config: dict[str, Any], model_name: str | None, *, upscale: bool) -> dict[str, Any]:
     """Return the configured keyword arguments a video backend's ``load_model`` takes for the model picked as *model_name*.
 
-    The diffusers options (``quantize``, ``transformer_source``, ``model_name``, ``latent_upsampler``) are ignored by the MLX backend.
+    The diffusers options (``quantize``, ``transformer_source``, ``model_name``, ``latent_upsampler`` and the
+    version-only ``repo_ignore``, ``sampler`` and ``image_crf``) are ignored by the MLX backend. The three
+    version-only keys are present only when the preset of *model_name* sets them, so the options of a model
+    without them are unchanged.
 
     Raises:
-        ValueError: If one of the ``video_model_presets.ltx.diffusers`` entries is malformed.
+        ValueError: If one of the ``diffusers`` entries is malformed.
     """
-    options: dict[str, Any] = {"quantize": ltx_diffusers_quantize(config, model_name), "transformer_source": ltx_transformer_source(config), "model_name": model_name}
+    diffusers, path = _ltx_diffusers(config, model_name)
+    options: dict[str, Any] = {
+        "quantize": ltx_diffusers_quantize(config, model_name),
+        "transformer_source": ltx_transformer_source(config, model_name),
+        "model_name": model_name,
+    }
+    for name, validate in _LTX_OPTION_VALIDATORS.items():
+        if diffusers.get(name) is not None:
+            options[name] = validate(diffusers[name], f"{path}.{name}")
     if upscale:
         options["upscale"] = True
-        options["latent_upsampler"] = ltx_latent_upsampler_source(config)
+        options["latent_upsampler"] = ltx_latent_upsampler_source(config, model_name)
     return options
 
 

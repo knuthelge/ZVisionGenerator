@@ -1,11 +1,12 @@
-"""LTX-2.3 weights for the CUDA video backend: the transformer from a single-file checkpoint and the Gemma text encoder.
+"""LTX weights for the CUDA video backend: the transformer from a single-file checkpoint and the Gemma text encoder.
 
 The distilled transformer comes from Lightricks' single-file checkpoint (e.g. ``ltx-2.3-22b-distilled-1.1``), renamed
 to diffusers' layout with diffusers' own key conversion. Every other component comes from the diffusers repo.
 
 The weights are prepared once per quantize level and kept as a *prepared copy* (sharded safetensors plus a
 manifest) under the cache folder: the transformer in NF4 (q4, the linear layers of its blocks) or FP8 (q8), and
-the text encoder in FP8 at either level. Both are written one tensor at a time, so a 38 GB transformer never
+the text encoder in FP8 at either level. The text encoder is Gemma 3 (LTX-2.3) or Gemma 4 (LTX-2.5); the repo's
+``model_index.json`` names the class, which picks how checkpoint tensor names map to the model's. Both are written one tensor at a time, so a 38 GB transformer never
 sits in memory at full precision.
 
 NF4 weights are packed by bitsandbytes on the GPU and saved with their quantization state, in the layout
@@ -18,12 +19,13 @@ import importlib.metadata
 import json
 import os
 import shutil
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends.cuda.quant import cast_to_fp8, empty_diffusers_model, fill_weights, kept_in_compute_dtype
 from zvisiongenerator.utils.file_links import link_or_copy
+from zvisiongenerator.utils.model_files import ltx2_text_encoder_class
 from zvisiongenerator.utils.safetensors_stream import ShardWriter, iter_tensors, read_header, shard_files
 from zvisiongenerator.utils.stored_quant import MANIFEST_NAME, discard_partial, manifest_matches, partial_dir, promote_partial, sweep_stale_partials, write_manifest
 
@@ -69,6 +71,16 @@ _LEGACY_TEXT_ENCODER_PREFIXES = (
     ("vision_tower.vision_model.", "model.vision_tower."),
     ("multi_modal_projector.", "model.multi_modal_projector."),
 )
+# LTX-2.5's Gemma 4 checkpoint names its vision embedder differently from transformers 5.19. The broad second rule
+# only reaches names the model does not already know, and the Gemma 3 set follows for the language-model names.
+_GEMMA4_TEXT_ENCODER_PREFIXES = (
+    ("model.vision_embedder.", "model.embed_vision."),
+    ("model.embed_vision.", "model.embed_vision.multimodal_embedder."),
+)
+# Rename tables by the text-encoder class in model_index.json; any other class (or no index) uses the Gemma 3 set.
+_TEXT_ENCODER_RENAMES: Mapping[str, tuple[tuple[str, str], ...]] = {
+    "Gemma4UnifiedForConditionalGeneration": _GEMMA4_TEXT_ENCODER_PREFIXES + _LEGACY_TEXT_ENCODER_PREFIXES,
+}
 
 
 def transformer_name_map(names: Iterable[str]) -> dict[str, str]:
@@ -431,18 +443,19 @@ def _empty_text_encoder(source_dir: Path, compute_dtype: torch.dtype) -> Any:
 
 
 def _source_text_encoder_tensors(source_dir: Path, model_names: Iterable[str]) -> Iterator[tuple[str, torch.Tensor]]:
-    """Yield the text encoder's tensors from *source_dir* under the model's names (see :data:`_LEGACY_TEXT_ENCODER_PREFIXES`)."""
+    """Yield the text encoder's tensors from *source_dir* under the model's names (see :data:`_TEXT_ENCODER_RENAMES`)."""
     known = set(model_names)
+    renames = _TEXT_ENCODER_RENAMES.get(ltx2_text_encoder_class(source_dir) or "", _LEGACY_TEXT_ENCODER_PREFIXES)
     for path in text_encoder_sources(source_dir):
         for name, tensor in iter_tensors(path):
-            yield _text_encoder_name(name, known), tensor
+            yield _text_encoder_name(name, known, renames), tensor
 
 
-def _text_encoder_name(name: str, known: set[str]) -> str:
-    """Return the model's name for the checkpoint tensor *name*, renaming an older Gemma 3 name."""
+def _text_encoder_name(name: str, known: set[str], renames: tuple[tuple[str, str], ...] = _LEGACY_TEXT_ENCODER_PREFIXES) -> str:
+    """Return the model's name for the checkpoint tensor *name*, renamed by the first of *renames* whose prefix it starts with."""
     if name in known:
         return name
-    for old, new in _LEGACY_TEXT_ENCODER_PREFIXES:
+    for old, new in renames:
         if name.startswith(old):
             return new + name[len(old) :]
     return name

@@ -9,17 +9,21 @@ import sys
 import tempfile
 import warnings
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Final
 
-from zvisiongenerator.backends.cuda.download_plan import SEPARATE_TRANSFORMER_IGNORE
+from zvisiongenerator.backends.cuda.download_plan import video_repo_ignore
 from zvisiongenerator.backends.cuda.driver import require_cuda
 from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error, warn_unmatched_lora
+from zvisiongenerator.backends.cuda.video import sampler as _sampler
+from zvisiongenerator.backends.cuda.video.image_crf import recompress
 from zvisiongenerator.core.video_types import ExtendSegment
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
+from zvisiongenerator.utils.model_files import LTX2_UNLOADED_COMPONENTS
+from zvisiongenerator.utils.paths import split_huggingface_revision
 from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE, CARRY_FRAMES, EXTEND_FRAME_STEP, audio_lead_samples, cut_window_audio, window_audio_cut, window_frames
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 
@@ -139,6 +143,8 @@ class _LoadedVideoModel:
     transformer: _TransformerSource | None = None
     prompt_cache: tuple[str, dict[str, Any]] | None = None
     resident_text_encoder: Any | None = None  # kept between prompts when it fits beside the transformer
+    sampler: str | None = None  # the configured step sampler (``euler_ancestral``), or None for the pipeline's own scheduler
+    image_crf: int | None = None  # the CRF an i2v image is re-compressed at before the fit, or None to leave it to the pipeline
 
 
 def _parse_version(version: str) -> tuple[int, ...]:
@@ -274,6 +280,7 @@ def _load_generation_pipeline(
     loras: list[tuple[str, float]],
     model_name: str | None,
     converted: dict[str, Any] | None = None,
+    repo_ignore: Sequence[str] = (),
 ) -> tuple[Any, _TextEncoderSource, _TransformerSource]:
     """Load the generation pipeline without its text encoder, placed for the memory mode.
 
@@ -290,10 +297,10 @@ def _load_generation_pipeline(
     if converted is not None:
         repo_dir, prepared_transformer, prepared_text_encoder, fits_together = _converted_weights(Path(model_path).expanduser(), converted)
     else:
-        repo_dir, prepared_transformer, prepared_text_encoder, fits_together = _stock_weights(model_path, model_name, transformer_source, quantize, runtime.torch.device("cuda"))
+        repo_dir, prepared_transformer, prepared_text_encoder, fits_together = _stock_weights(model_path, model_name, transformer_source, quantize, runtime.torch.device("cuda"), repo_ignore)
     connectors = _load_connectors(repo_dir, torch_dtype)
     try:
-        pipeline = pipeline_class.from_pretrained(str(repo_dir), transformer=None, connectors=connectors, text_encoder=None, torch_dtype=torch_dtype)
+        pipeline = pipeline_class.from_pretrained(str(repo_dir), transformer=None, connectors=connectors, text_encoder=None, torch_dtype=torch_dtype, **_absent_optional_components(repo_dir))
     except Exception as exc:
         raise RuntimeError(f"Failed to load {pipeline_class.__name__} from '{model_path}': {exc}") from exc
     _place_components(pipeline, runtime.torch, low_memory=low_memory)
@@ -356,10 +363,27 @@ def _ensure_transformer(model: _LoadedVideoModel, pipeline: Any) -> None:
         _attach_transformer(pipeline, model.transformer, model.runtime.torch)
 
 
-def _repo_dir(model_path: str, *, with_transformer: bool) -> Path:
+def _absent_optional_components(repo_dir: Path) -> dict[str, None]:
+    """Return ``{name: None}`` for each optional LTX-2 component the repo's ``model_index.json`` lists and the app never loads.
+
+    The pipeline would otherwise load them from the repo (``processor``, ``prompt_enhancer`` and ``duration_head`` of an
+    LTX-2.5 snapshot). An index that is missing or unreadable lists none.
+    """
+
+    try:
+        index = json.loads((repo_dir / "model_index.json").read_text(encoding="utf-8"))
+    except OSError, ValueError:
+        return {}
+    if not isinstance(index, dict):
+        return {}
+    return {name: None for name in sorted(LTX2_UNLOADED_COMPONENTS - {"diffusion_decoder"}) if name in index}
+
+
+def _repo_dir(model_path: str, *, with_transformer: bool, extra_ignore: Sequence[str] = ()) -> Path:
     """Return the local folder of the diffusers repo *model_path*, downloading what is missing for a repo id.
 
-    Without *with_transformer* the repo's own transformer weights are not downloaded (only its config).
+    A ``repo@revision`` reference downloads that revision. Without *with_transformer* the repo's own transformer
+    weights are not downloaded (only its config); *extra_ignore* names further patterns to skip.
     """
 
     local = Path(model_path).expanduser()
@@ -367,20 +391,25 @@ def _repo_dir(model_path: str, *, with_transformer: bool) -> Path:
         return local
     from huggingface_hub import snapshot_download
 
-    ignore = None if with_transformer else list(SEPARATE_TRANSFORMER_IGNORE)
+    repo_id, revision = split_huggingface_revision(model_path)
+    ignore = video_repo_ignore(separate_transformer=not with_transformer, extra=extra_ignore)
     try:
-        return Path(snapshot_download(model_path, ignore_patterns=ignore))
+        return Path(snapshot_download(repo_id, ignore_patterns=None if ignore is None else list(ignore), **({"revision": revision} if revision else {})))
     except Exception as exc:
         raise RuntimeError(f"Failed to download the LTX model '{model_path}': {exc}") from exc
 
 
 def _download_hub_file(repo_id: str, filename: str, label: str) -> Path:
-    """Download one file from the Hugging Face Hub (or find it in the cache) and return its local path."""
+    """Download one file from the Hugging Face Hub (or find it in the cache) and return its local path.
+
+    *repo_id* may carry a revision (``repo@revision``).
+    """
 
     try:
         from huggingface_hub import hf_hub_download
 
-        return Path(hf_hub_download(repo_id=repo_id, filename=filename))
+        repo, revision = split_huggingface_revision(repo_id)
+        return Path(hf_hub_download(repo_id=repo, filename=filename, **({"revision": revision} if revision else {})))
     except Exception as exc:
         raise RuntimeError(f"Failed to download the {label} '{filename}' from '{repo_id}': {exc}") from exc
 
@@ -391,13 +420,16 @@ def _resolve_upsampler_weights(repo_id: str, filename: str) -> str:
     return str(_download_hub_file(repo_id, filename, "LTX latent upsampler"))
 
 
-def _stock_weights(model_path: str, model_name: str | None, transformer_source: tuple[str, str] | None, quantize: int, device: Any) -> tuple[Path, Path, Path, bool]:
-    """Return the repo folder, the prepared transformer and text encoder at *quantize*, and whether they fit together, for a stock model."""
+def _stock_weights(model_path: str, model_name: str | None, transformer_source: tuple[str, str] | None, quantize: int, device: Any, repo_ignore: Sequence[str] = ()) -> tuple[Path, Path, Path, bool]:
+    """Return the repo folder, the prepared transformer and text encoder at *quantize*, and whether they fit together, for a stock model.
+
+    The repo is downloaded without the *repo_ignore* patterns.
+    """
 
     from zvisiongenerator.backends.cuda.video.memory_estimate import ltx_system_estimate
 
     checkpoint = _download_hub_file(*transformer_source, "LTX transformer") if transformer_source else None
-    repo_dir = _repo_dir(model_path, with_transformer=checkpoint is None)
+    repo_dir = _repo_dir(model_path, with_transformer=checkpoint is None, **({"extra_ignore": repo_ignore} if repo_ignore else {}))
     transformer_input = checkpoint or repo_dir / "transformer"
     fits_together = _check_system_memory(ltx_system_estimate(repo_dir, transformer_input, quantize), quantize, converted=False)
     prepared_transformer, prepared_text_encoder = _prepared_weights(model_name, model_path, repo_dir, transformer_input, quantize, device)
@@ -931,6 +963,21 @@ def _refine_scheduler(pipeline: Any) -> Iterator[None]:
         pipeline.scheduler = original
 
 
+def _pass_scheduler(model: _LoadedVideoModel, pipeline: Any, *, seed: int, stage: int, refine: bool, conditioned: bool = False) -> AbstractContextManager[None]:
+    """Return the scheduler scope of one denoising pass: *stage* 1 is the first (or only) pass, 2 the refinement.
+
+    With the ancestral sampler configured, the pass runs on a fresh Euler-ancestral scheduler whose step noise comes from
+    a generator of its own, seeded for *stage*. Otherwise the refinement pass (*refine*) runs on the static-shift scheduler
+    and any other pass on the pipeline's own. A *conditioned* pass (it carries ``conditions``, as Extend does) always takes
+    the second path: the ancestral ``step`` would re-noise the pinned frames that the stock Euler step leaves clean.
+    """
+
+    if conditioned or model.sampler != _sampler.EULER_ANCESTRAL:
+        return _refine_scheduler(pipeline) if refine else nullcontext()
+    generator = _make_generator(model.runtime.torch, _sampler.stage_seed(seed, stage))
+    return _sampler.swap_scheduler(pipeline, _sampler.ancestral_scheduler(generator, num_train_timesteps=pipeline.scheduler.config.num_train_timesteps))
+
+
 def _generate_one_stage(
     model: _LoadedVideoModel,
     pipeline: Any,
@@ -945,8 +992,12 @@ def _generate_one_stage(
     step_callback: Any | None,
     extra_kwargs: Mapping[str, Any],
     audio_carry: AudioCarry | None = None,
+    conditioned: bool = False,
 ) -> _GeneratedClip:
-    """Run one distilled denoising pass at full size and return its clip, with *audio_carry* pinned at the start of its sound."""
+    """Run one distilled denoising pass at full size and return its clip, with *audio_carry* pinned at the start of its sound.
+
+    A *conditioned* pass (Extend) keeps the pipeline's own scheduler whatever sampler is configured.
+    """
 
     sigmas = _stage1_sigmas(model.runtime.distilled_sigmas, steps)
     kwargs = _build_generation_kwargs(
@@ -961,12 +1012,14 @@ def _generate_one_stage(
         callback=_make_step_callback(step_callback, phase="video", offset=0, total=len(sigmas)),
         extra_kwargs=extra_kwargs,
     )
+    scheduler = _pass_scheduler(model, pipeline, seed=seed, stage=1, refine=False, conditioned=conditioned)
     if audio_carry is None:
-        return _decode_clip(pipeline, pipeline(**kwargs))
+        with scheduler:
+            return _decode_clip(pipeline, pipeline(**kwargs))
 
     from zvisiongenerator.backends.cuda.video.audio_carry import pin_audio_prefix, restore_audio_prefix
 
-    with pin_audio_prefix(pipeline.transformer, audio_carry):
+    with scheduler, pin_audio_prefix(pipeline.transformer, audio_carry):
         result = pipeline(**kwargs)
     restore_audio_prefix(result.audio, audio_carry)
     return _decode_clip(pipeline, result)
@@ -1004,23 +1057,24 @@ def _generate_two_stage(
     generator = _make_generator(runtime.torch, seed)
     common = {"prompt_inputs": prompt_inputs, "num_frames": num_frames, "fps": fps, "generator": generator}
 
-    stage1 = pipeline(
-        **_build_generation_kwargs(
-            **common,
-            width=width // 2,
-            height=height // 2,
-            sigmas=stage1_sigmas,
-            output_type="latent",
-            callback=_make_step_callback(step_callback, phase="video_upscale_stage_1", offset=0, total=total),
-            extra_kwargs=extra_kwargs,
+    with _pass_scheduler(model, pipeline, seed=seed, stage=1, refine=False):
+        stage1 = pipeline(
+            **_build_generation_kwargs(
+                **common,
+                width=width // 2,
+                height=height // 2,
+                sigmas=stage1_sigmas,
+                output_type="latent",
+                callback=_make_step_callback(step_callback, phase="video_upscale_stage_1", offset=0, total=total),
+                extra_kwargs=extra_kwargs,
+            )
         )
-    )
     if review is not None:
         _preview_small_render(model, pipeline, stage1, review)
     upsampled = _upsample_latents(model.upsample_pipeline, stage1.frames, width=width, height=height, num_frames=num_frames, low_memory=model.low_memory)
 
     refine_kwargs = {**extra_kwargs, "latents": upsampled, "audio_latents": stage1.audio, "noise_scale": stage2_sigmas[0]}
-    with _refine_scheduler(pipeline):
+    with _pass_scheduler(model, pipeline, seed=seed, stage=2, refine=True):
         stage2 = pipeline(
             **_build_generation_kwargs(
                 **common,
@@ -1060,10 +1114,12 @@ def _generate_clip(
     extra_kwargs: Mapping[str, Any],
     audio_carry: AudioCarry | None = None,
     review: Callable[[Path], None] | None = None,
+    conditioned: bool = False,
 ) -> _GeneratedClip:
     """Generate a clip at *fps* in one stage, or in two stages when *stage1_steps* is set; the prompt is encoded once for both.
 
     *audio_carry* (one stage only) pins sound at the start of the clip. *review* (two stages only) sees the half-size render first.
+    *conditioned* (Extend) keeps the pipeline's own scheduler whatever sampler is configured.
     """
 
     prompt_inputs = _encode_prompt(model, pipeline, prompt)
@@ -1082,6 +1138,7 @@ def _generate_clip(
             step_callback=step_callback,
             extra_kwargs=extra_kwargs,
             audio_carry=audio_carry,
+            conditioned=conditioned,
         )
     if audio_carry is not None:
         raise ValueError("Pinned sound is not supported with the two-stage upscale.")
@@ -1166,6 +1223,11 @@ class DiffusersVideoBackend:
             quantize: 4 (NF4 transformer) or 8 (FP8 transformer); both levels use an FP8 text encoder and connectors.
             transformer_source: ``(repo_id, filename)`` of a single-file transformer checkpoint that replaces the repo's own.
             model_name: The name the model was picked by (``ltx-4``); its prepared copy is ``<models>/<name>@q<bits>``.
+            repo_ignore: Patterns the repo is downloaded without (a model version's root single-file checkpoints).
+            sampler: ``euler_ancestral`` runs each t2v or i2v denoising pass on an Euler-ancestral scheduler; ``None`` keeps
+                the pipeline's own. An Extend pass always keeps the pipeline's own.
+            image_crf: The H.264 CRF an i2v image is re-compressed at before it is fitted; ``None`` leaves the image to
+                the pipeline's own default.
 
         A converted folder (``ziv model model --model-type ltx-2.3``) ignores ``quantize``, ``transformer_source``
         and ``model_name``: it loads the weights and level stored in it.
@@ -1175,15 +1237,18 @@ class DiffusersVideoBackend:
         low_memory = bool(kwargs.get("low_memory", True))
         loras = kwargs.get("loras") or []
         upscale = bool(kwargs.get("upscale"))
+        sampler = kwargs.get("sampler")
 
         if mode not in _PIPELINES_BY_MODE:
             raise ValueError(f"Unsupported video generation mode: {mode}")
+        if sampler is not None and sampler not in _sampler.LTX_SAMPLERS:
+            raise ValueError(f"Unsupported LTX sampler {sampler!r}: use one of {', '.join(sorted(_sampler.LTX_SAMPLERS))}.")
 
         # A converted folder carries its own level; the alias table's (``quantize``) is for stock models only.
         converted = read_converted_ltx(Path(model_path).expanduser())
         quantize = converted["bits"] if converted is not None else kwargs.get("quantize")
         if quantize not in (4, 8):
-            raise ValueError(f"LTX on Windows/Linux runs 4-bit or 8-bit: use the model 'ltx-4' or 'ltx-8' (got quantize level {quantize!r}).")
+            raise ValueError(f"LTX on Windows/Linux runs 4-bit or 8-bit: use the model 'ltx-4', 'ltx-8' or 'ltx25-4' (got quantize level {quantize!r}).")
 
         latent_upsampler = kwargs.get("latent_upsampler")
         if upscale and latent_upsampler is None:
@@ -1214,6 +1279,7 @@ class DiffusersVideoBackend:
             loras=loras,
             model_name=kwargs.get("model_name"),
             converted=converted,
+            repo_ignore=tuple(kwargs.get("repo_ignore") or ()),
         )
 
         upsample_pipeline = None
@@ -1237,6 +1303,8 @@ class DiffusersVideoBackend:
                 low_memory=low_memory,
                 text_encoder=text_encoder,
                 transformer=transformer,
+                sampler=sampler,
+                image_crf=kwargs.get("image_crf"),
             ),
             model_info,
         )
@@ -1311,7 +1379,13 @@ class DiffusersVideoBackend:
         _check_review_arguments(review, stage1_steps)
 
         with model.runtime.image_module.open(image_path) as image:
-            input_image = _fit_image(image.convert("RGB"), width, height)
+            source = image.convert("RGB")
+            if model.image_crf is not None:
+                source = recompress(source, model.image_crf)  # before the fit, as the model was trained
+            input_image = _fit_image(source, width, height)
+        extra_kwargs: dict[str, Any] = {"image": input_image}
+        if model.image_crf is not None:
+            extra_kwargs["image_crf"] = 0  # already re-compressed: the pipeline must not do it again
 
         try:
             with model.runtime.torch.inference_mode():
@@ -1327,7 +1401,7 @@ class DiffusersVideoBackend:
                     steps=steps,
                     stage1_steps=stage1_steps,
                     step_callback=step_callback,
-                    extra_kwargs={"image": input_image},
+                    extra_kwargs=extra_kwargs,
                     review=review,
                 )
                 output = _export_video(model, clip, output_path)
@@ -1406,6 +1480,7 @@ class DiffusersVideoBackend:
                     step_callback=step_callback,
                     extra_kwargs={"conditions": [carry]},
                     audio_carry=audio_carry,
+                    conditioned=True,
                 )
                 segment = _write_extend_segment(clip, source, extend_frames, Path(segment_dir), audio=audio_output and source.has_audio)
         finally:

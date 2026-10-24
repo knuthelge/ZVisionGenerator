@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model, is_known_video_repo
@@ -17,8 +19,10 @@ class TestDetectVideoModel:
             ("dgrauet/ltx-2-mlx-q8", "ltx", "ltx", True, 24, 8, 32),
             ("diffusers/LTX-2.3-Distilled-Diffusers", "ltx", "ltx", True, 24, 8, 32),
             ("Lightricks/LTX-Video", "ltx", "ltx", True, 24, 8, 32),
+            ("unsloth/LTX-2.5-FP8", "ltx", "ltx", True, 24, 8, 32),
+            ("unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2", "ltx", "ltx", True, 24, 8, 32),
         ],
-        ids=["ltx-q4", "ltx-q8", "ltx-diffusers-default", "ltx-video"],
+        ids=["ltx-q4", "ltx-q8", "ltx-diffusers-default", "ltx-video", "ltx-2.5", "ltx-2.5-pinned"],
     )
     def test_known_models(self, model_path, expected_family, expected_backend, expected_i2v, expected_fps, expected_frame_align, expected_res_align):
         info = detect_video_model(model_path)
@@ -40,6 +44,29 @@ class TestDetectVideoModel:
         assert is_known_video_repo("diffusers/LTX-2.3-Distilled-Diffusers") is True
         assert is_known_video_repo("Lightricks/LTX-2.3-13B") is False
         assert is_known_video_repo("dg845/LTX-2.3-Diffusers") is False
+
+    @pytest.mark.parametrize("model_path", ["unsloth/LTX-2.5-FP8", "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2"])
+    def test_is_known_video_repo_recognizes_ltx_2_5(self, model_path):
+        assert is_known_video_repo(model_path) is True
+
+    @pytest.mark.parametrize("text_encoder", ["Gemma4UnifiedForConditionalGeneration", "Gemma3ForConditionalGeneration"])
+    def test_a_local_folder_is_ltx_by_its_model_index(self, tmp_path, text_encoder):
+        model_dir = tmp_path / "converted"
+        model_dir.mkdir()
+        index = {"_class_name": "LTX2Pipeline", "text_encoder": ["transformers", text_encoder]}
+        (model_dir / "model_index.json").write_text(json.dumps(index), encoding="utf-8")
+
+        info = detect_video_model(str(model_dir))
+
+        assert info.family == "ltx"
+        assert info.supports_i2v is True
+
+    def test_a_local_folder_with_another_pipeline_index_stays_unknown(self, tmp_path):
+        model_dir = tmp_path / "other"
+        model_dir.mkdir()
+        (model_dir / "model_index.json").write_text(json.dumps({"_class_name": "ZImagePipeline"}), encoding="utf-8")
+
+        assert detect_video_model(str(model_dir)).family == "unknown"
 
     @pytest.mark.parametrize(
         ("model_path", "expected_family", "expected_i2v"),

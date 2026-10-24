@@ -440,7 +440,7 @@ def ltx_cuda_system_memory(
         if converted is None:
             return None
         quantize = converted["bits"]
-    return estimate_ltx_system_memory(config, resolved_model, quantize, find_local_dir=find_local_dir)
+    return estimate_ltx_system_memory(config, resolved_model, quantize, find_local_dir=find_local_dir, model_name=model_name)
 
 
 def _cuda_clip_fit(

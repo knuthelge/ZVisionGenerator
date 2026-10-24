@@ -11,6 +11,14 @@ from zvisiongenerator.utils.model_memory import estimate_ltx_cuda_system_memory
 
 _GIB = 1024**3
 _CONFIG = {"video_model_presets": {"ltx": {"diffusers": {"transformer": {"repo": "owner/ckpt", "filename": "ckpt.safetensors"}}}}}
+_VERSION_CONFIG = {
+    "video_model_presets": {
+        "ltx": {
+            "diffusers": {"transformer": {"repo": "owner/ckpt", "filename": "ckpt.safetensors"}},
+            "versions": {"ltx25": {"aliases": ["ltx25-4"], "diffusers": {"default_repo": "owner/ltx25@abc123", "transformer": None, "quantize": {"ltx25-4": 4}}}},
+        }
+    }
+}
 
 
 @pytest.fixture()
@@ -47,6 +55,25 @@ class TestCachedLtxSystemEstimate:
         assert estimate is not None and estimate.quantize == 4
         assert header_counts == [tmp_path / "ckpt.safetensors"]
 
+    def test_a_version_without_a_single_file_transformer_reads_the_repos_own(self, header_counts, monkeypatch, tmp_path):
+        def _unexpected(repo_id, filename, **kwargs):
+            raise AssertionError("no single-file transformer is configured for the version")
+
+        monkeypatch.setattr("huggingface_hub.try_to_load_from_cache", _unexpected)
+
+        estimate = memory_estimate.cached_ltx_system_estimate(_VERSION_CONFIG, "owner/ltx25@abc123", 4, model_name="ltx25-4", find_local_dir=lambda reference: tmp_path)
+
+        assert estimate is not None and estimate.quantize == 4
+        assert header_counts == [tmp_path / "transformer"]
+
+    def test_the_family_single_file_transformer_still_serves_a_2_3_alias_in_a_version_config(self, header_counts, monkeypatch, tmp_path):
+        monkeypatch.setattr("huggingface_hub.try_to_load_from_cache", lambda repo_id, filename: str(tmp_path / filename) if (repo_id, filename) == ("owner/ckpt", "ckpt.safetensors") else None)
+
+        estimate = memory_estimate.cached_ltx_system_estimate(_VERSION_CONFIG, "owner/ltx", 4, model_name="ltx-4", find_local_dir=lambda reference: tmp_path)
+
+        assert estimate is not None
+        assert header_counts == [tmp_path / "ckpt.safetensors"]
+
     def test_uses_the_repos_own_transformer_when_no_single_file_is_configured(self, header_counts, tmp_path):
         estimate = memory_estimate.cached_ltx_system_estimate({}, "owner/ltx", 8, find_local_dir=lambda reference: tmp_path)
 
@@ -70,3 +97,37 @@ class TestCachedLtxSystemEstimate:
         monkeypatch.setattr(memory_estimate.weights, "transformer_elements", _broken)
 
         assert memory_estimate.cached_ltx_system_estimate({}, "owner/ltx", 4, find_local_dir=lambda reference: tmp_path) is None
+
+
+class TestCachedHubFile:
+    def test_a_plain_repo_is_looked_up_without_a_revision(self, monkeypatch):
+        calls: list[tuple] = []
+        monkeypatch.setattr("huggingface_hub.try_to_load_from_cache", lambda *args, **kwargs: calls.append((args, kwargs)) or "/cache/ckpt.safetensors")
+
+        assert memory_estimate._cached_hub_file("owner/ckpt", "ckpt.safetensors") == Path("/cache/ckpt.safetensors")
+        assert calls == [(("owner/ckpt", "ckpt.safetensors"), {})]
+
+    def test_a_pinned_repo_is_looked_up_at_its_revision(self, monkeypatch):
+        calls: list[tuple] = []
+        monkeypatch.setattr("huggingface_hub.try_to_load_from_cache", lambda *args, **kwargs: calls.append((args, kwargs)) or "/cache/ckpt.safetensors")
+
+        assert memory_estimate._cached_hub_file("owner/ckpt@abc123", "ckpt.safetensors") == Path("/cache/ckpt.safetensors")
+        assert calls == [(("owner/ckpt", "ckpt.safetensors"), {"revision": "abc123"})]
+
+    def test_a_file_missing_from_the_cache_is_unknown(self, monkeypatch):
+        monkeypatch.setattr("huggingface_hub.try_to_load_from_cache", lambda *args, **kwargs: None)
+
+        assert memory_estimate._cached_hub_file("owner/ckpt@abc123", "ckpt.safetensors") is None
+
+
+class TestLtx25Estimate:
+    def test_the_q4_estimate_from_the_models_header_counts_is_21_08_gib_taking_turns(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(memory_estimate.weights, "transformer_elements", lambda source: (18_555_076_608, 432_782_592))
+        monkeypatch.setattr(memory_estimate.weights, "component_elements", lambda folder: 3_172_227_584)
+        monkeypatch.setattr(memory_estimate.weights, "text_encoder_bytes", lambda folder: 13_019_512_880)
+
+        estimate = memory_estimate.cached_ltx_system_estimate(_VERSION_CONFIG, "owner/ltx25@abc123", 4, model_name="ltx25-4", find_local_dir=lambda reference: tmp_path)
+
+        assert estimate is not None
+        assert round(estimate.taking_turns / _GIB, 2) == 21.08
+        assert round(estimate.together / _GIB, 2) == 30.81

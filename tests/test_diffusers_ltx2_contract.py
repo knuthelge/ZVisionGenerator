@@ -9,9 +9,18 @@ from __future__ import annotations
 import dataclasses
 import inspect
 
+import numpy as np
 import torch
-from diffusers import AutoencoderKLLTX2Audio, LTX2ConditionPipeline, LTX2VideoTransformer3DModel
+from diffusers import (
+    AutoencoderKLLTX2Audio,
+    LTX2ConditionPipeline,
+    LTX2ImageToVideoPipeline,
+    LTX2Pipeline,
+    LTX2VideoTransformer3DModel,
+    LTXEulerAncestralRFScheduler,
+)
 from diffusers.pipelines.ltx2.pipeline_ltx2_condition import LTX2VideoCondition
+from diffusers.pipelines.ltx2.utils import DISTILLED_SIGMA_VALUES, LTX2_5_IMAGE_CRF, apply_image_conditioning_crf, resolve_default_image_crf
 
 
 def _parameters(callable_obj) -> set[str]:
@@ -98,3 +107,44 @@ def test_the_transformer_takes_the_audio_timestep_per_token_and_equal_values_mat
     pinned = sigma.reshape(1, 1).expand(1, 5).clone()
     pinned[:, :2] = 0
     assert not torch.allclose(run(pinned)[:, :2], per_sample[:, :2])
+
+
+def test_the_ancestral_scheduler_keeps_the_terminal_timestep_so_the_sampler_trims_it():
+    scheduler = LTXEulerAncestralRFScheduler()
+    scheduler.set_timesteps(sigmas=[*DISTILLED_SIGMA_VALUES, 0.0], device="cpu")
+    assert len(scheduler.sigmas) == len(DISTILLED_SIGMA_VALUES) + 1
+    assert len(scheduler.timesteps) == len(DISTILLED_SIGMA_VALUES) + 1  # a forward at t = 0 unless trimmed
+    assert float(scheduler.timesteps[-1]) == 0.0
+
+
+def test_the_ancestral_scheduler_set_timesteps_takes_sigmas_and_mu_and_step_takes_a_generator():
+    assert {"sigmas", "device", "mu"} <= _parameters(LTXEulerAncestralRFScheduler.set_timesteps)
+    assert {"model_output", "timestep", "sample", "generator", "return_dict"} <= _parameters(LTXEulerAncestralRFScheduler.step)
+    config = LTXEulerAncestralRFScheduler().config
+    assert {"num_train_timesteps", "eta", "s_noise"} <= set(config)
+
+
+def test_the_ancestral_scheduler_final_step_is_the_denoised_sample_and_set_begin_index_exists():
+    scheduler = LTXEulerAncestralRFScheduler(eta=1.0, s_noise=1.0)
+    scheduler.set_timesteps(sigmas=[1.0, 0.5, 0.0], device="cpu")
+    scheduler.set_begin_index(0)
+    sample, velocity = torch.ones(1, 2), torch.full((1, 2), 0.25)
+    generator = torch.Generator(device="cpu").manual_seed(0)
+    mid = scheduler.step(velocity, scheduler.timesteps[0], sample, generator=generator, return_dict=False)[0]
+    last = scheduler.step(velocity, scheduler.timesteps[1], mid, generator=generator, return_dict=False)[0]
+    assert torch.allclose(last, mid - 0.5 * velocity)
+
+
+def test_the_three_ltx2_pipelines_list_the_optional_components_and_take_no_diffusion_decoder():
+    for pipeline in (LTX2Pipeline, LTX2ImageToVideoPipeline, LTX2ConditionPipeline):
+        assert {"processor", "prompt_enhancer", "duration_head"} <= set(pipeline._optional_components)  # noqa: SLF001
+        parameters = _parameters(pipeline.__init__)
+        assert {"processor", "prompt_enhancer", "duration_head"} <= parameters
+        assert "diffusion_decoder" not in parameters
+
+
+def test_the_image_conditioning_crf_defaults_and_zero_skips_recompression():
+    assert resolve_default_image_crf(None) == 33
+    assert LTX2_5_IMAGE_CRF == 18
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+    assert apply_image_conditioning_crf(image, 0) is image

@@ -501,6 +501,45 @@ class TestEstimateLtxCudaSystemMemory:
         assert estimate.taking_turns == 15 * _GIB + runtime
         assert estimate.together == 25 * _GIB + runtime
 
+    def test_the_ltx_2_5_q4_estimate_from_its_header_counts(self):
+        estimate = estimate_ltx_cuda_system_memory(block_matrices=18_555_076_608, transformer_rest=432_782_592, connectors=3_172_227_584, text_encoder=13_019_512_880, quantize=4)
+
+        assert round(estimate.taking_turns / _GIB, 2) == 21.08
+        assert round(estimate.together / _GIB, 2) == 30.81
+
+    @pytest.mark.parametrize(
+        ("quantize", "taking_turns", "together"),
+        [(4, 22_815_172_976, 33_261_754_346), (8, 29_037_278_208, 42_237_772_656)],
+    )
+    def test_the_ltx_2_3_estimates_are_unchanged(self, quantize, taking_turns, together):
+        estimate = estimate_ltx_cuda_system_memory(block_matrices=18_555_076_608, transformer_rest=433_761_536, connectors=3_172_227_584, text_encoder=13_200_494_448, quantize=quantize)
+
+        assert (estimate.taking_turns, estimate.together) == (taking_turns, together)
+
+
+class TestLtxCudaSystemMemory:
+    _CONFIG = {
+        "video_model_presets": {
+            "ltx": {
+                "diffusers": {"quantize": {"ltx-4": 4, "ltx-8": 8}},
+                "versions": {"ltx25": {"aliases": ["ltx25-4"], "diffusers": {"quantize": {"ltx25-4": 4}}}},
+            }
+        }
+    }
+
+    @pytest.mark.parametrize(("model_name", "quantize"), [("ltx-4", 4), ("ltx-8", 8), ("ltx25-4", 4)])
+    def test_the_model_name_and_its_level_reach_the_estimate(self, monkeypatch, model_name, quantize):
+        import zvisiongenerator.backends as backends
+
+        calls: list[tuple] = []
+        monkeypatch.setattr(backends, "estimate_ltx_system_memory", lambda *args, **kwargs: calls.append((args, kwargs)) or "estimate")
+
+        assert model_memory.ltx_cuda_system_memory("owner/ltx", model_name, self._CONFIG, lambda reference: None) == "estimate"
+
+        ((args, kwargs),) = calls
+        assert args[1:] == ("owner/ltx", quantize)
+        assert kwargs["model_name"] == model_name
+
 
 class TestEstimateLtxCudaClipMemory:
     _SYSTEM = model_memory.LtxCudaMemoryEstimate(text_encoder_bytes=12 * _GIB, transformer_bytes=10 * _GIB, resident_bytes=3 * _GIB)

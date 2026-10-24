@@ -11,6 +11,7 @@ from zvisiongenerator.utils.config import ltx_transformer_source
 from zvisiongenerator.utils.ltx_converted import read_converted_ltx
 from zvisiongenerator.utils.model_files import find_local_model_dir
 from zvisiongenerator.utils.model_memory import LtxCudaMemoryEstimate, estimate_ltx_cuda_system_memory
+from zvisiongenerator.utils.paths import split_huggingface_revision
 
 __all__ = ["cached_ltx_system_estimate", "converted_ltx_system_estimate", "ltx_system_estimate"]
 
@@ -46,6 +47,7 @@ def cached_ltx_system_estimate(
     resolved_model: str,
     quantize: int,
     *,
+    model_name: str | None = None,
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
 ) -> LtxCudaMemoryEstimate | None:
     """Estimate LTX's system memory from files already on disk, or return ``None`` when some are missing.
@@ -56,6 +58,8 @@ def cached_ltx_system_estimate(
         config: The loaded config, which names the single-file transformer.
         resolved_model: The model's resolved path (a local directory or a Hugging Face repo id).
         quantize: 4 or 8; a converted folder is estimated at its own level.
+        model_name: The picked model alias, which selects the version whose transformer source is read. A version
+            that uses the repo's own transformer has no single-file source.
         find_local_dir: Locates a downloaded model directory.
     """
     repo_dir = find_local_dir(resolved_model)
@@ -67,7 +71,7 @@ def cached_ltx_system_estimate(
             return converted_ltx_system_estimate(repo_dir, converted)
         except OSError, ValueError, KeyError, TypeError:
             return None
-    source = ltx_transformer_source(config)
+    source = ltx_transformer_source(config, model_name)
     transformer_input = _cached_hub_file(*source) if source else repo_dir / "transformer"
     if transformer_input is None:
         return None
@@ -78,8 +82,12 @@ def cached_ltx_system_estimate(
 
 
 def _cached_hub_file(repo_id: str, filename: str) -> Path | None:
-    """Return the local path of a Hugging Face Hub file if it is in the cache, without downloading."""
+    """Return the local path of a Hugging Face Hub file if it is in the cache, without downloading.
+
+    *repo_id* may carry a pinned revision (``owner/repo@revision``), which is looked up in the cache.
+    """
     from huggingface_hub import try_to_load_from_cache
 
-    cached = try_to_load_from_cache(repo_id, filename)
+    repo_id, revision = split_huggingface_revision(repo_id)
+    cached = try_to_load_from_cache(repo_id, filename) if revision is None else try_to_load_from_cache(repo_id, filename, revision=revision)
     return Path(cached) if isinstance(cached, str) else None

@@ -100,6 +100,12 @@ model_aliases:
     darwin: "dgrauet/ltx-2.3-mlx-q4"
     win32: "${video_model_presets.ltx.diffusers.default_repo}"
     linux: "${video_model_presets.ltx.diffusers.default_repo}"
+  # LTX-2.5 (video_model_presets.ltx.versions.ltx25): Windows/Linux only for now.
+  ltx25-4:
+    darwin:
+      message: "LTX-2.5 (ltx25-4) is not available on macOS yet. Use ltx-4 or ltx-8."
+    win32: "${video_model_presets.ltx.versions.ltx25.diffusers.default_repo}"
+    linux: "${video_model_presets.ltx.versions.ltx25.diffusers.default_repo}"
   zit: "Tongyi-MAI/Z-Image-Turbo"
   # klein9b: ungated mirror of black-forest-labs/FLUX.2-klein-9B, weights checked by sha256.
   klein9b: "unsloth/FLUX.2-klein-9B"
@@ -171,6 +177,8 @@ model_labels:
     name: "LTX-2.3 8-bit"
   ltx-4:
     name: "LTX-2.3 4-bit"
+  ltx25-4:
+    name: "LTX-2.5 4-bit"
 
 # First-run dialog: the model it preselects. large_model is for machines with at least min_memory_gb of memory
 # (unified memory on Apple Silicon, VRAM on a CUDA card); every other machine gets small_model.
@@ -317,6 +325,23 @@ video_model_presets:
     mlx_base:
       q4: "dgrauet/ltx-2.3-mlx-q4"
       q8: "dgrauet/ltx-2.3-mlx-q8"
+    # Per-version overlays: a version's block is merged over this family preset for the aliases it lists
+    # (CLI flags > version > family > global). The family block above is LTX-2.3.
+    versions:
+      ltx25:
+        aliases: [ltx25-4]
+        diffusers:
+          # Ungated, byte-identical copy of Lightricks/LTX-2.5-Diffusers (bf16 despite its name), pinned.
+          default_repo: "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2"
+          transformer: null # the repo's own transformer folder
+          quantize:
+            ltx25-4: 4
+          latent_upsampler:
+            repo: "${video_model_presets.ltx.versions.ltx25.diffusers.default_repo}"
+            filename: "latent_upsampler/diffusion_pytorch_model.safetensors"
+          repo_ignore: ["LTX-2.5-*.safetensors", "samples/*"] # root single-file checkpoints (69 GB) and samples
+          image_crf: 18 # i2v conditioning image, re-compressed before the fit
+          sampler: euler_ancestral # upstream distilled sampler; step noise from seed + 10000 / + 20000
 
 # --- Prompt enhancer (local LLM) ---
 

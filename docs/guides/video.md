@@ -8,16 +8,22 @@ Generate videos from text prompts or images using `ziv-video` or the Web UI.
 |---|---|---|---|
 | `ltx-4` | LTX-2.3, 4-bit: needs the least memory | macOS, Windows, Linux | ✅ |
 | `ltx-8` | LTX-2.3, 8-bit: closer to the full model, needs more memory | macOS, Windows, Linux | ✅ |
+| `ltx25-4` | LTX-2.5, 4-bit: the newer LTX, with the memory need of `ltx-4` | Windows, Linux | ✅ |
+
+`ltx25-4` is not available on macOS yet; there it stops with a message pointing to `ltx-4` and `ltx-8`. The LTX-2.3 aliases are unchanged.
 
 See [Image Guide → Model Aliases](image.md#model-aliases) for the full alias list.
 
 ## Quick Start
 
-Use `MODEL` below as `ltx-4` or `ltx-8` (4-bit or 8-bit) on every platform.
+Use `MODEL` below as `ltx-4` or `ltx-8` (4-bit or 8-bit) on every platform, or `ltx25-4` on Windows and Linux.
 
 ```bash
 # Text-to-video with LTX (4-bit)
 ziv-video -m ltx-4 --prompt "A cat walking through a garden"
+
+# Text-to-video with LTX-2.5 (Windows and Linux)
+ziv-video -m ltx25-4 --prompt "A cat walking through a garden"
 
 # Image-to-video with your platform alias
 ziv-video -m MODEL --image photo.jpg --prompt "Camera slowly zooms in"
@@ -208,7 +214,7 @@ Use `-W` / `-H` to override with exact pixel dimensions.
 
 ## LTX Constraints
 
-LTX-2.3 has specific alignment requirements that are auto-corrected with a warning:
+LTX has specific alignment requirements that are auto-corrected with a warning:
 
 - **Resolution**: width and height must be divisible by 32 (64 when using `--upscale`)
 - **Frames**: must follow 8k+1 pattern (9, 17, 25, 33, 41, 49, ..., 97, 121). In the Web UI you set **Duration (s)** instead: it snaps to the nearest valid frame count at the model's frame rate (5 s at 24 fps is 121 frames), shows that count next to it, and has no upper limit. Longer clips need more memory (see [Memory Check](#memory-check))
@@ -217,10 +223,20 @@ LTX-2.3 has specific alignment requirements that are auto-corrected with a warni
 
 On Windows and Linux:
 
-- **Memory** — `ltx-4` needs about 20 GB of system memory and `ltx-8` about 27 GB; on a 32 GB machine use `ltx-4`. A model that cannot fit stops with an error before it loads. On a 32 GB machine each new prompt takes a little longer than repeating one (`-r`, or several seeds).
+- **Memory** — `ltx-4` needs about 20 GB of system memory and `ltx-8` about 27 GB; on a 32 GB machine use `ltx-4` or `ltx25-4` (about 21 GB). A model that cannot fit stops with an error before it loads. On a 32 GB machine each new prompt takes a little longer than repeating one (`-r`, or several seeds).
 - **Length** — on a 10 GB GPU with `ltx-4`, clips up to 20 s at M, 15 s at L and 10 s at XL fit, with or without `--upscale 2`.
-- **First run** — the first run of each model downloads it and prepares it for your GPU, which takes a while. Later runs start much faster.
+- **First run** — the first run of each model downloads it and prepares it for your GPU, which takes a while. Later runs start much faster. For `ltx25-4` the download is about 71 GB, and the prepared copy takes about 22 GiB more on disk.
 - **Steps** — at most 8 (`--steps`).
+
+## LTX-2.5
+
+`ltx25-4` runs LTX-2.5, the newer LTX model, on Windows and Linux with an NVIDIA GPU. It uses the same 4-bit transformer path as `ltx-4`, so it fits the same machines: a 10 GB GPU with 30 GB of system memory.
+
+- **Download** — the weights come from an ungated repository, so no Hugging Face token is needed. The download is about 71 GB. The first run then prepares a 4-bit transformer and an FP8 text encoder from it, about 22 GiB on disk, and later runs reuse them.
+- **Speed and memory** — as a typical figure, a 5 s clip with audio at 1280×704 with `--upscale 2` took about 200 s on an RTX 3080 10 GB with 30 GB of system memory, and system memory peaked at about 21 GiB. That is the same as `ltx-4` on that machine. Your time depends on the GPU.
+- **Sampler** — text to video and image to video use LTX-2.5's own distilled sampler, which adds fresh noise at every step: 8 steps, plus 3 more with `--upscale 2`. A repeated seed gives the same video. **Extend** on `ltx25-4` uses the plain deterministic sampler instead, as `ltx-4` does.
+- **Image to video** — the input image is re-compressed at a higher quality than LTX-2.3 uses before it is resized, as LTX-2.5 expects.
+- **Not available** — macOS (use `ltx-4` or `ltx-8`), an 8-bit level, and converting LTX-2.5 fine-tunes.
 
 ## Memory Check
 
@@ -235,8 +251,8 @@ The estimate grows with the number of frames and the pixels per frame. On macOS 
 
 `ziv-video` auto-detects the model family from supported model values:
 
-- **Aliases** — `ltx-4` and `ltx-8`
-- **Supported repo IDs** — known LTX prefixes such as `dgrauet/ltx*` and `Lightricks/LTX-Video*`
+- **Aliases** — `ltx-4` and `ltx-8`, and `ltx25-4` on Windows and Linux
+- **Supported repo IDs** — known LTX prefixes such as `dgrauet/ltx*`, `Lightricks/LTX-Video*` and `unsloth/LTX-2.5*`
 - **Local paths** — local paths containing `ltx` are treated as LTX candidates, including Windows-style path strings on any host
 - **Converted models** — LTX folders are also recognised by their contents, so a fine-tune converted with `ziv-model model --model-type ltx-2.3` (see [LTX-2.3 video fine-tunes](model.md#ltx-23-video-fine-tunes)) runs by its name, whatever it is called
 
@@ -247,9 +263,9 @@ Runtime `--lora` values must be local LoRA files or bare LoRA names that resolve
 ## Common Platform Errors
 
 - `LTX at q8 needs about 27 GB of system memory; this machine has 16 GB. Use ltx-4 instead.` (Windows/Linux): pick the level the message names; `ltx-4` needs the least memory.
-- `LTX on Windows/Linux runs 4-bit or 8-bit...`: the diffusers backend only loads LTX at a quantize level; use `ltx-4` or `ltx-8` instead of the repository ID.
+- `LTX on Windows/Linux runs 4-bit or 8-bit...`: the diffusers backend only loads LTX at a quantize level; use `ltx-4`, `ltx-8` or `ltx25-4` instead of the repository ID.
 - `CUDA is not available...`: the diffusers video backend requires an NVIDIA CUDA device on Windows and Linux. When the message says to update the driver, install NVIDIA driver 580 or newer.
-- `Could not detect video model family...`: use an alias (`ltx-4` or `ltx-8`), a converted LTX model, a known/configured LTX repo ID, or a local path containing `ltx`.
+- `Could not detect video model family...`: use an alias (`ltx-4`, `ltx-8` or `ltx25-4`), a converted LTX model, a known/configured LTX repo ID, or a local path containing `ltx`.
 
 ## Related Guides
 

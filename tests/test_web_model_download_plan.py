@@ -196,6 +196,19 @@ class TestDownloadNeeded:
         present.update({"owner/ltx-transformer", "owner/ltx-up"})
         assert row_download_needed("model", "ltx-8", web_config, downloaded=True, present=_present) is False
 
+    def test_the_ltx25_row_plans_one_pinned_target_and_is_needed_until_it_is_present(self, env, monkeypatch):
+        from zvisiongenerator.utils.config import load_config
+
+        monkeypatch.setattr("zvisiongenerator.backends.sys.platform", "linux")
+        config = load_config()
+        pin = config["model_aliases"]["ltx25-4"]["linux"]
+        web_config = _web_config(env, video=[_video("ltx25-4", pin)], app_config=config)
+        target = DownloadTarget("unsloth/LTX-2.5-FP8", "7b40724fc39bbb01d9b4d72638c0d263531c88c2", None, ("LTX-2.5-*.safetensors", "samples/*"))
+
+        assert row_plan("model", "ltx25-4", web_config).targets == (target,)
+        assert row_download_needed("model", "ltx25-4", web_config, downloaded=True, present=lambda t: False) is True
+        assert row_download_needed("model", "ltx25-4", web_config, downloaded=True, present=lambda t: t == target) is False
+
     def test_a_video_plan_that_cannot_be_made_falls_back_to_the_downloaded_status(self, env, monkeypatch):
         monkeypatch.setattr(plan_module, "video_plan", lambda *a, **k: None)
         web_config = _web_config(env, video=[_video("ltx-8", "owner/ltx")])

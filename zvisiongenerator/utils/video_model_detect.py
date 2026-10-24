@@ -30,6 +30,7 @@ _VIDEO_MODEL_MAP: dict[str, tuple[str, str, bool, int, int, int]] = {
     "dgrauet/ltx": ("ltx", "ltx", True, 24, 8, 32),
     "diffusers/ltx-2.3-distilled-diffusers": ("ltx", "ltx", True, 24, 8, 32),
     "lightricks/ltx-video": ("ltx", "ltx", True, 24, 8, 32),
+    "unsloth/ltx-2.5": ("ltx", "ltx", True, 24, 8, 32),
 }
 
 
