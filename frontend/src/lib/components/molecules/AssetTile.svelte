@@ -44,7 +44,7 @@
 
   const isVideo = $derived(asset.media_type === 'video');
   const canReuse = $derived(asset.has_reusable_config === true);
-  const menuItems = $derived(assetMenuEntries(asset, { onreference, onextend, onupscale, ondelete }, deleting, referenceUnavailable));
+  const menuItems = $derived(assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, ondelete }, deleting, referenceUnavailable));
   // Stage videos play inline, so previewing goes through the expand action instead of the media.
   const inlineVideo = $derived(density === 'stage' && isVideo);
   // The stage shows the full-resolution file; small tiles use the thumbnail.
@@ -216,8 +216,10 @@
   @media (hover: hover) { .asset-tile:hover::after { opacity: 1; } }
   @media (hover: none) {
     .asset-tile-actions { opacity: 1; pointer-events: auto; }
-    /* A small tile has room for one button under a finger: ⋯ stays, and a tap on the tile opens it fullscreen. */
-    .asset-tile[data-density='compact'] .asset-tile-action:not(:last-child) { display: none; }
+    /* A grid or strip tile has room for one button under a finger: ⋯ stays (Reuse leads its menu), and a tap on
+       the tile opens it fullscreen. The stage keeps its buttons; it is the screen. */
+    .asset-tile[data-density='compact'] .asset-tile-action:not(:last-child),
+    .asset-tile[data-density='card'] .asset-tile-action:not(:last-child) { display: none; }
     .asset-tile[data-density='stage'][data-video='false'] .asset-tile-expand { display: none; }
     .asset-tile[data-density='stage'] .asset-tile-actions { top: 8px; right: 8px; gap: 6px; }
     .asset-tile[data-density='stage'] .asset-tile-action { width: 36px; height: 36px; box-shadow: 0 1px 6px var(--color-scrim); }

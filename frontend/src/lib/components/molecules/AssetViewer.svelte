@@ -26,9 +26,8 @@
   import type { GalleryAsset, UpscaleFactor } from '$lib/types';
   import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
   import { assetDetailSections, fileName, type DetailFact } from './assetDetails';
-  import { referenceEntries, upscaleEntries } from './assetMenu';
+  import { assetMenuEntries, referenceEntries, upscaleEntries } from './assetMenu';
   import { VIEWER_SHORTCUTS, stepUpscaleChord, viewerActionFor, type ViewerAction } from './viewerShortcuts';
-  import { assetMenuEntries } from './assetMenu';
   import { layout } from '$lib/state/layoutMode.svelte';
   import { sheetDrag } from '$lib/actions/sheetDrag';
   import { FIT, actualPixelsScale, clampPan, settleZoom, zoomAt, type Zoom } from './viewerZoom';
@@ -115,12 +114,15 @@
   const compact = $derived(layout.compact);
   let moreOpen = $state(false);
   let moreButton = $state<HTMLButtonElement | null>(null);
-  const moreItems = $derived<ActionMenuEntry[]>(asset ? [
-    ...(onreuse ? [{ kind: 'item' as const, id: 'reuse', label: 'Reuse settings', disabled: !canReuse, title: canReuse ? undefined : 'Reusable settings unavailable', onselect: () => onreuse(asset) }] : []),
-    ...(asset.prompt ? [{ kind: 'item' as const, id: 'copy-prompt', label: 'Copy the prompt', onselect: () => void copyPrompt(asset.prompt!) }] : []),
-    { kind: 'separator' as const },
-    ...assetMenuEntries(asset, { onreference, onextend, onupscale, ondelete }, deleting, referenceUnavailable),
-  ] : []);
+  const moreItems = $derived.by<ActionMenuEntry[]>(() => {
+    if (!asset) return [];
+    const entries = assetMenuEntries(asset, { onreuse, onreference, onextend, onupscale, ondelete }, deleting, referenceUnavailable);
+    if (!asset.prompt) return entries;
+    const copy: ActionMenuEntry = { kind: 'item', id: 'copy-prompt', label: 'Copy the prompt', onselect: () => void copyPrompt(asset.prompt!) };
+    // Copy the prompt sits with Reuse at the top, before the first separator.
+    if (onreuse) return [entries[0], copy, ...entries.slice(1)];
+    return [copy, { kind: 'separator' }, ...entries];
+  });
   // --- Touch and zoom ---
   // A finger, at any width: a swipe moves between assets or (down) closes, a pinch or a double tap zooms an image,
   // and a zoomed image pans under one finger. A mouse click shows an image at its real pixels; a drag then pans it.

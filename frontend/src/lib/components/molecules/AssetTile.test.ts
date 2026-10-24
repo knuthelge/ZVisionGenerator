@@ -77,6 +77,24 @@ describe('AssetTile', () => {
     expect((target.querySelector('button[aria-label="Reusable settings unavailable"]') as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('leads the menu with Reuse settings when reuse is offered, disabled without a reusable config', () => {
+    const onreuse = vi.fn();
+    const asset = makeAsset();
+    mountTile({ asset, onreuse, ondelete: vi.fn() });
+    openMenu(asset);
+    expect(menuActions()).toEqual(['reuse', 'download', 'delete']);
+    (document.querySelector('[data-action="reuse"]') as HTMLButtonElement).click();
+    expect(onreuse).toHaveBeenCalledWith(asset);
+    flushSync();
+
+    const plain = makeAsset({ id: 'out/b.png', filename: 'b.png', has_reusable_config: false });
+    app && unmount(app);
+    app = null;
+    mountTile({ asset: plain, onreuse });
+    openMenu(plain);
+    expect(document.querySelector('[data-action="reuse"]')?.getAttribute('aria-disabled')).toBe('true');
+  });
+
   it('offers reference, download and delete for images in the overflow menu', () => {
     const asset = makeAsset();
     const onreference = vi.fn();

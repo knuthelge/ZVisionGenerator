@@ -1,6 +1,6 @@
 # Stable frames: the frame first, pages remember, anchors do not move
 
-**Status:** In progress (2026-10-24)
+**Status:** Done (2026-10-24, unreleased). Seven of the eight stages shipped, one commit each (stage 6 was dropped after review); checked frame by frame in headless Chrome at a phone size (the stage keeps its height from the first frame on a return to the Workspace, and Back closes the drawer and sheets without leaving the page).
 
 ## Problem
 
@@ -36,7 +36,7 @@ Each stage is one commit that rebuilds the SPA and passes `make check`.
 3. **Admin shell.** Always render the page bar's actions, disabled while loading.
 4. **Gallery store and scroll restore.** Assets, filter, sort and loaded pages move to a store; a return shows the grid at once and refreshes page one in the background. A first-ever load shows placeholder tiles in the grid instead of a spinner.
 5. **Models and Config stores.** The same pattern; the inventory refreshes in the background and after downloads, the config after a save.
-6. **Back closes overlays.** Opening a sheet or the drawer pushes a history entry, so the Android back gesture and the browser's back button close it instead of leaving the page.
+6. **Back closes overlays.** *Dropped after review (2026-10-24): the history entry behind it raced every navigation made as a layer closed. Sheets, menus and the viewer close by pull-down, ✕, a tap outside and Escape.*
 7. **Quieter tiles on touch.** On a coarse pointer a tile shows only the ⋯ action; expand and reuse live in the menu, on tap and on hold. Desktop hover stays as it is.
 8. **Docs and changelog.** The three rules in `docs/development.md`, a changelog entry per stage.
 

@@ -318,7 +318,7 @@ describe('GalleryPage regressions', () => {
 
     (target.querySelector(`button[aria-label="More actions for ${asset.filename}"]`) as HTMLButtonElement).click();
     flushSync();
-    expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['extend', 'download', 'delete']);
+    expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['reuse', 'extend', 'download', 'delete']);
     (document.querySelector('[role="menu"] [data-action="extend"]') as HTMLButtonElement).click();
 
     expect(routerMocks.navigate).toHaveBeenCalledWith('workspace', {

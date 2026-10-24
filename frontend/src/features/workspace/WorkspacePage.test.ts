@@ -5190,7 +5190,7 @@ describe('WorkspacePage extend', () => {
       const asset = clip();
       await mountWithClip(asset);
       openMenu(asset);
-      expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['extend', 'download', 'delete']);
+      expect(Array.from(document.querySelectorAll('[role="menu"] [role="menuitem"]')).map((item) => item.getAttribute('data-action'))).toEqual(['reuse', 'extend', 'download', 'delete']);
     });
 
     it('turns the Workspace to Extend Video with the clip as source, its scene in the boxes, and checks it', async () => {

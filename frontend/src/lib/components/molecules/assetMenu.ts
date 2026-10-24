@@ -2,7 +2,12 @@ import { canExtend, canUseAsReference, extendReason, seedvr2Options, upscaleFact
 import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 import type { ActionMenuEntry } from './ActionMenu.svelte';
 
-/** Build the secondary actions for an asset: reference, extend, upscale, download, delete. */
+/**
+ * Build the actions for an asset's menu: reuse, reference, extend, upscale, download, delete.
+ *
+ * Reuse leads when offered: on a touch screen a grid tile shows only the menu button, so the menu is where the
+ * tile's quick action lives.
+ */
 export function assetMenuEntries(
   asset: GalleryAsset,
   handlers: AssetActionHandlers,
@@ -10,7 +15,14 @@ export function assetMenuEntries(
   referenceUnavailable: Partial<Record<ReferenceTarget, string>> = {}
 ): ActionMenuEntry[] {
   const entries: ActionMenuEntry[] = [];
-  const { onreference, onextend, onupscale, ondelete } = handlers;
+  const { onreuse, onreference, onextend, onupscale, ondelete } = handlers;
+  if (onreuse) {
+    const reusable = asset.has_reusable_config === true;
+    entries.push(
+      { kind: 'item', id: 'reuse', label: 'Reuse settings', disabled: !reusable, title: reusable ? undefined : 'Reusable settings unavailable', onselect: () => onreuse(asset) },
+      { kind: 'separator' }
+    );
+  }
   if (onreference && canUseAsReference(asset)) {
     entries.push(
       { kind: 'heading', label: 'Use as reference' },
