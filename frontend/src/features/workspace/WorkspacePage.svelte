@@ -893,7 +893,7 @@
     // with ⇧ they toggle that pane instead, focusing it when it opens.
     function handleKeydown(e: KeyboardEvent): void {
       // The full-screen viewer covers the form; generating behind it would be a surprise.
-      if (e.defaultPrevented || lightboxOpen || hasOpenModal()) return;
+      if (e.defaultPrevented || hasOpenModal()) return;
       if (isCommandKey(e) && !e.altKey && e.key === 'Enter') {
         e.preventDefault();
         // A held key must not queue the same run again and again.

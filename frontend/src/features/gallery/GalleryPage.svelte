@@ -57,8 +57,6 @@
   const emptyState = $derived(assets.length === 0 && !loading && !error);
   const filteredEmptyState = $derived(emptyState && mediaFilter !== 'all');
 
-  // Pending URL-based selection to restore after the first page load.
-  let _pendingSelected: string | null = null;
 
   // View changes and mutations are independent commit authorities. Every request
   // captures both, as well as its exact query, before it may update the UI.
@@ -75,12 +73,6 @@
   let sentinelEl = $state<HTMLDivElement | undefined>(undefined);
 
   onMount(() => {
-    // Record any URL-based selected asset so loadPage can restore it.
-    const params = router.params;
-    if (params.selected) {
-      _pendingSelected = params.selected;
-    }
-
     // Pages remember: the view a previous visit left is drawn at once, scrolled where it was, and page one refreshes
     // behind it; the first visit loads into placeholder tiles.
     const visit = galleryMemory.get();
@@ -97,7 +89,7 @@
     }
 
     _viewGeneration += 1;
-    void loadPageOne(mediaFilter, sortOrder, _viewGeneration, _mutationRevision, true, false, known);
+    void loadPageOne(mediaFilter, sortOrder, _viewGeneration, _mutationRevision, false, known);
     document.addEventListener('keydown', handleGridKeydown);
 
     return () => {
@@ -140,11 +132,9 @@
       && sort === sortOrder;
   }
 
-  function clearActiveAsset(removeRoute = true): void {
+  function clearActiveAsset(): void {
     selectedAsset = null;
     lightboxOpen = false;
-    _pendingSelected = null;
-    if (removeRoute) router.replace('gallery', {});
   }
 
   async function loadPageOne(
@@ -152,7 +142,6 @@
     sort: SortOrder,
     viewGeneration: number,
     mutationRevision: number,
-    restorePendingSelection = false,
     preserveLocalOnError = false,
     keepLoaded = false
   ): Promise<void> {
@@ -185,16 +174,7 @@
       const visibleIds = new Set(assets.map((asset) => asset.id));
       selected = new Set(Array.from(selected).filter((id) => visibleIds.has(id)));
 
-      if (restorePendingSelection && _pendingSelected) {
-        const found = assets.find((a) => a.id === _pendingSelected) ?? null;
-        if (found) {
-          selectedAsset = found;
-          lightboxOpen = true;
-        } else {
-          clearActiveAsset();
-        }
-        _pendingSelected = null;
-      } else if (selectedAsset) {
+      if (selectedAsset) {
         const refreshedActive = assets.find((asset) => asset.id === selectedAsset!.id) ?? null;
         if (refreshedActive) {
           selectedAsset = refreshedActive;
@@ -420,12 +400,11 @@
 
   function refillAfterMutation(): void {
     _refillAfterViewer = false;
-    void loadPageOne(mediaFilter, sortOrder, _viewGeneration, _mutationRevision, false, true);
+    void loadPageOne(mediaFilter, sortOrder, _viewGeneration, _mutationRevision, true);
   }
 
   function selectAsset(asset: GalleryAsset): void {
     selectedAsset = asset;
-    router.replace('gallery', { selected: asset.id });
   }
 
   function openViewer(asset: GalleryAsset, trigger: HTMLElement): void {
@@ -485,7 +464,7 @@
   }
 
   function handleGridKeydown(e: KeyboardEvent): void {
-    if (e.defaultPrevented || lightboxOpen || isTyping(e.target) || hasOpenModal()) return;
+    if (e.defaultPrevented || isTyping(e.target) || hasOpenModal()) return;
     if (isCommandKey(e) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
       if (assets.length === 0) return;
       e.preventDefault();

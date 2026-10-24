@@ -190,7 +190,6 @@ describe('GalleryPage active detail selection behavior', () => {
     card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    expect(routerMocks.replace).toHaveBeenCalledWith('gallery', { selected: asset.id });
     expect(checkbox?.checked).toBe(false);
     expect(target.textContent).toContain(asset.prompt);
   });
@@ -464,50 +463,6 @@ describe('GalleryPage regressions', () => {
     expect(routerMocks.navigate).toHaveBeenCalledWith('workspace');
   });
 
-  it('restores the selected asset from router params after the initial page load', async () => {
-    const asset = makeAsset();
-    routerMocks.params = { selected: asset.id };
-    galleryApiMocks.getGallery.mockResolvedValue({
-      assets: [asset],
-      page: 1,
-      total_pages: 1,
-      total_count: 1,
-    });
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-
-    expect(target.textContent).toContain(asset.prompt);
-  });
-
-  it('restores the selected asset after remount when the router keeps the selected id', async () => {
-    const asset = makeAsset();
-    galleryApiMocks.getGallery.mockResolvedValue({
-      assets: [asset],
-      page: 1,
-      total_pages: 1,
-      total_count: 1,
-    });
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-
-    const card = target.querySelector(`button[aria-label="View ${asset.filename}"]`) as HTMLElement | null;
-    card!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    await settle();
-
-    expect(routerMocks.replace).toHaveBeenCalledWith('gallery', { selected: asset.id });
-    routerMocks.params = { selected: asset.id };
-
-    await unmount(app!);
-    app = null;
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    await settle();
-
-    expect(target.textContent).toContain(asset.prompt);
-  });
-
   it('disconnects the infinite-scroll observer when the page unmounts', async () => {
     const asset = makeAsset();
     galleryApiMocks.getGallery.mockResolvedValue({
@@ -687,8 +642,6 @@ describe('GalleryPage lightbox navigation (REC-UX-003)', () => {
     nextBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
 
-    // Gallery route is updated to reflect the new selection
-    expect(routerMocks.replace).toHaveBeenCalledWith('gallery', { selected: assetB.id });
   });
 
   it('ArrowRight keyboard event navigates to the next asset in the lightbox', async () => {
@@ -717,7 +670,6 @@ describe('GalleryPage lightbox navigation (REC-UX-003)', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     await settle();
 
-    expect(routerMocks.replace).toHaveBeenCalledWith('gallery', { selected: assetB.id });
   });
 
   it('ArrowLeft keyboard event navigates to the previous asset in the lightbox', async () => {
@@ -747,7 +699,6 @@ describe('GalleryPage lightbox navigation (REC-UX-003)', () => {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     await settle();
 
-    expect(routerMocks.replace).toHaveBeenCalledWith('gallery', { selected: assetA.id });
   });
 
   it('shows both Prev and Next buttons when navigated to a middle asset', async () => {
@@ -1038,7 +989,6 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     await settle();
 
     expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(2, 1, 'video', 'newest');
-    expect(routerMocks.replace).toHaveBeenCalledWith('gallery', {});
     expect(target.textContent).toContain('0 selected');
     expect(getViewer()).toBeNull();
     expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -1054,28 +1004,6 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     queryButtonByName(target, 'Show all media')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     await settle();
     expect(galleryApiMocks.getGallery).toHaveBeenNthCalledWith(5, 1, 'all', 'oldest');
-  });
-
-  it('clears a pending selected route before its initial response can restore stale detail', async () => {
-    const pendingAsset = makeAsset({ id: 'pending.png', filename: 'pending.png' });
-    const video = makeAsset({ id: 'video.mp4', filename: 'video.mp4', media_type: 'video' });
-    const initial = deferred<GalleryPageResponse>();
-    galleryApiMocks.getGallery
-      .mockReturnValueOnce(initial.promise)
-      .mockResolvedValueOnce({ assets: [video], page: 1, total_pages: 1, total_count: 1 });
-    routerMocks.params = { selected: pendingAsset.id };
-
-    app = flushSync(() => mount(GalleryPage, { target }));
-    const filter = target.querySelector('[role="combobox"][aria-label="Filter gallery media"]') as HTMLButtonElement;
-    pickOption(filter, 'video');
-    await settle();
-    initial.resolve({ assets: [pendingAsset], page: 1, total_pages: 1, total_count: 1 });
-    await settle();
-
-    expect(routerMocks.replace).toHaveBeenCalledWith('gallery', {});
-    expect(target.textContent).toContain('video.mp4');
-    expect(target.textContent).not.toContain('pending.png');
-    expect(getViewer()).toBeNull();
   });
 
   it('prevents a stale sort response from resurrecting a successful deletion and refills page one', async () => {
@@ -1199,12 +1127,11 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     deleteAssetFromCard(target, active);
     await settle();
 
-    // The viewer moves on to the next asset, and the selected route follows it.
-    expect(routerMocks.replace).toHaveBeenCalledWith('gallery', { selected: other.id });
+    // The viewer moves on to the next asset.
     expect(getViewer()?.textContent).toContain('other prompt');
     expect(target.textContent).not.toContain('active.png');
 
-    // A non-active deletion leaves a still-present detail and its selected route alone.
+    // A non-active deletion leaves a still-present detail alone.
     (target.querySelector(`button[aria-label="View ${other.filename}"]`) as HTMLElement).dispatchEvent(
       new MouseEvent('click', { bubbles: true })
     );
@@ -1212,7 +1139,6 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     routerMocks.replace.mockReset();
     deleteAssetFromCard(target, nonActiveVictim);
     await settle();
-    expect(routerMocks.replace).not.toHaveBeenCalledWith('gallery', {});
     expect(getViewer()?.textContent).toContain('other prompt');
   });
 
@@ -1267,7 +1193,6 @@ describe('GalleryPage replacement and mutation authority (REQ-4 through REQ-7)',
     expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalled();
     expect(target.textContent).toContain('cancelled.png');
     expect(getViewer()?.textContent).toContain('keep me');
-    expect(routerMocks.replace).not.toHaveBeenCalled();
   });
 
   it('holds pagination at page one during a delete refill, then resumes contiguously from page two', async () => {

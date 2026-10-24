@@ -30,6 +30,7 @@
   import { VIEWER_SHORTCUTS, stepUpscaleChord, viewerActionFor, type ViewerAction } from './viewerShortcuts';
   import { layout } from '$lib/state/layoutMode.svelte';
   import { sheetDrag } from '$lib/actions/sheetDrag';
+  import { pushEscapeLayer } from '$lib/actions/escapeStack';
   import { FIT, actualPixelsScale, clampPan, settleZoom, zoomAt, type Zoom } from './viewerZoom';
 
   interface Props extends Omit<AssetActionHandlers, 'onpreview'> {
@@ -96,6 +97,11 @@
   let closeButton = $state<HTMLButtonElement | null>(null);
   let downloadLink = $state<HTMLAnchorElement | null>(null);
   let helpOpen = $state(false);
+  // The shortcut list is a layer of its own: Escape closes it before the viewer.
+  $effect(() => {
+    if (!helpOpen) return;
+    return pushEscapeLayer(() => { helpOpen = false; });
+  });
 
   const referenceItems = $derived<ActionMenuEntry[]>(
     asset && onreference ? referenceEntries(asset, onreference, referenceUnavailable) : []
@@ -371,6 +377,8 @@
   $effect(() => {
     if (!open) return;
     queueMicrotask(() => closeButton?.focus());
+    // On the overlay stack like every layer: Escape closes it, innermost first (the shortcut list before it).
+    const release = pushEscapeLayer(onclose);
     let upscaleWaitingSince: number | null = null;
     function handleKeydown(e: KeyboardEvent): void {
       // While a menu is open, keys belong to it.
@@ -401,7 +409,10 @@
       if (action && runAction(action)) e.preventDefault();
     }
     document.addEventListener('keydown', handleKeydown);
-    return () => document.removeEventListener('keydown', handleKeydown);
+    return () => {
+      document.removeEventListener('keydown', handleKeydown);
+      release();
+    };
   });
 </script>
 
