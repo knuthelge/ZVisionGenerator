@@ -47,7 +47,7 @@
 
   let selectedAsset = $state<GalleryAsset | null>(null);
   let lightboxOpen = $state(false);
-  let viewerTrigger: HTMLElement | null = null;
+  let viewerTrigger = $state<HTMLElement | null>(null);
 
   const selectedCount = $derived(selected.size);
   const deletableSelectedCount = $derived(
@@ -615,6 +615,7 @@
 
 <AssetViewer
   {assets}
+  origin={viewerTrigger}
   currentIndex={viewerIndex}
   open={lightboxOpen && selectedAsset !== null}
   setLabel="Gallery"

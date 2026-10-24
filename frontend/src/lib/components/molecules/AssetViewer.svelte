@@ -31,6 +31,8 @@
   import { layout } from '$lib/state/layoutMode.svelte';
   import { sheetDrag } from '$lib/actions/sheetDrag';
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
+  import { tick, untrack } from 'svelte';
+  import { FLIGHT_EASING, FLIGHT_MS, fitRect, flightKeyframes, rectOf, usableRect, type Rect } from './viewerFlight';
   import { FIT, actualPixelsScale, clampPan, settleZoom, zoomAt, type Zoom } from './viewerZoom';
 
   interface Props extends Omit<AssetActionHandlers, 'onpreview'> {
@@ -46,6 +48,8 @@
     onnearend?: () => void;
     onclose: () => void;
     onnavigate: (index: number) => void;
+    /** The tile that opened the viewer: the image grows out of it and shrinks back into it. */
+    origin?: HTMLElement | null;
   }
 
   let {
@@ -58,6 +62,7 @@
     onnearend,
     onclose,
     onnavigate,
+    origin = null,
     onreuse,
     onreference,
     onextend,
@@ -147,6 +152,117 @@
     zoom = FIT;
     actualScale = null;
   });
+
+  // --- Open and close from the tile ---
+  // The image grows out of the tile that opened it and shrinks back into it: a copy of its thumbnail flies, fixed over
+  // everything, between the tile's box and the image's box while the viewer itself fades. Until the full image has
+  // loaded, the flown thumbnail stands in for it.
+  type Flight = { rect: Rect; src: string };
+  let flight = $state<Flight | null>(null);
+  let flightEl = $state<HTMLImageElement | null>(null);
+  let phase = $state<'opening' | 'open' | 'closing'>('open');
+  let mediaLoaded = $state(false);
+
+  const viewportSize = () => ({ width: window.innerWidth, height: window.innerHeight });
+  const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /** The tile's box, while it is still on screen. */
+  function originRect(): Rect | null {
+    if (!origin?.isConnected) return null;
+    const rect = rectOf(origin.getBoundingClientRect());
+    return usableRect(rect, viewportSize()) ? rect : null;
+  }
+
+  /** The box of the shown asset's own tile, in the grid or strip the viewer opened from; null when it is off screen. */
+  function shownTileRect(): Rect | null {
+    if (!origin?.isConnected || !asset) return null;
+    const scope = origin.closest('[role="list"], .latest-region, #gallery-view') ?? document;
+    const id = asset.id.replace(/["\\]/g, '\\$&');
+    const tile = scope.querySelector<HTMLElement>(`.asset-tile[data-asset-id="${id}"] .asset-tile-media`);
+    if (!tile) return null;
+    const rect = rectOf(tile.getBoundingClientRect());
+    return usableRect(rect, viewportSize()) ? rect : null;
+  }
+
+  /** The shown media's box: the loaded image or the video, else the thumbnail standing in for the image. */
+  function mediaRect(): Rect | null {
+    const shown = mediaLoaded || asset?.media_type === 'video' ? stageEl?.querySelector('.viewer-media') : flightEl;
+    const rect = shown ? rectOf(shown.getBoundingClientRect()) : null;
+    return usableRect(rect, viewportSize()) ? rect : null;
+  }
+
+  /** The aspect the image will show at: the asset's own size, else the tile's media, else the tile. */
+  function mediaAspect(): number {
+    if (asset?.width && asset.height) return asset.width / asset.height;
+    const media = origin?.querySelector<HTMLImageElement | HTMLVideoElement>('img, video');
+    const width = media instanceof HTMLVideoElement ? media.videoWidth : media?.naturalWidth;
+    const height = media instanceof HTMLVideoElement ? media.videoHeight : media?.naturalHeight;
+    if (width && height) return width / height;
+    const box = originRect();
+    return box ? box.width / box.height : 1;
+  }
+
+  /** Where the fitted media lands: the stage's content box. */
+  function stageContentRect(): Rect | null {
+    if (!stageEl) return null;
+    const box = stageEl.getBoundingClientRect();
+    const style = getComputedStyle(stageEl);
+    const [top, right, bottom, left] = [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft].map((value) => parseFloat(value) || 0);
+    const rect = { left: box.left + left, top: box.top + top, width: box.width - left - right, height: box.height - top - bottom };
+    return usableRect(rect, viewportSize()) ? rect : null;
+  }
+
+  /** Fly the thumbnail from one box to another, then call `done` (at once where the browser cannot animate). */
+  function fly(from: Rect, to: Rect, src: string, done: () => void): void {
+    flight = { rect: to, src };
+    void tick().then(() => {
+      const el = flightEl;
+      if (!el || typeof el.animate !== 'function') { done(); return; }
+      const animation = el.animate(flightKeyframes(from, to), { duration: FLIGHT_MS, easing: FLIGHT_EASING, fill: 'both' });
+      animation.onfinish = done;
+      animation.oncancel = done;
+    });
+  }
+
+  // Opening: the thumbnail flies from the tile to where the image will sit.
+  $effect(() => {
+    if (!open) return;
+    untrack(() => {
+      const shown = asset;
+      // A video has no still to fly (its thumbnail is the video itself), so it fades in and out instead.
+      const from = reduceMotion() || shown?.media_type === 'video' ? null : originRect();
+      const stage = from ? stageContentRect() : null;
+      if (!shown || !from || !stage) { phase = 'open'; return; }
+      phase = 'opening';
+      fly(from, fitRect(stage, mediaAspect()), shown.thumbnail_url || shown.url, () => {
+        phase = 'open';
+        // The thumbnail stays until the image has loaded; a video shows itself at once.
+        if (mediaLoaded || shown.media_type === 'video') flight = null;
+      });
+    });
+    return () => { flight = null; phase = 'open'; };
+  });
+
+  $effect(() => {
+    void asset?.id;
+    mediaLoaded = false;
+  });
+
+  function onMediaLoad(): void {
+    mediaLoaded = true;
+    if (phase === 'open') flight = null;
+    measureActual();
+  }
+
+  /** Close the viewer: the image shrinks back into its own tile first, while that tile is on screen. */
+  function close(): void {
+    if (phase === 'closing') return;
+    const to = reduceMotion() || phase === 'opening' || asset?.media_type === 'video' ? null : shownTileRect();
+    const from = to && asset ? mediaRect() : null;
+    if (!to || !from || !asset) { onclose(); return; }
+    phase = 'closing';
+    fly(from, to, asset.thumbnail_url || asset.url, onclose);
+  }
 
   function measureActual(): void {
     if (!mediaEl) return;
@@ -243,7 +359,7 @@
     lastTap = null;
     if (current.kind !== 'swipe' || now - current.at > 900) return;
     if (Math.abs(dx) >= 48 && Math.abs(dx) > Math.abs(dy) * 1.5) runAction(dx < 0 ? 'next' : 'prev');
-    else if (dy >= 80 && Math.abs(dx) < 40) onclose();
+    else if (dy >= 80 && Math.abs(dx) < 40) close();
   }
 
   // A mouse: a click toggles real pixels at the cursor; a drag pans a zoomed image.
@@ -329,7 +445,7 @@
       case 'close':
         if (helpOpen) helpOpen = false;
         else if (zoomed) setZoom(FIT, true);
-        else onclose();
+        else close();
         return true;
       case 'prev':
         if (hasPrev) onnavigate(index - 1);
@@ -378,7 +494,7 @@
     if (!open) return;
     queueMicrotask(() => closeButton?.focus());
     // On the overlay stack like every layer: Escape closes it, innermost first (the shortcut list before it).
-    const release = pushEscapeLayer(onclose);
+    const release = pushEscapeLayer(close);
     let upscaleWaitingSince: number | null = null;
     function handleKeydown(e: KeyboardEvent): void {
       // While a menu is open, keys belong to it.
@@ -425,6 +541,8 @@
     data-testid="asset-viewer"
     data-details={detailsOpen}
     data-compact={compact}
+    data-phase={phase}
+    data-flight={flight !== null}
   >
     <div class="viewer-bar">
       <div class="viewer-title">
@@ -435,7 +553,7 @@
         <button type="button" class="viewer-btn ui-btn ui-btn-icon" data-action="details" aria-label="Details" aria-expanded={detailsOpen} aria-controls="asset-viewer-details" onclick={toggleDetails}><Icon name="info" size={16} /></button>
         <button type="button" bind:this={moreButton} class="viewer-btn ui-btn ui-btn-icon" data-action="more" aria-label="Actions" aria-haspopup="menu" aria-expanded={moreOpen} onclick={() => { moreOpen = !moreOpen; }}><Icon name="more" size={16} /></button>
         <ActionMenu open={moreOpen} anchor={moreButton} items={moreItems} label={asset.filename} onclose={() => { moreOpen = false; }} />
-        <button type="button" bind:this={closeButton} class="viewer-btn ui-btn ui-btn-icon" aria-label="Close viewer" onclick={onclose}><Icon name="close" size={16} /></button>
+        <button type="button" bind:this={closeButton} class="viewer-btn ui-btn ui-btn-icon" aria-label="Close viewer" onclick={close}><Icon name="close" size={16} /></button>
       {:else}
       {#if onreuse}
         <button
@@ -527,7 +645,7 @@
         class="viewer-btn ui-btn ui-btn-icon"
         aria-label="Close viewer"
         title="Close (Esc)"
-        onclick={onclose}
+        onclick={close}
       ><Icon name="close" size={16} /></button>
       {/if}
     </div>
@@ -570,7 +688,7 @@
             draggable="false"
             data-testid="viewer-image"
             data-zoom={zoom.scale.toFixed(2)}
-            onload={measureActual}
+            onload={onMediaLoad}
             onpointerdown={onMediaPointerDown}
             onpointermove={onMediaPointerMove}
             onpointerup={onMediaPointerUp}
@@ -708,6 +826,22 @@
   </div>
 {/if}
 
+{#if flight}
+  <!-- The thumbnail in flight between the tile and the stage; it stands in for the image until that has loaded. -->
+  <img
+    bind:this={flightEl}
+    class="viewer-flight"
+    src={flight.src}
+    alt=""
+    aria-hidden="true"
+    data-testid="viewer-flight"
+    style:left="{flight.rect.left}px"
+    style:top="{flight.rect.top}px"
+    style:width="{flight.rect.width}px"
+    style:height="{flight.rect.height}px"
+  >
+{/if}
+
 {#snippet factSection(title: string, facts: DetailFact[])}
   {#if facts.length > 0}
     <section>
@@ -788,4 +922,13 @@
     .viewer-btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   }
   .asset-viewer[data-compact='true'] .viewer-film { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
+
+  /* The flight: the thumbnail fixed over everything, moved by transform alone; the viewer fades in or out under it. */
+  .viewer-flight { position: fixed; z-index: calc(var(--z-viewer) + 1); object-fit: cover; border-radius: var(--radius-xs); transform-origin: top left; pointer-events: none; will-change: transform; }
+  .asset-viewer[data-flight='true'] .viewer-media { opacity: 0; }
+  .asset-viewer[data-phase='opening'] { animation: viewer-fade-in 240ms ease-out both; }
+  .asset-viewer[data-phase='closing'] { animation: viewer-fade-out 240ms ease-in both; pointer-events: none; }
+  @keyframes viewer-fade-in { from { opacity: 0; } }
+  @keyframes viewer-fade-out { to { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .asset-viewer[data-phase] { animation: none; } }
 </style>

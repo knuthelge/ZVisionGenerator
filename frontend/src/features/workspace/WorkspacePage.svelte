@@ -1669,6 +1669,7 @@
 <!-- One viewer for history and completed outputs -->
 <AssetViewer
   assets={lightboxAssets}
+  origin={completedOutputTrigger}
   currentIndex={lightboxIndex}
   open={lightboxOpen}
   setLabel={lightboxMode === 'completed-output' ? 'This run' : 'Gallery'}

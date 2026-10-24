@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Fixed
 - **Web UI on a phone: the Workspace no longer jumps when you come back to it.** The settings strip and the prompt composer are drawn at once, as placeholders, and fill in when the Workspace has loaded, so the latest image no longer appears full-screen and then shrinks to make room for them. The Workspace also remembers what it loaded, so coming back shows the real settings at once and no longer says "Loading models…" while the server answers again
+- **Web UI: the viewer opens out of the tile.** Tapping or clicking an image grows it out of its tile into the viewer, and closing shrinks it back, on every device; the thumbnail stands in until the full image has loaded
 - **Web UI: quieter Gallery tiles on a touch screen.** A tile in the grid shows only its ⋯ button; a tap opens the image, and **Reuse settings** now leads every asset menu. With a mouse the tiles are unchanged
 - **Web UI: the Config and Models pages keep their bar's height while loading.** Save and Discard are in the bar from the start, disabled until the page has loaded, instead of appearing afterwards and pushing the form down
 - **Web UI: the Gallery comes back where you left it.** Returning to the Gallery shows the assets it had, scrolled to the same place, and refreshes the newest page behind them; the first visit draws the grid's tiles as placeholders instead of a spinner. The Models and Config pages come back the same way, showing what they had while the server answers again

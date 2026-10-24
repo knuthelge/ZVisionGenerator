@@ -60,6 +60,7 @@
   use:hold={{ onhold: () => { menuOpen = true; }, ignore: '.asset-tile-actions, .asset-tile-check, video' }}
   class="asset-tile {extraClass}"
   data-density={density}
+  data-asset-id={asset.id}
   data-video={isVideo}
   data-selected={selected}
   data-menu-open={menuOpen}
