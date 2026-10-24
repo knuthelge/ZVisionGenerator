@@ -8,11 +8,13 @@
     activeKey: ChipKey | null;
     /** Settings that differ from the defaults, shown on All. */
     changedCount: number;
+    /** The context is still loading: the chips are placeholders and nothing opens. */
+    pending?: boolean;
     onopen: (key: ChipKey) => void;
     onall: () => void;
   }
 
-  let { chips, activeKey, changedCount, onopen, onall }: Props = $props();
+  let { chips, activeKey, changedCount, pending = false, onopen, onall }: Props = $props();
 
   let scroller = $state<HTMLDivElement | null>(null);
 
@@ -31,7 +33,7 @@
 </script>
 
 <!-- One chip per setting, its value on it and a dot when changed. The row scrolls; All stays pinned at the right. -->
-<div class="settings-strip" role="toolbar" aria-label="Settings" data-testid="settings-strip">
+<div class="settings-strip" role="toolbar" aria-label="Settings" aria-busy={pending || undefined} data-testid="settings-strip">
   <div bind:this={scroller} class="strip-chips">
     {#each chips as chip (chip.key)}
       <button
@@ -44,6 +46,7 @@
         aria-expanded={activeKey === chip.key}
         aria-haspopup={chip.key === 'preset' ? 'menu' : undefined}
         aria-label="{chip.label || chip.key}: {chip.value}"
+        disabled={pending}
         onclick={() => onopen(chip.key)}
       >
         {#if chip.key === 'preset'}<Icon name="list" size={14} />{/if}
@@ -56,7 +59,7 @@
       </button>
     {/each}
   </div>
-  <button type="button" class="setchip setchip-all" aria-label="All settings" onclick={onall}>
+  <button type="button" class="setchip setchip-all" aria-label="All settings" disabled={pending} onclick={onall}>
     <Icon name="sliders" size={14} />All{#if changedCount > 0}<span class="setchip-n">{changedCount}</span>{/if}
   </button>
 </div>
@@ -66,7 +69,9 @@
   .strip-chips { display: flex; flex: 1; min-width: 0; gap: 6px; overflow-x: auto; padding: 0 12px 0 max(12px, env(safe-area-inset-left, 0px)); scrollbar-width: none; mask-image: linear-gradient(to right, black calc(100% - 36px), transparent); -webkit-mask-image: linear-gradient(to right, black calc(100% - 36px), transparent); }
   .strip-chips::-webkit-scrollbar { display: none; }
   .setchip { position: relative; display: inline-flex; flex: none; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-radius: var(--radius-sm); background: var(--color-bg-surface-hover); font-size: var(--text-ui); font-weight: 600; white-space: nowrap; color: var(--color-text-primary); transition: background-color 0.12s ease, color 0.12s ease; }
-  .setchip:active { background: var(--color-bg-control-hover); }
+  .setchip:active:not(:disabled) { background: var(--color-bg-control-hover); }
+  /* Placeholders while the context loads: the same shapes, quieter. */
+  .setchip:disabled, .setchip:disabled .setchip-v { color: var(--color-text-muted); cursor: default; }
   .setchip-k { color: var(--color-text-muted); font-weight: 500; }
   .setchip-v { max-width: 36vw; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); font-weight: 500; }
   .setchip-v.on { color: var(--color-primary-main); }

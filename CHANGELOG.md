@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Web UI: the Add LoRA menu lists LoRAs made for the selected model first.** All others, including ones whose model can't be detected, are folded under **Other models (n)**. Which model a LoRA was made for is read from the safetensors header only, the first time the file is seen, and remembered in the app database, so opening the menu stays fast
 
 ### Fixed
+- **Web UI on a phone: the Workspace no longer jumps when you come back to it.** The settings strip and the prompt composer are drawn at once, as placeholders, and fill in when the Workspace has loaded, so the latest image no longer appears full-screen and then shrinks to make room for them
 - **Web UI: dropdowns look the same on every platform.** The model, quantization, workflow, scheduler, Gallery filter and sort, Models and Config dropdowns open the app's own dark list instead of the operating system's, which looked out of place on Linux. The arrow keys open the list; in it, arrow keys, Home and End, typing a letter, Enter, Space and Escape work as before. On a phone the list opens right at the dropdown too, with rows sized for a finger. Number fields on the Config page no longer show the browser's spin arrows
 - **Web UI: no "not downloaded" note on a model that is downloading.** The model picker's note under the list now goes away while that model's download is queued or running
 - **Gated models say what to do.** When Hugging Face refuses a model (it is gated, or your token has no access to it), the Models page, the job card, the download list and `ziv-image` / `ziv-video` show one line that names the model, links to its page and says whether to accept its license, run `hf auth login` or sign in again, instead of Hugging Face's multi-line error. On Windows and Linux the Download button now shows this refusal too, where it showed "Could not reach Hugging Face"
@@ -26,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Web UI: models are shown by name.** The Workspace, job cards and the Models page say FLUX.2 Klein 9B instead of `klein9b`. The alias is still what you use in the CLI and prompt files, and the Models page shows it under the name
 - **Web UI: downloads show in the Workspace.** A model downloading from the Models page shows its progress in the Workspace model picker (for example "Downloading 42%") instead of "not downloaded", and the picker updates when it finishes. The "downloaded" and "download failed" messages stay on screen when you leave the Models page, and Retry still works
 - **`klein9b` downloads from an ungated mirror.** It needs no Hugging Face token or license step any more. A copy downloaded before this update isn't used: `klein9b` downloads again (about 35 GB) and its `klein9b@q8` copy is made again once. Delete the old copy under Models → Other downloads (`black-forest-labs/FLUX.2-klein-9B`). Converting a Klein 9B checkpoint uses the mirror as its base too
+
 
 ## [0.13.0b25] - 2026-10-21
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { DraftState } from '$lib/types';
 import type { WorkspaceCapabilities } from './capabilities';
-import { settingsChips, type ChipFacts } from './settingsChips';
+import { pendingChips, settingsChips, type ChipFacts } from './settingsChips';
 
 const imageCaps = {
   isImageMode: true, showFrameCount: false, showExtendLength: false, showSteps: true, showGuidance: true, showI2IStrength: false, showSeed: true,
@@ -24,6 +24,14 @@ function facts(overrides: Partial<ChipFacts> = {}): ChipFacts {
 }
 
 describe('settingsChips', () => {
+  it('offers placeholder chips in the workflow order, with no value, while the context loads', () => {
+    const image = pendingChips('txt2img');
+    expect(image.map((chip) => chip.key)).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'size', 'loras', 'upscale', 'model']);
+    expect(image.every((chip) => chip.value === '—' && !chip.changed)).toBe(true);
+    expect(pendingChips('txt2vid').map((chip) => chip.key)).toEqual(['preset', 'seconds', 'steps', 'guidance', 'seed', 'size', 'audio', 'loras', 'model']);
+    expect(pendingChips('extend')[1]?.key).toBe('extendSeconds');
+  });
+
   it('orders an image workflow by how often each setting changes, model last', () => {
     expect(settingsChips(facts()).map((chip) => chip.key)).toEqual(['preset', 'steps', 'guidance', 'seed', 'runs', 'size', 'loras', 'upscale', 'model']);
   });

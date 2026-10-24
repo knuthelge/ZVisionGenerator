@@ -1,5 +1,5 @@
 import type { WorkspaceCapabilities } from './capabilities';
-import type { DraftState } from '$lib/types';
+import type { DraftState, Workflow } from '$lib/types';
 
 /** The settings a phone shows as chips, each opening one control. */
 export type ChipKey =
@@ -81,4 +81,22 @@ export function settingsChips(f: ChipFacts): SettingChip[] {
     { key: 'model', label: '', value: f.modelLabel, changed: false, warn: !f.modelDownloaded },
   ];
   return chips.filter((chip): chip is SettingChip => chip !== null);
+}
+
+/** The chips the strip shows before the context is known, so the frame is complete from the first frame. */
+const PENDING_CHIPS: Record<Workflow, [ChipKey, string][]> = {
+  txt2img: [['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['runs', 'Batch'], ['size', ''], ['loras', 'LoRA'], ['upscale', 'Upscale'], ['model', '']],
+  img2img: [['steps', 'Steps'], ['guidance', 'Guidance'], ['strength', 'Strength'], ['seed', 'Seed'], ['runs', 'Batch'], ['reference', 'Reference'], ['size', ''], ['loras', 'LoRA'], ['upscale', 'Upscale'], ['model', '']],
+  txt2vid: [['seconds', 'Length'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['size', ''], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']],
+  img2vid: [['seconds', 'Length'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['reference', 'Reference'], ['size', ''], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']],
+  extend: [['extendSeconds', 'Extend'], ['steps', 'Steps'], ['guidance', 'Guidance'], ['seed', 'Seed'], ['source', 'Source'], ['audio', 'Audio'], ['loras', 'LoRA'], ['model', '']],
+};
+
+/**
+ * Placeholder chips for a workflow while the context loads: the usual chips in their usual order with no value, so
+ * the strip has its height and width before the request answers and nothing under the stage moves when it does.
+ */
+export function pendingChips(workflow: Workflow): SettingChip[] {
+  const keys: [ChipKey, string][] = [['preset', 'Preset'], ...(PENDING_CHIPS[workflow] ?? PENDING_CHIPS.txt2img)];
+  return keys.map(([key, label]) => ({ key, label, value: '—', changed: false }));
 }

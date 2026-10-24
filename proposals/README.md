@@ -33,6 +33,7 @@ These files are not part of the published docs site, and the docs don't link to 
 | [Merge the Models and Config pages](admin-page-merge.md) | Proposed | One Setup page with General, Models, LoRAs and Folders tabs, redirects for the old routes, one nav slot fewer |
 | [Copy a CLI command from any asset](asset-cli-command.md) | Proposed | Build the reproducing `ziv` command from an asset's recorded settings in the tile menu and viewer, with a parity test against Reuse settings |
 | [Prompt enhancer: model hints, worked examples and a local judge](prompt-enhancer-hints.md) | Proposed | Split out of v3: per-model `enhance_hint` lines from config, one worked example per rewrite mode, and a local judge that ranks bench runs 1 to 5; each measured on the bench |
+| [Stable frames: the frame first, pages remember, anchors do not move](stable-frames.md) | In progress | Every page draws its complete frame before its data arrives, keeps its data in a store across visits and refreshes in the background, and reserves the boxes that content changes inside; back closes overlays, and tiles are quieter on touch. Done: the phone's Workspace frame |
 
 ## Archive
 

@@ -50,7 +50,7 @@
   import SettingsStrip from './SettingsStrip.svelte';
   import SettingPopover from './SettingPopover.svelte';
   import PresetMenu from './PresetMenu.svelte';
-  import { settingsChips, type ChipKey } from './settingsChips';
+  import { pendingChips, settingsChips, type ChipKey } from './settingsChips';
   import { Sheet } from '$lib/components/molecules';
   import { fileName } from '$lib/components/molecules/assetDetails';
   import { settingDefaultsFor } from '$lib/state/draft.svelte';
@@ -354,8 +354,10 @@
   const loraChips = $derived<LoraChip[]>(parseLoraString(draft.state.loraString, loraOptions));
 
   // The phone's settings strip: one chip per setting, derived from the same state the inspector shows.
+  // Before the context answers, placeholder chips give the strip its size, so the stage never has to shrink later.
   const chips = $derived.by(() => {
-    if (!compact || !context || !authorityReady) return [];
+    if (!compact) return [];
+    if (!context || !authorityReady) return pendingChips(draft.state.workflow);
     const s = draft.state;
     const caps = workspaceCapabilities(context, s);
     const defaults = settingDefaultsFor(context, { workflow: s.workflow, model: s.model }) as Partial<DraftState>;
@@ -395,6 +397,8 @@
     return { label: enhanced ? 'Enhanced' : video ? 'Action' : 'Prompt', text: text || (video ? 'What happens in the clip…' : 'Describe what to make…'), empty: !text };
   });
   const compactSubmitDisabled = $derived(busy || !authorityReady || promptChoiceMissing() || currentExtendGuard().blocked);
+  // The phone's strip and composer are drawn before the context loads (the frame first); they wake once it has.
+  const controlsPending = $derived(!context || !authorityReady);
 
   /** Open the composer and put the caret in the prompt (the Scene box comes first for a video). */
   async function openComposer(): Promise<void> {
@@ -1519,69 +1523,68 @@
          Settings stay inside the form (the composer and the All sheet host them) so every field still submits. -->
     <div class="compact-workspace" data-testid="compact-workspace">
       {@render stage()}
-      {#if authorityReady && context}
-        <div class="compact-controls">
-          {#if activeChip}
-            <button type="button" class="pop-scrim" aria-label="Close setting" tabindex="-1" onclick={() => { activeChip = null; }}></button>
-            <SettingPopover
-              key={activeChip}
-              {context}
-              {busy}
-              models={currentModels}
-              quantizeOptions={supportsQuantize ? quantizeOptions : null}
-              {imageFile}
-              {referencePreviewUrl}
-              lastSeed={historyStore.assets[0]?.seed ?? null}
-              onImageFileChange={(f) => { imageFile = f; submitError = null; }}
-              onModelChange={switchModel}
-              onUseLatestAsReference={() => { const latest = historyStore.assets[0]; if (latest) useAsReference(latest, draft.state.workflow === 'img2vid' ? 'video' : 'image'); activeChip = null; }}
-              onclose={() => { activeChip = null; }}
-            />
-          {/if}
-          <PresetMenu {context} applied={activePreset} changed={presetChanged} button={false} bind:open={presetMenuOpen} />
-          <SettingsStrip {chips} activeKey={activeChip} {changedCount} onopen={toggleChip} onall={() => { activeChip = null; sheetOpen = true; }} />
-          <div class="composer" class:expanded={composerOpen} data-testid="composer">
-            {#if generateError}<p class="ui-alert ui-alert-error composer-error" role="alert"><Icon name="alert" size={14} /><span class="min-w-0 break-words">{generateError}</span></p>{/if}
-            <div class="composer-row" hidden={composerOpen}>
-              <button type="button" class="composer-summary" aria-label="Edit the prompt" onclick={() => void openComposer()}>
-                <span class="ui-area-label composer-label">{composerSummary.label}</span>
-                <span class="composer-line" class:placeholder={composerSummary.empty}>{composerSummary.text}</span>
+      <!-- Always in the frame, even before the context answers: a loading state never changes the stage's height. -->
+      <div class="compact-controls">
+        {#if activeChip && context}
+          <button type="button" class="pop-scrim" aria-label="Close setting" tabindex="-1" onclick={() => { activeChip = null; }}></button>
+          <SettingPopover
+            key={activeChip}
+            {context}
+            {busy}
+            models={currentModels}
+            quantizeOptions={supportsQuantize ? quantizeOptions : null}
+            {imageFile}
+            {referencePreviewUrl}
+            lastSeed={historyStore.assets[0]?.seed ?? null}
+            onImageFileChange={(f) => { imageFile = f; submitError = null; }}
+            onModelChange={switchModel}
+            onUseLatestAsReference={() => { const latest = historyStore.assets[0]; if (latest) useAsReference(latest, draft.state.workflow === 'img2vid' ? 'video' : 'image'); activeChip = null; }}
+            onclose={() => { activeChip = null; }}
+          />
+        {/if}
+        {#if context}<PresetMenu {context} applied={activePreset} changed={presetChanged} button={false} bind:open={presetMenuOpen} />{/if}
+        <SettingsStrip {chips} activeKey={activeChip} {changedCount} pending={controlsPending} onopen={toggleChip} onall={() => { activeChip = null; sheetOpen = true; }} />
+        <div class="composer" class:expanded={composerOpen} data-testid="composer">
+          {#if generateError}<p class="ui-alert ui-alert-error composer-error" role="alert"><Icon name="alert" size={14} /><span class="min-w-0 break-words">{generateError}</span></p>{/if}
+          <div class="composer-row" hidden={composerOpen}>
+            <button type="button" class="composer-summary" aria-label="Edit the prompt" disabled={controlsPending} onclick={() => void openComposer()}>
+              <span class="ui-area-label composer-label">{composerSummary.label}</span>
+              <span class="composer-line" class:placeholder={composerSummary.empty}>{composerSummary.text}</span>
+            </button>
+            <span class="composer-split">
+              <button
+                id="ws-submit-compact"
+                type="submit"
+                class="composer-generate ui-btn ui-btn-primary ui-holdable"
+                disabled={compactSubmitDisabled}
+                title="Hold for more"
+                use:hold={{ onhold: () => { generateMenuOpen = true; } }}
+              >
+                <Icon name="bolt" size={16} />{busy ? 'Submitting…' : jobStore.jobsActive ? 'Queue' : 'Generate'}
+                {#if jobStore.jobsActive && jobStore.queuedJobs.length > 0}<span class="composer-q">+{jobStore.queuedJobs.length}</span>{/if}
               </button>
-              <span class="composer-split">
-                <button
-                  id="ws-submit-compact"
-                  type="submit"
-                  class="composer-generate ui-btn ui-btn-primary ui-holdable"
-                  disabled={compactSubmitDisabled}
-                  title="Hold for more"
-                  use:hold={{ onhold: () => { generateMenuOpen = true; } }}
-                >
-                  <Icon name="bolt" size={16} />{busy ? 'Submitting…' : jobStore.jobsActive ? 'Queue' : 'Generate'}
-                  {#if jobStore.jobsActive && jobStore.queuedJobs.length > 0}<span class="composer-q">+{jobStore.queuedJobs.length}</span>{/if}
-                </button>
-                <button
-                  bind:this={generateButton}
-                  type="button"
-                  class="composer-more ui-btn ui-btn-primary"
-                  aria-label="More ways to generate"
-                  aria-haspopup="menu"
-                  aria-expanded={generateMenuOpen}
-                  disabled={compactSubmitDisabled}
-                  onclick={() => { generateMenuOpen = true; }}
-                ><Icon name="chevdown" size={14} /></button>
-              </span>
-              <ActionMenu open={generateMenuOpen} anchor={generateButton} label="Generate" items={generateMenuItems} onclose={() => { generateMenuOpen = false; }} />
-            </div>
-            <div class="composer-pane" hidden={!composerOpen}>
-              <ComposePane {context} {busy} jobsActive={jobStore.jobsActive} />
-              <div class="composer-foot">
-                <button type="button" class="ui-btn" onclick={() => { composerOpen = false; }}>Done</button>
-                <button type="submit" class="ui-btn ui-btn-primary ui-btn-main" disabled={compactSubmitDisabled}><Icon name="bolt" size={16} />{jobStore.jobsActive ? 'Queue' : 'Generate'}</button>
-              </div>
+              <button
+                bind:this={generateButton}
+                type="button"
+                class="composer-more ui-btn ui-btn-primary"
+                aria-label="More ways to generate"
+                aria-haspopup="menu"
+                aria-expanded={generateMenuOpen}
+                disabled={compactSubmitDisabled}
+                onclick={() => { generateMenuOpen = true; }}
+              ><Icon name="chevdown" size={14} /></button>
+            </span>
+            <ActionMenu open={generateMenuOpen} anchor={generateButton} label="Generate" items={generateMenuItems} onclose={() => { generateMenuOpen = false; }} />
+          </div>
+          <div class="composer-pane" hidden={!composerOpen}>
+            {#if context}<ComposePane {context} {busy} jobsActive={jobStore.jobsActive} />{/if}
+            <div class="composer-foot">
+              <button type="button" class="ui-btn" onclick={() => { composerOpen = false; }}>Done</button>
+              <button type="submit" class="ui-btn ui-btn-primary ui-btn-main" disabled={compactSubmitDisabled}><Icon name="bolt" size={16} />{jobStore.jobsActive ? 'Queue' : 'Generate'}</button>
             </div>
           </div>
         </div>
-      {/if}
+      </div>
       <Sheet bind:open={jobSheetOpen} title="Job">
         <div class="job-sheet">
           {#if jobStore.current}
