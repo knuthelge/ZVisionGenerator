@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
+import sys
+from types import ModuleType
 from unittest.mock import patch
 
 import pytest
@@ -12,7 +16,7 @@ pytest.importorskip("diffusers")
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config  # noqa: E402
 from diffusers.models.modeling_utils import ModelMixin  # noqa: E402
-from safetensors.torch import save_file  # noqa: E402
+from safetensors.torch import load_file, save_file  # noqa: E402
 
 from zvisiongenerator.backends.cuda.video import weights  # noqa: E402
 from zvisiongenerator.utils.stored_quant import MANIFEST_NAME  # noqa: E402
@@ -47,6 +51,29 @@ def _write_checkpoint(path, model, *, drop: str | None = None):
     tensors[_PREFIX + "video_embeddings_connector.registers"] = torch.zeros(2)
     save_file(tensors, str(path))
     return path
+
+
+def _arange_tensor(shape, salt, dtype=torch.bfloat16):
+    """Return a tensor of *shape* whose values come from ``torch.arange`` (no RNG): distinct per *salt*, within bfloat16 range."""
+    values = ((torch.arange(math.prod(shape)) * 7 + salt) % 251 - 125).to(torch.float32) / 32
+    return values.reshape(shape).to(dtype)
+
+
+def _write_arange_checkpoint(path, dtype=torch.bfloat16):
+    """Save a single-file LTX-2 checkpoint of the tiny transformer with arange values, and other components beside it."""
+    tensors = {_PREFIX + name: _arange_tensor(list(tensor.shape), salt, dtype) for salt, (name, tensor) in enumerate(_TinyTransformer().state_dict().items())}
+    tensors["vae.decoder.conv.weight"] = torch.zeros(2)
+    save_file(tensors, str(path))
+    return path
+
+
+def _digest(tensor):
+    return hashlib.sha256(tensor.contiguous().view(torch.uint8).numpy().tobytes()).hexdigest()
+
+
+def _read_folder(folder):
+    """Return ``{name: (dtype, shape, sha256 of the raw bytes)}`` for every tensor in the safetensors files of *folder*."""
+    return {name: (str(tensor.dtype), list(tensor.shape), _digest(tensor)) for path in sorted(folder.glob("*.safetensors")) for name, tensor in load_file(str(path)).items()}
 
 
 @pytest.fixture
@@ -101,6 +128,39 @@ class TestElementCounts:
         save_file(tensors, str(tmp_path / "model.safetensors"))
 
         assert weights.text_encoder_bytes(tmp_path) == 2 * 40 + 2 * 4 + 16
+
+
+class TestElementCountEdgeShapes:
+    """A scalar (``[]``) counts as one element and a zero-size dimension as none."""
+
+    def test_the_transformer_count_handles_scalars_zero_dims_and_other_ranks(self):
+        shapes = [
+            ("transformer_blocks.0.attn.weight", [4, 3]),  # block matrix
+            ("transformer_blocks.0.empty.weight", [0, 5]),  # block matrix without elements
+            ("transformer_blocks.0.bias", [7]),  # block vector
+            ("transformer_blocks.0.conv.weight", [2, 3, 4]),  # block tensor of rank 3
+            ("transformer_blocks.0.scale", []),  # scalar
+            ("proj_in.weight", [6, 2]),  # matrix outside the blocks
+            ("proj_in.empty", [2, 0, 3]),
+        ]
+
+        assert weights.count_transformer_elements(shapes) == (12, 7 + 24 + 1 + 12)
+
+    def test_a_component_folder_counts_scalars_and_zero_size_tensors(self, tmp_path):
+        save_file({"a": torch.zeros(3, 4), "scalar": torch.tensor(1.0), "empty": torch.zeros(0, 5)}, str(tmp_path / "model.safetensors"))
+
+        assert weights.component_elements(tmp_path) == 12 + 1 + 0
+
+    def test_text_encoder_bytes_count_scalars_and_zero_size_tensors(self, tmp_path):
+        tensors = {
+            "model.embed_tokens.weight": torch.zeros(0, 4),  # bfloat16, no elements
+            "model.layers.0.input_layernorm.weight": torch.tensor(1.0),  # bfloat16 scalar
+            "model.layers.0.mlp.up_proj.weight": torch.zeros(2, 0, 3),  # FP8, no elements
+            "model.layers.0.mlp.gate_proj.weight": torch.tensor(1.0),  # FP8 scalar
+        }
+        save_file(tensors, str(tmp_path / "model.safetensors"))
+
+        assert weights.text_encoder_bytes(tmp_path) == 0 + 2 * 1 + 0 + 1
 
 
 class TestEnsurePrepared:
@@ -176,6 +236,49 @@ class TestEnsurePrepared:
         assert list(tmp_path.glob(".model@q8.*.partial")) == []
 
 
+class TestPreparedManifestBytes:
+    """The manifest of a prepared copy is pinned byte for byte: a change would make every installed copy look stale and rebuild it."""
+
+    def _sources(self, tmp_path):
+        (tmp_path / "store").mkdir()
+        real = tmp_path / "store" / "real-name.safetensors"
+        real.write_bytes(b"1234567")
+        link = tmp_path / "link.safetensors"
+        link.symlink_to(real)
+        plain = tmp_path / "plain.safetensors"
+        plain.write_bytes(b"0123456789a")
+        return [link, plain]
+
+    @pytest.mark.parametrize(
+        ("bits", "storage_format"),
+        [(8, "fp8-e4m3"), (4, "nf4-bitsandbytes-0.99")],
+    )
+    def test_the_manifest_bytes_are_pinned(self, monkeypatch, tmp_path, bits, storage_format):
+        monkeypatch.setattr("importlib.metadata.version", lambda _name: "0.99.0")  # a version no real install has
+        sources = self._sources(tmp_path)
+
+        target = weights.ensure_prepared(tmp_path / "copy", sources, bits, lambda folder: (folder / "w").write_text("x"))
+
+        expected = (
+            "{\n"
+            '  "layout": 1,\n'
+            f'  "bits": {bits},\n'
+            f'  "format": "{storage_format}",\n'
+            '  "sources": [\n'
+            "    {\n"
+            '      "name": "real-name.safetensors",\n'
+            '      "bytes": 7\n'
+            "    },\n"
+            "    {\n"
+            '      "name": "plain.safetensors",\n'
+            '      "bytes": 11\n'
+            "    }\n"
+            "  ]\n"
+            "}\n"
+        )
+        assert (target / MANIFEST_NAME).read_bytes() == expected.encode("utf-8")
+
+
 class TestTransformerWeights:
     def test_the_fp8_copy_stores_layer_weights_in_fp8_and_runs_close_to_the_source(self, tmp_path, tiny_models):
         reference = _reference()
@@ -212,6 +315,208 @@ class TestTransformerWeights:
         x = torch.randn(3, _WIDTH, dtype=torch.bfloat16, device="cuda")
         out = model.to("cuda")(x)
         assert torch.allclose(out.float(), reference.to("cuda")(x).float(), atol=0.5)
+
+
+_FP8 = "torch.float8_e4m3fn"
+_BF16 = "torch.bfloat16"
+
+
+class TestFp8TransformerLayout:
+    """The FP8 copy's files, index, config and tensors are pinned: a change would orphan every installed copy."""
+
+    def test_the_copy_has_exactly_this_layout(self, tmp_path, tiny_models):
+        checkpoint = _write_arange_checkpoint(tmp_path / "ltx.safetensors")
+
+        weights.write_transformer(checkpoint, {"width": _WIDTH}, tmp_path / "q8", 8, device="cpu")
+
+        out = tmp_path / "q8"
+        assert sorted(path.name for path in out.iterdir()) == ["config.json", "model-00001-of-00001.safetensors", "model.safetensors.index.json"]
+        assert json.loads((out / "model.safetensors.index.json").read_text()) == {
+            "metadata": {"total_size": 17152},
+            "weight_map": dict.fromkeys(
+                [
+                    "proj_in.bias",
+                    "proj_in.weight",
+                    "transformer_blocks.0.0.bias",
+                    "transformer_blocks.0.0.weight",
+                    "transformer_blocks.0.1.bias",
+                    "transformer_blocks.0.1.weight",
+                    "transformer_blocks.1.0.bias",
+                    "transformer_blocks.1.0.weight",
+                    "transformer_blocks.1.1.bias",
+                    "transformer_blocks.1.1.weight",
+                ],
+                "model-00001-of-00001.safetensors",
+            ),
+        }
+        assert (out / "config.json").read_bytes() == b'{\n  "width": 64\n}\n'
+        assert _read_folder(out) == {
+            "proj_in.bias": (_BF16, [64], "13d545059a9b9602fcb157bf3069698b8bc60546875fcf8ecacdbed1811b306d"),
+            "proj_in.weight": (_BF16, [64, 64], "14dfcbbf46c102e36bc2556ff8d38fb9479e6beecd7d7e5a45387fda10f4d9ba"),
+            "transformer_blocks.0.0.bias": (_FP8, [64], "3d0cdf0a66f3981eee7381e6672b6dd479dab6bc541ebd94be64433fa41b729e"),
+            "transformer_blocks.0.0.weight": (_FP8, [64, 64], "a6fc9a66b51351949f6f43a8670c4526db1c9c52f2ff535d09d12a67275148bc"),
+            "transformer_blocks.0.1.bias": (_BF16, [64], "2107ea243587f8d79124dd5ffc72265c55d7bad31e2e56d2c852de5c5d443a5c"),
+            "transformer_blocks.0.1.weight": (_BF16, [64], "f0a1bac823f36f546f702dd4e367e3f2c9d74b22eb0c9a117de477f91ae71fcd"),
+            "transformer_blocks.1.0.bias": (_FP8, [64], "f1760224663e212bc10b10da20919be327c4a377607506575b0ff4484165be9c"),
+            "transformer_blocks.1.0.weight": (_FP8, [64, 64], "e9d25977fd9d691356eef1f94a839a982b3ba1c07db367c42304e5d3e6d10bbf"),
+            "transformer_blocks.1.1.bias": (_BF16, [64], "cfe69753b24cda93136133024a249d82e6acaeaebf3a7195ea6ecdf9ed3bd935"),
+            "transformer_blocks.1.1.weight": (_BF16, [64], "16decb67ab0ced30e5669306db5d64e1f49834536708d0ca1548825760954157"),
+        }
+
+
+_NF4_PART_NAMES = ("absmax", "quant_map", "nested_absmax", "nested_quant_map", "quant_state.bitsandbytes__nf4")
+_NF4_BLOCK_LINEARS = ("transformer_blocks.0.0", "transformer_blocks.1.0")
+
+
+class _FakeLinear4bit(torch.nn.Module):
+    """Stands in for ``bitsandbytes.nn.Linear4bit``: records how it was built and keeps a (meta) bias like the real layer."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.args, self.kwargs = args, kwargs
+        self.bias = torch.nn.Parameter(torch.empty(args[1], device="meta", dtype=torch.bfloat16)) if kwargs["bias"] else None
+
+
+class _FakeQuantState:
+    def __init__(self, parts):
+        self._parts = parts
+
+    def as_dict(self, packed=False):
+        assert packed is True
+        return dict(self._parts)
+
+
+class _FakeBitsandbytes:
+    """Fake ``bitsandbytes`` modules (entered through ``sys.modules``) and a record of what the code under test asked of them."""
+
+    def __init__(self):
+        self.quantize_calls: list[dict] = []
+        self.prequantized_calls: list[dict] = []
+
+        functional = ModuleType("bitsandbytes.functional")
+        functional.quantize_4bit = self._quantize_4bit
+        params = type("Params4bit", (), {"from_prequantized": staticmethod(self._from_prequantized)})
+        nn = ModuleType("bitsandbytes.nn")
+        nn.Linear4bit = _FakeLinear4bit
+        nn.Params4bit = params
+        package = ModuleType("bitsandbytes")
+        package.functional, package.nn = functional, nn
+        self.modules = {"bitsandbytes": package, "bitsandbytes.functional": functional, "bitsandbytes.nn": nn}
+
+    def _quantize_4bit(self, weight, **kwargs):
+        self.quantize_calls.append({"dtype": weight.dtype, "device": weight.device.type, "shape": list(weight.shape), **kwargs})
+        rows = weight.shape[0] * weight.shape[1] // 2
+        packed = (torch.arange(rows) % 256).to(torch.uint8).reshape(-1, 1)
+        parts = {
+            "absmax": torch.arange(weight.numel() // 64, dtype=torch.float32),
+            "quant_map": torch.arange(16, dtype=torch.float32),
+            "nested_absmax": torch.ones(1, dtype=torch.float32),
+            "nested_quant_map": torch.arange(256, dtype=torch.float32),
+            "quant_state.bitsandbytes__nf4": torch.arange(5, dtype=torch.uint8),
+        }
+        return packed, _FakeQuantState(parts)
+
+    def _from_prequantized(self, **kwargs):
+        self.prequantized_calls.append({**kwargs, "quantized_stats": dict(kwargs["quantized_stats"])})
+        return torch.nn.Parameter(kwargs["data"], requires_grad=False)
+
+
+@pytest.fixture
+def fake_bitsandbytes(monkeypatch):
+    fake = _FakeBitsandbytes()
+    for name, module in fake.modules.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    return fake
+
+
+class TestNf4TransformerLayout:
+    """The NF4 copy's layout and load, with a fake ``bitsandbytes`` so they run on the CPU."""
+
+    def _write(self, tmp_path):
+        checkpoint = _write_arange_checkpoint(tmp_path / "ltx.safetensors", torch.float32)
+        weights.write_transformer(checkpoint, {"width": _WIDTH}, tmp_path / "q4", 4, device=torch.device("meta"))
+        return tmp_path / "q4"
+
+    def test_the_copy_holds_each_block_linear_weight_with_its_five_parts(self, tmp_path, tiny_models, fake_bitsandbytes):
+        out = self._write(tmp_path)
+
+        weight_map = json.loads((out / "model.safetensors.index.json").read_text())["weight_map"]
+        assert sorted(weight_map) == sorted(
+            [
+                "proj_in.bias",
+                "proj_in.weight",
+                "transformer_blocks.0.0.bias",
+                "transformer_blocks.0.0.weight",
+                *(f"transformer_blocks.0.0.weight.{part}" for part in _NF4_PART_NAMES),
+                "transformer_blocks.0.1.bias",
+                "transformer_blocks.0.1.weight",
+                "transformer_blocks.1.0.bias",
+                "transformer_blocks.1.0.weight",
+                *(f"transformer_blocks.1.0.weight.{part}" for part in _NF4_PART_NAMES),
+                "transformer_blocks.1.1.bias",
+                "transformer_blocks.1.1.weight",
+            ]
+        )
+        stored = _read_folder(out)
+        plain = {name: stored[name] for name in stored if not name.startswith(tuple(f"{linear}.weight" for linear in _NF4_BLOCK_LINEARS))}
+        assert {name: (dtype, shape) for name, (dtype, shape, _) in plain.items()} == {
+            "proj_in.bias": (_BF16, [64]),
+            "proj_in.weight": (_BF16, [64, 64]),
+            "transformer_blocks.0.0.bias": (_BF16, [64]),
+            "transformer_blocks.0.1.bias": (_BF16, [64]),
+            "transformer_blocks.0.1.weight": (_BF16, [64]),
+            "transformer_blocks.1.0.bias": (_BF16, [64]),
+            "transformer_blocks.1.1.bias": (_BF16, [64]),
+            "transformer_blocks.1.1.weight": (_BF16, [64]),
+        }
+        for linear in _NF4_BLOCK_LINEARS:
+            assert stored[f"{linear}.weight"][:2] == ("torch.uint8", [2048, 1])
+            assert {part: stored[f"{linear}.weight.{part}"][:2] for part in _NF4_PART_NAMES} == {
+                "absmax": ("torch.float32", [64]),
+                "quant_map": ("torch.float32", [16]),
+                "nested_absmax": ("torch.float32", [1]),
+                "nested_quant_map": ("torch.float32", [256]),
+                "quant_state.bitsandbytes__nf4": ("torch.uint8", [5]),
+            }
+
+    def test_each_block_linear_is_packed_once_from_a_bfloat16_weight_on_the_given_device(self, tmp_path, tiny_models, fake_bitsandbytes):
+        self._write(tmp_path)
+
+        assert (
+            fake_bitsandbytes.quantize_calls
+            == [{"dtype": torch.bfloat16, "device": "meta", "shape": [64, 64], "blocksize": 64, "compress_statistics": True, "quant_type": "nf4", "quant_storage": torch.uint8}] * 2
+        )
+
+    def test_the_copy_loads_block_linears_as_linear4bit_and_leaves_the_rest(self, tmp_path, tiny_models, fake_bitsandbytes):
+        out = self._write(tmp_path)
+
+        model = weights.load_transformer({"width": _WIDTH}, prepared=out, bits=4, compute_dtype=torch.bfloat16)
+
+        swapped = {name for name, module in model.named_modules() if isinstance(module, _FakeLinear4bit)}
+        assert swapped == set(_NF4_BLOCK_LINEARS)
+        assert type(model.proj_in) is torch.nn.Linear
+        for linear in _NF4_BLOCK_LINEARS:
+            layer = model.get_submodule(linear)
+            assert layer.args == (_WIDTH, _WIDTH)
+            assert layer.kwargs == {"bias": True, "compute_dtype": torch.bfloat16, "compress_statistics": True, "quant_type": "nf4", "quant_storage": torch.uint8, "device": "meta"}
+        assert [call["module"] for call in fake_bitsandbytes.prequantized_calls] == [model.get_submodule(linear) for linear in _NF4_BLOCK_LINEARS]
+        saved = {name: tensor for path in out.glob("*.safetensors") for name, tensor in load_file(str(path)).items()}
+        for call, linear in zip(fake_bitsandbytes.prequantized_calls, _NF4_BLOCK_LINEARS, strict=True):
+            assert (call["requires_grad"], call["device"]) == (False, "cpu")
+            assert torch.equal(call["data"], saved[f"{linear}.weight"])
+            assert call["quantized_stats"].keys() == set(_NF4_PART_NAMES) - {""}
+            assert all(torch.equal(call["quantized_stats"][part], saved[f"{linear}.weight.{part}"]) for part in _NF4_PART_NAMES)
+        assert model.get_submodule(_NF4_BLOCK_LINEARS[0]).weight.dtype == torch.uint8
+
+    def test_a_copy_missing_one_part_is_refused(self, tmp_path, tiny_models, fake_bitsandbytes):
+        out = self._write(tmp_path)
+        shard = out / "model-00001-of-00001.safetensors"
+        tensors = load_file(str(shard))
+        del tensors["transformer_blocks.1.0.weight.nested_absmax"]
+        save_file(tensors, str(shard))
+
+        with pytest.raises(RuntimeError, match="is incomplete in the prepared copy"):
+            weights.load_transformer({"width": _WIDTH}, prepared=out, bits=4, compute_dtype=torch.bfloat16)
 
 
 class TestConnectors:

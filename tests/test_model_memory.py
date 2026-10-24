@@ -476,6 +476,39 @@ class TestClipMemoryFit:
         assert clip_memory_fit("example/model", budget=MemoryBudget(_GIB), find_local_dir=self._finder(tmp_path, tmp_path), **self._CLIP) is None
 
 
+class TestLtxClipMemoryFitGolden:
+    """G5: the LTX MLX clip estimates, pinned so the family dispatch cannot move them."""
+
+    _FAMILY_ARGS = [pytest.param({}, id="default"), pytest.param({"family": "ltx"}, id="ltx")]
+    _BUDGET = MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB)
+    _CLIPS = [
+        ({"width": 704, "height": 448, "frames": 121, "low_memory": True}, {"status": "fits", "required_gb": 14.8, "budget_gb": 24.0}),
+        ({"width": 960, "height": 512, "frames": 241, "low_memory": True}, {"status": "fits", "required_gb": 16.8, "budget_gb": 24.0}),
+        ({"width": 704, "height": 448, "frames": 121, "low_memory": False, "upscale": True}, {"status": "too_large", "required_gb": 36.8, "budget_gb": 24.0}),
+    ]
+
+    @pytest.fixture(autouse=True)
+    def _text_encoder_repo(self, monkeypatch):
+        monkeypatch.setattr(model_memory, "ltx_mlx_text_encoder_repo", lambda: "example/gemma")
+
+    def test_a_family_without_an_estimate_gives_none_without_a_filesystem_lookup(self):
+        finder = MagicMock(return_value=None)
+
+        result = clip_memory_fit("example/model", budget=self._BUDGET, find_local_dir=finder, env={}, family="h3", **self._CLIPS[0][0])
+
+        assert result is None
+        finder.assert_not_called()
+
+    @pytest.mark.parametrize("family", _FAMILY_ARGS)
+    def test_three_clips_keep_their_estimates(self, tmp_path, family):
+        model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=7.477, connector=5.909, transformer=10.535, upsampler=0.927)
+        finder = lambda reference: {"example/model": model_dir, "example/gemma": text_encoder_dir}.get(reference)  # noqa: E731
+
+        results = [clip_memory_fit("example/model", budget=self._BUDGET, find_local_dir=finder, env={}, **clip, **family) for clip, _ in self._CLIPS]
+
+        assert results == [expected for _, expected in self._CLIPS]
+
+
 @pytest.mark.parametrize(
     ("required", "expected"),
     [(11 * _GIB, "fits"), (11 * _GIB + 1, "tight"), (15 * _GIB, "tight"), (15 * _GIB + 1, "too_large")],

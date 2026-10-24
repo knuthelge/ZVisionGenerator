@@ -11,10 +11,14 @@ import pytest
 from conftest import make_extend_source
 from huggingface_hub.errors import GatedRepoError
 
-from zvisiongenerator.utils.alignment import align_ltx_frames, align_resolution
+from zvisiongenerator.core.video_family import FrameRule
+from zvisiongenerator.utils.alignment import align_frames, align_resolution
+from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.model_memory import MemoryBudget
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_cli import _build_video_parser
+
+_LTX_FAMILY = {key: value for key, value in load_config()["video_model_presets"]["ltx"].items() if key in ("label", "default_steps", "max_steps", "frame_rule", "extend_frame_step", "capabilities")}
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +198,7 @@ class TestVideoCliExecution:
             lambda: {
                 "video_generation": {"default_ratio": "16:9", "default_size": "m"},
                 "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
-                "video_model_presets": {"ltx": {"upscale": {}}},
+                "video_model_presets": {"ltx": {**_LTX_FAMILY, "upscale": {}}},
                 "model_aliases": {},
             },
         )
@@ -278,7 +282,7 @@ class TestVideoCliExecution:
             lambda: {
                 "video_generation": {"default_ratio": "16:9", "default_size": "m"},
                 "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
-                "video_model_presets": {"ltx": {"upscale": {"default_upscale_steps": 8}}},
+                "video_model_presets": {"ltx": {**_LTX_FAMILY, "upscale": {"default_upscale_steps": 8}}},
             },
         )
         monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
@@ -316,7 +320,7 @@ class TestVideoCliExecution:
             lambda: {
                 "video_generation": {"default_ratio": "16:9", "default_size": "m"},
                 "video_sizes": {"16:9": {"m": {"width": 704, "height": 448, "frames": 49}}},
-                "video_model_presets": {"ltx": {"upscale": {"default_upscale_steps": 8}}},
+                "video_model_presets": {"ltx": {**_LTX_FAMILY, "upscale": {"default_upscale_steps": 8}}},
             },
         )
         monkeypatch.setattr(video_cli, "resolve_model_path", lambda model, **_: model)
@@ -358,7 +362,7 @@ class TestVideoCliExecution:
         model_info = VideoModelInfo(family="ltx", backend="ltx", supports_i2v=True, default_fps=24, frame_alignment=8, resolution_alignment=32)
         backend = MagicMock()
         backend.load_model.return_value = (MagicMock(), model_info)
-        ltx_preset = {"upscale": {"default_upscale_steps": 8}, **preset_extra}
+        ltx_preset = {**_LTX_FAMILY, "upscale": {"default_upscale_steps": 8}, **preset_extra}
 
         monkeypatch.setattr(
             video_cli,
@@ -708,6 +712,16 @@ class TestVideoCliExtend:
         with pytest.raises(SystemExit, match="2"):
             self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], extend_supported=False)
         assert "not available" in capsys.readouterr().err
+        self.backend.load_model.assert_not_called()
+
+    def test_a_family_that_cannot_extend_refuses_the_extension_before_the_model_loads(self, monkeypatch, tmp_path, capsys):
+        ltx = load_config()["video_model_presets"]["ltx"]
+        config = {"ui": {"default_models": {"video": "ltx-8"}}, "video_model_presets": {"ltx": {**ltx, "capabilities": {**ltx["capabilities"], "extend": False}}}}
+
+        with pytest.raises(SystemExit, match="2"):
+            self._main(monkeypatch, tmp_path, ["--extend", "clip.mp4"], config=config)
+
+        assert "LTX distilled model can't extend a clip. Pick another video model." in capsys.readouterr().err
         self.backend.load_model.assert_not_called()
 
     def test_capability_gate_does_not_touch_other_runs(self, monkeypatch, tmp_path):
@@ -1076,7 +1090,7 @@ class TestVideoCliClipMemory:
 class TestAlignedVideoDims:
     """One helper rounds the size and length of every video job (CLI and Web UI)."""
 
-    _MODEL = {"resolution_alignment": 32, "frame_alignment": 8, "family": "LTX"}
+    _MODEL = {"resolution_alignment": 32, "frame_rule": FrameRule(8, 1, "nearest"), "family": "LTX"}
 
     def _aligned(self, width, height, frames, **overrides):
         from zvisiongenerator.utils.alignment import aligned_video_dims
@@ -1094,7 +1108,7 @@ class TestAlignedVideoDims:
     def test_matches_the_single_step_helpers(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            expected = (*align_resolution(700, 475, 32, "LTX"), align_ltx_frames(100, 8))
+            expected = (*align_resolution(700, 475, 32, "LTX"), align_frames(100, FrameRule(8, 1, "nearest")))
 
         assert self._aligned(700, 475, 100) == expected
 
@@ -1158,11 +1172,11 @@ class TestAlignResolution:
 
 
 # ---------------------------------------------------------------------------
-# _align_ltx_frames
+# align_frames (the LTX rule)
 # ---------------------------------------------------------------------------
 
 
-class TestAlignLtxFrames:
+class TestAlignFramesLtxRule:
     """Verify LTX frame alignment to 8k+1 pattern."""
 
     @pytest.mark.parametrize(
@@ -1182,21 +1196,17 @@ class TestAlignLtxFrames:
         ids=["9", "17", "49", "97", "121", "50->49", "48->49", "10->9", "14->17", "1->9"],
     )
     def test_alignment(self, frames_in, frames_out):
-        result = align_ltx_frames(frames_in)
+        result = align_frames(frames_in, FrameRule(8, 1, "nearest"))
         assert result == frames_out
         # Verify 8k+1 pattern
         assert (result - 1) % 8 == 0
 
-    def test_valid_no_warning(self):
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            align_ltx_frames(49)
-            assert len(w) == 0
+    def test_aligned_video_dims_warns_about_an_invalid_count(self):
+        from zvisiongenerator.utils.alignment import aligned_video_dims
 
-    def test_invalid_emits_warning(self):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            align_ltx_frames(50)
+            aligned_video_dims(704, 448, 50, upscale=False, resolution_alignment=32, frame_rule=FrameRule(8, 1, "nearest"), family="LTX")
             assert len(w) == 1
             assert "8k+1" in str(w[0].message)
 

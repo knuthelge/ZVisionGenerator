@@ -44,6 +44,7 @@ from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.ltx_converted import write_converted_ltx
 from zvisiongenerator.utils import video_extend as video_extend_module
 from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
+from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.utils.model_memory import MemoryBudget, clip_memory_fit as real_clip_memory_fit
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
@@ -1371,6 +1372,7 @@ def test_cancel_route_rejects_running_jobs_without_cancel_support(monkeypatch):
     assert queued_controls == []
 
 
+@pytest.mark.usefixtures("hub_offline")
 def test_models_route_uses_shared_alias_inventory(monkeypatch, tmp_path):
     """Models route should expose the same alias-backed inventory authority as config loading."""
     web_config = _make_web_config()
@@ -1953,6 +1955,30 @@ def test_submit_video_job_refuses_review_where_the_platform_cannot_pause(monkeyp
     assert submitted[0]["args"].review is False
 
 
+@pytest.mark.parametrize(
+    ("capability", "form", "message"),
+    [
+        ("upscale_review", {"upscale": "2", "review": "on"}, "LTX distilled model can't pause for review before upscaling on this platform."),
+        ("i2v", {"image_path": "ref.png"}, "LTX distilled model does not support image-to-video. Pick another video model."),
+    ],
+)
+def test_submit_video_job_refuses_what_the_model_family_cannot_do(monkeypatch, tmp_path, capability, form, message):
+    """A family that lacks a capability refuses the workflow that needs it, whatever the platform supports, and queues nothing."""
+    web_config = _make_web_config()
+    web_config.output_dir = str(tmp_path)
+    ltx = load_config()["video_model_presets"]["ltx"]
+    web_config.app_config["video_model_presets"] = {"ltx": {**ltx, "capabilities": {**ltx["capabilities"], capability: False}}}
+    submitted: list[dict[str, object]] = []
+    _patch_video_submit_dependencies(monkeypatch, review_supported=True, submitted=submitted)
+    monkeypatch.setattr(web_server, "_resolve_reference_image", lambda _form, _output_dir: form.get("image_path"))
+
+    with pytest.raises(ValueError) as refused:
+        web_server._submit_video_job({"model": "ltx-8", "prompt": "a lake", **form}, web_config)
+
+    assert str(refused.value) == message
+    assert submitted == []
+
+
 @pytest.mark.parametrize("supported", [True, False])
 def test_workspace_contract_hides_the_video_review_control_where_unsupported(monkeypatch, supported):
     monkeypatch.setattr(web_server, "supports_video_upscale_review", lambda: supported)
@@ -2099,7 +2125,7 @@ def test_model_listings_carry_download_and_memory_status(monkeypatch, tmp_path):
     calls: list[tuple[str, str, tuple[int, ...]]] = []
     video_names: list[tuple[str | None, bool]] = []
 
-    def _fake_status(resolved_path, *, kind, quantize_options=(), budget=None, find_local_dir=None, model_name=None, app_config=None):
+    def _fake_status(resolved_path, *, kind, quantize_options=(), budget=None, find_local_dir=None, model_name=None, app_config=None, family=None):
         calls.append((resolved_path, kind, quantize_options))
         if kind == "video":
             video_names.append((model_name, app_config is web_config.app_config))
@@ -2749,6 +2775,7 @@ def test_inspect_route_adds_the_memory_fit_of_the_window(clip, monkeypatch):
         "low_memory": False,
         "budget": MemoryBudget(24 * 2**30),
         "model_name": "ltx-8",
+        "family": "ltx",
     }
 
 
@@ -3128,6 +3155,7 @@ def clip_fit(monkeypatch, tmp_path):
     """Stub the model and budget behind ``POST /api/video/memory-fit`` and record what the memory check receives."""
     web_config = _make_web_config()
     web_config.output_dir = str(tmp_path)
+    web_config.app_config["video_model_presets"] = {"ltx": load_config()["video_model_presets"]["ltx"]}
     calls: list[dict[str, object]] = []
 
     def _fit(model, **kwargs):
@@ -3164,6 +3192,7 @@ def test_memory_fit_route_checks_the_aligned_clip_against_the_budget(clip_fit):
         "upscale": False,
         "budget": MemoryBudget(24 * 2**30, unified_bytes=32 * 2**30),
         "model_name": "ltx-8",
+        "family": "ltx",
     }
 
 
@@ -3357,6 +3386,7 @@ class TestLtxConversion:
         assert "signal 9" in ltx_conversion._failure_message(progress, -9)
         assert ltx_conversion._failure_message([*progress, "RuntimeError: CUDA error"], 1) == "RuntimeError: CUDA error"
 
+    @pytest.mark.usefixtures("hub_offline")
     def test_inspect_returns_what_the_form_preselects(self, monkeypatch, tmp_path):
         from zvisiongenerator.converters.ltx_convert import LtxInspection, distill_advice
 
@@ -3372,6 +3402,7 @@ class TestLtxConversion:
         assert response.status_code == 200
         assert response.json() == {"layout": "full", "fp8_weights": 440, "distillation": "dev", "advice": distill_advice("dev", "Distill on"), "recommend_distill": True, "recommended_quantize": 8}
 
+    @pytest.mark.usefixtures("hub_offline")
     def test_inspect_refuses_a_file_that_is_not_ltx(self, monkeypatch, tmp_path):
         checkpoint = tmp_path / "ft.safetensors"
         checkpoint.write_bytes(b"x")

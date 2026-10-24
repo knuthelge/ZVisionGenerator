@@ -15,13 +15,13 @@ from zvisiongenerator.downloads.presence import target_present_offline
 from zvisiongenerator.backends.prompt_enhancer_session import is_model_downloaded
 from zvisiongenerator.utils.config import (
     enhancer_tier_models,
-    ltx_companion_repos,
     model_display_name,
     resolve_defaults,
     resolve_enhancer_model,
     resolve_video_defaults,
     smart_enhancer_model,
     smart_unavailable,
+    video_companion_repos,
 )
 from zvisiongenerator.utils.ideogram4_instant import is_instant_dir
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo, detect_image_model
@@ -450,7 +450,14 @@ def _status_resolver(
         quantize_options = _image_quantize_levels(web_config, image_model_defaults.get(entry.name, {})) if kind == "image" else ()
         try:
             described = describe_model_status(
-                entry.resolved_path, kind=kind, quantize_options=quantize_options, budget=budget, find_local_dir=find_local_dir, model_name=entry.name, app_config=web_config.app_config
+                entry.resolved_path,
+                kind=kind,
+                quantize_options=quantize_options,
+                budget=budget,
+                find_local_dir=find_local_dir,
+                model_name=entry.name,
+                app_config=web_config.app_config,
+                family=entry.family if kind == "video" else None,
             )
             if instant_sources_count and not described["downloaded"] and is_instant_dir(entry.resolved_path):
                 described["downloaded"] = not row_download_needed(KIND_MODEL, entry.name, web_config, downloaded=False)
@@ -501,7 +508,7 @@ def _disk_size_resolver(models_dir: Path, *, listed: set[str], app_config: dict[
         if entry.source == "installed":
             local.append(models_dir / entry.name)
         elif (repo := parse_huggingface_repo_reference(entry.resolved_path)) is not None:
-            hub = [huggingface_cache_repo_dir(repo_id) for repo_id in (repo.repo_id, *ltx_companion_repos(app_config, entry.resolved_path))]
+            hub = [huggingface_cache_repo_dir(repo_id) for repo_id in (repo.repo_id, *video_companion_repos(entry.family, app_config, entry.resolved_path))]
         total = sum(directory_bytes(path) for path in local) + sum(repo_disk_bytes(path) for path in hub)
         return disk_size_label(total) if total else None
 

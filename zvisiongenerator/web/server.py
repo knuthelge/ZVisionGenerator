@@ -41,6 +41,7 @@ from zvisiongenerator.converters.convert_checkpoint import LTX_MODEL_TYPE, MODEL
 from zvisiongenerator.converters.lora_import import import_lora_hf, import_lora_local
 from zvisiongenerator.core.ideogram4 import compact_caption
 from zvisiongenerator.core.image_types import ImageGenerationRequest
+from zvisiongenerator.core.video_family import settle_video_steps
 from zvisiongenerator.core.video_types import VideoGenerationRequest
 from zvisiongenerator.downloads.flights import DownloadFlights
 from zvisiongenerator.downloads.hub_access import token_source as hub_token_source
@@ -55,6 +56,7 @@ from zvisiongenerator.utils.config import (
     resolve_upscale_steps,
     validate_scheduler,
     validate_sharpen_amount,
+    video_family,
 )
 from zvisiongenerator.utils.enhance_record import parse_enhance_record
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
@@ -84,8 +86,9 @@ from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_row_name, seedvr2_tier_label
 from zvisiongenerator.upscale_runner import read_upscale_source
-from zvisiongenerator.utils.video_extend import apply_extend_args
+from zvisiongenerator.utils.video_extend import apply_extend_args, extend_step
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
+from zvisiongenerator.utils.video_support import unsupported_video_request
 from zvisiongenerator.workflows import build_seedvr2_upscale_workflow, build_upscale_workflow
 from zvisiongenerator.web.config import WebUiConfig, load_web_config
 from zvisiongenerator.web.config_api import build_api_config_response
@@ -1198,12 +1201,19 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     resolved_model, model_info = resolve_video_model(app_config, model_name)
     if image_path and not model_info.supports_i2v:
         raise ValueError(f"Model '{model_name}' does not support image-to-video.")
+    refusal = unsupported_video_request(app_config, model_info.family, image=image_path is not None, extend=extend, review=review_enabled(args))
+    if refusal is not None:
+        raise ValueError(refusal)
 
     args.lora_paths, args.lora_weights = _resolve_loras(form, require_file=False)
     if source is not None:
         # The window keeps the source's size and frame rate; no resolution or frame alignment applies.
         args.steps = clip_defaults(app_config, model_info, steps=args.steps)["steps"]
-        apply_extend_args(args, source, requested_extend_frames(_optional_int(form, "extend_frames"), _optional_float(form, "extend_seconds"), source.fps))
+        apply_extend_args(
+            args,
+            source,
+            requested_extend_frames(_optional_int(form, "extend_frames"), _optional_float(form, "extend_seconds"), source.fps, step=extend_step(video_family(app_config, model_info.family))),
+        )
     else:
         clip = resolve_video_clip(app_config, model_info, ratio=args.ratio, size=args.size, steps=args.steps, width=args.width, height=args.height, frames=args.frames, upscale=bool(args.upscale))
         args.steps, args.width, args.height, args.num_frames = clip.steps, clip.width, clip.height, clip.num_frames
@@ -1472,6 +1482,7 @@ def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[st
         budget=memory_budget(),
         model_name=model_name,
         app_config=app_config,
+        family=model_info.family,
     )
     return {"memory_fit": memory_fit, "width": clip.width, "height": clip.height, "frames": clip.num_frames}
 
@@ -1647,23 +1658,18 @@ def _video_ratio_and_size(form: Any, web_config: WebUiConfig) -> tuple[str, str]
 
 
 def _normalize_video_steps(args: argparse.Namespace, config: dict[str, Any], model_info: VideoModelInfo) -> None:
-    """Settle the step counts of a video job: upscale steps, and LTX's cap of 8 steps."""
-    steps_explicitly_set = args.steps is not None
-    if args.upscale:
-        upscale_cfg = config.get("video_model_presets", {}).get("ltx", {}).get("upscale", {})
-        if not steps_explicitly_set:
-            args.steps = upscale_cfg.get("default_upscale_steps", 8)
-        args.upscale_steps = args.steps
-    else:
-        args.upscale_steps = None
-
-    if args.steps < 1:
+    """Settle the step counts of a video job: upscale steps and the model family's step rules (silently)."""
+    if args.steps is not None and args.steps < 1:
         raise ValueError("Steps must be at least 1.")
-
-    if model_info.family == "ltx" and args.steps > 8:
-        args.steps = 8
-        if args.upscale_steps is not None:
-            args.upscale_steps = args.steps
+    upscale_cfg = config.get("video_model_presets", {}).get("ltx", {}).get("upscale", {})
+    settled = settle_video_steps(
+        args.steps,
+        upscale=bool(args.upscale),
+        family=video_family(config, model_info.family),
+        default_upscale_steps=upscale_cfg.get("default_upscale_steps", 8),
+    )
+    args.steps = settled.steps
+    args.upscale_steps = settled.upscale_steps
 
 
 def _persist_web_config(form: Any) -> None:

@@ -12,13 +12,19 @@ save, FP8 by casting one component at a time and saving it.
 
 The FP8 transformer is built empty and filled one saved tensor at a time, each cast to its storage dtype as it
 is read (see :func:`_stream_fp8_transformer`), so it is never held in memory at full precision.
+
+A model whose weights are written one tensor at a time (the video transformers) pre-packs its NF4 linear layers
+instead: :func:`pack_nf4` packs each weight on the GPU as it streams past, the copy is saved in the layout
+``Linear4bit`` saves itself in, and :func:`swap_in_linear4bit` with :func:`place_nf4` load it back into
+``Linear4bit`` layers on the CPU.
 """
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import re
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -39,11 +45,19 @@ __all__ = [
     "load_fp8_transformer",
     "load_nf4_components",
     "load_nf4_transformer",
+    "nf4_linear_names",
+    "nf4_storage_format",
+    "pack_nf4",
+    "place_nf4",
+    "swap_in_linear4bit",
     "write_fp8_copy",
 ]
 
 # Tensors assigned to an empty model at a time (bounds what is held beyond the model itself).
 _FILL_BATCH_BYTES = 512 * 1024**2
+_NF4_BLOCKSIZE = 64
+# What one saved NF4 weight consists of, by name suffix: the packed data and its double-quantized state.
+_NF4_PARTS = frozenset({"", "absmax", "quant_map", "nested_absmax", "nested_quant_map", "quant_state.bitsandbytes__nf4"})
 # Text-encoder layers kept in the compute dtype: norms and embeddings (diffusers' defaults cover the rest).
 _TEXT_ENCODER_SKIP_PATTERNS = ("pos_embed", "patch_embed", "norm", "embed", "^proj_in$", "^proj_out$", "lm_head")
 
@@ -289,3 +303,85 @@ def _weight_files(component_dir: Path) -> list[Path]:
         return [component_dir / name for name in sorted(set(weight_map.values()))]
     single = component_dir / "diffusion_pytorch_model.safetensors"
     return [single] if single.is_file() else sorted(component_dir.glob("*.safetensors"))
+
+
+def nf4_storage_format() -> str:
+    """Return the storage format of a pre-packed NF4 copy, ``nf4-bitsandbytes-<major>.<minor>``: it depends on bitsandbytes' serialization."""
+    major_minor = ".".join(importlib.metadata.version("bitsandbytes").split(".")[:2])
+    return f"nf4-bitsandbytes-{major_minor}"
+
+
+def nf4_linear_names(model: Any, *, prefix: str, exclude: Collection[str] = ()) -> list[str]:
+    """Return the names of *model*'s linear layers NF4 packs: those under *prefix*, less any with a name part in *exclude*.
+
+    Args:
+        model: The model (it may be empty).
+        prefix: What a layer's name starts with to be packed.
+        exclude: Name parts (the dot-separated pieces of a name) that keep a layer out; whole parts, not substrings.
+    """
+    import torch
+
+    return [name for name, module in model.named_modules() if name.startswith(prefix) and isinstance(module, torch.nn.Linear) and not any(part in exclude for part in name.split("."))]
+
+
+def pack_nf4(key: str, weight: torch.Tensor, device: Any) -> dict[str, torch.Tensor]:
+    """Pack *weight* to NF4 on *device* and return it with its quantization state, named as ``Linear4bit`` saves them."""
+    import torch
+    from bitsandbytes.functional import quantize_4bit
+
+    packed, state = quantize_4bit(weight.to(device=device, dtype=torch.bfloat16), blocksize=_NF4_BLOCKSIZE, compress_statistics=True, quant_type="nf4", quant_storage=torch.uint8)
+    return {key: packed.cpu(), **{f"{key}.{name}": value.cpu() for name, value in state.as_dict(packed=True).items()}}
+
+
+def swap_in_linear4bit(model: Any, names: Iterable[str], compute_dtype: torch.dtype) -> dict[str, Any]:
+    """Replace the linears *names* of the empty *model* with empty ``Linear4bit`` layers; return them by weight name."""
+    import torch
+    from bitsandbytes.nn import Linear4bit
+
+    layers: dict[str, Any] = {}
+    for name in names:
+        parent_name, _, child = name.rpartition(".")
+        parent = model.get_submodule(parent_name)
+        linear = getattr(parent, child)
+        layer = Linear4bit(
+            linear.in_features, linear.out_features, bias=linear.bias is not None, compute_dtype=compute_dtype, compress_statistics=True, quant_type="nf4", quant_storage=torch.uint8, device="meta"
+        )
+        setattr(parent, child, layer)
+        layers[f"{name}.weight"] = layer
+    return layers
+
+
+def place_nf4(tensors: Iterable[tuple[str, torch.Tensor]], layers: Mapping[str, Any]) -> Iterator[tuple[str, torch.Tensor]]:
+    """Put each NF4 weight of *tensors* into its ``Linear4bit`` layer in *layers*, and yield every other tensor.
+
+    A weight's parts are saved in one shard but not next to each other, so they are gathered until complete.
+
+    Raises:
+        RuntimeError: When a weight's parts are incomplete at the end.
+    """
+    from bitsandbytes.nn import Params4bit
+
+    parts: dict[str, dict[str, torch.Tensor]] = {}
+    for name, tensor in tensors:
+        owner = _nf4_owner(name, layers)
+        if owner is None:
+            yield name, tensor
+            continue
+        found = parts.setdefault(owner, {})
+        found[name[len(owner) :].lstrip(".")] = tensor
+        if found.keys() == _NF4_PARTS:
+            data = found.pop("")
+            layer = layers[owner]
+            layer.weight = Params4bit.from_prequantized(data=data, quantized_stats=found, requires_grad=False, device="cpu", module=layer)
+            del parts[owner]
+    if parts:
+        raise RuntimeError(f"The NF4 weight {sorted(parts)[0]} is incomplete in the prepared copy.")
+
+
+def _nf4_owner(name: str, layers: Mapping[str, Any]) -> str | None:
+    """Return the NF4 weight *name* belongs to (the weight itself or part of its quantization state), else ``None``."""
+    if name in layers:
+        return name
+    head, separator, _ = name.partition(".weight.")
+    owner = f"{head}.weight"
+    return owner if separator and owner in layers else None

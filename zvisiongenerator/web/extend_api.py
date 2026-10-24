@@ -9,11 +9,23 @@ from typing import Any
 
 from zvisiongenerator.backends import accelerator_memory_budget_or_none as memory_budget, supports_video_audio, supports_video_extend
 from zvisiongenerator.core.video_types import ExtendSource
+from zvisiongenerator.utils.config import video_family
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.model_memory import clip_memory_fit
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.prompt_enhance import EnhanceContext
-from zvisiongenerator.utils.video_extend import ExtendInspection, extend_enhance_context, inspect_extend_source, recorded_prompts, require_extend_source, resolve_extend_frames, window_frames
+from zvisiongenerator.utils.video_extend import (
+    EXTEND_FRAME_STEP,
+    ExtendInspection,
+    extend_enhance_context,
+    extend_step,
+    inspect_extend_source,
+    recorded_prompts,
+    require_extend_source,
+    resolve_extend_frames,
+    window_frames,
+)
+from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.gallery import output_media_url
 from zvisiongenerator.web.json_fields import json_field
@@ -90,13 +102,27 @@ def _inspect_source(path: Path) -> ExtendInspection:
     return _inspect_by_identity(_file_identity(path))
 
 
-def requested_extend_frames(frames: int | None, seconds: float | None, fps: float) -> int:
-    """Return the new frames of an extension: *frames* as given, else *seconds* at *fps* snapped to a multiple of 8, else the 2 s default.
+def requested_extend_frames(frames: int | None, seconds: float | None, fps: float, *, step: int = EXTEND_FRAME_STEP) -> int:
+    """Return the new frames of an extension: *frames* as given, else *seconds* at *fps* snapped to a multiple of *step*, else the 2 s default.
+
+    Args:
+        step: The step between the lengths the model's family can add.
 
     Raises:
-        ValueError: If *frames* is not a multiple of 8 of at least 8, or *seconds* is not positive.
+        ValueError: If *frames* is not a multiple of *step* of at least *step*, or *seconds* is not positive.
     """
-    return resolve_extend_frames(frames=frames, seconds=seconds, fps=fps, strict=True)[0]
+    return resolve_extend_frames(frames=frames, seconds=seconds, fps=fps, strict=True, step=step)[0]
+
+
+def _resolve_video_model(model: str | None, web_config: WebUiConfig) -> tuple[str, str] | None:
+    """Return the resolved path and the family of the video model picked as *model*, or ``None`` when it does not resolve."""
+    if model is None:
+        return None
+    try:
+        resolved = resolve_model_path(model, aliases=web_config.app_config.get("model_aliases", {}), platform_key=sys.platform)
+    except KeyError, ValueError:
+        return None
+    return resolved, detect_video_model(resolved).family
 
 
 def extend_source_response(payload: Any, web_config: WebUiConfig, media_root: Path) -> dict[str, Any]:
@@ -118,12 +144,18 @@ def extend_source_response(payload: Any, web_config: WebUiConfig, media_root: Pa
     scene, prompt = recorded_prompts(inspection.recorded)
     recorded_model = inspection.recorded.model if inspection.recorded is not None else None
     fps = probe.fps if probe is not None else 0.0
-    extend_frames = None if requested_frames is None and fps <= 0 else resolve_extend_frames(frames=requested_frames, seconds=None, fps=fps, strict=False)[0]
+    memory_model = model or (recorded_model if recorded_model in web_config.video_model_options else None) or preferred_option(web_config.default_models.video, web_config.video_model_options)
+    resolved_model = _resolve_video_model(memory_model, web_config)
+    family = resolved_model[1] if resolved_model is not None else None
+    extend_frames = (
+        None
+        if requested_frames is None and fps <= 0
+        else resolve_extend_frames(frames=requested_frames, seconds=None, fps=fps, strict=False, step=extend_step(video_family(web_config.app_config, family) if family is not None else None))[0]
+    )
     window = window_frames(extend_frames) if extend_frames is not None else None
     memory_fit = None
     if inspection.source is not None and window is not None:
-        memory_model = model or (recorded_model if recorded_model in web_config.video_model_options else None) or preferred_option(web_config.default_models.video, web_config.video_model_options)
-        memory_fit = _extend_memory_fit(memory_model, inspection.source, window, low_memory is not False, web_config)
+        memory_fit = _extend_memory_fit(resolved_model, memory_model, inspection.source, window, low_memory is not False, web_config)
     frame_count = probe.frame_count if probe is not None else None
     return {
         "path": str(path),
@@ -155,16 +187,15 @@ def _source_duration(probe: Any, fps: float, frame_count: int | None) -> float |
     return probe.duration if probe is not None else None
 
 
-def _extend_memory_fit(model: str | None, source: ExtendSource, window: int, low_memory: bool, web_config: WebUiConfig) -> dict[str, Any] | None:
+def _extend_memory_fit(resolved_model: tuple[str, str] | None, model: str | None, source: ExtendSource, window: int, low_memory: bool, web_config: WebUiConfig) -> dict[str, Any] | None:
     """Return how an extension window fits this machine's memory (``status``, ``required_gb``, ``budget_gb``), or ``None`` when unknown."""
     budget = memory_budget()
-    if model is None or budget is None:
+    if resolved_model is None or budget is None:
         return None
-    try:
-        resolved = resolve_model_path(model, aliases=web_config.app_config.get("model_aliases", {}), platform_key=sys.platform)
-    except KeyError, ValueError:
-        return None
-    return clip_memory_fit(resolved, width=source.width, height=source.height, frames=window, low_memory=low_memory, budget=budget, model_name=model, app_config=web_config.app_config)
+    # LTX is the only family that extends today, whatever the model's own detection says.
+    return clip_memory_fit(
+        resolved_model[0], width=source.width, height=source.height, frames=window, low_memory=low_memory, budget=budget, model_name=model, app_config=web_config.app_config, family="ltx"
+    )
 
 
 def extend_context_from_body(raw: dict[str, Any], prompt: str) -> EnhanceContext:

@@ -552,3 +552,34 @@ class TestCutWindowAudio:
         cut = cut_window_audio(np.zeros((1, 10), dtype=np.float32), skip=1, keep=12)
 
         assert cut.shape == (1, 12) and cut.dtype == np.float32
+
+
+class TestResolveExtendFramesStep:
+    """A family whose extension adds frames in another step (17) rounds and checks against that step."""
+
+    def test_a_lenient_length_snaps_to_the_step_with_a_note(self):
+        assert resolve_extend_frames(frames=58, seconds=None, fps=24.0, strict=False, frames_name="--extend-frames", step=17) == (51, "--extend-frames 58 rounded to 51 (a multiple of 17).")
+
+    @pytest.mark.parametrize(("frames", "expected"), [(26, 34), (4, 17), (8, 17), (68, 68)])
+    def test_lenient_lengths_snap_to_a_multiple_of_the_step(self, frames, expected):
+        assert resolve_extend_frames(frames=frames, seconds=None, fps=24.0, strict=False, step=17)[0] == expected
+
+    def test_a_tie_rounds_to_the_even_multiple_like_the_ltx_step(self):
+        # 25.5 is halfway between 17 and 34 multiples of 17 (1.5): halves go to the even count, 2 * 17.
+        assert snap_extend_frames(25.5, 17) == 34
+        assert snap_extend_frames(42.5, 17) == 34
+
+    def test_strict_frames_must_be_a_multiple_of_the_step(self):
+        assert resolve_extend_frames(frames=51, seconds=None, fps=24.0, strict=True, step=17) == (51, None)
+        with pytest.raises(ValueError, match=r"^extend_frames must be a multiple of 17, at least 17\.$"):
+            resolve_extend_frames(frames=58, seconds=None, fps=24.0, strict=True, step=17)
+
+    def test_the_default_and_seconds_lengths_use_the_step(self):
+        assert resolve_extend_frames(frames=None, seconds=None, fps=24.0, strict=False, step=17) == (51, None)
+        assert resolve_extend_frames(frames=None, seconds=2.0, fps=24.0, strict=True, step=17) == (51, None)
+        assert resolve_extend_frames(frames=None, seconds=2.0, fps=30.0, strict=True, step=17) == (68, None)
+        frames, note = resolve_extend_frames(frames=None, seconds=2.0, fps=24.0, strict=False, seconds_name="--extend-seconds", step=17)
+        assert frames == 51 and note == "--extend-seconds 2 is 48 frames at 24 fps; using 51 frames (2.12 s)."
+
+    def test_the_step_defaults_to_the_ltx_step(self):
+        assert resolve_extend_frames(frames=58, seconds=None, fps=24.0, strict=False)[0] == 56

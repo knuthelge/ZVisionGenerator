@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 import pytest
 
@@ -219,3 +220,118 @@ class TestFolders:
         sq.discard_partial(partial)
 
         assert not partial.exists()
+
+
+class TestEnsureStoredCopy:
+    """The write-once routine behind the video backend's prepared copies."""
+
+    _MANIFEST = {"layout": 1, "bits": 8, "format": "fp8-e4m3"}
+
+    def _write_x(self, folder):
+        (folder / "w").write_text("x")
+
+    def test_a_missing_copy_is_written_then_marked_complete(self, tmp_path):
+        target = tmp_path / "cache" / "model@q8"
+
+        result = sq.ensure_stored_copy(target, self._MANIFEST, self._write_x)
+
+        assert result == target
+        assert (target / "w").read_text() == "x"
+        assert json.loads((target / sq.MANIFEST_NAME).read_text()) == self._MANIFEST
+
+    def test_an_extra_manifest_key_that_differs_makes_the_copy_stale(self, tmp_path):
+        target = tmp_path / "model@q8"
+        sq.ensure_stored_copy(target, {**self._MANIFEST, "lora_scale": 0.5}, lambda folder: (folder / "w").write_text("old"))
+        writes: list[object] = []
+
+        sq.ensure_stored_copy(target, {**self._MANIFEST, "lora_scale": 0.75}, lambda folder: (writes.append(folder), (folder / "w").write_text("new")))
+
+        assert len(writes) == 1
+        assert (target / "w").read_text() == "new"
+        assert json.loads((target / sq.MANIFEST_NAME).read_text())["lora_scale"] == 0.75
+
+    def test_a_current_copy_is_returned_without_writing(self, tmp_path):
+        target = tmp_path / "model@q8"
+        sq.ensure_stored_copy(target, self._MANIFEST, self._write_x)
+        writes: list[object] = []
+
+        sq.ensure_stored_copy(target, self._MANIFEST, writes.append)
+
+        assert writes == []
+
+    def test_reuse_never_picks_the_target_itself(self, tmp_path):
+        target = tmp_path / "model@q8"
+        sq.ensure_stored_copy(target, {**self._MANIFEST, "n": 1}, lambda folder: (folder / "w").write_text("old"))
+        writes: list[object] = []
+
+        # The target is stale for the new manifest and also listed to reuse: it is written anew, not linked from itself.
+        sq.ensure_stored_copy(target, {**self._MANIFEST, "n": 2}, lambda folder: (writes.append(folder), (folder / "w").write_text("new")), reuse=[target])
+
+        assert len(writes) == 1
+        assert (target / "w").read_text() == "new"
+
+    def test_a_current_copy_in_reuse_is_hard_linked_with_its_own_manifest(self, tmp_path):
+        first = tmp_path / "a" / "text_encoder"
+        sq.ensure_stored_copy(first, self._MANIFEST, self._write_x)
+        writes: list[object] = []
+
+        second = sq.ensure_stored_copy(tmp_path / "b" / "text_encoder", self._MANIFEST, writes.append, reuse=[first])
+
+        assert writes == []
+        assert (second / "w").stat().st_ino == (first / "w").stat().st_ino
+        assert (second / sq.MANIFEST_NAME).stat().st_ino != (first / sq.MANIFEST_NAME).stat().st_ino
+
+    def test_the_reuse_branch_also_sweeps_a_stale_partial_of_the_target(self, tmp_path):
+        first = tmp_path / "a" / "text_encoder"
+        sq.ensure_stored_copy(first, self._MANIFEST, self._write_x)
+        target = tmp_path / "b" / "text_encoder"
+        stale = target.parent / ".text_encoder.deadbeef.partial"
+        stale.mkdir(parents=True)
+        (stale / "half").write_text("half")
+        old = time.time() - 2 * 60 * 60
+        for path in (stale / "half", stale):
+            os.utime(path, (old, old))
+
+        sq.ensure_stored_copy(target, self._MANIFEST, lambda folder: pytest.fail("reuse must not write"), reuse=[first])
+
+        assert not stale.exists()
+        assert (target / "w").exists()
+
+    def test_flush_syncs_the_files_before_the_manifest_exists(self, monkeypatch, tmp_path):
+        seen: list[tuple[bool, bool]] = []
+        monkeypatch.setattr(sq, "flush_to_disk", lambda folder: seen.append(((folder / "w").exists(), (folder / sq.MANIFEST_NAME).exists())))
+
+        sq.ensure_stored_copy(tmp_path / "model@q8", self._MANIFEST, self._write_x, flush=True)
+
+        assert seen == [(True, False)]
+
+    def test_flush_is_off_by_default(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(sq, "flush_to_disk", lambda folder: pytest.fail("flush_to_disk must not run"))
+
+        sq.ensure_stored_copy(tmp_path / "model@q8", self._MANIFEST, self._write_x)
+
+    @pytest.mark.parametrize("error", [RuntimeError("disk full"), KeyboardInterrupt()])
+    def test_a_failed_or_interrupted_write_leaves_neither_target_nor_partial(self, tmp_path, error):
+        target = tmp_path / "model@q8"
+
+        def _fail(folder):
+            (folder / "w").write_text("half")
+            raise error
+
+        with pytest.raises(type(error)):
+            sq.ensure_stored_copy(target, self._MANIFEST, _fail)
+
+        assert not target.exists()
+        assert list(tmp_path.glob(".model@q8.*.partial")) == []
+
+
+class TestFileIdentities:
+    def test_a_symlink_records_the_resolved_name_and_size(self, tmp_path):
+        real = tmp_path / "real-name.safetensors"
+        real.write_bytes(b"1234567")
+        link = tmp_path / "link.safetensors"
+        link.symlink_to(real)
+        plain = tmp_path / "plain.safetensors"
+        plain.write_bytes(b"01")
+
+        assert sq.file_identities([link, plain]) == [{"name": "real-name.safetensors", "bytes": 7}, {"name": "plain.safetensors", "bytes": 2}]

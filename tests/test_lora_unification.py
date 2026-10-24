@@ -13,6 +13,7 @@ import zvisiongenerator.image_cli as image_cli
 import zvisiongenerator.utils as utils
 import zvisiongenerator.utils.lora as lora_utils
 import zvisiongenerator.video_cli as video_cli
+from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.lora import parse_lora_arg
 
 
@@ -53,7 +54,7 @@ def _patch_video_main_dependencies(monkeypatch: pytest.MonkeyPatch) -> MagicMock
         lambda: {
             "video_generation": {"default_ratio": "16:9", "default_size": "m"},
             "video_sizes": {"16:9": {"m": {"width": 768, "height": 432}}},
-            "video_model_presets": {"ltx": {"upscale": {}}},
+            "video_model_presets": {"ltx": {**load_config()["video_model_presets"]["ltx"], "upscale": {}}},
             "model_aliases": {},
         },
     )

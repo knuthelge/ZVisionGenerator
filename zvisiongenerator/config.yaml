@@ -295,7 +295,14 @@ video_generation:
 
 video_model_presets:
   ltx:
+    label: "LTX distilled model"
     default_steps: 8
+    max_steps: 8
+    # Valid frame counts are alignment * k + offset (8k+1: 9, 17, ... 121); another count moves to the nearest one.
+    frame_rule: { alignment: 8, offset: 1, round: nearest }
+    # An extension adds frames in multiples of this.
+    extend_frame_step: 8
+    capabilities: { i2v: true, end_frame: false, extend: true, upscale: true, upscale_review: true, lora: true, audio: true, low_memory: true }
     diffusers:
       # Distilled LTX 2.3 in diffusers format, used on Windows/Linux (8 steps, guidance 1.0). Distilled checkpoints only.
       # Its text encoder, connectors, VAEs and vocoder are used; the transformer comes from the file below.

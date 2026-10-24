@@ -378,6 +378,7 @@ def clip_memory_fit(
     env: Mapping[str, str] | None = None,
     model_name: str | None = None,
     app_config: dict[str, Any] | None = None,
+    family: str = "ltx",
 ) -> dict[str, Any] | None:
     """Check a clip against the memory budget; callers warn on ``tight`` or ``too_large`` and never block.
 
@@ -393,13 +394,14 @@ def clip_memory_fit(
         env: The environment to read the decode budget from; the process environment when omitted.
         model_name: The name the model was picked by (``ltx-4``), which sets the quantize level on a discrete GPU.
         app_config: The loaded config, which sets that level and names the single-file transformer (discrete GPU only).
+        family: The model's video family; only LTX has an estimate.
 
     Returns:
-        ``{"status", "required_gb", "budget_gb"}``, or ``None`` when no memory budget is known or the model is not a
+        ``{"status", "required_gb", "budget_gb"}``, or ``None`` when no memory budget is known, the family has no estimate or the model is not a
         downloaded LTX model with its text encoder (bundled in the pack, or the Gemma 3 repo). On a discrete GPU (CUDA) it adds ``"kind": "discrete"`` and
         ``"resource"`` (``"gpu"`` or ``"system"``): the memory the numbers are about, whichever is closer to its limit.
     """
-    if budget is None or not budget.gpu_bytes:
+    if budget is None or not budget.gpu_bytes or family != "ltx":
         return None
     if budget.system_bytes is not None:
         return _cuda_clip_fit(

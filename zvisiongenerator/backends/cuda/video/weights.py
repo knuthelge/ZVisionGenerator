@@ -10,24 +10,22 @@ the text encoder in FP8 at either level. The text encoder is Gemma 3 (LTX-2.3) o
 sits in memory at full precision.
 
 NF4 weights are packed by bitsandbytes on the GPU and saved with their quantization state, in the layout
-``Linear4bit`` saves itself in; they load back into ``Linear4bit`` layers on the CPU.
+``Linear4bit`` saves itself in; they load back into ``Linear4bit`` layers on the CPU. The packing lives in
+``backends/cuda/quant.py``; this module picks which layers it applies to (the linears of the transformer blocks).
 """
 
 from __future__ import annotations
 
-import importlib.metadata
 import json
-import os
-import shutil
+import math
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends.cuda.quant import cast_to_fp8, empty_diffusers_model, fill_weights, kept_in_compute_dtype
-from zvisiongenerator.utils.file_links import link_or_copy
+from zvisiongenerator.backends.cuda.quant import cast_to_fp8, empty_diffusers_model, fill_weights, kept_in_compute_dtype, nf4_linear_names, nf4_storage_format, pack_nf4, place_nf4, swap_in_linear4bit
 from zvisiongenerator.utils.model_files import ltx2_text_encoder_class
 from zvisiongenerator.utils.safetensors_stream import ShardWriter, iter_tensors, read_header, shard_files
-from zvisiongenerator.utils.stored_quant import MANIFEST_NAME, discard_partial, manifest_matches, partial_dir, promote_partial, sweep_stale_partials, write_manifest
+from zvisiongenerator.utils.stored_quant import MANIFEST_NAME, ensure_stored_copy, file_identities
 
 if TYPE_CHECKING:
     import torch
@@ -60,9 +58,6 @@ _DIFFUSERS_INDEX_NAME = "diffusion_pytorch_model.safetensors.index.json"
 _TRANSFORMERS_INDEX_NAME = "model.safetensors.index.json"
 _CHECKPOINT_PREFIX = "model.diffusion_model."
 _BLOCKS_PREFIX = "transformer_blocks."
-_NF4_BLOCKSIZE = 64
-# What one saved NF4 weight consists of, by name suffix: the packed data and its double-quantized state.
-_NF4_PARTS = frozenset({"", "absmax", "quant_map", "nested_absmax", "nested_quant_map", "quant_state.bitsandbytes__nf4"})
 # LTX-2.3's prompt modulation layers, which diffusers 0.41's single-file conversion leaves under their checkpoint names.
 _LTX23_RENAMES = (("prompt_adaln_single.", "prompt_adaln."), ("audio_prompt_adaln_single.", "audio_prompt_adaln."))
 # The diffusers text-encoder checkpoint uses transformers' older Gemma 3 names.
@@ -122,7 +117,7 @@ def count_transformer_elements(shapes: Iterable[tuple[str, list[int]]]) -> tuple
     """Count the elements of the transformer tensors ``(diffusers name, shape)`` in *shapes*: ``(2-D weights in its blocks, the rest)``."""
     blocks = rest = 0
     for name, shape in shapes:
-        count = _numel(shape)
+        count = math.prod(shape)
         if name.startswith(_BLOCKS_PREFIX) and len(shape) == 2:
             blocks += count
         else:
@@ -134,14 +129,14 @@ def component_elements(component_dir: Path) -> int:
     """Count the elements of the component in the diffusers folder *component_dir* from its file headers."""
     files = [path for index in (_DIFFUSERS_INDEX_NAME, _TRANSFORMERS_INDEX_NAME) if (component_dir / index).is_file() for path in shard_files(component_dir, index)]
     files = files or sorted(component_dir.glob("*.safetensors"))
-    return sum(_numel(info["shape"]) for path in files for info in read_header(path)[1].values())
+    return sum(math.prod(info["shape"]) for path in files for info in read_header(path)[1].values())
 
 
 def text_encoder_bytes(component_dir: Path) -> int:
     """Return the bytes the FP8 text encoder in *component_dir* holds: one per element, two where it stays bfloat16."""
     files = [path for index in (_DIFFUSERS_INDEX_NAME, _TRANSFORMERS_INDEX_NAME) if (component_dir / index).is_file() for path in shard_files(component_dir, index)]
     files = files or sorted(component_dir.glob("*.safetensors"))
-    return sum(_numel(info["shape"]) * (2 if kept_in_compute_dtype(name) else 1) for path in files for name, info in read_header(path)[1].items())
+    return sum(math.prod(info["shape"]) * (2 if kept_in_compute_dtype(name) else 1) for path in files for name, info in read_header(path)[1].items())
 
 
 def _transformer_shapes(source: Path) -> Iterator[tuple[str, list[int]]]:
@@ -174,14 +169,6 @@ def _folder_files(directory: Path, index_name: str) -> list[Path]:
     return sorted(directory.glob("*.safetensors"))
 
 
-def _numel(shape: Iterable[int]) -> int:
-    """Return the number of elements of a tensor of *shape*."""
-    count = 1
-    for size in shape:
-        count *= size
-    return count
-
-
 def ensure_prepared(target: Path, sources: Iterable[Path], bits: int, write: Callable[[Path], None], reuse: Iterable[Path] = ()) -> Path:
     """Return *target* once it holds a current prepared copy of *sources* at *bits*, writing it first if needed.
 
@@ -196,44 +183,18 @@ def ensure_prepared(target: Path, sources: Iterable[Path], bits: int, write: Cal
         reuse: Other places the same copy may already be; a current one is hard-linked (copied across file
             systems) instead of written again, so the files are stored once.
     """
-    manifest = _manifest(sources, bits)
-    if manifest_matches(target, manifest):
-        return target
-    existing = next((path for path in reuse if path != target and manifest_matches(path, manifest)), None)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    sweep_stale_partials(target)
-    partial = partial_dir(target)
-    try:
-        if existing is not None:
-            # The manifest is written anew, never through a link to the other copy's.
-            shutil.copytree(existing, partial, copy_function=link_or_copy, ignore=shutil.ignore_patterns(MANIFEST_NAME))
-        else:
-            partial.mkdir()
-            write(partial)
-        write_manifest(partial, manifest)
-        promote_partial(partial, target)
-    except BaseException:
-        discard_partial(partial)
-        raise
-    return target
+    return ensure_stored_copy(target, _manifest(sources, bits), write, reuse=reuse)
 
 
 def _manifest(sources: Iterable[Path], bits: int) -> dict[str, Any]:
     """Return the manifest of a prepared copy of *sources* at *bits* in the current layout."""
-    files = [Path(os.path.realpath(path)) for path in sources]
-    return {
-        "layout": _LAYOUT_VERSION,
-        "bits": bits,
-        "format": _storage_format(bits),
-        "sources": [{"name": path.name, "bytes": path.stat().st_size} for path in files],
-    }
+    return {"layout": _LAYOUT_VERSION, "bits": bits, "format": _storage_format(bits), "sources": file_identities(sources)}
 
 
 def _storage_format(bits: int) -> str:
     """Return the storage format of *bits*: NF4 copies depend on bitsandbytes' serialization."""
     if bits == 4:
-        major_minor = ".".join(importlib.metadata.version("bitsandbytes").split(".")[:2])
-        return f"nf4-bitsandbytes-{major_minor}"
+        return nf4_storage_format()
     return "fp8-e4m3"
 
 
@@ -271,13 +232,13 @@ def write_transformer_tensors(tensors: Iterable[tuple[str, torch.Tensor]], confi
 
     model = _empty_transformer(config, bits, torch.bfloat16)
     storage = {key: tensor.dtype for key, tensor in model.state_dict().items()}
-    nf4_weights = {f"{name}.weight" for name in _block_linear_names(model)} if bits == 4 else set()
+    nf4_weights = {f"{name}.weight" for name in nf4_linear_names(model, prefix=_BLOCKS_PREFIX)} if bits == 4 else set()
     writer = ShardWriter(target, _SHARD_PREFIX, _INDEX_NAME)
     written: set[str] = set()
     for key, tensor in tensors:
         if key not in storage:
             continue
-        writer.add(_pack_nf4(key, tensor, device) if key in nf4_weights else {key: tensor.to(storage[key])})
+        writer.add(pack_nf4(key, tensor, device) if key in nf4_weights else {key: tensor.to(storage[key])})
         written.add(key)
     _require_coverage(storage.keys() - written, label)
     writer.close()
@@ -299,9 +260,9 @@ def load_transformer(config: dict[str, Any], *, prepared: Path, bits: int, compu
         compute_dtype: The dtype layers compute in.
     """
     model = _empty_transformer(config, bits, compute_dtype)
-    linears = _swap_in_linear4bit(model, compute_dtype) if bits == 4 else {}
+    linears = swap_in_linear4bit(model, nf4_linear_names(model, prefix=_BLOCKS_PREFIX), compute_dtype) if bits == 4 else {}
     tensors = (item for path in shard_files(prepared, _INDEX_NAME) for item in iter_tensors(path))
-    fill_weights(model, _place_nf4(tensors, linears) if linears else tensors, str(prepared), skipped=linears.keys())
+    fill_weights(model, place_nf4(tensors, linears) if linears else tensors, str(prepared), skipped=linears.keys())
     return model.eval()
 
 
@@ -309,76 +270,6 @@ def _empty_transformer(config: dict[str, Any], bits: int, compute_dtype: torch.d
     """Return the transformer without weights, its layer weights set to FP8 storage at q8."""
     model = empty_diffusers_model(config, compute_dtype)
     return cast_to_fp8(model, compute_dtype) if bits == 8 else model
-
-
-def _block_linear_names(model: Any) -> list[str]:
-    """Return the names of the linear layers inside the transformer blocks: the layers NF4 packs."""
-    import torch
-
-    return [name for name, module in model.named_modules() if name.startswith(_BLOCKS_PREFIX) and isinstance(module, torch.nn.Linear)]
-
-
-def _pack_nf4(key: str, weight: torch.Tensor, device: Any) -> dict[str, torch.Tensor]:
-    """Pack *weight* to NF4 on *device* and return it with its quantization state, named as ``Linear4bit`` saves them."""
-    import torch
-    from bitsandbytes.functional import quantize_4bit
-
-    packed, state = quantize_4bit(weight.to(device=device, dtype=torch.bfloat16), blocksize=_NF4_BLOCKSIZE, compress_statistics=True, quant_type="nf4", quant_storage=torch.uint8)
-    return {key: packed.cpu(), **{f"{key}.{name}": value.cpu() for name, value in state.as_dict(packed=True).items()}}
-
-
-def _swap_in_linear4bit(model: Any, compute_dtype: torch.dtype) -> dict[str, Any]:
-    """Replace the block linears of the empty *model* with empty ``Linear4bit`` layers; return them by weight name."""
-    import torch
-    from bitsandbytes.nn import Linear4bit
-
-    layers: dict[str, Any] = {}
-    for name in _block_linear_names(model):
-        parent_name, _, child = name.rpartition(".")
-        parent = model.get_submodule(parent_name)
-        linear = getattr(parent, child)
-        layer = Linear4bit(
-            linear.in_features, linear.out_features, bias=linear.bias is not None, compute_dtype=compute_dtype, compress_statistics=True, quant_type="nf4", quant_storage=torch.uint8, device="meta"
-        )
-        setattr(parent, child, layer)
-        layers[f"{name}.weight"] = layer
-    return layers
-
-
-def _place_nf4(tensors: Iterable[tuple[str, torch.Tensor]], layers: dict[str, Any]) -> Iterator[tuple[str, torch.Tensor]]:
-    """Put each NF4 weight of *tensors* into its ``Linear4bit`` layer in *layers*, and yield every other tensor.
-
-    A weight's parts are saved in one shard but not next to each other, so they are gathered until complete.
-
-    Raises:
-        RuntimeError: When a weight's parts are incomplete at the end.
-    """
-    from bitsandbytes.nn import Params4bit
-
-    parts: dict[str, dict[str, torch.Tensor]] = {}
-    for name, tensor in tensors:
-        owner = _nf4_owner(name, layers)
-        if owner is None:
-            yield name, tensor
-            continue
-        found = parts.setdefault(owner, {})
-        found[name[len(owner) :].lstrip(".")] = tensor
-        if found.keys() == _NF4_PARTS:
-            data = found.pop("")
-            layer = layers[owner]
-            layer.weight = Params4bit.from_prequantized(data=data, quantized_stats=found, requires_grad=False, device="cpu", module=layer)
-            del parts[owner]
-    if parts:
-        raise RuntimeError(f"The NF4 weight {sorted(parts)[0]} is incomplete in the prepared copy.")
-
-
-def _nf4_owner(name: str, layers: dict[str, Any]) -> str | None:
-    """Return the NF4 weight *name* belongs to (the weight itself or part of its quantization state), else ``None``."""
-    if name in layers:
-        return name
-    head, separator, _ = name.partition(".weight.")
-    owner = f"{head}.weight"
-    return owner if separator and owner in layers else None
 
 
 def load_connectors(component_dir: Path, *, compute_dtype: torch.dtype) -> Any:

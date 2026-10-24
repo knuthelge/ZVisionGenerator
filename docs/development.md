@@ -47,6 +47,7 @@ make install
 - An autouse fixture, `_isolated_app_db`, points `zvisiongenerator.utils.app_db.get_ziv_data_dir` at a per-test temporary directory, so no test touches the real `ziv.sqlite3`. Files a test creates are under 2 seconds old and the gallery index never persists them; to test caching, backdate them with `os.utime` (or pass `clock=` to `GalleryIndex`) and count reader calls.
 - Use `@pytest.mark.parametrize` for data-driven tests with many input/output pairs.
 - Tests that run the real `ffmpeg` and `ffprobe` (in `tests/test_video_probe.py`, `tests/test_video_splice.py` and `tests/test_video_tail.py`) are marked to skip when the tools are missing and are meant to be run locally with ffmpeg installed; run them before changing the extend join. Everything else mocks ffmpeg.
+- An autouse guard fails any test that reaches `huggingface_hub.hf_hub_download` or `snapshot_download` unmocked, even when the code under test swallows the error. Use the `hub_offline` fixture for a test whose subject is "nothing cached, no network", or mock the function in the test.
 - Skip heavy dependencies: `pytest.importorskip("torch")`, `@pytest.mark.skipif(sys.platform == ...)` for platform-specific tests.
 - Assert behavior and machine-readable contracts, not documentation prose, help text wording, CSS utility classes, source-code text, or incidental selector details.
 - String assertions are appropriate only when the string is the contract under test, such as routes, config keys, storage keys, parser options, event names, filenames, enum values, structured statuses, and accessibility or control names required for operability.
@@ -88,7 +89,7 @@ zvisiongenerator/
 │   │   ├── lora_peft.py           Detect and report LoRA files that match no module (peft)
 │   │   ├── memory.py              CUDA memory release after a job, and GPU and system memory sizes
 │   │   ├── prompt_enhancer.py     Prompt-enhancer LLM (transformers)
-│   │   ├── quant.py               NF4 (q4) and FP8 (q8) weights, at load and as stored quants
+│   │   ├── quant.py               NF4 (q4) and FP8 (q8) weights, at load and as stored quants, and the NF4 pre-pack of a model's block linears
 │   │   ├── seedvr2.py             SeedVR2 upscaler (vendored PyTorch core, FP8 streamed from system memory)
 │   │   ├── image/
 │   │   │   ├── backend.py         Image backend
@@ -97,8 +98,10 @@ zvisiongenerator/
 │   │   └── video/
 │   │       ├── audio_carry.py     Pin a clip's last sound at the start of an extension window
 │   │       ├── backend.py         LTX video backend
+│   │       ├── converted.py       Converted LTX-2.3 folders: write one from a single-file checkpoint
 │   │       ├── encode.py          Write frames and audio to MP4 with PyAV (H.264 CRF 18, AAC)
 │   │       ├── image_crf.py       Re-compress an image-to-video conditioning image through H.264 at a model version's CRF
+│   │       ├── memory_estimate.py System-memory estimate of LTX, read from the weight files' headers
 │   │       ├── sampler.py         Euler-ancestral sampling for LTX-2.5's distilled rows: seed and sigma maths, the shared noise holder and the scheduler swap
 │   │       ├── streaming_decode.py Decode LTX-2 video latents a few frames at a time, straight to 8-bit frames
 │   │       ├── timestep_runs.py   Run the LTX-2 transformer on per-token (image-to-video) timesteps by runs
@@ -177,7 +180,7 @@ zvisiongenerator/
 │   ├── provenance.py              Settings embedded in generated PNG/MP4 files: build, embed, read
 │   ├── safetensors_stream.py      Read and write safetensors one tensor at a time, keeping them out of the page cache; reads a header and its metadata in one bounded read
 │   ├── seedvr2.py                 SeedVR2 weight layouts, settings, memory estimate and tier choice
-│   ├── stored_quant.py            Stored-quant naming, manifests and folder handling
+│   ├── stored_quant.py            Stored-quant naming, manifests and folder handling, and the write-once stored-copy routine
 │   ├── upscale.py                 Upscale output sizes, size limits, SeedVR2 options and denoise defaults
 │   ├── video_extend.py            Extend: source checks and problem codes, loading the source, frame and audio-sample arithmetic of the window
 │   ├── video_model_detect.py      Video model type detection
@@ -245,7 +248,7 @@ LTX-2.5 uses a Gemma 4 text encoder, which `cuda/video/weights` selects by the `
 `cuda/video/backend.load_model` keeps LTX within the system memory of a 32 GB machine and the GPU memory of a 10 GB one. The rules a change must keep:
 
 - The text encoder and the transformer never share system memory unless both fit (`_check_system_memory`). When they do not, they take turns: the transformer is released while the text encoder encodes each new prompt (`_encode_prompt`, `_attach_transformer`, `_release_transformer`); when they do, the text encoder stays loaded between prompts. LoRAs are applied when the transformer is attached.
-- The transformer is the single-file checkpoint in `video_model_presets.ltx.diffusers.transformer`, or the repo's own `transformer` folder when a version sets it to `null` (LTX-2.5). `cuda/video/weights` prepares it and the text encoder once per level under `<models>/<alias>@q<bits>/`, streaming tensor by tensor through `safetensors_stream` so a 46 GB file never sits in memory.
+- The transformer is the single-file checkpoint in `video_model_presets.ltx.diffusers.transformer`, or the repo's own `transformer` folder when a version sets it to `null` (LTX-2.5). `cuda/video/weights` prepares it and the text encoder once per level under `<models>/<alias>@q<bits>/`, streaming tensor by tensor through `safetensors_stream` so a 46 GB file never sits in memory. The NF4 pre-pack (`nf4_linear_names`, `pack_nf4`, `swap_in_linear4bit`, `place_nf4`) is `cuda/quant`'s, and copies are written through `utils/stored_quant.ensure_stored_copy`.
 - In low-memory mode the transformer streams to the GPU block by block (`block_streaming`): FP8 with diffusers' group offloading, NF4 with `stream_blocks`, because group offloading leaves bitsandbytes' quantization state on the CPU. The VAEs and vocoder move to the GPU only to encode or decode. Video never uses `enable_model_cpu_offload()`.
 - Nothing may hold a full-length activation per token beyond the hidden states: the token-wise layers run in chunks (`token_chunking`), image-to-video's per-token timesteps are applied per run of equal timesteps (`timestep_runs`), and the final pass returns latents that `streaming_decode` decodes a few frames at a time. Each keeps diffusers' output unchanged, and its tests compare against diffusers.
 - Clips are written by `video_encode` (H.264 CRF 18 and AAC, as on macOS).

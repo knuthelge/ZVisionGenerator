@@ -20,6 +20,7 @@ from tests.conftest import _make_video_args
 from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.backends.mac.video import LtxVideoBackend, _drop_leading_frames, _generation_scope, _LOW_RAM_THRESHOLD_BYTES, _LtxModel, _TwoStageProgress, _use_low_ram_streaming
 from zvisiongenerator.core.video_types import ExtendSegment, VideoGenerationRequest, VideoWorkingArtifacts
+from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.video_cli import _build_video_parser, _resolve_upscale_steps
 from zvisiongenerator.workflows import build_video_workflow
@@ -72,7 +73,7 @@ class TestUpscaleCLIParsing:
     def test_upscale_steps_from_config_default(self):
         """--upscale 2 without --steps resolves upscale_steps to 8 from config."""
         args = _make_video_args(upscale=2, steps=50)
-        config = {"video_model_presets": {"ltx": {"upscale": {"default_upscale_steps": 8}}}}
+        config = load_config()
 
         _resolve_upscale_steps(args, config, "ltx", steps_explicitly_set=False)
 
@@ -82,7 +83,7 @@ class TestUpscaleCLIParsing:
     def test_upscale_steps_from_explicit_steps(self):
         """--upscale 2 --steps 20 resolves upscale_steps to 20."""
         args = _make_video_args(upscale=2, steps=20)
-        config = {"video_model_presets": {"ltx": {"upscale": {"default_upscale_steps": 8}}}}
+        config = load_config()
 
         _resolve_upscale_steps(args, config, "wan", steps_explicitly_set=True)
 
@@ -92,7 +93,7 @@ class TestUpscaleCLIParsing:
         """--upscale 2 still applies the LTX distilled step cap (steps capped at 8)."""
         args = _make_video_args(upscale=2, steps=30)
 
-        _resolve_upscale_steps(args, {}, "ltx", steps_explicitly_set=True)
+        _resolve_upscale_steps(args, load_config(), "ltx", steps_explicitly_set=True)
 
         assert args.steps == 8
         assert args.upscale_steps == 8
@@ -101,7 +102,7 @@ class TestUpscaleCLIParsing:
         """Without --upscale, steps are capped at 8 for distilled LTX."""
         args = _make_video_args(upscale=None, steps=20)
 
-        _resolve_upscale_steps(args, {}, "ltx", steps_explicitly_set=True)
+        _resolve_upscale_steps(args, load_config(), "ltx", steps_explicitly_set=True)
 
         assert args.steps == 8
         assert args.upscale_steps is None

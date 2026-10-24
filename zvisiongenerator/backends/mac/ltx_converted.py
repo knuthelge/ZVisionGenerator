@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import math
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -259,9 +260,7 @@ def _transformer_elements(checkpoint: LtxCheckpoint) -> tuple[int, int]:
     """Count the elements of *checkpoint*'s transformer: ``(Linear weights in its blocks, the rest)``."""
     blocks = rest = 0
     for normalized, shape in ((name, checkpoint.shapes[name]) for name in checkpoint.transformer):
-        count = 1
-        for size in shape:
-            count *= size
+        count = math.prod(shape)
         if _quantized(normalized, shape):
             blocks += count
         else:

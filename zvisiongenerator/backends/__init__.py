@@ -5,7 +5,10 @@ from __future__ import annotations
 import functools
 import sys
 from collections.abc import Callable, Sequence
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
+
+from zvisiongenerator.core.video_family import VideoCapabilities
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,7 +38,9 @@ __all__ = [
     "supports_seedvr2",
     "supports_stored_quants",
     "supports_video_upscale_review",
+    "video_capabilities",
     "video_download_plan",
+    "video_family_available",
 ]
 
 BACKENDS: dict[str, "ImageBackend"] = {}
@@ -106,28 +111,23 @@ def _create_diffusers_video_backend() -> "VideoBackend":
     return DiffusersVideoBackend()
 
 
-_VIDEO_BACKENDS_MAP: dict[str, tuple[str, Callable[[], "VideoBackend"]]] = {
-    "darwin": ("ltx", _create_ltx_video_backend),
-    "win32": ("ltx", _create_diffusers_video_backend),
-    "linux": ("ltx", _create_diffusers_video_backend),
+# Per platform, the video backend factory of each model family.
+_VIDEO_BACKENDS_MAP: dict[str, dict[str, Callable[[], "VideoBackend"]]] = {
+    "darwin": {"ltx": _create_ltx_video_backend},
+    "win32": {"ltx": _create_diffusers_video_backend},
+    "linux": {"ltx": _create_diffusers_video_backend},
 }
 
 
-def _get_video_backend_registration() -> tuple[str, Callable[[], "VideoBackend"]]:
+def _get_video_backend_factories() -> dict[str, Callable[[], "VideoBackend"]]:
     try:
         return _VIDEO_BACKENDS_MAP[sys.platform]
     except KeyError as exc:
         raise RuntimeError(f"Unsupported video platform: {sys.platform}. Video generation supports macOS, Windows, and Linux.") from exc
 
 
-def _register_video_backends() -> None:
-    """Register the platform video backend for the active OS."""
-    backend_key, factory = _get_video_backend_registration()
-    VIDEO_BACKENDS[backend_key] = factory()
-
-
 def get_video_backend(family: str) -> "VideoBackend":
-    """Get video backend by model family name.
+    """Get the video backend of a model family on this platform, created on first use.
 
     Args:
         family: Model family ("ltx").
@@ -136,13 +136,41 @@ def get_video_backend(family: str) -> "VideoBackend":
         The video backend instance for that family.
 
     Raises:
-        RuntimeError: If family is unknown or platform unsupported.
+        RuntimeError: If the platform is unsupported or has no backend for the family.
     """
-    if not VIDEO_BACKENDS:
-        _register_video_backends()
-    if family not in VIDEO_BACKENDS:
-        raise RuntimeError(f"No video backend for model family '{family}'. Available: {list(VIDEO_BACKENDS)}")
+    factories = _get_video_backend_factories()
+    if family in VIDEO_BACKENDS:
+        return VIDEO_BACKENDS[family]
+    if family not in factories:
+        raise RuntimeError(f"No video backend for model family '{family}'. Available: {list(factories)}")
+    VIDEO_BACKENDS[family] = factories[family]()
     return VIDEO_BACKENDS[family]
+
+
+def video_family_available(family: str) -> bool:
+    """Return whether this platform has a video backend for the model family."""
+    return family in _VIDEO_BACKENDS_MAP.get(sys.platform, {})
+
+
+def video_capabilities(config: dict[str, Any], family: str) -> VideoCapabilities | None:
+    """Return what the family can do on this platform, or ``None`` when the config does not describe the family.
+
+    The family's capabilities, overlaid by its ``platform_capabilities`` for this platform, then limited by what this
+    platform's video backend supports (audio, extend and upscale review) and by whether it has a backend for the
+    family at all (without one nothing is possible).
+
+    Raises:
+        ValueError: If the family's description is malformed.
+    """
+    from zvisiongenerator.utils.config import video_family
+
+    described = video_family(config, family)
+    if described is None:
+        return None
+    flags = {**asdict(described.capabilities), **described.platform_capabilities.get(sys.platform, {})}
+    available = video_family_available(family)
+    limits = {"audio": supports_video_audio(), "extend": supports_video_extend(), "upscale_review": supports_video_upscale_review()}
+    return VideoCapabilities(**{name: available and flag and limits.get(name, True) for name, flag in flags.items()})
 
 
 # --- SeedVR2 upscaler ---

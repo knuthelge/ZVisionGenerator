@@ -12,11 +12,13 @@ from __future__ import annotations
 import importlib.resources
 import warnings
 from copy import deepcopy
+from dataclasses import fields
 from pathlib import Path
 from typing import Any, Final
 
 import yaml
 
+from zvisiongenerator.core.video_family import FrameRule, VideoCapabilities, VideoFamily
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, seedvr2_settings
@@ -269,6 +271,130 @@ def ltx_version(config: dict[str, Any], model_name: str | None) -> str | None:
     return _video_version(config, "ltx", model_name)
 
 
+def video_family(config: dict[str, Any], family: str) -> VideoFamily | None:
+    """Return the description of a video family from ``video_model_presets.<family>``, or ``None`` without that block.
+
+    The family block is read as it stands: a version's overrides do not apply.
+
+    Raises:
+        ValueError: If a required key (``label``, ``default_steps``, ``frame_rule``, ``capabilities``,
+            ``extend_frame_step``) is missing or a value is malformed; the message names the key path.
+    """
+    preset = (config.get("video_model_presets") or {}).get(family)
+    if preset is None:
+        return None
+    base = f"video_model_presets.{family}"
+    if not isinstance(preset, dict):
+        raise ValueError(f"{base} must be a mapping.")
+    for key in ("label", "default_steps", "frame_rule", "capabilities", "extend_frame_step"):
+        if key not in preset:
+            raise ValueError(f"{base}.{key} is required.")
+    label = preset["label"]
+    if not isinstance(label, str) or not label.strip():
+        raise ValueError(f"{base}.label must be a non-blank string.")
+    default_steps = _positive_int(preset["default_steps"], f"{base}.default_steps")
+    max_steps = None if preset.get("max_steps") is None else _positive_int(preset["max_steps"], f"{base}.max_steps")
+    frame_rule = _frame_rule(preset["frame_rule"], f"{base}.frame_rule")
+    return VideoFamily(
+        name=family,
+        label=label,
+        frame_rule=frame_rule,
+        capabilities=_video_capabilities(preset["capabilities"], f"{base}.capabilities"),
+        platform_capabilities=_platform_capabilities(preset.get("platform_capabilities"), f"{base}.platform_capabilities"),
+        default_steps=default_steps,
+        max_steps=max_steps,
+        step_options=_step_options(preset.get("step_options"), max_steps, f"{base}.step_options"),
+        default_frames=_default_frames(preset.get("default_frames"), frame_rule, f"{base}.default_frames"),
+        extend_frame_step=_positive_int(preset["extend_frame_step"], f"{base}.extend_frame_step"),
+    )
+
+
+def _positive_int(value: Any, path: str) -> int:
+    """Return *value* when it is an integer of at least 1."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{path} must be an integer of at least 1.")
+    return value
+
+
+def _mapping_with_keys(value: Any, allowed: tuple[str, ...], path: str) -> dict[str, Any]:
+    """Return *value* when it is a mapping whose keys are all in *allowed*."""
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must be a mapping.")
+    for key in value:
+        if key not in allowed:
+            raise ValueError(f"{path}.{key} is not a known key (expected {', '.join(allowed)}).")
+    return value
+
+
+def _frame_rule(value: Any, path: str) -> FrameRule:
+    """Parse a ``frame_rule`` mapping."""
+    rule = _mapping_with_keys(value, ("alignment", "offset", "round"), path)
+    for key in ("alignment", "offset", "round"):
+        if key not in rule:
+            raise ValueError(f"{path}.{key} is required.")
+    alignment, offset, rounding = rule["alignment"], rule["offset"], rule["round"]
+    if isinstance(alignment, bool) or not isinstance(alignment, int) or alignment < 1:
+        raise ValueError(f"{path}.alignment must be an integer of at least 1.")
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        raise ValueError(f"{path}.offset must be an integer of at least 0.")
+    if rounding not in ("nearest", "up"):
+        raise ValueError(f"{path}.round must be 'nearest' or 'up'.")
+    return FrameRule(alignment, offset, rounding)
+
+
+def _video_capabilities(value: Any, path: str) -> VideoCapabilities:
+    """Parse a ``capabilities`` mapping: every capability, each a boolean."""
+    names = tuple(field.name for field in fields(VideoCapabilities))
+    caps = _mapping_with_keys(value, names, path)
+    for name in names:
+        if name not in caps:
+            raise ValueError(f"{path}.{name} is required.")
+        if not isinstance(caps[name], bool):
+            raise ValueError(f"{path}.{name} must be true or false.")
+    return VideoCapabilities(**caps)
+
+
+def _platform_capabilities(value: Any, path: str) -> dict[str, dict[str, bool]]:
+    """Parse ``platform_capabilities``: per platform, the capabilities that differ there."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must be a mapping.")
+    names = tuple(field.name for field in fields(VideoCapabilities))
+    parsed: dict[str, dict[str, bool]] = {}
+    for platform, caps in value.items():
+        caps = _mapping_with_keys(caps, names, f"{path}.{platform}")
+        for name, flag in caps.items():
+            if not isinstance(flag, bool):
+                raise ValueError(f"{path}.{platform}.{name} must be true or false.")
+        parsed[str(platform)] = dict(caps)
+    return parsed
+
+
+def _step_options(value: Any, max_steps: int | None, path: str) -> tuple[int, ...] | None:
+    """Parse ``step_options``: ascending positive integers, none above *max_steps*."""
+    if value is None:
+        return None
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"{path} must be a non-empty list of integers.")
+    options = tuple(_positive_int(option, f"{path}[{index}]") for index, option in enumerate(value))
+    if any(later <= earlier for earlier, later in zip(options, options[1:])):
+        raise ValueError(f"{path} must be in ascending order without repeats.")
+    if max_steps is not None and options[-1] > max_steps:
+        raise ValueError(f"{path} must not exceed max_steps ({max_steps}).")
+    return options
+
+
+def _default_frames(value: Any, rule: FrameRule, path: str) -> int | None:
+    """Parse ``default_frames``: a frame count the family's rule accepts."""
+    if value is None:
+        return None
+    frames = _positive_int(value, path)
+    if frames < rule.alignment + rule.offset or (frames - rule.offset) % rule.alignment:
+        raise ValueError(f"{path} must be a valid frame count ({rule.alignment}k+{rule.offset}, k >= 1).")
+    return frames
+
+
 def get_variant_key(model_info: ImageModelInfo) -> str | None:
     """Determine the variant key for preset lookup.
 
@@ -463,7 +589,7 @@ def resolve_video_defaults(
 
     Precedence (highest to lowest):
         1. CLI explicit dimension flags (width/height/num_frames)
-        2. Ratio + size preset lookup
+        2. Ratio + size preset lookup (the frame count is the family's ``default_frames`` when it sets one)
         3. Video model preset
         4. Video global defaults
 
@@ -492,11 +618,14 @@ def resolve_video_defaults(
     ratio_sizes = vsizes.get(ratio, {})
     size_entry = ratio_sizes.get(size, {})
 
+    # A preset without the key keeps the size table's count, and a partial preset (no label, rule, ...) is not parsed.
+    family = video_family(config, model_family) if preset.get("default_frames") is not None else None
+    default_frames = family.default_frames if family is not None else None
     effective: dict[str, Any] = {
         "steps": preset.get("default_steps", 8),
         "width": size_entry.get("width", 768),
         "height": size_entry.get("height", 448),
-        "num_frames": size_entry.get("frames", 121),
+        "num_frames": default_frames if default_frames is not None else size_entry.get("frames", 121),
         "ratio": ratio,
         "size": size,
     }
@@ -710,6 +839,24 @@ def ltx_load_options(config: dict[str, Any], model_name: str | None, *, upscale:
         options["upscale"] = True
         options["latent_upsampler"] = ltx_latent_upsampler_source(config, model_name)
     return options
+
+
+def video_load_options(family: str, config: dict[str, Any], model_name: str | None, *, upscale: bool) -> dict[str, Any]:
+    """Return the configured keyword arguments the video backend of *family* takes in ``load_model`` for the model picked as *model_name*.
+
+    Raises:
+        ValueError: If *family* has no load options, or its entries are malformed (see :func:`ltx_load_options`).
+    """
+    if family == "ltx":
+        return ltx_load_options(config, model_name, upscale=upscale)
+    raise ValueError(f"No video load options for model family '{family}'.")
+
+
+def video_companion_repos(family: str, config: dict[str, Any], repo_id: str) -> tuple[str, ...]:
+    """Return the other Hugging Face repos the video backend of *family* downloads beside *repo_id* (none for a family without companions)."""
+    if family == "ltx":
+        return ltx_companion_repos(config, repo_id)
+    return ()
 
 
 def model_reference(repo: str, revision: str | None) -> str:

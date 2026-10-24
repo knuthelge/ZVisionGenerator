@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
     import numpy as np
 
+    from zvisiongenerator.core.video_family import VideoFamily
+
 # Pixel frames of the source's end that are pinned at the start of the generated window (4 latent frames).
 CARRY_FRAMES = 25
 # New frames come in steps of one latent frame.
@@ -78,41 +80,49 @@ def carry_latent_frames() -> int:
     return (CARRY_FRAMES - 1) // EXTEND_FRAME_STEP + 1
 
 
-def snap_extend_frames(frames: float) -> int:
-    """Round a frame count to the nearest multiple of 8, at least 8.
+def extend_step(family: VideoFamily | None) -> int:
+    """Return the step between the lengths *family* can extend by (the LTX step for a model without a description)."""
+    return family.extend_frame_step if family is not None else EXTEND_FRAME_STEP
+
+
+def snap_extend_frames(frames: float, step: int = EXTEND_FRAME_STEP) -> int:
+    """Round a frame count to the nearest multiple of *step* (ties round to even), at least *step*.
 
     Raises:
         ValueError: If *frames* is not finite.
     """
     if not math.isfinite(frames):
         raise ValueError(f"The frame count must be a finite number, got {frames}.")
-    return max(EXTEND_FRAME_STEP, round(frames / EXTEND_FRAME_STEP) * EXTEND_FRAME_STEP)
+    return max(step, round(frames / step) * step)
 
 
-def extend_frames_from_seconds(seconds: float, fps: float) -> int:
-    """Return the new frames for a length in seconds at the source's frame rate: a multiple of 8, at least 8 (ties round to even).
+def extend_frames_from_seconds(seconds: float, fps: float, step: int = EXTEND_FRAME_STEP) -> int:
+    """Return the new frames for a length in seconds at the source's frame rate: a multiple of *step*, at least *step* (ties round to even).
 
     Raises:
         ValueError: If *seconds* or *fps* is not a finite number greater than 0.
     """
     _require_positive_finite(seconds, "The extension length")
     _require_positive_finite(fps, "The frame rate")
-    return snap_extend_frames(seconds * fps)
+    return snap_extend_frames(seconds * fps, step)
 
 
-def resolve_extend_frames(*, frames: int | None, seconds: float | None, fps: float, strict: bool, frames_name: str = "extend_frames", seconds_name: str = "extend_seconds") -> tuple[int, str | None]:
+def resolve_extend_frames(
+    *, frames: int | None, seconds: float | None, fps: float, strict: bool, frames_name: str = "extend_frames", seconds_name: str = "extend_seconds", step: int = EXTEND_FRAME_STEP
+) -> tuple[int, str | None]:
     """Return the new frames for a requested length and, when a lenient request was changed, a note saying how.
 
     A length given in frames wins over one in seconds; with neither, the default length applies.
 
     Args:
         frames: Requested frames.
-        seconds: Requested seconds, converted at *fps* (always rounded to a multiple of 8).
+        seconds: Requested seconds, converted at *fps* (always rounded to a multiple of *step*).
         fps: The source's frame rate.
-        strict: Require *frames* to be a multiple of 8 of at least 8 and *seconds* to be positive, and raise otherwise.
-            When false, *frames* are snapped to a multiple of 8 and a note is returned for any change.
+        strict: Require *frames* to be a multiple of *step* of at least *step* and *seconds* to be positive, and raise otherwise.
+            When false, *frames* are snapped to a multiple of *step* and a note is returned for any change.
         frames_name: How the caller's surface names the frames option in messages (a flag or a field).
         seconds_name: How the caller's surface names the seconds option in messages.
+        step: The step between the lengths the model's family can add (its ``extend_frame_step``).
 
     Returns:
         The frame count and a message when a lenient request was rounded, else ``None`` (always ``None`` when *strict*).
@@ -122,21 +132,21 @@ def resolve_extend_frames(*, frames: int | None, seconds: float | None, fps: flo
     """
     if frames is not None:
         if strict:
-            if frames < EXTEND_FRAME_STEP or frames % EXTEND_FRAME_STEP:
-                raise ValueError(f"{frames_name} must be a multiple of {EXTEND_FRAME_STEP}, at least {EXTEND_FRAME_STEP}.")
+            if frames < step or frames % step:
+                raise ValueError(f"{frames_name} must be a multiple of {step}, at least {step}.")
             return frames, None
-        snapped = snap_extend_frames(frames)
-        return snapped, None if snapped == frames else f"{frames_name} {frames} rounded to {snapped} (a multiple of {EXTEND_FRAME_STEP})."
+        snapped = snap_extend_frames(frames, step)
+        return snapped, None if snapped == frames else f"{frames_name} {frames} rounded to {snapped} (a multiple of {step})."
     if seconds is None:
-        return extend_frames_from_seconds(DEFAULT_EXTEND_SECONDS, fps), None
+        return extend_frames_from_seconds(DEFAULT_EXTEND_SECONDS, fps, step), None
     if strict:
         if seconds <= 0:
             raise ValueError(f"{seconds_name} must be positive.")
         try:
-            return extend_frames_from_seconds(seconds, fps), None
+            return extend_frames_from_seconds(seconds, fps, step), None
         except ValueError as exc:
             raise ValueError(f"{seconds_name}: {exc}") from exc
-    resolved = extend_frames_from_seconds(seconds, fps)
+    resolved = extend_frames_from_seconds(seconds, fps, step)
     if abs(resolved - seconds * fps) < 1e-6:
         return resolved, None
     return resolved, f"{seconds_name} {seconds:g} is {seconds * fps:g} frames at {fps:g} fps; using {resolved} frames ({resolved / fps:.2f} s)."

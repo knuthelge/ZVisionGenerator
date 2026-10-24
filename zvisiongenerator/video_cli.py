@@ -12,10 +12,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends import accelerator_memory_budget_or_none, get_video_backend, supports_video_audio, supports_video_extend, supports_video_upscale_review
+from zvisiongenerator.core.video_family import ANY_FRAMES, settle_video_steps
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.alignment import aligned_video_dims
 from zvisiongenerator.utils.app_log import setup_logging
-from zvisiongenerator.utils.config import load_config, ltx_load_options, resolve_video_defaults, select_ratio_size_defaults, validate_video_size_choice
+from zvisiongenerator.utils.config import load_config, resolve_video_defaults, select_ratio_size_defaults, validate_video_size_choice, video_family, video_load_options
 from zvisiongenerator.utils.ffmpeg import ensure_ffmpeg
 from zvisiongenerator.utils.interactive import SkipSignal, stdin_is_interactive
 from zvisiongenerator.utils.lora import parse_lora_arg, resolve_lora_references
@@ -25,7 +26,8 @@ from zvisiongenerator.downloads import describe_refusal
 from zvisiongenerator.utils.paths import resolve_lora_path, resolve_model_path
 from zvisiongenerator.utils.prompt_compose import is_original_prompt
 from zvisiongenerator.utils.prompts import inspect_prompts_file
-from zvisiongenerator.utils.video_extend import DEFAULT_EXTEND_SECONDS, EXTEND_FRAME_STEP, apply_extend_args, load_extend_source, resolve_extend_frames
+from zvisiongenerator.utils.video_extend import DEFAULT_EXTEND_SECONDS, EXTEND_FRAME_STEP, apply_extend_args, extend_step, load_extend_source, resolve_extend_frames
+from zvisiongenerator.utils.video_support import unsupported_video_request
 from zvisiongenerator.utils.video_model_detect import detect_video_model
 from zvisiongenerator.video_runner import run_video_batch
 from zvisiongenerator.enhance_cli import add_enhance_arguments, parse_enhance_args
@@ -114,25 +116,18 @@ def _build_video_parser(*, prog: str = "ziv-video") -> argparse.ArgumentParser:
 
 
 def _resolve_upscale_steps(args: argparse.Namespace, config: dict[str, Any], model_family: str, *, steps_explicitly_set: bool) -> None:
-    """Apply video upscale step defaults and model step caps to parsed args."""
-    if args.upscale:
-        upscale_cfg = config.get("video_model_presets", {}).get("ltx", {}).get("upscale", {})
-        if not steps_explicitly_set:
-            args.steps = upscale_cfg.get("default_upscale_steps", 8)
-        args.upscale_steps = args.steps
-    else:
-        args.upscale_steps = None
-
-    if model_family == "ltx":
-        max_steps = 8
-        if args.steps > max_steps:
-            warnings.warn(
-                f"LTX distilled model supports max {max_steps} denoising steps; capping {args.steps} -> {max_steps}",
-                stacklevel=2,
-            )
-            args.steps = max_steps
-            if args.upscale_steps is not None:
-                args.upscale_steps = args.steps
+    """Apply video upscale step defaults and the model family's step rules to parsed args."""
+    upscale_cfg = config.get("video_model_presets", {}).get("ltx", {}).get("upscale", {})
+    settled = settle_video_steps(
+        args.steps if steps_explicitly_set or not args.upscale else None,
+        upscale=bool(args.upscale),
+        family=video_family(config, model_family),
+        default_upscale_steps=upscale_cfg.get("default_upscale_steps", 8),
+    )
+    if settled.note:
+        warnings.warn(settled.note, stacklevel=2)
+    args.steps = settled.steps
+    args.upscale_steps = settled.upscale_steps
 
 
 def _check_extend_options(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -238,6 +233,7 @@ def _clip_fit(args: argparse.Namespace, config: dict[str, Any], *, upscale: bool
         budget=accelerator_memory_budget_or_none(),
         model_name=getattr(args, "model_name", None),
         app_config=config,
+        family=getattr(args, "model_family", "ltx"),
     )
 
 
@@ -382,6 +378,14 @@ def main(*, prog: str = "ziv-video") -> None:
     if model_info.family == "unknown":
         parser.error(f"Could not detect video model family for '{args.model}'. {_unknown_video_model_guidance()}")
 
+    args.model_family = model_info.family
+    try:
+        refusal = unsupported_video_request(config, model_info.family, image=args.image_path is not None, extend=source is not None, review=bool(args.review))
+    except ValueError as e:
+        parser.error(str(e))
+    if refusal is not None:
+        parser.error(refusal)
+
     # Validate --image file exists
     if args.image_path and not os.path.isfile(args.image_path):
         parser.error(f"Image file not found: {args.image_path}")
@@ -434,7 +438,13 @@ def main(*, prog: str = "ziv-video") -> None:
     if source is not None:
         # The source decides size and frame rate; its length was checked on load, so there is no resolution or frame alignment.
         extend_frames, note = resolve_extend_frames(
-            frames=args.extend_frames, seconds=args.extend_seconds, fps=source.fps, strict=False, frames_name="--extend-frames", seconds_name="--extend-seconds"
+            frames=args.extend_frames,
+            seconds=args.extend_seconds,
+            fps=source.fps,
+            strict=False,
+            frames_name="--extend-frames",
+            seconds_name="--extend-seconds",
+            step=extend_step(video_family(config, model_info.family)),
         )
         if note:
             warnings.warn(note, stacklevel=2)
@@ -446,13 +456,14 @@ def main(*, prog: str = "ziv-video") -> None:
         args.fps = model_info.default_fps
 
         # Alignment corrections using model metadata (an upscaled clip uses 64-alignment so its half-size stage stays 32-aligned)
+        family = video_family(config, model_info.family)
         args.width, args.height, args.num_frames = aligned_video_dims(
             args.width,
             args.height,
             args.num_frames,
             upscale=bool(args.upscale),
             resolution_alignment=model_info.resolution_alignment,
-            frame_alignment=model_info.frame_alignment,
+            frame_rule=family.frame_rule if family is not None else ANY_FRAMES,
             family=model_info.family.upper(),
         )
 
@@ -513,7 +524,7 @@ def main(*, prog: str = "ziv-video") -> None:
                 mode=mode,
                 low_memory=args.low_memory,
                 loras=loras,
-                **ltx_load_options(config, model_name, upscale=bool(args.upscale)),
+                **video_load_options(model_info.family, config, model_name, upscale=bool(args.upscale)),
             )
         except (RuntimeError, ValueError, OSError, ImportError) as e:
             logger.exception("Failed to load video model %s", args.model)

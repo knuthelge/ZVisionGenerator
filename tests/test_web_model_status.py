@@ -93,7 +93,47 @@ class TestDescribeMlxVideoStatus:
         }
 
 
+class TestDescribeLtxStatusGolden:
+    """G5: the LTX MLX status dicts, pinned so the family argument cannot move them."""
+
+    @pytest.fixture(autouse=True)
+    def _gemma_repo(self, monkeypatch):
+        monkeypatch.setattr(model_status, "ltx_mlx_text_encoder_repo", lambda: "org/gemma")
+
+    @pytest.mark.parametrize("family", [pytest.param({}, id="default"), pytest.param({"family": "ltx"}, id="ltx")])
+    def test_a_bundled_pack_status_is_pinned(self, tmp_path, family):
+        pack = _make_mlx_pack(tmp_path, bundled=True)
+
+        status = describe_model_status("owner/ltx25", kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({"owner/ltx25": pack}), **family)
+
+        assert status == {
+            "downloaded": True,
+            "memory_fit": {
+                "kind": "unified",
+                "budget_gb": 24.0,
+                "by_quantize": {"none": {"status": "fits", "required_gb": 15.1}},
+                "without_low_memory": {"status": "too_large", "required_gb": 36.2},
+                "note": VIDEO_ESTIMATE_NOTE,
+            },
+        }
+
+    @pytest.mark.parametrize("family", [pytest.param({}, id="default"), pytest.param({"family": "ltx"}, id="ltx")])
+    def test_a_2_3_pack_without_gemma_3_status_is_pinned(self, tmp_path, family):
+        pack = _make_mlx_pack(tmp_path, bundled=False)
+
+        status = describe_model_status("owner/ltx23", kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({"owner/ltx23": pack}), **family)
+
+        assert status == {"downloaded": False, "memory_fit": None}
+
+
 class TestDescribeModelStatus:
+    def test_another_video_family_is_downloaded_with_its_folder_and_has_no_estimate(self, tmp_path):
+        pack = _make_mlx_pack(tmp_path, bundled=False)
+
+        status = describe_model_status("owner/h3", kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({"owner/h3": pack}), family="h3")
+
+        assert status == {"downloaded": True, "memory_fit": None}
+
     def test_missing_model_is_not_downloaded_and_has_no_estimate(self):
         status = describe_model_status("owner/repo", kind="image", quantize_options=(4, 8), budget=MemoryBudget(10 * _GIB), find_local_dir=_finder({}))
 

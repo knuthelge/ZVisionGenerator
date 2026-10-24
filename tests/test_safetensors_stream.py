@@ -13,7 +13,7 @@ torch = pytest.importorskip("torch")
 from safetensors.torch import load_file, save_file  # noqa: E402
 
 from zvisiongenerator.utils import safetensors_stream  # noqa: E402
-from zvisiongenerator.utils.safetensors_stream import ShardWriter, SingleFileWriter, iter_tensors, read_metadata, shard_files  # noqa: E402
+from zvisiongenerator.utils.safetensors_stream import ShardWriter, SingleFileWriter, iter_tensors, read_header, read_metadata, shard_files  # noqa: E402
 
 
 def _tensors():
@@ -119,6 +119,19 @@ class TestSingleFileWriter:
         assert torch.equal(read["w"], w)
         assert read["s"].item() == 1.5 and read["s"].shape == ()
         assert read["q"].view(torch.int32).tolist() == [[7], [9]]
+
+    def test_the_header_offsets_count_a_scalar_as_one_element_and_a_zero_dimension_as_none(self, tmp_path):
+        path = tmp_path / "one.safetensors"
+        entries = [("w", "BF16", [2, 3]), ("s", "F32", []), ("z", "BF16", [0, 3]), ("q", "U32", [2, 1])]
+
+        with SingleFileWriter(path, entries) as writer:
+            writer.write("w", bytes(12))
+            writer.write("s", bytes(4))
+            writer.write("z", b"")
+            writer.write("q", bytes(8))
+
+        header = read_header(path)[1]
+        assert {name: info["data_offsets"] for name, info in header.items()} == {"w": [0, 12], "s": [12, 16], "z": [16, 16], "q": [16, 24]}
 
     def test_tensors_must_come_in_the_declared_order_and_size(self, tmp_path):
         writer = SingleFileWriter(tmp_path / "one.safetensors", self._entries())

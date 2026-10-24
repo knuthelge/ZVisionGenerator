@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import warnings
 
+from zvisiongenerator.core.video_family import FrameRule
+
 
 def round_to_alignment(value: int, alignment: int = 16) -> int:
     """Round *value* up to the nearest multiple of *alignment*."""
@@ -23,14 +25,22 @@ def align_resolution(width: int, height: int, divisor: int, label: str = "Video"
     return aligned_w, aligned_h
 
 
-def align_ltx_frames(frames: int, alignment: int = 8) -> int:
-    """Round a frame count to the nearest valid ``alignment * k + 1`` value."""
-    if alignment <= 0:
-        return frames
-    k = max(1, round((frames - 1) / alignment))
-    aligned = alignment * k + 1
+def align_frames(frames: int, rule: FrameRule) -> int:
+    """Move a frame count to the nearest valid ``alignment * k + offset`` count of *rule* (``k >= 1``).
+
+    The rule's ``round`` picks the direction: ``"nearest"`` rounds halves to even, ``"up"`` takes the next valid count.
+    There is no upper limit.
+    """
+    quotient = (frames - rule.offset) / rule.alignment
+    k = -((rule.offset - frames) // rule.alignment) if rule.round == "up" else round(quotient)
+    return rule.alignment * max(1, k) + rule.offset
+
+
+def _align_frames_warning(frames: int, rule: FrameRule) -> int:
+    """Return *frames* aligned to *rule*, warning when the count changed (the warning is attributed to the caller of this helper)."""
+    aligned = align_frames(frames, rule)
     if aligned != frames:
-        warnings.warn(f"Video model requires frames = {alignment}k+1. Adjusted {frames} -> {aligned}", stacklevel=2)
+        warnings.warn(f"Video model requires frames = {rule.alignment}k+{rule.offset}. Adjusted {frames} -> {aligned}", stacklevel=2)
     return aligned
 
 
@@ -41,7 +51,7 @@ def aligned_video_dims(
     *,
     upscale: bool,
     resolution_alignment: int,
-    frame_alignment: int,
+    frame_rule: FrameRule,
     family: str,
 ) -> tuple[int, int, int]:
     """Round a video job's size and frame count to what its model accepts, warning about each correction.
@@ -55,11 +65,11 @@ def aligned_video_dims(
         frames: Requested frame count.
         upscale: Whether the clip is upscaled.
         resolution_alignment: The model's size alignment.
-        frame_alignment: The model's frame alignment (frames are ``alignment * k + 1``).
+        frame_rule: The frame counts the model accepts.
         family: The model family label used in the warning.
 
     Returns:
         The aligned ``(width, height, frames)``.
     """
     aligned_w, aligned_h = align_resolution(width, height, 64 if upscale else resolution_alignment, family)
-    return aligned_w, aligned_h, align_ltx_frames(frames, frame_alignment)
+    return aligned_w, aligned_h, _align_frames_warning(frames, frame_rule)

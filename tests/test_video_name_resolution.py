@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
+from zvisiongenerator.utils.config import load_config
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.prompts import PromptFileInspection
 
@@ -73,7 +74,7 @@ class TestVideoCLIResolvesModelPath:
         return_value={
             "video_generation": {"default_ratio": "16:9", "default_size": "m"},
             "video_sizes": {"16:9": {"m": {"width": 704, "height": 480, "frames": 49}}},
-            "video_model_presets": {"ltx": {"default_steps": 8}},
+            "video_model_presets": {"ltx": load_config()["video_model_presets"]["ltx"]},
         },
     )
     @patch("zvisiongenerator.video_cli.get_video_backend")

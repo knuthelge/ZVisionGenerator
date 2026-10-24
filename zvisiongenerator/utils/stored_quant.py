@@ -3,6 +3,9 @@
 A model installed as ``<models dir>/<name>`` gets its quantized copy at ``<models dir>/<name>@q<bits>``.
 The copy holds the backend's saved weights plus the detection files ``detect_image_model`` reads, and a
 manifest recording what it was made from, so a changed source or backend format makes it stale.
+
+It also holds the write-once routine the video backend's prepared copies use (:func:`ensure_stored_copy`): a copy is
+written into a hidden partial folder, marked complete by its manifest, and renamed into place.
 """
 
 from __future__ import annotations
@@ -13,9 +16,11 @@ import re
 import shutil
 import time
 import uuid
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
 
+from zvisiongenerator.utils.file_links import link_or_copy
 from zvisiongenerator.utils.model_files import model_weight_files
 
 __all__ = [
@@ -24,6 +29,8 @@ __all__ = [
     "build_manifest",
     "copy_detection_files",
     "discard_partial",
+    "ensure_stored_copy",
+    "file_identities",
     "flush_to_disk",
     "fsync_file",
     "is_current",
@@ -217,3 +224,46 @@ def sweep_stale_partials(target: Path, *, older_than_seconds: float = _STALE_PAR
 def _last_write(folder: Path) -> float:
     """Return the newest modification time of *folder* and everything in it."""
     return max([folder.stat().st_mtime, *(path.stat().st_mtime for path in folder.rglob("*"))])
+
+
+def file_identities(paths: Iterable[Path]) -> list[dict[str, Any]]:
+    """Return each file's identity for a manifest: the resolved file's name and its size in bytes."""
+    files = [Path(os.path.realpath(path)) for path in paths]
+    return [{"name": path.name, "bytes": path.stat().st_size} for path in files]
+
+
+def ensure_stored_copy(target: Path, manifest: dict[str, Any], write: Callable[[Path], None], *, reuse: Iterable[Path] = (), flush: bool = False) -> Path:
+    """Return *target* once it holds a copy whose manifest matches *manifest*, writing it through a partial folder first if needed.
+
+    The copy is written into a hidden partial folder and renamed into place once complete, so an interrupted
+    write never leaves a copy that looks finished. A copy with another manifest is replaced.
+
+    Args:
+        target: Where the copy lives.
+        manifest: What the copy must record; every key must match for it to count as current.
+        write: Writes the copy's files into the folder it is given.
+        reuse: Other places the same copy may already be; a current one is hard-linked (copied across file
+            systems) instead of written again, so the files are stored once.
+        flush: Whether to flush the written files out of the page cache before the manifest marks the copy complete.
+    """
+    if manifest_matches(target, manifest):
+        return target
+    existing = next((path for path in reuse if path != target and manifest_matches(path, manifest)), None)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    sweep_stale_partials(target)
+    partial = partial_dir(target)
+    try:
+        if existing is not None:
+            # The manifest is written anew, never through a link to the other copy's.
+            shutil.copytree(existing, partial, copy_function=link_or_copy, ignore=shutil.ignore_patterns(MANIFEST_NAME))
+        else:
+            partial.mkdir()
+            write(partial)
+        if flush:
+            flush_to_disk(partial)
+        write_manifest(partial, manifest)
+        promote_partial(partial, target)
+    except BaseException:
+        discard_partial(partial)
+        raise
+    return target

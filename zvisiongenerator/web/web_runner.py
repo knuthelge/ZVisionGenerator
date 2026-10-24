@@ -38,7 +38,7 @@ from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.review import review_enabled
 from zvisiongenerator.seedvr2_loader import load_seedvr2
 from zvisiongenerator.upscale_runner import run_upscale
-from zvisiongenerator.utils.config import ltx_load_options
+from zvisiongenerator.utils.config import video_load_options
 from zvisiongenerator.utils.ffmpeg import require_ffmpeg
 from zvisiongenerator.utils.image_model_detect import detect_image_model
 from zvisiongenerator.utils.interactive import SkipSignal
@@ -849,7 +849,7 @@ class WebRunner:
             mode="extend" if getattr(args, "extend_source", None) is not None else "i2v" if request.image_path else "t2v",
             low_memory=getattr(args, "low_memory", True),
             loras=loras,
-            **ltx_load_options(config, request.model_name or model_ref, upscale=bool(request.upscale)),
+            **video_load_options(request.model_family, config, request.model_name or model_ref, upscale=bool(request.upscale)),
         )
         run_video_batch(
             backend=backend,

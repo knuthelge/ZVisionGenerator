@@ -31,6 +31,10 @@ def _image_entry(name: str, source: str, resolved_path: str) -> ImageInventoryEn
     return ImageInventoryEntry(name=name, family="flux2_klein", size=None, source=source, resolved_path=resolved_path)
 
 
+def _ltx_entry(name: str, source: str, resolved_path: str) -> VideoInventoryEntry:
+    return VideoInventoryEntry(name=name, family="ltx", supports_i2v=True, source=source, resolved_path=resolved_path)
+
+
 @pytest.fixture
 def layout(tmp_path, monkeypatch):
     """A data dir with a converted model linking into a cached HuggingFace base repo, plus a LoRA."""
@@ -129,11 +133,17 @@ class TestSharedDownload:
     """ltx-4 and ltx-8 on Windows/Linux load from one download plus a separate transformer checkpoint repo."""
 
     _CONFIG = {"video_model_presets": {"ltx": {"diffusers": {"default_repo": "org/base", "transformer": {"repo": "org/ckpt", "filename": "t.safetensors"}}}}}
-    _INVENTORY = (_image_entry("ltx-4", "alias", "org/base"), _image_entry("ltx-8", "alias", "org/base"))
+    _INVENTORY = (_ltx_entry("ltx-4", "alias", "org/base"), _ltx_entry("ltx-8", "alias", "org/base"))
 
     def _target(self, layout, name):
         entry = next(entry for entry in self._INVENTORY if entry.name == name)
         return model_delete_target(entry, layout.models_dir, **delete_scope(entry, self._INVENTORY, self._CONFIG))
+
+    def test_only_a_video_family_with_companions_lists_them(self):
+        ltx, other = self._INVENTORY[0], _image_entry("other", "alias", "org/base")
+
+        assert delete_scope(ltx, self._INVENTORY, self._CONFIG)["companion_repos"] == ("org/ckpt",)
+        assert delete_scope(other, self._INVENTORY, self._CONFIG)["companion_repos"] == ()
 
     def test_while_the_other_alias_has_its_copy_only_this_aliases_copy_goes(self, layout):
         _touch(layout.models_dir / "ltx-4@q4" / "transformer" / "0.safetensors")

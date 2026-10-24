@@ -9,8 +9,9 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
+from zvisiongenerator.core.video_family import ANY_FRAMES
 from zvisiongenerator.utils.alignment import aligned_video_dims
-from zvisiongenerator.utils.config import resolve_video_defaults, validate_video_size_choice
+from zvisiongenerator.utils.config import resolve_video_defaults, validate_video_size_choice, video_family
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 
@@ -87,6 +88,7 @@ def resolve_video_clip(
     """
     validate_video_size_choice(app_config, ratio, size)
     defaults = clip_defaults(app_config, model_info, ratio=ratio, size=size, steps=steps, width=width, height=height, frames=frames)
+    family = video_family(app_config, model_info.family)
     with _quiet() if quiet else contextlib.nullcontext():
         aligned_width, aligned_height, aligned_frames = aligned_video_dims(
             defaults["width"],
@@ -94,7 +96,7 @@ def resolve_video_clip(
             defaults["num_frames"],
             upscale=upscale,
             resolution_alignment=model_info.resolution_alignment,
-            frame_alignment=model_info.frame_alignment,
+            frame_rule=family.frame_rule if family is not None else ANY_FRAMES,
             family=model_info.family.upper(),
         )
     if aligned_width < 64 or aligned_height < 64:

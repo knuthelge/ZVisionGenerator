@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.seedvr2_loader import seedvr2_weights_dir
-from zvisiongenerator.utils.config import enhancer_tier_models, ltx_companion_repos
+from zvisiongenerator.utils.config import enhancer_tier_models, video_companion_repos
 from zvisiongenerator.utils.model_files import find_local_model_dir, huggingface_cache_repo_dir
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 from zvisiongenerator.utils.seedvr2 import SeedVR2Weights
@@ -75,7 +75,7 @@ def model_delete_target(
 
 def delete_scope(entry: ImageInventoryEntry | VideoInventoryEntry, inventory: Iterable[ImageInventoryEntry | VideoInventoryEntry], app_config: dict[str, Any]) -> dict[str, tuple[str, ...]]:
     """Return the ``sharing`` and ``companion_repos`` arguments of :func:`model_delete_target` for *entry*."""
-    return {"sharing": models_sharing(entry, inventory), "companion_repos": ltx_companion_repos(app_config, entry.resolved_path)}
+    return {"sharing": models_sharing(entry, inventory), "companion_repos": video_companion_repos(entry.family, app_config, entry.resolved_path)}
 
 
 def models_sharing(entry: ImageInventoryEntry | VideoInventoryEntry, inventory: Iterable[ImageInventoryEntry | VideoInventoryEntry]) -> tuple[str, ...]:
@@ -114,10 +114,11 @@ def used_repo_ids(
     extra: Iterable[str] = (),
 ) -> frozenset[str]:
     """Return the HuggingFace repos the app loads, case-folded: aliases, their LTX companions, enhancer tiers and *extra*."""
-    references = [entry.resolved_path for entry in inventory if entry.source != "installed"]
+    entries = [entry for entry in inventory if entry.source != "installed"]
+    references = [entry.resolved_path for entry in entries]
     references += [model[0] for model in enhancer_tier_models(app_config, platform_key=platform_key).values()]
     ids = {repo.repo_id for reference in references if (repo := parse_huggingface_repo_reference(reference)) is not None}
-    ids.update(repo_id for reference in references for repo_id in ltx_companion_repos(app_config, reference))
+    ids.update(repo_id for entry in entries for repo_id in video_companion_repos(entry.family, app_config, entry.resolved_path))
     ids.update(extra)
     return frozenset(repo_id.casefold() for repo_id in ids)
 

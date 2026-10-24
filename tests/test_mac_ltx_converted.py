@@ -119,6 +119,22 @@ def test_block_linears_are_quantized_and_the_rest_kept_as_stock_stores_it(tmp_pa
     assert torch.equal(written[f"{block}.scale_shift_table"], torch.ones(6, 2))
 
 
+def test_transformer_elements_count_scalars_and_zero_size_tensors_by_whether_they_are_quantized():
+    shapes = {
+        f"{P}transformer_blocks.0.attn1.to_q.weight": [2, 64],  # quantized
+        f"{P}transformer_blocks.0.attn1.to_empty.weight": [0, 64],  # quantized, no elements
+        f"{P}transformer_blocks.0.attn1.to_out.0.bias": [2],
+        f"{P}transformer_blocks.0.scale_shift_table": [],  # scalar
+        f"{P}patchify_proj.weight": [3, 5],  # outside the blocks
+        f"{P}patchify_proj.empty": [4, 0],
+    }
+    checkpoint = ltx_checkpoint.LtxCheckpoint(
+        path=Path("unused.safetensors"), transformer={name: name for name in shapes}, connectors={}, shapes=shapes, scales={}, fp8_weights=0, bundles_components=False
+    )
+
+    assert ltx_converted._transformer_elements(checkpoint) == (2 * 64 + 0, 2 + 1 + 15 + 0)
+
+
 def test_names_follow_the_vendored_mlx_renames():
     assert mlx_name(f"{P}transformer_blocks.0.attn1.to_out.0.weight") == "transformer.transformer_blocks.0.attn1.to_out.weight"
     assert mlx_name(f"{P}transformer_blocks.0.ff.net.0.proj.weight") == "transformer.transformer_blocks.0.ff.proj_in.weight"

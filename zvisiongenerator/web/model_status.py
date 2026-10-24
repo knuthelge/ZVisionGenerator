@@ -38,6 +38,7 @@ def describe_model_status(
     find_local_dir: Callable[[str], Path | None] = find_local_model_dir,
     model_name: str | None = None,
     app_config: dict[str, Any] | None = None,
+    family: str | None = None,
 ) -> dict[str, Any]:
     """Return the ``downloaded`` flag and ``memory_fit`` summary for one inventory model.
 
@@ -49,6 +50,7 @@ def describe_model_status(
         find_local_dir: Resolver for fully downloaded model directories.
         model_name: The name the model is picked by (``ltx-4``); on CUDA it sets a video model's quantize level.
         app_config: The loaded config, for the same.
+        family: A video model's family (``"ltx"``); ``None`` is LTX. Only LTX has a memory estimate.
 
     Returns:
         ``{"downloaded": bool, "memory_fit": dict | None}``. ``memory_fit`` holds ``kind`` (``"unified"`` on
@@ -60,7 +62,8 @@ def describe_model_status(
     """
     model_dir = find_local_dir(resolved_path)
     text_encoder_dir = None
-    if kind == "video" and model_dir is not None and is_ltx_mlx_layout(model_dir):
+    ltx_video = kind == "video" and family in (None, "ltx")
+    if ltx_video and model_dir is not None and is_ltx_mlx_layout(model_dir):
         if ltx_mlx_bundled_text_encoder(model_dir) is not None:
             downloaded = True  # An LTX-2.5 pack carries its own Gemma 4; it never needs the Gemma 3 repo.
         else:
@@ -70,7 +73,7 @@ def describe_model_status(
         downloaded = model_dir is not None
 
     memory_fit = None
-    if downloaded and model_dir is not None and budget is not None:
+    if downloaded and model_dir is not None and budget is not None and (kind == "image" or ltx_video):
         levels = (None, *quantize_options)
         if budget.system_bytes is not None:
             memory_fit = _cuda_image_memory_fit(model_dir, levels, budget) if kind == "image" else _cuda_video_memory_fit(resolved_path, budget, find_local_dir, model_name, app_config)

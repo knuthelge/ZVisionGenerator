@@ -593,6 +593,7 @@ def _patch_minimal_web_config(monkeypatch, tmp_path):
     monkeypatch.setattr(web_config_module, "list_loras", lambda _: [])
 
 
+@pytest.mark.usefixtures("hub_offline")
 def test_load_web_config_has_no_seedvr2_where_it_is_unsupported(monkeypatch, tmp_path):
     _patch_minimal_web_config(monkeypatch, tmp_path)
 
@@ -608,6 +609,7 @@ def test_load_web_config_has_no_seedvr2_where_it_is_unsupported(monkeypatch, tmp
     ],
 )
 @pytest.mark.parametrize("weights", [MLX_WEIGHTS, FP8_WEIGHTS])
+@pytest.mark.usefixtures("hub_offline")
 def test_load_web_config_builds_seedvr2_setup_from_the_memory_budget_and_engine(monkeypatch, tmp_path, budget, expected_gpu, expected_system, weights):
     _patch_minimal_web_config(monkeypatch, tmp_path)
     setup = object()
@@ -635,6 +637,7 @@ def _seedvr2_app_config() -> dict[str, object]:
     return {**_make_app_config(), "seedvr2": {"model": "auto", "softness": 0.75, "reference_megapixels": 16, "tiers": tiers}}
 
 
+@pytest.mark.usefixtures("hub_offline")
 def test_gallery_api_reports_a_seedvr2_copy_stored_after_the_server_started(monkeypatch, tmp_path):
     """The download state is read on every request, so a first-use download shows without a restart."""
     from fastapi.testclient import TestClient

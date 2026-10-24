@@ -11,6 +11,7 @@ drops its byte range from the cache right after; :class:`TensorFile` does the sa
 from __future__ import annotations
 
 import json
+import math
 import os
 import struct
 from collections.abc import Callable, Iterator, Sequence
@@ -286,7 +287,7 @@ class SingleFileWriter:
                 raise ValueError(f"Cannot write {name} as {dtype}.")
             if name in header:
                 raise ValueError(f"{name} is listed twice.")
-            size = _numel(shape) * _DTYPE_BYTES[dtype]
+            size = math.prod(shape) * _DTYPE_BYTES[dtype]
             header[name] = {"dtype": dtype, "shape": list(shape), "data_offsets": [offset, offset + size]}
             self._sizes.append((name, size))
             offset += size
@@ -332,11 +333,3 @@ class SingleFileWriter:
             self.close()
         else:
             self._handle.close()
-
-
-def _numel(shape: Sequence[int]) -> int:
-    """Return the element count of *shape* (1 for a scalar)."""
-    count = 1
-    for size in shape:
-        count *= size
-    return count

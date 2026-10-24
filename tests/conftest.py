@@ -59,6 +59,49 @@ def _presets_in_tmp(tmp_path, monkeypatch):
     monkeypatch.setattr("zvisiongenerator.web.presets.get_ziv_data_dir", lambda: tmp_path / "ziv-data")
 
 
+_HUB_DOWNLOADS = ("hf_hub_download", "snapshot_download")
+
+
+@pytest.fixture(autouse=True)
+def _no_hub_downloads(monkeypatch):
+    """Fail any test that reaches ``huggingface_hub``'s download functions unmocked.
+
+    The stubs raise ``RuntimeError`` and record the call; the test fails afterwards if any was recorded, because app
+    code often catches the error and carries on. A test that patches either name itself replaces the stub and wins.
+    Use ``hub_offline`` for tests whose subject is "nothing cached, no network".
+    """
+    import huggingface_hub
+
+    calls: list[str] = []
+
+    def _stub(name: str):
+        def _blocked(*args, **kwargs):
+            repo_id = kwargs.get("repo_id", args[0] if args else None)
+            calls.append(f"{name}(repo_id={repo_id!r})")
+            raise RuntimeError(f"Tests must not reach huggingface_hub.{name}; mock it.")
+
+        return _blocked
+
+    for name in _HUB_DOWNLOADS:
+        monkeypatch.setattr(huggingface_hub, name, _stub(name))
+    yield
+    if calls:
+        pytest.fail("Test reached the Hugging Face Hub unmocked: " + ", ".join(calls), pytrace=False)
+
+
+@pytest.fixture
+def hub_offline(monkeypatch):
+    """Make ``huggingface_hub``'s download functions report nothing cached and no network (``LocalEntryNotFoundError``), without failing the test."""
+    import huggingface_hub
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    def _offline(*_args, **_kwargs):
+        raise LocalEntryNotFoundError("Hub unavailable in tests.")
+
+    for name in _HUB_DOWNLOADS:
+        monkeypatch.setattr(huggingface_hub, name, _offline)
+
+
 def _make_args(**overrides):
     """Return a minimal argparse Namespace for run_batch()."""
     defaults = dict(

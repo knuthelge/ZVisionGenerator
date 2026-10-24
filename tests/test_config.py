@@ -23,6 +23,8 @@ from zvisiongenerator.utils.config import (
     resolve_defaults,
     resolve_video_defaults,
     validate_video_size_choice,
+    video_companion_repos,
+    video_load_options,
     video_preset,
 )
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
@@ -1531,6 +1533,59 @@ class TestLtxVersionAwareAccessors:
         assert ltx_companion_repos(config, _LTX23_REPO) == ("Lightricks/LTX-2.3",)
 
 
+class TestVideoLoadOptionsGolden:
+    """G4: ``video_load_options("ltx", ...)`` is exactly ``ltx_load_options`` for every LTX alias and both upscale settings."""
+
+    @pytest.mark.parametrize("upscale", [False, True])
+    @pytest.mark.parametrize("name", ["ltx-4", "ltx-8", "ltx25-4", "unknown", None])
+    def test_ltx_options_are_the_ltx_options(self, monkeypatch, tmp_path, name, upscale):
+        config = _packaged_config(monkeypatch, tmp_path)
+
+        assert video_load_options("ltx", config, name, upscale=upscale) == ltx_load_options(config, name, upscale=upscale)
+
+
+class TestVideoFamilyDispatch:
+    """R5: load options and companions are asked of the family; default frames come from the family."""
+
+    def test_a_family_without_load_options_is_refused(self):
+        with pytest.raises(ValueError, match="No video load options for model family 'wan'"):
+            video_load_options("wan", {}, "m", upscale=False)
+
+    def test_ltx_companions_are_the_ltx_companions(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+
+        assert video_companion_repos("ltx", config, _LTX23_REPO) == ("Lightricks/LTX-2.3",)
+        assert video_companion_repos("ltx", config, _LTX25_PIN) == ()
+
+    @pytest.mark.parametrize("family", ["zimage", "flux2_klein", "wan"])
+    def test_another_family_has_no_companions(self, monkeypatch, tmp_path, family):
+        assert video_companion_repos(family, _packaged_config(monkeypatch, tmp_path), _LTX23_REPO) == ()
+
+    def _h3_config(self, **preset):
+        block = {
+            "label": "MiniMax H3",
+            "default_steps": 8,
+            "frame_rule": {"alignment": 17, "offset": 5, "round": "up"},
+            "extend_frame_step": 17,
+            "capabilities": {"i2v": True, "end_frame": True, "extend": True, "upscale": True, "upscale_review": True, "lora": True, "audio": True, "low_memory": False},
+            **preset,
+        }
+        return {"video_sizes": {"16:9": {"s": {"width": 768, "height": 448, "frames": 121}}}, "video_model_presets": {"h3": block}}
+
+    def test_a_family_default_frame_count_replaces_the_size_tables(self):
+        defaults = resolve_video_defaults("h3", self._h3_config(default_frames=124), {"ratio": "16:9", "size": "s"})
+
+        assert (defaults["num_frames"], defaults["width"], defaults["height"]) == (124, 768, 448)
+
+    def test_explicit_frames_win_over_the_family_default(self):
+        defaults = resolve_video_defaults("h3", self._h3_config(default_frames=124), {"ratio": "16:9", "size": "s", "num_frames": 22})
+
+        assert defaults["num_frames"] == 22
+
+    def test_a_family_without_default_frames_takes_the_size_table(self):
+        assert resolve_video_defaults("h3", self._h3_config(), {"ratio": "16:9", "size": "s"})["num_frames"] == 121
+
+
 class TestModelDisplayName:
     """AC4.1/AC4.2: an alias reads by its configured name in the Web UI, else by itself."""
 
@@ -1564,3 +1619,28 @@ class TestModelDisplayName:
             assert isinstance(name, str) and name.strip(), alias
             assert model_display_name(config, alias) == name
         assert model_display_name(config, "klein9b") == "FLUX.2 Klein 9B"
+
+
+# ---------------------------------------------------------------------------
+# G7: video defaults for LTX
+# ---------------------------------------------------------------------------
+
+
+class TestResolveVideoDefaultsGolden:
+    """The packaged LTX defaults and the fallbacks for a size the table does not have."""
+
+    def test_packaged_ltx_defaults(self):
+        assert resolve_video_defaults("ltx", load_config(), {}) == {"steps": 8, "width": 768, "height": 448, "num_frames": 121, "ratio": "16:9", "size": "s"}
+
+    def test_explicit_values_win_over_the_size_entry(self):
+        overrides = {"ratio": "16:9", "size": "m", "steps": 4, "width": 640}
+
+        assert resolve_video_defaults("ltx", load_config(), overrides) == {"steps": 4, "width": 640, "height": 576, "num_frames": 121, "ratio": "16:9", "size": "m"}
+
+    def test_a_missing_size_falls_back_to_the_built_in_size(self):
+        config = {"video_sizes": {}, "video_model_presets": {"ltx": {"default_steps": 6}}}
+
+        assert resolve_video_defaults("ltx", config, {"ratio": "1:1", "size": "zz"}) == {"steps": 6, "width": 768, "height": 448, "num_frames": 121, "ratio": "1:1", "size": "zz"}
+
+    def test_a_family_without_a_preset_gets_eight_steps(self):
+        assert resolve_video_defaults("unknown", {}, {}) == {"steps": 8, "width": 768, "height": 448, "num_frames": 121, "ratio": "16:9", "size": "s"}

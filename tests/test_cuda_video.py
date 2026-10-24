@@ -609,7 +609,7 @@ class TestPreparedCopiesLiveWithTheAlias:
         monkeypatch.setattr("zvisiongenerator.backends.cuda.video.weights.text_encoder_sources", lambda repo: [repo / "te.safetensors"])
         monkeypatch.setattr(video_diffusers_module, "_transformer_config", lambda repo_dir: {})
         # The NF4 storage format names the installed bitsandbytes version, which is not installed on macOS.
-        monkeypatch.setattr("zvisiongenerator.backends.cuda.video.weights.importlib.metadata.version", lambda _name: "0.50.0")
+        monkeypatch.setattr("importlib.metadata.version", lambda _name: "0.50.0")
         return real_prepared_weights(name, "org/repo", tmp_path, tmp_path / "ckpt.safetensors", bits, "cuda")
 
     def test_copies_are_the_alias_stored_copy_and_share_one_text_encoder(self, monkeypatch, tmp_path):
