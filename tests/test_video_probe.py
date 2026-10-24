@@ -13,7 +13,7 @@ from _media import REAL, encode_frames, ffmpeg, first_frame, numbered_frames, ro
 
 from zvisiongenerator.utils import video_probe
 from zvisiongenerator.utils.video_extend import extend_source_problems
-from zvisiongenerator.utils.video_probe import audio_decodes, frame_rates_match, parse_fraction, parse_probe, probe_video
+from zvisiongenerator.utils.video_probe import audio_decodes, ffprobe_json, frame_rates_match, parse_fraction, parse_probe, probe_video
 
 
 def _video_stream(**overrides: Any) -> dict[str, Any]:
@@ -66,6 +66,15 @@ class TestParseProbe:
         assert probe.rotation == 0
         assert (probe.duration, probe.video_start, probe.format_start) == (3.0, 0.0, 0.0)
         assert probe.has_audio is True
+
+    @pytest.mark.parametrize("codec", ["aac", "opus", "pcm_s16le"])
+    def test_the_first_audio_streams_codec_is_kept(self, codec):
+        probe = parse_probe(_probe_json(_video_stream(), _audio_stream(codec_name=codec), _audio_stream(index=2, codec_name="mp3")))
+
+        assert probe.audio_codec == codec
+
+    def test_a_clip_without_audio_has_no_audio_codec(self):
+        assert parse_probe(_probe_json(_video_stream())).audio_codec is None
 
     def test_a_clip_without_audio(self):
         probe = parse_probe(_probe_json(_video_stream()))
@@ -191,6 +200,33 @@ class TestFrameRatesMatch:
 
     def test_tolerance_is_configurable(self):
         assert frame_rates_match("24/1", "2400/101", tolerance=0.02) is True
+
+
+class TestFfprobeJson:
+    def test_packets_are_counted_unless_told_not_to(self, monkeypatch):
+        run = MagicMock(return_value=MagicMock(stdout=json.dumps({"streams": [], "format": {}})))
+        monkeypatch.setattr(video_probe.subprocess, "run", run)
+
+        ffprobe_json("/clips/clip.mp4")
+        counted = run.call_args.args[0]
+        ffprobe_json("/clips/clip.mp4", count_packets=False)
+        quick = run.call_args.args[0]
+
+        assert "-count_packets" in counted and "-count_packets" not in quick
+        assert {"-show_streams", "-show_format"} <= set(quick)
+
+    def test_returns_the_parsed_json(self, monkeypatch):
+        data = _probe_json(_video_stream(), _audio_stream())
+        monkeypatch.setattr(video_probe.subprocess, "run", MagicMock(return_value=MagicMock(stdout=json.dumps(data))))
+
+        assert ffprobe_json("/clips/clip.mp4") == data
+
+    def test_an_unreadable_file_is_a_runtime_error(self, monkeypatch):
+        error = subprocess.CalledProcessError(1, ["ffprobe"], stderr="Invalid data found\n")
+        monkeypatch.setattr(video_probe.subprocess, "run", MagicMock(side_effect=error))
+
+        with pytest.raises(RuntimeError, match="Invalid data found"):
+            ffprobe_json("/clips/broken.mp4", count_packets=False)
 
 
 class TestProbeVideo:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ EXIF_IMAGE_DESCRIPTION = 0x010E
 # The recorded ``generation.upscale.method`` values: refine with the image model, or upscale with SeedVR2.
 UPSCALE_METHOD_CREATIVE = "creative"
 UPSCALE_METHOD_SEEDVR2 = "seedvr2"
+UPSCALE_WORKFLOW = "upscale"
 
 
 def build_image_config_payload(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> dict[str, Any]:
@@ -121,6 +123,67 @@ def build_video_config_payload(request: VideoGenerationRequest, artifacts: Video
     return _drop_unserializable(payload)
 
 
+def build_video_upscale_payload(
+    source_config: Mapping[str, Any] | None,
+    *,
+    source_path: str,
+    source_width: int,
+    source_height: int,
+    width: int,
+    height: int,
+    frame_count: int,
+    audio: bool,
+    upscale: Mapping[str, Any],
+    generation_time: float,
+) -> dict[str, Any]:
+    """Build the config payload embedded in a video made by upscaling an existing video.
+
+    It starts from the source's own recorded settings (*source_config*, the raw payload; ``None`` for a clip with
+    none), so Reuse and the viewer show how the original was made, and replaces what the upscale changes: the
+    workflow becomes ``upscale``, and the size and ``frame_count`` are the upscaled clip's. ``generation`` records
+    the time, the *upscale* block and whether the clip has sound; ``source`` the clip it came from (``path``, its
+    displayed ``width`` and ``height``) and ``workflow``. When the source was itself an upscale, the size and the
+    workflow are the original's, recorded in its own ``source``, so Reuse fills in the original's size and workflow
+    however many times the clip was upscaled. ``workflow`` is ``None`` for a clip with no recorded settings, which
+    therefore cannot be reused.
+    """
+    origin = _upscale_origin(source_config)
+    kept = {key: value for key, value in (source_config or {}).items() if key not in ("schema", "generation", "source")}
+    payload = {
+        **kept,
+        "schema": VIDEO_CONFIG_SCHEMA,
+        "workflow": UPSCALE_WORKFLOW,
+        "width": width,
+        "height": height,
+        "frame_count": frame_count,
+        "generation": _drop_empty({"time": _round_seconds(generation_time), "upscale": dict(upscale), "audio": audio}),
+        "source": {
+            "path": _portable_path(source_path),
+            "width": optional_int(origin.get("width")) or source_width,
+            "height": optional_int(origin.get("height")) or source_height,
+            "workflow": _original_video_workflow(source_config),
+        },
+    }
+    return _drop_unserializable(payload)
+
+
+def _upscale_origin(source_config: Mapping[str, Any] | None) -> Mapping[str, Any]:
+    """Return the ``source`` block of *source_config* when it is an upscale's (it describes the original behind it), else an empty mapping."""
+    if not source_config or optional_text(source_config.get("workflow")) != UPSCALE_WORKFLOW:
+        return {}
+    source = source_config.get("source")
+    return source if isinstance(source, Mapping) else {}
+
+
+def _original_video_workflow(source_config: Mapping[str, Any] | None) -> str | None:
+    """Return the workflow that made the original behind *source_config*: its own, or the one its upscale source recorded."""
+    if not source_config:
+        return None
+    if optional_text(source_config.get("workflow")) == UPSCALE_WORKFLOW:
+        return optional_text(_upscale_origin(source_config).get("workflow"))
+    return optional_text(source_config.get("workflow"))
+
+
 def _image_prompt_input(request: ImageGenerationRequest, artifacts: ImageWorkingArtifacts) -> str | None:
     """Return the user's own prompt of an enhanced image: the text sent beside a Web UI rewrite, or the template of a job rewrite."""
     if request.prompt_input:
@@ -181,6 +244,12 @@ def _video_scene_fields(request: VideoGenerationRequest, artifacts: VideoWorking
     return {key: text for key, value in fields.items() if (text := optional_text(value)) is not None}
 
 
+def mp4_config_args(payload: dict[str, Any]) -> list[str]:
+    """Return the ffmpeg output options that store a config payload as JSON in MP4 metadata under zvisiongenerator.config."""
+    value = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return ["-movflags", "use_metadata_tags", "-metadata", f"{_MP4_CONFIG_KEY}={value}"]
+
+
 def embed_mp4_config(video_path: str | Path, payload: dict[str, Any]) -> None:
     """Embed a config payload as JSON in MP4 container metadata under zvisiongenerator.config.
 
@@ -191,10 +260,9 @@ def embed_mp4_config(video_path: str | Path, payload: dict[str, Any]) -> None:
     """
     video_path = Path(video_path)
     tmp = staging_path(video_path)
-    value = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-v", "error", "-i", str(video_path), "-c", "copy", "-movflags", "use_metadata_tags", "-metadata", f"{_MP4_CONFIG_KEY}={value}", str(tmp)],
+            ["ffmpeg", "-y", "-v", "error", "-i", str(video_path), "-c", "copy", *mp4_config_args(payload), str(tmp)],
             check=True,
             capture_output=True,
         )
@@ -213,7 +281,11 @@ def read_mp4_config(video_path: str | Path) -> dict[str, Any] | None:
         text=True,
         check=True,
     )
-    data = json.loads(result.stdout)
+    return mp4_config_from_probe(json.loads(result.stdout))
+
+
+def mp4_config_from_probe(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the zvisiongenerator.config payload in ffprobe's JSON for a file (its ``format`` block), or None if absent."""
     raw = data.get("format", {}).get("tags", {}).get(_MP4_CONFIG_KEY)
     if raw is None:
         return None
@@ -343,7 +415,7 @@ def _is_video_config(config: dict[str, Any]) -> bool:
 
 
 def _generation_block(value: Any, *, is_video: bool = False) -> dict[str, Any]:
-    """Keep the known, well-typed keys of a recorded ``generation`` block; videos record no upscale method."""
+    """Keep the known, well-typed keys of a recorded ``generation`` block; a video keeps the upscale method only when it is ``seedvr2``."""
     if not isinstance(value, dict):
         return {}
     generation: dict[str, Any] = {}
@@ -374,7 +446,9 @@ def _generation_block(value: Any, *, is_video: bool = False) -> dict[str, Any]:
         }
         coerced = {key: item for key, item in coerced.items() if item is not None}
         if coerced and is_video:
-            generation["upscale"] = coerced
+            # A video upscaled from a file records its method; the in-run upscale of a generated clip records none.
+            method = {"method": UPSCALE_METHOD_SEEDVR2} if upscale.get("method") == UPSCALE_METHOD_SEEDVR2 else {}
+            generation["upscale"] = {**method, **coerced}
         elif coerced:
             # Image files that predate the method were all refined by the image model.
             method = UPSCALE_METHOD_SEEDVR2 if upscale.get("method") == UPSCALE_METHOD_SEEDVR2 else UPSCALE_METHOD_CREATIVE

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -51,6 +52,24 @@ class ExtendSpec:
 
     source: ExtendSource
     frames: int
+
+
+@dataclass(frozen=True)
+class VideoFileUpscaleRequest:
+    """Everything one upscale of an existing video file needs: the checked clip, its raw recorded settings and the plan.
+
+    *recorded_config* is the payload embedded in the clip (``None`` when it has none), so the result can carry it on.
+    *width* and *height* are the output size; *batch_size* is the frames the engine upscales at once.
+    """
+
+    source: ExtendSource
+    recorded_config: Mapping[str, Any] | None
+    output_dir: str
+    width: int
+    height: int
+    upscale_model: str
+    softness: float
+    batch_size: int
 
 
 @dataclass(frozen=True)

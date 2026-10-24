@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -153,7 +154,6 @@ class TestRun:
         calls.setup_generation_context.return_value = ctx
         self.dit = torch.nn.Module()
         calls.prepare_runner.return_value = (SimpleNamespace(dit=self.dit), {"cache": True})
-        calls.load_text_embeddings.return_value = {"texts_pos": []}
         calls.compute_generation_info.side_effect = lambda **kwargs: (kwargs["images"], {})
         for phase in ("encode_all_batches", "upscale_all_batches", "decode_all_batches"):
             getattr(calls, phase).side_effect = lambda runner, **kwargs: kwargs["ctx"]
@@ -163,7 +163,7 @@ class TestRun:
             return kwargs["ctx"]
 
         calls.postprocess_all_batches.side_effect = postprocess
-        for name in ("setup_generation_context", "prepare_runner", "load_text_embeddings", "compute_generation_info"):
+        for name in ("setup_generation_context", "prepare_runner", "compute_generation_info"):
             monkeypatch.setattr(generation_utils, name, getattr(calls, name))
         for name in ("encode_all_batches", "upscale_all_batches", "decode_all_batches", "postprocess_all_batches"):
             monkeypatch.setattr(generation_phases, name, getattr(calls, name))
@@ -180,7 +180,6 @@ class TestRun:
             "configure_allocator",
             "setup_generation_context",
             "prepare_runner",
-            "load_text_embeddings",
             "compute_generation_info",
             "encode_all_batches",
             "upscale_all_batches",
@@ -199,16 +198,13 @@ class TestRun:
         assert runner["dit_cache"] is False and runner["vae_cache"] is False
         assert runner["encode_tiled"] is True and runner["decode_tiled"] is True
 
-    def test_an_image_uses_the_core_tile_and_a_video_the_tile_it_is_given(self, core):
-        import torch
-
+    def test_an_image_decodes_in_the_core_tiles_and_frees_each_model_after_its_phase(self, core):
         self._run()
-        assert core.prepare_runner.call_args.kwargs["decode_tile_size"] == (1024, 1024)
-
-        module._run_frames(_model("seedvr2-3b"), torch.zeros(5, 4, 6, 3), seed=1, resolution=4, batch_size=5, tile=(512, 512))
 
         runner = core.prepare_runner.call_args.kwargs
-        assert runner["encode_tile_size"] == runner["decode_tile_size"] == (512, 512)
+        assert runner["encode_tile_size"] == runner["decode_tile_size"] == (1024, 1024)
+        assert core.upscale_all_batches.call_args.kwargs["cache_model"] is False
+        assert core.decode_all_batches.call_args.kwargs["cache_model"] is False
 
     def test_the_tiers_files_and_folder_are_passed(self, core):
         self._run()
@@ -239,99 +235,28 @@ class TestRun:
         assert np.asarray(image)[0, 0].tolist() == [128, 128, 128]
 
 
-class TestUpscaleVideo:
-    """The video upscale prepares every frame and hands the whole clip to the core in one run."""
+class TestToUint8Frames:
+    def test_values_are_clamped_scaled_and_rounded_into_one_frame_per_item(self):
+        torch = pytest.importorskip("torch")
+        pixels = torch.tensor([[[[-0.5, 0.0, 0.5], [1.0, 1.2, 0.2]]], [[[0.25, 0.75, 1.0], [0.0, 0.1, 0.9]]]])
 
-    @pytest.fixture
-    def run(self, monkeypatch):
+        frames = module._to_uint8_frames(pixels)
+
+        assert [frame.shape for frame in frames] == [(1, 2, 3)] * 2
+        assert all(frame.dtype == np.uint8 for frame in frames)
+        assert frames[0].tolist() == [[[0, 0, 128], [255, 255, 51]]]
+        assert frames[1].tolist() == [[[64, 191, 255], [0, 26, 230]]]
+
+    def test_a_half_precision_batch_is_converted_too(self):
         torch = pytest.importorskip("torch")
 
-        def fake(model, frames, *, seed, resolution, batch_size, tile, progress_callback=None):
-            if progress_callback is not None:
-                for done in range(1, 4):
-                    progress_callback(done, 3, 5, "Phase 2: Upscaling")
-            height, width = frames.shape[1:3]
-            return torch.full((frames.shape[0], height, width, 3), 0.5)
+        (frame,) = module._to_uint8_frames(torch.full((1, 2, 2, 3), 0.5, dtype=torch.bfloat16))
 
-        run = MagicMock(side_effect=fake)
-        monkeypatch.setattr(module, "_run_frames", run)
-        return run
-
-    def _frames(self, count: int) -> list[np.ndarray]:
-        return [np.full((6, 8, 3), 10 * i, dtype=np.uint8) for i in range(count)]
-
-    def _upscale(self, frames, **overrides):
-        kwargs = {"width": 16, "height": 12, "seed": 9, "softness": 0.0}
-        return module.TorchSeedVR2Upscaler().upscale_video(_model(), frames, **{**kwargs, **overrides})
-
-    def test_the_whole_clip_goes_through_the_core_in_one_run(self, run):
-        self._upscale(self._frames(12))
-
-        assert run.call_count == 1
-        assert run.call_args.args[1].shape[0] == 12
-
-    def test_the_run_gets_the_folded_seed_the_target_short_side_and_the_batch_size(self, run):
-        self._upscale(self._frames(11), seed=2**32 - 1, batch_size=9)
-
-        assert run.call_args.kwargs["seed"] == 2**32 - 1 - (2**32 - 1_000_000)
-        assert run.call_args.kwargs["resolution"] == 12
-        assert run.call_args.kwargs["batch_size"] == 9
-
-    @pytest.mark.parametrize(
-        ("width", "height", "tile"),
-        [(576, 320, (1024, 1024)), (768, 448, (1024, 1024)), (448, 768, (1024, 1024)), (1024, 576, (512, 512)), (1280, 704, (512, 512)), (1600, 896, (512, 512)), (896, 1600, (512, 512))],
-    )
-    def test_the_vae_tile_follows_the_frame_size(self, run, width, height, tile):
-        self._upscale(self._frames(2), width=width, height=height)
-
-        assert run.call_args.kwargs["tile"] == tile
-
-    def test_the_batch_size_defaults_to_five(self, run):
-        self._upscale(self._frames(7))
-
-        assert run.call_args.kwargs["batch_size"] == 5
-
-    def test_frames_reach_the_core_as_floats_at_the_target_size(self, run):
-        self._upscale(self._frames(2))
-
-        tensor = run.call_args.args[1]
-        assert tuple(tensor.shape) == (2, 12, 16, 3)
-        assert tensor.dtype.is_floating_point
-        assert float(tensor.max()) == pytest.approx(10 / 255)
-
-    def test_progress_is_forwarded_as_done_and_total(self, run):
-        progress = MagicMock()
-
-        self._upscale(self._frames(11), progress=progress)
-
-        assert [c.args for c in progress.call_args_list] == [(1, 3), (2, 3), (3, 3)]
-
-    def test_without_progress_the_core_gets_no_callback(self, run):
-        self._upscale(self._frames(3))
-
-        assert run.call_args.kwargs.get("progress_callback") is None
-
-    def test_the_output_has_one_uint8_array_per_frame_at_the_target_size(self, run):
-        result = self._upscale(self._frames(7))
-
-        assert len(result) == 7
-        assert all(frame.dtype == np.uint8 and frame.shape == (12, 16, 3) for frame in result)
-        assert result[0][0, 0].tolist() == [128, 128, 128]
-
-    def test_no_frames_and_a_bad_batch_size_are_refused_before_the_core_runs(self, run):
-        with pytest.raises(ValueError):
-            self._upscale([])
-        with pytest.raises(ValueError):
-            self._upscale(self._frames(2), batch_size=0)
-
-        run.assert_not_called()
-
-    def test_the_upscaler_has_the_optional_video_method(self):
-        assert hasattr(module.TorchSeedVR2Upscaler(), "upscale_video")
+        assert frame.tolist() == [[[128] * 3] * 2] * 2
 
 
-class TestVideoCoreCalls:
-    """The core's phases see the clip's batch size and the progress callback."""
+class TestUpscaleVideo:
+    """The video upscale streams chunks of two batches through the core on one runner and frees it at the end."""
 
     @pytest.fixture
     def core(self, monkeypatch):
@@ -339,57 +264,211 @@ class TestVideoCoreCalls:
         pytest.importorskip("seedvr2_torch")
         import torch
         from seedvr2_torch.src.core import generation_phases, generation_utils
+        from seedvr2_torch.src.optimization import memory_manager
 
         calls = MagicMock()
-        calls.setup_generation_context.return_value = {"dit_device": "cuda:0", "compute_dtype": torch.bfloat16}
+        self.generation_contexts: list[dict] = []
+        self.input_tensors: list = []
+        self.text_embeds_seen: list = []
+        calls.setup_generation_context.return_value = {"dit_device": "cuda:0", "compute_dtype": torch.bfloat16, "text_embeds": None}
         calls.prepare_runner.return_value = (SimpleNamespace(), {"cache": True})
-        calls.compute_generation_info.side_effect = lambda **kwargs: (kwargs["images"], {})
-        for phase in ("encode_all_batches", "upscale_all_batches", "decode_all_batches"):
-            getattr(calls, phase).side_effect = lambda runner, **kwargs: kwargs["ctx"]
 
-        def postprocess(**kwargs):
-            kwargs["ctx"]["final_video"] = torch.full((7, 12, 16, 3), 0.25)
+        def generation_info(**kwargs):
+            self.generation_contexts.append(dict(kwargs["ctx"]))
+            self.input_tensors.append(kwargs["images"].clone())
+            return kwargs["images"], {}
+
+        def encode(runner, **kwargs):
+            kwargs["ctx"].update(frames=kwargs["images"], batch_size=kwargs["batch_size"], true_target_dims=tuple(kwargs["images"].shape[1:3]))
             return kwargs["ctx"]
 
+        def decode(runner, **kwargs):
+            ctx = kwargs["ctx"]
+            count = math.ceil(ctx["frames"].shape[0] / ctx["batch_size"])
+            for current in range(1, count + 1):
+                kwargs["progress_callback"](current, count, 5, "Phase 3: Decoding")
+            return ctx
+
+        def postprocess(**kwargs):
+            kwargs["ctx"]["final_video"] = kwargs["ctx"]["frames"]
+            return kwargs["ctx"]
+
+        calls.compute_generation_info.side_effect = generation_info
+        calls.encode_all_batches.side_effect = encode
+
+        def upscale(runner, **kwargs):
+            # The core loads the embeddings into the context it is given when the key is None, and frees them after the phase.
+            self.text_embeds_seen.append(kwargs["ctx"].get("text_embeds"))
+            kwargs["ctx"]["text_embeds"] = {"texts_pos": [torch.zeros(1)]}
+            return kwargs["ctx"]
+
+        calls.upscale_all_batches.side_effect = upscale
+        calls.decode_all_batches.side_effect = decode
         calls.postprocess_all_batches.side_effect = postprocess
-        for name in ("setup_generation_context", "prepare_runner", "load_text_embeddings", "compute_generation_info"):
+        for name in ("setup_generation_context", "prepare_runner", "compute_generation_info"):
             monkeypatch.setattr(generation_utils, name, getattr(calls, name))
         for name in ("encode_all_batches", "upscale_all_batches", "decode_all_batches", "postprocess_all_batches"):
             monkeypatch.setattr(generation_phases, name, getattr(calls, name))
+        monkeypatch.setattr(memory_manager, "complete_cleanup", calls.complete_cleanup)
         monkeypatch.setattr(module, "configure_allocator", calls.configure_allocator)
         return calls
 
-    def _upscale(self, **overrides):
-        frames = [np.zeros((6, 8, 3), dtype=np.uint8)] * 7
-        kwargs = {"width": 16, "height": 12, "seed": 3, "softness": 0.0}
-        return module.TorchSeedVR2Upscaler().upscale_video(_model("seedvr2-3b"), frames, **{**kwargs, **overrides})
+    def _frames(self, count: int) -> list[np.ndarray]:
+        return [np.full((6, 8, 3), 10 * i, dtype=np.uint8) for i in range(count)]
 
-    def test_every_batching_phase_gets_the_batch_size_and_the_models_are_built_once(self, core):
-        self._upscale(batch_size=5)
+    def _upscale(self, frames, **overrides):
+        kwargs = {"width": 16, "height": 12, "total_frames": len(frames), "seed": 9, "softness": 0.0, "batch_size": 1}
+        return module.TorchSeedVR2Upscaler().upscale_video(_model(), iter(frames), **{**kwargs, **overrides})
+
+    def test_the_upscaler_has_the_optional_video_method(self):
+        assert hasattr(module.TorchSeedVR2Upscaler(), "upscale_video")
+
+    @pytest.mark.parametrize(
+        ("count", "batch_size", "chunks"),
+        [(7, 1, [2, 2, 2, 1]), (11, 3, [6, 5])],
+        ids=["batch 1", "batch 3"],
+    )
+    def test_a_chunk_is_two_batches_and_all_chunks_run_on_one_runner_with_the_models_kept(self, core, count, batch_size, chunks):
+        result = list(self._upscale(self._frames(count), batch_size=batch_size))
 
         assert core.prepare_runner.call_count == 1
-        assert core.compute_generation_info.call_args.kwargs["batch_size"] == 5
-        assert core.encode_all_batches.call_args.kwargs["batch_size"] == 5
-        assert core.postprocess_all_batches.call_args.kwargs["batch_size"] == 5
-        assert tuple(core.compute_generation_info.call_args.kwargs["images"].shape) == (7, 12, 16, 3)
+        assert [c.kwargs["images"].shape[0] for c in core.compute_generation_info.call_args_list] == chunks
+        assert {c.kwargs["batch_size"] for c in core.encode_all_batches.call_args_list} == {batch_size}
+        assert all(c.kwargs["cache_model"] is True for c in core.upscale_all_batches.call_args_list + core.decode_all_batches.call_args_list)
+        assert all("cache_model" not in c.kwargs for c in core.encode_all_batches.call_args_list + core.postprocess_all_batches.call_args_list)
+        assert [int(frame[0, 0, 0]) for frame in result] == [10 * i for i in range(count)]
+        assert all(frame.dtype == np.uint8 and frame.shape == (12, 16, 3) for frame in result)
 
-    def test_the_seed_and_colour_correction_match_the_image_path(self, core):
-        self._upscale()
+    def test_a_chunk_never_inherits_the_previous_chunks_target_size(self, core):
+        list(self._upscale(self._frames(4)))
 
-        assert core.compute_generation_info.call_args.kwargs["seed"] == core.encode_all_batches.call_args.kwargs["seed"] == 3
-        assert core.upscale_all_batches.call_args.kwargs["seed"] == 3
+        assert len(self.generation_contexts) == 2
+        assert all("true_target_dims" not in ctx for ctx in self.generation_contexts)
+
+    def test_no_chunk_shares_text_embeddings_with_another(self, core):
+        list(self._upscale(self._frames(7)))
+
+        assert self.text_embeds_seen == [None] * 4
+
+    def test_progress_counts_decoded_batches_across_chunks(self, core):
+        progress = MagicMock()
+
+        list(self._upscale(self._frames(7), progress=progress))
+
+        assert [c.args for c in progress.call_args_list] == [(n, 7) for n in range(1, 8)]
+
+    def test_the_total_grows_when_the_stream_is_longer_than_announced(self, core):
+        progress = MagicMock()
+
+        list(self._upscale(self._frames(7), total_frames=5, progress=progress))
+
+        assert [c.args for c in progress.call_args_list] == [(1, 5), (2, 5), (3, 5), (4, 5), (5, 5), (6, 6), (7, 7)]
+
+    def _ends_normally(self, core):
+        list(self._upscale(self._frames(3)))
+
+    def _phase_raises(self, core):
+        core.upscale_all_batches.side_effect = ValueError("boom")
+        with pytest.raises(ValueError, match="boom"):
+            list(self._upscale(self._frames(3)))
+
+    def _is_closed_midway(self, core):
+        frames = self._upscale(self._frames(7))
+        next(frames)
+        frames.close()
+
+    def _is_interrupted(self, core):
+        class Stop(Exception):
+            pass
+
+        def encode(runner, **kwargs):
+            kwargs["ctx"]["interrupt_fn"]()
+
+        core.encode_all_batches.side_effect = encode
+        with pytest.raises(Stop):
+            list(self._upscale(self._frames(3), interrupt=MagicMock(side_effect=Stop)))
+
+    @pytest.mark.parametrize("scenario", ["_ends_normally", "_phase_raises", "_is_closed_midway", "_is_interrupted"])
+    def test_the_models_are_freed_once(self, core, scenario):
+        getattr(self, scenario)(core)
+
+        core.complete_cleanup.assert_called_once()
+        assert core.complete_cleanup.call_args.kwargs == {"dit_cache": False, "vae_cache": False}
+
+    def test_no_frames_yield_nothing_and_still_free_the_models(self, core):
+        assert list(self._upscale([], total_frames=0)) == []
+
+        core.compute_generation_info.assert_not_called()
+        core.complete_cleanup.assert_called_once()
+
+    @pytest.mark.parametrize(("batch_size", "read_for_first_chunk"), [(1, 2), (3, 6)])
+    def test_frames_are_read_only_as_chunks_are_needed(self, core, batch_size, read_for_first_chunk):
+        read = []
+
+        def source():
+            for frame in self._frames(13):
+                read.append(1)
+                yield frame
+
+        frames = module.TorchSeedVR2Upscaler().upscale_video(_model(), source(), width=16, height=12, total_frames=13, seed=9, softness=0.0, batch_size=batch_size)
+        next(frames)
+
+        assert len(read) == read_for_first_chunk
+        frames.close()
+
+    def test_the_interrupt_reaches_the_core_context(self, core):
+        interrupt = MagicMock()
+
+        list(self._upscale(self._frames(2), interrupt=interrupt))
+
+        assert self.generation_contexts[0]["interrupt_fn"] is interrupt
+        for phase in ("encode_all_batches", "upscale_all_batches", "decode_all_batches"):
+            assert getattr(core, phase).call_args.kwargs["ctx"]["interrupt_fn"] is interrupt
+
+    @pytest.mark.parametrize(("width", "height"), [(1536, 896), (320, 192)])
+    def test_the_vae_always_uses_512_pixel_tiles(self, core, width, height):
+        list(self._upscale([np.zeros((4, 4, 3), dtype=np.uint8)], width=width, height=height))
+
+        runner = core.prepare_runner.call_args.kwargs
+        assert runner["encode_tile_size"] == runner["decode_tile_size"] == (512, 512)
+
+    def test_the_seed_the_short_side_and_the_colour_correction_match_the_image_path(self, core):
+        list(self._upscale(self._frames(2), seed=2**32 - 1))
+
+        seed = 2**32 - 1 - (2**32 - 1_000_000)
+        assert core.compute_generation_info.call_args.kwargs["seed"] == core.encode_all_batches.call_args.kwargs["seed"] == core.upscale_all_batches.call_args.kwargs["seed"] == seed
+        assert core.compute_generation_info.call_args.kwargs["resolution"] == core.encode_all_batches.call_args.kwargs["resolution"] == 12
         assert core.encode_all_batches.call_args.kwargs["color_correction"] == "lab"
         assert core.postprocess_all_batches.call_args.kwargs["color_correction"] == "lab"
 
-    def test_the_upscale_phase_gets_the_progress_adapter(self, core):
-        progress = MagicMock()
-        self._upscale(progress=progress)
+    def test_softness_pre_blurs_each_frame_at_the_target_size(self, core, monkeypatch):
+        spy = MagicMock(wraps=module.seedvr2_input_image)
+        monkeypatch.setattr(module, "seedvr2_input_image", spy)
 
-        core.upscale_all_batches.call_args.kwargs["progress_callback"](2, 3, 5, "Phase 2: Upscaling")
+        list(self._upscale(self._frames(2), softness=0.5))
 
-        progress.assert_called_once_with(2, 3)
+        assert [c.args[1:] for c in spy.call_args_list] == [(16, 12, 0.5)] * 2
 
-    def test_the_result_is_one_uint8_array_per_frame(self, core):
-        result = self._upscale()
+    def test_frames_reach_the_core_as_floats_at_the_target_size(self, core):
+        list(self._upscale(self._frames(2)))
 
-        assert len(result) == 7 and result[0].shape == (12, 16, 3) and result[0].dtype == np.uint8
+        tensor = self.input_tensors[0]
+        assert tuple(tensor.shape) == (2, 12, 16, 3)
+        assert tensor.dtype.is_floating_point
+        assert [float(tensor[i, 0, 0, 0]) for i in range(2)] == pytest.approx([0.0, 10 / 255])
+
+    def test_running_out_of_gpu_memory_becomes_a_readable_error_naming_the_output_size(self, core):
+        import torch
+
+        core.decode_all_batches.side_effect = torch.cuda.OutOfMemoryError("CUDA out of memory")
+
+        with pytest.raises(RuntimeError, match="3840×2160"):
+            list(self._upscale(self._frames(1), width=3840, height=2160))
+
+        core.complete_cleanup.assert_called_once()
+
+    def test_a_bad_batch_size_is_refused_before_anything_runs(self, core):
+        with pytest.raises(ValueError, match="batch_size"):
+            self._upscale(self._frames(2), batch_size=0)
+
+        core.prepare_runner.assert_not_called()

@@ -100,6 +100,8 @@ def public_job_snapshot(
         "settings": context.get("settings", {}),
         "notices": list(context.get("notices", ())),
     }
+    if "media_type" in context:
+        snapshot["media_type"] = context["media_type"]
     terminal_event = terminal_event_for_status(status)
     if terminal_event is not None:
         snapshot["terminal_event"] = terminal_event

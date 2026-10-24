@@ -6,7 +6,7 @@
   import { acceptsPageShortcut } from '$lib/keyboard';
   import { workflowLabel } from '$lib/state/assetActions';
   import {
-    etaLabel, finishingText, formatClock, headline, isActive, isPaused, itemActivity, itemNoun, iterations, jobBar, jobControls, jobPhase, jobTone,
+    etaLabel, finishingText, formatClock, headline, isActive, isPaused, itemActivity, itemNoun, iterations, jobBar, jobControls, jobPhase, jobTone, stepUnit,
     stageBars, type JobTone
   } from '$lib/state/jobView';
   import { trackStepTiming, type StepTiming } from '$lib/state/stepTiming';
@@ -261,7 +261,7 @@
         live={headerLive && activity === 'stepping'}
         busy={headerLive && activity !== 'stepping'}
         {stepMs}
-        valuetext={activity === 'stepping' ? `Step ${job.currentStep} of ${job.totalSteps}` : activity === 'finishing' ? finishingText(job) : 'Starting'}
+        valuetext={activity === 'stepping' ? `${stepUnit(job)} ${job.currentStep} of ${job.totalSteps}` : activity === 'finishing' ? finishingText(job) : 'Starting'}
       />
     {:else if bar.kind === 'download'}
       <!-- While the model's files download, the bar is that download; it goes back to the steps once generation starts. -->

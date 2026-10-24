@@ -232,6 +232,7 @@ function makeJobStateFromSnapshot(snapshot: JobSnapshot): ActiveJobState {
     job_id: snapshot.job_id ?? snapshot.id,
     id: snapshot.id,
     workflow: snapshot.workflow,
+    media_type: snapshot.media_type,
     prompt: snapshot.prompt,
     model: snapshot.model,
     model_label: snapshot.model_label,

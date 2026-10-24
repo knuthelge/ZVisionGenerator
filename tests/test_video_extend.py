@@ -289,6 +289,17 @@ class TestInspectExtendSource:
         assert inspection.source is not None
         assert (inspection.source.scene, inspection.source.prompt, inspection.source.model) == ("A castle.", "A knight rides in.", "/models/ltx")
         assert inspection.source.probe is inspection.probe
+        assert inspection.config == probed["config"]
+
+    def test_the_settings_of_a_mov_are_read_like_those_of_an_mp4(self, tmp_path, probed):
+        mov = tmp_path / "clip.mov"
+        mov.write_bytes(b"")
+        probed["config"] = {"prompt": "A knight rides in."}
+
+        inspection = inspect_extend_source(mov)
+
+        assert inspection.config == probed["config"]
+        assert inspection.recorded is not None and inspection.recorded.prompt == "A knight rides in."
 
     def test_a_missing_file_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError, match="missing.mp4"):
@@ -351,7 +362,7 @@ class TestInspectExtendSource:
         inspection = inspect_extend_source(clip)
 
         assert inspection.problems == ()
-        assert inspection.recorded is None
+        assert inspection.recorded is None and inspection.config is None
         assert inspection.source is not None
         assert (inspection.source.scene, inspection.source.prompt, inspection.source.model) == (None, None, None)
 

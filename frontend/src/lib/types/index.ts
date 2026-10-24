@@ -189,11 +189,13 @@ export interface AssetUpscaleFactor {
   height: number;
   allowed: boolean;
   reason: string | null;
-  /** Set on a SeedVR2 option that is allowed but may not fit in memory. */
+  /** Set on a SeedVR2 option that is allowed but needs care: it may not fit in memory, or a video runs one frame per batch. */
   warning?: string | null;
+  /** Why there is a warning: `memory`, or `one_frame_batch` for a video upscaled one frame at a time. */
+  warning_code?: 'memory' | 'one_frame_batch' | null;
 }
 
-/** The SeedVR2 upscale an asset offers (macOS only). */
+/** The SeedVR2 upscale an asset offers. */
 export interface AssetSeedvr2Upscale {
   options: AssetUpscaleFactor[];
   /** Label of the model tier that runs, e.g. `SeedVR2 7B q8`. */
@@ -885,6 +887,8 @@ export interface JobContext {
   id?: string;
   job_id: string;
   workflow: JobWorkflow;
+  /** `video` for a job that upscales an existing video file; absent on other jobs. */
+  media_type?: 'image' | 'video';
   prompt: string;
   model: string;
   /** How the Web UI shows `model`: its configured name, else the id. Absent on jobs from an older server. */

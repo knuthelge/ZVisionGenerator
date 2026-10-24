@@ -10,14 +10,22 @@ from fastapi.testclient import TestClient
 from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+from conftest import make_extend_source, make_probe
+
 from zvisiongenerator.core.image_types import ImageGenerationRequest
 from zvisiongenerator.upscale_runner import UpscaleSource
 from zvisiongenerator.utils.image_model_detect import ImageModelInfo
 from zvisiongenerator.utils.provenance import RecordedSettings, embed_png_config
-from zvisiongenerator.utils.seedvr2 import MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
-from zvisiongenerator.utils.upscale import SEEDVR2_MEMORY_WARNING
+from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS, SeedVR2Settings, SeedVR2Setup, SeedVR2Tier
+from zvisiongenerator.utils.upscale import SEEDVR2_MEMORY_WARNING, WORK_DIR_PREFIX
+from zvisiongenerator.utils.video_extend import ExtendInspection, ExtendProblem, extend_source_problems
 from zvisiongenerator.web import server as web_server
 from zvisiongenerator.web import upscale_api
+from zvisiongenerator import video_file_upscale_runner
 from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.gallery import gallery_asset_to_json, list_gallery_assets
 from zvisiongenerator.web.model_inventory import ImageInventoryEntry
@@ -464,14 +472,6 @@ def test_upscale_route_rejects_output_over_cap(upscale_client):
     assert "megapixel" in response.json()["detail"]
 
 
-def test_upscale_route_rejects_video(upscale_client):
-    (upscale_client.root / "clip.mp4").write_bytes(b"")
-
-    response = upscale_client.client.post("/api/upscale", json={"asset_id": "clip.mp4", "factor": 2})
-
-    assert response.status_code == 404
-
-
 def test_upscale_route_conflict_while_busy(upscale_client):
     _write_png(upscale_client.root / "a.png")
 
@@ -591,8 +591,8 @@ def test_gallery_upscale_field_lists_factors(tmp_path):
     upscale = _asset_json(tmp_path, "a.png")["upscale"]
 
     assert upscale["factors"] == [
-        {"factor": 2, "width": 1664, "height": 2432, "allowed": True, "reason": None, "warning": None},
-        {"factor": 4, "width": 3328, "height": 4864, "allowed": False, "reason": upscale["factors"][1]["reason"], "warning": None},
+        {"factor": 2, "width": 1664, "height": 2432, "allowed": True, "reason": None, "warning": None, "warning_code": None},
+        {"factor": 4, "width": 3328, "height": 4864, "allowed": False, "reason": upscale["factors"][1]["reason"], "warning": None, "warning_code": None},
     ]
     assert "megapixel" in upscale["factors"][1]["reason"]
 
@@ -610,8 +610,8 @@ def test_gallery_upscale_field_lists_seedvr2_options(tmp_path):
     seedvr2 = _asset_json(tmp_path, "a.png", web_config)["upscale"]["seedvr2"]
 
     assert seedvr2["options"] == [
-        {"factor": 2, "width": 2048, "height": 3072, "allowed": True, "reason": None, "warning": None},
-        {"factor": 4, "width": 4096, "height": 6144, "allowed": True, "reason": None, "warning": None},
+        {"factor": 2, "width": 2048, "height": 3072, "allowed": True, "reason": None, "warning": None, "warning_code": None},
+        {"factor": 4, "width": 4096, "height": 6144, "allowed": True, "reason": None, "warning": None, "warning_code": None},
     ]
     assert seedvr2["model"] == "SeedVR2 7B q8"
     assert seedvr2["downloaded"] is False
@@ -748,7 +748,230 @@ def test_gallery_source_outside_output_root_has_no_id(tmp_path):
     assert source["id"] is None
 
 
-def test_gallery_video_has_no_upscale_field(tmp_path):
+def test_gallery_video_has_no_upscale_field_without_a_seedvr2_setup(tmp_path):
     (tmp_path / "clip.mp4").write_bytes(b"")
 
     assert _asset_json(tmp_path, "clip.mp4")["upscale"] is None
+
+
+# ── Videos ──────────────────────────────────────────────────────────────────
+
+_STREAMED_7B = SeedVR2Tier("seedvr2-7b", weights_gb=1.6, activation_floor_gb=5.0, activation_base_gb=0.21, activation_gb_per_mp=0.556, system_gb=22)
+_CARD_10GB = 10240 * 1024 * 1024
+
+
+def _video_setup(**overrides):
+    setup = _seedvr2_setup(budget_bytes=_CARD_10GB, tier=_STREAMED_7B)
+    return replace(setup, weights=FP8_WEIGHTS, **overrides)
+
+
+def _ffprobe_data(config=None, *, size=None, rotation=None):
+    """Return the JSON the gallery's one ffprobe call would give for a video with *config* embedded and a stream of *size*."""
+    tags = {"zvisiongenerator.config": json.dumps(config)} if config is not None else {}
+    stream = {"codec_type": "video", "codec_name": "h264", "width": size[0], "height": size[1], "r_frame_rate": "24/1", "avg_frame_rate": "24/1"} if size else None
+    if stream and rotation is not None:
+        stream["side_data_list"] = [{"side_data_type": "Display Matrix", "rotation": rotation}]
+    return {"streams": [stream] if stream else [], "format": {"tags": tags}}
+
+
+@pytest.fixture
+def video_gallery(monkeypatch):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_file_upscale", lambda: True)
+
+
+def _video_asset_json(tmp_path, name, data, web_config=None):
+    (tmp_path / name).write_bytes(b"\x00" * 8)
+    with patch("zvisiongenerator.web.gallery.ffprobe_json", return_value=data):
+        return _asset_json(tmp_path, name, web_config or _web_config(tmp_path, seedvr2=_video_setup()))
+
+
+def test_gallery_video_offers_one_2x_option_at_the_recorded_size(tmp_path, video_gallery):
+    config = {"schema": "zvisiongenerator.config.v1", "workflow": "txt2vid", "width": 768, "height": 448, "frame_count": 121}
+
+    payload = _video_asset_json(tmp_path, "clip.mp4", _ffprobe_data(config, size=(1536, 896)))
+
+    seedvr2 = payload["upscale"]["seedvr2"]
+    assert payload["upscale"]["factors"] == []
+    assert seedvr2["options"] == [{"factor": 2, "width": 1536, "height": 896, "allowed": True, "reason": None, "warning": None, "warning_code": None}]
+    assert (seedvr2["model"], seedvr2["downloaded"], seedvr2["download_size_label"]) == ("SeedVR2 7B fp8", False, "9.0 GB")
+
+
+def test_gallery_video_uses_the_displayed_size_of_a_rotated_foreign_clip(tmp_path, video_gallery):
+    payload = _video_asset_json(tmp_path, "phone.mov", _ffprobe_data(size=(1920, 1080), rotation=-90))
+
+    option = payload["upscale"]["seedvr2"]["options"][0]
+    assert (option["width"], option["height"]) == (2160, 3840)
+    assert (payload["width"], payload["height"]) == (1080, 1920)
+
+
+@pytest.mark.parametrize(("size", "output", "code"), [((2560, 1440), (5120, 2880), "memory"), ((1920, 1080), (3840, 2160), "one_frame_batch"), ((768, 448), (1536, 896), None)])
+def test_gallery_video_carries_a_warning_code_without_disabling_the_option(tmp_path, video_gallery, size, output, code):
+    payload = _video_asset_json(tmp_path, "big.webm", _ffprobe_data(size=size))
+
+    option = payload["upscale"]["seedvr2"]["options"][0]
+    assert (option["width"], option["height"], option["allowed"], option["warning_code"]) == (*output, True, code)
+    assert (option["warning"] is not None) == (code is not None)
+
+
+@pytest.mark.parametrize("case", ["unsupported", "no_setup", "no_size"])
+def test_gallery_video_has_no_upscale_menu_without_support_a_setup_or_a_size(tmp_path, monkeypatch, case):
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_file_upscale", lambda: case != "unsupported")
+    web_config = _web_config(tmp_path, seedvr2=None if case == "no_setup" else _video_setup())
+    data = _ffprobe_data() if case == "no_size" else _ffprobe_data(size=(768, 448))
+
+    assert _video_asset_json(tmp_path, "clip.mp4", data, web_config)["upscale"] is None
+
+
+def test_gallery_runs_ffprobe_once_per_video_whatever_its_container(tmp_path, video_gallery):
+    (tmp_path / "app.mp4").write_bytes(b"\x00")
+    (tmp_path / "foreign.webm").write_bytes(b"\x00")
+
+    with patch("zvisiongenerator.web.gallery.ffprobe_json", return_value=_ffprobe_data(size=(640, 360))) as probe:
+        assets = list_gallery_assets(str(tmp_path))
+
+    assert len(assets) == 2
+    assert probe.call_count == 2
+    assert all(call.kwargs == {"count_packets": False} for call in probe.call_args_list)
+
+
+@pytest.fixture
+def video_upscale_client(upscale_client, monkeypatch):
+    submitted: list[dict] = []
+    upscale_client.web_config.seedvr2 = _video_setup()
+    source = make_extend_source(path=upscale_client.root / "clip.mp4", width=768, height=448, frame_count=121, scene=None, prompt=None)
+    monkeypatch.setattr(web_server, "supports_video_file_upscale", lambda: True)
+    monkeypatch.setattr(web_server, "require_ffmpeg", lambda: None)
+    monkeypatch.setattr(web_server, "read_video_upscale_source", lambda path: (source, None))
+
+    def _submit(**kwargs):
+        submitted.append(kwargs)
+        return "job-video"
+
+    monkeypatch.setattr(web_server.web_runner, "submit_video_file_upscale_job", _submit)
+    (upscale_client.root / "clip.mp4").write_bytes(b"\x00")
+    return SimpleNamespace(
+        client=upscale_client.client, root=upscale_client.root, monkeypatch=monkeypatch, submitted=submitted, image_submitted=upscale_client.submitted, web_config=upscale_client.web_config
+    )
+
+
+def _post_video(client, **body):
+    return client.client.post("/api/upscale", json={"asset_id": "clip.mp4", "factor": 2, "method": "seedvr2", **body})
+
+
+def test_video_upscale_route_queues_the_job(video_upscale_client):
+    response = _post_video(video_upscale_client)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert (payload["job_id"], payload["workflow"], payload["job_type"], payload["media_type"]) == ("job-video", "upscale", "Upscale", "video")
+    assert (payload["meta"], payload["supported_controls"], payload["runs"]) == ("2× → 1536×896", ["quit"], 1)
+    assert payload["notices"] == [upscale_api.NOTICE_SETTINGS_UNKNOWN]
+    submitted = video_upscale_client.submitted[0]
+    request = submitted["request"]
+    assert (request.width, request.height, request.batch_size, request.upscale_model, request.softness) == (1536, 896, 29, "seedvr2-7b", 0.0)
+    assert Path(request.output_dir) == video_upscale_client.root
+    assert submitted["context"]["media_type"] == "video"
+    assert submitted["context"]["settings"] == {}
+    assert video_upscale_client.image_submitted == []
+
+
+@pytest.mark.parametrize("extra", [{"method": "creative"}, {"method": None}, {"factor": 4}])
+def test_video_upscale_route_takes_seedvr2_2x_only(video_upscale_client, extra):
+    body = {"asset_id": "clip.mp4", "factor": 2, "method": "seedvr2", **extra}
+    body = {key: value for key, value in body.items() if value is not None}
+
+    response = video_upscale_client.client.post("/api/upscale", json=body)
+
+    assert response.status_code == 422
+    assert response.json()["detail"]
+    assert video_upscale_client.submitted == []
+
+
+@pytest.mark.parametrize("case", ["unsupported", "no_setup", "no_ffmpeg"])
+def test_video_upscale_route_refuses_where_it_cannot_run(video_upscale_client, case):
+    if case == "unsupported":
+        video_upscale_client.monkeypatch.setattr(web_server, "supports_video_file_upscale", lambda: False)
+    elif case == "no_setup":
+        video_upscale_client.web_config.seedvr2 = None
+    else:
+
+        def _missing():
+            raise RuntimeError("ffmpeg is not installed.")
+
+        video_upscale_client.monkeypatch.setattr(web_server, "require_ffmpeg", _missing)
+
+    response = _post_video(video_upscale_client)
+
+    assert response.status_code == 422
+    assert video_upscale_client.submitted == []
+
+
+@pytest.mark.parametrize(
+    ("overrides", "audio_ok"),
+    [({"color_trc": "smpte2084"}, True), ({"avg_frame_rate": "2400/101"}, True), ({"has_audio": True}, False)],
+    ids=["hdr", "variable frame rate", "unreadable sound"],
+)
+def test_video_upscale_route_refuses_a_clip_the_upscale_would_get_wrong(video_upscale_client, monkeypatch, overrides, audio_ok):
+    probe = make_probe(**{"frame_count": 72, "color_space": "bt709", "color_primaries": "bt709", "color_trc": "bt709", **overrides})
+    problems = tuple(extend_source_problems(probe, None, audio_ok=audio_ok))
+    monkeypatch.setattr(web_server, "read_video_upscale_source", video_file_upscale_runner.read_video_upscale_source)
+    monkeypatch.setattr(video_file_upscale_runner, "inspect_extend_source", lambda path: ExtendInspection(probe, None, problems, None))
+
+    response = _post_video(video_upscale_client)
+
+    assert response.status_code == 422
+    assert video_upscale_client.submitted == []
+
+
+def test_video_upscale_route_unreadable_file_is_422(video_upscale_client):
+    problem = ExtendProblem("unreadable", "ffprobe could not read the file")
+    video_upscale_client.monkeypatch.setattr(web_server, "read_video_upscale_source", lambda path: (_ for _ in ()).throw(ValueError("clip.mp4 can't be upscaled: " + problem.message)))
+
+    response = _post_video(video_upscale_client)
+
+    assert response.status_code == 422
+
+
+def test_video_upscale_route_missing_file_is_404_and_outside_the_root_is_422(video_upscale_client):
+    video_upscale_client.monkeypatch.setattr(web_server, "read_video_upscale_source", video_file_upscale_runner.read_video_upscale_source)
+    missing = video_upscale_client.client.post("/api/upscale", json={"asset_id": "gone.mp4", "factor": 2, "method": "seedvr2"})
+    outside = video_upscale_client.client.post("/api/upscale", json={"asset_id": "../clip.mp4", "factor": 2, "method": "seedvr2"})
+
+    assert missing.status_code == 404
+    assert outside.status_code == 422
+    assert video_upscale_client.submitted == []
+
+
+def test_video_upscale_route_conflict_while_busy(video_upscale_client):
+    def _busy(**_kwargs):
+        raise JobConflictError("busy")
+
+    video_upscale_client.monkeypatch.setattr(web_server.web_runner, "submit_video_file_upscale_job", _busy)
+
+    assert _post_video(video_upscale_client).status_code == 409
+
+
+def test_video_upscale_plan_carries_the_clips_settings_and_softness():
+    source = make_extend_source(width=1280, height=704, frame_count=60)
+    setup = _video_setup()
+    setup = replace(setup, settings=replace(setup.settings, video_softness=0.25))
+
+    plan = upscale_api.plan_video_upscale(source, {"workflow": "txt2vid"}, setup=setup)
+
+    assert (plan.request.width, plan.request.height) == (2560, 1408)
+    assert (plan.request.batch_size, plan.request.softness, plan.request.recorded_config) == (9, 0.25, {"workflow": "txt2vid"})
+    assert plan.notices == ()
+
+
+def test_work_folders_are_hidden_from_the_gallery_and_not_served(video_upscale_client):
+    folder = video_upscale_client.root / f"{WORK_DIR_PREFIX}x"
+    folder.mkdir()
+    (folder / "a.mp4").write_bytes(b"\x00")
+    (video_upscale_client.root / "clip.mp4").write_bytes(b"\x00")
+
+    with patch("zvisiongenerator.web.gallery.ffprobe_json", return_value=_ffprobe_data(size=(64, 64))):
+        names = [asset.name for asset in list_gallery_assets(str(video_upscale_client.root))]
+    served = video_upscale_client.client.get(f"/media/{folder.name}/a.mp4")
+
+    assert names == ["clip.mp4"]
+    assert served.status_code == 404

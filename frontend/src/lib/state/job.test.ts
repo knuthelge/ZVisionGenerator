@@ -261,6 +261,15 @@ describe('jobStore reconnect contract', () => {
     expect(jobStore.current?.meta).toBe('2:3 · m · 8 steps');
   });
 
+  it('keeps a video upscale a video after a reload, with its batches and time left', async () => {
+    await jobStore.reconnectActiveJob({ snapshot: {
+      id: 'restore-video-upscale', job_id: 'restore-video-upscale', workflow: 'upscale', media_type: 'video', job_type: 'Upscale', status: 'running',
+      prompt: '', model: 'SeedVR2 7B fp8', runs: 1, created_at: '', event_count: 10, paused: false,
+      last_event: { type: 'step_progress', current_step: 3, total_steps: 28, eta_secs: 240 },
+    } });
+    expect(jobStore.current).toMatchObject({ media_type: 'video', currentStep: 3, totalSteps: 28, remaining: 240 });
+  });
+
   it('restores the current prompt and counter from a step snapshot', async () => {
     await jobStore.reconnectActiveJob({ snapshot: {
       id: 'restore-prompts', job_id: 'restore-prompts', workflow: 'txt2img', job_type: 'txt2img', status: 'running',

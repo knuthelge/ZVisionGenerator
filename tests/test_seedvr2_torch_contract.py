@@ -16,6 +16,7 @@ pytest.importorskip("torchvision")
 pytest.importorskip("seedvr2_torch")
 
 from seedvr2_torch.src.core import generation_phases, generation_utils  # noqa: E402
+from seedvr2_torch.src.optimization.memory_manager import complete_cleanup  # noqa: E402
 from seedvr2_torch.src.utils.constants import get_script_directory  # noqa: E402
 from seedvr2_torch.src.utils.debug import Debug  # noqa: E402
 
@@ -62,7 +63,8 @@ def test_bundled_files_resolve_from_the_script_directory() -> None:
         (generation_utils.compute_generation_info, {"ctx", "images", "resolution", "max_resolution", "batch_size", "seed", "debug"}),
         (generation_phases.encode_all_batches, {"runner", "ctx", "images", "debug", "batch_size", "seed", "resolution", "max_resolution", "input_noise_scale", "color_correction"}),
         (generation_phases.upscale_all_batches, {"runner", "ctx", "debug", "seed", "latent_noise_scale", "cache_model"}),
-        (generation_phases.decode_all_batches, {"runner", "ctx", "debug", "cache_model"}),
+        (generation_phases.decode_all_batches, {"runner", "ctx", "debug", "progress_callback", "cache_model"}),
+        (complete_cleanup, {"runner", "debug", "dit_cache", "vae_cache"}),
         (generation_phases.postprocess_all_batches, {"ctx", "debug", "color_correction", "batch_size"}),
     ],
 )

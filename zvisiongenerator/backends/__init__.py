@@ -247,6 +247,11 @@ def get_seedvr2_upscaler() -> "SeedVR2Upscaler | None":
     return _SEEDVR2_UPSCALERS[sys.platform]
 
 
+def supports_video_file_upscale() -> bool:
+    """Return whether this platform's SeedVR2 upscaler can upscale a video file (the PyTorch core can; the Mac one cannot)."""
+    return hasattr(get_seedvr2_upscaler(), "upscale_video")
+
+
 # --- Accelerator memory ---
 
 

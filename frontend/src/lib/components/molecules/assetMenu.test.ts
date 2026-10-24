@@ -33,6 +33,16 @@ describe('upscaleEntries', () => {
     expect(new Set(labels).size).toBe(4);
   });
 
+  it('offers a video one SeedVR2 item, marked when it is over the memory estimate, and no creative ones', () => {
+    const video = { ...makeAsset({ factors: [option(2)], seedvr2: seedvr2([option(2, { warning: 'May need more memory.' })]) }), media_type: 'video' as const };
+    const entries = upscaleEntries(video, vi.fn());
+
+    expect(kinds(entries)).toEqual(['upscale-seedvr2-2']);
+    expect(entries[0]).toMatchObject({ title: 'May need more memory.' });
+    expect(kinds(assetMenuEntries(video, { onupscale: vi.fn() }))).toEqual(['heading', 'upscale-seedvr2-2', 'separator', 'download']);
+    expect(upscaleEntries({ ...video, upscale: null }, vi.fn())).toEqual([]);
+  });
+
   it('offers only the creative items, with no separator, where SeedVR2 is unavailable', () => {
     const entries = upscaleEntries(makeAsset({ factors: [option(2), option(4)], seedvr2: null }), vi.fn());
     expect(kinds(entries)).toEqual(['upscale-creative-2', 'upscale-creative-4']);
@@ -44,6 +54,15 @@ describe('upscaleEntries', () => {
     for (const entry of upscaleEntries(asset, onupscale)) if (entry.kind === 'item') entry.onselect?.();
 
     expect(onupscale.mock.calls.map(([, factor, method]) => [factor, method])).toEqual([[2, 'seedvr2'], [4, 'seedvr2'], [2, 'creative'], [4, 'creative']]);
+  });
+
+  it('marks a one-frame-batch warning differently from a memory warning, by the warning code', () => {
+    const label = (warning_code: 'memory' | 'one_frame_batch') => {
+      const [entry] = upscaleEntries(makeAsset({ factors: [], seedvr2: seedvr2([option(2, { warning: 'w', warning_code })]) }), vi.fn());
+      return entry.kind === 'item' ? entry.label : '';
+    };
+
+    expect(label('one_frame_batch')).not.toBe(label('memory'));
   });
 
   it('keeps a warned SeedVR2 item enabled, marks its label and puts the warning in its tooltip', () => {

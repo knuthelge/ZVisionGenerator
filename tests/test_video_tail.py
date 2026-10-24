@@ -19,7 +19,15 @@ from zvisiongenerator.utils import video_tail
 from zvisiongenerator.utils.video_extend import build_extend_source
 from zvisiongenerator.utils.video_probe import probe_video
 from zvisiongenerator.utils.video_extend import CARRY_FRAMES
-from zvisiongenerator.utils.video_tail import _build_tail_command, _read_tail_frames, _tail_start_seconds, build_tail_audio_command, read_source_tail, read_source_tail_audio
+from zvisiongenerator.utils.video_tail import (
+    _build_tail_command,
+    _read_tail_frames,
+    _tail_start_seconds,
+    build_tail_audio_command,
+    read_source_tail,
+    read_source_tail_audio,
+    stream_frames,
+)
 
 WIDTH, HEIGHT = 8, 4
 FRAME_BYTES = WIDTH * HEIGHT * 3
@@ -154,6 +162,51 @@ class TestReadTailFrames:
             patch.setattr(video_tail.subprocess, "Popen", popen)
             frames = read_source_tail(source)
         assert frames.shape == (CARRY_FRAMES, HEIGHT, WIDTH, 3)
+
+
+class TestStreamFrames:
+    def _stream(self, popen: MagicMock):
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(video_tail.subprocess, "Popen", popen)
+            return list(stream_frames("clip.mp4", width=WIDTH, height=HEIGHT))
+
+    def test_yields_every_frame_in_order_as_an_rgb_array(self):
+        popen = _popen_returning(b"".join(_frame(i) for i in range(5)))
+
+        frames = self._stream(popen)
+
+        assert [int(frame[0, 0, 0]) for frame in frames] == list(range(5))
+        assert all(frame.shape == (HEIGHT, WIDTH, 3) and frame.dtype == np.uint8 for frame in frames)
+
+    def test_reads_the_whole_clip_from_the_start_without_dropping_frames(self):
+        popen = _popen_returning(_frame(1))
+
+        self._stream(popen)
+
+        command = popen.call_args.args[0]
+        assert "-ss" not in command
+        assert command[command.index("-fps_mode") + 1] == "passthrough"
+
+    def test_a_failing_ffmpeg_raises_with_its_message(self):
+        popen = _popen_returning(_frame(1), returncode=1, stderr_text=b"Invalid data found")
+
+        with pytest.raises(RuntimeError, match="Invalid data found"):
+            self._stream(popen)
+
+    def test_closing_the_iterator_stops_ffmpeg(self):
+        processes: list[_FakeProcess] = []
+
+        def popen(command, **kwargs):
+            processes.append(_FakeProcess(b"".join(_frame(i) for i in range(5)), returncode=None))
+            return processes[0]
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(video_tail.subprocess, "Popen", popen)
+            frames = stream_frames("clip.mp4", width=WIDTH, height=HEIGHT)
+            next(frames)
+            frames.close()
+
+        assert processes[0].returncode == -9
 
 
 class TestReadTailFramesCount:

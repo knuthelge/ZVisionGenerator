@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 import tempfile
 from collections import deque
@@ -86,6 +87,27 @@ def _read_tail_frames(
 def read_source_tail(source: ExtendSource, frames: int = CARRY_FRAMES) -> np.ndarray:
     """Return the last *frames* frames of an extend source at its displayed size (see ``_read_tail_frames``)."""
     return _read_tail_frames(source.path, width=source.width, height=source.height, fps=source.fps, frame_count=source.frame_count, video_start=source.video_start, frames=frames)
+
+
+def stream_frames(path: str | Path, *, width: int, height: int) -> Iterator[np.ndarray]:
+    """Yield every frame of a clip, in order, as a ``height x width x 3`` uint8 RGB array at the displayed size.
+
+    The frames are decoded as they are asked for, so a long clip is never held in memory; closing the iterator stops
+    ffmpeg. Auto-rotation is on, as in ``_build_tail_command``, and no frame is duplicated or dropped.
+
+    Args:
+        path: The video file.
+        width: Displayed width (the size after rotation), as in the probe.
+        height: Displayed height.
+
+    Raises:
+        RuntimeError: If ffmpeg fails, or its output is not a whole number of ``width`` x ``height`` frames.
+    """
+    import numpy as np
+
+    with contextlib.closing(_stream_frames(_build_tail_command(path, 0.0), width, height)) as chunks:
+        for chunk in chunks:
+            yield np.frombuffer(chunk, dtype=np.uint8).reshape(height, width, 3)
 
 
 def _stream_frames(command: list[str], width: int, height: int) -> Iterator[bytes]:

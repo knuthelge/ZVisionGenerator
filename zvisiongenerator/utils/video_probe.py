@@ -49,6 +49,8 @@ class VideoProbe:
     video_start: float | None
     format_start: float | None
     has_audio: bool
+    # The first audio stream's codec name (``aac``, ``opus``), when the clip has sound.
+    audio_codec: str | None = None
 
     @property
     def fps(self) -> float:
@@ -134,7 +136,29 @@ def parse_probe(data: dict[str, Any]) -> VideoProbe:
         video_start=_float(video.get("start_time")),
         format_start=_float(fmt.get("start_time")),
         has_audio=audio is not None,
+        audio_codec=_text(audio.get("codec_name")) if audio is not None else None,
     )
+
+
+def ffprobe_json(path: str | Path, *, count_packets: bool = True) -> dict[str, Any]:
+    """Return ffprobe's JSON for a file's streams and container (``-show_streams -show_format``).
+
+    Args:
+        path: The media file.
+        count_packets: Whether ffprobe also counts the video packets, which reads the whole file (the container's frame
+            count can be missing or wrong); off for a quick look at the metadata.
+
+    Raises:
+        RuntimeError: If ffprobe cannot read the file or prints something that is not JSON.
+    """
+    command = ["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format", *(["-count_packets"] if count_packets else []), str(path)]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=True)
+        return json.loads(result.stdout)
+    except subprocess.CalledProcessError as exc:
+        raise tool_error(f"ffprobe could not read {path}", exc.stderr, limit=500) from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"ffprobe returned unreadable output for {path}") from exc
 
 
 def probe_video(path: str | Path) -> VideoProbe:
@@ -144,15 +168,7 @@ def probe_video(path: str | Path) -> VideoProbe:
         RuntimeError: If ffprobe cannot read the file.
         ValueError: If the file has no video stream.
     """
-    command = ["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format", "-count_packets", str(path)]
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, check=True)
-        data = json.loads(result.stdout)
-    except subprocess.CalledProcessError as exc:
-        raise tool_error(f"ffprobe could not read {path}", exc.stderr, limit=500) from exc
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"ffprobe returned unreadable output for {path}") from exc
-    return parse_probe(data)
+    return parse_probe(ffprobe_json(path))
 
 
 def audio_decodes(path: str | Path, *, start: float, duration: float) -> bool:

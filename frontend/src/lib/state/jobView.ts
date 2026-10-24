@@ -126,7 +126,17 @@ export function isPaused(job: ActiveJobState): boolean {
 }
 
 export function isVideo(job: ActiveJobState): boolean {
-  return job.workflow === 'txt2vid' || job.workflow === 'img2vid' || job.workflow === 'extend';
+  return job.workflow === 'txt2vid' || job.workflow === 'img2vid' || job.workflow === 'extend' || job.media_type === 'video';
+}
+
+/** Whether the job upscales an existing video file, whose one item runs in batches of frames. */
+export function isVideoUpscale(job: ActiveJobState): boolean {
+  return job.workflow === 'upscale' && job.media_type === 'video';
+}
+
+/** What one progress unit is called: a "Batch" of frames for a video upscale, a "Step" of denoising otherwise. */
+export function stepUnit(job: ActiveJobState): 'Batch' | 'Step' {
+  return isVideoUpscale(job) ? 'Batch' : 'Step';
 }
 
 export function itemNoun(job: ActiveJobState): 'image' | 'video' {
@@ -299,7 +309,7 @@ export function headline(job: ActiveJobState): string {
     if (job.loadPhase === 'building') return `Building ${job.model_label || job.model}`;
     return job.loadQuant ? 'Preparing the model' : 'Loading the model';
   }
-  if (job.workflow === 'upscale') return 'Upscaling';
+  if (job.workflow === 'upscale') return isVideo(job) ? 'Upscaling video' : 'Upscaling';
   const verb = job.stageName === 'upscale' && !job.itemFinished ? 'Upscaling' : 'Generating';
   return total > 1 ? `${verb} ${noun} ${index + 1} of ${total}` : `${verb} ${noun}`;
 }
@@ -498,11 +508,16 @@ export function positionLabel(job: ActiveJobState): string {
   return next ? `Next: ${text}` : text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-/** The estimate for the rest of the job, or why there is none yet. Single-item jobs never get one. */
+/**
+ * The estimate for the rest of the job, or why there is none yet. Single-item jobs never get one, except a video upscale,
+ * whose one item reports the time left from its batches and has none once the last batch is done.
+ */
 export function etaLabel(job: ActiveJobState): string {
   if (!isActive(job) || isPaused(job) || jobPhase(job) !== 'generate' || job.connection === 'reconnecting') return '';
-  if (iterations(job).total < 2) return '';
+  const batches = isVideoUpscale(job);
+  if (iterations(job).total < 2 && !batches) return '';
   if (job.remaining > 0) return timeLeft(job.remaining);
+  if (batches) return job.totalSteps > 0 && job.currentStep >= job.totalSteps ? '' : 'Estimate after the first batch';
   return `Estimate after the first ${itemNoun(job)}`;
 }
 

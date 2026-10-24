@@ -449,6 +449,44 @@ describe('AssetViewer', () => {
     expect(document.querySelector('[data-action="upscale"]')).toBeNull();
   });
 
+  const videoUpscale = (warning: string | null = null) => ({
+    factors: [],
+    seedvr2: { options: [{ factor: 2 as const, width: 1536, height: 896, allowed: true as const, reason: null, warning }], model: 'SeedVR2 7B fp8', downloaded: true, download_size_label: null },
+  });
+
+  it('offers a video one 2× SeedVR2 item', () => {
+    const onupscale = vi.fn();
+    mountViewer({ assets: [makeAsset({ media_type: 'video', upscale: videoUpscale('May need more memory.') })], onupscale });
+
+    flushSync(() => document.querySelector<HTMLButtonElement>('[data-action="upscale"]')!.click());
+
+    const items = upscaleItems();
+    expect(items.map((item) => item.getAttribute('data-action'))).toEqual(['upscale-seedvr2-2']);
+    flushSync(() => items[0].click());
+    expect(onupscale).toHaveBeenCalledWith(expect.objectContaining({ media_type: 'video' }), 2, 'seedvr2');
+  });
+
+  it('hides the upscale menu for a video the server offers no upscale for', () => {
+    mountViewer({ assets: [makeAsset({ media_type: 'video', upscale: null })], onupscale: vi.fn() });
+    expect(document.querySelector('[data-action="upscale"]')).toBeNull();
+  });
+
+  it('upscales a video 2× with X then 2, warns first about a marked size, and ignores X then 4', () => {
+    const onupscale = vi.fn();
+    toasts.length = 0;
+    mountViewer({ assets: [makeAsset({ media_type: 'video', upscale: videoUpscale('May need more memory.') })], onupscale });
+
+    press('x');
+    press('4');
+    expect(onupscale).not.toHaveBeenCalled();
+
+    press('x');
+    press('2');
+    expect(onupscale).toHaveBeenCalledTimes(1);
+    expect(onupscale).toHaveBeenLastCalledWith(expect.objectContaining({ media_type: 'video' }), 2, 'seedvr2');
+    expect(toasts.map((toast) => toast.message)).toEqual(['May need more memory.']);
+  });
+
   it('upscales 2× with X then 2 and refuses a disallowed 4× with X then 4', () => {
     const onupscale = vi.fn();
     const ondelete = vi.fn();

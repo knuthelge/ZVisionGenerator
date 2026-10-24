@@ -33,9 +33,14 @@ export function upscaleFactors(asset: GalleryAsset): AssetUpscaleFactor[] {
   return asset.media_type === 'image' ? (asset.upscale?.factors ?? []) : [];
 }
 
-/** Return the SeedVR2 upscale options an image offers, or none where SeedVR2 is unavailable. */
+/** Return the SeedVR2 upscale options an image or video offers, or none where SeedVR2 is unavailable. */
 export function seedvr2Options(asset: GalleryAsset): AssetUpscaleFactor[] {
-  return asset.media_type === 'image' ? (asset.upscale?.seedvr2?.options ?? []) : [];
+  return asset.upscale?.seedvr2?.options ?? [];
+}
+
+/** Return the upscale factors an asset offers by any method, smallest first (the chord's keys and the button's tooltip). */
+export function offeredUpscaleFactors(asset: GalleryAsset): UpscaleFactor[] {
+  return [...new Set([...upscaleFactors(asset), ...seedvr2Options(asset)].map((option) => option.factor))].sort((a, b) => a - b);
 }
 
 /** Return the method the plain upscale shortcut runs: SeedVR2 where it is offered, otherwise creative. */

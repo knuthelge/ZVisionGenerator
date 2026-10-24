@@ -31,7 +31,7 @@ from zvisiongenerator.utils import app_db
 
 GALLERY_COMPONENT_NAME = "gallery"
 # Bump when the table's columns change or the gallery's fact reader reads something different.
-GALLERY_INDEX_VERSION = 1
+GALLERY_INDEX_VERSION = 2
 
 _TABLE_PREFIX = "gallery_assets_v"
 

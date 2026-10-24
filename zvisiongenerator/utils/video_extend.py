@@ -7,7 +7,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.core.video_types import ExtendSource
 from zvisiongenerator.utils.alignment import align_frames
@@ -63,6 +63,8 @@ class ExtendInspection:
     recorded: RecordedSettings | None
     problems: tuple[ExtendProblem, ...]
     source: ExtendSource | None
+    # The raw config payload embedded in the clip, of which ``recorded`` is the typed reading; ``None`` when it has none.
+    config: dict[str, Any] | None = None
 
 
 def window_frames(extend_frames: int, family: VideoFamily | None = None) -> int:
@@ -300,7 +302,7 @@ def with_family_problems(inspection: ExtendInspection, family: VideoFamily | Non
     added = extend_family_problems(inspection.probe.fps, family)
     if not added:
         return inspection
-    return ExtendInspection(inspection.probe, inspection.recorded, (*inspection.problems, *added), None)
+    return ExtendInspection(inspection.probe, inspection.recorded, (*inspection.problems, *added), None, inspection.config)
 
 
 def require_extend_family(source: ExtendSource, family: VideoFamily | None) -> None:
@@ -359,10 +361,11 @@ def inspect_extend_source(path: str | Path) -> ExtendInspection:
         return ExtendInspection(None, None, (problem,), None)
     except RuntimeError as exc:
         return ExtendInspection(None, None, (ExtendProblem("unreadable", str(exc)),), None)
-    recorded = _read_recorded(source_path)
+    config = _read_config(source_path)
+    recorded = _recorded_from(config)
     problems = tuple(extend_source_problems(probe, recorded, audio_ok=_tail_audio_decodes(source_path, probe)))
     source = None if problems else build_extend_source(source_path, probe, recorded)
-    return ExtendInspection(probe, recorded, problems, source)
+    return ExtendInspection(probe, recorded, problems, source, config)
 
 
 def load_extend_source(path: str | Path) -> ExtendSource:
@@ -386,12 +389,22 @@ def require_extend_source(inspection: ExtendInspection, path: str | Path) -> Ext
     return inspection.source
 
 
-def _read_recorded(path: Path) -> RecordedSettings | None:
-    """Read the settings embedded in a clip; a clip without readable settings gives ``None``."""
+def _read_config(path: Path) -> dict[str, Any] | None:
+    """Read the config payload embedded in a clip; a clip without a readable one gives ``None``."""
     try:
         config = read_mp4_config(path)
-        return recorded_settings(config) if isinstance(config, dict) else None
-    except subprocess.CalledProcessError, OSError, ValueError, TypeError, AttributeError:
+    except subprocess.CalledProcessError, OSError, ValueError:
+        return None
+    return config if isinstance(config, dict) else None
+
+
+def _recorded_from(config: dict[str, Any] | None) -> RecordedSettings | None:
+    """Read the typed settings out of a config payload; a payload that does not read gives ``None``."""
+    if config is None:
+        return None
+    try:
+        return recorded_settings(config)
+    except TypeError, AttributeError, ValueError:
         return None
 
 

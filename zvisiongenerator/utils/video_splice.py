@@ -17,7 +17,7 @@ from zvisiongenerator.utils.video_extend import AUDIO_FADE_SAMPLES, AUDIO_LEAD_S
 from zvisiongenerator.utils.video_probe import VideoProbe, parse_fraction, probe_video
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
 
     import numpy as np
 
@@ -97,8 +97,13 @@ def build_segment_command(width: int, height: int, fps_text: str, output: str | 
     ]
 
 
-def write_segment_frames(frames: Iterable[np.ndarray], command: list[str]) -> None:
+def write_segment_frames(frames: Iterable[np.ndarray], command: list[str], *, description: str = "the extension segment") -> None:
     """Pipe ``height x width x 3`` uint8 RGB frames into a segment command from ``build_segment_command``.
+
+    Args:
+        frames: The frames to encode.
+        command: The command from ``build_segment_command``.
+        description: What is being written, for the error text ("ffmpeg could not encode <description>").
 
     Raises:
         RuntimeError: If ffmpeg exits with an error.
@@ -117,7 +122,7 @@ def write_segment_frames(frames: Iterable[np.ndarray], command: list[str]) -> No
                 process.stdin.close()
         if process.returncode != 0:
             errors.seek(0)
-            raise tool_error("ffmpeg could not encode the extension segment", errors.read())
+            raise tool_error(f"ffmpeg could not encode {description}", errors.read())
 
 
 def source_audio_chain(*, samples: int, offset: float) -> str:
@@ -279,13 +284,52 @@ def build_mux_command(video: str | Path, wav: str | Path, output: str | Path) ->
     return [*_FFMPEG_QUIET, "-i", str(video), "-i", str(wav), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", *_AUDIO_ENCODER, "-map_metadata", "-1", str(output)]
 
 
+def build_audio_prep_command(source: str | Path, output: str | Path, *, copy: bool) -> list[str]:
+    """Build the ffmpeg command that writes a clip's first audio stream, and nothing else, to an audio file.
+
+    Args:
+        source: The video file.
+        output: The audio file (``.m4a``).
+        copy: Whether to copy the stream unchanged (it is AAC already); otherwise it is encoded as AAC.
+    """
+    codec = ["-c:a", "copy"] if copy else _AUDIO_ENCODER
+    return [*_FFMPEG_QUIET, "-i", str(source), "-map", "0:a:0", "-vn", *codec, "-map_metadata", "-1", str(output)]
+
+
+def build_final_mux_command(video: str | Path, audio: str | Path | None, output: str | Path, *, video_offset: float, metadata: Sequence[str] = ()) -> list[str]:
+    """Build the ffmpeg command that stream-copies a video-only file, and an AAC audio file when there is one, into one MP4.
+
+    ``-copyts`` keeps the audio file's own start (a late-starting track is delayed by an edit list, which ffmpeg would
+    otherwise shift back to zero); the video is moved to *video_offset* seconds, where the source's first frame was, so the
+    two stay in step. Neither stream is cut to the other's length. Without audio the video is copied as it is. The result
+    carries no metadata but *metadata*.
+
+    Args:
+        video: The video-only file, which starts at zero.
+        audio: The audio file from ``build_audio_prep_command``, or ``None`` for a silent result.
+        output: The muxed file.
+        video_offset: Seconds from the start of the source file to its first video frame; unused without audio.
+        metadata: Output options that add metadata, such as those from ``mp4_config_args``.
+    """
+    if audio is None:
+        return [*_FFMPEG_QUIET, "-i", str(video), "-map", "0:v:0", "-c", "copy", "-map_metadata", "-1", *metadata, str(output)]
+    return [
+        *_FFMPEG_QUIET,
+        *("-itsoffset", f"{video_offset:.6f}", "-i", str(video)),
+        *("-i", str(audio)),
+        *("-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-copyts", "-map_metadata", "-1"),
+        *metadata,
+        str(output),
+    ]
+
+
 def mux_audio(video: str | Path, wav: str | Path, output: str | Path) -> None:
     """Write *output* as *video* with *wav* as its audio track (see ``build_mux_command``).
 
     Raises:
         RuntimeError: If ffmpeg exits with an error.
     """
-    _run(build_mux_command(video, wav, output), "ffmpeg could not add the audio to the video")
+    run_ffmpeg(build_mux_command(video, wav, output), "ffmpeg could not add the audio to the video")
 
 
 def write_pcm16_wav(samples: np.ndarray, path: str | Path, sample_rate: int = AUDIO_SAMPLE_RATE) -> None:
@@ -331,7 +375,7 @@ def splice_clips(source: ExtendSource, segment: ExtendSegment, output: str | Pat
             head_samples, wav = _prepare_join_audio(source, segment, work)
         if can_stream_copy(source.probe or probe_video(source.path), probe_video(segment.video_path)):
             video_only = work / "source-video.mp4"
-            _run(build_video_only_command(source.path, video_only))
+            run_ffmpeg(build_video_only_command(source.path, video_only))
             list_file = work / "clips.txt"
             list_file.write_text(_concat_list(source, video_only, segment.video_path), encoding="utf-8")
             graph = _audio_graph(source, wav, head_samples, source_input=1, wav_input=2)
@@ -349,7 +393,7 @@ def splice_clips(source: ExtendSource, segment: ExtendSegment, output: str | Pat
                 color_trc=source.color_trc,
                 audio_graph=graph,
             )
-        _run(command)
+        run_ffmpeg(command)
         _check_joined(probe_video(joined), source, extend_frames=extend_frames, audio=wav is not None)
         os.replace(joined, output)
     finally:
@@ -450,8 +494,8 @@ def _concat_list(source: ExtendSource, video_only: Path, segment: Path) -> str:
     return f"file '{quoted(video_only)}'\nduration {source.frame_count / source.fps:.6f}\nfile '{quoted(segment)}'\n"
 
 
-def _run(command: list[str], message: str = "ffmpeg could not join the clips") -> None:
-    """Run an ffmpeg command.
+def run_ffmpeg(command: list[str], message: str = "ffmpeg could not join the clips") -> None:
+    """Run an ffmpeg command, hiding its output.
 
     Raises:
         RuntimeError: If ffmpeg exits with an error; *message* leads the error text.

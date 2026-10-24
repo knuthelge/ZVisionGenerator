@@ -26,6 +26,14 @@ describe('jobStatusLine', () => {
     expect(jobStatusLine(job({ runs: 3, batchIndex: 1 }), 0).text).toBe('2/3 · Step 12 of 32');
   });
 
+  it('counts the batches of a video upscale instead of steps', () => {
+    const upscale = { workflow: 'upscale' as const, media_type: 'video' as const, totalSteps: 28 };
+
+    expect(jobStatusLine(job({ ...upscale, currentStep: 0 }), 0)).toEqual({ text: 'Batch 0 of 28', tone: 'running' });
+    expect(jobStatusLine(job({ ...upscale, currentStep: 3 }), 0).text).toBe('Batch 3 of 28');
+    expect(jobStatusLine(job({ workflow: 'upscale', currentStep: 3, totalSteps: 8 }), 0).text).toBe('Step 3 of 8');
+  });
+
   it('names the phase before the steps', () => {
     expect(jobStatusLine(job({ phase: 'load' }), 0).text).toBe('Loading model…');
     expect(jobStatusLine(job({ phase: 'enhance' }), 0).text).toBe('Enhancing…');

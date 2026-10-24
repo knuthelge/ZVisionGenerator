@@ -16,11 +16,14 @@ from conftest import make_extend_source, make_probe
 
 from zvisiongenerator.core.video_types import ExtendSegment, ExtendSource
 from zvisiongenerator.utils import video_splice
+from zvisiongenerator.utils.provenance import mp4_config_args, read_mp4_config
 from zvisiongenerator.utils.video_extend import build_extend_source, cut_window_audio
 from zvisiongenerator.utils.video_probe import probe_video
 from zvisiongenerator.utils.video_splice import (
     build_audio_graph,
+    build_audio_prep_command,
     build_concat_copy_command,
+    build_final_mux_command,
     build_join_audio,
     build_mux_command,
     build_reencode_command,
@@ -29,6 +32,7 @@ from zvisiongenerator.utils.video_splice import (
     can_stream_copy,
     color_filter,
     mux_audio,
+    run_ffmpeg,
     silent_end_length,
     splice_clips,
     write_pcm16_wav,
@@ -42,6 +46,60 @@ def _source(path: Path = Path("source.mp4"), **overrides: Any) -> ExtendSource:
 
 def _arg(command: list[str], flag: str) -> str:
     return command[command.index(flag) + 1]
+
+
+class TestAudioPrepCommand:
+    def test_an_aac_track_is_copied(self):
+        command = build_audio_prep_command("in.mp4", "audio.m4a", copy=True)
+
+        assert _arg(command, "-c:a") == "copy"
+        assert "-b:a" not in command
+
+    def test_any_other_track_is_encoded_as_aac_at_192k(self):
+        command = build_audio_prep_command("in.webm", "audio.m4a", copy=False)
+
+        assert (_arg(command, "-c:a"), _arg(command, "-b:a")) == ("aac", "192k")
+
+    @pytest.mark.parametrize("copy", [True, False])
+    def test_only_the_first_audio_stream_is_written(self, copy):
+        command = build_audio_prep_command("in.mp4", "audio.m4a", copy=copy)
+
+        assert _arg(command, "-map") == "0:a:0"
+        assert "-vn" in command
+        assert command[-1] == "audio.m4a"
+
+
+class TestFinalMuxCommand:
+    def test_copies_both_streams_with_the_video_moved_to_the_sources_first_frame(self):
+        command = build_final_mux_command("video.mp4", "audio.m4a", "out.mp4", video_offset=0.021333)
+
+        assert command.index("-itsoffset") < command.index("-i")
+        assert _arg(command, "-itsoffset") == "0.021333"
+        assert command[command.index("-i") + 1] == "video.mp4"
+        assert [command[i + 1] for i, part in enumerate(command) if part == "-map"] == ["0:v:0", "1:a:0"]
+        assert _arg(command, "-c") == "copy"
+        assert command[-1] == "out.mp4"
+
+    def test_the_audio_keeps_its_own_start_and_neither_stream_is_cut_to_the_other(self):
+        command = build_final_mux_command("video.mp4", "audio.m4a", "out.mp4", video_offset=0.0)
+
+        assert "-copyts" in command
+        assert "-shortest" not in command
+
+    def test_a_silent_result_copies_the_video_alone(self):
+        command = build_final_mux_command("video.mp4", None, "out.mp4", video_offset=0.25)
+
+        assert command.count("-i") == 1
+        assert "-itsoffset" not in command
+        assert [command[i + 1] for i, part in enumerate(command) if part == "-map"] == ["0:v:0"]
+
+    @pytest.mark.parametrize("audio", ["audio.m4a", None])
+    def test_the_only_metadata_is_what_is_passed(self, audio):
+        command = build_final_mux_command("video.mp4", audio, "out.mp4", video_offset=0.0, metadata=["-metadata", "key=value"])
+
+        assert _arg(command, "-map_metadata") == "-1"
+        assert command[-3:-1] == ["-metadata", "key=value"]
+        assert command.index("-map_metadata") < command.index("-metadata")
 
 
 class TestColorFilter:
@@ -266,7 +324,7 @@ class TestSpliceClipsMocked:
 
         self.prepared = []
         monkeypatch.setattr(video_splice, "probe_video", fake_probe)
-        monkeypatch.setattr(video_splice, "_run", fake_run)
+        monkeypatch.setattr(video_splice, "run_ffmpeg", fake_run)
         monkeypatch.setattr(video_splice, "_prepare_join_audio", fake_prepare)
         output = tmp_path / "out" / "result.mp4"
         output.parent.mkdir()
@@ -441,6 +499,8 @@ def test_write_segment_frames_reports_an_ffmpeg_failure(tmp_path):
     command = build_segment_command(128, 64, "24/1", tmp_path / "missing-dir" / "segment.mp4")
     with pytest.raises(RuntimeError, match="extension segment"):
         write_segment_frames(numbered_frames(8, 128, 64), command)
+    with pytest.raises(RuntimeError, match="the upscaled video"):
+        write_segment_frames(numbered_frames(8, 128, 64), command, description="the upscaled video")
 
 
 class _DeadPipe:
@@ -543,6 +603,54 @@ class TestRealMux:
         with pytest.raises(RuntimeError, match="add the audio"):
             mux_audio(video, tmp_path / "missing.wav", tmp_path / "out.mp4")
         assert not (tmp_path / "out.mp4").exists()
+
+
+def _stream_starts(path: Path) -> dict[str, float]:
+    """Return the start time in seconds of each stream of a file by its type."""
+    command = ["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,start_time", "-of", "csv=p=0", str(path)]
+    lines = subprocess.run(command, capture_output=True, check=True, text=True).stdout.split()
+    return {kind: float(start) for kind, start in (line.split(",") for line in lines)}
+
+
+@REAL
+class TestRealFinalMux:
+    @pytest.mark.parametrize(("video_delay", "audio_delay"), [(0.0, 0.5), (0.5, 0.0), (0.25, 0.75)])
+    def test_each_stream_keeps_the_start_it_had_in_the_source(self, tmp_path, video_delay, audio_delay):
+        video = tmp_path / "video.mp4"
+        write_segment_frames(numbered_frames(48, 128, 64), build_segment_command(128, 64, "24/1", video))
+        wav = tmp_path / "tone.wav"
+        write_pcm16_wav(np.stack([0.3 * np.sin(2 * np.pi * 300 * np.arange(2 * RATE) / RATE)] * 2), wav)
+        source = tmp_path / "source.mp4"
+        ffmpeg("-itsoffset", str(video_delay), "-i", str(video), "-itsoffset", str(audio_delay), "-i", str(wav), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", str(source))
+        starts = _stream_starts(source)
+        assert starts["audio"] - starts["video"] == pytest.approx(audio_delay - video_delay, abs=0.05)
+        audio = tmp_path / "audio.m4a"
+        run_ffmpeg(build_audio_prep_command(source, audio, copy=True))
+        output = tmp_path / "out.mp4"
+
+        run_ffmpeg(build_final_mux_command(video, audio, output, video_offset=starts["video"] - min(starts.values())))
+
+        result = _stream_starts(output)
+        assert result["audio"] - result["video"] == pytest.approx(starts["audio"] - starts["video"], abs=0.05)
+        assert result["audio"] - min(result.values()) == pytest.approx(starts["audio"] - min(starts.values()), abs=0.05)
+
+    @pytest.mark.parametrize("with_audio", [True, False])
+    def test_the_settings_in_the_metadata_read_back_as_the_app_reads_them(self, tmp_path, with_audio):
+        video = tmp_path / "video.mp4"
+        write_segment_frames(numbered_frames(24, 128, 64), build_segment_command(128, 64, "24/1", video))
+        audio = None
+        if with_audio:
+            wav = tmp_path / "tone.wav"
+            write_pcm16_wav(np.stack([0.3 * np.sin(2 * np.pi * 300 * np.arange(RATE) / RATE)] * 2), wav)
+            audio = tmp_path / "audio.m4a"
+            ffmpeg("-i", str(wav), "-c:a", "aac", str(audio))
+        payload = {"schema": "zvisiongenerator.config.v1", "workflow": "upscale", "prompt": 'A knight "rides" in \u2014 \u00e9', "width": 256, "height": 128}
+        output = tmp_path / "out.mp4"
+
+        run_ffmpeg(build_final_mux_command(video, audio, output, video_offset=0.0, metadata=mp4_config_args(payload)))
+
+        assert read_mp4_config(output) == payload
+        assert probe_video(output).has_audio is with_audio
 
 
 @REAL

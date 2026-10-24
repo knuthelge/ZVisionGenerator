@@ -15,15 +15,26 @@ from urllib.parse import quote, unquote, urlencode
 
 from PIL import Image, UnidentifiedImageError
 
-from zvisiongenerator.backends import supports_video_extend
+from zvisiongenerator.backends import supports_video_extend, supports_video_file_upscale
 from zvisiongenerator.core.ideogram4 import is_json_caption
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.utils.enhance_record import enhance_record_summary
 from zvisiongenerator.utils.ffmpeg import STAGING_FILE_PREFIX
-from zvisiongenerator.utils.provenance import image_prompt_text, optional_float, optional_int, optional_text, read_mp4_config, read_png_config, recorded_settings
+from zvisiongenerator.utils.provenance import (
+    UPSCALE_WORKFLOW,
+    RecordedSettings,
+    image_prompt_text,
+    mp4_config_from_probe,
+    optional_float,
+    optional_int,
+    optional_text,
+    read_png_config,
+    recorded_settings,
+)
 from zvisiongenerator.utils.config import model_capabilities
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_download_bytes, seedvr2_size_label, seedvr2_tier_label
-from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, seedvr2_options, upscale_options, upscale_output_size
+from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, seedvr2_options, seedvr2_video_option, upscale_options, upscale_output_size
+from zvisiongenerator.utils.video_probe import ffprobe_json, parse_probe
 from zvisiongenerator.utils.video_splice import SPLICE_DIR_PREFIX
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 from zvisiongenerator.web.gallery_index import FactsRead, GalleryIndex, ScannedFile
@@ -31,11 +42,11 @@ from zvisiongenerator.web.workspace_contract import WORKFLOW_DEFINITIONS, canoni
 
 
 _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
-_VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".mkv"})
-GALLERY_MEDIA_EXTENSIONS = _IMAGE_EXTENSIONS | _VIDEO_EXTENSIONS
+VIDEO_EXTENSIONS = frozenset({".mp4", ".mov", ".webm", ".mkv"})
+GALLERY_MEDIA_EXTENSIONS = _IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 _STAGING_DIR_NAMES = frozenset({".web_uploads"})
-# Scratch names the video tools create beside the finished outputs: the splice's directories (see ``video_splice``)
-# and the hidden temp files of an in-place MP4 rewrite (see ``ffmpeg.staging_path``).
+# Scratch names the video tools create beside the finished outputs: the splice's directories (see ``video_splice``),
+# and the hidden temp files of an in-place MP4 rewrite and the video upscale's work folders (see ``ffmpeg.staging_path``).
 _STAGING_PREFIXES = (SPLICE_DIR_PREFIX, STAGING_FILE_PREFIX)
 EXTEND_UPSCALED_REASON = "Upscaled videos can't be extended yet."
 EXTEND_MISSING_FILE_REASON = "The file is missing."
@@ -331,7 +342,7 @@ def gallery_asset_to_json(asset: GalleryAsset, web_config: WebUiConfig) -> dict[
         "reuse_workspace_url": f"#/workspace?{urlencode(reuse_params)}",
         "details": _asset_details_json(asset),
         "enhance": _asset_enhance_json(asset),
-        "upscale": _asset_upscale_json(asset, web_config, resolved_model) if asset.kind == "image" else None,
+        "upscale": _asset_upscale_json(asset, web_config, resolved_model) if asset.kind == "image" else _video_upscale_json(asset, web_config.seedvr2),
         "extend": _asset_extend_json(asset) if asset.kind == "video" and video_extend else None,
     }
 
@@ -529,8 +540,9 @@ def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[
         prompt = ""
     else:
         prompt = _coerce_text(prompt or asset_path.stem.replace("_", " "))
-    width = recorded.width or optional_int(image_metadata.get("width") or filename_metadata.get("width"))
-    height = recorded.height or optional_int(image_metadata.get("height") or filename_metadata.get("height"))
+    video_metadata = facts.get("video") or {}
+    width = recorded.width or optional_int(image_metadata.get("width") or filename_metadata.get("width")) or optional_int(video_metadata.get("width"))
+    height = recorded.height or optional_int(image_metadata.get("height") or filename_metadata.get("height")) or optional_int(video_metadata.get("height"))
 
     return {
         "prompt": prompt,
@@ -551,7 +563,7 @@ def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[
         "reference_image_path": recorded.image_path,
         "end_image_path": recorded.end_image_path,
         "lora": recorded.lora,
-        "has_reusable_config": bool(config),
+        "has_reusable_config": bool(config) and not (kind == "video" and _is_orphan_upscale(recorded)),
         "negative_prompt": recorded.negative_prompt,
         "scene": recorded.scene,
         "scene_input": recorded.scene_input,
@@ -566,6 +578,11 @@ def _asset_metadata(asset_path: Path, kind: str, facts: dict[str, Any]) -> dict[
         "extend_frames": recorded.extend_frames,
         "upscaled": bool(recorded.generation.get("upscale")),
     }
+
+
+def _is_orphan_upscale(recorded: RecordedSettings) -> bool:
+    """Return whether *recorded* is an upscale of a video that recorded no settings, so there is nothing to reuse."""
+    return recorded.workflow == UPSCALE_WORKFLOW and recorded.source is not None and recorded.source.get("workflow") is None
 
 
 def _asset_details_json(asset: GalleryAsset) -> dict[str, Any]:
@@ -598,20 +615,33 @@ def _asset_upscale_json(asset: GalleryAsset, web_config: WebUiConfig, resolved_m
         # The inventory's family gives the same capabilities resolve_defaults uses for POST /api/upscale, without detection.
         family = next((entry.family for entry in web_config.image_inventory if entry.name == model), "unknown")
         options = upscale_options(asset.width, asset.height, model_capabilities(web_config.app_config, family), web_config.app_config)
-    return {"factors": [asdict(option) for option in options], "seedvr2": _seedvr2_upscale_json(asset.width, asset.height, web_config.seedvr2)}
+    setup = web_config.seedvr2
+    seedvr2_menu = seedvr2_options(asset.width, asset.height, setup.tier, budget_bytes=setup.budget_bytes) if setup is not None else []
+    return {"factors": [asdict(option) for option in options], "seedvr2": _seedvr2_upscale_json(seedvr2_menu, setup)}
 
 
-def _seedvr2_upscale_json(width: int, height: int, setup: SeedVR2Setup | None) -> dict[str, Any] | None:
-    """Return the SeedVR2 part of the upscale menu, or ``None`` when SeedVR2 is unsupported."""
+def _seedvr2_upscale_json(options: list[UpscaleOption], setup: SeedVR2Setup | None) -> dict[str, Any] | None:
+    """Return the SeedVR2 part of the upscale menu for *options*, or ``None`` when SeedVR2 is unsupported."""
     if setup is None:
         return None
     model = setup.tier.model
     return {
-        "options": [asdict(option) for option in seedvr2_options(width, height, setup.tier, budget_bytes=setup.budget_bytes)],
+        "options": [asdict(option) for option in options],
         "model": seedvr2_tier_label(model, setup.weights),
         "downloaded": setup.downloaded,
         "download_size_label": None if setup.downloaded else seedvr2_size_label(seedvr2_download_bytes(model, setup.weights)),
     }
+
+
+def _video_upscale_json(asset: GalleryAsset, setup: SeedVR2Setup | None) -> dict[str, Any] | None:
+    """Return the upscale menu for a video: one SeedVR2 2× option, or ``None`` where it is unsupported or the size is unknown.
+
+    The size is the recorded one, else the displayed size ffprobe reported. The option is never disabled, only warned.
+    """
+    if setup is None or asset.width is None or asset.height is None or not supports_video_file_upscale():
+        return None
+    option = seedvr2_video_option(asset.width, asset.height, setup.tier, budget_bytes=setup.budget_bytes)
+    return {"factors": [], "seedvr2": _seedvr2_upscale_json([option], setup)}
 
 
 def _source_with_asset_id(root: Path, source: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -631,17 +661,17 @@ def _source_with_asset_id(root: Path, source: dict[str, Any] | None) -> dict[str
 
 # Changing what this reads requires bumping ``gallery_index.GALLERY_INDEX_VERSION``.
 def _read_asset_facts(asset_path: Path, kind: str | None) -> FactsRead:
-    """Read the raw facts of a media file: the embedded config and, for an image, its size and prompt text.
+    """Read the raw facts of a media file: the embedded config, and the size (plus prompt text for an image).
 
     The facts are incomplete when a reader failed, so the index does not store them.
     """
+    if kind == "video":
+        return _read_video_facts(asset_path)
     complete = True
     config: dict[str, Any] | None = None
     try:
         if kind == "image" and asset_path.suffix.lower() == ".png":
             config = read_png_config(asset_path)
-        elif kind == "video" and asset_path.suffix.lower() == ".mp4":
-            config = read_mp4_config(asset_path)
     except Exception:
         complete = False
     image: dict[str, Any] = {}
@@ -652,6 +682,30 @@ def _read_asset_facts(asset_path: Path, kind: str | None) -> FactsRead:
         except FileNotFoundError, OSError, UnidentifiedImageError, ValueError:
             complete = False
     return FactsRead({"config": config, "image": image}, complete)
+
+
+def _read_video_facts(asset_path: Path) -> FactsRead:
+    """Read a video's embedded config and displayed size with one ffprobe call.
+
+    The config is only read from ``.mp4`` files. The size is what a player shows (rotation applied), and is left out
+    when the file has no video stream.
+    """
+    try:
+        data = ffprobe_json(asset_path, count_packets=False)
+    except Exception:
+        return FactsRead({"config": None, "image": {}}, False)
+    complete = True
+    config: dict[str, Any] | None = None
+    try:
+        config = mp4_config_from_probe(data) if asset_path.suffix.lower() == ".mp4" else None
+    except ValueError:
+        complete = False
+    try:
+        probe = parse_probe(data)
+        video = {"width": probe.width, "height": probe.height}
+    except ValueError:
+        video = {}
+    return FactsRead({"config": config, "image": {}, "video": video}, complete)
 
 
 def _read_scanned_facts(file: ScannedFile) -> FactsRead:
@@ -697,7 +751,7 @@ def _asset_kind(path: Path) -> str | None:
     suffix = path.suffix.lower()
     if suffix in _IMAGE_EXTENSIONS:
         return "image"
-    if suffix in _VIDEO_EXTENSIONS:
+    if suffix in VIDEO_EXTENSIONS:
         return "video"
     return None
 

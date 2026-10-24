@@ -74,6 +74,13 @@ describe('JobCard', () => {
   const control = (name: string, within: ParentNode = target) => within.querySelector<HTMLButtonElement>(`button[data-control="${name}"]`);
   const jobBar = () => header().querySelector<HTMLElement>('[aria-label="Job progress"]')!;
 
+  it.each([3, 0])('counts a video upscale in batches from the first one (batch %i of 28) and offers only quit', (currentStep) => {
+    render({ workflow: 'upscale', media_type: 'video', stageName: 'upscale', stageNames: ['upscale'], currentStep, totalSteps: 28, remaining: 240, supported_controls: ['quit'] });
+
+    expect(jobBar().getAttribute('aria-valuetext')).toBe(`Batch ${currentStep} of 28`);
+    expect(control('quit')).not.toBeNull();
+  });
+
   it('labels the workflow and shows the job notices', () => {
     render({ workflow: 'upscale', notices: ['original settings unknown'] });
     expect(target.querySelector('.job-status')?.textContent).toContain('Upscale');

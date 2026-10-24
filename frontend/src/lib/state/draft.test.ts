@@ -1793,7 +1793,7 @@ describe('applyPreset', () => {
       image_model_defaults: { 'json-model': json, 'plain-model': plain, 'twin-model': { ...json } },
       current_image_model: 'json-model',
       video_models: [{ id: 'ltx-v-0.9', label: 'LTX Video', type: 'video' }, { id: 'ltx-2', label: 'LTX 2', type: 'video' }],
-      video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ family: 'ltx' }), 'ltx-2': makeVideoDefaults({ family: 'ltx', steps: 6, max_steps: 8, frame_alignment: 8 }) },
+      video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ family: 'ltx' }), 'ltx-2': makeVideoDefaults({ family: 'ltx', steps: 6, max_steps: 8, frame_rule: { alignment: 8, offset: 1, round: 'nearest' } }) },
       loras: LORAS,
       ...overrides,
     });

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { AssetUpscaleFactor, GalleryAsset } from '$lib/types';
 
-import { assetAspect, canExtend, canUseAsReference, describeFallbackReason, extendParams, extendReason, plainUpscaleMethod, referenceParams, reuseParams, upscaleOption, workflowLabel } from './assetActions';
+import { assetAspect, canExtend, canUseAsReference, describeFallbackReason, extendParams, extendReason, offeredUpscaleFactors, plainUpscaleMethod, referenceParams, reuseParams, seedvr2Options, upscaleFactors, upscaleOption, workflowLabel } from './assetActions';
 
 function makeAsset(overrides: Partial<GalleryAsset> = {}): GalleryAsset {
   return {
@@ -66,6 +66,26 @@ describe('asset actions', () => {
       expect(plainUpscaleMethod(withSeedvr2)).toBe('seedvr2');
       expect(plainUpscaleMethod(creativeOnly)).toBe('creative');
       expect(plainUpscaleMethod(makeAsset())).toBe('creative');
+    });
+
+    it('reads the SeedVR2 options of a video but never its creative factors', () => {
+      const video = makeAsset({ media_type: 'video', upscale: { factors: [two], seedvr2: { options: [plainTwo], model: 'SeedVR2 7B fp8', downloaded: true, download_size_label: null } } });
+
+      expect(seedvr2Options(video)).toEqual([plainTwo]);
+      expect(upscaleFactors(video)).toEqual([]);
+      expect(upscaleOption(video, 2, 'seedvr2')).toBe(plainTwo);
+      expect(plainUpscaleMethod(video)).toBe('seedvr2');
+      expect(seedvr2Options(makeAsset({ media_type: 'video', upscale: null }))).toEqual([]);
+    });
+
+    it('lists the factors an asset offers by any method, smallest first', () => {
+      const four: AssetUpscaleFactor = { ...two, factor: 4 };
+      const both = makeAsset({ upscale: { factors: [two, four], seedvr2: { options: [{ ...plainTwo }, { ...four, warning: null }], model: 'm', downloaded: true, download_size_label: null } } });
+      const video = makeAsset({ media_type: 'video', upscale: { factors: [], seedvr2: { options: [plainTwo], model: 'm', downloaded: true, download_size_label: null } } });
+
+      expect(offeredUpscaleFactors(both)).toEqual([2, 4]);
+      expect(offeredUpscaleFactors(video)).toEqual([2]);
+      expect(offeredUpscaleFactors(makeAsset())).toEqual([]);
     });
 
     it('finds the option of a factor within its method', () => {

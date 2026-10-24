@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 import type { ActiveJobState } from '$lib/types';
 import { downloadFromEvent } from './jobPhases';
 import {
-  activeDownload, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, failureToastText, finishingLabel, formatClock, GENERIC_FAILURE_MESSAGE, headline, isReviewing, isSteppedStage, isVideo, itemActivity, itemFraction, iterations,
+  activeDownload, documentTitle, downloadFraction, downloadRowKey, downloadView, etaLabel, failureToastText, finishingLabel, formatClock, GENERIC_FAILURE_MESSAGE, headline, isReviewing, isSteppedStage, isVideo, isVideoUpscale, itemActivity, itemFraction, iterations, itemNoun,
   jobBar, jobControls, jobTone, loadBody, outcome, phaseRows, positionLabel, readySummary, reviewDecisions, reviewFactor, reviewHasSound, reviewLine,
-  reviewVideoUrl, stageBars, timeLeft
+  reviewVideoUrl, stageBars, stepUnit, timeLeft
 } from './jobView';
 
 const IMAGE_CONTROLS = ['next', 'pause', 'resume', 'repeat', 'quit'];
@@ -219,6 +219,38 @@ describe('jobView', () => {
     expect(etaLabel(batch({ remaining: 600, status: 'paused', paused: true }))).toBe('');
     expect(timeLeft(30)).toBe('Under a minute left');
     expect(timeLeft(7210)).toBe('About 2 h 0 min left');
+  });
+
+  describe('a video upscale', () => {
+    const upscale = (overrides: Partial<ActiveJobState> = {}) => job({ workflow: 'upscale', media_type: 'video', stageName: 'upscale', currentStep: 0, totalSteps: 28, ...overrides });
+
+    it('is a video and counts batches', () => {
+      expect(isVideo(upscale())).toBe(true);
+      expect(isVideoUpscale(upscale())).toBe(true);
+      expect(itemNoun(upscale())).toBe('video');
+      expect(headline(upscale())).toBe('Upscaling video');
+      expect(stepUnit(upscale())).toBe('Batch');
+    });
+
+    it('leaves an image upscale and other jobs as they were', () => {
+      expect(isVideo(job({ workflow: 'upscale' }))).toBe(false);
+      expect(isVideoUpscale(job({ workflow: 'upscale' }))).toBe(false);
+      expect(headline(job({ workflow: 'upscale' }))).toBe('Upscaling');
+      expect(stepUnit(job({ workflow: 'upscale' }))).toBe('Step');
+      expect(stepUnit(job())).toBe('Step');
+    });
+
+    it('shows the time left from its batches although it is one item', () => {
+      expect(etaLabel(upscale())).toBe('Estimate after the first batch');
+      expect(etaLabel(upscale({ currentStep: 3, remaining: 240 }))).toBe('About 4 min left');
+      expect(etaLabel(upscale({ currentStep: 28, remaining: 0 }))).toBe('');
+      expect(etaLabel(upscale({ currentStep: 3, remaining: 240, status: 'paused', paused: true }))).toBe('');
+    });
+
+    it('does not give a single-item image job an estimate', () => {
+      expect(etaLabel(job({ workflow: 'upscale', remaining: 240 }))).toBe('');
+      expect(etaLabel(job({ remaining: 240 }))).toBe('');
+    });
   });
 
   it('counts what an ended job saved and what never ran', () => {

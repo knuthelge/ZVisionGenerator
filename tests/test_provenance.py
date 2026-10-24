@@ -21,9 +21,11 @@ from zvisiongenerator.utils.provenance import (
     VIDEO_CONFIG_SCHEMA,
     build_image_config_payload,
     build_video_config_payload,
+    build_video_upscale_payload,
     embed_mp4_config,
     embed_png_config,
     image_prompt_text,
+    mp4_config_from_probe,
     optional_float,
     optional_int,
     optional_text,
@@ -612,6 +614,17 @@ class TestReadMp4Config:
         assert result == payload
 
 
+class TestMp4ConfigFromProbe:
+    def test_reads_the_payload_from_the_format_tags(self):
+        data = {"streams": [], "format": {"tags": {"zvisiongenerator.config": json.dumps({"prompt": "a sunset"})}}}
+
+        assert mp4_config_from_probe(data) == {"prompt": "a sunset"}
+
+    @pytest.mark.parametrize("data", [{}, {"format": {}}, {"format": {"tags": {}}}, {"format": {"tags": {"title": "x"}}}])
+    def test_a_file_without_the_payload_gives_none(self, data):
+        assert mp4_config_from_probe(data) is None
+
+
 class TestRecordedValueHelpers:
     def test_optional_values_reject_missing_blank_bool_and_garbage(self):
         for value in (None, "", True, "abc"):
@@ -666,6 +679,15 @@ class TestRecordedUpscaleMethod:
 
         assert by_workflow == by_frames == {"upscale": upscale}
 
+    def test_a_video_keeps_the_seedvr2_method_and_drops_any_other(self):
+        seedvr2 = {"method": "seedvr2", "factor": 2}
+
+        kept = recorded_settings({"workflow": "upscale", "frame_count": 97, "generation": {"upscale": seedvr2}}).generation
+        dropped = recorded_settings({"workflow": "txt2vid", "generation": {"upscale": {"method": "creative", "factor": 2}}}).generation
+
+        assert kept == {"upscale": seedvr2}
+        assert dropped == {"upscale": {"factor": 2}}
+
     def test_extended_video_upscale_records_no_method(self):
         upscale = {"factor": 2, "steps": 8}
 
@@ -683,6 +705,100 @@ class TestRecordedUpscaleMethod:
         generation = recorded_settings({"workflow": "upscale", "generation": {"upscale": {"method": "seedvr2", "factor": 2}}}).generation
 
         assert generation == {"upscale": {"method": "seedvr2", "factor": 2}}
+
+
+_VIDEO_UPSCALE = {"method": "seedvr2", "factor": 2, "model": "seedvr2-7b", "quantize": 8, "softness": 0.0, "seed": 42}
+
+
+def _upscale_payload(source_config, **overrides):
+    kwargs = dict(source_path="/media/clips/a.mp4", source_width=768, source_height=448, width=1536, height=896, frame_count=121, audio=True, upscale=_VIDEO_UPSCALE, generation_time=61.26)
+    return build_video_upscale_payload(source_config, **{**kwargs, **overrides})
+
+
+class TestBuildVideoUpscalePayload:
+    def _source(self, **overrides):
+        request = _make_video_request(prompt="a knight rides in", scene="A castle.", seed=11, steps=8, **overrides)
+        return json.loads(json.dumps(build_video_config_payload(request, VideoWorkingArtifacts(generation_time=30.0, metadata={"scene": "A castle."}))))
+
+    def test_an_app_clip_keeps_its_settings_and_records_the_upscale(self):
+        source = self._source()
+
+        payload = _upscale_payload(source)
+
+        for key in ("prompt", "scene", "model", "model_family", "seed", "steps", "lora"):
+            assert payload.get(key) == source.get(key)
+        assert (payload["schema"], payload["workflow"]) == (VIDEO_CONFIG_SCHEMA, "upscale")
+        assert (payload["width"], payload["height"], payload["frame_count"]) == (1536, 896, 121)
+        assert payload["generation"] == {"time": 61.3, "upscale": _VIDEO_UPSCALE, "audio": True}
+        assert payload["source"] == {"path": "/media/clips/a.mp4", "width": 768, "height": 448, "workflow": "txt2vid"}
+
+    def test_the_sources_own_generation_and_source_blocks_are_not_carried_over(self):
+        source = {**self._source(), "source": {"path": "/x.mp4", "width": 1, "height": 1, "workflow": "extend"}}
+
+        payload = _upscale_payload(source, audio=False)
+
+        assert payload["generation"] == {"time": 61.3, "upscale": _VIDEO_UPSCALE, "audio": False}
+        assert payload["source"]["path"] == "/media/clips/a.mp4"
+
+    def test_an_extension_keeps_its_source_video_and_new_frames(self, tmp_path):
+        extension = ExtendSpec(source=make_extend_source(path=tmp_path / "base.mp4"), frames=48)
+        source = json.loads(json.dumps(build_video_config_payload(_make_video_request(extend=extension), VideoWorkingArtifacts())))
+
+        payload = _upscale_payload(source)
+
+        assert payload["source"]["workflow"] == "extend"
+        assert (payload["source_video"], payload["extend_frames"]) == (source["source_video"], 48)
+
+    def test_an_upscale_of_an_upscale_points_at_its_source_and_keeps_the_originals_size_and_workflow(self):
+        first = _upscale_payload(self._source())
+
+        second = _upscale_payload(first, source_path="/media/clips/a_2x.mp4", source_width=1536, source_height=896, width=3072, height=1792)
+        third = _upscale_payload(second, source_path="/media/clips/a_2x_2x.mp4", source_width=3072, source_height=1792, width=6144, height=3584)
+
+        assert second["source"] == {"path": "/media/clips/a_2x.mp4", "width": 768, "height": 448, "workflow": "txt2vid"}
+        assert third["source"] == {"path": "/media/clips/a_2x_2x.mp4", "width": 768, "height": 448, "workflow": "txt2vid"}
+        assert second["prompt"] == first["prompt"]
+
+    @pytest.mark.parametrize("source_config", [None, {}])
+    def test_a_clip_with_no_settings_gets_the_minimal_payload(self, source_config):
+        payload = _upscale_payload(source_config)
+
+        assert set(payload) == {"schema", "workflow", "width", "height", "frame_count", "generation", "source"}
+        assert payload["source"]["workflow"] is None
+
+    def test_an_upscale_of_a_foreign_clip_stays_without_a_source_workflow(self):
+        first = _upscale_payload(None)
+
+        assert _upscale_payload(first, source_path="/media/clips/a_2x.mp4")["source"]["workflow"] is None
+
+    def test_the_source_path_is_portable(self):
+        from pathlib import Path
+
+        payload = _upscale_payload(None, source_path=str(Path.home() / "clips" / "a.mp4"))
+
+        assert payload["source"]["path"] == "~/clips/a.mp4"
+
+    def test_the_payload_reads_back_as_an_upscaled_video(self):
+        settings = recorded_settings(_upscale_payload(self._source()))
+
+        assert settings.generation["upscale"] == _VIDEO_UPSCALE
+        assert (settings.workflow, settings.frame_count, settings.source["workflow"]) == ("upscale", 121, "txt2vid")
+
+    def test_extend_refuses_the_result_as_upscaled(self):
+        from conftest import make_probe
+        from zvisiongenerator.utils.video_extend import extend_source_problems
+
+        problems = extend_source_problems(
+            make_probe(frame_count=72, duration=3.0, color_space="bt709", color_primaries="bt709", color_trc="bt709"), recorded_settings(_upscale_payload(self._source()))
+        )
+
+        assert [problem.code for problem in problems] == ["upscaled"]
+
+    def test_a_foreign_clips_result_still_reads_as_a_video(self):
+        settings = recorded_settings(_upscale_payload(None))
+
+        assert settings.generation["upscale"]["method"] == "seedvr2"
+        assert settings.frame_count == 121
 
 
 class TestRecordedSettings:

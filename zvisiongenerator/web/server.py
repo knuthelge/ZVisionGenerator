@@ -34,6 +34,7 @@ from zvisiongenerator.backends import (
     get_prompt_enhancer_session,
     supports_video_audio,
     supports_video_extend,
+    supports_video_file_upscale,
     supports_video_upscale_review,
     video_family_on_platform,
 )
@@ -85,8 +86,10 @@ from zvisiongenerator.utils.prompt_enhance_video import EnhancePairResult, enhan
 from zvisiongenerator.utils.prompts import enhance_by_set as group_enhance_by_set
 from zvisiongenerator.utils.prompts import scene_by_set as group_scene_by_set
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_SEEDVR2
+from zvisiongenerator.utils.upscale import VIDEO_UPSCALE_FACTOR
 from zvisiongenerator.utils.seedvr2 import SeedVR2Setup, seedvr2_row_name, seedvr2_tier_label
 from zvisiongenerator.upscale_runner import read_upscale_source
+from zvisiongenerator.video_file_upscale_runner import read_video_upscale_source
 from zvisiongenerator.utils.video_extend import apply_extend_args, extend_step, require_extend_family
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo
 from zvisiongenerator.utils.video_support import unsupported_video_request
@@ -99,6 +102,7 @@ from zvisiongenerator.web.defaults import default_image_size_for_ratio, default_
 from zvisiongenerator.web.extend_api import EXTEND_UNAVAILABLE_MESSAGE, extend_context_from_body, extend_source_response, load_source_video, requested_extend_frames
 from zvisiongenerator.web.gallery import (
     GALLERY_MEDIA_EXTENSIONS,
+    VIDEO_EXTENSIONS,
     build_gallery_page_json,
     delete_gallery_assets,
     filter_and_sort_assets,
@@ -111,7 +115,7 @@ from zvisiongenerator.web.json_fields import json_field
 from zvisiongenerator.web.model_download_plan import PlanUnchecked, plan_summary, row_plan
 from zvisiongenerator.web.path_browser import BrowsePlace, BrowsePurpose, DirectoryListing, browse_places, create_folder, default_place_dir, host_drives, list_directory, resolve_purpose
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
-from zvisiongenerator.web.upscale_api import plan_seedvr2_upscale, plan_upscale, upscale_json_request, upscale_size_label
+from zvisiongenerator.web.upscale_api import plan_seedvr2_upscale, plan_upscale, plan_video_upscale, upscale_json_request, upscale_size_label, video_upscale_size_label
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
 from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, append_entry_payload, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
@@ -705,6 +709,7 @@ def _job_response(job_id: str, context: dict[str, Any], supported_controls: tupl
             "meta": context["meta"],
             "notices": list(context.get("notices", ())),
             "queue_position": queue_position,
+            **({"media_type": context["media_type"]} if "media_type" in context else {}),
         }
     )
 
@@ -788,7 +793,9 @@ def _upscale_from_body(body: Any) -> JSONResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     source_path = resolve_output_asset_path(_media_output_root(), asset_id)
     if source_path is None:
-        raise HTTPException(status_code=422, detail="The image must be inside the output folder.")
+        raise HTTPException(status_code=422, detail="The file must be inside the output folder.")
+    if source_path.suffix.lower() in VIDEO_EXTENSIONS:
+        return _video_upscale_from_body(source_path, factor, method)
     if source_path.suffix.lower() not in _IMAGE_EXTENSIONS or not source_path.is_file():
         raise HTTPException(status_code=404, detail=f"Unknown image: {asset_id}")
 
@@ -831,6 +838,46 @@ def _upscale_from_body(body: Any) -> JSONResponse:
             admission_check=_reject_while_busy,
             context=context,
         )
+    except JobConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _job_response(job_id, context, UPSCALE_SUPPORTED_CONTROLS)
+
+
+def _video_upscale_from_body(source_path: Path, factor: int, method: str) -> JSONResponse:
+    """Validate an upscale request for a gallery video, plan the job and submit it; runs off the event loop."""
+    if method != UPSCALE_METHOD_SEEDVR2:
+        raise HTTPException(status_code=422, detail="Videos are upscaled with SeedVR2 only.")
+    if factor != VIDEO_UPSCALE_FACTOR:
+        raise HTTPException(status_code=422, detail=f"Videos are upscaled {VIDEO_UPSCALE_FACTOR}× only.")
+    web_config = load_web_config()
+    setup = web_config.seedvr2
+    if setup is None or not supports_video_file_upscale():
+        raise HTTPException(status_code=422, detail="Video upscaling is not available on this machine.")
+    try:
+        require_ffmpeg()
+        source, recorded_config = read_video_upscale_source(source_path)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    plan = plan_video_upscale(source, recorded_config, setup=setup)
+    upscale_model = seedvr2_tier_label(setup.tier.model, setup.weights)
+    context = {
+        "workflow": "upscale",
+        "job_type": "Upscale",
+        "media_type": "video",
+        "prompt": source.prompt or "",
+        "model": upscale_model,
+        "model_label": model_display_name(web_config.app_config, upscale_model),
+        "runs": 1,
+        "meta": video_upscale_size_label(plan),
+        "notices": list(plan.notices),
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+        "output_dir": web_config.output_dir,
+        "settings": {},
+    }
+    try:
+        job_id = web_runner.submit_video_file_upscale_job(request=plan.request, admission_check=_reject_while_busy, context=context)
     except JobConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _job_response(job_id, context, UPSCALE_SUPPORTED_CONTROLS)

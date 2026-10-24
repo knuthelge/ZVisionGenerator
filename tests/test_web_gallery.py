@@ -18,10 +18,11 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 
 from zvisiongenerator.utils import app_db
-from zvisiongenerator.utils.provenance import embed_png_config
+from zvisiongenerator.utils.provenance import build_video_upscale_payload, embed_png_config
 from zvisiongenerator.web import gallery
 from zvisiongenerator.web.config import WebUiDefaultModels
 from zvisiongenerator.web.gallery import (
+    EXTEND_UPSCALED_REASON,
     GalleryAsset,
     _scan_output_root,
     delete_gallery_assets,
@@ -40,6 +41,13 @@ def _make_png_with_config(path: Path, payload: dict) -> None:
     info = PngInfo()
     embed_png_config(info, payload)
     img.save(path, pnginfo=info)
+
+
+def _video_probe_returning(config: dict | None, *, size: tuple[int, int] | None = None):
+    """Return a patch that makes the gallery's one ffprobe call report *config* as the embedded payload and *size* as the video stream."""
+    tags = {"zvisiongenerator.config": json.dumps(config)} if config is not None else {}
+    streams = [{"codec_type": "video", "codec_name": "h264", "width": size[0], "height": size[1], "r_frame_rate": "24/1", "avg_frame_rate": "24/1"}] if size else []
+    return patch("zvisiongenerator.web.gallery.ffprobe_json", return_value={"streams": streams, "format": {"tags": tags}})
 
 
 def _make_plain_png(path: Path) -> None:
@@ -270,12 +278,12 @@ def test_missing_metadata_uses_filename_and_pil_for_display_only_fields(tmp_path
 
 
 # ---------------------------------------------------------------------------
-# Embedded video config via mocked read_mp4_config
+# Embedded video config via a mocked ffprobe
 # ---------------------------------------------------------------------------
 
 
 def test_embedded_mp4_config_drives_gallery_metadata(tmp_path):
-    """Gallery metadata for an MP4 should use read_mp4_config payload when present."""
+    """Gallery metadata for an MP4 should use the embedded config payload when present."""
     embedded_config = {
         "schema": "zvisiongenerator.config.v1",
         "workflow": "txt2vid",
@@ -293,9 +301,9 @@ def test_embedded_mp4_config_drives_gallery_metadata(tmp_path):
         "lora": None,
     }
     mp4_path = tmp_path / "clip.mp4"
-    mp4_path.write_bytes(b"\x00" * 8)  # Minimal placeholder; read_mp4_config is mocked.
+    mp4_path.write_bytes(b"\x00" * 8)  # Minimal placeholder; ffprobe is mocked.
 
-    with patch("zvisiongenerator.web.gallery.read_mp4_config", return_value=embedded_config):
+    with _video_probe_returning(embedded_config):
         assets = list_gallery_assets(str(tmp_path))
 
     asset = _find_asset(assets, "clip.mp4")
@@ -333,7 +341,7 @@ def test_embedded_mp4_config_ignores_mp4_sidecar(tmp_path):
     mp4_path.write_bytes(b"\x00" * 8)
     mp4_path.with_suffix(".json").write_text(json.dumps(sidecar_data), encoding="utf-8")
 
-    with patch("zvisiongenerator.web.gallery.read_mp4_config", return_value=embedded_config):
+    with _video_probe_returning(embedded_config):
         assets = list_gallery_assets(str(tmp_path))
 
     asset = _find_asset(assets, "dual.mp4")
@@ -358,7 +366,7 @@ def test_mp4_without_embedded_config_ignores_sidecar(tmp_path):
     mp4_path.write_bytes(b"\x00" * 8)
     mp4_path.with_suffix(".json").write_text(json.dumps(sidecar_data), encoding="utf-8")
 
-    with patch("zvisiongenerator.web.gallery.read_mp4_config", return_value=None):
+    with _video_probe_returning(None):
         assets = list_gallery_assets(str(tmp_path))
 
     asset = _find_asset(assets, "nosidebar.mp4")
@@ -433,6 +441,7 @@ def _reuse_web_config() -> SimpleNamespace:
         image_model_options=("zit",),
         video_model_options=("ltx-8",),
         default_models=WebUiDefaultModels(image="zit", video="ltx-8"),
+        seedvr2=None,
     )
 
 
@@ -445,7 +454,7 @@ def _video_reuse(tmp_path, config_overrides: dict) -> tuple[dict, dict[str, str]
     """Return a video asset's gallery JSON and parsed Reuse query params for an embedded config with *config_overrides*."""
     config = {"schema": "zvisiongenerator.config.v1", "workflow": "txt2vid", "model": "ltx-8", "seed": 1, "steps": 8, "frame_count": 49, **config_overrides}
     (tmp_path / "clip.mp4").write_bytes(b"\x00" * 8)
-    with patch("zvisiongenerator.web.gallery.read_mp4_config", return_value=config):
+    with _video_probe_returning(config):
         asset = _find_asset(list_gallery_assets(str(tmp_path)), "clip.mp4")
     payload = gallery_asset_to_json(asset, _reuse_web_config())
     return payload, _reuse_params(payload)
@@ -653,7 +662,7 @@ def test_a_video_with_settings_but_no_text_shows_no_file_name_as_its_prompt(tmp_
 
 def test_a_video_without_embedded_settings_still_shows_its_file_name(tmp_path):
     (tmp_path / "walk_in_rain.mp4").write_bytes(b"\x00" * 8)
-    with patch("zvisiongenerator.web.gallery.read_mp4_config", return_value=None):
+    with _video_probe_returning(None):
         asset = _find_asset(list_gallery_assets(str(tmp_path)), "walk_in_rain.mp4")
 
     payload = gallery_asset_to_json(asset, _reuse_web_config())
@@ -764,7 +773,7 @@ def test_a_video_that_cannot_be_extended_says_why(tmp_path, monkeypatch):
         if upscaled:
             config["generation"] = {"upscale": {"factor": 2, "steps": 8}}
         (directory / "clip.mp4").write_bytes(b"\x00" * 8)
-        with patch("zvisiongenerator.web.gallery.read_mp4_config", return_value=config):
+        with _video_probe_returning(config):
             asset = _find_asset(list_gallery_assets(str(directory)), "clip.mp4")
         if vanished:
             (directory / "clip.mp4").unlink()
@@ -1061,7 +1070,7 @@ def test_an_extension_flags_a_deleted_source_video_without_reading_again(tmp_pat
     clip.write_bytes(b"\x00" * 8)
     _backdate(source, clip)
     config = {"schema": "zvisiongenerator.config.v1", **_extend_config(source), "model": "ltx-8"}
-    with patch("zvisiongenerator.web.gallery.read_mp4_config", return_value=config):
+    with patch("zvisiongenerator.web.gallery.ffprobe_json", return_value={}), patch("zvisiongenerator.web.gallery.mp4_config_from_probe", return_value=config):
         list_gallery_assets(str(tmp_path))
     reads.clear()
 
@@ -1113,7 +1122,7 @@ def test_indexed_assets_equal_freshly_read_ones_except_the_age_label(tmp_path, m
     clip.write_bytes(b"\x00" * 8)
     _backdate(clip)
     video_config = {"schema": "zvisiongenerator.config.v1", "workflow": "txt2vid", "model": "ltx-8", "scene": "Rain.", "frame_count": 49}
-    with patch("zvisiongenerator.web.gallery.read_mp4_config", return_value=video_config):
+    with patch("zvisiongenerator.web.gallery.ffprobe_json", return_value={}), patch("zvisiongenerator.web.gallery.mp4_config_from_probe", return_value=video_config):
         cold = list_gallery_assets(str(tmp_path))
     reads.clear()
     _restart_index(monkeypatch)
@@ -1202,3 +1211,62 @@ def test_a_failed_config_read_is_listed_but_not_stored(tmp_path):
     assert [asset.id for asset in second] == ["broken.png"]
     assert reader.call_count == 2
     assert _stored_rel_paths() == []
+
+
+# ---------------------------------------------------------------------------
+# Videos upscaled from a file: recorded settings, Reuse and Extend
+# ---------------------------------------------------------------------------
+
+_VIDEO_UPSCALE_RECORD = {"method": "seedvr2", "factor": 2, "model": "seedvr2-7b", "quantize": 8, "softness": 0.0, "seed": 42}
+
+
+def _upscaled_video_json(tmp_path, monkeypatch, source_config: dict | None) -> tuple[dict, dict[str, str]]:
+    monkeypatch.setattr("zvisiongenerator.web.gallery.supports_video_extend", lambda: True)
+    payload = build_video_upscale_payload(
+        source_config,
+        source_path=str(tmp_path / "clip.mp4"),
+        source_width=512,
+        source_height=256,
+        width=1024,
+        height=512,
+        frame_count=97,
+        audio=True,
+        upscale=_VIDEO_UPSCALE_RECORD,
+        generation_time=90.0,
+    )
+    (tmp_path / "clip_2x.mp4").write_bytes(b"\x00" * 8)
+    with _video_probe_returning(payload):
+        asset = _find_asset(list_gallery_assets(str(tmp_path)), "clip_2x.mp4")
+    result = gallery_asset_to_json(asset, _reuse_web_config())
+    return result, _reuse_params(result)
+
+
+def test_an_upscaled_app_video_is_marked_upscaled_and_reuses_the_sources_workflow_at_its_size(tmp_path, monkeypatch):
+    source = {"schema": "zvisiongenerator.config.v1", "workflow": "txt2vid", "model": "ltx-8", "seed": 5, "steps": 8, "prompt": "A knight rides in.", "frame_count": 97, "width": 512, "height": 256}
+
+    result, params = _upscaled_video_json(tmp_path, monkeypatch, source)
+
+    assert result["has_reusable_config"] is True
+    assert result["extend"] == {"available": False, "reason": EXTEND_UPSCALED_REASON}
+    assert result["details"]["generation"]["upscale"] == _VIDEO_UPSCALE_RECORD
+    assert result["reuse_state"]["requested_workflow"] == "txt2vid"
+    assert (params["workflow"], params["width"], params["height"], params["prompt"]) == ("txt2vid", "512", "256", "A knight rides in.")
+
+
+def test_reuse_of_an_upscaled_extension_opens_extend_with_the_original_source_and_new_frames(tmp_path, monkeypatch):
+    original = tmp_path / "base.mp4"
+    original.write_bytes(b"\x00")
+    source = {"schema": "zvisiongenerator.config.v1", "workflow": "extend", "model": "ltx-8", "source_video": str(original), "extend_frames": 48, "frame_count": 97, "prompt": "She walks away."}
+
+    result, params = _upscaled_video_json(tmp_path, monkeypatch, source)
+
+    assert result["reuse_state"]["resolved_workflow"] == "extend"
+    assert (params["source_video"], params["extend_frames"]) == (str(original), "48")
+
+
+@pytest.mark.parametrize("source_config", [None, {}])
+def test_the_upscale_of_a_clip_with_no_recorded_settings_cannot_be_reused(tmp_path, monkeypatch, source_config):
+    result, _params = _upscaled_video_json(tmp_path, monkeypatch, source_config)
+
+    assert result["has_reusable_config"] is False
+    assert result["extend"] == {"available": False, "reason": EXTEND_UPSCALED_REASON}

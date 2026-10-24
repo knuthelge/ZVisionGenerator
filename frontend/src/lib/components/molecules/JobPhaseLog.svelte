@@ -5,7 +5,7 @@
   import Alert from './Alert.svelte';
   import {
     activeDownload, downloadRowKey, downloadView, enhanceProgress, finishingLabel, finishingText, formatClock, isActive, isPaused, isVideo, itemActivity, iterations, jobPhase, loadBody, outcome, phaseRows,
-    positionLabel, readySummary, stageBars, stepFraction, type PhaseRow, type PhaseRowStatus
+    positionLabel, readySummary, stageBars, stepFraction, stepUnit, type PhaseRow, type PhaseRowStatus
   } from '$lib/state/jobView';
   import type { ActiveJobState, JobDownload } from '$lib/types';
 
@@ -138,7 +138,7 @@
         {:else if activity === 'reviewing'}
           <span>Waiting for your review</span>
         {:else}
-          <span>Step {job.currentStep} of {job.totalSteps}</span><span class="num">{stepPct}%</span>
+          <span>{stepUnit(job)} {job.currentStep} of {job.totalSteps}</span><span class="num">{stepPct}%</span>
         {/if}
       </div>
       <!-- A single-item job shows its steps as the job bar in the header. -->
@@ -150,7 +150,7 @@
           live={running && activity === 'stepping'}
           busy={running && activity !== 'stepping'}
           {stepMs}
-          valuetext={activity === 'stepping' ? `Step ${job.currentStep} of ${job.totalSteps}` : activity === 'finishing' ? finishingText(job) : 'Starting'}
+          valuetext={activity === 'stepping' ? `${stepUnit(job)} ${job.currentStep} of ${job.totalSteps}` : activity === 'finishing' ? finishingText(job) : 'Starting'}
         />
       {/if}
     </div>

@@ -119,6 +119,23 @@ class TestPlatformFlagsReadTheMap:
         assert backends_module.supports_video_extend() is False
 
 
+class TestVideoFileUpscaleCapability:
+    def test_an_upscaler_with_a_video_method_supports_it(self, monkeypatch):
+        monkeypatch.setattr(backends_module, "get_seedvr2_upscaler", lambda: MagicMock(spec=["upscale_image", "upscale_video"]))
+
+        assert backends_module.supports_video_file_upscale() is True
+
+    def test_an_upscaler_without_a_video_method_does_not(self, monkeypatch):
+        monkeypatch.setattr(backends_module, "get_seedvr2_upscaler", lambda: MagicMock(spec=["upscale_image"]))
+
+        assert backends_module.supports_video_file_upscale() is False
+
+    def test_no_upscaler_does_not(self, monkeypatch):
+        monkeypatch.setattr(backends_module, "get_seedvr2_upscaler", lambda: None)
+
+        assert backends_module.supports_video_file_upscale() is False
+
+
 class TestFamilyAvailability:
     def test_a_family_is_available_where_the_platform_registers_it(self, factories, monkeypatch):
         assert backends_module.video_family_available("h3") is True

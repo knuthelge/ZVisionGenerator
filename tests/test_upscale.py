@@ -13,17 +13,22 @@ from zvisiongenerator.core.types import StageOutcome
 from zvisiongenerator.core.workflow import GenerationWorkflow
 from zvisiongenerator.upscale_runner import read_upscale_source, run_upscale
 from zvisiongenerator.utils.provenance import embed_png_config, read_png_config
-from zvisiongenerator.utils.seedvr2 import SeedVR2Tier, estimate_seedvr2_bytes
+from zvisiongenerator.utils.seedvr2 import SeedVR2Tier, estimate_seedvr2_bytes, seedvr2_over_budget
 from zvisiongenerator.utils.upscale import (
     SEEDVR2_MEMORY_WARNING,
+    WARNING_MEMORY,
+    WARNING_ONE_FRAME_BATCH,
     default_upscale_denoise,
+    estimate_seedvr2_video_bytes,
     existing_image_denoise,
     max_megapixels,
     seedvr2_input_image,
     seedvr2_options,
     seedvr2_output_size,
+    seedvr2_video_option,
     upscale_options,
     upscale_output_size,
+    video_upscale_batch_size,
 )
 from zvisiongenerator.workflows import build_upscale_workflow
 from zvisiongenerator.workflows.image_stages import load_source_stage, save_image_stage
@@ -108,6 +113,113 @@ def test_seedvr2_options_do_not_warn_when_the_budget_equals_the_estimate():
 
 def test_seedvr2_options_do_not_warn_for_an_unknown_budget():
     assert all(option.warning is None for option in seedvr2_options(4000, 4000, _TIER_7B, budget_bytes=None))
+
+
+_STREAMED_7B = SeedVR2Tier("seedvr2-7b", weights_gb=1.6, activation_floor_gb=5.0, activation_base_gb=0.21, activation_gb_per_mp=0.556, system_gb=22)
+_MIB = 1024 * 1024
+_GIB = 1024 * _MIB
+# Output sizes of the spike's source sizes: s, m and l (batch rule tuned on them), then 4K and 5K.
+_S, _M, _L, _4K, _5K = (1536, 896), (2048, 1152), (2560, 1408), (3840, 2160), (5120, 2880)
+
+# Card peaks (nvidia-smi MiB) of runs that finished on a 10 GB card: (output megapixels, batch, peak).
+_FINISHED_RUNS = [
+    (1.376, 5, 6296),
+    (1.376, 9, 8016),
+    (1.376, 13, 8020),
+    (1.376, 17, 8036),
+    (1.376, 21, 8220),
+    (1.376, 25, 8643),
+    (1.376, 29, 8282),
+    (2.359, 13, 8819),
+    (3.604, 13, 9788),
+    (4.199, 5, 6783),
+    (5.545, 5, 8395),
+    (6.905, 5, 9793),
+    (5.545, 1, 4879),
+    (8.294, 1, 6733),
+    (14.746, 1, 9815),
+]
+# Runs on that card that ran out of memory: (output megapixels, batch).
+_OUT_OF_MEMORY_RUNS = [(2.359, 29), (3.604, 29), (8.294, 2), (8.294, 3), (8.294, 5)]
+
+
+@pytest.mark.parametrize(("megapixels", "batch_size", "peak_mib"), _FINISHED_RUNS)
+def test_the_video_estimate_is_at_or_above_every_measured_card_peak(megapixels, batch_size, peak_mib):
+    assert estimate_seedvr2_video_bytes(_STREAMED_7B, megapixels, batch_size) >= peak_mib * _MIB
+
+
+@pytest.mark.parametrize(("megapixels", "batch_size"), _OUT_OF_MEMORY_RUNS)
+def test_the_video_estimate_puts_every_measured_out_of_memory_run_over_the_card(megapixels, batch_size):
+    assert seedvr2_over_budget(estimate_seedvr2_video_bytes(_STREAMED_7B, megapixels, batch_size), 10 * _GIB)
+
+
+def test_the_video_estimate_grows_with_the_batch_and_the_size():
+    estimates = [estimate_seedvr2_video_bytes(_STREAMED_7B, 4.0, batch) for batch in (1, 5, 9, 13, 29)]
+
+    assert estimates == sorted(estimates)
+    assert estimate_seedvr2_video_bytes(_STREAMED_7B, 8.0, 5) > estimate_seedvr2_video_bytes(_STREAMED_7B, 4.0, 5)
+
+
+@pytest.mark.parametrize(
+    ("budget_gib", "output", "expected"),
+    [
+        (10, _S, 29),
+        (10, _M, 17),
+        (10, _L, 9),
+        (10, _4K, 1),
+        (10, _5K, 1),
+        (8, _L, 5),
+        (8, _4K, 1),
+        (24, _L, 29),
+        (24, _4K, 13),
+        (24, _5K, 5),
+    ],
+)
+def test_the_video_batch_is_the_largest_that_fits_the_cards_memory(budget_gib, output, expected):
+    assert video_upscale_batch_size(*output, _STREAMED_7B, budget_bytes=budget_gib * _GIB) == expected
+
+
+def test_the_video_batch_is_always_one_plus_a_multiple_of_four_and_never_grows_with_the_size():
+    batches = [video_upscale_batch_size(width, width * 9 // 16, _STREAMED_7B, budget_bytes=10 * _GIB) for width in range(256, 8000, 64)]
+
+    assert all(batch % 4 == 1 for batch in batches)
+    assert batches == sorted(batches, reverse=True)
+
+
+def test_an_unknown_budget_uses_a_batch_of_five():
+    assert {video_upscale_batch_size(*output, _STREAMED_7B, budget_bytes=None) for output in (_S, _L, _4K, _5K)} == {5}
+
+
+@pytest.mark.parametrize(
+    ("budget_gib", "source", "output", "code"),
+    [
+        (10, (768, 448), _S, None),
+        (10, (1280, 704), _L, None),
+        (10, (1920, 1080), _4K, WARNING_ONE_FRAME_BATCH),
+        (10, (2560, 1440), _5K, WARNING_MEMORY),
+        (8, (1280, 704), _L, None),
+        (24, (1920, 1080), _4K, None),
+        (24, (3840, 2160), (7680, 4320), WARNING_ONE_FRAME_BATCH),
+    ],
+)
+def test_the_video_option_is_warned_by_the_batch_the_job_will_use(budget_gib, source, output, code):
+    option = seedvr2_video_option(*source, _STREAMED_7B, budget_bytes=budget_gib * _GIB)
+
+    assert (option.factor, option.width, option.height, option.allowed) == (2, *output, True)
+    assert option.warning_code == code
+    assert (option.warning is not None) == (code is not None)
+
+
+def test_the_video_option_has_no_warning_for_an_unknown_budget():
+    option = seedvr2_video_option(1920, 1080, _STREAMED_7B, budget_bytes=None)
+
+    assert (option.warning, option.warning_code) == (None, None)
+
+
+def test_video_option_rounds_the_output_down_to_even():
+    option = seedvr2_video_option(853, 480, _STREAMED_7B, budget_bytes=None)
+
+    assert (option.width, option.height) == (1706, 960)
 
 
 def test_creative_options_carry_no_warning():

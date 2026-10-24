@@ -21,7 +21,7 @@
 <script lang="ts">
   import { Icon, ShortcutList } from '$lib/components/atoms';
   import { isTyping } from '$lib/keyboard';
-  import { canExtend, canUseAsReference, describeFallbackReason, extendReason, plainUpscaleMethod, upscaleFactors, upscaleOption, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
+  import { canExtend, canUseAsReference, describeFallbackReason, extendReason, offeredUpscaleFactors, plainUpscaleMethod, upscaleOption, type AssetActionHandlers, type ReferenceTarget } from '$lib/state/assetActions';
   import { addToast } from '$lib/state/toasts.svelte';
   import type { GalleryAsset, UpscaleFactor } from '$lib/types';
   import ActionMenu, { type ActionMenuEntry } from './ActionMenu.svelte';
@@ -121,6 +121,8 @@
   const upscaleItems = $derived<ActionMenuEntry[]>(
     asset && onupscale ? upscaleEntries(asset, onupscale) : []
   );
+  /** The keys that follow X for the factors this asset offers: "2 or 4" for an image, "2" for a video. */
+  const upscaleKeys = $derived(asset ? offeredUpscaleFactors(asset).join(' or ') : '');
 
   // A video offers Extend where an image offers Use as reference; the button is absent without the capability.
   const showExtend = $derived(Boolean(onextend && asset?.media_type === 'video' && asset.extend));
@@ -603,7 +605,7 @@
         upscaleWaitingSince = null;
         return;
       }
-      if (onupscale && asset && upscaleFactors(asset).length > 0) {
+      if (onupscale && asset && offeredUpscaleFactors(asset).length > 0) {
         const chord = stepUpscaleChord(upscaleWaitingSince, e, Date.now());
         upscaleWaitingSince = chord.waitingSince;
         if (chord.value) {
@@ -698,7 +700,7 @@
           data-action="upscale"
           aria-haspopup="menu"
           aria-expanded={upscaleOpen}
-          title="Upscale (X then 2 or 4)"
+          title="Upscale (X then {upscaleKeys})"
           onclick={() => { upscaleOpen = !upscaleOpen; }}
         ><Icon name="expand" size={14} /><span class="viewer-btn-label">Upscale</span><Icon name="chevdown" size={12} class="opacity-70" /></button>
       {/if}

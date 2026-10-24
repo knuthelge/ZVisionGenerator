@@ -107,6 +107,8 @@ Windows and Linux video generation require CUDA. CPU fallback is not available f
 
 Each video records the settings it was made with, as images do (see [Output Files](image.md#output-files)); **Reuse settings** in the Web UI loads them.
 
+To upscale a video that already exists, see [Upscale an existing video](#upscale-an-existing-video-web-ui).
+
 ### Review before upscaling
 
 `--review` works as for images (see [Review before upscaling](image.md#review-before-upscaling)) on macOS, Windows and Linux. The small render is decoded to a short preview, so the pause adds a few seconds before the full-size pass. With LTX the sound may change slightly after upscaling. MiniMax H3 keeps the sound it made with the half-size render.
@@ -204,6 +206,34 @@ The extension generates the last second of the source again (the part carried ov
 - **A faint change at the join.** On very still shots, one frame at the join can look slightly different. It comes from the model's video encoder, which re-draws the carried second, and it is not smoothed over.
 - **Fading audio in long chains.** The model's sound can fade or thin out over many extensions of the same clip.
 - **A LoRA can break the seam of a MiniMax H3 extension.** With one user LoRA, the new part started with a cut to a different shot instead of continuing the source. It is a known issue; the same clip extended without the LoRA joined cleanly, and the LoRA worked in text to video. Extend without a LoRA when the join matters.
+
+## Upscale an existing video (Web UI)
+
+On Windows and Linux, any video in the gallery can be made twice as large with SeedVR2, the same model as the [plain image upscale](image.md#plain-upscale). It enlarges the frames faithfully and adds fine detail; it does not generate a new clip.
+
+### Starting an upscale
+
+Open a video in the viewer and choose **Upscale**, or press `X` and then `2`. The same item is in the **⋯** menu of every video tile and, on a phone, in the viewer's **⋯** sheet. The menu has one item, **2× → 1536×896** for a 768×448 clip, and it is marked **· high memory** when the result may not fit in your GPU's memory, or **· very slow** when it has to be upscaled one frame at a time (see [Memory and time](#memory-and-time)). The job starts at once and joins the queue like any other; it is listed on the job card as **Upscaling video** and can be cancelled.
+
+The video can come from anywhere in the output folder, whether the app made it or not, and in `.mp4`, `.mov`, `.webm` or `.mkv`. A video that was already upscaled can be upscaled again. These are refused when you click, with the reason: a file with no readable video, HDR video, a variable frame rate, interlaced video and non-square pixels. Clips that are 10-bit but not HDR, very short or not a multiple of 32 pixels in size are fine.
+
+### What you get
+
+`<name>_2x.mp4` is saved beside the original (`<name>_2x_2.mp4` if that name is taken). It has twice the width and height, the same frames and frame rate, and the original sound: an AAC track is copied as it is, and any other format is converted to AAC. The original file is never changed. A clip rotated by a flag, as phones record them, comes out upright.
+
+The settings recorded in the original are carried over, so **Reuse settings** on the result loads the original's prompt, model and seed at the original's size. The details show the upscale as `2× · SeedVR2 · seedvr2-7b q8 · softness 0`. A clip with no recorded settings is upscaled all the same, but its result has nothing to reuse.
+
+An upscaled video can't be extended. Extend first and upscale last.
+
+### Memory and time
+
+The job card shows **Batch 0 of N** as soon as the model is loaded and then fills batch by batch, with the time left once the first batch is done. Time grows with the size of the result: on an RTX 3080 with 10 GB of GPU memory and 30 GB of system memory, a clip takes about 1 minute per second of video at 768×448 (small), 2 minutes at 1024×576 (medium) and 3 minutes at 1280×704 (large). The first upscale downloads the model (9.0 GB for 7B, 3.9 GB for 3B), as the image upscale does.
+
+The model is the one the image upscale uses: 7B needs about 22 GB of system memory, otherwise the 3B model runs. How long the clip is does not change the memory it needs, because the frames stream through the GPU a few at a time. The size of the result does, and so does your GPU: the app estimates how much GPU memory a batch needs at that size and uses the largest batch (up to 29 frames) that fits your card. Bigger batches run faster per frame and leave fewer seams between batches. On a 10 GB card the small size uses 29 frames per batch, medium 17 and large 9, and a 1080p clip (a 3840×2160 result) has to go one frame at a time, at about 25 to 30 seconds per frame, which is 10 to 12 minutes per second of 24 fps video. A card with more memory picks bigger batches for the same clip. When even one frame at a time does not fit, as for 5120×2880 on a 10 GB card, the size is marked **· high memory**. A marked size can still be started; if it does not fit, the job stops at the first batch with "Not enough GPU memory to upscale to …" and leaves no file. When the app cannot read your GPU's memory it uses 5 frames per batch and marks nothing.
+
+Cancel a running job and no file is left behind. The `seedvr2.video_softness` setting (default `0`) sets how much each frame is softened before it is enlarged; the other `seedvr2` settings are in [Plain upscale](image.md#plain-upscale).
+
+Playback may show a faint change in texture where one batch of frames ends and the next begins, about once a second at the smaller sizes. A size marked **· very slow** is upscaled one frame at a time, so every frame is a batch of its own and the texture shimmers a little more.
 
 ## Video Sizes
 

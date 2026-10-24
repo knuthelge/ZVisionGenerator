@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from PIL import Image
@@ -41,7 +41,7 @@ class SeedVR2Upscaler(Protocol):
 
 
 class SeedVR2VideoUpscaler(Protocol):
-    """Optional extension of an engine that can also enlarge the frames of a video.
+    """Optional extension of an engine that can also enlarge the frames of a video file.
 
     It is not runtime-checkable: callers test for the method with ``hasattr(upscaler, "upscale_video")``.
     """
@@ -49,18 +49,23 @@ class SeedVR2VideoUpscaler(Protocol):
     def upscale_video(
         self,
         model: Any,
-        frames: list[np.ndarray],
+        frames: Iterable[np.ndarray],
         *,
         width: int,
         height: int,
+        total_frames: int,
         seed: int,
         softness: float,
-        batch_size: int = 5,
+        batch_size: int,
         progress: Callable[[int, int], None] | None = None,
-    ) -> list[np.ndarray]:
-        """Return *frames* (HxWx3 uint8) enlarged to *width* × *height*, pre-blurred by *softness* (0-1).
+        interrupt: Callable[[], None] | None = None,
+    ) -> Iterator[np.ndarray]:
+        """Return an iterator over *frames* (HxWx3 uint8) enlarged to *width* × *height*, pre-blurred by *softness* (0-1).
 
-        The engine upscales the clip in temporal batches of *batch_size*; *progress* gets
-        ``(batches_done, batches_total)`` after each batch.
+        The engine reads *frames* as it goes and yields the enlarged frames in order, so a long clip never sits in
+        memory whole. It upscales in temporal batches of *batch_size*; *progress* gets
+        ``(batches_done, batches_total)`` after each batch, where the total starts as the batches *total_frames*
+        needs and grows if the stream is longer. *interrupt* is called at each step and stops the upscale by
+        raising. Closing the iterator frees the engine's models.
         """
         ...

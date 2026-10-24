@@ -24,7 +24,8 @@ from tests.conftest import _make_args
 from tests.conftest import _make_plan
 from tests.conftest import _make_video_args, make_extend_source
 from zvisiongenerator.core.image_types import ImageGenerationRequest
-from zvisiongenerator.core.video_types import VideoGenerationRequest
+from zvisiongenerator.core.video_types import VideoFileUpscaleRequest, VideoGenerationRequest
+from zvisiongenerator.downloads.target import DownloadTarget
 from zvisiongenerator.utils.interactive import SkipSignal
 from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, MLX_WEIGHTS
 from zvisiongenerator.web import server as web_server
@@ -469,6 +470,104 @@ class TestWebRunner:
         workflow.run.assert_not_called()
         assert events[-1]["type"] == "batch_cancelled"
         assert not list(tmp_path.glob("*.png"))
+
+    def _video_file_request(self, tmp_path):
+        return VideoFileUpscaleRequest(
+            source=make_extend_source(path=tmp_path / "clip.mp4"), recorded_config=None, output_dir=str(tmp_path), width=1536, height=896, upscale_model="seedvr2-7b", softness=0.0, batch_size=25
+        )
+
+    def test_video_file_upscale_job_downloads_loads_and_runs_in_video_mode(self, tmp_path, monkeypatch):
+        """A video file upscale downloads the tier like the image one, loads it with video-mode events, runs once, and accepts only quit."""
+        upscaler = MagicMock(name="upscaler")
+        upscaler.weights = FP8_WEIGHTS
+        model = MagicMock(name="seedvr2_model")
+        targets = (DownloadTarget("numz/SeedVR2_comfyUI", None, ("a.safetensors",)),)
+        plans: list = []
+        downloads: list = []
+        runs: list = []
+
+        def _fake_load(engine, name, *, models_dir, on_phase):
+            on_phase("loading")
+            return model
+
+        def _fake_run(engine, loaded, request, *, progress_callback, skip_signal):
+            runs.append((engine, loaded, request))
+            progress_callback({"type": "batch_completed", "mode": "video", "completed_iterations": 1, "total_iterations": 1})
+
+        def _fake_ensure(self, planned, **kwargs):
+            downloads.append((planned, kwargs["mode"], kwargs["role"], kwargs["model"]))
+            return True
+
+        monkeypatch.setattr(web_runner_module, "seedvr2_plan", lambda name, **kwargs: plans.append((name, kwargs["weights"])) or targets)
+        monkeypatch.setattr(web_runner_module.WebRunner, "_ensure_downloads", _fake_ensure)
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: upscaler)
+        monkeypatch.setattr(web_runner_module, "load_seedvr2", _fake_load)
+        monkeypatch.setattr(web_runner_module, "run_video_file_upscale", _fake_run)
+        request = self._video_file_request(tmp_path)
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            job_id = runner.submit_video_file_upscale_job(request=request, context={"output_dir": str(tmp_path), "media_type": "video"})
+            snapshot = _wait_for_status(runner, job_id, "completed")
+            loading = [event for event in runner._get_job(job_id).history if event["type"] == "model_loading"]
+        finally:
+            runner.shutdown()
+
+        image_plan = web_runner_module.WebRunner._upscale_download_plan(
+            ImageGenerationRequest(backend=None, model=None, prompt="p", upscale_method="seedvr2", upscale_model="seedvr2-7b"), "numz/SeedVR2_comfyUI"
+        )
+        assert snapshot["job_type"] == "upscale"
+        assert snapshot["supported_controls"] == ["quit"]
+        assert snapshot["media_type"] == "video"
+        assert downloads[0] == (targets, "video", "model", "SeedVR2 7B fp8")
+        assert downloads[0][0] == image_plan
+        assert plans[0] == ("seedvr2-7b", FP8_WEIGHTS)
+        assert [(event["mode"], event["model"], event["replaces_download"]) for event in loading] == [("video", "SeedVR2 7B fp8", False)]
+        assert runs == [(upscaler, model, request)]
+
+    def test_a_quit_before_a_video_file_upscale_starts_cancels_in_video_mode(self, tmp_path, monkeypatch):
+        control = SkipSignal()
+        control.queue_action("quit")
+        events: list = []
+        monkeypatch.setattr(web_runner_module, "run_video_file_upscale", MagicMock(side_effect=AssertionError("must not run")))
+        monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", MagicMock(side_effect=AssertionError("must not load")))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            runner._run_video_file_upscale_request(request=self._video_file_request(tmp_path), progress_callback=events.append, control_signal=control)
+        finally:
+            runner.shutdown()
+
+        assert events == [{"type": "batch_cancelled", "mode": "video", "completed_iterations": 0, "total_iterations": 1}]
+
+    def test_a_stopped_video_file_download_ends_the_job_without_loading(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(web_runner_module.WebRunner, "_ensure_downloads", lambda self, *_a, **_kw: False)
+        monkeypatch.setattr(web_runner_module, "run_video_file_upscale", MagicMock(side_effect=AssertionError("must not run")))
+        monkeypatch.setattr(web_runner_module, "load_seedvr2", MagicMock(side_effect=AssertionError("must not load")))
+        monkeypatch.setattr(web_runner_module, "get_seedvr2_upscaler", lambda: MagicMock(name="upscaler"))
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+
+        try:
+            runner._run_video_file_upscale_request(request=self._video_file_request(tmp_path), progress_callback=lambda _event: None, control_signal=SkipSignal())
+        finally:
+            runner.shutdown()
+
+    def test_image_job_snapshots_carry_no_media_type(self, tmp_path, monkeypatch):
+        runner = web_runner_module.WebRunner(max_workers=1, heartbeat_seconds=0.01)
+        _stub_request_job(monkeypatch)
+        monkeypatch.setattr(web_runner_module, "run_upscale", lambda *_a, **_kw: None)
+        monkeypatch.setattr(web_runner_module, "load_image_model", lambda *_a, **_kw: (MagicMock(), MagicMock()))
+        monkeypatch.setattr(web_runner_module, "get_ziv_data_dir", lambda: tmp_path)
+        request = ImageGenerationRequest(backend=None, model=None, prompt="p", model_name="zit", upscale_factor=2, upscale_source="/out/a.png", quantize=8)
+
+        try:
+            job_id = runner.submit_upscale_job(request=request, workflow=MagicMock(), model_ref="/models/zit", context={"output_dir": str(tmp_path)})
+            snapshot = _wait_for_status(runner, job_id, "completed")
+        finally:
+            runner.shutdown()
+
+        assert "media_type" not in snapshot
 
     def test_completed_image_job_includes_output_assets(self, tmp_path, monkeypatch):
         """Successful generated output paths should become gallery-shaped job outputs."""

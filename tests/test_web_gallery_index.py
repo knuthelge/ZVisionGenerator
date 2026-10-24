@@ -16,7 +16,7 @@ import pytest
 
 from zvisiongenerator.utils import app_db
 from zvisiongenerator.web import gallery_index
-from zvisiongenerator.web.gallery_index import FactsRead, GalleryIndex, ScannedFile
+from zvisiongenerator.web.gallery_index import GALLERY_INDEX_VERSION, FactsRead, GalleryIndex, ScannedFile
 
 NOW = 1_000_000.0
 
@@ -61,7 +61,7 @@ def _index(tmp_path: Path, **kwargs) -> GalleryIndex:
     return GalleryIndex(lambda: tmp_path / "ziv.sqlite3", **kwargs)
 
 
-def _rows(tmp_path: Path, version: int = 1) -> dict[str, tuple[int, int, int]]:
+def _rows(tmp_path: Path, version: int = GALLERY_INDEX_VERSION) -> dict[str, tuple[int, int, int]]:
     with closing(sqlite3.connect(tmp_path / "ziv.sqlite3")) as conn:
         return {row[0]: row[1:] for row in conn.execute(f"SELECT rel_path, mtime_ns, ctime_ns, size FROM gallery_assets_v{version}")}
 
@@ -424,7 +424,7 @@ def test_g19_forget_removes_only_the_named_rows(tmp_path: Path, root: Path) -> N
     index.facts_for("other", _scan(root), _Reader(), prune=True)
     index.forget("root", ["a.png", "missing.png"])
     with closing(sqlite3.connect(tmp_path / "ziv.sqlite3")) as conn:
-        remaining = set(conn.execute("SELECT root, rel_path FROM gallery_assets_v1"))
+        remaining = set(conn.execute(f"SELECT root, rel_path FROM gallery_assets_v{GALLERY_INDEX_VERSION}"))
     assert remaining == {("root", "b.png"), ("root", "c.png"), ("other", "a.png"), ("other", "b.png"), ("other", "c.png")}
 
 
@@ -456,7 +456,7 @@ def test_invalid_row_facts_are_read_again(tmp_path: Path, root: Path) -> None:
     index = _index(tmp_path)
     index.facts_for("root", _scan(root), _Reader(), prune=True)
     with closing(sqlite3.connect(tmp_path / "ziv.sqlite3")) as conn:
-        conn.execute("UPDATE gallery_assets_v1 SET facts = 'not json'")
+        conn.execute(f"UPDATE gallery_assets_v{GALLERY_INDEX_VERSION} SET facts = 'not json'")
         conn.commit()
     reader = _Reader()
     facts = index.facts_for("root", _scan(root), reader, prune=True)

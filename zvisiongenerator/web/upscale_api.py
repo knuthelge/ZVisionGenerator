@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from zvisiongenerator.core.image_types import ImageGenerationRequest
+from zvisiongenerator.core.video_types import ExtendSource, VideoFileUpscaleRequest
 from zvisiongenerator.upscale_runner import UpscaleSource
 from zvisiongenerator.utils.config import resolve_defaults, resolve_scheduler_class, resolve_upscale_steps, sharpening_amounts
 from zvisiongenerator.utils.image_model_detect import detect_image_model
@@ -15,7 +17,16 @@ from zvisiongenerator.utils.lora import parse_lora_arg
 from zvisiongenerator.utils.paths import resolve_model_path
 from zvisiongenerator.utils.provenance import UPSCALE_METHOD_CREATIVE, UPSCALE_METHOD_SEEDVR2, RecordedSettings
 from zvisiongenerator.utils.seedvr2 import SEEDVR2_BITS, SEEDVR2_REPO, SeedVR2Setup
-from zvisiongenerator.utils.upscale import UPSCALE_FACTORS, UpscaleOption, existing_image_denoise, seedvr2_options, upscale_options
+from zvisiongenerator.utils.upscale import (
+    UPSCALE_FACTORS,
+    VIDEO_UPSCALE_FACTOR,
+    UpscaleOption,
+    existing_image_denoise,
+    seedvr2_options,
+    seedvr2_video_option,
+    upscale_options,
+    video_upscale_batch_size,
+)
 from zvisiongenerator.web.config import WebUiConfig, preferred_option
 
 NOTICE_SETTINGS_UNKNOWN = "original settings unknown"
@@ -32,6 +43,15 @@ class UpscalePlan:
     model_ref: str
     option: UpscaleOption
     # Job-panel notes on how the job differs from the original, e.g. a model fallback.
+    notices: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class VideoUpscalePlan:
+    """Everything needed to submit one video upscale job."""
+
+    request: VideoFileUpscaleRequest
+    # Job-panel notes on how the job differs from the original, e.g. settings that were not recorded.
     notices: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -151,6 +171,28 @@ def plan_seedvr2_upscale(source: UpscaleSource, factor: int, *, setup: SeedVR2Se
     return UpscalePlan(request=request, model_ref=SEEDVR2_REPO, option=option, notices=notices)
 
 
+def plan_video_upscale(source: ExtendSource, recorded_config: Mapping[str, Any] | None, *, setup: SeedVR2Setup) -> VideoUpscalePlan:
+    """Build the SeedVR2 upscale request for the checked video *source*, always 2×.
+
+    The output size, batch size and memory warning follow the size rules of ``utils.upscale``; the pre-blur is the
+    configured ``seedvr2.video_softness``. *recorded_config* is the settings embedded in the clip, carried on to
+    the result; without it the job says the original settings are unknown.
+    """
+    option = seedvr2_video_option(source.width, source.height, setup.tier, budget_bytes=setup.budget_bytes)
+    request = VideoFileUpscaleRequest(
+        source=source,
+        recorded_config=recorded_config,
+        output_dir=str(source.path.parent),
+        width=option.width,
+        height=option.height,
+        upscale_model=setup.tier.model,
+        softness=setup.settings.video_softness,
+        batch_size=video_upscale_batch_size(option.width, option.height, setup.tier, budget_bytes=setup.budget_bytes),
+    )
+    notices = () if recorded_config else (NOTICE_SETTINGS_UNKNOWN,)
+    return VideoUpscalePlan(request=request, notices=notices)
+
+
 def _source_request_fields(source: UpscaleSource, recorded: RecordedSettings) -> dict[str, Any]:
     """Return the request fields both upscale methods take from *source* and its recorded settings."""
     prompt = recorded.prompt or ""
@@ -209,6 +251,11 @@ def upscale_size_label(plan: UpscalePlan) -> str:
     """Return the job's size line, e.g. ``2× → 1664×2432``, or ``2× creative → 1664×2432``."""
     creative = " creative" if plan.request.upscale_method == UPSCALE_METHOD_CREATIVE else ""
     return f"{plan.option.factor}×{creative} → {plan.option.width}×{plan.option.height}"
+
+
+def video_upscale_size_label(plan: VideoUpscalePlan) -> str:
+    """Return the video job's size line, e.g. ``2× → 3840×2160``."""
+    return f"{VIDEO_UPSCALE_FACTOR}× → {plan.request.width}×{plan.request.height}"
 
 
 def upscale_json_request(body: Any) -> tuple[str, int, str]:

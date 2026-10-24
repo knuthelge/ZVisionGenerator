@@ -62,7 +62,7 @@ upscale:
 seedvr2:                       # Plain upscale (Web UI viewer)
   model: auto                  # auto, seedvr2-3b or seedvr2-7b
   softness: 0.75               # 0-1: pre-blur before upscaling an image; 0 = off
-  video_softness: 0.0          # The same pre-blur for the SeedVR2 video engine; MiniMax H3 no longer uses SeedVR2 and does not read it
+  video_softness: 0.0          # Pre-blur before upscaling a video on Windows and Linux; 0 = off
   reference_megapixels: 16     # Output size the automatic tier must fit on a Mac (a typical 4x)
   tiers:                       # macOS, 8-bit, quality order; the first within this Mac's memory budget at reference_megapixels is used.
     # Estimate = weights_gb + max(activation_floor_gb, activation_base_gb + activation_gb_per_mp * MP)

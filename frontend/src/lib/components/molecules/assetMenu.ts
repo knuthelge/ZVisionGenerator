@@ -63,7 +63,7 @@ export function upscaleEntries(asset: GalleryAsset, onupscale: NonNullable<Asset
     ? seedvr2Options(asset).map((option) => ({
         kind: 'item' as const,
         id: `upscale-seedvr2-${option.factor}`,
-        label: `${sizeLabel(option, '')}${option.warning ? HIGH_MEMORY_MARKER : ''}`,
+        label: `${sizeLabel(option, '')}${warningMarker(option)}`,
         title: plainTitle(option, seedvr2.download_size_label),
         onselect: () => onupscale(asset, option.factor, 'seedvr2'),
       }))
@@ -80,6 +80,13 @@ export function upscaleEntries(asset: GalleryAsset, onupscale: NonNullable<Asset
 }
 
 const HIGH_MEMORY_MARKER = ' · high memory';
+const ONE_FRAME_MARKER = ' · very slow';
+
+/** The label suffix for a warned SeedVR2 option: what the warning is about, from its code; none without a warning. */
+function warningMarker(option: AssetUpscaleFactor): string {
+  if (!option.warning) return '';
+  return option.warning_code === 'one_frame_batch' ? ONE_FRAME_MARKER : HIGH_MEMORY_MARKER;
+}
 
 function sizeLabel(option: AssetUpscaleFactor, suffix: string): string {
   return `${option.factor}×${suffix} → ${option.width}×${option.height}`;
