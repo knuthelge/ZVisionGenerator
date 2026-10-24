@@ -1,6 +1,6 @@
 # Upscale existing videos 2×
 
-**Status:** Proposed (2026-10-22). Not started. macOS uses LTX's own upsampler and refine. SeedVR2 won't fit a 32 GB Mac at our sizes (see [Why not SeedVR2](#why-not-seedvr2)). Windows and Linux use SeedVR2 for video, which the vendored core already supports (see [Windows and Linux: SeedVR2](#windows-and-linux-seedvr2)). Outside research on 2026-10-22 added the official LTX upscaler IC-LoRA to the macOS spike (see [Outside practice](#outside-practice)).
+**Status:** In progress (2026-10-24). Windows and Linux have shipped (unreleased) with SeedVR2; see [Windows and Linux: SeedVR2 (shipped)](#windows-and-linux-seedvr2-shipped). macOS is not started: it uses LTX's own upsampler and refine, because SeedVR2 won't fit a 32 GB Mac at our sizes (see [Why not SeedVR2](#why-not-seedvr2)). Outside research on 2026-10-22 added the official LTX upscaler IC-LoRA to the macOS spike (see [Outside practice](#outside-practice)).
 
 ## Problem
 
@@ -31,7 +31,7 @@ LTX already has everything needed: its two-stage pipeline's second stage takes a
 
 ### Not in scope
 
-- **The LTX path on Windows and Linux.** CUDA uses SeedVR2 instead (see [Windows and Linux: SeedVR2](#windows-and-linux-seedvr2)). The CUDA video backend has no encode-and-refine path, and SeedVR2 is the better-supported tool for a 10 GB GPU.
+- **The LTX path on Windows and Linux.** CUDA uses SeedVR2 instead (see [Windows and Linux: SeedVR2 (shipped)](#windows-and-linux-seedvr2-shipped)). The CUDA video backend has no encode-and-refine path, and SeedVR2 is the better-supported tool for a 10 GB GPU.
 - **Factors other than 2×.** The app only finds 2× spatial upsampler files (`ltx_mlx_upsampler_file`).
 - **Frame-rate upscaling.** The vendored `LatentUpsampler` has a `temporal_x2` variant; a separate feature if wanted.
 - **Videos from outside the output folder**, like the image upscale. Everything in the output folder was made by LTX, which is what the refine is trained on.
@@ -111,7 +111,7 @@ Write the numbers, the default step count, the tiling rule and the plain-or-IC-L
 - `core/video_types.py` (or next to the extend types): a frozen `VideoUpscaleSource` with the path, probe, size, frame count, frame rate and colour tags.
 - `backends/mac/video.py`: `LtxVideoBackend.upscale_video(model, source, *, prompt, seed, steps, output_path, step_callback)`. It loads `DistilledPipeline` (the same load as the in-run upscale, plus `tile_count` from the spike's rule for the clip's length), encodes the video and audio, builds the stage-1 result from the encoded latent and the prompt embeddings, runs `_upsample_latent` and `_stage2` with `stage2_steps=steps`, and decodes through the streamed tiled decode. Progress events reuse `_TwoStageProgress`'s stage-2 phase. It refuses a model without an upsampler file and the diffusion video decoder, like extend.
 - The original audio is muxed onto the decoded video with the extend splice helpers (`video_splice.source_audio_chain`), in a work folder beside the output that the gallery skips; the file is moved into place only on success.
-- `backends/__init__.py`: `supports_video_file_upscale()`, true on macOS, and on Windows and Linux once their part ships. No other module branches on platform.
+- `backends/__init__.py`: `supports_video_file_upscale()`, true on Windows and Linux already, and on macOS once this part ships. No other module branches on platform.
 - Tests, mocked: the stage-1 result carries the encoded latent's dims and the prompt embeddings; `_stage2` gets `stage2_steps`; the tile count follows the clip length; refusals for a missing upsampler and the diffusion decoder; audio is muxed only when the source has it; a failure leaves no file.
 
 ### 2. Runner and recorded settings
@@ -146,29 +146,25 @@ Write the numbers, the default step count, the tiling rule and the plain-or-IC-L
 - A `CHANGELOG.md` entry under `[Unreleased]`.
 - Move this proposal to `archive/` and update the index.
 
-## Windows and Linux: SeedVR2
+## Windows and Linux: SeedVR2 (shipped)
 
-The vendored PyTorch core (`packages/seedvr2_torch`, from numz's ComfyUI node) already processes video: `encode_all_batches`, `upscale_all_batches` and `decode_all_batches` take a clip with `batch_size` and `temporal_overlap`. `backends/cuda/seedvr2.py` only passes it one frame, with all 36 blocks streamed from system memory and 1024² VAE tiles. A video upscale reuses that setup and feeds it the clip in batches. Unlike the LTX path, it works on any video, not only LTX renders, and needs no video model.
+Shipped on 2026-10-24 (unreleased). The viewer's Upscale menu offers **2×** for every video in the gallery, made by the app or not. `TorchSeedVR2Upscaler.upscale_video` runs the vendored core in our own chunk loop: the DiT and VAE are built once and cached across chunks, each chunk's frames are streamed to the encoder, and the original sound is kept (AAC copied, other codecs re-encoded to AAC). Settings: the image upscale's SeedVR2 tier (7B FP8, 3B below about 22 GB of system memory), softness 0, temporal overlap 0, 512-px VAE tiles, and the largest 4n+1 batch whose estimate fits the GPU's budget. A clip the card can only take at batch 1 is marked as very slow. The job card shows batches done and the time left. HDR, variable frame rate, interlaced, non-square-pixel and unreadable sources are refused when clicked. An upscaled video can't be extended. Stepping the batch down after an out-of-memory error is proposed separately in [video-upscale-batch-step-down.md](video-upscale-batch-step-down.md).
 
-### W0. Spike, with recorded results
+### W0 spike results
 
-A script outside the app on the vendored core, on a 10 GB GPU with 32 GB of system memory: a 5 s `s` clip, a 10 s extended `s` clip and a face close-up, at 2×. About half a day.
+Measured on an RTX 3080 10 GB with 30 GB of system memory, 7B FP8, at 2×:
 
-| Gate | Pass when |
+| Gate | Result |
 |---|---|
-| Fit | `s` → 1536×896 at `batch_size` 5 finishes on 10 GB. Record the largest 4n+1 batch that fits, and the GPU and system peaks |
-| Time | Seconds per output second at batch 5 and the largest batch |
-| Model | 3B FP8 against 7B FP8 on the same clips (the maintainers report 7B FP8 quality problems). 7B FP16 only if system memory allows |
-| Temporal | No visible flicker or seams at batch joins with `temporal_overlap` 0 and 3; pick the default |
-| Input | The clip as is against a 0.5× downscale first, as the guides advise for AI-generated input |
-| Length | Long clips stream in chunks (the core's `chunk_size`, or our own loop) without system memory growing with the clip |
-| Estimate | A per-batch term for `estimate_seedvr2_bytes` that is at or above the measured peaks |
+| Fit | `s` → 1536×896 fits at batch 29 (8.3 GiB on the card). `m` → 2048×1152 fits at batch 13 (8.4 GiB) and runs out of memory at 29. `l` → 2560×1408 needed 9.8 GiB at batch 13, so it ships at a smaller batch. 3840×2160 only fits at batch 1 |
+| Time | 2.1 s per frame at `s` batch 29 (about 51 s per output second), 5.3 at `m` batch 13, 7.1 at `l` batch 13, about 25–29 at 4K batch 1. Measured in the app: a 5 s `s` clip in 284 s, a 15 s clip in 768 s, a 5 s `m` clip in 522 s |
+| Model | 7B FP8 is clearly sharper than 3B (Laplacian variance about half for 3B); 3B stays as the low-memory tier at 9.3 GiB of system memory. 7B FP16 not tried: FP8 already peaks at 18–19.6 GiB |
+| Temporal | Each batch join shows a small texture jump on fine detail. Overlap 3–4 doesn't remove it: it moves the jump to the start of the blend and costs 1.3–2× the time. Larger batches don't make a join smaller, but make 3–6× fewer of them, and are faster, because the streamed DiT costs per batch: 2.2 s per frame at batch 5, 0.5 at batch 29. Overlap 0 and the largest batch that fits |
+| Input | A 0.5× downscale first (softness 3–7) gave a slightly softer face and nothing else; softness 0 |
+| Length | The core's whole-clip path holds every frame in system memory, and a 15 s clip was killed at 26.8 GiB. The chunk loop stays flat at 11–14.5 GiB at any length, and chunk joins look no worse than batch joins |
+| Estimate | GPU: a fixed context plus a VAE term by output size and a DiT term per batch (`estimate_seedvr2_video_bytes`), fitted to about 20 runs. System memory: the image tiers' 22 GB (7B) and 12.5 GB (3B) |
 
-### W1–W5. Build
-
-- `backends/cuda/seedvr2.py`: `TorchSeedVR2Upscaler.upscale_video(model, source, *, seed, output_path, step_callback)`. It reads frames, runs the batches with the spike's batch size and overlap, streams the decoded frames to the encoder and keeps the original audio like the macOS path.
-- The rest follows steps 2–5 above: the same menu item, route, job, recorded settings and docs, with `generation.upscale.method: "seedvr2"` and SeedVR2's memory check instead of `clip_memory_fit`. Since SeedVR2 needs no source model, a CUDA video without recorded settings can be upscaled too.
-- Update the platform parity notes when it ships.
+The mux must not use `-shortest`: LTX audio is about 0.03 s shorter than its video, and `-shortest` cut 4 frames.
 
 ## Alternatives considered
 
@@ -184,4 +180,4 @@ A script outside the app on the vendored core, on a 10 GB GPU with 32 GB of syst
 
 ## Open questions
 
-None. The macOS spike sets the step default, the tiling rule, the prompt fallback and the plain-or-IC-LoRA choice; the Windows/Linux spike sets the model, batch size and overlap.
+None. The macOS spike sets the step default, the tiling rule, the prompt fallback and the plain-or-IC-LoRA choice; the Windows/Linux results are recorded above.
