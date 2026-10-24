@@ -19,8 +19,8 @@ import { hasPendingJobSettings, requestJobSettings } from '$lib/state/pendingJob
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { router } from '$lib/state/router.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
-import { forgetContext } from '$lib/state/workspaceContext';
 import type { DownloadItem, EnhanceFrame, SettingsPreset, ImageModelDefaults, JobContext, JobSnapshot, PromptEnhancerContract, VideoModelDefaults, WorkspaceContext, GalleryAsset, GalleryPage } from '$lib/types';
+import { workspaceMemory } from '$lib/state/pageMemory';
 
 const workspaceApiMocks = vi.hoisted(() => ({
   getWorkspaceContext: vi.fn<() => Promise<WorkspaceContext>>(),
@@ -162,7 +162,7 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   draft.reset();
-  forgetContext();
+  workspaceMemory.forget();
   extendInspection.reset();
   clipMemory.reset();
   historyStore.seedHistory([]);

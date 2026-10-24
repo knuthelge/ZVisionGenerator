@@ -25,8 +25,13 @@
   }: Props = $props();
 </script>
 
+{#snippet shellActions()}
+  <!-- The actions are in the frame from the first paint (the bar keeps its height) and wake once the page has loaded. -->
+  <fieldset class="contents" disabled={loading || error !== null} data-testid="page-actions">{@render actions?.()}</fieldset>
+{/snippet}
+
 <main class="flex min-h-0 flex-1 flex-col bg-bg-base {extraClass}">
-  <PageHeader {title} {description} contained actions={loading || error ? undefined : actions} />
+  <PageHeader {title} {description} contained actions={actions ? shellActions : undefined} />
   <!-- The padding sits outside the centred block, so content lines up with the page bar's title. -->
   <div class="min-h-0 flex-1 overflow-y-auto p-4">
     <div class="mx-auto max-w-page">

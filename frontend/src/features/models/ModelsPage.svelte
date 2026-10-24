@@ -10,6 +10,7 @@
   import { Alert, ConfirmDialog, FormField, KeyValueList, ModelStatusBadges, Panel, PathField, Select } from '$lib/components/molecules';
   import { DOWNLOADABLE_TOOLTIP, DOWNLOADED_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTANT_TOOLTIP, PREPARED_SEEDVR2_TOOLTIP } from '$lib/components/molecules/ModelStatusBadges.svelte';
   import { AdminPageShell } from '$lib/components/organisms';
+  import { inventoryMemory } from '$lib/state/pageMemory';
 
   let inventory = $state<ModelInventory | null>(null);
   let loading = $state(true);
@@ -51,7 +52,13 @@
   onMount(async () => {
     stopDownloadSync = downloadStore.startSync();
     stopDownloadedHook = downloadStore.onDownloaded(() => void loadInventory({ silent: true }));
-    await loadInventory();
+    // Pages remember: the inventory a previous visit loaded shows at once; the fresh one replaces it.
+    const remembered = inventoryMemory.get();
+    if (remembered) {
+      inventory = remembered;
+      loading = false;
+    }
+    await loadInventory({ silent: remembered !== null });
     await pollConversion(false);
   });
 
@@ -190,6 +197,7 @@
     error = null;
     try {
       inventory = await getModelInventory();
+      inventoryMemory.set(inventory);
     } catch (e) {
       error = errorText(e, 'Failed to load model inventory');
     } finally {

@@ -25,6 +25,9 @@ vi.mock('$lib/state/toasts.svelte', () => ({
 }));
 
 import ConfigPage from './ConfigPage.svelte';
+import { configMemory } from '$lib/state/pageMemory';
+
+beforeEach(() => configMemory.forget());
 
 function makeField(overrides: Partial<WritableConfigField> & Pick<WritableConfigField, 'key'>): WritableConfigField {
   const { key, ...rest } = overrides;
@@ -365,5 +368,21 @@ describe('ConfigPage', () => {
     expect(save.form).toBe(form);
     expect(discard.type).toBe('reset');
     expect(discard.form).toBe(form);
+  });
+
+  it('comes back with the config a previous visit loaded, before the refresh answers', async () => {
+    configApiMocks.getConfig.mockResolvedValue(makeConfig());
+    app = flushSync(() => mount(ConfigPage, { target }));
+    await settle();
+    expect(target.querySelector('#config-form')).not.toBeNull();
+    await unmount(app!);
+    app = null;
+
+    configApiMocks.getConfig.mockImplementation(() => new Promise<AppConfig>(() => undefined));
+    app = flushSync(() => mount(ConfigPage, { target }));
+    await settle();
+    expect(target.querySelector('#config-form')).not.toBeNull();
+    expect((target.querySelector('[data-testid="page-actions"]') as HTMLFieldSetElement).disabled).toBe(false);
+    expect(configApiMocks.getConfig).toHaveBeenCalledTimes(2);
   });
 });

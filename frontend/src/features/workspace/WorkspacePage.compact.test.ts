@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { draft } from '$lib/state/draft.svelte';
 import { historyStore } from '$lib/state/history.svelte';
 import { jobStore } from '$lib/state/job.svelte';
-import { forgetContext } from '$lib/state/workspaceContext';
+import { workspaceMemory } from '$lib/state/pageMemory';
 import type { JobSnapshot, WorkspaceContext } from '$lib/types';
 
 vi.mock('$lib/state/layoutMode.svelte', () => ({
@@ -39,7 +39,7 @@ describe('WorkspacePage on a phone', () => {
     localStorage.clear();
     sessionStorage.clear();
     draft.reset();
-    forgetContext();
+    workspaceMemory.forget();
     historyStore.seedHistory([]);
     jobStore.clearJob();
     workspaceApiMocks.getWorkspaceCoreContext.mockReset();

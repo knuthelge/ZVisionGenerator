@@ -2,7 +2,7 @@
   import { onDestroy, onMount, tick } from 'svelte';
   import { errorText } from '$lib/api/client';
   import { keepLoadedTail } from '$lib/state/pageMerge';
-  import { forgetGallery, rememberGallery, rememberedGallery } from './galleryMemory';
+  import { galleryMemory } from '$lib/state/pageMemory';
   import { router } from '$lib/state/router.svelte';
   import { addToast, dismissToast } from '$lib/state/toasts.svelte';
   import { getGallery, deleteAsset } from '$lib/api/gallery';
@@ -79,7 +79,7 @@
 
     // Pages remember: the view a previous visit left is drawn at once, scrolled where it was, and page one refreshes
     // behind it; the first visit loads into placeholder tiles.
-    const remembered = rememberedGallery();
+    const remembered = galleryMemory.get();
     if (remembered) {
       assets = remembered.assets;
       page = remembered.page;
@@ -97,8 +97,8 @@
 
     return () => {
       document.removeEventListener('keydown', handleGridKeydown);
-      if (error || loading) forgetGallery();
-      else rememberGallery({ assets, page, totalPages, totalCount, filter: mediaFilter, sort: sortOrder, scrollTop });
+      if (error || loading) galleryMemory.forget();
+      else galleryMemory.set({ assets, page, totalPages, totalCount, filter: mediaFilter, sort: sortOrder, scrollTop });
       // Invalidate every request still awaiting a response after unmount.
       _viewGeneration += 1;
       _mutationRevision += 1;

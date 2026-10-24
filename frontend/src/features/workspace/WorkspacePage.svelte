@@ -14,7 +14,7 @@
   import { addToast } from '$lib/state/toasts.svelte';
   import { getWorkspaceCoreContext, skipFirstRun, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
   import { updateConfig } from '$lib/api/config';
-  import { rememberContext, rememberedContext } from '$lib/state/workspaceContext';
+  import { workspaceMemory } from '$lib/state/pageMemory';
   import { deleteAsset } from '$lib/api/gallery';
   import { canExtend, extendParams, referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { Icon, MascotSpot } from '$lib/components/atoms';
@@ -503,7 +503,7 @@
       .then((fresh) => {
         if (request !== modelStatusRequest || !context) return;
         context = { ...context, image_models: fresh.image_models, video_models: fresh.video_models };
-        rememberContext(context);
+        workspaceMemory.set(context);
       })
       .catch(() => undefined);
   }
@@ -855,14 +855,14 @@
     }
 
     // Pages remember: the context a previous visit loaded answers the first frame; the server's fresh one replaces it.
-    const remembered = rememberedContext();
+    const remembered = workspaceMemory.get();
     if (remembered) adoptContext(remembered);
 
     // Load workspace authority first; gallery/history hydration follows after the core page can paint.
     getWorkspaceCoreContext()
       .then((ctx) => {
         if (cancelled) return;
-        rememberContext(ctx);
+        workspaceMemory.set(ctx);
         adoptContext(ctx);
         jobStore.seedQueue(ctx.queued_jobs ?? []);
         void jobStore.reconnectActiveJob({ snapshot: ctx.active_job });

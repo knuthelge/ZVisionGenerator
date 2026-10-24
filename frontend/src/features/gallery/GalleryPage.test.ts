@@ -4,7 +4,7 @@ import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/inde
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { historyStore } from '$lib/state/history.svelte';
-import { forgetGallery } from './galleryMemory';
+import { galleryMemory } from '$lib/state/pageMemory';
 import type { GalleryAsset, GalleryPage as GalleryPageResponse } from '$lib/types';
 
 const galleryApiMocks = vi.hoisted(() => ({
@@ -143,7 +143,7 @@ let app: Record<string, unknown> | null = null;
 beforeEach(() => {
   target = document.createElement('div');
   document.body.appendChild(target);
-  forgetGallery();
+  galleryMemory.forget();
   galleryApiMocks.getGallery.mockReset();
   galleryApiMocks.deleteAsset.mockReset();
   toastMocks.addToast.mockReset();

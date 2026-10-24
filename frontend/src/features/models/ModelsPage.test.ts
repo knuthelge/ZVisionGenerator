@@ -60,6 +60,9 @@ import { DOWNLOADABLE_TOOLTIP, NOT_DOWNLOADED_FIRST_USE_TOOLTIP, PREPARED_INSTAN
 import ModelsPage from './ModelsPage.svelte';
 import { chooseInBrowser, listingWith, placesFor } from '../../test-utils/pathBrowser';
 import { pickOption } from '../../test-utils/select';
+import { inventoryMemory } from '$lib/state/pageMemory';
+
+beforeEach(() => inventoryMemory.forget());
 
 function makeInventory(): ModelInventory {
   return {
@@ -1191,5 +1194,44 @@ describe('ModelsPage downloads', () => {
     downloadButton()!.click();
     await tickFor();
     expect(addToast).toHaveBeenLastCalledWith('Hub unreachable', 'error', { action: { label: 'Retry', run: expect.any(Function) } });
+  });
+});
+
+describe('ModelsPage memory', () => {
+  let target: HTMLDivElement;
+  let app: Record<string, unknown> | null = null;
+
+  beforeEach(() => {
+    for (const mock of Object.values(modelApiMocks)) mock.mockReset();
+    modelApiMocks.getDownloads.mockResolvedValue({ items: [] });
+    modelApiMocks.getConversionStatus.mockResolvedValue({ state: 'idle' });
+    target = document.createElement('div');
+    document.body.appendChild(target);
+  });
+
+  afterEach(async () => {
+    if (app) {
+      await unmount(app);
+      app = null;
+    }
+    target.remove();
+  });
+
+  it('comes back with the inventory a previous visit loaded, before the refresh answers', async () => {
+    modelApiMocks.getModelInventory.mockResolvedValue({
+      ...makeInventory(),
+      image_models: [{ download_needed: false, name: 'atlas', label: 'atlas', family: 'flux2_klein', size_label: '9b', stored_quant: null }],
+    });
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+    expect(target.querySelector('[data-testid="model-name"]')?.textContent).toBe('atlas');
+    await unmount(app!);
+    app = null;
+
+    modelApiMocks.getModelInventory.mockImplementation(() => new Promise<ModelInventory>(() => undefined));
+    app = flushSync(() => mount(ModelsPage, { target }));
+    await settle();
+    expect(target.querySelector('[data-testid="model-name"]')?.textContent).toBe('atlas');
+    expect(modelApiMocks.getModelInventory).toHaveBeenCalledTimes(2);
   });
 });

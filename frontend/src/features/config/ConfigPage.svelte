@@ -7,6 +7,7 @@
   import { Button, Icon, Input } from '$lib/components/atoms';
   import { Alert, FormField, KeyValueList, Panel, PathField, Select, type KeyValueItem } from '$lib/components/molecules';
   import { AdminPageShell } from '$lib/components/organisms';
+  import { configMemory } from '$lib/state/pageMemory';
 
   type SelectOption = { value: string; label: string; disabled?: boolean };
 
@@ -26,6 +27,12 @@
   let formValues = $state<Record<string, string>>({});
 
   onMount(async () => {
+    // Pages remember: the config a previous visit loaded shows at once; the fresh one replaces it.
+    const remembered = configMemory.get();
+    if (remembered) {
+      applyConfig(remembered);
+      loading = false;
+    }
     try {
       applyConfig(await getConfig());
     } catch (e) {
@@ -36,6 +43,7 @@
   });
 
   function applyConfig(nextConfig: AppConfig): void {
+    configMemory.set(nextConfig);
     config = nextConfig;
     formValues = valuesFromConfig(nextConfig);
   }
