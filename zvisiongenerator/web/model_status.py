@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.utils.model_files import find_local_model_dir, is_ltx_mlx_layout, ltx_mlx_text_encoder_repo
+from zvisiongenerator.utils.model_files import find_local_model_dir, is_ltx_mlx_layout, ltx_mlx_bundled_text_encoder, ltx_mlx_text_encoder_repo
 from zvisiongenerator.utils.model_memory import (
     GIB,
     CudaMemoryEstimate,
@@ -61,8 +61,11 @@ def describe_model_status(
     model_dir = find_local_dir(resolved_path)
     text_encoder_dir = None
     if kind == "video" and model_dir is not None and is_ltx_mlx_layout(model_dir):
-        text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo())
-        downloaded = text_encoder_dir is not None
+        if ltx_mlx_bundled_text_encoder(model_dir) is not None:
+            downloaded = True  # An LTX-2.5 pack carries its own Gemma 4; it never needs the Gemma 3 repo.
+        else:
+            text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo())
+            downloaded = text_encoder_dir is not None
     else:
         downloaded = model_dir is not None
 
@@ -116,8 +119,6 @@ def _cuda_video_memory_fit(resolved_path: str, budget: MemoryBudget, find_local_
 
 
 def _video_memory_fit(model_dir: Path, text_encoder_dir: Path | None, budget: MemoryBudget) -> dict[str, Any] | None:
-    if text_encoder_dir is None:
-        return None
     budget_bytes = budget.gpu_bytes
     staged = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, low_memory=True, unified_bytes=budget.unified_bytes, **_REFERENCE_CLIP)
     resident = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, low_memory=False, unified_bytes=budget.unified_bytes, **_REFERENCE_CLIP)

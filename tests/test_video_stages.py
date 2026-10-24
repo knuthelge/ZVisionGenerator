@@ -44,6 +44,10 @@ def _req(**overrides) -> VideoGenerationRequest:
     return VideoGenerationRequest(**defaults)
 
 
+def test_request_defaults_to_121_frames():
+    assert _req().num_frames == 121
+
+
 def _source(tmp_path: Path | None = None, **overrides) -> ExtendSource:
     """Build a checked extend source: a 24 fps clip with sound that was recorded with a scene."""
     return make_extend_source(**{"path": (tmp_path or Path("/videos")) / "clip.mp4", "prompt": 'She says "I told you." Then she sighs.', **overrides})

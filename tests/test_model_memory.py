@@ -165,6 +165,19 @@ def _make_ltx(root: Path, *, gemma: float, connector: float, transformer: float,
     return model_dir, text_encoder_dir
 
 
+def _make_ltx_25(root: Path, *, encoder: float) -> tuple[Path, Path]:
+    """Build a fake LTX-2.5 MLX pack bundling its text encoder, plus a Gemma dir holding the same encoder file."""
+    model_dir = root / "ltx25"
+    _write_sized(model_dir / "transformer-distilled-1.1.safetensors", 10.535)
+    _write_sized(model_dir / "connector.safetensors", 5.909)
+    _write_sized(model_dir / "vae_decoder_conv.safetensors", _DECODER_GIB)
+    _write_sized(model_dir / "text_encoder.safetensors", encoder)
+    (model_dir / "text_encoder_config.json").write_text("{}", encoding="utf-8")
+    text_encoder_dir = root / "gemma"
+    _write_sized(text_encoder_dir / "model-00001-of-00001.safetensors", encoder)
+    return model_dir, text_encoder_dir
+
+
 # The weights (GiB) and the peaks MLX measured per run on the machine the estimate was fit on (32 GiB, q4 distilled).
 _MEASURED_WEIGHTS = {"gemma": 7.477, "connector": 5.909, "transformer": 10.535, "upsampler": 0.927}
 _MEASURED_UNIFIED = 32 * _GIB
@@ -272,6 +285,61 @@ class TestEstimateLtxMlxClipMemory:
         required = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, width=704, height=448, frames=121, low_memory=False, env={"LTX2_VAE_DECODE_BUDGET_GB": "3"})
 
         assert required == pytest.approx((2 + 3 + 4 + 1.7) * _GIB, abs=1)
+
+    def test_ltx_2_3_estimates_are_pinned_to_the_bytes(self, tmp_path):
+        """The 2.5 pack support leaves every 2.3 estimate unchanged."""
+        model_dir, text_encoder_dir = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
+        _write_sized(model_dir / "audio_vae.safetensors", 0.1)
+        _write_sized(model_dir / "vocoder.safetensors", 0.2)
+        clip = {"width": 768, "height": 448, "frames": 121, "env": {}}
+
+        def estimate(low_memory: bool, unified_bytes: int | None) -> int | None:
+            return estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, low_memory=low_memory, unified_bytes=unified_bytes, **clip)
+
+        assert estimate(True, None) == 16245456099
+        assert estimate(True, _MEASURED_UNIFIED) == 16245456099
+        assert estimate(True, 16 * _GIB) == 15285786214
+        assert estimate(False, None) == 38891742353
+        assert estimate(False, _MEASURED_UNIFIED) == 38891742353
+        assert estimate(False, 16 * _GIB) == 32372236206
+
+    def test_a_bundled_pack_estimates_without_a_text_encoder_dir_and_matches_a_gemma_dir_holding_the_same_file(self, tmp_path):
+        model_dir, text_encoder_dir = _make_ltx_25(tmp_path, encoder=7.477)
+        clip = {"width": 768, "height": 448, "frames": 121, "low_memory": True, "env": {}}
+
+        bundled = estimate_ltx_mlx_clip_memory(model_dir, None, **clip)
+        with_dir = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, **clip)
+
+        assert bundled is not None
+        assert bundled == with_dir
+        # 5376 tokens: the decode stage (12.9 + 0.00067 * 3328 GiB) is the peak, about 15.1 GiB.
+        assert bundled / _GIB == pytest.approx(12.9 + 0.00067 * (5376 - 2048), abs=0.01)
+
+    def test_the_bundled_encoder_is_counted_resident_without_low_memory(self, tmp_path):
+        model_dir, _ = _make_ltx_25(tmp_path, encoder=3)
+        _write_sized(model_dir / "connector.safetensors", 2)
+        _write_sized(model_dir / "transformer-distilled-1.1.safetensors", 4)
+        clip = {"width": 704, "height": 448, "frames": 121, "low_memory": False, "env": {}}
+
+        resident = estimate_ltx_mlx_clip_memory(model_dir, None, **clip)
+
+        assert resident == pytest.approx((3 + 2 + 4 + 12.9 + 0.00067 * (4928 - 2048) - 2.83) * _GIB, abs=1)
+
+    def test_a_2_3_pack_without_a_text_encoder_dir_gives_none(self, tmp_path):
+        model_dir, _ = _make_ltx(tmp_path, gemma=1, connector=1, transformer=1)
+
+        assert estimate_ltx_mlx_clip_memory(model_dir, None, width=704, height=448, frames=121, low_memory=True) is None
+
+    def test_the_conv_decoder_bytes_are_counted_in_the_capped_decode(self, tmp_path):
+        model_dir, text_encoder_dir = _make_ltx(tmp_path, gemma=0.1, connector=0.1, transformer=0.1)
+        clip = {"width": 1280, "height": 704, "frames": 241, "low_memory": True, "env": {}, "unified_bytes": 16 * _GIB}
+        plain = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, **clip)
+        _write_sized(model_dir / "vae_decoder_conv.safetensors", 0.5)
+
+        with_conv = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, **clip)
+
+        assert plain == pytest.approx((8 + _DECODER_GIB) * _GIB, abs=2**20)
+        assert with_conv == pytest.approx((8 + 0.5) * _GIB, abs=2**20)  # The conv decoder replaces vae_decoder.
 
     def test_returns_none_for_non_ltx_layout(self, tmp_path):
         _write_safetensors(tmp_path / "transformer" / "model.safetensors", {"w": ("BF16", [10, 10])})
@@ -383,6 +451,19 @@ class TestClipMemoryFit:
         _, text_encoder_dir = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)
 
         assert clip_memory_fit("example/model", budget=MemoryBudget(_GIB), find_local_dir=self._finder(None, text_encoder_dir), **self._CLIP) is None
+
+    def test_a_bundled_pack_needs_no_gemma_lookup(self, tmp_path):
+        model_dir, _ = _make_ltx_25(tmp_path, encoder=7.477)
+        seen: list[str] = []
+
+        def finder(reference: str) -> Path | None:
+            seen.append(reference)
+            return self._finder(model_dir, None)(reference)
+
+        result = clip_memory_fit("example/model", budget=MemoryBudget(40 * _GIB), find_local_dir=finder, env={}, **self._CLIP)
+
+        assert result is not None and result["status"] == "fits"
+        assert seen == ["example/model"]
 
     def test_a_missing_text_encoder_gives_none(self, tmp_path):
         model_dir, _ = _make_ltx(tmp_path, **_MEASURED_WEIGHTS)

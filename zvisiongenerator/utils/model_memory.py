@@ -22,9 +22,11 @@ from zvisiongenerator.utils.model_files import (
     is_ideogram4_model,
     is_krea2_model,
     is_ltx_mlx_layout,
+    ltx_mlx_bundled_text_encoder,
     ltx_mlx_text_encoder_repo,
     ltx_mlx_transformer_file,
     ltx_mlx_upsampler_file,
+    ltx_mlx_video_decoder_file,
     model_weight_files,
 )
 from zvisiongenerator.utils.safetensors_stream import read_header
@@ -94,8 +96,8 @@ _QUANT_GROUP_OVERHEAD_BYTES = 4 / 64
 # Diffusion pipelines read text-encoder hidden states, never logits, so mflux does not load the LM head.
 _TEXT_ENCODER_SKIPPED_PREFIXES = ("lm_head.",)
 _LTX_MLX_CONNECTOR_FILE = "connector.safetensors"
-# The decoders loaded for a decode: the VAE tiler's budget limits only its activations, not these weights.
-_LTX_MLX_DECODER_FILES = ("vae_decoder.safetensors", "audio_vae.safetensors", "vocoder.safetensors")
+# The audio decoders loaded for a decode next to the video VAE decoder: the VAE tiler's budget limits only activations, not these weights.
+_LTX_MLX_AUDIO_DECODER_FILES = ("audio_vae.safetensors", "vocoder.safetensors")
 # LTX MLX working memory beyond the weights, in GiB, from per-stage peak memory measured with ``mx.get_peak_memory``
 # (one fresh process per clip). Fit on the q4 distilled LTX 2.3 model with its Gemma 4-bit text
 # encoder on a 32 GiB Apple Silicon Mac, where the transformer is not streamed; Macs with 24 GiB or less stream
@@ -284,7 +286,7 @@ def ltx_decode_budget_bytes(unified_bytes: int | None, env: Mapping[str, str]) -
 
 def estimate_ltx_mlx_clip_memory(
     model_dir: Path,
-    text_encoder_dir: Path,
+    text_encoder_dir: Path | None,
     *,
     width: int,
     height: int,
@@ -296,8 +298,9 @@ def estimate_ltx_mlx_clip_memory(
 ) -> int | None:
     """Estimate peak memory for generating a clip with ltx-pipelines-mlx.
 
-    The peak is the largest stage. Weights are read from safetensors headers (bfloat16 bytes of Gemma *G*,
-    connector *C*, transformer *T*, spatial upsampler *U* and decoders *D*: video VAE, audio VAE, vocoder). The
+    The peak is the largest stage. Weights are read from safetensors headers (bfloat16 bytes of the text encoder *G*,
+    connector *C*, transformer *T*, spatial upsampler *U* and decoders *D*: video VAE, audio VAE, vocoder). *G* is the pack's bundled text encoder (LTX-2.5) when it has
+    one, else the Gemma 3 in *text_encoder_dir*; *D* uses the video decoder the pipeline picks for the pack. The
     working memory of each stage is a measured curve (the ``_LTX_*_GIB`` constants) over the video tokens of the
     final output size, which is stage 2 when upscaling::
 
@@ -316,7 +319,7 @@ def estimate_ltx_mlx_clip_memory(
 
     Args:
         model_dir: The LTX MLX model directory.
-        text_encoder_dir: The Gemma text-encoder directory.
+        text_encoder_dir: The Gemma 3 text-encoder directory; ``None`` is accepted for a pack with a bundled text encoder, which is read from *model_dir* instead.
         width: Output width in pixels, as aligned for the job.
         height: Output height in pixels, as aligned for the job.
         frames: Output frame count, as aligned for the job.
@@ -326,18 +329,24 @@ def estimate_ltx_mlx_clip_memory(
         env: The environment to read the decode budget from; the process environment when omitted.
 
     Returns:
-        Estimated peak bytes, or ``None`` when the layout is not LTX MLX or weights are unreadable.
+        Estimated peak bytes, or ``None`` when the layout is not LTX MLX, the pack has no bundled text encoder and *text_encoder_dir* is ``None``, or weights are unreadable.
     """
     transformer_file = ltx_mlx_transformer_file(model_dir)
     if not is_ltx_mlx_layout(model_dir) or transformer_file is None:
         return None
+    bundled_encoder = ltx_mlx_bundled_text_encoder(model_dir)
+    if bundled_encoder is None and text_encoder_dir is None:
+        return None
+    encoder_files = [bundled_encoder] if bundled_encoder is not None else model_weight_files(text_encoder_dir)
     upsampler_file = ltx_mlx_upsampler_file(model_dir) if upscale else None
+    video_decoder = ltx_mlx_video_decoder_file(model_dir)
+    decoder_files = [*([video_decoder] if video_decoder is not None else []), *(model_dir / name for name in _LTX_MLX_AUDIO_DECODER_FILES)]
     try:
-        gemma = _files_bfloat16_bytes(model_weight_files(text_encoder_dir)) / GIB
+        gemma = _files_bfloat16_bytes(encoder_files) / GIB
         connector = _files_bfloat16_bytes([model_dir / _LTX_MLX_CONNECTOR_FILE]) / GIB
         transformer = _files_bfloat16_bytes([transformer_file]) / GIB
         upsampler = _files_bfloat16_bytes([upsampler_file]) / GIB if upsampler_file is not None else 0.0
-        decoders = _files_bfloat16_bytes([model_dir / name for name in _LTX_MLX_DECODER_FILES]) / GIB
+        decoders = _files_bfloat16_bytes(decoder_files) / GIB
     except OSError, ValueError, KeyError, TypeError:
         return None
     tokens = ltx_video_tokens(width, height, frames)
@@ -387,7 +396,7 @@ def clip_memory_fit(
 
     Returns:
         ``{"status", "required_gb", "budget_gb"}``, or ``None`` when no memory budget is known or the model is not a
-        downloaded LTX model with its text encoder. On a discrete GPU (CUDA) it adds ``"kind": "discrete"`` and
+        downloaded LTX model with its text encoder (bundled in the pack, or the Gemma 3 repo). On a discrete GPU (CUDA) it adds ``"kind": "discrete"`` and
         ``"resource"`` (``"gpu"`` or ``"system"``): the memory the numbers are about, whichever is closer to its limit.
     """
     if budget is None or not budget.gpu_bytes:
@@ -408,9 +417,11 @@ def clip_memory_fit(
     model_dir = find_local_dir(resolved_model)
     if model_dir is None or not is_ltx_mlx_layout(model_dir):
         return None
-    text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo())
-    if text_encoder_dir is None:
-        return None
+    text_encoder_dir = None
+    if ltx_mlx_bundled_text_encoder(model_dir) is None:
+        text_encoder_dir = find_local_dir(ltx_mlx_text_encoder_repo())
+        if text_encoder_dir is None:
+            return None
     required = estimate_ltx_mlx_clip_memory(model_dir, text_encoder_dir, width=width, height=height, frames=frames, low_memory=low_memory, upscale=upscale, unified_bytes=budget.unified_bytes, env=env)
     if required is None:
         return None

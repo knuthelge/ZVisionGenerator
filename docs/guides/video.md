@@ -8,21 +8,21 @@ Generate videos from text prompts or images using `ziv-video` or the Web UI.
 |---|---|---|---|
 | `ltx-4` | LTX-2.3, 4-bit: needs the least memory | macOS, Windows, Linux | ✅ |
 | `ltx-8` | LTX-2.3, 8-bit: closer to the full model, needs more memory | macOS, Windows, Linux | ✅ |
-| `ltx25-4` | LTX-2.5, 4-bit: the newer LTX, with the memory need of `ltx-4` | Windows, Linux | ✅ |
+| `ltx25-4` | LTX-2.5, 4-bit: the newer LTX, with the memory need of `ltx-4` | macOS, Windows, Linux | ✅ |
 
-`ltx25-4` is not available on macOS yet; there it stops with a message pointing to `ltx-4` and `ltx-8`. The LTX-2.3 aliases are unchanged.
+The LTX-2.3 aliases are unchanged.
 
 See [Image Guide → Model Aliases](image.md#model-aliases) for the full alias list.
 
 ## Quick Start
 
-Use `MODEL` below as `ltx-4` or `ltx-8` (4-bit or 8-bit) on every platform, or `ltx25-4` on Windows and Linux.
+Use `MODEL` below as `ltx-4`, `ltx-8` (4-bit or 8-bit) or `ltx25-4` (LTX-2.5, 4-bit), all available on every platform.
 
 ```bash
 # Text-to-video with LTX (4-bit)
 ziv-video -m ltx-4 --prompt "A cat walking through a garden"
 
-# Text-to-video with LTX-2.5 (Windows and Linux)
+# Text-to-video with LTX-2.5
 ziv-video -m ltx25-4 --prompt "A cat walking through a garden"
 
 # Image-to-video with your platform alias
@@ -202,11 +202,11 @@ Default ratio is `16:9` and default size is `s`. Dimensions vary by `--ratio`.
 
 | Preset | 16:9 | 9:16 | 1:1 |
 |--------|------|------|-----|
-| `xs` | 576×320 (49f) | 320×576 (49f) | 384×384 (49f) |
-| `s` | 768×448 (49f) | 448×768 (49f) | 576×576 (49f) |
-| `m` | 1024×576 (49f) | 576×1024 (49f) | 768×768 (49f) |
-| `l` | 1280×704 (33f) | 704×1280 (33f) | 960×960 (33f) |
-| `xl` | 1600×896 (25f) | 896×1600 (25f) | 1216×1216 (25f) |
+| `xs` | 576×320 (121f) | 320×576 (121f) | 384×384 (121f) |
+| `s` | 768×448 (121f) | 448×768 (121f) | 576×576 (121f) |
+| `m` | 1024×576 (121f) | 576×1024 (121f) | 768×768 (121f) |
+| `l` | 1280×704 (121f) | 704×1280 (121f) | 960×960 (121f) |
+| `xl` | 1600×896 (121f) | 896×1600 (121f) | 1216×1216 (121f) |
 
 Every size is a multiple of 64, so `--upscale 2` keeps it exact. `xs` is for quick prompt tests; `m` and `l` are 576p and 720p.
 
@@ -218,7 +218,7 @@ LTX has specific alignment requirements that are auto-corrected with a warning:
 
 - **Resolution**: width and height must be divisible by 32 (64 when using `--upscale`)
 - **Frames**: must follow 8k+1 pattern (9, 17, 25, 33, 41, 49, ..., 97, 121). In the Web UI you set **Duration (s)** instead: it snaps to the nearest valid frame count at the model's frame rate (5 s at 24 fps is 121 frames), shows that count next to it, and has no upper limit. Longer clips need more memory (see [Memory Check](#memory-check))
-- **macOS MLX Q4 baseline**: `ltx-4`, 704×448, ≤49 frames with `--low-memory`
+- **macOS MLX Q4 baseline**: `ltx-4` at `s` (768×448), 121 frames (5 s), with `--low-memory`
 - **macOS low memory**: `--low-memory` (the default) frees each model component once it has run. On Macs with 24 GB of memory or less it also streams the transformer from disk during generation, which cuts the memory held while denoising; steps are slightly slower, and about twice as slow with a LoRA. `--no-low-memory` (or **Low memory** off in the Web UI) turns off both, keeping every component loaded
 
 On Windows and Linux:
@@ -230,13 +230,22 @@ On Windows and Linux:
 
 ## LTX-2.5
 
-`ltx25-4` runs LTX-2.5, the newer LTX model, on Windows and Linux with an NVIDIA GPU. It uses the same 4-bit transformer path as `ltx-4`, so it fits the same machines: a 10 GB GPU with 30 GB of system memory.
+`ltx25-4` runs LTX-2.5, the newer LTX model, on macOS and on Windows and Linux with an NVIDIA GPU. It uses the same 4-bit transformer path as `ltx-4`, so it fits the same machines: a Mac with 32 GB of memory, or a 10 GB GPU with 30 GB of system memory.
+
+On Windows and Linux:
 
 - **Download** — the weights come from an ungated repository, so no Hugging Face token is needed. The download is about 71 GB. The first run then prepares a 4-bit transformer and an FP8 text encoder from it, about 22 GiB on disk, and later runs reuse them.
 - **Speed and memory** — as a typical figure, a 5 s clip with audio at 1280×704 with `--upscale 2` took about 200 s on an RTX 3080 10 GB with 30 GB of system memory, and system memory peaked at about 21 GiB. That is the same as `ltx-4` on that machine. Your time depends on the GPU.
 - **Sampler** — text to video and image to video use LTX-2.5's own distilled sampler, which adds fresh noise at every step: 8 steps, plus 3 more with `--upscale 2`. A repeated seed gives the same video. **Extend** on `ltx25-4` uses the plain deterministic sampler instead, as `ltx-4` does.
 - **Image to video** — the input image is re-compressed at a higher quality than LTX-2.3 uses before it is resized, as LTX-2.5 expects.
-- **Not available** — macOS (use `ltx-4` or `ltx-8`), an 8-bit level, and converting LTX-2.5 fine-tunes.
+
+On macOS:
+
+- **Download** — about 30.5 GB from an ungated repository, so no Hugging Face token is needed. It holds the 4-bit model with its own Gemma 4 text encoder, so no separate Gemma 3 download is made. Nothing is prepared afterwards.
+- **Memory** — estimated at about 15 GiB at `s` with 121 frames and `--low-memory`, which is within a Mac with 32 GB of memory. Longer clips and larger sizes need more (see [Memory Check](#memory-check)).
+- **Sampler** — as on Windows and Linux: text to video and image to video use LTX-2.5's own distilled sampler, and **Extend** on `ltx25-4` is deterministic. Image to video sets the input image's quality automatically.
+
+On every platform, `ltx25-4` has no 8-bit level, and LTX-2.5 fine-tunes cannot be converted.
 
 ## Memory Check
 
@@ -245,13 +254,13 @@ Text to Video and Image to Video check the clip's size and length against the ma
 - **Web UI**: under **Duration (s)**, a note appears when the clip is **tight** (the Mac may slow down while generating; on Windows and Linux the GPU is nearly full or system memory is short) or **too large** (expect heavy swapping or an out-of-memory error). The note names the memory it is about. It follows the model, size, duration, **Low memory** and **Upscale**, and stays hidden while the clip fits. The memory badge on a video model is the estimate for a 5 s clip at 768×448 without upscale.
 - **Command line**: `ziv-video` prints one warning at the start of a run and carries on. Shorten the clip with `--frames`, use a smaller `--size`, and keep `--low-memory` on.
 
-The estimate grows with the number of frames and the pixels per frame. On macOS it was measured with `ltx-4` on a Mac with 32 GB of memory, for clips up to about 10 s at 704×448; far beyond that it is extrapolated. Macs with 24 GB or less stream the transformer from disk, so the estimate is on the high side there. On Windows and Linux it was measured on one 10 GB GPU with 32 GB of system memory, at `ltx-4` and `ltx-8`: the GPU need stays flat for short clips and grows once a clip passes about 26,000 tokens at `ltx-4` (for example 1408×896 beyond about 10 s), and it adds room for the allocator. On a card with more or less memory the thresholds are an extrapolation. It does not count memory already used by other apps or by an image model that is still loaded.
+The estimate grows with the number of frames and the pixels per frame. On macOS it was measured with `ltx-4` on a Mac with 32 GB of memory, for clips up to about 10 s at 704×448; far beyond that it is extrapolated, and `ltx25-4` is estimated from its file sizes on the same basis. Macs with 24 GB or less stream the transformer from disk, so the estimate is on the high side there. On Windows and Linux it was measured on one 10 GB GPU with 32 GB of system memory, at `ltx-4` and `ltx-8`: the GPU need stays flat for short clips and grows once a clip passes about 26,000 tokens at `ltx-4` (for example 1408×896 beyond about 10 s), and it adds room for the allocator. On a card with more or less memory the thresholds are an extrapolation. It does not count memory already used by other apps or by an image model that is still loaded.
 
 ## Model Detection
 
 `ziv-video` auto-detects the model family from supported model values:
 
-- **Aliases** — `ltx-4` and `ltx-8`, and `ltx25-4` on Windows and Linux
+- **Aliases** — `ltx-4`, `ltx-8` and `ltx25-4`
 - **Supported repo IDs** — known LTX prefixes such as `dgrauet/ltx*`, `Lightricks/LTX-Video*` and `unsloth/LTX-2.5*`
 - **Local paths** — local paths containing `ltx` are treated as LTX candidates, including Windows-style path strings on any host
 - **Converted models** — LTX folders are also recognised by their contents, so a fine-tune converted with `ziv-model model --model-type ltx-2.3` (see [LTX-2.3 video fine-tunes](model.md#ltx-23-video-fine-tunes)) runs by its name, whatever it is called

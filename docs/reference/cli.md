@@ -112,7 +112,7 @@ The `ideo` alias selects Ideogram 4 (`ideogram-ai/ideogram-4-fp8`), an image mod
 Platform-aware aliases:
 
 - `ltx-4` and `ltx-8` (4-bit and 8-bit LTX-2.3) on every platform. On Windows and Linux they need about 20 GB and 27 GB of system memory.
-- `ltx25-4` (4-bit LTX-2.5) on Windows and Linux, which needs about 21 GB of system memory. On macOS it stops with a message pointing to `ltx-4` and `ltx-8`. Extend uses the deterministic sampler (see the [Video Guide](../guides/video.md#ltx-25)).
+- `ltx25-4` (4-bit LTX-2.5) on every platform. On Windows and Linux it needs about 21 GB of system memory; on macOS it downloads about 30.5 GB with its own text encoder. Extend uses the deterministic sampler (see the [Video Guide](../guides/video.md#ltx-25)).
 
 | Argument | Default | Description |
 |---|---|---|
@@ -216,8 +216,8 @@ Default ratio is `16:9` and default size is `s`. Dimensions vary by `--ratio`.
 
 | Preset | 16:9 | 9:16 | 1:1 |
 |--------|------|------|-----|
-| `xs` | 576×320 (49f) | 320×576 (49f) | 384×384 (49f) |
-| `s` | 768×448 (49f) | 448×768 (49f) | 576×576 (49f) |
-| `m` | 1024×576 (49f) | 576×1024 (49f) | 768×768 (49f) |
-| `l` | 1280×704 (33f) | 704×1280 (33f) | 960×960 (33f) |
-| `xl` | 1600×896 (25f) | 896×1600 (25f) | 1216×1216 (25f) |
+| `xs` | 576×320 (121f) | 320×576 (121f) | 384×384 (121f) |
+| `s` | 768×448 (121f) | 448×768 (121f) | 576×576 (121f) |
+| `m` | 1024×576 (121f) | 576×1024 (121f) | 768×768 (121f) |
+| `l` | 1280×704 (121f) | 704×1280 (121f) | 960×960 (121f) |
+| `xl` | 1600×896 (121f) | 896×1600 (121f) | 1216×1216 (121f) |

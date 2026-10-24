@@ -21,8 +21,10 @@ class TestDetectVideoModel:
             ("Lightricks/LTX-Video", "ltx", "ltx", True, 24, 8, 32),
             ("unsloth/LTX-2.5-FP8", "ltx", "ltx", True, 24, 8, 32),
             ("unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2", "ltx", "ltx", True, 24, 8, 32),
+            ("MarceloFSO/ltx-2.5-mlx-q4-fast", "ltx", "ltx", True, 24, 8, 32),
+            ("MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5", "ltx", "ltx", True, 24, 8, 32),
         ],
-        ids=["ltx-q4", "ltx-q8", "ltx-diffusers-default", "ltx-video", "ltx-2.5", "ltx-2.5-pinned"],
+        ids=["ltx-q4", "ltx-q8", "ltx-diffusers-default", "ltx-video", "ltx-2.5", "ltx-2.5-pinned", "ltx-2.5-mlx", "ltx-2.5-mlx-pinned"],
     )
     def test_known_models(self, model_path, expected_family, expected_backend, expected_i2v, expected_fps, expected_frame_align, expected_res_align):
         info = detect_video_model(model_path)
@@ -47,6 +49,10 @@ class TestDetectVideoModel:
 
     @pytest.mark.parametrize("model_path", ["unsloth/LTX-2.5-FP8", "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2"])
     def test_is_known_video_repo_recognizes_ltx_2_5(self, model_path):
+        assert is_known_video_repo(model_path) is True
+
+    @pytest.mark.parametrize("model_path", ["MarceloFSO/ltx-2.5-mlx-q4-fast", "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5"])
+    def test_is_known_video_repo_recognizes_the_ltx_2_5_mac_mirror(self, model_path):
         assert is_known_video_repo(model_path) is True
 
     @pytest.mark.parametrize("text_encoder", ["Gemma4UnifiedForConditionalGeneration", "Gemma3ForConditionalGeneration"])

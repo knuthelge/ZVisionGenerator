@@ -238,22 +238,25 @@ class TestVideoCliExecution:
             with pytest.raises(SystemExit, match="2"):
                 video_cli.main()
 
-    def test_main_reports_the_ltx25_alias_as_unavailable_on_macos(self, monkeypatch, tmp_path, capsys):
+    def test_main_loads_the_ltx25_alias_on_macos_from_the_pinned_mirror(self, monkeypatch, tmp_path):
         import zvisiongenerator.video_cli as video_cli
         from zvisiongenerator.utils.config import load_config
 
         monkeypatch.setenv("ZIV_DATA_DIR", str(tmp_path / "ziv"))
         monkeypatch.setattr(video_cli, "load_config", load_config)
+        monkeypatch.setattr(video_cli, "ensure_ffmpeg", lambda: None)
         monkeypatch.setattr(video_cli.sys, "platform", "darwin")
         backend = MagicMock()
+        backend.load_model.side_effect = RuntimeError("stop after the load request")
         monkeypatch.setattr(video_cli, "get_video_backend", lambda _family: backend)
 
-        with patch("sys.argv", ["ziv-video", "-m", "ltx25-4", "--prompt", "a dog"]):
+        with patch("sys.argv", ["ziv-video", "-m", "ltx25-4", "--prompt", "a dog", "-o", str(tmp_path)]):
             with pytest.raises(SystemExit, match="2"):
                 video_cli.main()
 
-        assert "(ltx25-4) is not available on macOS" in capsys.readouterr().err
-        backend.load_model.assert_not_called()
+        backend.load_model.assert_called_once()
+        call = backend.load_model.call_args
+        assert "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5" in (*call.args, *call.kwargs.values())
 
     def test_main_reports_backend_load_errors_via_parser_error(self, monkeypatch, tmp_path):
         import zvisiongenerator.video_cli as video_cli

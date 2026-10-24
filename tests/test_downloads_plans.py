@@ -143,6 +143,7 @@ class TestVideoPlan:
             latent_upsampler=("owner/ltx-up", "u.safetensors"),
             upscale=True,
             repo_ignore=(),
+            text_encoder_bundled=False,
         )
 
     def test_the_versions_repo_ignore_is_passed_to_the_backend(self, monkeypatch):
@@ -350,6 +351,46 @@ class TestThroughTheRealDispatch:
             DownloadTarget("Lightricks/LTX-2.3", None, ("ltx-2.3-22b-distilled-1.1.safetensors",), None, None),
             DownloadTarget("Lightricks/LTX-2.3", None, ("ltx-2.3-spatial-upscaler-x2-1.1.safetensors",), None, None),
         )
+
+    @staticmethod
+    def _darwin_config(monkeypatch, tmp_path):
+        from zvisiongenerator.backends.mac import download_plan as mac_plan
+        from zvisiongenerator.utils import config as config_module
+        from zvisiongenerator.utils.config import load_config
+
+        monkeypatch.setattr(config_module, "get_ziv_data_dir", lambda: tmp_path / ".ziv")
+        monkeypatch.setattr("zvisiongenerator.utils.paths.get_ziv_data_dir", lambda: tmp_path / ".ziv")
+        monkeypatch.setattr("zvisiongenerator.backends.sys.platform", "darwin")
+        monkeypatch.setattr(mac_plan, "ltx_mlx_text_encoder_repo", lambda: "owner/gemma3")
+        return load_config()
+
+    def test_a_macos_version_alias_plans_no_gemma_3_and_keeps_its_revision(self, monkeypatch, tmp_path):
+        config = self._darwin_config(monkeypatch, tmp_path)
+        config["video_model_presets"]["ltx"]["versions"]["ltx25"]["aliases"].append("ltx-ver")
+        pin = "owner/ltx25-mlx@" + "d" * 40
+
+        assert video_plan(pin, family="ltx", config=config, model_name="ltx-ver", upscale=False) == (DownloadTarget("owner/ltx25-mlx", "d" * 40),)
+
+    def test_the_macos_ltx25_plan_is_the_pinned_mirror_alone_with_upscale(self, monkeypatch, tmp_path):
+        config = self._darwin_config(monkeypatch, tmp_path)
+        pin = config["model_aliases"]["ltx25-4"]["darwin"]
+
+        assert pin == "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5"
+        assert video_plan(pin, family="ltx", config=config, model_name="ltx25-4", upscale=True) == (DownloadTarget("MarceloFSO/ltx-2.5-mlx-q4-fast", "281bf05bd23207d6feef708fc2e270f84ba992b5"),)
+
+    @pytest.mark.parametrize("name", ["ltx-4", "ltx-8"])
+    def test_the_macos_ltx_2_3_plan_is_the_repo_then_gemma_3(self, monkeypatch, tmp_path, name):
+        """2.3 guard: the packaged ``ltx-4`` and ``ltx-8`` Mac plans are the whole repo with no revision, then Gemma 3."""
+        from zvisiongenerator.backends.mac.download_plan import MLX_LM_ALLOW_PATTERNS
+
+        config = self._darwin_config(monkeypatch, tmp_path)
+        repo = config["model_aliases"][name]["darwin"]
+
+        for upscale in (False, True):
+            assert video_plan(repo, family="ltx", config=config, model_name=name, upscale=upscale) == (
+                DownloadTarget(repo),
+                DownloadTarget("owner/gemma3", None, MLX_LM_ALLOW_PATTERNS, None, None),
+            )
 
     def test_the_enhancer_plan_uses_the_transformers_patterns(self):
         from zvisiongenerator.backends.cuda.download_plan import TRANSFORMERS_ALLOW_PATTERNS

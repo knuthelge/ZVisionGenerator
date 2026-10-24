@@ -162,6 +162,27 @@ class TestHasCompleteWeights:
         _touch(tmp_path / "vae_decoder.safetensors")
         assert has_complete_weights(tmp_path) is True
 
+    def test_ltx_mlx_layout_accepts_the_2_5_conv_decoder(self, tmp_path):
+        _touch(tmp_path / "connector.safetensors")
+        _touch(tmp_path / "transformer-distilled.safetensors")
+        _touch(tmp_path / "text_encoder.safetensors")
+        _touch(tmp_path / "text_encoder_config.json", "{}")
+
+        assert has_complete_weights(tmp_path) is False
+        _touch(tmp_path / "vae_decoder_conv.safetensors")
+        assert has_complete_weights(tmp_path) is True
+
+    def test_ltx_mlx_layout_with_a_bundled_encoder_config_needs_its_weights(self, tmp_path):
+        """An interrupted download links the small config before the large weights."""
+        _touch(tmp_path / "connector.safetensors")
+        _touch(tmp_path / "transformer-distilled.safetensors")
+        _touch(tmp_path / "vae_decoder_conv.safetensors")
+        _touch(tmp_path / "text_encoder_config.json", "{}")
+
+        assert has_complete_weights(tmp_path) is False
+        _touch(tmp_path / "text_encoder.safetensors")
+        assert has_complete_weights(tmp_path) is True
+
     def test_converted_layout_with_symlinked_base_components(self, tmp_path):
         base = tmp_path / "base"
         model = tmp_path / "converted"
@@ -247,6 +268,17 @@ class TestLtx2TextEncoderClass:
 
 
 class TestFindLocalModelDir:
+    def test_a_pinned_ltx_2_5_mlx_pack_is_found_through_the_cache(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("huggingface_hub.constants.HF_HUB_CACHE", str(tmp_path))
+        snapshot = tmp_path / "models--owner--pack" / "snapshots" / _PIN
+        for name in ("connector", "transformer-distilled", "vae_decoder_conv", "text_encoder"):
+            _touch(snapshot / f"{name}.safetensors")
+        _touch(snapshot / "text_encoder_config.json", "{}")
+
+        assert find_local_model_dir(f"owner/pack@{_PIN}") == snapshot
+        (snapshot / "text_encoder.safetensors").unlink()
+        assert find_local_model_dir(f"owner/pack@{_PIN}") is None
+
     def test_local_directory_with_weights(self, tmp_path):
         _touch(tmp_path / "model.safetensors")
 
@@ -488,3 +520,40 @@ class TestCachedSnapshotDirs:
         assert cached_snapshot_dirs("owner/repo", "main") == [snapshot]
         assert cached_snapshot_dirs("owner/repo", "..") == []
         assert cached_snapshot_dirs("owner/missing", None) == []
+
+
+@pytest.mark.parametrize(
+    ("present", "expected"),
+    [
+        (["text_encoder.safetensors", "text_encoder_config.json"], "text_encoder.safetensors"),
+        (["text_encoder.safetensors"], None),
+        (["text_encoder_config.json"], None),
+        ([], None),
+    ],
+)
+def test_ltx_bundled_text_encoder_needs_both_files(tmp_path, present, expected):
+    for name in present:
+        _touch(tmp_path / name)
+
+    found = model_files.ltx_mlx_bundled_text_encoder(tmp_path)
+
+    assert (found.name if found else None) == expected
+
+
+@pytest.mark.parametrize(
+    ("present", "expected"),
+    [
+        (["vae_decoder_conv.safetensors"], "vae_decoder_conv.safetensors"),
+        (["vae_decoder.safetensors"], "vae_decoder.safetensors"),
+        (["vae_decoder.safetensors", "vae_decoder_conv.safetensors"], "vae_decoder_conv.safetensors"),
+        (["vae_encoder_conv.safetensors"], None),
+        ([], None),
+    ],
+)
+def test_ltx_video_decoder_file_follows_the_pipeline_names(tmp_path, present, expected):
+    for name in present:
+        _touch(tmp_path / name)
+
+    found = model_files.ltx_mlx_video_decoder_file(tmp_path)
+
+    assert (found.name if found else None) == expected

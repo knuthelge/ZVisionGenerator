@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.backends.mac.memory import memory_size_bytes, mlx_cache_limit
 from zvisiongenerator.core.video_types import ExtendSegment
+from zvisiongenerator.utils.model_files import find_local_model_dir, ltx_mlx_bundled_text_encoder
+from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 from zvisiongenerator.utils.video_extend import CARRY_FRAMES, EXTEND_FRAME_STEP, audio_lead_samples, carry_latent_frames, cut_window_audio, window_audio_cut, window_frames
 from zvisiongenerator.utils.video_model_detect import VideoModelInfo, detect_video_model
 from zvisiongenerator.utils.video_splice import build_segment_command, write_pcm16_wav
@@ -64,12 +66,53 @@ class _LtxModel:
         upscale: Whether ``pipeline`` is the two-stage upscale pipeline.
         low_ram_streaming: Whether the pipeline streams the transformer blocks, which also needs
             the MLX buffer cache disabled for the duration of each generation.
+        ltx25: Whether the loaded pack is an LTX-2.5 pack (it bundles its own Gemma 4 text encoder).
     """
 
     pipeline: Any
     frame_rate: float
     upscale: bool
     low_ram_streaming: bool
+    ltx25: bool = False
+
+
+def _snapshot_download(repo_id: str, revision: str) -> str:
+    """Download the *revision* snapshot of *repo_id* and return its local folder."""
+    from huggingface_hub import snapshot_download
+
+    return snapshot_download(repo_id, revision=revision)
+
+
+def _resolve_pinned_model(
+    model_path: str,
+    *,
+    find_local_dir: Callable[[str], Path | None] | None = None,
+    download: Callable[..., str] | None = None,
+) -> str:
+    """Resolve a pinned ``owner/repo@revision`` reference to a local snapshot folder.
+
+    The vendored pipeline downloads by repo id and cannot take a revision, so a pinned reference is resolved here:
+    the complete cached snapshot when there is one, otherwise a download of that revision.
+
+    Args:
+        model_path: Local path or HuggingFace repo id, optionally ``@revision``.
+        find_local_dir: Cache lookup returning the complete snapshot folder or ``None``; defaults to ``find_local_model_dir``.
+        download: Called as ``download(repo_id=..., revision=...)`` to fetch the snapshot; defaults to the Hub download.
+
+    Returns:
+        The snapshot folder for a pinned reference. An unpinned reference or a local path comes back unchanged.
+    """
+    if Path(model_path).expanduser().is_dir():
+        return model_path
+    reference = parse_huggingface_repo_reference(model_path)
+    if reference is None or reference.revision is None:
+        return model_path
+    find_local_dir = find_local_model_dir if find_local_dir is None else find_local_dir
+    download = _snapshot_download if download is None else download
+    local = find_local_dir(model_path)
+    if local is not None:
+        return str(local)
+    return str(download(repo_id=reference.repo_id, revision=reference.revision))
 
 
 class _TwoStageProgress:
@@ -371,7 +414,9 @@ def _generate_one_stage(
 ) -> None:
     """Run the distilled sampler at full resolution and write the clip to *output_path*.
 
-    Mirrors stage 1 of upstream's distilled pipeline, without the half-resolution step.
+    Mirrors stage 1 of upstream's distilled pipeline, without the half-resolution step. An LTX-2.5 pack uses its own
+    sigma table; text-to-video and image-to-video then run the ancestral (SDE) sampler with the noise seed offset
+    upstream uses, and an extension (``carry``) stays on the deterministic sampler. LTX-2.3 is deterministic throughout.
 
     Args:
         model: Handle returned by ``load_model``.
@@ -393,7 +438,7 @@ def _generate_one_stage(
     from ltx_core_mlx.model.transformer.model import X0Model
     from ltx_core_mlx.utils.memory import aggressive_cleanup
     from ltx_core_mlx.utils.positions import compute_audio_positions, compute_audio_token_count, compute_video_positions
-    from ltx_pipelines_mlx.scheduler import DISTILLED_SIGMAS, shorten_schedule
+    from ltx_pipelines_mlx.scheduler import DISTILLED_SIGMAS, LTX_2_5_DISTILLED_SIGMAS, shorten_schedule
     from ltx_pipelines_mlx.utils.helpers import create_noised_state
     from ltx_pipelines_mlx.utils.samplers import denoise_loop
 
@@ -444,15 +489,33 @@ def _generate_one_stage(
     if low_memory:
         aggressive_cleanup()
 
-    output = denoise_loop(
-        model=X0Model(pipe.dit),
-        video_state=video_state,
-        audio_state=audio_state,
-        video_text_embeds=video_embeds,
-        audio_text_embeds=audio_embeds,
-        sigmas=shorten_schedule(DISTILLED_SIGMAS, steps, keep="start"),
-        on_step=_one_stage_progress(step_callback),
-    )
+    sigmas = shorten_schedule(LTX_2_5_DISTILLED_SIGMAS if model.ltx25 else DISTILLED_SIGMAS, steps, keep="start")
+    if model.ltx25 and carry is None:
+        from ltx_core_mlx.components.diffusion_steps import EulerAncestralDiffusionStep
+        from ltx_pipelines_mlx.distilled import ANCESTRAL_ETA, ANCESTRAL_NOISE_SEED_OFFSET, ANCESTRAL_S_NOISE
+        from ltx_pipelines_mlx.utils.samplers import euler_ancestral_denoising_loop
+
+        output = euler_ancestral_denoising_loop(
+            sigmas=sigmas,
+            video_state=video_state,
+            audio_state=audio_state,
+            stepper=EulerAncestralDiffusionStep(eta=ANCESTRAL_ETA, s_noise=ANCESTRAL_S_NOISE),
+            transformer=X0Model(pipe.dit),
+            video_text_embeds=video_embeds,
+            audio_text_embeds=audio_embeds,
+            noise_seed=seed + ANCESTRAL_NOISE_SEED_OFFSET,
+            on_step=_one_stage_progress(step_callback),
+        )
+    else:
+        output = denoise_loop(
+            model=X0Model(pipe.dit),
+            video_state=video_state,
+            audio_state=audio_state,
+            video_text_embeds=video_embeds,
+            audio_text_embeds=audio_embeds,
+            sigmas=sigmas,
+            on_step=_one_stage_progress(step_callback),
+        )
     if low_memory:
         aggressive_cleanup()
 
@@ -678,11 +741,13 @@ class LtxVideoBackend:
 
         Raises:
             RuntimeError: If ltx-pipelines-mlx is not installed.
+            ValueError: If the pack is LTX-2.5 but its text encoder is not at the folder root.
         """
         low_memory: bool = kwargs.get("low_memory", True)
         loras: list[tuple[str, float]] | None = kwargs.get("loras")
         upscale: bool = bool(kwargs.get("upscale"))
         streaming = _use_low_ram_streaming(low_memory, memory_size_bytes())
+        model_dir = _resolve_pinned_model(model_path)
 
         try:
             # The constructor sets the MLX cache limit to 0 process-wide when streaming; scope it.
@@ -690,20 +755,28 @@ class LtxVideoBackend:
                 if upscale:
                     from ltx_pipelines_mlx import DistilledPipeline
 
-                    pipeline = DistilledPipeline(model_dir=model_path, low_memory=low_memory, low_ram_streaming=streaming)
+                    pipeline = DistilledPipeline(model_dir=model_dir, low_memory=low_memory, low_ram_streaming=streaming)
                 else:
                     from ltx_pipelines_mlx import BasePipeline
 
-                    pipeline = BasePipeline(model_dir=model_path, low_memory=low_memory, low_ram_streaming=streaming)
+                    pipeline = BasePipeline(model_dir=model_dir, low_memory=low_memory, low_ram_streaming=streaming)
         except ImportError as exc:
             raise RuntimeError("Video dependency ltx-pipelines-mlx not found. Reinstall with: uv sync") from exc
+
+        from ltx_pipelines_mlx.utils.generation import is_ltx25_pack
+
+        ltx25 = bool(is_ltx25_pack(pipeline.model_dir))
+        if ltx25 and ltx_mlx_bundled_text_encoder(Path(pipeline.model_dir)) is None:
+            raise ValueError(
+                f"{model_path} is an LTX-2.5 pack but has no text_encoder.safetensors and text_encoder_config.json at its root; re-download it so the bundled Gemma 4 text encoder is present."
+            )
 
         if loras:
             # ltx-pipelines-mlx fuses _pending_loras while it loads the transformer
             pipeline._pending_loras = loras  # noqa: SLF001
 
         model_info = detect_video_model(model_path)
-        return _LtxModel(pipeline=pipeline, frame_rate=float(model_info.default_fps), upscale=upscale, low_ram_streaming=streaming), model_info
+        return _LtxModel(pipeline=pipeline, frame_rate=float(model_info.default_fps), upscale=upscale, low_ram_streaming=streaming, ltx25=ltx25), model_info
 
     def text_to_video(
         self,

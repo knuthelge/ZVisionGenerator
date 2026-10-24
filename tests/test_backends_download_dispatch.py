@@ -69,6 +69,19 @@ def test_macos_dispatch_accepts_the_repo_ignore(monkeypatch: pytest.MonkeyPatch)
     assert backends.video_download_plan("owner/ltx", family="ltx", repo_ignore=("x/*",)) == (DownloadTarget("owner/ltx"), DownloadTarget("owner/gemma", allow_patterns=mac_plan.MLX_LM_ALLOW_PATTERNS))
 
 
+def test_macos_dispatch_forwards_text_encoder_bundled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(backends.sys, "platform", "darwin")
+    monkeypatch.setattr(mac_plan, "ltx_mlx_text_encoder_repo", lambda: "owner/gemma")
+
+    assert backends.video_download_plan("owner/ltx@abc", family="ltx", text_encoder_bundled=True) == (DownloadTarget("owner/ltx", "abc"),)
+
+
+def test_cuda_dispatch_ignores_text_encoder_bundled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(backends.sys, "platform", "linux")
+
+    assert backends.video_download_plan("owner/ltx", family="ltx", text_encoder_bundled=True) == backends.video_download_plan("owner/ltx", family="ltx")
+
+
 def test_macos_dispatches_to_the_mac_planner(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(backends.sys, "platform", "darwin")
     monkeypatch.setattr(mac_plan, "ltx_mlx_text_encoder_repo", lambda: "owner/gemma")

@@ -70,7 +70,7 @@ def video_plan(model_ref: str, *, family: str, config: dict[str, Any], model_nam
         ValueError: If the ``video_model_presets.ltx.diffusers`` config entries are malformed.
     """
     from zvisiongenerator import backends
-    from zvisiongenerator.utils.config import ltx_load_options
+    from zvisiongenerator.utils.config import ltx_load_options, ltx_version
 
     options = ltx_load_options(config, model_name, upscale=upscale)
     return _offline_as_none(
@@ -81,6 +81,7 @@ def video_plan(model_ref: str, *, family: str, config: dict[str, Any], model_nam
             latent_upsampler=options.get("latent_upsampler"),
             upscale=upscale,
             repo_ignore=options.get("repo_ignore", ()),
+            text_encoder_bundled=ltx_version(config, model_name) is not None,
         )
     )
 

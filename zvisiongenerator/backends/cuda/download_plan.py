@@ -127,6 +127,7 @@ def video_download_plan(
     latent_upsampler: tuple[str, str] | None = None,
     upscale: bool = False,
     repo_ignore: Sequence[str] = (),
+    text_encoder_bundled: bool = False,
 ) -> tuple[DownloadTarget, ...]:
     """Return the downloads of the LTX diffusers model *model_ref*: the repo, the single-file transformer and the latent upsampler.
 
@@ -142,8 +143,9 @@ def video_download_plan(
         latent_upsampler: ``(repo_id[@revision], filename)`` of the latent upsampler weights, or ``None``.
         upscale: Whether the run uses the two-stage upscale.
         repo_ignore: Extra patterns the repo download skips.
+        text_encoder_bundled: Ignored (the macOS planner uses it to leave Gemma 3 out).
     """
-    del family
+    del family, text_encoder_bundled
     if Path(model_ref).expanduser().is_dir():
         return ()
     reference = parse_huggingface_repo_reference(model_ref)

@@ -19,6 +19,12 @@ _LTX_MLX_DISTILLED_GLOB = "transformer-distilled-*.safetensors"
 _LTX_MLX_DISTILLED_UNVERSIONED = "transformer-distilled.safetensors"
 # The spatial upsampler names ltx-pipelines-mlx looks for (``_resolve_upsampler_path``), 2.5 packs first.
 _LTX_MLX_UPSAMPLER_STEMS = ("spatial_upscaler_x2_v1_0", "ltx-2.3-spatial-upscaler-x2", "spatial_upscaler_x2_v1_1")
+# Bundled Gemma 4 text encoder of an LTX-2.5 pack: ltx_core_mlx ``encoder_configurator._TEXT_ENCODER_WEIGHTS`` / ``_TEXT_ENCODER_CONFIG``.
+_LTX_MLX_BUNDLED_ENCODER_WEIGHTS = "text_encoder.safetensors"
+_LTX_MLX_BUNDLED_ENCODER_CONFIG = "text_encoder_config.json"
+# Video VAE decoder names: ltx_pipelines_mlx ``blocks._video_vae_names`` (the conv decoder of 2.5 packs wins over the 2.3 one).
+_LTX_MLX_DECODER_CONV = "vae_decoder_conv.safetensors"
+_LTX_MLX_DECODER = "vae_decoder.safetensors"
 _WEIGHTLESS_CLASS_HINTS = ("Tokenizer", "Scheduler", "Processor", "FeatureExtractor")
 _TRANSFORMER_COMPONENT = "transformer"
 # The diffusers pipeline classes of LTX-2 repos. Those with a Gemma 3 text encoder (LTX-2.3) are downloaded without their
@@ -83,6 +89,30 @@ def ltx_mlx_transformer_file(model_dir: Path) -> Path | None:
         return versioned[-1]
     unversioned = model_dir / _LTX_MLX_DISTILLED_UNVERSIONED
     return unversioned if unversioned.is_file() else None
+
+
+def ltx_mlx_bundled_text_encoder(model_dir: Path) -> Path | None:
+    """Return the text encoder bundled in an LTX-2.5 MLX pack, or ``None`` for a pack that needs a separate Gemma 3.
+
+    Mirrors the pipeline's ``select_text_encoder``: the root ``text_encoder.safetensors`` counts only when
+    ``text_encoder_config.json`` sits next to it.
+    """
+    weights = model_dir / _LTX_MLX_BUNDLED_ENCODER_WEIGHTS
+    config = model_dir / _LTX_MLX_BUNDLED_ENCODER_CONFIG
+    return weights if weights.is_file() and config.is_file() else None
+
+
+def ltx_mlx_video_decoder_file(model_dir: Path) -> Path | None:
+    """Return the video VAE decoder file ltx-pipelines-mlx loads from *model_dir*, if present.
+
+    Mirrors the pipeline's ``_video_vae_names``: ``vae_decoder_conv.safetensors`` (LTX-2.5) when present,
+    else ``vae_decoder.safetensors`` (LTX-2.3).
+    """
+    for name in (_LTX_MLX_DECODER_CONV, _LTX_MLX_DECODER):
+        candidate = model_dir / name
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def ltx_mlx_upsampler_file(model_dir: Path) -> Path | None:
@@ -198,11 +228,19 @@ def has_complete_weights(model_dir: Path, only: set[str] | None = None) -> bool:
     if not files and (only is None or components is None):
         return False  # Without an index nothing declares what a complete snapshot holds.
     if is_ltx_mlx_layout(model_dir):
-        return ltx_mlx_transformer_file(model_dir) is not None and (model_dir / "vae_decoder.safetensors").is_file()
+        return ltx_mlx_transformer_file(model_dir) is not None and ltx_mlx_video_decoder_file(model_dir) is not None and _bundled_encoder_downloaded(model_dir)
     # Root-level files are only selected when they stand in for the transformer folder.
     present = {component_of(model_dir, path) or _TRANSFORMER_COMPONENT for path in files}
     required = [name for name in components or () if (only is None or name in only) and not (name == _TRANSFORMER_COMPONENT and _has_separate_transformer(model_dir))]
     return all(name in present for name in required) and _shards_complete(files)
+
+
+def _bundled_encoder_downloaded(model_dir: Path) -> bool:
+    """Return whether an MLX pack that declares a bundled text encoder (its config file) also holds the weights.
+
+    HuggingFace snapshots link a file only once it is complete, so the small config appears first in an interrupted download.
+    """
+    return not (model_dir / _LTX_MLX_BUNDLED_ENCODER_CONFIG).is_file() or (model_dir / _LTX_MLX_BUNDLED_ENCODER_WEIGHTS).is_file()
 
 
 def ltx2_text_encoder_class(model_dir: Path) -> str | None:

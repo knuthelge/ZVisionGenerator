@@ -50,6 +50,33 @@ def test_video_plan_local_mlx_layout_needs_only_gemma(tmp_path: Path, gemma: Dow
     assert video_download_plan(str(tmp_path), family="ltx") == (gemma,)
 
 
+def test_video_plan_local_bundled_pack_needs_nothing(tmp_path: Path, gemma: DownloadTarget) -> None:
+    (tmp_path / "connector.safetensors").write_bytes(b"")
+    (tmp_path / "text_encoder.safetensors").write_bytes(b"")
+    (tmp_path / "text_encoder_config.json").write_text("{}")
+
+    assert video_download_plan(str(tmp_path), family="ltx") == ()
+
+
+def test_video_plan_local_layout_with_bundled_flag_needs_nothing(tmp_path: Path, gemma: DownloadTarget) -> None:
+    (tmp_path / "connector.safetensors").write_bytes(b"")
+
+    assert video_download_plan(str(tmp_path), family="ltx", text_encoder_bundled=True) == ()
+
+
+def test_video_plan_keeps_the_revision_of_a_pinned_reference(gemma: DownloadTarget) -> None:
+    pin = "o/p@" + "a1" * 20
+
+    assert video_download_plan(pin, family="ltx") == (DownloadTarget("o/p", "a1" * 20), gemma)
+
+
+def test_video_plan_bundled_text_encoder_is_the_model_alone(gemma: DownloadTarget) -> None:
+    pin = "o/p@" + "a1" * 20
+
+    assert video_download_plan(pin, family="ltx", text_encoder_bundled=True) == (DownloadTarget("o/p", "a1" * 20),)
+    assert video_download_plan("o/p", family="ltx", text_encoder_bundled=True) == (DownloadTarget("o/p"),)
+
+
 def test_video_plan_other_local_folder_is_empty(tmp_path: Path, gemma: DownloadTarget) -> None:
     assert video_download_plan(str(tmp_path), family="ltx") == ()
 

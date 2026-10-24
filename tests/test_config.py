@@ -17,6 +17,7 @@ from zvisiongenerator.utils.config import (
     ltx_latent_upsampler_source,
     ltx_load_options,
     ltx_transformer_source,
+    ltx_version,
     model_capabilities,
     model_display_name,
     resolve_defaults,
@@ -968,7 +969,14 @@ class TestResolveVideoDefaults:
         assert result["steps"] == 8
         assert result["width"] == 768
         assert result["height"] == 448
-        assert result["num_frames"] == 49
+        assert result["num_frames"] == 121
+
+    def test_every_packaged_video_size_is_121_frames(self, monkeypatch, tmp_path):
+        sizes = _packaged_config(monkeypatch, tmp_path)["video_sizes"]
+
+        frames = {(ratio, size): dims["frames"] for ratio, entries in sizes.items() for size, dims in entries.items()}
+        assert len(frames) == 15
+        assert set(frames.values()) == {121}
 
     def test_ratio_override_selects_preset(self):
         overrides = {"ratio": "9:16", "size": "m"}
@@ -1212,6 +1220,7 @@ class TestLtxLoadOptions:
 
 _LTX25_PIN = "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2"
 _LTX25_UPSAMPLER = (_LTX25_PIN, "latent_upsampler/diffusion_pytorch_model.safetensors")
+_LTX25_MAC_PIN = "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5"
 _LTX23_REPO = "diffusers/LTX-2.3-Distilled-Diffusers"
 _LTX23_TRANSFORMER = ("Lightricks/LTX-2.3", "ltx-2.3-22b-distilled-1.1.safetensors")
 _LTX23_UPSAMPLER = ("Lightricks/LTX-2.3", "ltx-2.3-spatial-upscaler-x2-1.1.safetensors")
@@ -1320,11 +1329,10 @@ class TestPackagedLtx25Config:
 
         assert resolve_model_path("ltx25-4", aliases=config["model_aliases"], platform_key=platform_key) == _LTX25_PIN
 
-    def test_ltx25_4_on_macos_raises_the_alias_message(self, monkeypatch, tmp_path):
+    def test_ltx25_4_resolves_to_the_pinned_mirror_on_macos(self, monkeypatch, tmp_path):
         config = _packaged_config(monkeypatch, tmp_path)
 
-        with pytest.raises(ValueError, match=r"LTX-2\.5 \(ltx25-4\) is not available on macOS yet\. Use ltx-4 or ltx-8\."):
-            resolve_model_path("ltx25-4", aliases=config["model_aliases"], platform_key="darwin")
+        assert resolve_model_path("ltx25-4", aliases=config["model_aliases"], platform_key="darwin") == _LTX25_MAC_PIN
 
     def test_ltx25_4_is_labelled(self, monkeypatch, tmp_path):
         config = _packaged_config(monkeypatch, tmp_path)
@@ -1339,6 +1347,7 @@ class TestPackagedLtx25Config:
         assert version["diffusers"]["default_repo"] == _LTX25_PIN
         assert version["diffusers"]["latent_upsampler"]["repo"] == _LTX25_PIN
         assert config["model_aliases"]["ltx25-4"]["win32"] == config["model_aliases"]["ltx25-4"]["linux"] == _LTX25_PIN
+        assert config["model_aliases"]["ltx25-4"]["darwin"] == _LTX25_MAC_PIN
         assert config["video_model_presets"]["ltx"]["diffusers"]["default_repo"] == _LTX23_REPO
 
     def test_the_version_block_carries_the_2_5_settings(self, monkeypatch, tmp_path):
@@ -1428,6 +1437,35 @@ class TestLtxVersionAwareAccessors:
         assert ltx_transformer_source(config, "ltx-4") == ("me/ltx", "mine.safetensors")
         assert ltx_transformer_source(config, "ltx25-4") is None
         assert ltx_load_options(config, "ltx25-4", upscale=False)["transformer_source"] is None
+
+    @pytest.mark.parametrize("name", ["ltx-4", "ltx-8", None, "unknown", "org/some-ltx-repo"])
+    def test_ancestral_sampler_outside_a_version_is_refused(self, monkeypatch, tmp_path, name):
+        config = _packaged_config(monkeypatch, tmp_path)
+        config["video_model_presets"]["ltx"]["diffusers"]["sampler"] = EULER_ANCESTRAL
+
+        with pytest.raises(ValueError, match=r"video_model_presets\.ltx\.diffusers\.sampler") as excinfo:
+            ltx_load_options(config, name, upscale=False)
+        assert (name or "this model") in str(excinfo.value)
+
+    def test_ancestral_sampler_is_accepted_for_a_version_alias(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+        config["video_model_presets"]["ltx"]["diffusers"]["sampler"] = EULER_ANCESTRAL
+
+        assert ltx_load_options(config, "ltx25-4", upscale=False)["sampler"] == EULER_ANCESTRAL
+
+    def test_an_invalid_sampler_still_reports_the_allowed_values(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+        config["video_model_presets"]["ltx"]["diffusers"]["sampler"] = "ddim"
+
+        with pytest.raises(ValueError, match="must be one of"):
+            ltx_load_options(config, "ltx-4", upscale=False)
+
+    def test_ltx_version_reports_version_membership(self, monkeypatch, tmp_path):
+        config = _packaged_config(monkeypatch, tmp_path)
+
+        assert ltx_version(config, "ltx25-4") == "ltx25"
+        assert ltx_version(config, "ltx-4") is None
+        assert ltx_version(config, None) is None
 
     def test_a_version_without_the_new_keys_adds_none(self):
         config = _versioned(diffusers={"quantize": {"alias-v": 4}})

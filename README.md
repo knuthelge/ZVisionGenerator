@@ -32,7 +32,7 @@ Local AI image and video generation — hassle-free and fun. No tangled node gra
 
 | Platform | Image Generation | Video Generation |
 |----------|------------------|------------------|
-| macOS (Apple Silicon) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`) |
+| macOS (Apple Silicon) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via mflux/MLX | ✅ LTX via MLX aliases (`ltx-4`, `ltx-8`, `ltx25-4`) |
 | Windows (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`, `ltx25-4`) |
 | Linux (NVIDIA GPU) | ✅ Z-Image / FLUX / Krea 2 / Ideogram 4 via diffusers/CUDA | ✅ LTX via diffusers/CUDA aliases (`ltx-4`, `ltx-8`, `ltx25-4`) |
 
@@ -56,7 +56,7 @@ uv sync
 
 > Video generation requires [ffmpeg](https://ffmpeg.org/). On Windows and Linux, image and video generation require an RTX 20-series (Turing) or newer NVIDIA GPU, including RTX 50-series, with NVIDIA driver 580 or newer, so that CUDA is available to PyTorch.
 
-> Video uses `ltx-4` (4-bit) or `ltx-8` (8-bit) on every platform, and `ltx25-4` (LTX-2.5, 4-bit) on Windows and Linux. On Windows and Linux they need about 20 GB, 27 GB and 21 GB of system memory. See the [Video Guide](docs/guides/video.md).
+> Video uses `ltx-4` (4-bit), `ltx-8` (8-bit) or `ltx25-4` (LTX-2.5, 4-bit) on every platform. On Windows and Linux they need about 20 GB, 27 GB and 21 GB of system memory. See the [Video Guide](docs/guides/video.md).
 
 ## Quick Start
 

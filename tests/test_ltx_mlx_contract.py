@@ -16,7 +16,9 @@ pytest.importorskip("ltx_pipelines_mlx")
 
 from ltx_core_mlx.components.patchifiers import AudioPatchifier, VideoLatentPatchifier, compute_video_latent_shape, snap_output_dimensions  # noqa: E402
 from ltx_core_mlx.conditioning.types import VideoConditionByLatentIndex  # noqa: E402
+from ltx_core_mlx.components.diffusion_steps import EulerAncestralDiffusionStep  # noqa: E402
 from ltx_core_mlx.model.audio_vae import encode_audio  # noqa: E402
+from ltx_core_mlx.text_encoders.gemma.encoders import encoder_configurator  # noqa: E402
 from ltx_core_mlx.model.transformer.model import X0Model  # noqa: E402
 from ltx_core_mlx.model.video_vae.video_vae import (  # noqa: E402
     VideoDecoder as VaeVideoDecoder,
@@ -29,17 +31,21 @@ from ltx_core_mlx.utils.audio import AudioData, load_audio  # noqa: E402
 from ltx_core_mlx.utils.memory import aggressive_cleanup  # noqa: E402
 from ltx_core_mlx.utils.positions import compute_audio_positions, compute_audio_token_count, compute_video_positions  # noqa: E402
 from ltx_pipelines_mlx import BasePipeline, DistilledPipeline  # noqa: E402
-from ltx_pipelines_mlx.distilled import Stage1Result  # noqa: E402
+from ltx_pipelines_mlx.distilled import ANCESTRAL_ETA, ANCESTRAL_NOISE_SEED_OFFSET, ANCESTRAL_S_NOISE, Stage1Result  # noqa: E402
 from ltx_pipelines_mlx.extend_distilled import carry_audio_tokens, fit_audio_latent  # noqa: E402
 from ltx_pipelines_mlx.retake import encode_video_tensor  # noqa: E402
-from ltx_pipelines_mlx.scheduler import DISTILLED_SIGMAS, STAGE_2_SIGMAS, shorten_schedule  # noqa: E402
+from ltx_pipelines_mlx.scheduler import DISTILLED_SIGMAS, LTX_2_5_DISTILLED_SIGMAS, LTX_2_5_STAGE_2_DISTILLED_SIGMAS, STAGE_2_SIGMAS, shorten_schedule  # noqa: E402
 from ltx_pipelines_mlx.utils._orchestration import combined_image_conditionings  # noqa: E402
 from ltx_pipelines_mlx.utils.args import ImageConditioningInput  # noqa: E402
-from ltx_pipelines_mlx.utils.blocks import AudioConditioner, AudioDecoder, ImageConditioner, PromptEncoder, VideoDecoder as VideoDecoderBlock  # noqa: E402
+from ltx_pipelines_mlx.utils.blocks import AudioConditioner, AudioDecoder, ImageConditioner, PromptEncoder, VideoDecoder as VideoDecoderBlock, _video_vae_names  # noqa: E402
+from ltx_pipelines_mlx.utils.generation import is_ltx25_pack  # noqa: E402
 from ltx_pipelines_mlx.utils.helpers import create_noised_state  # noqa: E402
 from ltx_pipelines_mlx.utils.media_io import video_preprocess  # noqa: E402
-from ltx_pipelines_mlx.utils.samplers import denoise_loop  # noqa: E402
+from ltx_pipelines_mlx.utils.samplers import denoise_loop, euler_ancestral_denoising_loop  # noqa: E402
 from ltx_pipelines_mlx.utils.stepwise import StepwisePreview  # noqa: E402
+
+
+from zvisiongenerator.utils.model_files import ltx_mlx_bundled_text_encoder, ltx_mlx_video_decoder_file  # noqa: E402
 
 
 def _params(fn) -> dict[str, inspect.Parameter]:
@@ -160,6 +166,42 @@ class TestBlockContract:
         assert {"path", "frame_idx", "strength"} <= set(ImageConditioningInput._fields)
 
 
+class TestLoadTimeContract:
+    """The vendored behaviour ``load_model`` and ``utils/model_files`` mirror."""
+
+    def test_pack_detection_takes_the_model_dir(self):
+        assert list(_params(is_ltx25_pack)) == ["model_dir"]
+
+    def test_base_pipeline_assigns_model_dir_in_its_constructor(self):
+        source = inspect.getsource(BasePipeline.__init__)
+        assert "self.model_dir" in source
+
+    def test_text_encoder_file_names_match_the_bundled_encoder_rule(self):
+        assert encoder_configurator._TEXT_ENCODER_WEIGHTS == "text_encoder.safetensors"
+        assert encoder_configurator._TEXT_ENCODER_CONFIG == "text_encoder_config.json"
+
+    @pytest.mark.parametrize(("weights", "config"), [(True, True), (True, False), (False, True), (False, False)])
+    def test_bundled_encoder_rule_agrees_with_select_text_encoder(self, tmp_path, weights, config):
+        if weights:
+            (tmp_path / "text_encoder.safetensors").write_bytes(b"")
+        if config:
+            (tmp_path / "text_encoder_config.json").write_text("{}")
+
+        bundled = ltx_mlx_bundled_text_encoder(tmp_path) is not None
+        assert (encoder_configurator.select_text_encoder(tmp_path) == "gemma4") is bundled
+
+    @pytest.mark.parametrize("conv", [True, False])
+    def test_decoder_rule_agrees_with_the_video_vae_names(self, tmp_path, conv):
+        (tmp_path / "vae_decoder.safetensors").write_bytes(b"")
+        if conv:
+            (tmp_path / "vae_decoder_conv.safetensors").write_bytes(b"")
+
+        decoder_name, _ = _video_vae_names(tmp_path)
+        chosen = ltx_mlx_video_decoder_file(tmp_path)
+        assert chosen is not None
+        assert chosen.name == f"{decoder_name}.safetensors"
+
+
 class TestStepwiseContract:
     def test_bind_accepts_stage(self):
         _assert_keyword_only(StepwisePreview.bind, "stage")
@@ -182,6 +224,22 @@ class TestSamplingContract:
     def test_sigma_tables_are_sequences(self):
         assert len(DISTILLED_SIGMAS) > 1
         assert len(STAGE_2_SIGMAS) > 1
+
+    def test_ancestral_loop_arguments(self):
+        _assert_params(euler_ancestral_denoising_loop, "sigmas", "video_state", "audio_state", "stepper", "transformer", "video_text_embeds", "audio_text_embeds")
+        _assert_keyword_only(euler_ancestral_denoising_loop, "noise_seed", "on_step")
+
+    def test_ancestral_stepper_takes_eta_and_s_noise(self):
+        stepper = EulerAncestralDiffusionStep(eta=1.0, s_noise=1.0)
+        assert (stepper.eta, stepper.s_noise) == (1.0, 1.0)
+
+    def test_ancestral_constants(self):
+        assert (ANCESTRAL_ETA, ANCESTRAL_S_NOISE, ANCESTRAL_NOISE_SEED_OFFSET) == (1.0, 1.0, 10000)
+
+    def test_ltx_2_5_tables_have_the_lengths_of_the_2_3_tables(self):
+        # The progress totals (_TwoStageProgress, the one-stage step count) are derived from the 2.3 tables.
+        assert len(LTX_2_5_DISTILLED_SIGMAS) == len(DISTILLED_SIGMAS)
+        assert len(LTX_2_5_STAGE_2_DISTILLED_SIGMAS) == len(STAGE_2_SIGMAS)
 
     def test_x0_model_wraps_a_transformer_positionally(self):
         assert len(_params(X0Model.__init__)) == 2

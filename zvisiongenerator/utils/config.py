@@ -256,6 +256,19 @@ def _video_version(config: dict[str, Any], family: str, model_name: str | None) 
     return owners.get(model_name) if model_name is not None else None
 
 
+def ltx_version(config: dict[str, Any], model_name: str | None) -> str | None:
+    """Return the id of the LTX version block that lists *model_name* in its ``aliases``, or ``None``.
+
+    ``None`` means the model is not in any version block, which makes it LTX-2.3 (the family block): a ``None``
+    model name, an LTX-2.3 alias, a repo id or a local path.
+
+    Raises:
+        ValueError: If ``versions`` is not a mapping of mappings, a version's ``aliases`` is not a list of
+            non-blank strings, or an alias appears in two versions.
+    """
+    return _video_version(config, "ltx", model_name)
+
+
 def get_variant_key(model_info: ImageModelInfo) -> str | None:
     """Determine the variant key for preset lookup.
 
@@ -483,7 +496,7 @@ def resolve_video_defaults(
         "steps": preset.get("default_steps", 8),
         "width": size_entry.get("width", 768),
         "height": size_entry.get("height", 448),
-        "num_frames": size_entry.get("frames", 49),
+        "num_frames": size_entry.get("frames", 121),
         "ratio": ratio,
         "size": size,
     }
@@ -675,7 +688,8 @@ def ltx_load_options(config: dict[str, Any], model_name: str | None, *, upscale:
     without them are unchanged.
 
     Raises:
-        ValueError: If one of the ``diffusers`` entries is malformed.
+        ValueError: If one of the ``diffusers`` entries is malformed, or the ``sampler`` is ``euler_ancestral``
+            for a model that is in no LTX version block (the ancestral sampler is for LTX-2.5 only).
     """
     diffusers, path = _ltx_diffusers(config, model_name)
     options: dict[str, Any] = {
@@ -686,6 +700,12 @@ def ltx_load_options(config: dict[str, Any], model_name: str | None, *, upscale:
     for name, validate in _LTX_OPTION_VALIDATORS.items():
         if diffusers.get(name) is not None:
             options[name] = validate(diffusers[name], f"{path}.{name}")
+    if options.get("sampler") == EULER_ANCESTRAL and ltx_version(config, model_name) is None:
+        raise ValueError(
+            f"video_model_presets.ltx.diffusers.sampler is '{EULER_ANCESTRAL}', which is for LTX-2.5 version aliases only, "
+            f"but {model_name or 'this model'} is not in an LTX version block. "
+            "Set the sampler under video_model_presets.ltx.versions.<id>.diffusers."
+        )
     if upscale:
         options["upscale"] = True
         options["latent_upsampler"] = ltx_latent_upsampler_source(config, model_name)

@@ -86,7 +86,7 @@ class VideoGenerationRequest:
     # Generation params
     width: int = 704
     height: int = 448
-    num_frames: int = 49
+    num_frames: int = 121
     seed: int = 0
     steps: int = 8
     step_callback: Callable[[dict[str, Any]], None] | None = None

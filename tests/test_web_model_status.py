@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import struct
 from pathlib import Path
+
+import pytest
 
 from zvisiongenerator.utils.model_memory import CudaMemoryEstimate, LtxCudaMemoryEstimate, MemoryBudget
 from zvisiongenerator.web import model_status
@@ -13,6 +17,80 @@ _GIB = 1024**3
 
 def _finder(mapping: dict[str, Path]):
     return lambda reference: mapping.get(reference)
+
+
+def _write_sized(path: Path, gib: float) -> Path:
+    """Write a header-only safetensors file whose weights load as *gib* GiB of bfloat16."""
+    header = json.dumps({"w": {"dtype": "BF16", "shape": [int(gib * _GIB / 2 / 1024), 1024], "data_offsets": [0, 0]}}).encode()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(struct.pack("<Q", len(header)) + header)
+    return path
+
+
+def _make_mlx_pack(root: Path, *, bundled: bool) -> Path:
+    """Build a fake LTX MLX pack: LTX-2.5 (bundled Gemma 4, conv decoder) or LTX-2.3 (plain decoder)."""
+    pack = root / ("ltx25" if bundled else "ltx23")
+    _write_sized(pack / "transformer-distilled-1.1.safetensors", 10.5)
+    _write_sized(pack / "connector.safetensors", 5.9)
+    _write_sized(pack / ("vae_decoder_conv.safetensors" if bundled else "vae_decoder.safetensors"), 0.75)
+    if bundled:
+        _write_sized(pack / "text_encoder.safetensors", 7.5)
+        (pack / "text_encoder_config.json").write_text("{}", encoding="utf-8")
+    return pack
+
+
+class TestDescribeMlxVideoStatus:
+    @pytest.fixture(autouse=True)
+    def _gemma_repo(self, monkeypatch):
+        monkeypatch.setattr(model_status, "ltx_mlx_text_encoder_repo", lambda: "org/gemma")
+
+    def _gemma_dir(self, root: Path) -> Path:
+        _write_sized(root / "gemma" / "model-00001-of-00001.safetensors", 7.5)
+        return root / "gemma"
+
+    def test_a_bundled_pack_is_downloaded_without_gemma_3_and_estimated(self, tmp_path):
+        pack = _make_mlx_pack(tmp_path, bundled=True)
+
+        status = describe_model_status("owner/ltx25", kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({"owner/ltx25": pack}))
+
+        assert status["downloaded"] is True
+        assert status["memory_fit"] is not None
+        assert status["memory_fit"]["kind"] == "unified"
+        assert set(status["memory_fit"]) == {"kind", "budget_gb", "by_quantize", "without_low_memory", "note"}
+        assert set(status["memory_fit"]["by_quantize"]) == {"none"}
+
+    def test_a_bundled_pack_is_estimated_the_same_with_or_without_a_gemma_3_copy(self, tmp_path):
+        pack = _make_mlx_pack(tmp_path, bundled=True)
+        budget = MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB)
+
+        alone = describe_model_status("owner/ltx25", kind="video", budget=budget, find_local_dir=_finder({"owner/ltx25": pack}))
+        with_gemma = describe_model_status("owner/ltx25", kind="video", budget=budget, find_local_dir=_finder({"owner/ltx25": pack, "org/gemma": self._gemma_dir(tmp_path)}))
+
+        assert alone == with_gemma
+
+    def test_a_2_3_pack_without_gemma_3_is_not_downloaded(self, tmp_path):
+        pack = _make_mlx_pack(tmp_path, bundled=False)
+
+        status = describe_model_status("owner/ltx23", kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=_finder({"owner/ltx23": pack}))
+
+        assert status == {"downloaded": False, "memory_fit": None}
+
+    def test_a_2_3_pack_with_gemma_3_keeps_its_payload(self, tmp_path):
+        pack = _make_mlx_pack(tmp_path, bundled=False)
+        finder = _finder({"owner/ltx23": pack, "org/gemma": self._gemma_dir(tmp_path)})
+
+        status = describe_model_status("owner/ltx23", kind="video", budget=MemoryBudget(24 * _GIB, unified_bytes=32 * _GIB), find_local_dir=finder)
+
+        assert status == {
+            "downloaded": True,
+            "memory_fit": {
+                "kind": "unified",
+                "budget_gb": 24.0,
+                "by_quantize": {"none": {"status": "fits", "required_gb": 15.1}},
+                "without_low_memory": {"status": "too_large", "required_gb": 36.2},
+                "note": VIDEO_ESTIMATE_NOTE,
+            },
+        }
 
 
 class TestDescribeModelStatus:

@@ -339,10 +339,12 @@ def video_download_plan(
     latent_upsampler: tuple[str, str] | None = None,
     upscale: bool = False,
     repo_ignore: Sequence[str] = (),
+    text_encoder_bundled: bool = False,
 ) -> "tuple[DownloadTarget, ...]":
     """Return the downloads this platform's video backend needs for *model_ref* (empty for a local folder).
 
-    macOS lists the model repo and the Gemma text encoder; Windows and Linux list the diffusers repo (without the
+    macOS lists the model repo at its revision and, unless *text_encoder_bundled* (a model whose pack carries its own
+    text encoder), the Gemma 3 text encoder; Windows and Linux list the diffusers repo (without the
     *repo_ignore* patterns), the single-file *transformer_source* and, with *upscale*, the *latent_upsampler*
     (each a ``(repo_id[@revision], filename)`` pair).
 
@@ -355,7 +357,15 @@ def video_download_plan(
         from zvisiongenerator.backends.cuda.download_plan import video_download_plan as plan
     else:
         raise RuntimeError(f"Unsupported video platform: {sys.platform}. Video generation supports macOS, Windows, and Linux.")
-    return plan(model_ref, family=family, transformer_source=transformer_source, latent_upsampler=latent_upsampler, upscale=upscale, repo_ignore=repo_ignore)
+    return plan(
+        model_ref,
+        family=family,
+        transformer_source=transformer_source,
+        latent_upsampler=latent_upsampler,
+        upscale=upscale,
+        repo_ignore=repo_ignore,
+        text_encoder_bundled=text_encoder_bundled,
+    )
 
 
 def enhancer_download_plan(repo: str, revision: str | None) -> "tuple[DownloadTarget, ...]":

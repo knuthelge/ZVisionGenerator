@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from zvisiongenerator.downloads.target import DownloadTarget
-from zvisiongenerator.utils.model_files import is_ltx_mlx_layout, ltx_mlx_text_encoder_repo
+from zvisiongenerator.utils.model_files import is_ltx_mlx_layout, ltx_mlx_bundled_text_encoder, ltx_mlx_text_encoder_repo
 from zvisiongenerator.utils.paths import parse_huggingface_repo_reference
 
 __all__ = ["MLX_LM_ALLOW_PATTERNS", "enhancer_download_plan", "image_download_plan", "video_download_plan"]
@@ -77,22 +77,38 @@ def video_download_plan(
     latent_upsampler: tuple[str, str] | None = None,
     upscale: bool = False,
     repo_ignore: Sequence[str] = (),
+    text_encoder_bundled: bool = False,
 ) -> tuple[DownloadTarget, ...]:
-    """Return the downloads of the LTX MLX model *model_ref*: its whole repo, then the Gemma text encoder repo.
+    """Return the downloads of the LTX MLX model *model_ref*: its whole repo at its revision, then the Gemma 3 text encoder repo.
 
-    The vendored loader downloads the model repo without patterns, and ``mlx_lm`` fetches Gemma at the first prompt
-    encode, so the plan brings Gemma forward. A local folder in the LTX MLX layout needs only Gemma; any other
-    local folder needs nothing. The diffusers-only arguments are ignored.
+    The vendored loader downloads the model repo without patterns, and ``mlx_lm`` fetches Gemma 3 at the first
+    prompt encode, so the plan brings Gemma 3 forward. A model in an LTX version block (LTX-2.5) bundles its Gemma 4
+    text encoder in the pack, so the loader never fetches Gemma 3 for it and the plan leaves it out
+    (*text_encoder_bundled*). A local folder in the LTX MLX layout needs only Gemma 3, unless it carries its own
+    text encoder or *text_encoder_bundled* is set, and then it needs nothing; any other local folder needs
+    nothing. The diffusers-only arguments are ignored.
+
+    Args:
+        model_ref: A local path or a Hugging Face ``owner/repo[@revision]`` reference.
+        family: The model family (``ltx``).
+        transformer_source: Ignored (diffusers only).
+        latent_upsampler: Ignored (diffusers only).
+        upscale: Ignored (diffusers only).
+        repo_ignore: Ignored (diffusers only).
+        text_encoder_bundled: Whether the model's pack bundles its text encoder, so Gemma 3 is not needed.
     """
     del family, transformer_source, latent_upsampler, upscale, repo_ignore
     gemma = DownloadTarget(ltx_mlx_text_encoder_repo(), allow_patterns=MLX_LM_ALLOW_PATTERNS)
     local = Path(model_ref).expanduser()
     if local.is_dir():
-        return (gemma,) if is_ltx_mlx_layout(local) else ()
+        if not is_ltx_mlx_layout(local) or text_encoder_bundled or ltx_mlx_bundled_text_encoder(local) is not None:
+            return ()
+        return (gemma,)
     reference = parse_huggingface_repo_reference(model_ref)
     if reference is None:
         return ()
-    return (DownloadTarget(reference.repo_id), gemma)
+    model = DownloadTarget(reference.repo_id, reference.revision)
+    return (model,) if text_encoder_bundled else (model, gemma)
 
 
 def enhancer_download_plan(repo: str, revision: str | None) -> tuple[DownloadTarget, ...]:

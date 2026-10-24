@@ -325,6 +325,7 @@ _FPS = 24.0
 _LATENT_SHAPE = (3, 7, 11)  # (F, H, W)
 _AUDIO_TOKENS = 16
 _FAKE_DISTILLED_SIGMAS = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.2, 0.0]
+_FAKE_LTX25_SIGMAS = [1.0, 0.95, 0.85, 0.75, 0.6, 0.45, 0.3, 0.1, 0.0]
 _FAKE_STAGE_2_SIGMAS = [0.909375, 0.725, 0.421875, 0.0]
 
 
@@ -366,7 +367,7 @@ def ltx(monkeypatch):
     h.x0_model = MagicMock()
     transformer = MagicMock(X0Model=h.x0_model)
 
-    h.scheduler = MagicMock(DISTILLED_SIGMAS=_FAKE_DISTILLED_SIGMAS, STAGE_2_SIGMAS=_FAKE_STAGE_2_SIGMAS)
+    h.scheduler = MagicMock(DISTILLED_SIGMAS=_FAKE_DISTILLED_SIGMAS, STAGE_2_SIGMAS=_FAKE_STAGE_2_SIGMAS, LTX_2_5_DISTILLED_SIGMAS=_FAKE_LTX25_SIGMAS)
     h.scheduler.shorten_schedule.return_value = ["shortened"]
     h.orchestration = MagicMock()
     h.orchestration.combined_image_conditionings.side_effect = lambda *a, **k: [MagicMock(clean_latent="clean_a"), MagicMock(clean_latent="clean_b")]
@@ -378,6 +379,10 @@ def ltx(monkeypatch):
     h.output = MagicMock()
     samplers = MagicMock()
     samplers.denoise_loop.return_value = h.output
+    samplers.euler_ancestral_denoising_loop.return_value = h.output
+    h.diffusion_steps = MagicMock()
+    h.distilled = MagicMock(ANCESTRAL_ETA=1.0, ANCESTRAL_S_NOISE=1.0, ANCESTRAL_NOISE_SEED_OFFSET=10000)
+    h.generation = MagicMock(is_ltx25_pack=MagicMock(return_value=False))  # a bare MagicMock return value is truthy
 
     # Modules the extension path imports lazily.
     h.conditioning_types = MagicMock()
@@ -408,6 +413,7 @@ def ltx(monkeypatch):
     h.calls.attach_mock(h.scheduler.shorten_schedule, "shorten_schedule")
     h.calls.attach_mock(helpers.create_noised_state, "create_noised_state")
     h.calls.attach_mock(samplers.denoise_loop, "denoise_loop")
+    h.calls.attach_mock(samplers.euler_ancestral_denoising_loop, "euler_ancestral_denoising_loop")
     h.helpers = helpers
     h.samplers = samplers
 
@@ -416,6 +422,7 @@ def ltx(monkeypatch):
         "mlx.core": h.mx,
         "ltx_core_mlx": MagicMock(),
         "ltx_core_mlx.components": MagicMock(),
+        "ltx_core_mlx.components.diffusion_steps": h.diffusion_steps,
         "ltx_core_mlx.components.patchifiers": patchifiers,
         "ltx_core_mlx.conditioning": MagicMock(),
         "ltx_core_mlx.conditioning.types": h.conditioning_types,
@@ -430,12 +437,14 @@ def ltx(monkeypatch):
         "ltx_core_mlx.utils.memory": h.memory,
         "ltx_core_mlx.utils.positions": positions,
         "ltx_pipelines_mlx": MagicMock(),
+        "ltx_pipelines_mlx.distilled": h.distilled,
         "ltx_pipelines_mlx.extend_distilled": h.extend_distilled,
         "ltx_pipelines_mlx.retake": h.retake,
         "ltx_pipelines_mlx.scheduler": h.scheduler,
         "ltx_pipelines_mlx.utils": MagicMock(),
         "ltx_pipelines_mlx.utils._orchestration": h.orchestration,
         "ltx_pipelines_mlx.utils.args": args,
+        "ltx_pipelines_mlx.utils.generation": h.generation,
         "ltx_pipelines_mlx.utils.helpers": helpers,
         "ltx_pipelines_mlx.utils.media_io": h.media_io,
         "ltx_pipelines_mlx.utils.samplers": samplers,
@@ -470,14 +479,14 @@ def _call_names(h) -> list[str]:
     return [c[0] for c in h.calls.method_calls if "." not in c[0]]
 
 
-def _handle(pipe, *, upscale: bool = False, frame_rate: float = _FPS, low_ram_streaming: bool = False) -> _LtxModel:
-    return _LtxModel(pipeline=pipe, frame_rate=frame_rate, upscale=upscale, low_ram_streaming=low_ram_streaming)
+def _handle(pipe, *, upscale: bool = False, frame_rate: float = _FPS, low_ram_streaming: bool = False, ltx25: bool = False) -> _LtxModel:
+    return _LtxModel(pipeline=pipe, frame_rate=frame_rate, upscale=upscale, low_ram_streaming=low_ram_streaming, ltx25=ltx25)
 
 
-def _run_one_stage(pipe, *, image_path: str | None = None, step_callback=None, steps: int = 8):
+def _run_one_stage(pipe, *, image_path: str | None = None, step_callback=None, steps: int = 8, ltx25: bool = False):
     backend = LtxVideoBackend()
     kwargs = dict(
-        model=_handle(pipe),
+        model=_handle(pipe, ltx25=ltx25),
         prompt="a prompt",
         width=704,
         height=480,
@@ -527,12 +536,16 @@ class TestLoadModel:
     @pytest.fixture
     def classes(self, monkeypatch):
         base, distilled = MagicMock(name="BasePipeline"), MagicMock(name="DistilledPipeline")
-        base.return_value = SimpleNamespace(kind="base")
-        distilled.return_value = SimpleNamespace(kind="distilled")
+        base.return_value = SimpleNamespace(kind="base", model_dir="model/path")
+        distilled.return_value = SimpleNamespace(kind="distilled", model_dir="model/path")
         monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx", MagicMock(BasePipeline=base, DistilledPipeline=distilled))
+        # A bare MagicMock return value is truthy, so the pack check is stubbed to a plain LTX-2.3 answer.
+        generation = MagicMock(is_ltx25_pack=MagicMock(return_value=False))
+        monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx.utils", MagicMock(generation=generation))
+        monkeypatch.setitem(sys.modules, "ltx_pipelines_mlx.utils.generation", generation)
         # A large Mac: no streaming, and the real MLX cache limit is never touched.
         monkeypatch.setattr("zvisiongenerator.backends.mac.video.memory_size_bytes", lambda: 64 * 1024**3)
-        return SimpleNamespace(base=base, distilled=distilled)
+        return SimpleNamespace(base=base, distilled=distilled, is_ltx25_pack=generation.is_ltx25_pack)
 
     @pytest.mark.parametrize("mode", ["t2v", "i2v"])
     def test_without_upscale_builds_base_pipeline_for_either_mode(self, classes, mode):
@@ -603,7 +616,7 @@ class TestLoadModel:
         scope = MagicMock()
         scope.return_value.__enter__.side_effect = lambda: events.append("enter")
         scope.return_value.__exit__.side_effect = lambda *a: events.append("exit")
-        classes.base.side_effect = lambda **_: events.append("construct") or SimpleNamespace()
+        classes.base.side_effect = lambda **_: events.append("construct") or SimpleNamespace(model_dir="model/path")
         monkeypatch.setattr("zvisiongenerator.backends.mac.video.memory_size_bytes", lambda: _LOW_RAM_THRESHOLD_BYTES)
         monkeypatch.setattr("zvisiongenerator.backends.mac.video.mlx_cache_limit", scope)
         with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
@@ -626,6 +639,82 @@ class TestLoadModel:
 
         with pytest.raises(RuntimeError, match="ltx-pipelines-mlx"):
             LtxVideoBackend().load_model("model/path")
+
+    def test_unpinned_reference_reaches_the_pipeline_unchanged(self, classes, monkeypatch):
+        find, download = MagicMock(), MagicMock()
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.find_local_model_dir", find)
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video._snapshot_download", download)
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            LtxVideoBackend().load_model("owner/repo")
+
+        classes.base.assert_called_once_with(model_dir="owner/repo", low_memory=True, low_ram_streaming=False)
+        find.assert_not_called()
+        download.assert_not_called()
+
+    @pytest.mark.parametrize("upscale", [False, True])
+    def test_pinned_reference_builds_the_pipeline_from_the_cached_snapshot(self, classes, monkeypatch, tmp_path, upscale):
+        find, download = MagicMock(return_value=tmp_path), MagicMock()
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.find_local_model_dir", find)
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video._snapshot_download", download)
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()) as detect:
+            LtxVideoBackend().load_model("owner/repo@abc123", upscale=upscale)
+
+        ctor = classes.distilled if upscale else classes.base
+        ctor.assert_called_once_with(model_dir=str(tmp_path), low_memory=True, low_ram_streaming=False)
+        find.assert_called_once_with("owner/repo@abc123")
+        download.assert_not_called()
+        detect.assert_called_once_with("owner/repo@abc123")
+
+    def test_pinned_reference_missing_from_the_cache_is_downloaded_at_its_revision(self, classes, monkeypatch, tmp_path):
+        download = MagicMock(return_value=str(tmp_path))
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.find_local_model_dir", MagicMock(return_value=None))
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video._snapshot_download", download)
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            LtxVideoBackend().load_model("owner/repo@abc123")
+
+        download.assert_called_once_with(repo_id="owner/repo", revision="abc123")
+        classes.base.assert_called_once_with(model_dir=str(tmp_path), low_memory=True, low_ram_streaming=False)
+
+    def test_local_folder_with_an_at_sign_is_not_treated_as_a_pin(self, classes, monkeypatch, tmp_path):
+        folder = tmp_path / "owner" / "repo@abc123"
+        folder.mkdir(parents=True)
+        find, download = MagicMock(), MagicMock()
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video.find_local_model_dir", find)
+        monkeypatch.setattr("zvisiongenerator.backends.mac.video._snapshot_download", download)
+        monkeypatch.chdir(tmp_path)
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            LtxVideoBackend().load_model("owner/repo@abc123")
+
+        classes.base.assert_called_once_with(model_dir="owner/repo@abc123", low_memory=True, low_ram_streaming=False)
+        find.assert_not_called()
+        download.assert_not_called()
+
+    def test_a_2_3_pack_is_recorded_as_not_ltx25(self, classes):
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            handle, _ = LtxVideoBackend().load_model("model/path")
+
+        classes.is_ltx25_pack.assert_called_once_with("model/path")
+        assert handle.ltx25 is False
+
+    @pytest.mark.parametrize("upscale", [False, True])
+    def test_a_2_5_pack_with_its_encoder_at_the_root_is_recorded_as_ltx25(self, classes, tmp_path, upscale):
+        (tmp_path / "text_encoder.safetensors").write_bytes(b"")
+        (tmp_path / "text_encoder_config.json").write_text("{}")
+        classes.base.return_value.model_dir = classes.distilled.return_value.model_dir = tmp_path
+        classes.is_ltx25_pack.return_value = True
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            handle, _ = LtxVideoBackend().load_model("model/path", upscale=upscale)
+
+        classes.is_ltx25_pack.assert_called_once_with(tmp_path)
+        assert handle.ltx25 is True
+
+    def test_a_2_5_pack_without_its_encoder_at_the_root_is_refused(self, classes, tmp_path):
+        (tmp_path / "text_encoder_config.json").write_text("{}")  # the weights are missing
+        classes.base.return_value.model_dir = tmp_path
+        classes.is_ltx25_pack.return_value = True
+        with patch("zvisiongenerator.backends.mac.video.detect_video_model", return_value=_model_info()):
+            with pytest.raises(ValueError, match="text_encoder.safetensors"):
+                LtxVideoBackend().load_model("model/path")
 
 
 class TestLowRamStreamingGate:
@@ -745,6 +834,42 @@ class TestOneStageGeneration:
 
         ltx.scheduler.shorten_schedule.assert_called_once_with(_FAKE_DISTILLED_SIGMAS, 6, keep="start")
         assert ltx.samplers.denoise_loop.call_args.kwargs["sigmas"] is ltx.scheduler.shorten_schedule.return_value
+
+    def test_a_2_3_handle_never_calls_the_ancestral_loop(self, ltx):
+        _run_one_stage(_pipeline(ltx), image_path="/tmp/first.png")
+
+        ltx.samplers.euler_ancestral_denoising_loop.assert_not_called()
+        ltx.diffusion_steps.EulerAncestralDiffusionStep.assert_not_called()
+
+    @pytest.mark.parametrize("image_path", [None, "/tmp/first.png"])
+    def test_a_2_5_clip_runs_the_ancestral_loop_on_the_2_5_schedule(self, ltx, image_path):
+        pipe = _pipeline(ltx)
+        pipe.dit = object()
+        callback = MagicMock()
+
+        _run_one_stage(pipe, image_path=image_path, steps=6, ltx25=True, step_callback=callback)
+
+        ltx.samplers.denoise_loop.assert_not_called()
+        ltx.scheduler.shorten_schedule.assert_called_once_with(_FAKE_LTX25_SIGMAS, 6, keep="start")
+        ltx.samplers.euler_ancestral_denoising_loop.assert_called_once()
+        kwargs = ltx.samplers.euler_ancestral_denoising_loop.call_args.kwargs
+        assert kwargs["sigmas"] is ltx.scheduler.shorten_schedule.return_value
+        assert kwargs["noise_seed"] == 42 + 10000
+        assert kwargs["stepper"] is ltx.diffusion_steps.EulerAncestralDiffusionStep.return_value
+        ltx.diffusion_steps.EulerAncestralDiffusionStep.assert_called_once_with(eta=1.0, s_noise=1.0)
+        assert kwargs["transformer"] is ltx.x0_model.return_value
+        ltx.x0_model.assert_called_once_with(pipe.dit)
+        assert kwargs["video_state"] is ltx.video_state
+        assert kwargs["audio_state"] is ltx.audio_state
+        assert kwargs["video_text_embeds"] == "video_embeds"
+        assert kwargs["audio_text_embeds"] == "audio_embeds"
+        assert kwargs["on_step"] is not None
+
+    def test_a_2_5_clip_keeps_the_initial_noise_on_the_plain_seeds(self, ltx):
+        _run_one_stage(_pipeline(ltx), ltx25=True)
+
+        seeds = [c.kwargs["seed"] for c in ltx.helpers.create_noised_state.call_args_list]
+        assert seeds == [42, 43]
 
     def test_decode_uses_frame_rate_and_seed(self, ltx):
         pipe = _pipeline(ltx)
@@ -1403,6 +1528,15 @@ class TestExtendVideo:
 
         assert pipe.prompt_encoder.call_args == call("a prompt", free_after=True)
         ext.scheduler.shorten_schedule.assert_called_once_with(_FAKE_DISTILLED_SIGMAS, 8, keep="start")
+
+    def test_a_2_5_extension_stays_deterministic_on_the_2_5_schedule(self, ext):
+        pipe = ext.pipeline()
+        ext.run(pipe, handle=_handle(pipe, ltx25=True))
+
+        ext.samplers.euler_ancestral_denoising_loop.assert_not_called()
+        ext.scheduler.shorten_schedule.assert_called_once_with(_FAKE_LTX25_SIGMAS, 8, keep="start")
+        ext.samplers.denoise_loop.assert_called_once()
+        assert ext.samplers.denoise_loop.call_args.kwargs["sigmas"] is ext.scheduler.shorten_schedule.return_value
 
     def test_streaming_handle_scopes_the_cache_limit_over_the_carry_encode_and_generation(self, ext):
         ext.mx.set_cache_limit.return_value = "previous"

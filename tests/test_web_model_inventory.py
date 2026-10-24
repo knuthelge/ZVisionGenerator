@@ -12,6 +12,7 @@ from zvisiongenerator.web.first_run import recommended_first_run_model
 from zvisiongenerator.web.model_inventory import discover_video_inventory
 
 _LTX25_REPO = "unsloth/LTX-2.5-FP8@7b40724fc39bbb01d9b4d72638c0d263531c88c2"
+_LTX25_MAC_REPO = "MarceloFSO/ltx-2.5-mlx-q4-fast@281bf05bd23207d6feef708fc2e270f84ba992b5"
 
 
 @pytest.fixture
@@ -47,10 +48,11 @@ def test_ltx23_aliases_resolve_unchanged_off_macos(packaged_config, tmp_path, mo
     assert "2.5" not in default_repo
 
 
-def test_ltx25_alias_is_hidden_on_macos_and_the_ltx23_aliases_remain(packaged_config, tmp_path, monkeypatch):
+def test_ltx25_alias_is_listed_on_macos_beside_the_ltx23_aliases(packaged_config, tmp_path, monkeypatch):
     inventory = _video_inventory(packaged_config, tmp_path, "darwin", monkeypatch)
 
-    assert "ltx25-4" not in inventory
+    entry = inventory["ltx25-4"]
+    assert (entry.source, entry.family, entry.supports_i2v, entry.resolved_path) == ("alias", "ltx", True, _LTX25_MAC_REPO)
     assert {"ltx-4", "ltx-8"} <= set(inventory)
     assert inventory["ltx-8"].resolved_path == packaged_config["model_aliases"]["ltx-8"]["darwin"]
 
