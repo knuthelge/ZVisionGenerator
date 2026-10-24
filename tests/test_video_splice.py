@@ -22,11 +22,13 @@ from zvisiongenerator.utils.video_splice import (
     build_audio_graph,
     build_concat_copy_command,
     build_join_audio,
+    build_mux_command,
     build_reencode_command,
     build_segment_command,
     build_video_only_command,
     can_stream_copy,
     color_filter,
+    mux_audio,
     silent_end_length,
     splice_clips,
     write_pcm16_wav,
@@ -194,6 +196,23 @@ class TestReencodeCommand:
         assert _arg(command, "-map_metadata") == "-1"
 
 
+class TestMuxCommand:
+    def test_copies_the_video_and_encodes_the_wav_as_the_only_audio_track(self):
+        command = build_mux_command("video.mp4", "audio.wav", "out.mp4")
+        assert [command[i + 1] for i, part in enumerate(command) if part == "-i"] == ["video.mp4", "audio.wav"]
+        assert [command[i + 1] for i, part in enumerate(command) if part == "-map"] == ["0:v:0", "1:a:0"]
+        assert _arg(command, "-c:v") == "copy"
+        assert _arg(command, "-c:a") == "aac"
+        assert _arg(command, "-map_metadata") == "-1"
+        assert "-shortest" not in command and "libx264" not in command
+        assert command[-1] == "out.mp4"
+
+    def test_a_failing_ffmpeg_raises_with_its_error(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(video_splice.subprocess, "run", lambda *_a, **_k: subprocess.CompletedProcess([], 1, b"", b"Invalid data found"))
+        with pytest.raises(RuntimeError, match="add the audio.*Invalid data found"):
+            mux_audio(tmp_path / "video.mp4", tmp_path / "audio.wav", tmp_path / "out.mp4")
+
+
 class TestWritePcmWav:
     def test_writes_every_sample_of_every_channel(self, tmp_path):
         samples = np.stack([np.linspace(-1, 1, 1234, dtype=np.float32), np.zeros(1234, dtype=np.float32)])
@@ -204,6 +223,13 @@ class TestWritePcmWav:
             data = np.frombuffer(reader.readframes(1234), dtype=np.int16).reshape(1234, 2)
         assert data[0, 0] == -32767 and data[-1, 0] == 32767
         assert not data[:, 1].any()
+
+    @pytest.mark.parametrize(("extra", "expected"), [((), 48000), ((32000,), 32000)])
+    def test_the_sample_rate_defaults_to_the_joins_and_can_be_given(self, tmp_path, extra, expected):
+        path = tmp_path / "audio.wav"
+        write_pcm16_wav(np.zeros((2, 10), dtype=np.float32), path, *extra)
+        with wave.open(str(path)) as reader:
+            assert reader.getframerate() == expected
 
     def test_clips_out_of_range_values(self, tmp_path):
         path = tmp_path / "audio.wav"
@@ -491,6 +517,32 @@ def _red_overlap(frame: np.ndarray, reference: np.ndarray) -> float:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@REAL
+class TestRealMux:
+    def test_the_video_packets_are_copied_and_the_wav_becomes_the_only_audio_stream(self, tmp_path):
+        frames = numbered_frames(24, 128, 64)
+        video = tmp_path / "video.mp4"
+        write_segment_frames(frames, build_segment_command(128, 64, "24/1", video))
+        wav = tmp_path / "audio.wav"
+        write_pcm16_wav(np.stack([0.3 * np.sin(2 * np.pi * 300 * np.arange(32000) / 32000)] * 2), wav, 32000)
+        output = tmp_path / "out.mp4"
+
+        mux_audio(video, wav, output)
+
+        probe = probe_video(output)
+        assert (probe.frame_count, probe.width, probe.height, probe.has_audio) == (24, 128, 64, True)
+        assert _packet_hashes(output)[1:] == _packet_hashes(video)[1:]
+        streams = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(output)], capture_output=True, check=True, text=True).stdout.split()
+        assert sorted(streams) == ["audio", "video"]
+
+    def test_a_missing_wav_is_reported(self, tmp_path):
+        video = tmp_path / "video.mp4"
+        write_segment_frames(numbered_frames(8, 128, 64), build_segment_command(128, 64, "24/1", video))
+        with pytest.raises(RuntimeError, match="add the audio"):
+            mux_audio(video, tmp_path / "missing.wav", tmp_path / "out.mp4")
+        assert not (tmp_path / "out.mp4").exists()
 
 
 @REAL

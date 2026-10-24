@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "manifest_id": "minimax-h3-mlx-release-assets",
+  "manifest_version": "2026.08.09.asset-manager-v1",
+  "generated_by": "argus delivery_asset_manifest_manager_quant_probe_v1",
+  "contract": {
+    "bundles_model_weights": false,
+    "license_acceptance_env_var": "MINIMAX_H3_ACCEPT_LICENSE",
+    "default_cache_subdir": "minimax-h3/assets",
+    "hash_algorithm": "sha256",
+    "fetch_policy": "license-gated, retryable, resumable into .part files, sha256-verified, atomically renamed",
+    "offline_reuse_policy": "existing files are reused only when size and sha256 match the manifest"
+  },
+  "assets": [
+    {
+      "id": "dit-mlx-4bit",
+      "aliases": ["4bit", "dit4", "balanced-baseline"],
+      "kind": "dit_transformer",
+      "precision": "4bit core + 8bit AdaLN",
+      "repo_id": "pipenetwork/MiniMax-H3-MLX-4bit",
+      "repo_type": "model",
+      "revision": "ca27876d9ea42bb087bdcd3a1336d3b7f8fb2b05",
+      "local_subdir": "MiniMax-H3-MLX-4bit",
+      "fetch_enabled": true,
+      "pinning_status": "pinned_from_local_snapshot_ref_and_local_sha256",
+      "license": {
+        "name": "minimax-h3-community-license",
+        "url": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE",
+        "requires_user_acceptance": true,
+        "acceptance_env_var": "MINIMAX_H3_ACCEPT_LICENSE",
+        "redistribution_note": "Model weights are not bundled in the source package; users must accept the upstream license before download."
+      },
+      "files": [
+        {"path": "config.json", "size_bytes": 604, "sha256": "f619093a231fcfbcc3d035bec26c50ad864e7331a500d5c519f5045dc1e50458", "role": "config", "required": true},
+        {"path": "quant_config.json", "size_bytes": 199, "sha256": "9ac0aa1b7387884e93869534b0d0f618dbb11d9181795aead7fed485f3e1bce0", "role": "quant_config", "required": true},
+        {"path": "model.safetensors.index.json", "size_bytes": 75922, "sha256": "113dba25a4dc5d12eb3da0d0ebc9bf5b06cdade1024a9ff96944d1d0094fdbfd", "role": "safetensors_index", "required": true},
+        {"path": "model-00001-of-00005.safetensors", "size_bytes": 5307086311, "sha256": "7718b0a19f3d6b1db7b1dbd29dc50d51ea276a0980d8e6c978c71b99ee4b6f4b", "role": "safetensors_shard", "required": true},
+        {"path": "model-00002-of-00005.safetensors", "size_bytes": 5359384176, "sha256": "827ebd4f3669ec10f81fe1a64cc0fd38adc41075383f1119bc0326fd6c0935a4", "role": "safetensors_shard", "required": true},
+        {"path": "model-00003-of-00005.safetensors", "size_bytes": 5137805859, "sha256": "56b3a18e5eba0578ddd8fd800ee361827fa69c76848e40de21f5018e7ce067b2", "role": "safetensors_shard", "required": true},
+        {"path": "model-00004-of-00005.safetensors", "size_bytes": 5366996109, "sha256": "60f2128673c9c8272c1afb4a1b19de3d974369a84573ee0015ff46e9c6f71e0d", "role": "safetensors_shard", "required": true},
+        {"path": "model-00005-of-00005.safetensors", "size_bytes": 4111461214, "sha256": "df24d5fe9ee43490d92c7ad9ead1fec9d4e785ecedd98e6746ae099ba1ce5aa5", "role": "safetensors_shard", "required": true},
+        {"path": "LICENSE", "size_bytes": 17604, "sha256": "59b99642b95ea21630e311198ddbfffbfe05aadba0c2f5d884cbdf4efcc90f44", "role": "license", "required": true},
+        {"path": "README.md", "size_bytes": 5759, "sha256": "1c2a13aad9ff74bbf90bd0a921f0dceba5cb806d280e7f818fa6576e75d7a1fb", "role": "model_card", "required": true}
+      ],
+      "streaming_24gb_notes": {
+        "published_on_disk_gb": 25.28,
+        "published_resident_gb_after_adaln_drop": 11.45,
+        "expected_shards": 5,
+        "expected_dit_blocks": 50,
+        "risk_level": "baseline_only",
+        "risk_note": "4-bit DiT fits the existing low-memory streamed-block path, but this is only a run baseline and not a high-quality baseline. Full generation still requires staged text encoder and VAE loading."
+      },
+      "quality_claim_status": "run_baseline_only_not_lossless_not_default_recommendation"
+    },
+    {
+      "id": "dit-mlx-6bit",
+      "aliases": ["6bit", "dit6", "balanced-candidate"],
+      "kind": "dit_transformer",
+      "precision": "6bit core + 8bit AdaLN",
+      "repo_id": "pipenetwork/MiniMax-H3-MLX-6bit",
+      "repo_type": "model",
+      "revision": null,
+      "local_subdir": "MiniMax-H3-MLX-6bit",
+      "fetch_enabled": false,
+      "pinning_status": "repo_known_but_revision_file_hashes_not_verified_in_this_package",
+      "license": {
+        "name": "minimax-h3-community-license",
+        "url": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE",
+        "requires_user_acceptance": true,
+        "acceptance_env_var": "MINIMAX_H3_ACCEPT_LICENSE"
+      },
+      "files": [],
+      "streaming_24gb_notes": {
+        "published_on_disk_gb": 30.3,
+        "published_resident_gb_after_adaln_drop": 16.5,
+        "expected_dit_blocks": 50,
+        "risk_level": "moderate_until_pinned_and_measured",
+        "risk_note": "README-published size suggests possible streamed DiT staging on 24GB, but no revision/hash-pinned files are packaged yet; quality/performance claims are unverified."
+      },
+      "quality_claim_status": "unverified_candidate_no_generation_claim"
+    },
+    {
+      "id": "dit-mlx-8bit",
+      "aliases": ["8bit", "dit8", "quality-candidate"],
+      "kind": "dit_transformer",
+      "precision": "8bit core + 8bit AdaLN",
+      "repo_id": "pipenetwork/MiniMax-H3-MLX-8bit",
+      "repo_type": "model",
+      "revision": null,
+      "local_subdir": "MiniMax-H3-MLX-8bit",
+      "fetch_enabled": false,
+      "pinning_status": "repo_known_but_revision_file_hashes_not_verified_in_this_package",
+      "license": {
+        "name": "minimax-h3-community-license",
+        "url": "https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE",
+        "requires_user_acceptance": true,
+        "acceptance_env_var": "MINIMAX_H3_ACCEPT_LICENSE"
+      },
+      "files": [],
+      "streaming_24gb_notes": {
+        "published_on_disk_gb": 35.3,
+        "published_resident_gb_after_adaln_drop": 21.5,
+        "expected_dit_blocks": 50,
+        "risk_level": "high_until_pinned_and_measured",
+        "risk_note": "README-published resident DiT size alone is close to the 24GB contract; 24GB viability requires streamed blocks/staging and real measurement after hash-pinned staging."
+      },
+      "quality_claim_status": "unverified_candidate_no_generation_claim"
+    }
+  ]
+}

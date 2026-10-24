@@ -1,7 +1,7 @@
 """Load H3 LoRA files, merge the turbo LoRA in fp32 and route a user LoRA by target.
 
-``MiniMaxH3LoraLoaderMixin.lora_state_dict`` reads every format (PEFT, ai-toolkit, kohya/musubi, Comfy-style fused qkv) and
-returns diffusers' module names under the ``transformer.`` prefix. This module owns what follows:
+``utils/h3_lora`` reads every format (PEFT, ai-toolkit, kohya/musubi, Comfy-style fused qkv) into diffusers' module names under
+the ``transformer.`` prefix, and its names are re-exported here. This module owns what follows:
 
 * The turbo LoRA is merged into the bf16 weights with the maths in fp32. The config scale *replaces* ``alpha / rank``
   (it is never multiplied by it), so the loader hands the merger the raw factors with every ``.alpha`` dropped.
@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from zvisiongenerator.utils.h3_lora import PREFIX, LoraFile, fetch_lora_state, load_lora, pairs_from_state
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -46,23 +48,8 @@ __all__ = [
     "split_user_lora",
 ]
 
-PREFIX = "transformer."
 _TIMESTEP_MODULES = ("time_embedder", "time_proj")
 _ADALN_BLOCK = re.compile(r"transformer_blocks\.(\d+)\.adaln_proj\.linear")
-_PAIR_KEY = re.compile(rf"{re.escape(PREFIX)}(.+)\.lora_([AB])\.weight")
-
-
-@dataclass(frozen=True)
-class LoraFile:
-    """A LoRA file in diffusers' converted form.
-
-    Attributes:
-        state: Keys ``transformer.<module>.lora_A.weight`` and ``.lora_B.weight``; any per-module ``.alpha`` is already folded into the factors.
-        scales: ``{module: alpha / rank}`` from the file's metadata alpha, else 1.0 (the alpha-equals-rank convention). Never needed for a folded ``.alpha``.
-    """
-
-    state: dict[str, torch.Tensor]
-    scales: dict[str, float]
 
 
 @dataclass(frozen=True)
@@ -97,51 +84,6 @@ class UserLoraParts:
     refused: tuple[str, ...]
 
 
-def _fetch(source: str | dict[str, torch.Tensor]) -> tuple[dict[str, torch.Tensor], dict[str, object] | None]:
-    """Return ``(converted state, metadata)`` from diffusers' H3 loader; the one wrapper around it."""
-    from diffusers.loaders import MiniMaxH3LoraLoaderMixin
-
-    state, metadata = MiniMaxH3LoraLoaderMixin.lora_state_dict(source, return_lora_metadata=True)
-    return state, metadata
-
-
-def pairs_from_state(state: Mapping[str, torch.Tensor]) -> dict[str, Pair]:
-    """Return ``{module: (lora_A, lora_B)}`` from a converted state dict.
-
-    Raises:
-        ValueError: If a key is not a ``transformer.`` LoRA weight, or a module has only one half of its pair.
-    """
-    halves: dict[str, dict[str, torch.Tensor]] = {}
-    stray: list[str] = []
-    for key, tensor in state.items():
-        match = _PAIR_KEY.fullmatch(key)
-        if match is None:
-            stray.append(key)
-            continue
-        halves.setdefault(match.group(1), {})[match.group(2)] = tensor
-    if stray:
-        raise ValueError(f"LoRA state holds keys that are not transformer lora_A/lora_B weights (a LoRA for the reference partition?): {sorted(stray)[:4]}")
-    incomplete = sorted(module for module, pair in halves.items() if len(pair) != 2)
-    if incomplete:
-        raise ValueError(f"LoRA module {incomplete[0]} has only one of lora_A and lora_B.")
-    return {module: (pair["A"], pair["B"]) for module, pair in halves.items()}
-
-
-def _metadata_scales(state: Mapping[str, torch.Tensor], metadata: Mapping[str, object] | None) -> dict[str, float]:
-    """Return ``{module: alpha / rank}``: the metadata's uniform network alpha over each module's rank, else 1.0."""
-    alpha = None if metadata is None else metadata.get(f"{PREFIX}lora_alpha")
-    pairs = pairs_from_state(state)
-    if not isinstance(alpha, int | float):
-        return dict.fromkeys(pairs, 1.0)
-    return {module: float(alpha) / int(down.shape[0]) for module, (down, _) in pairs.items()}
-
-
-def load_lora(path: Path | str) -> LoraFile:
-    """Load a user LoRA file (any format diffusers converts) with its effective ``alpha / rank`` per module."""
-    state, metadata = _fetch(str(path))
-    return LoraFile(state=state, scales=_metadata_scales(state, metadata))
-
-
 def load_pairs(path: Path | str) -> dict[str, Pair]:
     """Load the raw ``{module: (lora_A, lora_B)}`` factors of the turbo LoRA, with every alpha ignored.
 
@@ -151,7 +93,7 @@ def load_pairs(path: Path | str) -> dict[str, Pair]:
     from safetensors.torch import load_file
 
     raw = {name: tensor for name, tensor in load_file(str(path)).items() if not name.endswith(".alpha")}
-    return pairs_from_state(_fetch(raw)[0])
+    return pairs_from_state(fetch_lora_state(raw)[0])
 
 
 def check_targets(modules: Mapping[str, object] | list[str] | tuple[str, ...]) -> None:

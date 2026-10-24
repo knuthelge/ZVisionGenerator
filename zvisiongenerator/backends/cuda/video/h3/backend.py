@@ -34,6 +34,7 @@ from zvisiongenerator.backends.cuda.video.h3.sources import resolve_files, trans
 from zvisiongenerator.backends.cuda.video.runtime import configure_torch_runtime, fit_image
 from zvisiongenerator.backends.cuda.video.token_chunking import chunk_tokens
 from zvisiongenerator.core.video_types import ExtendSegment
+from zvisiongenerator.utils.audio_resample import resample_audio
 from zvisiongenerator.utils.h3_memory import H3_FPS, H3_FRAMES_PER_CHUNK, H3_ROW_PIXELS, h3_cuda_system_bytes, h3_lora_bytes, h3_seedvr2_tier
 from zvisiongenerator.utils.h3_preset import H3Files, H3Preset
 from zvisiongenerator.utils.paths import get_ziv_data_dir
@@ -186,23 +187,13 @@ def _require_mode(model: _H3Model, mode: str) -> None:
         raise RuntimeError(f"This loaded video model was loaded for mode {model.mode!r}, not {mode!r} (load it with mode={mode!r}).")
 
 
-def _resample(audio: np.ndarray, source_rate: int, target_rate: int) -> np.ndarray:
-    """Return ``(channels, samples)`` audio resampled from *source_rate* to *target_rate* (polyphase)."""
-    if source_rate == target_rate:
-        return audio
-    from scipy.signal import resample_poly
-
-    divisor = math.gcd(source_rate, target_rate)
-    return resample_poly(audio, target_rate // divisor, source_rate // divisor, axis=1).astype("float32")
-
-
 def _new_audio(waveform: torch.Tensor, extend_frames: int) -> np.ndarray:
     """Return the sound of the new frames of an extension window as ``(2, extend_frames * 2000)`` float32 at the join's rate.
 
     The window's sound is resampled to the rate the join works at; the samples that cover the carried tail are dropped,
     the samples of the new frames kept, and a window whose sound ends early is faded out and padded with silence.
     """
-    samples = _resample(waveform.float().cpu().numpy(), h3_audio.AUDIO_SAMPLE_RATE, JOIN_SAMPLE_RATE)
+    samples = resample_audio(waveform.float().cpu().numpy(), h3_audio.AUDIO_SAMPLE_RATE, JOIN_SAMPLE_RATE)
     return cut_window_audio(samples, round(conditioning.TAIL_FRAMES * JOIN_SAMPLE_RATE / H3_FPS), round(extend_frames * JOIN_SAMPLE_RATE / H3_FPS))
 
 

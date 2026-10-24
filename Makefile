@@ -82,6 +82,25 @@ update-seedvr2: ## Update vendored SeedVR2 PyTorch inference core (Windows/Linux
 	rm -rf $(TMP)
 	@echo "✓ Vendored seedvr2_torch updated to $(SEEDVR2_COMMIT)"
 
+H3_MLX_REPO   ?= https://github.com/Argus-AiTeam/minimax-h3-mac.git
+# main (2026-08-12)
+H3_MLX_COMMIT ?= 3fcc9f8c557cf353400b1acf737b985e524a509f
+
+.PHONY: update-h3-mlx
+
+update-h3-mlx: ## Update vendored minimax_h3_mlx (MiniMax H3 on macOS)
+	$(eval TMP := $(shell mktemp -d))
+	git clone --quiet $(H3_MLX_REPO) $(TMP)
+	cd $(TMP) && git checkout --quiet $(H3_MLX_COMMIT)
+	rm -rf packages/minimax_h3_mlx
+	cp -r $(TMP)/minimax_h3_mlx packages/minimax_h3_mlx
+	cp $(TMP)/scripts/quantize_text_encoder.py packages/minimax_h3_mlx/quantize_text_encoder.py
+	cp $(TMP)/LICENSE packages/minimax_h3_mlx/LICENSE
+	rm -f packages/minimax_h3_mlx/generate_cli.py packages/minimax_h3_mlx/doctor.py packages/minimax_h3_mlx/cleanroom_smoke.py
+	find packages/minimax_h3_mlx -name __pycache__ -type d -prune -exec rm -rf {} +
+	rm -rf $(TMP)
+	@echo "✓ Vendored minimax_h3_mlx updated to $(H3_MLX_COMMIT)"
+
 # ——— Frontend ————————————————————————————————————————————
 
 .PHONY: frontend-install frontend-build frontend-static-check frontend-palette-check frontend-hover-check frontend-test frontend-dev

@@ -48,6 +48,7 @@ dependencies = [
     "mlx>=0.32.2; sys_platform == 'darwin'",
     "mlx-arsenal>=0.2.4,<0.3; sys_platform == 'darwin'",
     "mlx-lm>=0.32.0; sys_platform == 'darwin'",
+    "mlx-vlm==0.6.10; sys_platform == 'darwin'",
     "safetensors>=0.8.0",
     "tqdm>=4.66.0",
     "ruamel-yaml>=0.18.10",
@@ -111,7 +112,7 @@ raw-options = { version_scheme = "no-guess-dev" }
 version-file = "zvisiongenerator/_version.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["zvisiongenerator", "packages/ltx_core_mlx", "packages/ltx_pipelines_mlx", "packages/seedvr2_torch"]
+packages = ["zvisiongenerator", "packages/ltx_core_mlx", "packages/ltx_pipelines_mlx", "packages/minimax_h3_mlx", "packages/seedvr2_torch"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "zvisiongenerator/config.yaml" = "zvisiongenerator/config.yaml"

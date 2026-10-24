@@ -265,15 +265,38 @@ def build_reencode_command(
     return [*_FFMPEG_QUIET, *inputs, "-filter_complex", graph, *video, "-an", "-map_metadata", "-1", str(output)]
 
 
-def write_pcm16_wav(samples: np.ndarray, path: str | Path) -> None:
-    """Write audio of shape ``(channels, samples)`` with values in -1..1 as a 16-bit PCM WAV file at ``AUDIO_SAMPLE_RATE``."""
+def build_mux_command(video: str | Path, wav: str | Path, output: str | Path) -> list[str]:
+    """Build the ffmpeg command that stream-copies a video-only file and encodes a WAV as its AAC audio track.
+
+    The video is copied unchanged, so a clip written once by ``build_segment_command`` is never encoded twice. The result
+    carries no metadata from either input.
+
+    Args:
+        video: The video-only file.
+        wav: The audio, at any sample rate.
+        output: The muxed file.
+    """
+    return [*_FFMPEG_QUIET, "-i", str(video), "-i", str(wav), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", *_AUDIO_ENCODER, "-map_metadata", "-1", str(output)]
+
+
+def mux_audio(video: str | Path, wav: str | Path, output: str | Path) -> None:
+    """Write *output* as *video* with *wav* as its audio track (see ``build_mux_command``).
+
+    Raises:
+        RuntimeError: If ffmpeg exits with an error.
+    """
+    _run(build_mux_command(video, wav, output), "ffmpeg could not add the audio to the video")
+
+
+def write_pcm16_wav(samples: np.ndarray, path: str | Path, sample_rate: int = AUDIO_SAMPLE_RATE) -> None:
+    """Write audio of shape ``(channels, samples)`` with values in -1..1 as a 16-bit PCM WAV file, by default at ``AUDIO_SAMPLE_RATE``."""
     import numpy as np
 
     pcm = (np.clip(np.asarray(samples, dtype=np.float32), -1.0, 1.0) * 32767).astype(np.int16)
     with wave.open(str(path), "wb") as writer:
         writer.setnchannels(pcm.shape[0])
         writer.setsampwidth(2)
-        writer.setframerate(AUDIO_SAMPLE_RATE)
+        writer.setframerate(sample_rate)
         writer.writeframes(np.ascontiguousarray(pcm.T).tobytes())
 
 
@@ -427,15 +450,15 @@ def _concat_list(source: ExtendSource, video_only: Path, segment: Path) -> str:
     return f"file '{quoted(video_only)}'\nduration {source.frame_count / source.fps:.6f}\nfile '{quoted(segment)}'\n"
 
 
-def _run(command: list[str]) -> None:
+def _run(command: list[str], message: str = "ffmpeg could not join the clips") -> None:
     """Run an ffmpeg command.
 
     Raises:
-        RuntimeError: If ffmpeg exits with an error.
+        RuntimeError: If ffmpeg exits with an error; *message* leads the error text.
     """
     result = subprocess.run(command, capture_output=True, check=False)
     if result.returncode != 0:
-        raise tool_error("ffmpeg could not join the clips", result.stderr)
+        raise tool_error(message, result.stderr)
 
 
 def _check_joined(probe: VideoProbe, source: ExtendSource, *, extend_frames: int, audio: bool) -> None:

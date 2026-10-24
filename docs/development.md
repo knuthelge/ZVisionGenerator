@@ -28,6 +28,7 @@ make install
 | `make frontend-palette-check` | Fail on raw colour classes or literals in Svelte files (`PALETTE_STRICT=0` only warns) |
 | `make update-ltx` | Re-vendor `ltx-core-mlx` and `ltx-pipelines-mlx` into `packages/` |
 | `make update-seedvr2` | Re-vendor the SeedVR2 PyTorch inference core into `packages/seedvr2_torch` |
+| `make update-h3-mlx` | Re-vendor the MiniMax H3 MLX pipeline into `packages/minimax_h3_mlx` |
 | `make build` | Build wheel and sdist |
 | `make clean` | Remove build artifacts, caches, venv |
 | `make run` | Run `ziv-image` CLI (use `ARGS="..."`) |
@@ -580,6 +581,15 @@ The bench loads one enhancer model and nothing else. `tests/test_enhance_bench.p
 - **Layout.** `make update-seedvr2` copies upstream's `src/` without `src/interfaces/` (the ComfyUI nodes), the two model configs, the fixed text embeddings `pos_emb.pt` and `neg_emb.pt`, and the licence, and writes its own `__init__.py` in place of upstream's, which loads the nodes. Upstream's code imports itself relatively and finds its configs and embeddings three folders above `src/utils/constants.py`, so the copy keeps upstream's layout and is imported as `seedvr2_torch.src`.
 - **Update.** It does not carry dependencies: mirror upstream's `requirements.txt` into ours by hand, Windows and Linux only, leaving out `gguf` (only imported for GGUF weights) and `matplotlib` (debug output). `torchvision` comes from the same CUDA index as `torch`, and `opencv-python` is replaced by `opencv-python-headless`.
 - **Internals we rely on.** `tests/test_seedvr2_torch_contract.py` pins the entry points the upscaler calls, their keyword arguments and the bundled files.
+
+## Vendored MiniMax H3 MLX
+
+`packages/minimax_h3_mlx` is the MLX pipeline for MiniMax H3 from [`Argus-AiTeam/minimax-h3-mac`](https://github.com/Argus-AiTeam/minimax-h3-mac) (Apache-2.0), which the macOS H3 backend runs. Upstream is not published to PyPI, so it lives in the repository. Never edit it by hand.
+
+- **Pin.** `H3_MLX_COMMIT` in the `Makefile` names the vendored commit and the comment above it names the branch and date. `tests/test_h3_mlx_contract.py` checks it against `H3_MLX_COMMIT` in `backends/mac/h3_video.py`.
+- **Layout.** `make update-h3-mlx` copies upstream's `minimax_h3_mlx/` without its command-line modules (`generate_cli.py`, `doctor.py` and `cleanroom_smoke.py`), adds `scripts/quantize_text_encoder.py` as `quantize_text_encoder.py`, and copies the license. Upstream imports itself absolutely as `minimax_h3_mlx`, so the directory keeps that name and is imported as a top-level package.
+- **Update.** It does not carry dependencies: mirror upstream's `dependencies` into ours by hand, macOS-only. `mlx-vlm` is pinned exactly, because upstream imports its Qwen3-VL vision model, and a newer `mlx-vlm` pulls a newer `mlx` than the one LTX is tested with. Check that `uv lock` adds packages and leaves `mlx` where it was. On macOS the pinned `mlx-vlm` also needs a newer `starlette` (the Web UI's server library) than Windows and Linux use, so run the Web UI on a Mac after a bump.
+- **Internals we rely on.** `tests/test_h3_mlx_contract.py` reads the source as a syntax tree, since Linux has no MLX, and pins the `MiniMaxH3Pipeline.from_pretrained` and `__call__` parameters, the single read of `self.text_encoder` in `__call__`, the `GenerationResult` fields, the low-memory image refusal, the Turbo LoRA key pattern and its six targets, and `quantize_text_encoder.convert`. Import checks for the same names run where MLX is installed.
 
 ## Releasing
 
