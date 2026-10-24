@@ -29,7 +29,7 @@ The Workspace history strip has the same limits, so the problem shows on both pa
 
 ### 2. Search and filters in the API
 
-`GET /api/gallery` (and `/api/history`, or the one endpoint [One Gallery](one-gallery.md) leaves) gains:
+`GET /api/gallery` (the one endpoint [One Gallery](archive/one-gallery.md) left) gains:
 
 | Param | Meaning |
 |---|---|

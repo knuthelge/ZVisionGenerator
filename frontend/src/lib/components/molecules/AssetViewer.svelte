@@ -230,7 +230,11 @@
   // Opening: the thumbnail flies from the tile to where the image will sit.
   $effect(() => {
     if (!open) return;
+    // The neighbours sit a stage padding further out than the track, so they stay clear of its edges at any width.
+    const measureGap = () => { paneGap = Math.max(0, (stageEl?.clientWidth ?? 0) - (trackEl?.clientWidth ?? 0)); };
+    window.addEventListener('resize', measureGap);
     untrack(() => {
+      measureGap();
       const shown = asset;
       // A video has no still to fly (its thumbnail is the video itself), so it fades in and out instead.
       const from = reduceMotion() || shown?.media_type === 'video' ? null : originRect();
@@ -638,7 +642,9 @@
     data-chrome={chromeHidden ? 'hidden' : 'shown'}
     style:--pull={drag?.axis === 'y' ? pullBackdropOpacity(drag.offset) : undefined}
   >
-    <div class="viewer-backdrop" aria-hidden="true"></div>
+    <!-- On a desktop or a tablet the viewer is a panel over the page; a click on the backdrop closes it. -->
+    <button type="button" class="viewer-backdrop" aria-label="Close viewer" tabindex="-1" onclick={close}></button>
+    <div class="viewer-panel">
     <div class="viewer-bar">
       <div class="viewer-title">
         <b id="asset-viewer-title" class="truncate">{asset.filename}</b>
@@ -924,6 +930,7 @@
       </div>
     {/if}
 
+    </div>
     <ActionMenu
       open={referenceOpen}
       anchor={referenceButton}
@@ -986,6 +993,11 @@
   .asset-viewer { z-index: var(--z-viewer); display: flex; flex-direction: column; }
   /* The backdrop and the chrome clear as the image is pulled down (--pull), and the chrome goes on a tap. */
   .viewer-backdrop { position: absolute; inset: 0; background: color-mix(in srgb, var(--color-bg-base) 70%, black); opacity: var(--pull, 1); }
+  .viewer-panel { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; }
+  /* A desktop or a tablet: a panel over the page, the details beside the image, a backdrop that closes on click. */
+  .asset-viewer[data-compact='false'] { padding: 24px; }
+  .asset-viewer[data-compact='false'] .viewer-backdrop { background: var(--color-scrim); cursor: default; }
+  .asset-viewer[data-compact='false'] .viewer-panel { flex: none; width: min(1400px, 100%); height: 100%; margin: 0 auto; overflow: hidden; border-radius: var(--radius-lg); background: var(--color-bg-base); box-shadow: 0 24px 64px var(--color-scrim); }
   .viewer-bar, .viewer-main, .viewer-film { position: relative; }
   .viewer-bar, .viewer-film { opacity: var(--pull, 1); transition: opacity 160ms ease; }
   .asset-viewer[data-chrome='hidden'] .viewer-bar, .asset-viewer[data-chrome='hidden'] .viewer-film { opacity: 0; pointer-events: none; }
