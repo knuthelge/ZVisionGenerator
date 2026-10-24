@@ -15,11 +15,11 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends import prompt_enhancer_session, release_accelerator_memory
+from zvisiongenerator.backends import prompt_enhancer_session, release_accelerator_memory, video_family_on_platform
 from zvisiongenerator.core.job_plan import EnhancerUsed, EnhanceStatus, IterationPlan, JobPlan
 from zvisiongenerator.core.progress_events import ProgressCallback, emit_progress
 from zvisiongenerator.utils.prompt_compose import expand_random_choices, is_original_prompt
-from zvisiongenerator.utils.config import model_reference, video_family
+from zvisiongenerator.utils.config import model_reference
 from zvisiongenerator.utils.enhance_record import enhancer_tier
 from zvisiongenerator.utils.prompt_enhance import (
     EnhanceContext,
@@ -197,7 +197,7 @@ def run_preflight(
         return JobPlan(iterations, cancelled=True)
     pause = _make_pause(control, mode=mode, total_iterations=total_iterations, progress_callback=progress_callback)
     caption = mode == "image" and getattr(args, "enhance_format", None) == "json"
-    family = video_family(config, model_family) if video and model_family else None
+    family = video_family_on_platform(config, model_family) if video and model_family else None
     rewrite = _make_rewriter(config, mode=mode, model_family=model_family, context=_job_context(args, mode=mode, family=family), caption=caption)
 
     def _on_phase(phase: str) -> None:

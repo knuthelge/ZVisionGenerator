@@ -66,7 +66,7 @@ def instant_plan(model_ref: str, *, config: dict[str, Any], platform_key: str) -
 def video_plan(model_ref: str, *, family: str, config: dict[str, Any], model_name: str | None, upscale: bool) -> tuple[DownloadTarget, ...] | None:
     """Return the targets a video model needs with the configured companions, or ``None`` when the plan cannot be made now.
 
-    MiniMax H3 plans its repository, text encoder and turbo LoRA, plus the SeedVR2 weights of the video upscale.
+    MiniMax H3 plans its repository, text encoder and turbo LoRA, plus the latent upscaler of the video upscale.
 
     Raises:
         ValueError: If the ``video_model_presets`` config entries of the family are malformed.

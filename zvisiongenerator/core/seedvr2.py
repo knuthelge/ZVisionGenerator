@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from PIL import Image
 
 from zvisiongenerator.utils.seedvr2 import SeedVR2Weights
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 @runtime_checkable
@@ -33,4 +37,30 @@ class SeedVR2Upscaler(Protocol):
 
     def upscale_image(self, model: Any, image_path: str, *, width: int, height: int, seed: int, softness: float) -> Image.Image:
         """Return *image_path* enlarged to *width* × *height*, pre-blurred by *softness* (0-1)."""
+        ...
+
+
+class SeedVR2VideoUpscaler(Protocol):
+    """Optional extension of an engine that can also enlarge the frames of a video.
+
+    It is not runtime-checkable: callers test for the method with ``hasattr(upscaler, "upscale_video")``.
+    """
+
+    def upscale_video(
+        self,
+        model: Any,
+        frames: list[np.ndarray],
+        *,
+        width: int,
+        height: int,
+        seed: int,
+        softness: float,
+        batch_size: int = 5,
+        progress: Callable[[int, int], None] | None = None,
+    ) -> list[np.ndarray]:
+        """Return *frames* (HxWx3 uint8) enlarged to *width* × *height*, pre-blurred by *softness* (0-1).
+
+        The engine upscales the clip in temporal batches of *batch_size*; *progress* gets
+        ``(batches_done, batches_total)`` after each batch.
+        """
         ...

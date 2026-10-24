@@ -724,7 +724,6 @@ def _build_video_bootstrap_defaults(model_name: str, web_config: WebUiConfig) ->
         "quantize": None,
         "max_steps": described.max_steps if described is not None else _default_video_max_steps(app_config, family),
         "fps": fps,
-        "frame_alignment": frame_alignment,
         "frame_rule": frame_rule,
         # A family the config does not describe keeps every capability but the opt-in last frame.
         "hidden_controls": hidden_video_controls(capabilities) if capabilities is not None else sorted(END_FRAME_CONTROLS),

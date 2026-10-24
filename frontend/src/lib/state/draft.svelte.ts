@@ -247,9 +247,9 @@ function _swapFamilyLoras(ctx: WorkspaceContext, state: DraftState, fromModel: s
   };
 }
 
-/** The frame counts a video model accepts: its family's rule, else `frame_alignment * k + 1` rounded to the nearest. */
+/** The frame counts a video model accepts: its family's rule, else any count. */
 function _frameRuleOf(defaults: VideoModelDefaults | undefined): FrameRule {
-  return defaults?.frame_rule ?? { alignment: defaults?.frame_alignment ?? 1, offset: 1, round: 'nearest' };
+  return defaults?.frame_rule ?? { alignment: 1, offset: 1, round: 'nearest' };
 }
 
 /** Return a video model's defaults, falling back to the default video model's. */

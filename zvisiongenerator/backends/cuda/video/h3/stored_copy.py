@@ -14,6 +14,7 @@ LoRAs by target (refiner merge, AdaLN table delta, PEFT on the NF4 layers) and s
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -25,7 +26,8 @@ from zvisiongenerator.backends.cuda.lora_peft import is_unmatched_adapter_error,
 from zvisiongenerator.backends.cuda.quant import dequantized_tensors, empty_diffusers_model, fill_weights, nf4_linear_names, nf4_storage_format, pack_nf4, place_nf4, swap_in_linear4bit
 from zvisiongenerator.backends.cuda.video.h3 import lora as h3_lora
 from zvisiongenerator.utils.safetensors_stream import ShardWriter, iter_tensors, shard_files
-from zvisiongenerator.utils.stored_quant import ensure_stored_copy, file_identities
+from zvisiongenerator.utils.h3_preset import is_folder_name
+from zvisiongenerator.utils.stored_quant import ensure_stored_copy, file_identities, stored_quant_name
 
 if TYPE_CHECKING:
     import torch
@@ -33,14 +35,13 @@ if TYPE_CHECKING:
     from zvisiongenerator.backends.cuda.video.h3.adaln import Key
 
 __all__ = [
-    "COPY_NAME",
     "copy_manifest",
+    "copy_name",
     "ensure_copy",
     "load_copy",
     "write_copy",
 ]
 
-COPY_NAME = "h3@q4"
 _LAYOUT_VERSION = 1
 _BITS = 4
 _FAMILY = "h3"
@@ -72,11 +73,33 @@ def copy_manifest(shards: Iterable[Path], lora_file: Path, scale: float, keys: I
     }
 
 
-def ensure_copy(models_dir: Path, shards: Sequence[Path], config: dict[str, Any], lora_file: Path, scale: float, keys: Sequence[Key], device: Any) -> Path:
+def copy_name(model_name: str | None, model_ref: str) -> str:
+    """Return the name a model's stored copy goes by (the copy folder is ``<name>@q4``), so each source model keeps a copy of its own.
+
+    The name the model was picked by is used when it is a plain folder name (``h3``, an installed fine-tune), which is how the
+    Models page counts and deletes the copy with the model. Any other pick is named after its reference: a Hub repository
+    (``owner--repo``, any revision dropped) or a local folder (its name and a digest of its full path, so equally named folders
+    stay apart).
+
+    Args:
+        model_name: The name the model was picked by, if the caller has one.
+        model_ref: The resolved model: a Hub reference or a local H3 folder.
+    """
+    if model_name and is_folder_name(model_name):
+        return model_name
+    ref = model_ref.strip()
+    folder = Path(ref).expanduser()
+    if folder.is_dir():
+        return f"{folder.resolve().name}-{hashlib.sha256(str(folder.resolve()).encode()).hexdigest()[:8]}"
+    return ref.partition("@")[0].replace("/", "--")
+
+
+def ensure_copy(models_dir: Path, name: str, shards: Sequence[Path], config: dict[str, Any], lora_file: Path, scale: float, keys: Sequence[Key], device: Any) -> Path:
     """Return the stored copy under *models_dir*, writing it first when it is missing or not current.
 
     Args:
-        models_dir: The models folder; the copy lives at ``<models>/h3@q4``.
+        models_dir: The models folder; the copy lives at ``<models>/<name>@q4``.
+        name: The source model's name (see :func:`copy_name`); the stock ``h3`` keeps ``h3@q4``.
         shards: The transformer's safetensors files, under the model's own (diffusers) tensor names.
         config: The diffusers transformer config.
         lora_file: The turbo LoRA.
@@ -85,7 +108,7 @@ def ensure_copy(models_dir: Path, shards: Sequence[Path], config: dict[str, Any]
         device: The CUDA device bitsandbytes packs weights on.
     """
     manifest = copy_manifest(shards, lora_file, scale, keys)
-    return ensure_stored_copy(models_dir / COPY_NAME, manifest, lambda target: write_copy(shards, config, lora_file, scale, keys, target, device), flush=True)
+    return ensure_stored_copy(models_dir / stored_quant_name(name, _BITS), manifest, lambda target: write_copy(shards, config, lora_file, scale, keys, target, device), flush=True)
 
 
 def write_copy(shards: Sequence[Path], config: dict[str, Any], lora_file: Path, scale: float, keys: Sequence[Key], target: Path, device: Any) -> None:

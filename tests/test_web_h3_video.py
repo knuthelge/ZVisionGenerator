@@ -221,14 +221,63 @@ class TestExtend:
         assert submitted[0]["args"].steps == 8
 
 
+def _lora_file(tmp_path: Path, name: str, size: int) -> Path:
+    path = tmp_path / f"{name}.safetensors"
+    path.write_bytes(b"\0" * size)
+    return path
+
+
 class TestExtendMemoryFit:
+    def test_the_selected_loras_are_sized_for_h3_and_ignored_for_ltx(self, tmp_path, monkeypatch):
+        calls: list[dict[str, Any]] = []
+        monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
+        monkeypatch.setattr(extend_api_module, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
+        lora = f"{_lora_file(tmp_path, 'style', 4_000)}:0.7"
+
+        extend_api_module._extend_memory_fit(("/models/h3", "h3"), "h3", make_extend_source(), 34, True, None, lora, _web_config(tmp_path))
+        extend_api_module._extend_memory_fit(("/models/h3", "h3"), "h3", make_extend_source(), 34, True, None, None, _web_config(tmp_path))
+        extend_api_module._extend_memory_fit(("/models/ltx", "ltx"), "ltx-8", make_extend_source(), 48, True, None, lora, _web_config(tmp_path))
+
+        assert [call["loras_bytes"] for call in calls] == [4_000, 0, 0]
+
+    def test_a_lora_that_is_not_there_leaves_the_estimate_unknown_without_failing(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
+        monkeypatch.setattr(extend_api_module, "clip_memory_fit", lambda model, **kwargs: pytest.fail("estimated"))
+
+        fit = extend_api_module._extend_memory_fit(("/models/h3", "h3"), "h3", make_extend_source(), 34, True, None, str(tmp_path / "gone.safetensors"), _web_config(tmp_path))
+
+        assert fit is None
+
+    def test_the_source_request_carries_the_loras_into_the_estimate(self, tmp_path, monkeypatch):
+        calls: list[dict[str, Any]] = []
+        monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
+        monkeypatch.setattr(extend_api_module, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
+        monkeypatch.setattr(extend_api_module, "_resolve_video_model", lambda model, _config: ("/models/h3", "h3"))
+        monkeypatch.setattr(
+            extend_api_module,
+            "_inspect_source",
+            lambda _path: SimpleNamespace(
+                probe=SimpleNamespace(fps=24.0, width=768, height=448, rotation=0, frame_count=48, has_audio=False, duration=2.0), recorded=None, problems=(), source=make_extend_source()
+            ),
+        )
+        monkeypatch.setattr(extend_api_module, "with_family_problems", lambda inspection, family: inspection)
+        monkeypatch.setattr(extend_api_module, "_source_video_path", lambda *_a, **_k: tmp_path / "clip.mp4")
+        monkeypatch.setattr(extend_api_module, "output_media_url", lambda *_a, **_k: None)
+        lora = str(_lora_file(tmp_path, "style", 700))
+
+        extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3", "lora": lora}, _web_config(tmp_path), tmp_path)
+        with pytest.raises(ValueError, match="lora must be a string"):
+            extend_api_module.extend_source_response({"path": "clip.mp4", "lora": 5}, _web_config(tmp_path), tmp_path)
+
+        assert [call["loras_bytes"] for call in calls] == [700]
+
     def test_the_memory_fit_is_asked_for_the_family_of_the_model(self, tmp_path, monkeypatch):
         calls: list[dict[str, Any]] = []
         monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
         monkeypatch.setattr(extend_api_module, "clip_memory_fit", lambda model, **kwargs: calls.append({"model": model, **kwargs}))
 
-        extend_api_module._extend_memory_fit(("/models/h3", "h3"), "h3", make_extend_source(), 34, True, _web_config(tmp_path))
-        extend_api_module._extend_memory_fit(("/models/ltx", "ltx"), "ltx-8", make_extend_source(), 48, True, _web_config(tmp_path))
+        extend_api_module._extend_memory_fit(("/models/h3", "h3"), "h3", make_extend_source(), 34, True, None, None, _web_config(tmp_path))
+        extend_api_module._extend_memory_fit(("/models/ltx", "ltx"), "ltx-8", make_extend_source(), 48, True, None, None, _web_config(tmp_path))
 
         assert [(call["model"], call["family"]) for call in calls] == [("/models/h3", "h3"), ("/models/ltx", "ltx")]
 
@@ -237,15 +286,25 @@ class TestExtendMemoryFit:
         monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
         monkeypatch.setattr(extend_api_module, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
 
-        extend_api_module._extend_memory_fit(("/models/h3", "h3"), "h3", make_extend_source(), 34, True, _web_config(tmp_path))
-        extend_api_module._extend_memory_fit(("/models/ltx", "ltx"), "ltx-8", make_extend_source(), 48, True, _web_config(tmp_path))
+        extend_api_module._extend_memory_fit(("/models/h3", "h3"), "h3", make_extend_source(), 34, True, None, None, _web_config(tmp_path))
+        extend_api_module._extend_memory_fit(("/models/ltx", "ltx"), "ltx-8", make_extend_source(), 48, True, None, None, _web_config(tmp_path))
 
         assert [(call["mode"], call["frames"], call["forwards"]) for call in calls] == [("extend", 22 + 34, 8), ("extend", 25 + 48, 8)]
+
+    @pytest.mark.parametrize(("steps", "forwards"), [(4, 4), (8, 8), (6, 8), (12, 8), (None, 8)])
+    def test_the_h3_estimate_runs_the_chosen_steps_as_the_step_rules_settle_them(self, tmp_path, monkeypatch, steps, forwards):
+        calls: list[dict[str, Any]] = []
+        monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
+        monkeypatch.setattr(extend_api_module, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
+
+        extend_api_module._extend_memory_fit(("/models/h3", "h3"), "h3", make_extend_source(), 34, True, steps, None, _web_config(tmp_path))
+
+        assert calls[0]["forwards"] == forwards
 
     def test_a_discrete_gpu_gets_an_estimated_time_for_the_window(self, tmp_path, monkeypatch):
         monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(10 * 2**30, system_bytes=30 * 2**30))
 
-        fit = extend_api_module._extend_memory_fit(("/models/h3", "h3"), "h3", make_extend_source(width=768, height=448), 34, True, _web_config(tmp_path))
+        fit = extend_api_module._extend_memory_fit(("/models/h3", "h3"), "h3", make_extend_source(width=768, height=448), 34, True, None, None, _web_config(tmp_path))
 
         assert fit is not None
         assert (fit["kind"], fit["family"]) == ("discrete", "h3")
@@ -254,13 +313,71 @@ class TestExtendMemoryFit:
     def test_a_family_without_an_estimate_has_no_fit(self, tmp_path, monkeypatch):
         monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
 
-        fit = extend_api_module._extend_memory_fit(("/models/h3", "h3"), "h3", make_extend_source(), 59, True, _web_config(tmp_path))
+        fit = extend_api_module._extend_memory_fit(("/models/h3", "h3"), "h3", make_extend_source(width=100, height=60), 34, True, None, None, _web_config(tmp_path))
 
         assert fit is None
 
     @pytest.mark.parametrize(("family", "extend_frames", "window"), [("h3", 34, 56), ("h3", 17, 39), ("ltx", 48, 73)])
     def test_the_window_is_the_carried_frames_plus_the_new_ones(self, family, extend_frames, window):
         assert window_frames(extend_frames, video_family(load_config(), family)) == window
+
+    def test_the_source_request_carries_the_steps_into_the_estimate(self, tmp_path, monkeypatch):
+        calls: list[dict[str, Any]] = []
+        self._stub_a_source(tmp_path, monkeypatch)
+        monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
+        monkeypatch.setattr(extend_api_module, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
+        monkeypatch.setattr(
+            extend_api_module,
+            "_inspect_source",
+            lambda _path: SimpleNamespace(
+                probe=SimpleNamespace(fps=24.0, width=768, height=448, rotation=0, frame_count=48, has_audio=False, duration=2.0), recorded=None, problems=(), source=make_extend_source()
+            ),
+        )
+        monkeypatch.setattr(extend_api_module, "with_family_problems", lambda inspection, family: inspection)
+
+        extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3", "steps": 4}, _web_config(tmp_path), tmp_path)
+        extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 17, "model": "h3"}, _web_config(tmp_path), tmp_path)
+
+        assert [call["forwards"] for call in calls] == [4, 8]
+
+    def test_on_a_mac_the_source_response_reports_the_window_the_mac_renders(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(backends_module.sys, "platform", "darwin")
+        monkeypatch.setattr(extend_api_module, "memory_budget", lambda: None)
+        monkeypatch.setattr(extend_api_module, "_inspect_source", lambda _path: SimpleNamespace(probe=None, recorded=None, problems=(), source=None))
+        self._stub_a_source(tmp_path, monkeypatch)
+
+        payload = extend_api_module.extend_source_response({"path": "clip.mp4", "extend_frames": 51, "model": "h3"}, _web_config(tmp_path), tmp_path)
+
+        assert (payload["extend_frames"], payload["window_frames"]) == (51, 56)
+
+    def test_on_a_mac_the_estimate_and_the_rewrite_context_use_the_same_window(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(backends_module.sys, "platform", "darwin")
+        calls: list[dict[str, Any]] = []
+        monkeypatch.setattr(extend_api_module, "memory_budget", lambda: MemoryBudget(24 * 2**30))
+        monkeypatch.setattr(extend_api_module, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
+        monkeypatch.setattr(extend_api_module, "load_config", load_config)
+        monkeypatch.setattr(extend_api_module, "load_source_video", lambda *_a, **_k: make_extend_source(fps=24.0))
+        monkeypatch.setattr(extend_api_module, "supports_video_extend", lambda: True)
+        monkeypatch.setattr(extend_api_module, "supports_video_audio", lambda: False)
+        self._stub_a_source(tmp_path, monkeypatch)
+
+        extend_api_module._extend_memory_fit(("/models/h3", "h3"), "h3", make_extend_source(), 51, True, None, None, _web_config(tmp_path))
+        context = extend_api_module.extend_context_from_body({"source_video": "clip.mp4", "extend_frames": 51, "model": "h3"}, "She waves.")
+
+        assert calls[0]["frames"] == 56
+        assert context.seconds == pytest.approx(56 / 24)
+
+    @pytest.mark.parametrize("steps", [0, -1, "8", 4.5, True])
+    def test_steps_must_be_a_positive_integer(self, tmp_path, monkeypatch, steps):
+        self._stub_a_source(tmp_path, monkeypatch)
+
+        with pytest.raises(ValueError, match="steps must be a positive integer"):
+            extend_api_module.extend_source_response({"path": "clip.mp4", "model": "h3", "steps": steps}, _web_config(tmp_path), tmp_path)
+
+    def _stub_a_source(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(extend_api_module, "_source_video_path", lambda *_a, **_k: tmp_path / "clip.mp4")
+        monkeypatch.setattr(extend_api_module, "output_media_url", lambda *_a, **_k: None)
+        monkeypatch.setattr(extend_api_module, "detect_video_model", lambda path: SimpleNamespace(family="h3" if "h3" in path or "H3" in path else "ltx"))
 
     def test_the_source_response_reports_the_window_of_the_models_family(self, tmp_path, monkeypatch):
         monkeypatch.setattr(extend_api_module, "memory_budget", lambda: None)
@@ -312,6 +429,36 @@ class TestMemoryFitHints:
         self._fit(tmp_path, model="ltx-8", steps=4)
 
         assert asked[0]["family"] == "ltx"
+
+    def test_the_selected_loras_are_sized_as_a_job_resolves_them(self, tmp_path, asked):
+        small, large = _lora_file(tmp_path, "small", 1_000), _lora_file(tmp_path, "large", 2_500)
+
+        self._fit(tmp_path, lora=f"{small}:0.8,{large}")
+        self._fit(tmp_path)
+
+        assert [call["loras_bytes"] for call in asked] == [3_500, 0]
+
+    def test_review_counts_only_with_an_upscale(self, tmp_path, asked):
+        self._fit(tmp_path, upscale=2, review=True)
+        self._fit(tmp_path, upscale=2, review=False)
+        self._fit(tmp_path, review=True)
+        self._fit(tmp_path)
+
+        assert [call["review"] for call in asked] == [True, False, False, False]
+
+    def test_an_ltx_model_does_not_size_its_loras_or_need_them_to_exist(self, tmp_path, asked):
+        self._fit(tmp_path, model="ltx-8", lora=f"{tmp_path / 'gone.safetensors'}:1", upscale=2, review=True)
+
+        assert asked[0]["loras_bytes"] == 0
+
+    def test_an_h3_clip_with_a_missing_lora_is_refused_as_the_job_would_be(self, tmp_path, asked):
+        with pytest.raises(ValueError, match="LoRA file not found"):
+            self._fit(tmp_path, lora=str(tmp_path / "gone.safetensors"))
+
+    @pytest.mark.parametrize("body", [{"lora": 3}, {"review": "yes"}])
+    def test_a_bad_lora_or_review_is_refused(self, tmp_path, asked, body):
+        with pytest.raises(ValueError):
+            self._fit(tmp_path, **body)
 
 
 class TestExtendEnhanceContext:

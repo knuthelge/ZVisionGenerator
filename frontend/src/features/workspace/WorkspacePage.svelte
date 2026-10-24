@@ -823,7 +823,7 @@
     }
     const caps = workspaceCapabilities(context, state);
     const { frameRule } = videoTimingFor(context, state.model);
-    clipMemory.watch(clipMemoryRequest(state, { frameRule, lowMemory: caps.showLowMemory, upscale: caps.showVideoUpscale, steps: stepOptionsFor(context, state.model) !== null }));
+    clipMemory.watch(clipMemoryRequest(state, { frameRule, lowMemory: caps.showLowMemory, upscale: caps.showVideoUpscale, steps: stepOptionsFor(context, state.model) !== null, review: caps.showVideoUpscaleReview }));
   });
 
   onMount(() => {

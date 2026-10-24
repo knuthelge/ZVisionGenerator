@@ -9,6 +9,10 @@ export interface ExtendSourceRequest {
   /** The model whose memory use is estimated; the source's or the default one when absent. */
   model?: string | null;
   low_memory?: boolean | null;
+  /** The steps the job would run, which set the H3 time estimate; the model's default when absent. */
+  steps?: number | null;
+  /** The selected LoRAs as the job form submits them (`name:weight,...`), whose files take memory on MiniMax H3; none when absent. */
+  lora?: string | null;
 }
 
 /** Read a video chosen for extending: its facts, recorded text, problems that stop it, and the memory the extension needs. */

@@ -29,6 +29,7 @@ def _preset(**overrides) -> H3Preset:
         text_encoder_layers=50,
         lora=_hub("lo/ra"),
         lora_scale=0.0625,
+        latent_upsampler=_hub("up/sampler"),
         schedules={8: H3Schedule(8, 6.0, 3.0), 4: H3Schedule(4, 6.0, 3.0)},
     )
     fields.update(overrides)
@@ -77,6 +78,7 @@ def test_public_names_are_exported():
         "h3_mlx_preset",
         "h3_preset",
         "h3_turbo_lora",
+        "is_folder_name",
     }
     assert all(hasattr(h3_preset, name) for name in h3_preset.__all__)
 
@@ -99,6 +101,9 @@ class TestShippedPreset:
         assert preset.text_encoder_layers == 50
         assert preset.lora == HubFiles("lightx2v/Minimax-h3-Turbo", "30f485ed874aa44c8183348ad361c5eabad318da", ("minimax_h3_fl2v_turbo_8step_v1.0_768p_bf16.safetensors",))
         assert preset.lora_scale == 0.0625
+        assert preset.latent_upsampler == HubFiles(
+            "LBH-123-AI/Minimax_h3_latent_Upscaler", "3f941d5d182014dd5c0a5e16330420ee2d4aa0c6", ("minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors",)
+        )
         assert preset.schedules == {8: H3Schedule(8, 6.0, 3.0), 4: H3Schedule(4, 6.0, 3.0)}
         assert preset.attention == "sdpa"
         assert preset.ffn_chunk_tokens == 4096
@@ -163,6 +168,10 @@ class TestPresetErrors:
             ("diffusers.text_encoder.layers", 0, "video_model_presets.h3.diffusers.text_encoder.layers must be an integer of at least 1"),
             ("diffusers.lora.filename", "", "video_model_presets.h3.diffusers.lora.filename must be a non-blank string"),
             ("diffusers.lora.scale", -1, "video_model_presets.h3.diffusers.lora.scale must be a number above 0"),
+            ("diffusers.latent_upsampler", None, "video_model_presets.h3.diffusers.latent_upsampler must be a mapping"),
+            ("diffusers.latent_upsampler.repo", "LBH-123-AI/Minimax_h3_latent_Upscaler", r"video_model_presets.h3.diffusers.latent_upsampler.repo must name a revision"),
+            ("diffusers.latent_upsampler.repo", None, r"video_model_presets.h3.diffusers.latent_upsampler.repo must be a string"),
+            ("diffusers.latent_upsampler.filename", " ", "video_model_presets.h3.diffusers.latent_upsampler.filename must be a non-blank string"),
             ("diffusers.schedules", {}, "video_model_presets.h3.diffusers.schedules must not be empty"),
             ("diffusers.schedules.8.forwards", 0, "video_model_presets.h3.diffusers.schedules.8.forwards must be an integer of at least 1"),
             ("diffusers.schedules.4.video_shift", "x", "video_model_presets.h3.diffusers.schedules.4.video_shift must be a number above 0"),
@@ -202,8 +211,8 @@ class TestLoadOptionsAndCompanions:
         assert set(video_load_options("h3", config, "h3", upscale=True)) <= {"model_name", "preset", "upscale"}
 
     @pytest.mark.parametrize("repo_id", [REPO_REF, "MiniMaxAI/MiniMax-H3", "MiniMaxAI/MiniMax-H3@other"])
-    def test_the_companions_are_the_text_encoder_and_the_lora_repos(self, config, repo_id):
-        assert video_companion_repos("h3", config, repo_id) == ("unsloth/Qwen3-VL-32B-Instruct-bnb-4bit", "lightx2v/Minimax-h3-Turbo")
+    def test_the_companions_are_the_text_encoder_the_lora_and_the_latent_upsampler_repos(self, config, repo_id):
+        assert video_companion_repos("h3", config, repo_id) == ("unsloth/Qwen3-VL-32B-Instruct-bnb-4bit", "lightx2v/Minimax-h3-Turbo", "LBH-123-AI/Minimax_h3_latent_Upscaler")
 
     def test_seedvr2_repos_are_not_companions(self, config):
         assert not any("seedvr2" in repo.lower() for repo in h3_companion_repos(config, REPO_REF))

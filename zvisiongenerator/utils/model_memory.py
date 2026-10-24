@@ -382,6 +382,7 @@ def clip_memory_fit(
     mode: str = "t2v",
     forwards: int = 8,
     loras_bytes: int = 0,
+    review: bool = False,
 ) -> dict[str, Any] | None:
     """Check a clip against the memory budget; callers warn on ``tight`` or ``too_large`` and never block.
 
@@ -391,16 +392,17 @@ def clip_memory_fit(
         height: Output height in pixels, as aligned for the job.
         frames: Output frame count, as aligned for the job (an extension window carries its carried frames).
         low_memory: Whether the pipeline frees Gemma before loading the transformer.
-        upscale: Whether the clip is upscaled 2x (for H3, with SeedVR2; *width* and *height* are the enlarged size).
+        upscale: Whether the clip is upscaled 2x (*width* and *height* are the enlarged size).
         budget: The accelerator's memory budget, or ``None`` when unknown.
         find_local_dir: Locates a downloaded model directory.
         env: The environment to read the decode budget from; the process environment when omitted.
         model_name: The name the model was picked by (``ltx-4``), which sets the quantize level on a discrete GPU.
-        app_config: The loaded config, which sets that level and names the single-file transformer (discrete GPU only).
+        app_config: The loaded config, which sets that level and names the single-file transformer (LTX on a discrete GPU only).
         family: The model's video family; LTX and H3 have an estimate.
         mode: H3 only: ``"t2v"``, ``"i2v"`` or ``"extend"``; the image modes cost more memory and time (a keyframe, or an extension's tail).
         forwards: H3 only: the transformer forwards of the run, which set the estimated time.
         loras_bytes: H3 on a discrete GPU only: the total size of the user LoRA files.
+        review: H3 on a discrete GPU only: whether the upscale pauses to review the half-size render, which makes it load the transformer twice.
 
     Returns:
         ``{"status", "required_gb", "budget_gb"}`` (H3 adds ``"expected_seconds"``, an estimate in seconds), or ``None`` when no memory budget is known, the family has no estimate or the model is not a
@@ -410,7 +412,7 @@ def clip_memory_fit(
     if budget is None or not budget.gpu_bytes:
         return None
     if family == "h3":
-        return _h3_clip_fit(width, height, frames, budget, mode=mode, forwards=forwards, upscale=upscale, loras_bytes=loras_bytes, app_config=app_config)
+        return _h3_clip_fit(width, height, frames, budget, mode=mode, forwards=forwards, upscale=upscale, loras_bytes=loras_bytes, review=review)
     if family != "ltx":
         return None
     if budget.system_bytes is not None:
@@ -440,19 +442,14 @@ def clip_memory_fit(
     return {"status": classify_memory_fit(required, budget.gpu_bytes), "required_gb": round(required / GIB, 1), "budget_gb": round(budget.gpu_bytes / GIB, 1)}
 
 
-def _h3_clip_fit(width: int, height: int, frames: int, budget: MemoryBudget, *, mode: str, forwards: int, upscale: bool, loras_bytes: int, app_config: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Check an H3 clip against the budget, or return ``None`` when it has no estimate (a canvas or length H3 cannot take, or a config without the SeedVR2 tiers)."""
-    from zvisiongenerator.utils.h3_memory import h3_clip_fit, h3_mlx_clip_fit, h3_seedvr2_tier
+def _h3_clip_fit(width: int, height: int, frames: int, budget: MemoryBudget, *, mode: str, forwards: int, upscale: bool, loras_bytes: int, review: bool) -> dict[str, Any] | None:
+    """Check an H3 clip against the budget, or return ``None`` when it has no estimate (a canvas or length H3 cannot take)."""
+    from zvisiongenerator.utils.h3_memory import h3_clip_fit, h3_mlx_clip_fit
 
     try:
         if budget.system_bytes is None:
             return h3_mlx_clip_fit(width, height, frames, budget, forwards=forwards, mode=mode)
-        tier = None
-        if upscale:
-            from zvisiongenerator.utils.config import load_config
-
-            tier = h3_seedvr2_tier(app_config or load_config(), budget)
-        return h3_clip_fit(width, height, frames, budget, forwards=forwards, mode=mode, loras_bytes=loras_bytes, upscale=upscale, seedvr2_tier=tier)
+        return h3_clip_fit(width, height, frames, budget, forwards=forwards, mode=mode, loras_bytes=loras_bytes, upscale=upscale, review=review)
     except ValueError:
         return None
 

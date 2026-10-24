@@ -12,7 +12,7 @@ from typing import Any
 from zvisiongenerator.core.video_family import FrameRule
 from zvisiongenerator.utils.paths import split_huggingface_revision
 
-__all__ = ["H3Files", "H3MlxFiles", "H3MlxPreset", "H3Preset", "H3Schedule", "HubFiles", "h3_load_options", "h3_mlx_load_options", "h3_mlx_preset", "h3_preset", "h3_turbo_lora"]
+__all__ = ["H3Files", "H3MlxFiles", "H3MlxPreset", "H3Preset", "H3Schedule", "HubFiles", "h3_load_options", "h3_mlx_load_options", "h3_mlx_preset", "h3_preset", "h3_turbo_lora", "is_folder_name"]
 
 _SUPPORTED_ATTENTION = ("sdpa",)
 _MLX_TEXT_ENCODER_BITS = (4, 8)  # the levels a ``<name>@mlx-te<bits>`` folder name can carry
@@ -44,7 +44,7 @@ class H3Schedule:
 
 @dataclass(frozen=True)
 class H3Preset:
-    """The CUDA (diffusers) H3 preset: the main repo's file filters, the text encoder, the turbo LoRA and the schedules."""
+    """The CUDA (diffusers) H3 preset: the main repo's file filters, the text encoder, the turbo LoRA, the latent upscaler and the schedules."""
 
     repo: str
     revision: str
@@ -54,6 +54,7 @@ class H3Preset:
     text_encoder_layers: int
     lora: HubFiles
     lora_scale: float
+    latent_upsampler: HubFiles
     schedules: dict[int, H3Schedule]
     attention: str = "sdpa"
     ffn_chunk_tokens: int | None = None
@@ -85,6 +86,7 @@ class H3Files:
     text_encoder_dir: Path
     text_encoder_shards: tuple[Path, ...]
     lora_file: Path
+    latent_upsampler_file: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -100,7 +102,7 @@ class H3MlxFiles:
 def h3_preset(config: dict[str, Any]) -> H3Preset:
     """Return the CUDA H3 preset parsed from ``video_model_presets.h3`` of *config*.
 
-    The main repository, the text encoder and the turbo LoRA must each name a revision (``owner/repo@revision``), so
+    The main repository, the text encoder, the turbo LoRA and the latent upscaler must each name a revision (``owner/repo@revision``), so
     that the download plan and the runtime resolve the same files.
 
     Raises:
@@ -116,6 +118,7 @@ def h3_preset(config: dict[str, Any]) -> H3Preset:
     path = f"{_BASE}.diffusers"
     encoder = _mapping(diffusers.get("text_encoder"), f"{path}.text_encoder")
     lora, lora_scale = _turbo_lora(diffusers, path)
+    upsampler = _mapping(diffusers.get("latent_upsampler"), f"{path}.latent_upsampler")
     attention = diffusers.get("attention", "sdpa")
     if attention not in _SUPPORTED_ATTENTION:
         raise ValueError(f"{path}.attention must be one of: {', '.join(_SUPPORTED_ATTENTION)}.")
@@ -128,6 +131,7 @@ def h3_preset(config: dict[str, Any]) -> H3Preset:
         text_encoder_layers=_positive_int(encoder.get("layers"), f"{path}.text_encoder.layers"),
         lora=lora,
         lora_scale=lora_scale,
+        latent_upsampler=HubFiles(*_pinned_repo(upsampler.get("repo"), f"{path}.latent_upsampler.repo"), (_filename(upsampler.get("filename"), f"{path}.latent_upsampler.filename"),)),
         schedules=_schedules(diffusers.get("schedules"), f"{path}.schedules"),
         attention=attention,
         ffn_chunk_tokens=_optional_positive_int(diffusers.get("ffn_chunk_tokens"), f"{path}.ffn_chunk_tokens"),
@@ -200,7 +204,7 @@ def h3_mlx_load_options(config: dict[str, Any], model_name: str | None) -> dict[
     """
     lora, lora_scale = h3_turbo_lora(config)
     options: dict[str, Any] = {"preset": h3_mlx_preset(config), "lora": lora, "lora_scale": lora_scale}
-    if model_name and _is_folder_name(model_name):
+    if model_name and is_folder_name(model_name):
         options["model_name"] = model_name
     return options
 
@@ -214,7 +218,7 @@ def h3_load_options(config: dict[str, Any], model_name: str | None) -> dict[str,
     return {"model_name": model_name, "preset": h3_preset(config)}
 
 
-def _is_folder_name(name: str) -> bool:
+def is_folder_name(name: str) -> bool:
     """Return whether *name* can name a folder directly inside the models folder."""
     return name not in {".", ".."} and not any(char in name for char in "/\\:~")
 

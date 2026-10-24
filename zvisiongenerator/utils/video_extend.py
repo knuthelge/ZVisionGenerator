@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from zvisiongenerator.core.video_types import ExtendSource
+from zvisiongenerator.utils.alignment import align_frames
 from zvisiongenerator.utils.prompt_compose import is_original_prompt
 from zvisiongenerator.utils.prompt_enhance import EnhanceContext, enhance_context
 from zvisiongenerator.utils.provenance import RecordedSettings, read_mp4_config, recorded_settings
@@ -65,13 +66,18 @@ class ExtendInspection:
 
 
 def window_frames(extend_frames: int, family: VideoFamily | None = None) -> int:
-    """Return the frames generated for an extension: the carried frames plus the new ones (LTX: 25 + 8n).
+    """Return the frames generated for an extension: the carried frames plus the new ones (LTX: 25 + 8n), moved to the family's frame rule.
+
+    The sum is already valid when the carried frames fill whole blocks (LTX 25, H3 on CUDA 22); a family that carries a single
+    frame (H3 on macOS) moves it up to the next valid count.
 
     Args:
         extend_frames: The new frames.
         family: The model's family, whose ``carry_frames`` are carried; ``None`` carries the LTX frames.
     """
-    return (family.carry_frames if family is not None else CARRY_FRAMES) + extend_frames
+    if family is None:
+        return CARRY_FRAMES + extend_frames
+    return align_frames(family.carry_frames + extend_frames, family.frame_rule)
 
 
 def extend_audio_output(source: ExtendSource, *, no_audio: bool) -> bool:

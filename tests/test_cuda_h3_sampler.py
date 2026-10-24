@@ -590,3 +590,129 @@ def test_a_tiny_transformer_run_is_finite_and_deterministic():
     again = denoise(model, _embeds(), _WINDOW, _schedulers(), 2, _CPU, conditioning=conditioning, text_token_tags=_TEXT_TAGS)
     assert all(torch.isfinite(part).all() for part in first)
     assert all(torch.equal(a, b) for a, b in zip(first, again, strict=True))
+
+
+# --- refine ----------------------------------------------------------------------------------------------------------
+
+
+class _ZeroVelocity(_Recorder):
+    """A stand-in transformer that records its forwards and predicts no change."""
+
+    def forward(self, hidden_states, audio_hidden_states, *args, **kwargs):
+        super().forward(hidden_states, audio_hidden_states, *args, **kwargs)
+        return torch.zeros_like(hidden_states), torch.zeros_like(audio_hidden_states)
+
+
+def _refine_inputs(geo=_PLAIN, seed: int = 31):
+    latents = _latents(geo.latent_frames, seed, geo)
+    generator = torch.Generator().manual_seed(seed + 1)
+    audio = torch.randn(geo.audio_rows, 32, generator=generator)
+    noise = (torch.randn(latents.shape, generator=generator), torch.randn(audio.shape, generator=generator))
+    return latents, audio, noise
+
+
+def _refine(geo=_PLAIN, *, start: int = 6, transformer=None, conditioning: Conditioning | None = None, **kwargs):
+    transformer = transformer or _ZeroVelocity()
+    latents, audio, noise = _refine_inputs(geo)
+    result = sampler_module.refine(transformer, _embeds(), geo, _schedulers(), latents, audio, noise, start=start, device=_CPU, conditioning=conditioning, text_token_tags=_TEXT_TAGS, **kwargs)
+    return transformer, result, (latents, audio, noise)
+
+
+def test_a_refine_with_no_velocity_returns_the_renoised_latents():
+    _, result, (latents, _audio, (noise, _noise_audio)) = _refine(start=6)
+    video_scheduler = _schedulers()[0]
+    t6 = float(video_scheduler.timesteps[6])
+    assert 1 - t6 == pytest.approx(0.667, abs=1e-3)
+    assert result.shape == latents.shape
+    assert result.dtype == torch.float32
+    assert torch.allclose(result, t6 * latents + (1 - t6) * noise, atol=1e-5)
+
+
+def test_a_refine_from_step_six_runs_the_last_two_forwards_and_reports_them():
+    events: list[dict] = []
+    transformer, _, _ = _refine(start=6, step_callback=events.append, phase="video_upscale_stage_2")
+    assert len(transformer.calls) == 2
+    assert events == [
+        {"phase": "video_upscale_stage_2", "current_step": 1, "total_steps": 2},
+        {"phase": "video_upscale_stage_2", "current_step": 2, "total_steps": 2},
+    ]
+
+
+def test_a_refine_runs_the_timesteps_from_start_on():
+    video_scheduler, audio_scheduler = _schedulers()
+    transformer, _, _ = _refine(start=6)
+    for call, step in zip(transformer.calls, (6, 7), strict=True):
+        levels = call["timestep"][call["timestep_indices"][call["video_indices"]]]
+        audio_levels = call["timestep"][call["timestep_indices"][call["audio_indices"]]]
+        assert torch.allclose(levels, torch.tensor(float(video_scheduler.timesteps[step])))
+        assert torch.allclose(audio_levels, torch.tensor(float(audio_scheduler.timesteps[step])))
+
+
+def test_a_refine_renoises_the_audio_rows_too():
+    transformer, _, (_latents, audio, (_noise, noise_audio)) = _refine(start=6)
+    audio_scheduler = _schedulers()[1]
+    t6 = float(audio_scheduler.timesteps[6])
+    assert torch.allclose(transformer.calls[0]["audio"][0], t6 * audio + (1 - t6) * noise_audio, atol=1e-5)
+
+
+def test_a_refine_holds_its_keyframes_at_every_forward_prenoised_with_the_keyframe_seed():
+    conditioning = _keyframes("first", "last")
+    transformer, result, _ = _refine(start=6, conditioning=conditioning, keyframe_seed=77)
+    scheduler = _schedulers()[0]
+    generator = torch.Generator().manual_seed(77)
+    expected = torch.cat([patchify_video_latents(prenoise(scheduler, latents, KEYFRAME_T, generator), (1, 2, 2)) for latents in conditioning.keyframes])
+    held = 2 * _CELLS
+    assert len(transformer.calls) == 2
+    for call in transformer.calls:
+        assert call["video"].shape == (1, held + _PLAIN.video_rows, 96)
+        assert torch.equal(call["video"][0, :held], expected)
+        levels = call["timestep"][call["timestep_indices"][call["video_indices"]]]
+        assert torch.all(levels[:held] == torch.tensor(KEYFRAME_T, dtype=torch.float32))
+    assert result.shape == (1, 24, 7, 4, 4)  # the keyframes are not part of the result
+
+
+def test_a_refine_leaves_the_callers_schedulers_reusable():
+    schedulers = _schedulers()
+    before = [scheduler.timesteps.clone() for scheduler in schedulers]
+    latents, audio, noise = _refine_inputs()
+    sampler_module.refine(_ZeroVelocity(), _embeds(), _PLAIN, schedulers, latents, audio, noise, start=6, device=_CPU, text_token_tags=_TEXT_TAGS)
+    assert all(torch.equal(a, b.timesteps) for a, b in zip(before, schedulers, strict=True))
+    assert all(scheduler.step_index is None for scheduler in schedulers)
+
+
+def test_a_refine_callback_exception_propagates():
+    class Cancelled(Exception):
+        pass
+
+    def cancel(event):
+        if event["current_step"] == 1:
+            raise Cancelled
+
+    transformer = _ZeroVelocity()
+    with pytest.raises(Cancelled):
+        _refine(transformer=transformer, step_callback=cancel)
+    assert len(transformer.calls) == 1
+
+
+@pytest.mark.parametrize("start", [-1, 8, 9])
+def test_a_refine_start_outside_the_schedule_is_refused(start):
+    with pytest.raises(ValueError, match="start"):
+        _refine(start=start)
+
+
+def test_a_refine_refuses_inputs_that_do_not_fit_the_window():
+    latents, audio, (noise, noise_audio) = _refine_inputs()
+    args = (_ZeroVelocity(), _embeds(), _PLAIN, _schedulers())
+    with pytest.raises(ValueError, match="latents"):
+        sampler_module.refine(*args, latents[:, :, :3], audio, (noise, noise_audio), start=6, device=_CPU)
+    with pytest.raises(ValueError, match="audio rows"):
+        sampler_module.refine(*args, latents, audio[:-1], (noise, noise_audio), start=6, device=_CPU)
+    with pytest.raises(ValueError, match="noise"):
+        sampler_module.refine(*args, latents, audio, (noise[:, :, :3], noise_audio), start=6, device=_CPU)
+    with pytest.raises(ValueError, match="noise"):
+        sampler_module.refine(*args, latents, audio, (noise, noise_audio[:-1]), start=6, device=_CPU)
+
+
+def test_a_refine_refuses_an_extend_tail():
+    with pytest.raises(ValueError, match="tail"):
+        _refine(geo=_WINDOW, conditioning=_extend())

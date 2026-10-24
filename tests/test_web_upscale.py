@@ -277,7 +277,7 @@ _SEEDVR2_TIER = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=1
 
 
 def _seedvr2_setup(*, budget_bytes=None, tier=_SEEDVR2_TIER):
-    settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(tier,))
+    settings = SeedVR2Settings(model="auto", softness=0.75, video_softness=0.0, reference_megapixels=16, tiers=(tier,))
     return SeedVR2Setup(settings=settings, tier=tier, budget_bytes=budget_bytes, downloaded=False, weights=MLX_WEIGHTS)
 
 

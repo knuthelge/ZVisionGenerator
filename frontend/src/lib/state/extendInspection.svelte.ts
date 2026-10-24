@@ -16,8 +16,8 @@ let _sequence = 0;
 let _pending: Promise<void> | null = null;
 
 function _keyFor(): string {
-  const { extendSourcePath, extendFrames, model, lowMemory } = draft.state;
-  return JSON.stringify([extendSourcePath, extendFrames, model, lowMemory]);
+  const { extendSourcePath, extendFrames, model, lowMemory, steps, loraString } = draft.state;
+  return JSON.stringify([extendSourcePath, extendFrames, model, lowMemory, steps, loraString]);
 }
 
 async function _inspect(ctx: WorkspaceContext | null, options: { replaceText?: boolean }): Promise<void> {
@@ -37,13 +37,13 @@ async function _inspect(ctx: WorkspaceContext | null, options: { replaceText?: b
   _status = 'checking';
   _failure = null;
   try {
-    const info = await inspectExtendSource({ path, extend_frames: state.extendFrames, model: state.model || null, low_memory: state.lowMemory });
+    const info = await inspectExtendSource({ path, extend_frames: state.extendFrames, model: state.model || null, low_memory: state.lowMemory, steps: state.steps > 0 ? state.steps : null, lora: state.loraString.trim() || null });
     if (request !== _sequence || draft.state.extendSourcePath !== path) return;
     draft.applyExtendSource(info, ctx, options);
     _status = 'ready';
     // The answer sized itself for the inputs it was asked about; filling the 2 s default length is not a change worth asking again.
     const after = draft.state;
-    if (after.extendSourcePath === path && after.model === state.model && after.lowMemory === state.lowMemory && (state.extendFrames === null || after.extendFrames === state.extendFrames)) {
+    if (after.extendSourcePath === path && after.model === state.model && after.lowMemory === state.lowMemory && after.steps === state.steps && after.loraString === state.loraString && (state.extendFrames === null || after.extendFrames === state.extendFrames)) {
       _requestedKey = _keyFor();
     }
   } catch (error) {
@@ -75,7 +75,7 @@ export const extendInspection = {
     return _requestedPath;
   },
 
-  /** Whether the draft's source, length, model and low-memory setting are the ones last inspected. */
+  /** Whether the draft's source, length, model, low-memory setting, steps and LoRAs are the ones last inspected. */
   isCurrent(): boolean {
     return _requestedKey === _keyFor();
   },
@@ -84,7 +84,7 @@ export const extendInspection = {
    * Inspect the draft's source and apply the answer.
    *
    * Pass `replaceText` when the user just chose a new source, so its Scene and Prompt replace both boxes; a
-   * re-inspection of the same source (page load, a new length, model or memory setting) refreshes the facts only.
+   * re-inspection of the same source (page load, a new length, model, steps or memory setting) refreshes the facts only.
    * A newer inspection supersedes an older one still in flight.
    */
   inspect(ctx: WorkspaceContext | null, options: { replaceText?: boolean } = {}): Promise<void> {

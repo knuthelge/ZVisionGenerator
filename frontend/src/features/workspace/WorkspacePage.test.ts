@@ -268,7 +268,9 @@ function makeVideoDefaults(overrides: Partial<VideoModelDefaults> = {}): VideoMo
     quantize: null,
     max_steps: 8,
     fps: 24,
-    frame_alignment: 8,
+    frame_rule: { alignment: 8, offset: 1, round: 'nearest' },
+    supports_extend: true,
+    extend_frame_step: 8,
     upscale: {
       enabled: false,
       factor: 2,

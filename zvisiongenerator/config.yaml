@@ -61,7 +61,8 @@ upscale:
 
 seedvr2:                       # Plain upscale (Web UI viewer)
   model: auto                  # auto, seedvr2-3b or seedvr2-7b
-  softness: 0.75               # 0-1: pre-blur before upscaling; 0 = off
+  softness: 0.75               # 0-1: pre-blur before upscaling an image; 0 = off
+  video_softness: 0.0          # The same pre-blur for the SeedVR2 video engine; MiniMax H3 no longer uses SeedVR2 and does not read it
   reference_megapixels: 16     # Output size the automatic tier must fit on a Mac (a typical 4x)
   tiers:                       # macOS, 8-bit, quality order; the first within this Mac's memory budget at reference_megapixels is used.
     # Estimate = weights_gb + max(activation_floor_gb, activation_base_gb + activation_gb_per_mp * MP)
@@ -371,6 +372,7 @@ video_model_presets:
     extend_frame_step: 17
     extend_fps: 24 # an Extend source must run at 24 fps
     carry_frames: 22 # 17 * 1 + 5, the smallest valid clip
+    platform_carry_frames: { darwin: 1 } # macOS renders an image-to-video clip from the source's last frame, so one frame is carried
     capabilities: { i2v: true, end_frame: true, extend: true, upscale: true, upscale_review: true, lora: true, audio: true, low_memory: false }
     platform_capabilities:
       darwin: { upscale: false, upscale_review: false }
@@ -388,6 +390,12 @@ video_model_presets:
         repo: "lightx2v/Minimax-h3-Turbo@30f485ed874aa44c8183348ad361c5eabad318da"
         filename: "minimax_h3_fl2v_turbo_8step_v1.0_768p_bf16.safetensors"
         scale: 0.0625
+      # The 3D latent upscaler of the H3 upscale: a 2x enlargement of the stage-1 latents before a short full-size refinement.
+      # sha256 043e5a48e161610ef6c3ea974645220354d06fa618abca15f76d084812eb55c2, 690,592,672 bytes, Apache-2.0, ungated.
+      # Run in fp16. There is no runtime hash check: the revision pin fixes the file and the strict load rejects a wrong one.
+      latent_upsampler:
+        repo: "LBH-123-AI/Minimax_h3_latent_Upscaler@3f941d5d182014dd5c0a5e16330420ee2d4aa0c6"
+        filename: "minimax_h3_latent_upscaler_3d_conv_v1/minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors"  # in a subfolder of the repository
       schedules:
         8: { forwards: 8, video_shift: 6.0, audio_shift: 3.0 }
         4: { forwards: 4, video_shift: 6.0, audio_shift: 3.0 }

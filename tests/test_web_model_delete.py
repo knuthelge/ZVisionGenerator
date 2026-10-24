@@ -81,10 +81,25 @@ class TestModelDeleteTarget:
         assert target.repo_id == "org/base"
         assert target.path == layout.hub / "models--org--base"
 
-    def test_alias_without_complete_weights_is_not_deletable(self, layout):
+    @pytest.mark.parametrize("make_entry", [_image_entry, _ltx_entry], ids=["image", "ltx"])
+    def test_alias_with_a_partial_download_is_deletable(self, layout, make_entry):
         _touch(layout.hub / "models--org--partial" / "snapshots" / "abc" / "model_index.json")
 
-        assert model_delete_target(_image_entry("partial", "alias", "org/partial"), layout.models_dir) is None
+        target = model_delete_target(make_entry("partial", "alias", "org/partial"), layout.models_dir)
+
+        assert (target.kind, target.repo_id, target.path) == ("huggingface", "org/partial", layout.hub / "models--org--partial")
+
+    def test_a_partial_ltx_download_is_removed_from_the_cache(self, layout):
+        partial = _touch(layout.hub / "models--org--partial" / "blobs" / "model.safetensors.incomplete").parent.parent
+        target = model_delete_target(_ltx_entry("partial", "alias", "org/partial"), layout.models_dir)
+
+        delete_model(target)
+
+        assert not partial.exists()
+        assert (layout.hub / "models--org--other").is_dir()
+
+    def test_alias_never_downloaded_is_not_deletable(self, layout):
+        assert model_delete_target(_ltx_entry("missing", "alias", "org/missing"), layout.models_dir) is None
 
     def test_alias_to_local_directory_is_not_deletable(self, layout, tmp_path):
         assert model_delete_target(_image_entry("local", "alias", str(tmp_path / "elsewhere")), layout.models_dir) is None
@@ -283,6 +298,8 @@ def test_models_payload_describes_what_each_delete_removes(layout):
     assert delete_info(_image_entry("custom", "installed", "")) == {"kind": "installed", "repo_id": None, "linked_by": [], "stored_quants": []}
     assert delete_info(_image_entry("base", "alias", "org/base")) == {"kind": "huggingface", "repo_id": "org/base", "linked_by": ["custom"], "stored_quants": []}
     assert delete_info(_image_entry("missing", "alias", "org/missing")) is None
+    _touch(layout.hub / "models--org--partial" / "snapshots" / "abc" / "model_index.json")
+    assert delete_info(_ltx_entry("partial", "alias", "org/partial")) == {"kind": "huggingface", "repo_id": "org/partial", "linked_by": [], "stored_quants": []}
 
 
 class TestMacH3Delete:
@@ -418,7 +435,7 @@ class TestSeedvr2Fp8DeleteRoute:
     @pytest.fixture
     def client(self, layout, monkeypatch):
         tier = SeedVR2Tier("seedvr2-7b", weights_gb=0.9, activation_floor_gb=5.0, activation_base_gb=0.21, activation_gb_per_mp=0.556, system_gb=22)
-        settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(tier,))
+        settings = SeedVR2Settings(model="auto", softness=0.75, video_softness=0.0, reference_megapixels=16, tiers=(tier,))
         self.folder = seedvr2_weights_dir("seedvr2-7b", layout.models_dir, FP8_WEIGHTS)
         _touch(self.folder / "ema_vae_fp16.safetensors")
         web_config = SimpleNamespace(
@@ -449,7 +466,7 @@ class TestSeedvr2DeleteRoute:
     @pytest.fixture
     def client(self, layout, monkeypatch):
         tier = SeedVR2Tier("seedvr2-7b", weights_gb=9.26, activation_floor_gb=10.79, activation_base_gb=1.88, activation_gb_per_mp=0.83)
-        settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(tier,))
+        settings = SeedVR2Settings(model="auto", softness=0.75, video_softness=0.0, reference_megapixels=16, tiers=(tier,))
         self.copy = seedvr2_weights_dir("seedvr2-7b", layout.models_dir, MLX_WEIGHTS)
         _touch(self.copy / "transformer" / "weights.safetensors")
         self.web_config = SimpleNamespace(

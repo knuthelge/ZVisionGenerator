@@ -11,7 +11,7 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from zvisiongenerator.backends import accelerator_memory_budget_or_none, get_video_backend, supports_video_audio, supports_video_extend, supports_video_upscale_review
+from zvisiongenerator.backends import accelerator_memory_budget_or_none, get_video_backend, supports_video_audio, supports_video_extend, supports_video_upscale_review, video_family_on_platform
 from zvisiongenerator.core.video_family import ANY_FRAMES, UNDESCRIBED_UPSCALE_STEPS, settle_video_steps
 from zvisiongenerator.preflight import run_preflight
 from zvisiongenerator.utils.alignment import aligned_video_dims
@@ -256,6 +256,7 @@ def _clip_fit(args: argparse.Namespace, config: dict[str, Any], *, upscale: bool
         mode=_fit_mode(args),
         forwards=getattr(args, "steps", None) or 8,
         loras_bytes=h3_lora_bytes(getattr(args, "lora_paths", None) or ()),
+        review=bool(getattr(args, "review", False)),
     )
 
 
@@ -501,7 +502,7 @@ def main(*, prog: str = "ziv-video") -> None:
         )
         if note:
             warnings.warn(note, stacklevel=2)
-        apply_extend_args(args, source, extend_frames, video_family(config, model_info.family))
+        apply_extend_args(args, source, extend_frames, video_family_on_platform(config, model_info.family))
     else:
         args.width = defaults["width"]
         args.height = defaults["height"]

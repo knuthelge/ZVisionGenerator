@@ -123,7 +123,6 @@ def test_ltx_workspace_defaults_are_unchanged(model):
         "quantize": None,
         "max_steps": 8,
         "fps": 24,
-        "frame_alignment": 8,
         "upscale": {"enabled": False, "factor": 2, "steps": None},
         "enhance_max_words": 300,
         "family": "ltx",
@@ -199,6 +198,7 @@ def test_the_packaged_ltx_family_is_described_literally():
         carry_frames=25,
         default_upscale_steps=8,
         extend_fps=None,
+        platform_carry_frames={},
     )
 
 
@@ -356,3 +356,43 @@ def test_the_carried_frames_match_what_the_backends_carry():
 
     assert video_family(config, "ltx").carry_frames == CARRY_FRAMES == 25
     assert video_family(config, "h3").carry_frames == H3_TAIL_FRAMES == 22
+
+
+# ---------------------------------------------------------------------------
+# The frames an extension carries, per platform
+# ---------------------------------------------------------------------------
+
+
+def test_the_packaged_h3_carries_one_frame_on_macos_and_22_elsewhere():
+    from zvisiongenerator.backends import video_family_on_platform
+    from zvisiongenerator.utils.video_extend import window_frames
+
+    config = load_config()
+    described = video_family(config, "h3")
+
+    assert (described.carry_frames, described.platform_carry_frames) == (22, {"darwin": 1})
+    carried = {}
+    for platform in ("darwin", "linux", "win32"):
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr("zvisiongenerator.backends.sys.platform", platform)
+            family = video_family_on_platform(config, "h3")
+            carried[platform] = (family.carry_frames, window_frames(51, family), window_frames(17, family))
+    assert carried == {"darwin": (1, 56, 22), "linux": (22, 73, 39), "win32": (22, 73, 39)}
+
+
+def test_a_family_with_no_platform_carry_is_the_same_on_every_platform(monkeypatch):
+    from zvisiongenerator.backends import video_family_on_platform
+
+    monkeypatch.setattr("zvisiongenerator.backends.sys.platform", "darwin")
+
+    assert video_family_on_platform(load_config(), "ltx") == video_family(load_config(), "ltx")
+    assert video_family_on_platform(load_config(), "wan") is None
+
+
+@pytest.mark.parametrize(
+    ("value", "path"),
+    [("one", "platform_carry_frames"), ({"darwin": 0}, "platform_carry_frames.darwin"), ({"darwin": True}, "platform_carry_frames.darwin"), ({"darwin": 1.5}, "platform_carry_frames.darwin")],
+)
+def test_a_malformed_platform_carry_names_its_key(value, path):
+    with pytest.raises(ValueError, match=re.escape(path)):
+        video_family(_config_with({**_h3_block(), "platform_carry_frames": value}), "h3")

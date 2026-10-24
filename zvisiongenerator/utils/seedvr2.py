@@ -95,6 +95,7 @@ class SeedVR2Settings:
 
     model: str
     softness: float
+    video_softness: float
     reference_megapixels: float
     tiers: tuple[SeedVR2Tier, ...]
 
@@ -136,10 +137,13 @@ def seedvr2_settings(config: dict[str, Any], tiers_key: str = MLX_WEIGHTS.tiers_
     softness = block.get("softness")
     if not _is_number(softness) or not 0 <= softness <= 1:
         raise ValueError(f"config 'seedvr2.softness' must be a number from 0 to 1, got {softness!r}.")
+    video_softness = block.get("video_softness")
+    if not _is_number(video_softness) or not 0 <= video_softness <= 1:
+        raise ValueError(f"config 'seedvr2.video_softness' must be a number from 0 to 1, got {video_softness!r}.")
     reference = block.get("reference_megapixels")
     if not _is_number(reference) or reference <= 0:
         raise ValueError(f"config 'seedvr2.reference_megapixels' must be a positive number, got {reference!r}.")
-    return SeedVR2Settings(model=model, softness=float(softness), reference_megapixels=float(reference), tiers=tiers)
+    return SeedVR2Settings(model=model, softness=float(softness), video_softness=float(video_softness), reference_megapixels=float(reference), tiers=tiers)
 
 
 def estimate_seedvr2_bytes(tier: SeedVR2Tier, megapixels: float) -> int:

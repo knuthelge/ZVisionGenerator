@@ -73,7 +73,8 @@ class VideoBackend(Protocol):
           when it returns; the file is deleted afterwards. ``review`` may raise to end the generation. A backend
           that cannot pause after the half-size render raises ``ValueError`` (see ``supports_video_upscale_review``).
         - H3: ``steps`` must be a step count of the preset's schedules (4 or 8); ``stage1_steps`` is the same count
-          for the half-size render, and the full-size result comes from the SeedVR2 video upscale.
+          for the half-size render. The full-size result comes from a 2x latent upscale of the stage-1 latents and a short
+          refinement at full size, not from enlarging the decoded frames.
         """
         ...
 

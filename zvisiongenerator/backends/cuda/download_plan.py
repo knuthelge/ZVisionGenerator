@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from zvisiongenerator.downloads.hub_access import describe_refusal
 from zvisiongenerator.downloads.target import DownloadTarget
-from zvisiongenerator.utils.paths import get_ziv_data_dir, parse_huggingface_repo_reference, split_huggingface_revision
+from zvisiongenerator.utils.paths import parse_huggingface_repo_reference, split_huggingface_revision
 
 if TYPE_CHECKING:
     from zvisiongenerator.utils.h3_preset import H3Preset
@@ -167,36 +167,13 @@ def video_download_plan(
     return tuple(targets)
 
 
-def _seedvr2_targets() -> tuple[DownloadTarget, ...]:
-    """Return the downloads of the SeedVR2 tier a video upscale on this machine would use (none without a SeedVR2 engine)."""
-    from zvisiongenerator.backends import accelerator_memory_budget_or_none, get_seedvr2_upscaler
-    from zvisiongenerator.downloads.plans import seedvr2_plan
-    from zvisiongenerator.seedvr2_loader import build_seedvr2_setup
-    from zvisiongenerator.utils.config import load_config
-
-    upscaler = get_seedvr2_upscaler()
-    if upscaler is None:
-        return ()
-    budget = accelerator_memory_budget_or_none()
-    models_dir = get_ziv_data_dir() / "models"
-    setup = build_seedvr2_setup(
-        load_config(),
-        weights=upscaler.weights,
-        budget_bytes=budget.gpu_bytes if budget else None,
-        system_bytes=budget.system_bytes if budget else None,
-        models_dir=models_dir,
-    )
-    return seedvr2_plan(setup.tier.model, models_dir=models_dir, weights=upscaler.weights)
-
-
 def h3_download_plan(
     model_ref: str,
     preset: H3Preset,
     *,
     upscale: bool = False,
-    seedvr2_targets: Callable[[], tuple[DownloadTarget, ...]] | None = None,
 ) -> tuple[DownloadTarget, ...]:
-    """Return the downloads of the MiniMax H3 model *model_ref*: the repository, the text encoder and the turbo LoRA, plus SeedVR2 with *upscale*.
+    """Return the downloads of the MiniMax H3 model *model_ref*: the repository, the text encoder and the turbo LoRA, plus the latent upscaler with *upscale*.
 
     Each target is the ``(repo_id, revision, allow, ignore)`` the backend's own file resolution downloads with, so a
     target reads as present exactly when the backend finds its files without the network. A reference without a
@@ -205,8 +182,7 @@ def h3_download_plan(
     Args:
         model_ref: A local H3 folder or a Hugging Face ``owner/repo[@revision]`` reference.
         preset: The CUDA H3 preset.
-        upscale: Whether the run upscales with SeedVR2, which adds the weights of the tier this machine would use.
-        seedvr2_targets: Lists the SeedVR2 downloads; defaults to the planner for this machine's tier.
+        upscale: Whether the run upscales, which adds the latent upscaler's file.
     """
     targets: list[DownloadTarget] = []
     if not Path(model_ref).expanduser().is_dir() and parse_huggingface_repo_reference(model_ref) is not None:
@@ -216,7 +192,8 @@ def h3_download_plan(
         targets.append(DownloadTarget(repo_id, revision, preset.repo_allow, preset.repo_ignore))
     targets.extend(DownloadTarget(files.repo_id, files.revision, files.files) for files in (preset.text_encoder, preset.lora))
     if upscale:
-        targets.extend((seedvr2_targets or _seedvr2_targets)())
+        upsampler = preset.latent_upsampler
+        targets.append(DownloadTarget(upsampler.repo_id, upsampler.revision, upsampler.files))
     return tuple(targets)
 
 

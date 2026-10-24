@@ -78,7 +78,6 @@ _LTX_PAYLOAD = {
     "quantize": None,
     "max_steps": 8,
     "fps": 24,
-    "frame_alignment": 8,
     "upscale": {"enabled": False, "factor": 2, "steps": None},
     "enhance_max_words": 300,
     "family": "ltx",
@@ -135,7 +134,8 @@ def test_an_h3_payload_carries_the_rule_the_options_and_the_hidden_controls(monk
     assert payload["frame_rule"] == {"alignment": 17, "offset": 5, "round": "up"}
     assert payload["hidden_controls"] == ["low_memory"]
     assert (payload["supports_extend"], payload["step_options"], payload["extend_frame_step"]) == (True, [4, 8], 17)
-    assert (payload["steps"], payload["max_steps"], payload["frame_count"], payload["frame_alignment"], payload["supports_i2v"]) == (8, 8, 124, 17, True)
+    assert (payload["steps"], payload["max_steps"], payload["frame_count"], payload["frame_rule"]["alignment"], payload["supports_i2v"]) == (8, 8, 124, 17, True)
+    assert "frame_alignment" not in payload
     assert payload["family"] == "h3"
 
 

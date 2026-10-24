@@ -838,12 +838,14 @@ class TestH3CudaClipMemoryFit:
         assert tuned["expected_seconds"] < plain["expected_seconds"]
         assert tuned["required_gb"] >= plain["required_gb"]
 
-    def test_an_upscale_resolves_the_seedvr2_tier_from_the_config(self):
-        from zvisiongenerator.utils.config import load_config
+    def test_an_upscale_is_estimated_and_takes_longer_than_its_half_size_render_alone(self):
+        fit = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", upscale=True, **{**self._CLIP, "width": 1280, "height": 704})
+        half = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", **{**self._CLIP, "width": 640, "height": 352})
 
-        fit = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", upscale=True, app_config=load_config(), **{**self._CLIP, "width": 768, "height": 448})
+        assert fit is not None and fit["status"] == "fits"
+        assert fit["expected_seconds"] > half["expected_seconds"]
 
-        assert fit is not None and fit["status"] != "too_large"
+    def test_an_upscale_does_not_read_the_config(self):
+        fit = clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", upscale=True, app_config={"seedvr2": {}}, **{**self._CLIP, "width": 1280, "height": 704})
 
-    def test_an_upscale_with_a_config_without_seedvr2_has_no_estimate(self):
-        assert clip_memory_fit("example/h3", budget=self._BUDGET, family="h3", upscale=True, app_config={"seedvr2": {}}, **self._CLIP) is None
+        assert fit is not None

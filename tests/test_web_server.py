@@ -127,7 +127,6 @@ def _make_workspace_bootstrap_view() -> dict[str, object]:
         "quantize": None,
         "max_steps": 8,
         "fps": 24,
-        "frame_alignment": 8,
         "upscale": {"enabled": False, "factor": 2, "steps": None},
     }
     return {
@@ -455,8 +454,8 @@ def test_workspace_bootstrap_uses_backend_registry_name(monkeypatch):
 
 
 @pytest.mark.parametrize(("family", "alignment"), [("ltx", 8), ("unknown", 1)])
-def test_video_bootstrap_defaults_include_frame_alignment(monkeypatch, family, alignment):
-    """Video bootstrap defaults should expose the model's frame alignment so the UI can snap frame counts."""
+def test_video_bootstrap_defaults_include_frame_rule(monkeypatch, family, alignment):
+    """Video bootstrap defaults expose the model's frame rule, and only that, so the UI can snap frame counts."""
     web_config = _make_web_config()
     monkeypatch.setattr(workspace_api_module, "resolve_model_path", lambda model, **_: model)
     monkeypatch.setattr(
@@ -467,7 +466,8 @@ def test_video_bootstrap_defaults_include_frame_alignment(monkeypatch, family, a
 
     defaults = workspace_api_module._build_video_bootstrap_defaults("ltx-8", web_config)
 
-    assert defaults["frame_alignment"] == alignment
+    assert defaults["frame_rule"]["alignment"] == alignment
+    assert "frame_alignment" not in defaults
 
 
 @pytest.mark.parametrize(("detected", "expected"), [("ltx", "ltx"), ("unknown", None)])
@@ -514,7 +514,7 @@ def test_video_bootstrap_defaults_fall_back_to_unaligned_frames_when_detection_f
 
     defaults = workspace_api_module._build_video_bootstrap_defaults("missing", web_config)
 
-    assert defaults["frame_alignment"] == 1
+    assert defaults["frame_rule"] == {"alignment": 1, "offset": 1, "round": "nearest"}
 
 
 def test_workspace_bootstrap_defaults_include_ideogram_capability_flags(monkeypatch):
@@ -1458,7 +1458,7 @@ def _models_route_with_seedvr2(monkeypatch, tmp_path, *, copy_files: dict[str, i
             (copy / name).parent.mkdir(parents=True, exist_ok=True)
             (copy / name).touch()
             os.truncate(copy / name, size)
-    settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(_SEEDVR2_7B,))
+    settings = SeedVR2Settings(model="auto", softness=0.75, video_softness=0.0, reference_megapixels=16, tiers=(_SEEDVR2_7B,))
     web_config = _make_web_config()
     web_config.data_dir = str(tmp_path)
     web_config.models_dir = str(tmp_path / "models")
@@ -1530,7 +1530,7 @@ def test_models_route_reads_not_downloaded_after_the_copy_is_deleted(monkeypatch
     web_config = _make_web_config()
     web_config.data_dir = str(tmp_path)
     web_config.models_dir = str(models_dir)
-    settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(_SEEDVR2_7B,))
+    settings = SeedVR2Settings(model="auto", softness=0.75, video_softness=0.0, reference_megapixels=16, tiers=(_SEEDVR2_7B,))
 
     def load() -> SimpleNamespace:
         web_config.seedvr2 = SeedVR2Setup(settings=settings, tier=_SEEDVR2_7B, budget_bytes=None, downloaded=seedvr2_downloaded("seedvr2-7b", models_dir, MLX_WEIGHTS), weights=MLX_WEIGHTS)
@@ -2897,6 +2897,7 @@ def test_inspect_route_adds_the_memory_fit_of_the_window(clip, monkeypatch):
         "family": "ltx",
         "mode": "extend",
         "forwards": 8,
+        "loras_bytes": 0,
     }
 
 
@@ -3316,6 +3317,8 @@ def test_memory_fit_route_checks_the_aligned_clip_against_the_budget(clip_fit):
         "family": "ltx",
         "mode": "t2v",
         "forwards": 8,
+        "loras_bytes": 0,
+        "review": False,
     }
 
 

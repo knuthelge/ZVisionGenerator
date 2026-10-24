@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
     from zvisiongenerator.backends.cuda.video.h3.frames import Geometry
 
-__all__ = ["Conditioning", "Layout", "build_layout", "denoise", "draw_noise"]
+__all__ = ["Conditioning", "Layout", "build_layout", "denoise", "draw_noise", "refine"]
 
 _AUDIO_TAG = 2  # modality tag of an audio row of the packed sequence
 _PATCH = (1, 2, 2)  # the transformer's (t, h, w) patch
@@ -246,6 +246,56 @@ def _unpatchify(rows: torch.Tensor, geo: Geometry) -> torch.Tensor:
     return rows.reshape(-1, _VIDEO_CHANNELS, geo.latent_frames, geo.latent_height, geo.latent_width).contiguous()
 
 
+def _run_steps(
+    transformer: Any,
+    embeds: torch.Tensor,
+    layout: Layout,
+    schedulers: tuple[MiniMaxH3Scheduler, MiniMaxH3Scheduler],
+    video: torch.Tensor,
+    audio: torch.Tensor,
+    start: int,
+    step_callback: Callable[[dict[str, Any]], None] | None,
+    phase: str,
+) -> None:
+    """Run the steps ``start`` to the end of the schedules over the packed rows, stepping the generated rows of *video* and *audio* in place.
+
+    One forward serves every row. The callback reports ``current_step = step - start + 1`` of ``total_steps = len - start``.
+    The schedulers are stepped, so the caller passes copies. *embeds* is already on the rows' device.
+    """
+    import torch
+
+    video_scheduler, audio_scheduler = schedulers
+    if len(video_scheduler.timesteps) != len(audio_scheduler.timesteps):
+        raise ValueError(f"The video and audio schedules must have the same length, got {len(video_scheduler.timesteps)} and {len(audio_scheduler.timesteps)}.")
+    device = video.device
+    total = len(video_scheduler.timesteps) - start
+    with torch.no_grad():
+        for step in range(start, len(video_scheduler.timesteps)):
+            t, audio_t = video_scheduler.timesteps[step], audio_scheduler.timesteps[step]
+            timestep, timestep_indices = row_timesteps(
+                layout.timestep_video_idx,
+                layout.timestep_audio_idx,
+                layout.text_rows,
+                float(t),
+                float(audio_t),
+                condition_video_rows=layout.condition_video_rows,
+                condition_audio_rows=layout.condition_audio_rows,
+            )
+            video_velocity, audio_velocity = transformer(
+                hidden_states=video[None],
+                audio_hidden_states=audio[None],
+                encoder_hidden_states=embeds,
+                timestep=timestep.to(device),
+                timestep_indices=timestep_indices.to(device),
+                return_dict=False,
+                **layout.kwargs,
+            )
+            _step_generated(video_scheduler, video_velocity[0], t, video, layout.video_generated)
+            _step_generated(audio_scheduler, audio_velocity[0], audio_t, audio, layout.audio_generated)
+            if step_callback is not None:
+                step_callback({"phase": phase, "current_step": step - start + 1, "total_steps": total})
+
+
 def denoise(
     transformer: Any,
     embeds: torch.Tensor,
@@ -294,31 +344,84 @@ def denoise(
     generator = torch.Generator(device="cpu").manual_seed(seed) if seed is not None else None
     video, audio = _initial_rows(geo, layout, conditioning, video_scheduler, generator, device)
     embeds = embeds.to(device)
-
-    total = len(video_scheduler.timesteps)
-    with torch.no_grad():
-        for step, (t, audio_t) in enumerate(zip(video_scheduler.timesteps, audio_scheduler.timesteps, strict=True)):
-            timestep, timestep_indices = row_timesteps(
-                layout.timestep_video_idx,
-                layout.timestep_audio_idx,
-                layout.text_rows,
-                float(t),
-                float(audio_t),
-                condition_video_rows=layout.condition_video_rows,
-                condition_audio_rows=layout.condition_audio_rows,
-            )
-            video_velocity, audio_velocity = transformer(
-                hidden_states=video[None],
-                audio_hidden_states=audio[None],
-                encoder_hidden_states=embeds,
-                timestep=timestep.to(device),
-                timestep_indices=timestep_indices.to(device),
-                return_dict=False,
-                **layout.kwargs,
-            )
-            _step_generated(video_scheduler, video_velocity[0], t, video, layout.video_generated)
-            _step_generated(audio_scheduler, audio_velocity[0], audio_t, audio, layout.audio_generated)
-            if step_callback is not None:
-                step_callback({"phase": phase, "current_step": step + 1, "total_steps": total})
+    _run_steps(transformer, embeds, layout, (video_scheduler, audio_scheduler), video, audio, 0, step_callback, phase)
     audio_latents = audio.reshape(H3_AUDIO_CHANNELS, geo.audio_latents, _AUDIO_CHANNELS).permute(0, 2, 1).contiguous()
     return _unpatchify(video[layout.keyframe_rows :], geo), audio_latents
+
+
+def refine(
+    transformer: Any,
+    embeds: torch.Tensor,
+    geo: Geometry,
+    schedulers: tuple[MiniMaxH3Scheduler, MiniMaxH3Scheduler],
+    latents: torch.Tensor,
+    audio_rows: torch.Tensor,
+    noise: tuple[torch.Tensor, torch.Tensor],
+    *,
+    start: int,
+    device: Any,
+    conditioning: Conditioning | None = None,
+    keyframe_seed: int | None = None,
+    step_callback: Callable[[dict[str, Any]], None] | None = None,
+    phase: str = "video",
+    text_token_tags: Sequence[int] | torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Re-noise clean latents to step *start* of the schedules, run the steps from there to the end and return the refined video latents.
+
+    The video latents and the audio rows are mixed with the given noise at ``timesteps[start]`` (``scale_noise``), the
+    keyframes are held at :data:`~zvisiongenerator.backends.cuda.video.h3.schedule.KEYFRAME_T`, and the loop is the one
+    :func:`denoise` runs. The audio is stepped with the video, because the transformer reads it, and then discarded.
+    The schedulers are copied first, so the caller's stay reusable.
+
+    Args:
+        transformer: The H3 transformer; called as a module so its hooks fire.
+        embeds: Text conditioning ``(1, rows, hidden)``.
+        geo: The clip geometry of the window the latents cover.
+        schedulers: The ``(video, audio)`` schedulers from ``build_schedulers``.
+        latents: Clean video latents ``(1, 24, geo.latent_frames, latent_height, latent_width)``.
+        audio_rows: Clean audio rows ``(geo.audio_rows, 32)``, channel-major.
+        noise: ``(video noise shaped like latents, audio noise shaped like audio_rows)``.
+        start: The schedule step to re-noise to; the loop runs ``start`` to the end.
+        device: Where the sequence lives.
+        conditioning: The keyframes to hold, or ``None``. An Extend tail is refused.
+        keyframe_seed: Seed of the keyframes' pre-noise, or ``None`` for the global generator.
+        step_callback: Called after every step with ``{"phase", "current_step", "total_steps"}``, counted from *start*.
+        phase: The ``phase`` the callback reports.
+        text_token_tags: The modality tag of every row of *embeds*; all text when ``None``.
+
+    Returns:
+        The refined video latents ``(1, 24, geo.latent_frames, latent_height, latent_width)``, float32 (keyframes excluded).
+
+    Raises:
+        ValueError: If *start* is outside the schedule, the latents, audio rows or noise have the wrong shape, the
+            schedulers differ in length, or the conditioning holds an Extend tail or does not fit the geometry.
+        Exception: Anything the transformer or *step_callback* raises (cancellation, out of memory) propagates.
+    """
+    import torch
+
+    video_scheduler, audio_scheduler = (copy.deepcopy(scheduler) for scheduler in schedulers)
+    conditioning = conditioning or Conditioning()
+    if conditioning.tail_latents is not None or conditioning.tail_audio is not None:
+        raise ValueError("A refine cannot hold an Extend tail.")
+    if not 0 <= start < len(video_scheduler.timesteps):
+        raise ValueError(f"start must be within the {len(video_scheduler.timesteps)} steps of the schedule, got {start}.")
+    video_shape = (1, _VIDEO_CHANNELS, geo.latent_frames, geo.latent_height, geo.latent_width)
+    audio_shape = (geo.audio_rows, _AUDIO_CHANNELS)
+    if tuple(latents.shape) != video_shape:
+        raise ValueError(f"The latents must be shaped {video_shape} for this window, got {tuple(latents.shape)}.")
+    if tuple(audio_rows.shape) != audio_shape:
+        raise ValueError(f"The audio rows must be shaped {audio_shape} for this window, got {tuple(audio_rows.shape)}.")
+    noise_video, noise_audio = noise
+    if tuple(noise_video.shape) != video_shape or tuple(noise_audio.shape) != audio_shape:
+        raise ValueError(f"The noise must be shaped {video_shape} and {audio_shape}, got {tuple(noise_video.shape)} and {tuple(noise_audio.shape)}.")
+    if text_token_tags is None:
+        text_token_tags = [TEXT_TAG] * embeds.shape[1]
+    layout = build_layout(text_token_tags, geo, device, conditioning)
+    generator = torch.Generator(device="cpu").manual_seed(keyframe_seed) if keyframe_seed is not None else None
+    keyframes = [_patchify(prenoise(video_scheduler, latent.float(), KEYFRAME_T, generator)) for latent in conditioning.keyframes]
+    renoised_video = video_scheduler.scale_noise(latents.float(), float(video_scheduler.timesteps[start]), noise_video.float())
+    renoised_audio = audio_scheduler.scale_noise(audio_rows.float(), float(audio_scheduler.timesteps[start]), noise_audio.float())
+    video = torch.cat([*(rows.to(device) for rows in keyframes), _patchify(renoised_video).to(device)])
+    audio = renoised_audio.to(device)
+    _run_steps(transformer, embeds.to(device), layout, (video_scheduler, audio_scheduler), video, audio, start, step_callback, phase)
+    return _unpatchify(video[layout.keyframe_rows :], geo)

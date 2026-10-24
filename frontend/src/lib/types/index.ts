@@ -676,18 +676,16 @@ export interface VideoModelDefaults {
   quantize: number | null;
   max_steps: number | null;
   fps: number;
-  /** Valid frame counts are `frame_alignment * k + 1`; 1 means any count. Superseded by `frame_rule` when that is sent. */
-  frame_alignment?: number;
-  /** The family's frame counts; absent: `frame_alignment * k + 1`, rounded to the nearest. */
-  frame_rule?: FrameRule;
+  /** The frame counts the model's family accepts. */
+  frame_rule: FrameRule;
   /** Workflow controls this model does not have (`low_memory`, `video_upscale_enabled`, ...); they are not shown. */
   hidden_controls?: string[];
-  /** The model can extend a clip; absent: it can. */
-  supports_extend?: boolean;
+  /** The model can extend a clip. */
+  supports_extend: boolean;
   /** The only step counts the model offers (ascending); null or absent: any count up to `max_steps`. */
   step_options?: number[] | null;
-  /** An extension adds frames in multiples of this; absent: 8. */
-  extend_frame_step?: number;
+  /** An extension adds frames in multiples of this. */
+  extend_frame_step: number;
   upscale: UpscaleDefaults;
   enhance_max_words?: number;
   /** The detected model family; null when it could not be detected. */

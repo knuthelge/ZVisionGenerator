@@ -7,7 +7,7 @@ import { clipMemoryRequest, clipTimeNote, memoryFitNote, type ClipMemoryControls
 function draftState(overrides: Partial<DraftState> = {}): DraftState {
   return {
     workflow: 'txt2vid', model: 'ltx-8', dimensionMode: 'ratio', ratio: '16:9', size: 'm', width: 704, height: 448, frameCount: 121, lowMemory: true,
-    videoUpscaleEnabled: false, videoUpscaleFactor: 2, ...overrides,
+    videoUpscaleEnabled: false, videoUpscaleFactor: 2, videoUpscaleReview: false, loraString: '', ...overrides,
   } as DraftState;
 }
 
@@ -102,6 +102,22 @@ describe('clipMemoryRequest', () => {
   it('leaves Low memory on when the model does not offer the toggle', () => {
     expect(clipMemoryRequest(draftState({ lowMemory: false }), CONTROLS)?.low_memory).toBe(false);
     expect(clipMemoryRequest(draftState({ lowMemory: false }), { ...CONTROLS, lowMemory: false })?.low_memory).toBe(true);
+  });
+
+  it('sends the selected LoRAs as the job form submits them, and none when there are none', () => {
+    expect(clipMemoryRequest(draftState({ loraString: 'detail:0.8,style:1' }), CONTROLS)?.lora).toBe('detail:0.8,style:1');
+    expect(clipMemoryRequest(draftState({ loraString: '  ' }), CONTROLS)).not.toHaveProperty('lora');
+    expect(clipMemoryRequest(draftState({ loraString: '' }), CONTROLS)).not.toHaveProperty('lora');
+  });
+
+  it('sends Review only while an upscale is on and the model offers the toggle', () => {
+    const reviewing = { videoUpscaleEnabled: true, videoUpscaleReview: true };
+    const controls = { ...CONTROLS, review: true };
+    expect(clipMemoryRequest(draftState(reviewing), controls)?.review).toBe(true);
+    expect(clipMemoryRequest(draftState({ ...reviewing, videoUpscaleReview: false }), controls)).not.toHaveProperty('review');
+    expect(clipMemoryRequest(draftState({ ...reviewing, videoUpscaleEnabled: false }), controls)).not.toHaveProperty('review');
+    expect(clipMemoryRequest(draftState(reviewing), CONTROLS)).not.toHaveProperty('review');
+    expect(clipMemoryRequest(draftState(reviewing), { ...controls, upscale: false })).not.toHaveProperty('review');
   });
 
   it('checks Image to Video like Text to Video', () => {

@@ -35,6 +35,7 @@ from zvisiongenerator.backends import (
     supports_video_audio,
     supports_video_extend,
     supports_video_upscale_review,
+    video_family_on_platform,
 )
 from zvisiongenerator.backends.prompt_enhancer_session import runs_on_cpu, smart_budget_bytes
 from zvisiongenerator.converters.convert_checkpoint import LTX_MODEL_TYPE, MODEL_TYPES
@@ -112,6 +113,7 @@ from zvisiongenerator.web.path_browser import BrowsePlace, BrowsePurpose, Direct
 from zvisiongenerator.web.request_guard import LocalRequestGuardMiddleware
 from zvisiongenerator.web.upscale_api import plan_seedvr2_upscale, plan_upscale, upscale_json_request, upscale_size_label
 from zvisiongenerator.web.video_clip import clip_defaults, require_upscale_factor, resolve_video_clip, resolve_video_model
+from zvisiongenerator.web.lora_fit import lora_bytes_for_fit
 from zvisiongenerator.web.prompt_builder import PromptFileChangedError, append_entry_payload, create_prompt_file, load_document_payload, preview_document_payload, save_document_payload
 from zvisiongenerator.web.prompt_files import inspect_prompt_file, resolve_prompt_file_options, write_prompt_file
 from zvisiongenerator.web.presets import create_preset, delete_preset, list_presets, rename_preset, update_preset
@@ -1230,7 +1232,7 @@ def _submit_video_job(form: Any, web_config: WebUiConfig) -> dict[str, Any]:
     if source is not None:
         # The window keeps the source's size and frame rate; no resolution or frame alignment applies.
         args.steps = clip_defaults(app_config, model_info, steps=args.steps)["steps"]
-        family = video_family(app_config, model_info.family)
+        family = video_family_on_platform(app_config, model_info.family)
         require_extend_family(source, family)
         apply_extend_args(
             args,
@@ -1479,13 +1481,14 @@ def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[st
     """Build the ``POST /api/video/memory-fit`` response: the size and length a video job would use, and how that clip fits memory.
 
     The size and length resolve exactly as in a Text to Video or Image to Video job. ``image`` (an Image to Video clip,
-    which holds a keyframe) and ``steps`` (settled by the model's step rules) refine MiniMax H3's estimate; LTX ignores
-    both. ``memory_fit`` is ``None`` when this machine has no memory budget or the model has no estimate: an LTX model
+    which holds a keyframe), ``steps`` (settled by the model's step rules), ``lora`` (the job's ``name:weight,...`` list,
+    whose files H3 holds in memory) and ``review`` (the upscale pauses to review, so H3 loads its transformer twice)
+    refine MiniMax H3's estimate; LTX ignores all four. ``memory_fit`` is ``None`` when this machine has no memory budget or the model has no estimate: an LTX model
     that is not a downloaded MLX model with its text encoder, or a MiniMax H3 clip size it cannot take. MiniMax H3
     adds ``expected_seconds``, an estimate of the generation time.
 
     Raises:
-        ValueError: If the body, model, ratio, size, steps or upscale is invalid.
+        ValueError: If the body, model, ratio, size, steps, upscale or review is invalid, or an H3 clip names a LoRA that is not there.
     """
     if not isinstance(payload, dict):
         raise ValueError("Request body must be a JSON object.")
@@ -1494,6 +1497,8 @@ def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[st
     width, height, frames, upscale, steps = (json_field(payload, key, int, "a positive integer", minimum=1) for key in ("width", "height", "frames", "upscale", "steps"))
     low_memory = json_field(payload, "low_memory", bool, "a boolean")
     image = json_field(payload, "image", bool, "a boolean")
+    lora = json_field(payload, "lora", str, "a string")
+    review = json_field(payload, "review", bool, "a boolean")
 
     app_config = web_config.app_config
     model_name = _video_model_name(payload, web_config)
@@ -1515,6 +1520,8 @@ def _video_memory_fit_response(payload: Any, web_config: WebUiConfig) -> dict[st
         family=model_info.family,
         mode="i2v" if image else "t2v",
         forwards=forwards or 8,
+        loras_bytes=lora_bytes_for_fit(lora, family=model_info.family),
+        review=bool(upscale) and review is True,
     )
     return {"memory_fit": memory_fit, "width": clip.width, "height": clip.height, "frames": clip.num_frames}
 

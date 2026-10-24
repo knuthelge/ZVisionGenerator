@@ -9,13 +9,16 @@ frees it right after, so the stages never overlap in memory:
 4. the stored 4-bit transformer copy loads, with the AdaLN tables of the clip's forwards and the user LoRAs, and denoises;
 5. the video VAE decodes the video, then the audio VAE decodes the sound.
 
-Upscale renders stage 1 at half size, lets a review look at it, and enlarges the frames with SeedVR2 to the full size.
+Upscale renders stage 1 at half size and lets a review look at it. It then enlarges the stage-1 latents 2x with a 3D
+latent upscaler and refines them at the full size with the last two forwards of the 8-step schedule, in overlapping
+windows of latent frames (the user LoRAs applied, the start and end images held as full-size keyframe rows). One decode
+of the stitched latents gives the video, which is written with the stage-1 sound.
 Extend pins the last 22 frames of a clip, and their sound, at the start of a window and keeps only what follows them.
 """
 
 from __future__ import annotations
 
-import math
+import json
 import tempfile
 import warnings
 from collections.abc import Callable, Iterator, Sequence
@@ -35,7 +38,20 @@ from zvisiongenerator.backends.cuda.video.runtime import configure_torch_runtime
 from zvisiongenerator.backends.cuda.video.token_chunking import chunk_tokens
 from zvisiongenerator.core.video_types import ExtendSegment
 from zvisiongenerator.utils.audio_resample import resample_audio
-from zvisiongenerator.utils.h3_memory import H3_FPS, H3_FRAMES_PER_CHUNK, H3_ROW_PIXELS, h3_cuda_system_bytes, h3_lora_bytes, h3_seedvr2_tier
+from zvisiongenerator.utils.h3_memory import (
+    H3_FPS,
+    H3_FRAMES_PER_CHUNK,
+    H3_REFINE_FORWARDS,
+    H3_REFINE_OVERLAP_LATENT_FRAMES,
+    H3_REFINE_SCHEDULE,
+    H3_ROW_PIXELS,
+    h3_cuda_system_bytes,
+    h3_frames_of_latent_frames,
+    h3_latent_frames,
+    h3_lora_bytes,
+    h3_refine_windows,
+    h3_upscale_keeps_transformer,
+)
 from zvisiongenerator.utils.h3_preset import H3Files, H3Preset
 from zvisiongenerator.utils.paths import get_ziv_data_dir
 from zvisiongenerator.utils.video_extend import AUDIO_SAMPLE_RATE as JOIN_SAMPLE_RATE
@@ -55,10 +71,8 @@ __all__ = ["H3VideoBackend"]
 
 _MODEL_INFO = VideoModelInfo(family="h3", backend="h3", supports_i2v=True, default_fps=H3_FPS, frame_alignment=H3_FRAMES_PER_CHUNK, resolution_alignment=H3_ROW_PIXELS)
 _MODES = ("t2v", "i2v", "extend")
-# What ``load_model`` takes. ``low_memory`` (H3 always streams its blocks) and ``model_name`` (the stored copy has one
-# fixed name) are accepted for the callers that pass them to every backend, and ignored.
+# What ``load_model`` takes. ``low_memory`` (H3 always streams its blocks) is accepted for the callers that pass it to every backend, and ignored.
 _LOAD_KEYS = frozenset({"mode", "low_memory", "loras", "upscale", "model_name", "preset"})
-_UPSCALE_BATCH = 5  # frames SeedVR2 enlarges together; the smallest coherent batch
 _SYSTEM_MEMORY_TIGHT_RATIO = 0.8  # a load needing more than this share of system memory leaves little to the rest of the machine
 _RESOLUTION_FOR_UPSCALE = 2 * H3_ROW_PIXELS  # stage 1 runs at half size, which must stay a multiple of 32
 _PHASE = "video"
@@ -115,11 +129,52 @@ class _ClipSpec:
 
 
 @dataclass(frozen=True)
+class _Denoised:
+    """The result of the generation stages of a clip, all on the CPU: the latents, and the text conditioning they were made with.
+
+    Attributes:
+        video: Video latents ``(1, 24, frames, latent_height, latent_width)``.
+        audio: Audio latents ``(2, 32, audio_latents)``.
+        embeds: The text conditioning ``(1, rows, hidden)``.
+        token_tags: The modality tag of each row of *embeds*.
+    """
+
+    video: torch.Tensor
+    audio: torch.Tensor
+    embeds: torch.Tensor
+    token_tags: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class _Rendered:
     """A decoded clip: 8-bit frames and a stereo waveform ``(2, samples)`` at the audio VAE's sample rate."""
 
     frames: list[np.ndarray]
     waveform: torch.Tensor
+
+
+@dataclass
+class _SharedTransformer:
+    """A transformer both passes of an upscale use, loaded on first use so its CPU side is not resident while the encoders run.
+
+    Attributes:
+        refine_keys: The fold keys of the refine's forwards; the first load adds those of the stage-1 forwards.
+        value: The loaded transformer, or ``None``.
+    """
+
+    refine_keys: list[Any]
+    value: Any = None
+
+    def get(self, model: _H3Model, stage_one_keys: Sequence[Any]) -> Any:
+        """Return the transformer, loading it the first time with the fold keys of both passes."""
+        if self.value is None:
+            self.value = _load_transformer(model, list(dict.fromkeys([*stage_one_keys, *self.refine_keys])))
+        return self.value
+
+    def drop(self) -> bool:
+        """Let go of the transformer; return whether one was loaded."""
+        loaded, self.value = self.value is not None, None
+        return loaded
 
 
 # ---- Small pure helpers ---------------------------------------------------------------------------------------------
@@ -230,12 +285,12 @@ def _encode_tail_audio(model: _H3Model, tail_audio: np.ndarray) -> torch.Tensor:
     return conditioning.encode_tail_audio(audio_vae, torch.from_numpy(tail_audio))
 
 
-def _fold_keys(schedulers: tuple[Any, Any], row_set: str) -> list[Any]:
-    """Return the AdaLN fold keys of every forward of *schedulers* for a clip with the conditioning rows of *row_set*."""
+def _fold_keys(schedulers: tuple[Any, Any], row_set: str, start: int = 0) -> list[Any]:
+    """Return the AdaLN fold keys of the forwards of *schedulers* from step *start* on, for a clip with the conditioning rows of *row_set*."""
     from zvisiongenerator.backends.cuda.video.h3 import adaln  # imports torch at its top level
 
     video, audio = schedulers
-    return adaln.unique_keys(adaln.step_keys(video, audio, row_set))
+    return adaln.unique_keys(adaln.step_keys(video, audio, row_set)[start:])
 
 
 def _all_fold_keys(preset: H3Preset, repo_dir: Path) -> list[Any]:
@@ -255,6 +310,13 @@ def _chunk_feed_forwards(transformer: Any, preset: H3Preset) -> None:
         chunk_tokens([block.ff for block in transformer.transformer_blocks], preset.ffn_chunk_tokens)
 
 
+def _load_transformer(model: _H3Model, keys: Sequence[Any]) -> Any:
+    """Load the transformer from the stored copy for the forwards that use the fold *keys*, with the user LoRAs and the preset's feed-forward chunks."""
+    transformer = stored_copy.load_copy(model.copy_dir, keys, model.device, loras=model.loras)
+    _chunk_feed_forwards(transformer, model.preset)
+    return transformer
+
+
 def _denoise(
     model: _H3Model,
     spec: _ClipSpec,
@@ -263,10 +325,15 @@ def _denoise(
     token_tags: Sequence[int],
     schedulers: tuple[Any, Any],
     held: sampler.Conditioning,
+    shared: _SharedTransformer | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Load the transformer for the clip's forwards and LoRAs, denoise, and return the video and audio latents on the CPU."""
-    transformer = stored_copy.load_copy(model.copy_dir, _fold_keys(schedulers, spec.row_set), model.device, loras=model.loras)
-    _chunk_feed_forwards(transformer, model.preset)
+    """Denoise the clip's latents and return the video and audio latents on the CPU.
+
+    The transformer loads here, after the encoders have let go, for the clip's forwards and LoRAs. A *shared* transformer is
+    loaded (the first time) with the fold keys of both passes instead, and stays with the caller.
+    """
+    stage_keys = _fold_keys(schedulers, spec.row_set)
+    transformer = shared.get(model, stage_keys) if shared is not None else _load_transformer(model, stage_keys)
     video, audio = sampler.denoise(transformer, embeds, geo, schedulers, spec.seed, model.device, conditioning=held, step_callback=spec.on_step, phase=_PHASE, text_token_tags=token_tags)
     return video.cpu(), audio.cpu()
 
@@ -291,8 +358,11 @@ def _staged(stage: Callable[..., Any], *args: Any) -> Any:
         release_memory()
 
 
-def _render(model: _H3Model, spec: _ClipSpec) -> _Rendered:
-    """Run every stage of one clip in order, releasing each before the next, and return the decoded frames and sound."""
+def _generate(model: _H3Model, spec: _ClipSpec, shared: _SharedTransformer | None = None) -> _Denoised:
+    """Run the generation stages of one clip in order, releasing each before the next, and return its latents and text conditioning.
+
+    A *shared* transformer serves the forwards instead of one loaded here, and is not released here.
+    """
     geo = geometry(spec.width, spec.height, spec.num_frames)
     images = [fit_image(image, spec.width, spec.height) for image in spec.keyframes]
     schedulers = schedule.build_schedulers(model.preset.schedules[spec.forwards], model.files.repo_dir)
@@ -300,29 +370,126 @@ def _render(model: _H3Model, spec: _ClipSpec) -> _Rendered:
     keyframes, tail_latents = _staged(_encode_visuals, model, spec, images) if images or spec.tail is not None else ((), None)
     tail_audio = _staged(_encode_tail_audio, model, spec.tail_audio) if spec.tail_audio is not None else None
     held = sampler.Conditioning(keyframes=keyframes, anchors=spec.anchors, tail_latents=tail_latents, tail_audio=tail_audio)
-    video_latents, audio_latents = _staged(_denoise, model, spec, geo, embeds, token_tags, schedulers, held)
-    frames = _staged(_decode_frames, model, video_latents)
-    waveform = _staged(_decode_waveform, model, audio_latents)
+    video_latents, audio_latents = _staged(_denoise, model, spec, geo, embeds, token_tags, schedulers, held, shared)
+    return _Denoised(video=video_latents, audio=audio_latents, embeds=embeds, token_tags=tuple(token_tags))
+
+
+def _render(model: _H3Model, spec: _ClipSpec) -> _Rendered:
+    """Generate one clip, then decode its frames and its sound, and return them."""
+    generated = _generate(model, spec)
+    frames = _staged(_decode_frames, model, generated.video)
+    waveform = _staged(_decode_waveform, model, generated.audio)
     return _Rendered(frames=frames, waveform=waveform)
 
 
 # ---- Upscale -----------------------------------------------------------------------------------------------------------
 
 
-def _upscale_frames(frames: list[np.ndarray], width: int, height: int, seed: int, progress: Callable[[int, int], None] | None) -> list[np.ndarray]:
-    """Enlarge *frames* to *width* x *height* with the SeedVR2 tier the config and this machine's memory pick."""
-    from zvisiongenerator.backends import accelerator_memory_budget_or_none, get_seedvr2_upscaler
-    from zvisiongenerator.seedvr2_loader import build_seedvr2_setup, load_seedvr2
-    from zvisiongenerator.utils.config import load_config
+def _upscale_latents(model: _H3Model, latents: torch.Tensor) -> torch.Tensor:
+    """Return the stage-1 video *latents* enlarged 2x by the latent upscaler, float32 on the CPU.
 
-    upscaler = get_seedvr2_upscaler()
-    if upscaler is None or not hasattr(upscaler, "upscale_video"):
-        raise RuntimeError("SeedVR2 video upscaling is not available on this platform.")
-    budget = accelerator_memory_budget_or_none()
-    models_dir = _models_dir()
-    setup = build_seedvr2_setup(load_config(), weights=upscaler.weights, budget_bytes=budget.gpu_bytes if budget else None, system_bytes=budget.system_bytes if budget else None, models_dir=models_dir)
-    seedvr2 = load_seedvr2(upscaler, setup.tier.model, models_dir=models_dir, on_phase=None)
-    return upscaler.upscale_video(seedvr2, frames, width=width, height=height, seed=seed, softness=setup.settings.softness, batch_size=_UPSCALE_BATCH, progress=progress)
+    The video VAE's latent statistics, which the upscaler normalises with, come from the repository's ``vae/config.json``.
+
+    Raises:
+        RuntimeError: If the upscaler file does not match the network, or the VAE config holds no latent statistics.
+    """
+    from zvisiongenerator.backends.cuda.video.h3.latent_upsampler import load_latent_upsampler, upscale_latents
+
+    config_path = model.files.repo_dir / "vae" / "config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    if "latents_mean" not in config or "latents_std" not in config:
+        raise RuntimeError(f"{config_path} holds no latents_mean and latents_std; the MiniMax H3 download is incomplete.")
+    if model.files.latent_upsampler_file is None:
+        raise RuntimeError("The model was loaded without the latent upscaler file.")
+    net = load_latent_upsampler(model.files.latent_upsampler_file, model.device)
+    return upscale_latents(net, latents, config["latents_mean"], config["latents_std"])
+
+
+def _refine_start(preset: H3Preset) -> int:
+    """Return the step of the 8-step schedule the refine starts at: all but its last ``H3_REFINE_FORWARDS`` forwards.
+
+    It comes from the refine schedule alone, never from the stage-1 step count.
+    """
+    return preset.schedules[H3_REFINE_SCHEDULE].forwards - H3_REFINE_FORWARDS
+
+
+def _refine(
+    model: _H3Model,
+    spec: _ClipSpec,
+    latents: torch.Tensor,
+    stage1: _Denoised,
+    keyframes: Sequence[torch.Tensor],
+    windows: Sequence[tuple[int, int]],
+    start: int,
+    step_callback: Callable[[dict[str, Any]], None] | None,
+    total: int,
+    shared: _SharedTransformer | None = None,
+) -> torch.Tensor:
+    """Refine the enlarged *latents* window by window with the transformer and return them stitched into one latent.
+
+    *spec* is the full-size clip. The transformer loads once, with the fold keys of every row set the windows use (a
+    window that holds an image has the ``keyframe`` rows, the others the ``plain`` ones) and the user LoRAs, unless the
+    caller passes a *shared* one (loaded with those keys). One noise draw serves all windows. Window *i* reports progress after the
+    *spec.forwards* stage-1 steps and the forwards of the windows before it.
+    """
+    from zvisiongenerator.backends.cuda.video.h3 import refine
+
+    refine_schedule = model.preset.schedules[H3_REFINE_SCHEDULE]
+    schedulers = schedule.build_schedulers(refine_schedule, model.files.repo_dir)
+    forwards = refine_schedule.forwards - start
+    held = [refine.window_conditioning(keyframes, spec.anchors, index, len(windows)) for index in range(len(windows))]
+    transformer = shared.value if shared is not None else _load_transformer(model, _refine_fold_keys(schedulers, spec.anchors, len(windows), start))
+    noise_video, noise_audio = refine.draw_refine_noise(latents.shape, stage1.audio.shape, spec.seed)
+    latent_frames, audio_latents = latents.shape[2], stage1.audio.shape[2]
+    parts = []
+    for index, (first, last) in enumerate(windows):
+        geo = geometry(spec.width, spec.height, h3_frames_of_latent_frames(last - first))
+        offset, count = refine.audio_window(audio_latents, first, latent_frames, geo.num_frames)
+        parts.append(
+            sampler.refine(
+                transformer,
+                stage1.embeds,
+                geo,
+                schedulers,
+                latents[:, :, first:last],
+                refine.window_audio_rows(stage1.audio, offset, count),
+                (noise_video[:, :, first:last], refine.window_audio_rows(noise_audio, offset, count)),
+                start=start,
+                device=model.device,
+                conditioning=held[index],
+                keyframe_seed=spec.seed + 2,
+                step_callback=_progress(step_callback, _PHASE_STAGE_2, offset=spec.forwards + forwards * index, total=total),
+                phase=_PHASE_STAGE_2,
+                text_token_tags=stage1.token_tags,
+            ).cpu()
+        )
+    return refine.stitch(parts, windows, latent_frames, H3_REFINE_OVERLAP_LATENT_FRAMES)
+
+
+def _refine_fold_keys(schedulers: tuple[Any, Any], anchors: Sequence[str], windows: int, start: int) -> list[Any]:
+    """Return the AdaLN fold keys of the refine's forwards from step *start*: those of every row set its windows use.
+
+    A window that holds an image has the ``keyframe`` rows, the others the ``plain`` ones, which the clip's *anchors* settle.
+    """
+    from zvisiongenerator.backends.cuda.video.h3 import refine
+
+    row_sets = dict.fromkeys("keyframe" if refine.window_conditioning(anchors, anchors, index, windows).keyframes else "plain" for index in range(windows))
+    return list(dict.fromkeys(key for row_set in row_sets for key in _fold_keys(schedulers, row_set, start)))
+
+
+def _keeps_transformer(model: _H3Model, spec: _ClipSpec) -> bool:
+    """Return whether the upscale of *spec* loads the transformer once for both passes: the card holds the resident transformer beside the stages between them.
+
+    The estimate decides, as it does for the memory note and the time shown, so a card that would not hold it loads twice.
+    """
+    return h3_upscale_keeps_transformer(spec.width, spec.height, spec.num_frames, _gpu_total_bytes(model.device), mode=model.mode, loras_bytes=h3_lora_bytes(path for path, _weight in model.loras))
+
+
+def _gpu_total_bytes(device: Any) -> int:
+    """Return the memory of the GPU *device*."""
+    import torch
+
+    return int(torch.cuda.get_device_properties(device).total_memory)
 
 
 def _review_stage1(clip: _Rendered, review: Callable[[Path], None]) -> None:
@@ -341,25 +508,45 @@ def _render_upscaled(
     step_callback: Callable[[dict[str, Any]], None] | None,
     review: Callable[[Path], None] | None,
 ) -> None:
-    """Render *spec* at half size, review it, enlarge its frames with SeedVR2 and write them with the stage-1 sound.
+    """Render *spec* at half size, review it, enlarge its latents, refine them at the full size and write the video with the stage-1 sound.
 
-    Progress is one run: the stage-1 forwards, then one step per SeedVR2 batch. An exception from *review* ends the
-    generation.
+    The stage-1 sound is decoded first and kept; the half-size video is decoded only for *review*. Progress is one run:
+    the stage-1 forwards, then ``H3_REFINE_FORWARDS`` for each refine window. An exception from *review* or from the
+    progress callback ends the generation before anything is written.
+
+    Without *review* the transformer loads once, with the fold keys of both passes, where the stage-1 forwards need it (after
+    the text, vision and keyframe encoders have let go, so its CPU side never overlaps theirs), and stays loaded through the
+    sound decode, the latent upscaler and the keyframe encode until the refine uses it, when the card holds it there. With review
+    the half-size decode needs the memory, so the stage-1 transformer is released and the refine loads its own.
     """
-    batches = math.ceil(spec.num_frames / _UPSCALE_BATCH)
-    total = spec.forwards + batches
-    small = _render(model, replace(spec, width=spec.width // 2, height=spec.height // 2, on_step=_progress(step_callback, _PHASE_STAGE_1, total=total)))
-    if review is not None:
-        _review_stage1(small, review)
-    release_memory()
-    stage2 = _progress(step_callback, _PHASE_STAGE_2, offset=spec.forwards, total=total)
+    windows = h3_refine_windows(h3_latent_frames(spec.num_frames))
+    start = _refine_start(model.preset)
+    total = spec.forwards + H3_REFINE_FORWARDS * len(windows)
+    small_spec = replace(spec, width=spec.width // 2, height=spec.height // 2, on_step=_progress(step_callback, _PHASE_STAGE_1, total=total))
+    shared = _shared_transformer(model, spec, len(windows), start) if review is None and _keeps_transformer(model, spec) else None
+    try:
+        small = _generate(model, small_spec, shared)
+        waveform = _staged(_decode_waveform, model, small.audio)
+        if review is not None:
+            preview = _staged(_decode_frames, model, small.video)
+            _review_stage1(_Rendered(frames=preview, waveform=waveform), review)
+            del preview
+        release_memory()
+        latents = _staged(_upscale_latents, model, small.video)
+        images = [fit_image(image, spec.width, spec.height) for image in spec.keyframes]
+        keyframes = _staged(_encode_visuals, model, spec, images)[0] if images else ()
+        refined = _staged(_refine, model, spec, latents, small, keyframes, windows, start, step_callback, total, shared)
+    finally:
+        if shared is not None and shared.drop():  # let go of the shared transformer, also when a stage fails or the job is cancelled
+            release_memory()
+    frames = _staged(_decode_frames, model, refined)
+    _write_video(_Rendered(frames=frames, waveform=waveform), output_path)
 
-    def _on_batch(done: int, _batches: int) -> None:
-        if stage2 is not None:
-            stage2({"current_step": done, "total_steps": batches})
 
-    frames = _staged(_upscale_frames, small.frames, spec.width, spec.height, spec.seed, _on_batch)
-    _write_video(_Rendered(frames=frames, waveform=small.waveform), output_path)
+def _shared_transformer(model: _H3Model, spec: _ClipSpec, windows: int, start: int) -> _SharedTransformer:
+    """Return the transformer both passes of an upscale use, not yet loaded: its fold keys are those of the stage-1 forwards and of the refine's."""
+    refine_keys = _refine_fold_keys(schedule.build_schedulers(model.preset.schedules[H3_REFINE_SCHEDULE], model.files.repo_dir), spec.anchors, windows, start)
+    return _SharedTransformer(refine_keys)
 
 
 # ---- Extend --------------------------------------------------------------------------------------------------------------
@@ -458,7 +645,7 @@ def _render_clip(
     step_callback: Callable[[dict[str, Any]], None] | None,
     review: Callable[[Path], None] | None,
 ) -> None:
-    """Render *spec* in one stage, or at half size plus the SeedVR2 upscale when *stage1_steps* is set, and write the video to *output_path*."""
+    """Render *spec* in one stage, or at half size plus the latent upscale and refine when *stage1_steps* is set, and write the video to *output_path*."""
     with _out_of_memory_as_error(spec.width, spec.height, spec.num_frames):
         if stage1_steps is None:
             _write_video(_render(model, replace(spec, on_step=_progress(step_callback, _PHASE))), output_path)
@@ -466,8 +653,8 @@ def _render_clip(
             _render_upscaled(model, spec, output_path, step_callback=step_callback, review=review)
 
 
-def _check_system_memory(loras: Sequence[tuple[Path, float]], upscale: bool) -> None:
-    """Refuse a load whose system memory (base, user LoRAs and the upscale's SeedVR2 tier) exceeds the machine's, and warn above 80% of it.
+def _check_system_memory(loras: Sequence[tuple[Path, float]]) -> None:
+    """Refuse a load whose system memory (base and user LoRAs) exceeds the machine's, and warn above 80% of it.
 
     The decoded frames add to this per clip, so the figure is a floor.
 
@@ -476,16 +663,10 @@ def _check_system_memory(loras: Sequence[tuple[Path, float]], upscale: bool) -> 
     """
     import psutil
 
-    from zvisiongenerator.backends import accelerator_memory_budget_or_none
-    from zvisiongenerator.utils.config import load_config
-
     total = int(psutil.virtual_memory().total)
-    tier = h3_seedvr2_tier(load_config(), accelerator_memory_budget_or_none()) if upscale else None
-    need = h3_cuda_system_bytes(loras_bytes=h3_lora_bytes(path for path, _weight in loras), seedvr2_tier=tier)
+    need = h3_cuda_system_bytes(loras_bytes=h3_lora_bytes(path for path, _weight in loras))
     if need > total:
-        raise RuntimeError(
-            f"MiniMax H3 needs about {need / 1024**3:.0f} GB of system memory; this machine has {total / 1024**3:.0f} GB." + (" Generate without Upscale to need less." if upscale else "")
-        )
+        raise RuntimeError(f"MiniMax H3 needs about {need / 1024**3:.0f} GB of system memory; this machine has {total / 1024**3:.0f} GB.")
     if need > total * _SYSTEM_MEMORY_TIGHT_RATIO:
         warnings.warn(f"MiniMax H3 needs about {need / 1024**3:.0f} GB of this machine's {total / 1024**3:.0f} GB of system memory, leaving little for other apps.", stacklevel=2)
 
@@ -506,16 +687,17 @@ class H3VideoBackend:
                 mode: ``"t2v"`` (default), ``"i2v"`` or ``"extend"``; the clip methods check it.
                 preset: The ``H3Preset`` (required).
                 loras: ``(path, weight)`` of each user LoRA.
-                upscale: Whether the clips are made with the SeedVR2 upscale.
-                low_memory, model_name: Accepted and ignored.
+                upscale: Whether the clips are made with the latent upscale; the upscaler's file is then resolved (and downloaded on first use).
+                model_name: The name the model was picked by; the stored copy is named after it (see ``stored_copy.copy_name``).
+                low_memory: Accepted and ignored.
 
         Returns:
             Tuple of (backend-private model handle, VideoModelInfo).
 
         Raises:
             ValueError: For a keyword other than the above (quantize, transformer_source, sampler, image_crf and
-                repo_ignore are among those refused), an unknown mode, or a missing preset.
-            FileNotFoundError: If a LoRA file is missing.
+                repo_ignore are among those refused), an unknown mode, a missing preset, or an upscale without the 8-step schedule in the preset.
+            FileNotFoundError: If a LoRA file, or with upscale the latent upscaler's file, is missing.
             RuntimeError: If CUDA is unavailable, or the load needs more system memory than the machine has.
         """
         unknown = sorted(set(kwargs) - _LOAD_KEYS)
@@ -527,6 +709,9 @@ class H3VideoBackend:
         preset = kwargs.get("preset")
         if not isinstance(preset, H3Preset):
             raise ValueError("MiniMax H3 needs its preset to load (preset=).")
+        upscale = bool(kwargs.get("upscale"))
+        if upscale and H3_REFINE_SCHEDULE not in preset.schedules:
+            raise ValueError(f"The MiniMax H3 upscale refines with the {H3_REFINE_SCHEDULE}-step schedule; add video_model_presets.h3.diffusers.schedules.{H3_REFINE_SCHEDULE}.")
         loras = tuple((Path(path), float(weight)) for path, weight in kwargs.get("loras") or ())
         for path, _weight in loras:
             if not path.exists():
@@ -536,12 +721,14 @@ class H3VideoBackend:
 
         require_cuda(torch, "MiniMax H3 on Windows and Linux")
         configure_torch_runtime(torch)
-        _check_system_memory(loras, bool(kwargs.get("upscale")))
+        _check_system_memory(loras)
         device = torch.device("cuda")
-        files = resolve_files(model_path, preset)
+        files = resolve_files(model_path, preset, upscale=upscale)
         shards, config = transformer_files(files.repo_dir)
-        copy_dir = stored_copy.ensure_copy(_models_dir(), shards, config, files.lora_file, preset.lora_scale, _all_fold_keys(preset, files.repo_dir), device)
-        return _H3Model(files=files, preset=preset, copy_dir=copy_dir, mode=mode, loras=loras, upscale=bool(kwargs.get("upscale")), device=device), _MODEL_INFO
+        copy_dir = stored_copy.ensure_copy(
+            _models_dir(), stored_copy.copy_name(kwargs.get("model_name"), model_path), shards, config, files.lora_file, preset.lora_scale, _all_fold_keys(preset, files.repo_dir), device
+        )
+        return _H3Model(files=files, preset=preset, copy_dir=copy_dir, mode=mode, loras=loras, upscale=upscale, device=device), _MODEL_INFO
 
     def text_to_video(
         self,

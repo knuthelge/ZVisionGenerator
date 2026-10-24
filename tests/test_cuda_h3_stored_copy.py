@@ -23,7 +23,7 @@ from zvisiongenerator.backends.cuda.video.h3 import adaln as adaln_module  # noq
 from zvisiongenerator.backends.cuda.video.h3 import lora as h3_lora  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3 import stored_copy  # noqa: E402
 from zvisiongenerator.backends.cuda.video.h3.schedule import ROW_SETS, build_schedulers  # noqa: E402
-from zvisiongenerator.backends.cuda.video.h3.stored_copy import COPY_NAME, copy_manifest, ensure_copy, load_copy, write_copy  # noqa: E402
+from zvisiongenerator.backends.cuda.video.h3.stored_copy import copy_manifest, copy_name, ensure_copy, load_copy, write_copy  # noqa: E402
 from zvisiongenerator.utils.h3_preset import H3Schedule  # noqa: E402
 from zvisiongenerator.utils.stored_quant import MANIFEST_NAME  # noqa: E402
 
@@ -36,6 +36,7 @@ _LAYERS = 2
 _TEXT_TAG, _AUDIO_TAG, _VIDEO_TAG = 1, 2, 0
 _NF4_FORMAT = "nf4-test"
 _ALL_KEYS = adaln_module.fold_keys({8: _SCHEDULE_8, 4: _SCHEDULE_4})
+_STOCK_COPY = "h3@q4"
 _BLOCK_LINEARS = ("attn.to_q", "attn.to_k", "attn.to_v", "attn.to_out.0", "ff.net.0.proj", "ff.net.2")
 
 
@@ -231,8 +232,8 @@ def _spy_writes(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
     return calls
 
 
-def _ensure(sources: _Sources, models: Path, keys=_ALL_KEYS, scale: float = _SCALE) -> Path:
-    return ensure_copy(models, sources.shards, sources.config, sources.turbo, scale, keys, "cpu")
+def _ensure(sources: _Sources, models: Path, keys=_ALL_KEYS, scale: float = _SCALE, name: str = "h3") -> Path:
+    return ensure_copy(models, name, sources.shards, sources.config, sources.turbo, scale, keys, "cpu")
 
 
 def test_ensure_writes_h3_q4_with_its_manifest_and_a_second_ensure_writes_nothing(sources: _Sources, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -243,7 +244,7 @@ def test_ensure_writes_h3_q4_with_its_manifest_and_a_second_ensure_writes_nothin
     snapshot = {path.name: path.stat().st_mtime_ns for path in first.iterdir()}
     second = _ensure(sources, models)
 
-    assert first == second == models / COPY_NAME == models / "h3@q4"
+    assert first == second == models / _STOCK_COPY
     assert len(calls) == 1
     assert {path.name: path.stat().st_mtime_ns for path in second.iterdir()} == snapshot
     assert json.loads((first / MANIFEST_NAME).read_text(encoding="utf-8")) == copy_manifest(sources.shards, sources.turbo, _SCALE, _ALL_KEYS)
@@ -269,16 +270,52 @@ def test_a_local_fine_tune_with_the_stock_names_and_sizes_rebuilds_the_copy(sour
     tuned = _fine_tune(sources, sources.root / "tuned")
 
     _ensure(sources, models)
-    ensure_copy(models, tuned, sources.config, sources.turbo, _SCALE, _ALL_KEYS, "cpu")
+    ensure_copy(models, "h3", tuned, sources.config, sources.turbo, _SCALE, _ALL_KEYS, "cpu")
     assert len(calls) == 2
     name = "transformer_blocks.1.attn.to_q.weight"
     tuned_weight = next(tensors[name] for shard in tuned if name in (tensors := load_file(str(shard))))
-    stored = _stored(models / COPY_NAME)[name]
+    stored = _stored(models / _STOCK_COPY)[name]
     assert torch.equal(stored, tuned_weight.to(stored.dtype))
     assert not torch.equal(stored, sources.model.state_dict()[name].to(stored.dtype))
 
-    ensure_copy(models, tuned, sources.config, sources.turbo, _SCALE, _ALL_KEYS, "cpu")
+    ensure_copy(models, "h3", tuned, sources.config, sources.turbo, _SCALE, _ALL_KEYS, "cpu")
     assert len(calls) == 2
+
+
+def test_two_source_models_keep_a_copy_each_and_neither_overwrites_the_other(sources: _Sources, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _spy_writes(monkeypatch)
+    models = sources.root / "models"
+    tuned = _fine_tune(sources, sources.root / "tuned")
+
+    stock_copy = _ensure(sources, models)
+    tuned_copy = ensure_copy(models, "my-tune", tuned, sources.config, sources.turbo, _SCALE, _ALL_KEYS, "cpu")
+    assert (stock_copy, tuned_copy) == (models / "h3@q4", models / "my-tune@q4")
+    assert len(calls) == 2
+
+    # Using either again, in either order, writes nothing: the stock copy still holds the stock weights.
+    _ensure(sources, models)
+    ensure_copy(models, "my-tune", tuned, sources.config, sources.turbo, _SCALE, _ALL_KEYS, "cpu")
+    assert len(calls) == 2
+    name = "transformer_blocks.1.attn.to_q.weight"
+    assert not torch.equal(_stored(stock_copy)[name], _stored(tuned_copy)[name])
+
+
+def test_the_copy_is_named_after_the_model_it_was_picked_by() -> None:
+    assert copy_name("h3", "MiniMaxAI/MiniMax-H3@42ed227") == "h3"
+    assert copy_name("my-tune", "/data/models/my-tune") == "my-tune"
+
+
+def test_a_pick_that_is_not_a_folder_name_is_named_after_its_reference(tmp_path: Path) -> None:
+    assert copy_name(None, "MiniMaxAI/MiniMax-H3@42ed227") == "MiniMaxAI--MiniMax-H3"
+    assert copy_name("org/tune", "org/tune") == "org--tune"
+
+    first, second = tmp_path / "a" / "tune", tmp_path / "b" / "tune"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    names = {copy_name(str(path), str(path)) for path in (first, second)}
+    assert len(names) == 2
+    assert all(name.startswith("tune-") and "/" not in name for name in names)
+    assert copy_name(str(first), str(first)) == copy_name(None, str(first))
 
 
 def test_a_copy_made_from_hub_cache_files_stays_current_under_its_old_manifest(sources: _Sources, recorder: _Recorder, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -306,11 +343,11 @@ def test_a_copy_made_from_hub_cache_files_stays_current_under_its_old_manifest(s
         "lora_scale": _SCALE,
         "fold_keys": [list(key) for key in _ALL_KEYS],
     }
-    (models / COPY_NAME).mkdir(parents=True)
-    (models / COPY_NAME / MANIFEST_NAME).write_text(json.dumps(legacy, indent=2) + "\n", encoding="utf-8")
+    (models / _STOCK_COPY).mkdir(parents=True)
+    (models / _STOCK_COPY / MANIFEST_NAME).write_text(json.dumps(legacy, indent=2) + "\n", encoding="utf-8")
 
     assert copy_manifest(model_shards, turbo, _SCALE, _ALL_KEYS) == legacy
-    ensure_copy(models, model_shards, sources.config, turbo, _SCALE, _ALL_KEYS, "cpu")
+    ensure_copy(models, "h3", model_shards, sources.config, turbo, _SCALE, _ALL_KEYS, "cpu")
     assert calls == []
 
 
@@ -352,7 +389,7 @@ def test_a_failed_write_leaves_no_copy(sources: _Sources, recorder: _Recorder, m
     models = sources.root / "models"
     with pytest.raises(RuntimeError, match="pack failed"):
         _ensure(sources, models)
-    assert not (models / COPY_NAME).exists()
+    assert not (models / _STOCK_COPY).exists()
     assert not list(models.glob(".*.partial"))
 
 
@@ -696,4 +733,4 @@ def test_loading_needs_no_heavy_import_at_module_level() -> None:
 
 
 def test_public_names_are_exported() -> None:
-    assert sorted(stored_copy.__all__) == ["COPY_NAME", "copy_manifest", "ensure_copy", "load_copy", "write_copy"]
+    assert sorted(stored_copy.__all__) == ["copy_manifest", "copy_name", "ensure_copy", "load_copy", "write_copy"]

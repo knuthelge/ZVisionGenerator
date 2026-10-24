@@ -85,6 +85,10 @@ export interface ClipMemoryRequest {
   image?: boolean;
   /** The steps the job would run, for a model that offers the control. */
   steps?: number;
+  /** The selected LoRAs as the job form submits them (`name:weight,...`); absent when none. Their files take memory on MiniMax H3. */
+  lora?: string;
+  /** Present (true) when the upscale pauses to review the small render first, which makes MiniMax H3 load its transformer twice. */
+  review?: boolean;
 }
 
 /** Which video controls the model offers, as they decide what the job form submits. */
@@ -96,6 +100,8 @@ export interface ClipMemoryControls {
   upscale: boolean;
   /** The model offers a choice of step counts, which set its time; the steps are sent only then. */
   steps?: boolean;
+  /** The Review toggle is shown; without it no review is submitted. */
+  review?: boolean;
 }
 
 /**
@@ -115,13 +121,17 @@ export function clipMemoryRequest(state: DraftState, controls: ClipMemoryControl
     if (!state.ratio || !state.size) return null;
     size = { ratio: state.ratio, size: state.size };
   }
+  const upscale = controls.upscale && state.videoUpscaleEnabled ? state.videoUpscaleFactor : null;
+  const lora = state.loraString.trim();
   return {
     model: state.model,
     ...size,
     frames: alignFrames(state.frameCount, controls.frameRule),
     low_memory: controls.lowMemory ? state.lowMemory : true,
-    upscale: controls.upscale && state.videoUpscaleEnabled ? state.videoUpscaleFactor : null,
+    upscale,
     ...(state.workflow === 'img2vid' ? { image: true } : {}),
     ...(controls.steps && state.steps > 0 ? { steps: state.steps } : {}),
+    ...(lora ? { lora } : {}),
+    ...(upscale !== null && controls.review && state.videoUpscaleReview ? { review: true } : {}),
   };
 }

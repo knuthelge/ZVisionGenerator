@@ -43,6 +43,7 @@ PRESET = H3Preset(
     text_encoder_layers=50,
     lora=HubFiles("lora/repo", "rev-lora", ("turbo.safetensors",)),
     lora_scale=0.0625,
+    latent_upsampler=HubFiles("upsampler/repo", "rev-up", ("upsampler.safetensors",)),
     schedules={8: H3Schedule(8, 6.0, 3.0), 4: H3Schedule(4, 6.0, 3.0)},
 )
 
@@ -59,9 +60,11 @@ class Rig:
         self.tmp_path = tmp_path
         self.real_encode = False
         self.row_sets: list[str] = []
+        self.refine_forwards: list[int] = []
         self.calls: dict[str, list[Any]] = {}
         self.window_waveform: Any = None  # a callable (latent audio frames) -> (2, samples), else a quiet sine
         self.oom_in: str | None = None
+        self.gpu_bytes = 10 * 2**30  # the card the backend asks about
 
     def note(self, name: str, **info: Any) -> None:
         self.events.append(name)
@@ -88,9 +91,10 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Rig:
     monkeypatch.setattr(h3_backend, "require_cuda", lambda *_a, **_k: rig.note("require_cuda"))
     monkeypatch.setattr(h3_backend, "configure_torch_runtime", lambda *_a, **_k: rig.note("configure_torch_runtime"))
     monkeypatch.setattr(h3_backend, "_models_dir", lambda: tmp_path / "models")
-    monkeypatch.setattr(h3_backend, "_check_system_memory", lambda loras, upscale: None)
+    monkeypatch.setattr(h3_backend, "_gpu_total_bytes", lambda device: rig.gpu_bytes)
+    monkeypatch.setattr(h3_backend, "_check_system_memory", lambda loras: None)
     files = H3Files(tmp_path / "repo", tmp_path / "te", (tmp_path / "te" / "model-1.safetensors",), tmp_path / "turbo.safetensors")
-    monkeypatch.setattr(h3_backend, "resolve_files", lambda ref, preset: (rig.note("resolve_files", ref=ref), files)[1])
+    monkeypatch.setattr(h3_backend, "resolve_files", lambda ref, preset, *, upscale=False: (rig.note("resolve_files", ref=ref, upscale=upscale), files)[1])
     monkeypatch.setattr(h3_backend, "transformer_files", lambda repo_dir: ([repo_dir / "transformer" / "a.safetensors"], {"config": 1}))
     monkeypatch.setattr(h3_backend, "_all_fold_keys", lambda preset, repo_dir: [(0.0,), (0.5, 1.0)])
     monkeypatch.setattr(stored_copy, "ensure_copy", lambda *args: (rig.note("ensure_copy", args=args), tmp_path / "models" / "h3@q4")[1])
@@ -113,8 +117,12 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Rig:
     monkeypatch.setattr(conditioning, "encode_tail", lambda enc, frames: (rig.note("tail", shape=tuple(frames.shape)), torch.zeros(1, 24, 7, frames.shape[1] // 16, frames.shape[2] // 16))[1])
     monkeypatch.setattr(h3_audio, "load_audio_vae", lambda audio_dir, device: (rig.note("audio_vae.load", audio_dir=audio_dir), "audio-vae")[1])
     monkeypatch.setattr(conditioning, "encode_tail_audio", lambda vae, waveform: (rig.note("tail_audio", shape=tuple(waveform.shape)), torch.zeros(74, 32))[1])
-    monkeypatch.setattr(h3_backend, "_fold_keys", lambda schedulers, row_set: (rig.row_sets.append(row_set), [("fold", row_set)])[1])
-    monkeypatch.setattr(stored_copy, "load_copy", lambda copy_dir, keys, device, *, loras=(), lora_names=(): (rig.note("copy.load", keys=keys, loras=loras), "transformer")[1])
+    monkeypatch.setattr(
+        h3_backend,
+        "_fold_keys",
+        lambda schedulers, row_set, start=0: (rig.row_sets.append(row_set), [("fold", row_set) if start == 0 else ("fold", row_set, start)])[1],
+    )
+    monkeypatch.setattr(stored_copy, "load_copy", lambda copy_dir, keys, device, *, loras=(), lora_names=(): (rig.note("copy.load", keys=keys, loras=loras), object())[1])
 
     def denoise(transformer, embeds, geo, schedulers, seed, device, *, conditioning=None, step_callback=None, phase="video", text_token_tags=None):
         rig.note("denoise", geo=geo, seed=seed, conditioning=conditioning, text_token_tags=text_token_tags, phase=phase, transformer=transformer, schedulers=schedulers)
@@ -154,14 +162,37 @@ def rig(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Rig:
     monkeypatch.setattr(h3_backend, "encode_video", encode_video)
 
     # --- upscale
-    def upscale_frames(frames, width, height, seed, progress):
-        rig.note("seedvr2", count=len(frames), size=frames[0].shape, width=width, height=height, seed=seed)
-        batches = -(-len(frames) // 5)
-        for done in range(1, batches + 1):
-            progress(done, batches)
-        return [np.full((height, width, 3), 7, dtype=np.uint8) for _ in frames]
+    def upscale_latents(model, latents):
+        rig.note("upsampler", shape=tuple(latents.shape))
+        rig.maybe_oom("upsampler")
+        return torch.zeros(1, 24, latents.shape[2], latents.shape[3] * 2, latents.shape[4] * 2)
 
-    monkeypatch.setattr(h3_backend, "_upscale_frames", upscale_frames)
+    monkeypatch.setattr(h3_backend, "_upscale_latents", upscale_latents)
+
+    def refine(transformer, embeds, geo, schedulers, latents, audio_rows, noise, *, start, device, conditioning=None, keyframe_seed=None, step_callback=None, phase="video", text_token_tags=None):
+        rig.note(
+            "refine",
+            geo=geo,
+            start=start,
+            latents=latents,
+            audio_rows=audio_rows,
+            noise=noise,
+            conditioning=conditioning,
+            keyframe_seed=keyframe_seed,
+            phase=phase,
+            text_token_tags=text_token_tags,
+            embeds=embeds,
+            transformer=transformer,
+        )
+        rig.maybe_oom("refine")
+        forwards = rig.last("schedulers")["schedule"].forwards - start
+        rig.refine_forwards.append(forwards)
+        for step in range(forwards):
+            if step_callback is not None:
+                step_callback({"phase": phase, "current_step": step + 1, "total_steps": forwards})
+        return torch.full(latents.shape, float(len(rig.calls["refine"]) - 1))
+
+    monkeypatch.setattr(sampler, "refine", refine)
 
     # --- extend
     monkeypatch.setattr(h3_backend, "read_source_tail", lambda source, frames: (rig.note("read_tail", frames=frames), np.zeros((frames, source.height, source.width, 3), np.uint8))[1])
@@ -180,6 +211,7 @@ def _load(rig: Rig, **kwargs: Any) -> Any:
     rig.events.clear()
     rig.calls.clear()
     rig.row_sets.clear()
+    rig.refine_forwards.clear()
     return model
 
 
@@ -210,8 +242,9 @@ class TestLoadModel:
 
     def test_ensures_the_stored_copy_for_the_whole_key_union_and_the_turbo_scale(self, rig, tmp_path):
         model, _ = H3VideoBackend().load_model("MiniMaxAI/MiniMax-H3", preset=PRESET)
-        models_dir, shards, config, lora_file, scale, keys, _device = rig.last("ensure_copy")["args"]
+        models_dir, name, shards, config, lora_file, scale, keys, _device = rig.last("ensure_copy")["args"]
         assert models_dir == tmp_path / "models"
+        assert name == "MiniMaxAI--MiniMax-H3"
         assert shards == [tmp_path / "repo" / "transformer" / "a.safetensors"]
         assert config == {"config": 1}
         assert lora_file == tmp_path / "turbo.safetensors"
@@ -219,9 +252,28 @@ class TestLoadModel:
         assert keys == [(0.0,), (0.5, 1.0)]
         assert model.copy_dir == tmp_path / "models" / "h3@q4"
 
+    def test_the_stored_copy_is_named_after_the_model_it_was_picked_by(self, rig):
+        H3VideoBackend().load_model("MiniMaxAI/MiniMax-H3@rev", preset=PRESET, model_name="h3")
+        assert rig.last("ensure_copy")["args"][1] == "h3"
+        H3VideoBackend().load_model("/data/my-tune", preset=PRESET, model_name="my-tune")
+        assert rig.last("ensure_copy")["args"][1] == "my-tune"
+
     def test_checks_cuda_and_configures_the_runtime_before_resolving_files(self, rig):
         H3VideoBackend().load_model("m", preset=PRESET)
         assert rig.events == ["require_cuda", "configure_torch_runtime", "resolve_files", "ensure_copy"]
+
+    def test_an_upscale_load_resolves_the_latent_upsampler_and_a_plain_load_does_not(self, rig):
+        H3VideoBackend().load_model("m", preset=PRESET, upscale=True)
+        assert rig.last("resolve_files")["upscale"] is True
+        H3VideoBackend().load_model("m", preset=PRESET)
+        assert rig.last("resolve_files")["upscale"] is False
+
+    def test_an_upscale_needs_the_8_step_schedule_in_the_preset(self, rig):
+        only_four = H3Preset(**{**PRESET.__dict__, "schedules": {4: H3Schedule(4, 6.0, 3.0)}})
+        with pytest.raises(ValueError, match=r"video_model_presets\.h3\.diffusers\.schedules\.8"):
+            H3VideoBackend().load_model("m", preset=only_four, upscale=True)
+        assert rig.events == []
+        assert H3VideoBackend().load_model("m", preset=only_four)[0].upscale is False
 
     def test_accepts_loras_and_upscale_and_ignores_low_memory_and_model_name(self, rig, tmp_path):
         lora = tmp_path / "style.safetensors"
@@ -462,6 +514,14 @@ class TestImageToVideo:
 
 # --- upscale -------------------------------------------------------------------------------------------------------
 
+_REAL_REFINE = sampler.refine  # the rig replaces these with recorders; some tests run the real code
+_REAL_UPSCALE_LATENTS = h3_backend._upscale_latents
+
+
+def _names(rig: Rig, *names: str) -> list[str]:
+    """Return the events of *rig* that are one of *names*, in order."""
+    return [event for event in rig.events if event in names]
+
 
 class TestUpscale:
     def _run(self, rig: Rig, tmp_path: Path, **kwargs: Any) -> Any:
@@ -470,24 +530,40 @@ class TestUpscale:
         arguments.update(kwargs)
         return _t2v(model, tmp_path / "out.mp4", **arguments)
 
-    def test_stage_one_runs_at_half_size_then_seedvr2_then_the_stage_one_audio_is_muxed(self, rig, tmp_path):
+    def test_stage_one_runs_at_half_size_then_the_latent_upscale_then_the_refine_then_one_full_size_decode(self, rig, tmp_path):
         self._run(rig, tmp_path)
         geo = rig.last("denoise")["geo"]
         assert (geo.width, geo.height) == (64, 32)
-        assert rig.last("schedulers")["schedule"] == PRESET.schedules[4]
-        assert rig.events.index("decode_audio") < rig.events.index("seedvr2") < rig.events.index("encode_video")
-        assert rig.events[-4:] == ["release", "seedvr2", "release", "encode_video"] or rig.events[-5:] == ["release", "seedvr2", "release", "encode_video", "release"]
-        # one SeedVR2 run for the clip: all the half-size frames, the target size and the request's seed
-        assert len(rig.calls["seedvr2"]) == 1
-        call = rig.last("seedvr2")
-        assert (call["count"], call["size"], call["width"], call["height"], call["seed"]) == (FRAMES, (32, 64, 3), 128, 64, 5)
+        assert PRESET.schedules[4] in [call["schedule"] for call in rig.calls["schedulers"]]
+        assert _names(rig, "denoise", "decode_audio", "upsampler", "copy.load", "refine", "decode_video", "encode_video") == [
+            "copy.load",
+            "denoise",
+            "decode_audio",
+            "upsampler",
+            "refine",
+            "decode_video",
+            "encode_video",
+        ]
+        assert rig.events.count("copy.load") == 1  # one load serves stage 1 and the refine
+        assert rig.last("upsampler")["shape"] == (1, 24, 7, 2, 4)
+        assert rig.last("decode_video")["shape"] == (1, 24, 7, 4, 8)  # the one decode is at the full size, 128x64
         final = rig.last("encode_video")
         assert len(rig.calls["encode_video"]) == 1
         assert all(frame.shape == (64, 128, 3) for frame in final["frames"]) and len(final["frames"]) == FRAMES
         assert final["audio"].shape[0] == 2 and final["audio_sample_rate"] == 32000
         assert rig.events[-1] == "release"
 
-    def test_review_is_called_with_a_temporary_video_of_the_half_size_render(self, rig, tmp_path):
+    def test_the_stage_one_sound_is_decoded_from_the_stage_one_audio_and_muxed(self, rig, tmp_path):
+        self._run(rig, tmp_path)
+        assert rig.last("decode_audio")["shape"] == (2, 32, 37)
+        assert rig.last("encode_video")["audio"].shape == (2, 37 * 800)
+
+    def test_each_stage_is_released_before_the_next(self, rig, tmp_path):
+        self._run(rig, tmp_path)
+        for stage in ("denoise", "decode_audio", "upsampler", "refine", "decode_video"):
+            assert rig.events[rig.events.index(stage) + 1] == "release", stage
+
+    def test_review_decodes_the_half_size_clip_and_looks_at_it_before_the_upscaler(self, rig, tmp_path):
         seen: dict[str, Any] = {}
 
         def review(path: Path) -> None:
@@ -501,28 +577,188 @@ class TestUpscale:
         assert seen["path"].suffix == ".mp4" and seen["path"].parent.name.startswith("ziv-review-")
         assert not seen["path"].exists()  # deleted afterwards
         assert set(seen["frames"]) == {(32, 64, 3)}
-        assert rig.events.index("encode_video") < rig.events.index("review") < rig.events.index("seedvr2")
+        assert [call["shape"] for call in rig.calls["decode_video"]] == [(1, 24, 7, 2, 4), (1, 24, 7, 4, 8)]  # half size for the review, then full size
+        assert _names(rig, "decode_audio", "decode_video", "encode_video", "review", "upsampler", "refine") == [
+            "decode_audio",
+            "decode_video",
+            "encode_video",
+            "review",
+            "upsampler",
+            "refine",
+            "decode_video",
+            "encode_video",
+        ]
         assert rig.events[rig.events.index("review") + 1] == "release"
         assert len(rig.calls["encode_video"]) == 2  # the preview and the final video
+        assert rig.events.count("copy.load") == 2  # the half-size decode needs the memory, so the refine loads its own transformer
 
-    def test_a_review_that_raises_ends_the_generation(self, rig, tmp_path):
+    def test_without_a_review_the_video_is_decoded_once(self, rig, tmp_path):
+        self._run(rig, tmp_path)
+        assert len(rig.calls["decode_video"]) == 1
+
+    def test_a_review_that_raises_stops_before_the_upscaler(self, rig, tmp_path):
         def review(path: Path) -> None:
             raise _Stop("rejected")
 
         with pytest.raises(_Stop, match="rejected"):
             self._run(rig, tmp_path, review=review)
-        assert "seedvr2" not in rig.calls
+        assert "upsampler" not in rig.calls and "refine" not in rig.calls
+        assert rig.events.count("copy.load") == 1  # stage 1 only
+        assert len(rig.calls["decode_video"]) == 1
         assert len(rig.calls["encode_video"]) == 1  # only the preview
         assert not (tmp_path / "out.mp4").exists()
         assert rig.events[-1] == "release"
 
-    def test_progress_runs_through_stage_one_then_the_seedvr2_batches(self, rig, tmp_path):
+    def test_progress_runs_through_stage_one_then_the_refine_forwards(self, rig, tmp_path):
         events: list[dict[str, Any]] = []
         self._run(rig, tmp_path, step_callback=events.append)
-        batches = 5  # ceil(22 / 5)
-        total = 4 + batches
-        assert events[:4] == [{"phase": "video_upscale_stage_1", "current_step": step, "total_steps": total} for step in range(1, 5)]
-        assert events[4:] == [{"phase": "video_upscale_stage_2", "current_step": 4 + done, "total_steps": total} for done in range(1, batches + 1)]
+        assert events[:4] == [{"phase": "video_upscale_stage_1", "current_step": step, "total_steps": 6} for step in range(1, 5)]
+        assert events[4:] == [{"phase": "video_upscale_stage_2", "current_step": step, "total_steps": 6} for step in (5, 6)]
+
+    def test_two_windows_make_a_total_of_eight_with_four_stage_one_steps(self, rig, tmp_path):
+        events: list[dict[str, Any]] = []
+        self._run(rig, tmp_path, step_callback=events.append, num_frames=124)
+        assert len(rig.calls["refine"]) == 2
+        assert {event["total_steps"] for event in events} == {8}
+        assert [(event["phase"], event["current_step"]) for event in events[4:]] == [("video_upscale_stage_2", step) for step in (5, 6, 7, 8)]
+
+    def test_eight_stage_one_steps_count_eight_forwards_before_the_refine(self, rig, tmp_path):
+        events: list[dict[str, Any]] = []
+        self._run(rig, tmp_path, step_callback=events.append, stage1_steps=8)
+        assert [event["current_step"] for event in events] == list(range(1, 11))
+        assert {event["total_steps"] for event in events} == {10}
+
+    @pytest.mark.parametrize("stage1_steps", [4, 8])
+    def test_the_refine_starts_at_step_six_of_the_eight_step_schedule_whatever_stage_one_ran(self, rig, tmp_path, stage1_steps):
+        self._run(rig, tmp_path, stage1_steps=stage1_steps)
+        assert PRESET.schedules[stage1_steps] in [call["schedule"] for call in rig.calls["schedulers"]]
+        assert rig.last("schedulers")["schedule"] == PRESET.schedules[8]
+        assert [call["start"] for call in rig.calls["refine"]] == [6]
+        assert rig.refine_forwards == [2]
+
+    def test_every_window_runs_exactly_two_forwards(self, rig, tmp_path):
+        self._run(rig, tmp_path, num_frames=175)
+        assert len(rig.calls["refine"]) == 3
+        assert rig.refine_forwards == [2, 2, 2]
+        assert {call["phase"] for call in rig.calls["refine"]} == {"video_upscale_stage_2"}
+
+    def test_a_callback_that_raises_on_the_first_stage_two_event_ends_the_run_before_any_decode_or_write(self, rig, tmp_path):
+        class Cancelled(Exception):
+            pass
+
+        def cancel(event: dict[str, Any]) -> None:
+            if event["phase"] == "video_upscale_stage_2":
+                raise Cancelled
+
+        with pytest.raises(Cancelled):
+            self._run(rig, tmp_path, step_callback=cancel)
+        assert "decode_video" not in rig.calls and "encode_video" not in rig.calls
+        assert not (tmp_path / "out.mp4").exists()
+        assert rig.events[-1] == "release"
+
+    def test_the_refine_loads_the_copy_once_with_the_user_loras(self, rig, tmp_path):
+        lora = tmp_path / "style.safetensors"
+        lora.write_bytes(b"x")
+        model = _load(rig, upscale=True, loras=[(str(lora), 0.7)])
+        _t2v(model, tmp_path / "out.mp4", width=128, height=64, stage1_steps=4, num_frames=124)
+        assert [call["loras"] for call in rig.calls["copy.load"]] == [((lora, 0.7),)]
+        assert len(rig.calls["copy.load"]) == 1  # one load for stage 1 and every window
+        assert len({id(call["transformer"]) for call in rig.calls["refine"]}) == 1
+        assert rig.calls["refine"][0]["transformer"] is rig.last("denoise")["transformer"]
+
+    def test_the_shared_transformer_loads_after_the_text_and_keyframe_encoders_have_let_go(self, rig, tmp_path):
+        model = _load(rig, mode="i2v", upscale=True)
+        H3VideoBackend().image_to_video(model, _image(tmp_path / "a.png"), "x", 128, 64, FRAMES, 3, 8, str(tmp_path / "out.mp4"), stage1_steps=4)
+        events = rig.events
+        load = events.index("copy.load")
+        assert events.count("copy.load") == 1
+        assert load > max(events.index("text_encoder.encode"), events.index("vae_encoder.load"), events.index("keyframe"))
+        assert events[load - 1] == "release"  # the last encoder was released before the load
+        assert events[load + 1] == "denoise"
+
+    def test_a_review_makes_the_refine_load_its_own_copy_with_the_user_loras(self, rig, tmp_path):
+        lora = tmp_path / "style.safetensors"
+        lora.write_bytes(b"x")
+        model = _load(rig, upscale=True, loras=[(str(lora), 0.7)])
+        _t2v(model, tmp_path / "out.mp4", width=128, height=64, stage1_steps=4, num_frames=124, review=lambda path: None)
+        assert [call["loras"] for call in rig.calls["copy.load"]] == [((lora, 0.7),), ((lora, 0.7),)]
+        assert len({id(call["transformer"]) for call in rig.calls["refine"]}) == 1
+        assert rig.calls["refine"][0]["transformer"] is not rig.last("denoise")["transformer"]
+
+    def test_a_card_that_cannot_hold_the_resident_transformer_loads_twice(self, rig, tmp_path):
+        rig.gpu_bytes = 2**30
+        self._run(rig, tmp_path)
+        assert [call["keys"] for call in rig.calls["copy.load"]] == [[("fold", "plain")], [("fold", "plain", 6)]]
+        assert rig.calls["refine"][0]["transformer"] is not rig.last("denoise")["transformer"]
+
+    def test_the_decision_uses_the_cards_memory_the_clip_size_the_mode_and_the_loras(self, rig, tmp_path, monkeypatch):
+        asked: list[tuple[Any, ...]] = []
+        monkeypatch.setattr(h3_backend, "h3_upscale_keeps_transformer", lambda *args, **kwargs: (asked.append((args, kwargs)), False)[1])
+        lora = tmp_path / "style.safetensors"
+        lora.write_bytes(b"12345")
+        model = _load(rig, mode="i2v", upscale=True, loras=[(str(lora), 0.7)])
+        H3VideoBackend().image_to_video(model, _image(tmp_path / "a.png"), "x", 128, 64, FRAMES, 3, 8, str(tmp_path / "out.mp4"), stage1_steps=4)
+        assert asked == [((128, 64, FRAMES, rig.gpu_bytes), {"mode": "i2v", "loras_bytes": 5})]
+        assert len(rig.calls["copy.load"]) == 2
+
+    def test_the_shared_transformer_is_let_go_before_the_full_size_decode(self, rig, tmp_path, monkeypatch):
+        import gc
+        import weakref
+
+        class _Transformer:
+            pass
+
+        monkeypatch.setattr(stored_copy, "load_copy", lambda copy_dir, keys, device, *, loras=(), lora_names=(): (rig.note("copy.load", keys=keys, loras=loras), _Transformer())[1])
+        seen: dict[str, Any] = {}
+        real_decode = decode.decode_video
+
+        def decode_video(vae, latents):
+            for stage in ("denoise", "refine"):
+                for call in rig.calls[stage]:
+                    call["transformer"] = None
+            gc.collect()
+            seen["alive"] = seen["ref"]() is not None
+            return real_decode(vae, latents)
+
+        real_refine = sampler.refine
+
+        def refine(transformer, *args, **kwargs):
+            seen["ref"] = weakref.ref(transformer)
+            return real_refine(transformer, *args, **kwargs)
+
+        monkeypatch.setattr(sampler, "refine", refine)
+        monkeypatch.setattr(decode, "decode_video", decode_video)
+        self._run(rig, tmp_path)
+        assert seen["alive"] is False
+
+    def test_a_failure_in_a_stage_between_the_passes_lets_go_of_the_transformer_and_releases_memory(self, rig, tmp_path):
+        rig.oom_in = "upsampler"
+        with pytest.raises(RuntimeError, match="ran out of GPU memory at 128x64"):
+            self._run(rig, tmp_path)
+        assert "refine" not in rig.calls and "decode_video" not in rig.calls
+        assert rig.events[-1] == "release"
+
+    def test_windows_get_their_own_slice_of_one_noise_draw_and_the_audio_at_proportional_offsets(self, rig, tmp_path):
+        from zvisiongenerator.backends.cuda.video.h3 import refine as refine_module
+
+        self._run(rig, tmp_path, num_frames=124)
+        noise_video, noise_audio = refine_module.draw_refine_noise((1, 24, 37, 4, 8), (2, 32, 207), 5)
+        first, second = rig.calls["refine"]
+        assert first["latents"].shape == second["latents"].shape == (1, 24, 22, 4, 8)
+        assert torch.equal(first["noise"][0], noise_video[:, :, 0:22]) and torch.equal(second["noise"][0], noise_video[:, :, 15:37])
+        offset = round(15 / 37 * 207)
+        assert torch.equal(second["noise"][1], refine_module.window_audio_rows(noise_audio, offset, 122))
+        assert first["audio_rows"].shape == second["audio_rows"].shape == (244, 32)
+        assert (first["geo"].num_frames, first["geo"].width, first["geo"].height) == (73, 128, 64)
+
+    def test_the_windows_are_stitched_into_one_latent_for_the_decode(self, rig, tmp_path):
+        self._run(rig, tmp_path, num_frames=124)
+        assert rig.last("decode_video")["shape"] == (1, 24, 37, 4, 8)
+
+    def test_stage_one_text_conditioning_is_reused_by_every_window(self, rig, tmp_path):
+        self._run(rig, tmp_path, num_frames=124)
+        assert len(rig.calls["presentation"]) == 1
+        assert all(call["text_token_tags"] == rig.last("denoise")["text_token_tags"] for call in rig.calls["refine"])
 
     def test_an_upscale_model_needs_stage1_steps(self, rig, tmp_path):
         model = _load(rig, upscale=True)
@@ -534,53 +770,90 @@ class TestUpscale:
         with pytest.raises(ValueError, match="divisible by 64"):
             _t2v(model, tmp_path / "out.mp4", width=96, height=64, stage1_steps=4)
 
-    def test_image_to_video_fits_the_keyframes_to_the_half_size_canvas(self, rig, tmp_path):
+    def test_image_to_video_encodes_the_keyframes_at_the_half_canvas_then_again_at_the_full_canvas(self, rig, tmp_path):
         model = _load(rig, mode="i2v", upscale=True)
-        H3VideoBackend().image_to_video(model, _image(tmp_path / "a.png"), "x", 128, 64, FRAMES, 3, 8, str(tmp_path / "out.mp4"), stage1_steps=8)
-        assert [image.size for image in rig.last("presentation")["images"]] == [(64, 32)]
-        assert rig.last("keyframe")["canvas"] == (64, 32)
-        assert rig.last("seedvr2")["width"] == 128
+        H3VideoBackend().image_to_video(model, _image(tmp_path / "a.png"), "x", 128, 64, FRAMES, 3, 8, str(tmp_path / "out.mp4"), end_image=_image(tmp_path / "b.png"), stage1_steps=8)
+        assert [image.size for image in rig.last("presentation")["images"]] == [(64, 32), (64, 32)]
+        assert [call["canvas"] for call in rig.calls["keyframe"]] == [(64, 32), (64, 32), (128, 64), (128, 64)]
+        assert [call["size"] for call in rig.calls["keyframe"][2:]] == [(128, 64), (128, 64)]
+        names = _names(rig, "upsampler", "vae_encoder.load", "refine")
+        assert names[-3:] == ["upsampler", "vae_encoder.load", "refine"]
 
-    def test_upscale_frames_runs_one_video_upscale_with_the_configured_tier(self, monkeypatch, tmp_path):
+    def test_a_single_window_holds_both_images(self, rig, tmp_path):
+        model = _load(rig, mode="i2v", upscale=True)
+        H3VideoBackend().image_to_video(model, _image(tmp_path / "a.png"), "x", 128, 64, FRAMES, 3, 8, str(tmp_path / "out.mp4"), end_image=_image(tmp_path / "b.png"), stage1_steps=4)
+        held = rig.last("refine")
+        assert held["conditioning"].anchors == ("first", "last")
+        assert all(frame.shape == (1, 24, 1, 4, 8) for frame in held["conditioning"].keyframes)
+        assert held["keyframe_seed"] == 3 + 2
+
+    def test_chunked_first_and_last_images_are_held_by_the_outer_windows_only(self, rig, tmp_path):
+        model = _load(rig, mode="i2v", upscale=True)
+        H3VideoBackend().image_to_video(model, _image(tmp_path / "a.png"), "x", 128, 64, 175, 3, 8, str(tmp_path / "out.mp4"), end_image=_image(tmp_path / "b.png"), stage1_steps=4)
+        assert [call["conditioning"].anchors for call in rig.calls["refine"]] == [("first",), (), ("last",)]
+        assert [len(call["conditioning"].keyframes) for call in rig.calls["refine"]] == [1, 0, 1]
+
+    def test_a_clip_without_images_holds_nothing_and_encodes_no_keyframe(self, rig, tmp_path):
+        self._run(rig, tmp_path, num_frames=175)
+        assert "keyframe" not in rig.calls
+        assert all(call["conditioning"].keyframes == () for call in rig.calls["refine"])
+
+    def test_the_refine_loads_the_union_of_the_fold_keys_of_the_row_sets_its_windows_use(self, rig, tmp_path):
+        model = _load(rig, mode="i2v", upscale=True)
+        H3VideoBackend().image_to_video(model, _image(tmp_path / "a.png"), "x", 128, 64, 175, 3, 8, str(tmp_path / "out.mp4"), stage1_steps=4)
+        assert len(rig.calls["copy.load"]) == 1
+        # stage 1 keeps the whole-clip keys; window 0 holds the image and the others hold none
+        assert set(rig.calls["copy.load"][0]["keys"]) == {("fold", "keyframe"), ("fold", "keyframe", 6), ("fold", "plain", 6)}
+
+    def test_a_text_to_video_refine_loads_only_the_plain_keys(self, rig, tmp_path):
+        self._run(rig, tmp_path, num_frames=175)
+        assert rig.calls["copy.load"][-1]["keys"] == [("fold", "plain"), ("fold", "plain", 6)]
+
+    def test_a_single_window_with_an_image_loads_only_the_keyframe_keys(self, rig, tmp_path):
+        model = _load(rig, mode="i2v", upscale=True)
+        H3VideoBackend().image_to_video(model, _image(tmp_path / "a.png"), "x", 128, 64, FRAMES, 3, 8, str(tmp_path / "out.mp4"), stage1_steps=4)
+        assert rig.calls["copy.load"][-1]["keys"] == [("fold", "keyframe"), ("fold", "keyframe", 6)]
+
+
+class TestUpscaleLatents:
+    def _model(self, rig: Rig, tmp_path: Path, *, stats: dict[str, Any] | None, with_file: bool = True) -> Any:
+        model = _load(rig, upscale=True)
+        (model.files.repo_dir / "vae").mkdir(parents=True)
+        if stats is not None:
+            (model.files.repo_dir / "vae" / "config.json").write_text(json.dumps(stats))
+        files = dataclasses.replace(model.files, latent_upsampler_file=tmp_path / "net.safetensors" if with_file else None)
+        return dataclasses.replace(model, files=files)
+
+    def test_it_loads_the_net_and_upscales_with_the_vae_statistics(self, rig, tmp_path, monkeypatch):
+        from zvisiongenerator.backends.cuda.video.h3 import latent_upsampler
+
+        model = self._model(rig, tmp_path, stats={"latents_mean": [0.5] * 24, "latents_std": [2.0] * 24})
         calls: dict[str, Any] = {}
+        monkeypatch.setattr(latent_upsampler, "load_latent_upsampler", lambda path, device: (calls.__setitem__("load", (path, device)), "net")[1])
+        monkeypatch.setattr(latent_upsampler, "upscale_latents", lambda net, latents, mean, std: (calls.__setitem__("up", (net, tuple(latents.shape), mean, std)), "result")[1])
 
-        class Upscaler:
-            weights = "weights"
+        assert _REAL_UPSCALE_LATENTS(model, torch.zeros(1, 24, 7, 2, 4)) == "result"
+        assert calls["load"] == (tmp_path / "net.safetensors", model.device)
+        assert calls["up"] == ("net", (1, 24, 7, 2, 4), [0.5] * 24, [2.0] * 24)
 
-            def upscale_video(self, model, frames, *, width, height, seed, softness, batch_size, progress):
-                calls["upscale"] = (model, len(frames), width, height, seed, softness, batch_size)
-                progress(1, 1)
-                return ["up"] * len(frames)
+    def test_a_vae_config_without_statistics_is_refused(self, rig, tmp_path):
+        model = self._model(rig, tmp_path, stats={"scaling_factor": 1})
+        with pytest.raises(RuntimeError, match="latents_mean"):
+            _REAL_UPSCALE_LATENTS(model, torch.zeros(1, 24, 7, 2, 4))
 
-        import zvisiongenerator.backends as backends
-        import zvisiongenerator.seedvr2_loader as seedvr2_loader
-        import zvisiongenerator.utils.config as config
+    def test_a_model_loaded_without_the_net_file_is_refused(self, rig, tmp_path):
+        model = self._model(rig, tmp_path, stats={"latents_mean": [0.0], "latents_std": [1.0]}, with_file=False)
+        with pytest.raises(RuntimeError, match="latent upscaler"):
+            _REAL_UPSCALE_LATENTS(model, torch.zeros(1, 24, 7, 2, 4))
 
-        monkeypatch.setattr(h3_backend, "_models_dir", lambda: tmp_path)
-        monkeypatch.setattr(backends, "get_seedvr2_upscaler", lambda: Upscaler())
-        monkeypatch.setattr(backends, "accelerator_memory_budget_or_none", lambda: SimpleNamespace(gpu_bytes=10, system_bytes=20))
-        monkeypatch.setattr(config, "load_config", lambda: {"cfg": 1})
 
-        def build(app_config, *, weights, budget_bytes, system_bytes, models_dir):
-            calls["setup"] = (app_config, weights, budget_bytes, system_bytes, models_dir)
-            return SimpleNamespace(tier=SimpleNamespace(model="seedvr2-3b"), settings=SimpleNamespace(softness=0.75))
+class TestRefineStart:
+    def test_it_is_the_last_two_forwards_of_the_eight_step_schedule(self):
+        assert h3_backend._refine_start(PRESET) == 6
 
-        monkeypatch.setattr(seedvr2_loader, "build_seedvr2_setup", build)
-        monkeypatch.setattr(seedvr2_loader, "load_seedvr2", lambda upscaler, model, *, models_dir, on_phase: (calls.setdefault("load", (model, models_dir, on_phase)), "loaded")[1])
-        progress: list[tuple[int, int]] = []
-        frames = [np.zeros((4, 4, 3), np.uint8)] * 3
-        assert h3_backend._upscale_frames(frames, 8, 8, 9, lambda done, total: progress.append((done, total))) == ["up"] * 3
-        assert calls["setup"] == ({"cfg": 1}, "weights", 10, 20, tmp_path)
-        assert calls["load"] == ("seedvr2-3b", tmp_path, None)
-        assert calls["upscale"] == ("loaded", 3, 8, 8, 9, 0.75, 5)
-        assert progress == [(1, 1)]
-
-    def test_upscale_frames_needs_a_video_capable_engine(self, monkeypatch):
-        import zvisiongenerator.backends as backends
-
-        monkeypatch.setattr(backends, "get_seedvr2_upscaler", lambda: SimpleNamespace(weights=None))
-        with pytest.raises(RuntimeError, match="not available"):
-            h3_backend._upscale_frames([], 8, 8, 0, lambda *_a: None)
+    def test_it_ignores_the_stage_one_schedules(self):
+        only_eight = dataclasses.replace(PRESET, schedules={8: H3Schedule(8, 6.0, 3.0)})
+        assert h3_backend._refine_start(only_eight) == 6
 
 
 # --- extend --------------------------------------------------------------------------------------------------------
@@ -770,6 +1043,15 @@ class TestOutOfMemory:
             _t2v(model, tmp_path / "out.mp4", width=128, height=64, stage1_steps=4)
         assert str(raised.value) == OOM_MESSAGE.format(w=128, h=64, n=FRAMES)
 
+    @pytest.mark.parametrize("stage", ["upsampler", "refine", "decode"])
+    def test_upscale_reports_the_target_size_from_every_later_stage(self, rig, tmp_path, stage):
+        model = _load(rig, upscale=True)
+        rig.oom_in = stage
+        with pytest.raises(RuntimeError) as raised:
+            _t2v(model, tmp_path / "out.mp4", width=128, height=64, stage1_steps=4)
+        assert str(raised.value) == OOM_MESSAGE.format(w=128, h=64, n=FRAMES)
+        assert rig.events[-1] == "release"
+
     def test_extend_reports_the_window(self, rig, tmp_path):
         rig.oom_in = "denoise"
         with pytest.raises(RuntimeError) as raised:
@@ -879,6 +1161,58 @@ class TestRowSetCoversTheForwards:
         assert recorder.keys <= loaded, (kind, forwards, spec.row_set, recorder.keys - loaded)
 
 
+class TestRefineRowSetsCoverTheForwards:
+    """The refine loads the union of the tail keys of the row sets its windows use; every window kind must find its keys in it."""
+
+    @staticmethod
+    def _schedulers(tmp_path: Path) -> Any:
+        pytest.importorskip("diffusers")
+        from diffusers import MiniMaxH3Scheduler
+
+        for folder, shift in (("scheduler", 6.0), ("audio_scheduler", 3.0)):
+            MiniMaxH3Scheduler(shift=shift).save_pretrained(tmp_path / folder)
+        return schedule.build_schedulers(PRESET.schedules[8], tmp_path)
+
+    def test_the_union_holds_both_tails_and_each_tail_is_two_keys_inside_the_stored_copy(self, tmp_path):
+        schedulers = self._schedulers(tmp_path)
+        stored = set(h3_backend._all_fold_keys(PRESET, tmp_path))
+        plain = h3_backend._fold_keys(schedulers, "plain", 6)
+        keyframe = h3_backend._fold_keys(schedulers, "keyframe", 6)
+        assert len(plain) == len(keyframe) == 2
+        assert set(plain) | set(keyframe) <= stored
+        assert set(plain) != set(keyframe)
+
+    @pytest.mark.parametrize("held", [(), ("first",), ("last",), ("first", "last")], ids=["none", "first", "last", "both"])
+    def test_the_timesteps_of_every_window_kind_are_in_the_loaded_keys(self, tmp_path, held):
+        schedulers = self._schedulers(tmp_path)
+        loaded = set(h3_backend._fold_keys(schedulers, "plain", 6)) | set(h3_backend._fold_keys(schedulers, "keyframe", 6))
+        geo = h3_backend.geometry(WIDTH, HEIGHT, FRAMES)
+        cell = (geo.latent_height, geo.latent_width)
+        conditioning_ = sampler.Conditioning(keyframes=tuple(torch.zeros(1, 24, 1, *cell) for _ in held), anchors=held)
+        recorder = _TimestepRecorder()
+        _REAL_REFINE(
+            recorder,
+            torch.zeros(1, 3, 4),
+            geo,
+            schedulers,
+            torch.zeros(1, 24, geo.latent_frames, *cell),
+            torch.zeros(geo.audio_rows, 32),
+            (torch.zeros(1, 24, geo.latent_frames, *cell), torch.zeros(geo.audio_rows, 32)),
+            start=h3_backend._refine_start(PRESET),
+            device="cpu",
+            conditioning=conditioning_,
+            text_token_tags=[0, 0, 0],
+        )
+        assert len(recorder.keys) == 2
+        assert recorder.keys <= loaded
+
+    def test_one_row_set_alone_would_miss_a_key(self, tmp_path):
+        schedulers = self._schedulers(tmp_path)
+        plain = set(h3_backend._fold_keys(schedulers, "plain", 6))
+        keyframe = set(h3_backend._fold_keys(schedulers, "keyframe", 6))
+        assert keyframe - plain and plain - keyframe  # this is why the refine loads the union
+
+
 # --- file resolution -----------------------------------------------------------------------------------------------
 
 
@@ -895,6 +1229,7 @@ class _Downloader:
         folder.mkdir(parents=True, exist_ok=True)
         for name in kwargs.get("allow_patterns") or ():
             if "*" not in name:
+                (folder / name).parent.mkdir(parents=True, exist_ok=True)
                 (folder / name).write_bytes(b"x")
         return str(folder)
 
@@ -944,6 +1279,38 @@ class TestResolveFiles:
         files = sources.resolve_files("MiniMaxAI/MiniMax-H3", PRESET, snapshot_download=download)
         assert [call["repo_id"] for call in download.calls] == ["MiniMaxAI/MiniMax-H3"]
         assert files.text_encoder_dir == snapshot and files.lora_file == snapshot / "turbo.safetensors"
+
+    def test_an_upscale_resolves_the_latent_upsampler_with_the_files_of_its_plan_target(self, tmp_path):
+        download = _Downloader(tmp_path)
+        files = sources.resolve_files("MiniMaxAI/MiniMax-H3", PRESET, upscale=True, snapshot_download=download)
+        planned = download.calls[-1]
+        assert (planned["repo_id"], planned["revision"], planned["allow_patterns"]) == ("upsampler/repo", "rev-up", ["upsampler.safetensors"])
+        assert files.latent_upsampler_file == tmp_path / "upsampler--repo" / "upsampler.safetensors"
+
+    def test_a_latent_upsampler_in_a_subfolder_of_its_repository_resolves_to_that_file(self, tmp_path):
+        preset = H3Preset(**{**PRESET.__dict__, "latent_upsampler": HubFiles("upsampler/repo", "rev-up", ("net_v1/net_fp16.safetensors",))})
+        download = _Downloader(tmp_path)
+        files = sources.resolve_files("MiniMaxAI/MiniMax-H3", preset, upscale=True, snapshot_download=download)
+        assert download.calls[-1]["allow_patterns"] == ["net_v1/net_fp16.safetensors"]
+        assert files.latent_upsampler_file == tmp_path / "upsampler--repo" / "net_v1" / "net_fp16.safetensors"
+
+    def test_without_an_upscale_the_latent_upsampler_is_not_requested(self, tmp_path):
+        download = _Downloader(tmp_path)
+        files = sources.resolve_files("MiniMaxAI/MiniMax-H3", PRESET, snapshot_download=download)
+        assert files.latent_upsampler_file is None
+        assert "upsampler/repo" not in [call["repo_id"] for call in download.calls]
+
+    def test_a_missing_latent_upsampler_file_is_reported(self, tmp_path):
+        download = _Downloader(tmp_path)
+
+        def without_upsampler(**kwargs: Any) -> str:
+            folder = download(**kwargs)
+            if kwargs["repo_id"] == "upsampler/repo":
+                (Path(folder) / "upsampler.safetensors").unlink()
+            return folder
+
+        with pytest.raises(FileNotFoundError, match="Latent upsampler not found"):
+            sources.resolve_files("MiniMaxAI/MiniMax-H3", PRESET, upscale=True, snapshot_download=without_upsampler)
 
     def test_a_failed_download_names_the_model(self, tmp_path):
         def failing(**_kwargs: Any) -> str:
@@ -1042,20 +1409,20 @@ class TestSystemMemoryCheck:
         machine(16)
 
         with pytest.raises(RuntimeError, match=r"needs about 18 GB of system memory; this machine has 16 GB"):
-            h3_backend._check_system_memory((), False)
+            h3_backend._check_system_memory(())
 
     def test_a_machine_above_80_percent_is_warned(self, machine):
         machine(20)
 
         with pytest.warns(UserWarning, match="leaving little for other apps") as seen:
-            h3_backend._check_system_memory((), False)
+            h3_backend._check_system_memory(())
 
         assert seen[0].filename == __file__
 
     def test_a_roomy_machine_loads_silently(self, machine, recwarn):
         machine(32)
 
-        h3_backend._check_system_memory((), False)
+        h3_backend._check_system_memory(())
 
         assert len(recwarn) == 0
 
@@ -1066,18 +1433,4 @@ class TestSystemMemoryCheck:
         machine(18)
 
         with pytest.raises(RuntimeError, match="system memory"):
-            h3_backend._check_system_memory(((lora, 1.0),), False)
-
-    def test_a_default_upscale_on_30_gib_is_not_refused_or_warned(self, machine, recwarn):
-        machine(30)
-
-        h3_backend._check_system_memory((), True)
-
-        assert len(recwarn) == 0
-
-    def test_an_upscale_takes_the_larger_phase_not_the_sum(self, machine, recwarn):
-        machine(24)
-
-        h3_backend._check_system_memory((), True)  # the SeedVR2 phase (about 12 GiB) is smaller than the H3 phase (17.7 GiB); their sum would be refused
-
-        assert len(recwarn) == 0
+            h3_backend._check_system_memory(((lora, 1.0),))

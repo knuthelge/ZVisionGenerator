@@ -40,9 +40,39 @@ The MiniMax H3 MLX pipeline (`packages/minimax_h3_mlx`, used on macOS) is vendor
 
 Licensed under the Apache License, Version 2.0. The full license text ships with the vendored code as `packages/minimax_h3_mlx/LICENSE`, and at http://www.apache.org/licenses/LICENSE-2.0. Upstream publishes no NOTICE file and names no copyright holder in its license file.
 
+## MiniMax H3 latent upscaler (network code)
+
+The network code of the MiniMax H3 upscale (`zvisiongenerator/backends/cuda/video/h3/latent_upsampler.py`, used on Windows and Linux) is ported from [LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler) (`nodes/minimax_h3_latent_upscaler_3d.py`), matching upstream commit 98934c0b5f4a213323c4d1d0e47eb3d2f27cb743, without its ComfyUI node code.
+
+MIT License
+
+Copyright (c) 2026 LBH-123-AI
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
 ## MiniMax H3 models (downloaded at runtime, not bundled)
 
 The MiniMax H3 weights are downloaded from Hugging Face on first use and are not distributed with this package. They are subject to the [MiniMax-H3 License](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE) of [`MiniMaxAI/MiniMax-H3`](https://huggingface.co/MiniMaxAI/MiniMax-H3).
+
+## MiniMax H3 latent upscaler weights (downloaded at runtime, not bundled)
+
+The upscaler weights are downloaded from Hugging Face on the first upscale and are not distributed with this package: [`LBH-123-AI/Minimax_h3_latent_Upscaler`](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler), licensed under the Apache License 2.0.
 
 ## SeedVR2 models (downloaded at runtime, not bundled)
 

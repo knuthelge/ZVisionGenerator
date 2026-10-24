@@ -212,7 +212,7 @@ The model choice and its defaults live in the `seedvr2` section of `~/.ziv/confi
 ```yaml
 seedvr2:
   model: auto                  # auto, seedvr2-3b or seedvr2-7b
-  softness: 0.75               # 0-1: pre-blur before upscaling; 0 = off
+  softness: 0.75               # 0-1: pre-blur before upscaling an image; 0 = off
   reference_megapixels: 16     # Output size the automatic choice must fit on a Mac (a typical 4x)
   tiers:                       # macOS, 8-bit, best first; the first that fits this Mac's memory at reference_megapixels is used
     - {model: seedvr2-7b, weights_gb: 9.26, activation_floor_gb: 10.79, activation_base_gb: 1.88, activation_gb_per_mp: 0.83}

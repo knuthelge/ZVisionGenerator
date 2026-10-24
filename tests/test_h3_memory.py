@@ -2,19 +2,24 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
 import pytest
 
 from zvisiongenerator.backends.cuda.video.h3.frames import Geometry, geometry
 from zvisiongenerator.utils import h3_memory
 from zvisiongenerator.utils.h3_memory import (
+    H3_REFINE_FORWARDS,
+    H3_REFINE_OVERLAP_LATENT_FRAMES,
+    H3_REFINE_SCHEDULE,
+    H3_REFINE_WINDOW_LATENT_FRAMES,
     H3_TEXT_TOKENS,
     estimate_h3_mlx_clip_memory,
     estimate_h3_mlx_seconds,
     h3_audio_latents,
+    h3_frames_of_latent_frames,
     h3_latent_frames,
     h3_mlx_clip_fit,
+    h3_refine_windows,
     h3_sequence_rows,
     h3_video_rows,
 )
@@ -121,6 +126,49 @@ def test_public_names_are_exported():
     assert all(hasattr(h3_memory, name) for name in h3_memory.__all__)
 
 
+@pytest.mark.parametrize(("latent_frames", "frames"), [(2, 5), (7, 22), (22, 73), (37, 124), (72, 243)])
+def test_frames_of_latent_frames_inverts_latent_frames(latent_frames, frames):
+    assert h3_frames_of_latent_frames(latent_frames) == frames
+    assert h3_latent_frames(frames) == latent_frames
+
+
+@pytest.mark.parametrize("latent_frames", [0, 1, 3, 21, 23])
+def test_frames_of_latent_frames_refuses_other_counts(latent_frames):
+    with pytest.raises(ValueError, match="5 \\* n \\+ 2"):
+        h3_frames_of_latent_frames(latent_frames)
+
+
+def test_the_refine_constants():
+    assert (H3_REFINE_SCHEDULE, H3_REFINE_FORWARDS, H3_REFINE_WINDOW_LATENT_FRAMES, H3_REFINE_OVERLAP_LATENT_FRAMES) == (8, 2, 22, 7)
+
+
+@pytest.mark.parametrize("latent_frames", [2, 7, 12, 22])
+def test_a_clip_of_22_latent_frames_or_fewer_is_one_window(latent_frames):
+    assert h3_refine_windows(latent_frames) == ((0, latent_frames),)
+
+
+@pytest.mark.parametrize(
+    ("latent_frames", "windows"),
+    [
+        (27, ((0, 22), (5, 27))),
+        (37, ((0, 22), (15, 37))),
+        (72, ((0, 22), (15, 37), (30, 52), (45, 67), (50, 72))),
+    ],
+)
+def test_a_longer_clip_gets_22_frame_windows_every_15_with_the_last_pulled_back(latent_frames, windows):
+    assert h3_refine_windows(latent_frames) == windows
+
+
+@pytest.mark.parametrize("latent_frames", range(23, 130))
+def test_the_windows_cover_the_clip_in_order_and_are_all_22_long(latent_frames):
+    windows = h3_refine_windows(latent_frames)
+
+    assert windows[0][0] == 0
+    assert windows[-1][1] == latent_frames
+    assert all(end - start == 22 for start, end in windows)
+    assert all(later[0] > earlier[0] and later[0] < earlier[1] for earlier, later in zip(windows, windows[1:], strict=False))
+
+
 class TestMacMemory:
     """The macOS (MLX) estimate, from the fork's M4 Pro measurements."""
 
@@ -213,12 +261,6 @@ class TestCudaEstimate:
 
     BUDGET = MemoryBudget(10 * GIB, system_bytes=30 * GIB)
 
-    @pytest.fixture
-    def tier(self):
-        from zvisiongenerator.utils.config import load_config
-
-        return h3_memory.h3_seedvr2_tier(load_config(), self.BUDGET)
-
     # Measured on the RTX 3080 (generation time of clean runs, excluding the one-time weight preparation).
     @pytest.mark.parametrize(
         ("width", "height", "frames", "forwards", "seconds"),
@@ -235,9 +277,6 @@ class TestCudaEstimate:
     def test_the_time_matches_the_measured_pins_within_5_percent(self, width, height, frames, forwards, seconds):
         assert h3_memory.h3_expected_seconds(width, height, frames, forwards=forwards) == pytest.approx(seconds, rel=0.05)
 
-    def test_the_upscale_time_matches_the_measured_pin_within_5_percent(self):
-        assert h3_memory.h3_expected_seconds(768, 448, 124, forwards=8, upscale=True) == pytest.approx(346, rel=0.05)
-
     def test_an_image_mode_adds_the_encoder_time_and_a_lora_slows_each_forward(self):
         plain = h3_memory.h3_expected_seconds(864, 480, 124, forwards=8)
 
@@ -249,14 +288,56 @@ class TestCudaEstimate:
 
         assert h3_memory.h3_expected_seconds(864, 480, 124, forwards=8, mode="extend") == t2v + 30
 
-    def test_an_upscaled_clip_renders_at_half_size_then_adds_the_seedvr2_phase(self):
-        single = h3_memory.h3_expected_seconds(1536, 896, 124, forwards=8)
-        upscaled = h3_memory.h3_expected_seconds(1536, 896, 124, forwards=8, upscale=True)
-        stage_one = h3_memory.h3_expected_seconds(768, 448, 124, forwards=8)
+    # The spike's chunked phase totals on the RTX 3080 (stage 1, net, transformer load, refine, decode): 424, 598 and 1,069 s.
+    @pytest.mark.parametrize(("width", "height", "frames", "seconds"), [(1280, 704, 124, 424), (1600, 896, 124, 598), (1600, 896, 243, 1069)])
+    def test_the_upscale_time_matches_the_spikes_chunked_totals_within_15_percent(self, width, height, frames, seconds):
+        assert h3_memory.h3_expected_seconds(width, height, frames, forwards=8, upscale=True) == pytest.approx(seconds, rel=0.15)
 
-        assert upscaled > stage_one
-        assert upscaled - stage_one > 0
-        assert single > stage_one
+    def test_an_upscale_is_the_half_size_render_plus_the_net_the_refine_load_and_two_forwards_per_window(self):
+        forward = h3_memory._cuda_forward_seconds
+        rows = h3_memory._cuda_rows
+        expected = (
+            h3_memory._CUDA_FIXED_SECONDS
+            + h3_memory._CUDA_DECODE_BASE_SECONDS
+            + h3_memory._CUDA_DECODE_SECONDS_PER_PIXEL_FRAME * 1280 * 704 * 124
+            + h3_memory._CUDA_EXPORT_SECONDS
+            + 8 * forward(rows(640, 352, 124, "t2v"))
+            + h3_memory._CUDA_LATENT_UPSCALE_SECONDS
+            + h3_memory._CUDA_REFINE_LOAD_SECONDS
+            + 2 * 2 * forward(rows(1280, 704, 73, "t2v"))
+        )
+
+        assert h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True) == round(expected)
+
+    def test_the_refine_pays_two_forwards_for_each_window(self):
+        one = h3_memory.h3_expected_seconds(1280, 704, 73, forwards=8, upscale=True)
+        two = h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True)
+        five = h3_memory.h3_expected_seconds(1280, 704, 243, forwards=8, upscale=True)
+
+        assert one < two < five
+
+    def test_an_image_mode_upscale_encodes_the_images_a_second_time_at_the_full_size(self):
+        t2v = h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True)
+        i2v = h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, mode="i2v", upscale=True)
+        keyframe_rows = h3_memory._cuda_rows(640, 352, 124, "i2v") - h3_memory._cuda_rows(640, 352, 124, "t2v")
+        assert keyframe_rows > 0
+        assert i2v - t2v >= 2 * h3_memory._CUDA_IMAGE_ENCODE_SECONDS
+
+    def test_a_lora_slows_the_refine_forwards_as_well_as_stage_one(self):
+        plain = h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True)
+        loaded = h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True, loras=True)
+        stage_one_only = h3_memory.h3_expected_seconds(640, 352, 124, forwards=8, loras=True) - h3_memory.h3_expected_seconds(640, 352, 124, forwards=8)
+
+        assert loaded - plain > stage_one_only
+
+    def test_a_larger_upscale_takes_longer(self):
+        assert h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True) < h3_memory.h3_expected_seconds(1600, 896, 124, forwards=8, upscale=True)
+
+    def test_the_stage_one_forwards_are_the_ones_given_and_the_refine_always_runs_two_per_window(self):
+        eight = h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True)
+        four = h3_memory.h3_expected_seconds(1280, 704, 124, forwards=4, upscale=True)
+
+        assert eight - four == pytest.approx(4 * h3_memory._cuda_forward_seconds(h3_memory._cuda_rows(640, 352, 124, "t2v")), abs=1)
 
     def test_the_mlx_platform_delegates_to_the_mac_estimate(self):
         assert h3_memory.h3_expected_seconds(768, 448, 124, forwards=8, platform="mlx") == estimate_h3_mlx_seconds(768, 448, 124, forwards=8)
@@ -318,49 +399,154 @@ class TestCudaEstimate:
         assert large["status"] == "fits"
         assert long["status"] == "tight"
 
-    def test_an_upscale_needs_a_tier(self):
-        with pytest.raises(ValueError, match="tier"):
-            h3_memory.estimate_h3_cuda_clip_memory(768, 448, 124, upscale=True)
+    def test_an_upscale_needs_no_tier(self):
+        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124, upscale=True).gpu_bytes > 0
 
-    def test_an_upscale_runs_the_transformer_at_half_size(self, tier):
-        upscaled = h3_memory.estimate_h3_cuda_clip_memory(1536, 896, 124, upscale=True, seedvr2_tier=tier)
-        half = h3_memory.estimate_h3_cuda_clip_memory(768, 448, 124)
+    @pytest.mark.parametrize(("width", "height", "frames", "measured_gib"), [(1280, 704, 124, 5.7), (1600, 896, 124, 6.6), (1600, 896, 243, 6.7)])
+    def test_the_upscale_gpu_estimate_covers_the_spikes_peaks(self, width, height, frames, measured_gib):
+        # 5.7 GiB: the full-size decode at 1280x704; 6.6 and 6.7 GiB: the chunked refine at 1600x896.
+        assert h3_memory.estimate_h3_cuda_clip_memory(width, height, frames, upscale=True).gpu_bytes >= measured_gib * GIB
 
-        assert upscaled.gpu_bytes == half.gpu_bytes
+    @pytest.mark.parametrize(("width", "height"), [(1280, 704), (1600, 896)])
+    def test_the_large_upscales_fit_a_10_gib_card(self, width, height):
+        estimate = h3_memory.estimate_h3_cuda_clip_memory(width, height, 124, upscale=True)
+        fit = h3_memory.h3_clip_fit(width, height, 124, self.BUDGET, forwards=8, upscale=True)
 
-    def test_the_system_peak_is_the_larger_phase_not_their_sum(self, tier):
-        estimate = h3_memory.estimate_h3_cuda_clip_memory(768, 448, 124, upscale=True, seedvr2_tier=tier)
-        seedvr2_phase = 12 * GIB + 124 * 384 * 224 * 3 + 124 * 768 * 448 * 3 * 5
-        h3_phase = int(17.7 * GIB) + 124 * 384 * 224 * 3
+        assert estimate.gpu_bytes <= 9.0 * GIB
+        assert fit["status"] == "fits"
+        assert fit["resource"] == "gpu"
 
-        assert estimate.system_bytes == max(h3_phase, seedvr2_phase)
-        assert estimate.system_bytes < h3_phase + 12 * GIB
+    def test_the_refine_term_uses_the_rows_of_a_73_frame_window_not_the_whole_clip(self):
+        window_rows = h3_memory._cuda_rows(1600, 896, 73, "t2v")
+        whole_rows = h3_memory._cuda_rows(1600, 896, 243, "t2v")
+        transformer = lambda rows: h3_memory._CUDA_DIT_REFERENCE_BYTES + h3_memory._CUDA_DIT_BYTES_PER_ROW * (rows - h3_memory._CUDA_REFERENCE_ROWS)  # noqa: E731
 
-    def test_system_bytes_without_a_tier_or_with_a_tier_without_a_system_need(self):
-        from zvisiongenerator.utils.seedvr2 import SeedVR2Tier
+        assert transformer(window_rows) < transformer(whole_rows)
+        long = h3_memory.estimate_h3_cuda_clip_memory(1600, 896, 243, upscale=True)
+        window = h3_memory.estimate_h3_cuda_clip_memory(1600, 896, 73, upscale=True)
+        refine_of_the_long_clip = transformer(window_rows) + h3_memory._CUDA_GPU_HEADROOM_BYTES
+        assert window.gpu_bytes >= refine_of_the_long_clip
+        assert long.gpu_bytes >= refine_of_the_long_clip
 
-        bare = SeedVR2Tier("seedvr2-3b", 1.0, 1.0, 1.0, 1.0)
+    def test_a_clip_of_73_frames_or_fewer_refines_at_its_own_rows(self):
+        short = h3_memory.estimate_h3_cuda_clip_memory(1600, 896, 39, upscale=True)
+        full_window = h3_memory.estimate_h3_cuda_clip_memory(1600, 896, 73, upscale=True)
 
+        assert short.gpu_bytes <= full_window.gpu_bytes
+
+    # The peaks of the latent upscaler measured alone: (width, height, frames, GiB).
+    @pytest.mark.parametrize(("width", "height", "frames", "measured_gib"), [(1280, 704, 124, 1.71), (1600, 896, 124, 2.28), (1600, 896, 243, 4.14), (1600, 896, 481, 7.44)])
+    def test_the_upsampler_stage_covers_the_measured_peaks(self, width, height, frames, measured_gib):
+        assert h3_memory._cuda_upsampler_bytes(width, height, frames) >= measured_gib * GIB
+
+    def test_the_upsampler_stage_grows_linearly_with_the_latent_frames(self):
+        steps = [h3_memory._cuda_upsampler_bytes(1600, 896, frames + 17) - h3_memory._cuda_upsampler_bytes(1600, 896, frames) for frames in (124, 141, 158)]
+
+        assert steps[0] > 0
+        assert steps[0] == pytest.approx(steps[1]) == pytest.approx(steps[2])
+
+    def test_the_upsampler_stage_is_part_of_the_gpu_peak(self, monkeypatch):
+        monkeypatch.setattr(h3_memory, "_cuda_upsampler_bytes", lambda width, height, frames: 20 * GIB)
+
+        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124, upscale=True).gpu_bytes == 21 * GIB
+        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124).gpu_bytes < 21 * GIB
+
+    def test_the_gpu_estimate_of_a_plain_clip_is_unchanged_by_the_upscale_terms(self):
+        assert h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124).gpu_bytes == pytest.approx((5.857 + 9.48e-7 * 864 * 480 + 1.0) * GIB, abs=0.01 * GIB)
+
+    def test_an_upscale_holds_the_full_size_frames_in_system_memory_and_no_seedvr2_phase(self):
+        estimate = h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124, upscale=True)
+
+        assert estimate.system_bytes == int(17.7 * GIB) + 124 * 1280 * 704 * 3
+
+    def test_an_upscale_with_loras_and_images_adds_them_to_system_memory(self):
+        estimate = h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124, mode="i2v", loras_bytes=GIB, upscale=True)
+
+        assert estimate.system_bytes == int(17.7 * GIB) + int(1.5 * GIB) + GIB + 124 * 1280 * 704 * 3
+
+    def test_the_system_bytes_are_the_base_the_vision_tower_the_loras_and_the_frames(self):
         assert h3_memory.h3_cuda_system_bytes() == int(17.7 * GIB)
-        assert h3_memory.h3_cuda_system_bytes(seedvr2_tier=bare) == int(17.7 * GIB)
-        streaming = SeedVR2Tier("seedvr2-7b", 1, 1, 1, 1, system_gb=22)
-        assert h3_memory.h3_cuda_system_bytes(loras_bytes=GIB, seedvr2_tier=streaming) == int(17.7 * GIB) + GIB
-        assert h3_memory.h3_cuda_system_bytes(seedvr2_tier=streaming, seedvr2_frame_bytes=7 * GIB) == 19 * GIB
+        assert h3_memory.h3_cuda_system_bytes(loras_bytes=GIB, frame_bytes=2 * GIB, vision=True) == int(17.7 * GIB) + int(1.5 * GIB) + 3 * GIB
 
-    def test_the_tier_is_the_one_the_upscale_picks(self, tier):
-        from zvisiongenerator.seedvr2_loader import build_seedvr2_setup
-        from zvisiongenerator.utils.config import load_config
-        from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS
+    def test_a_default_upscale_on_30_gib_fits_with_the_gpu_as_the_limit(self):
+        fit = h3_memory.h3_clip_fit(1280, 704, 124, self.BUDGET, forwards=8, upscale=True)
 
-        setup = build_seedvr2_setup(load_config(), weights=FP8_WEIGHTS, budget_bytes=self.BUDGET.gpu_bytes, system_bytes=self.BUDGET.system_bytes, models_dir=Path("/nowhere"))
+        assert fit["status"] == "fits"
+        assert fit["resource"] == "gpu"
+        assert fit["expected_seconds"] == h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True, keep_transformer=True)
 
-        assert setup.tier == tier
+    # --- an upscale that keeps the transformer loaded between its passes
 
-    def test_a_default_upscale_on_30_gib_is_not_too_large(self, tier):
-        fit = h3_memory.h3_clip_fit(768, 448, 124, self.BUDGET, forwards=8, upscale=True, seedvr2_tier=tier)
+    def test_keeping_the_transformer_skips_exactly_the_second_load(self):
+        two = h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True)
+        one = h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True, keep_transformer=True)
 
-        assert fit["status"] != "too_large"
-        assert fit["resource"] in ("gpu", "system")
+        assert two - one == h3_memory._CUDA_REFINE_LOAD_SECONDS
+        assert h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, keep_transformer=True) == h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8)
+
+    @pytest.mark.parametrize(("width", "height"), [(1280, 704), (1600, 896)])
+    @pytest.mark.parametrize("mode", ["t2v", "i2v"])
+    def test_a_5_s_large_upscale_still_fits_a_10_gib_card_with_the_transformer_resident(self, width, height, mode):
+        kept = h3_memory.estimate_h3_cuda_clip_memory(width, height, 124, mode=mode, upscale=True, keep_transformer=True)
+        loaded_twice = h3_memory.estimate_h3_cuda_clip_memory(width, height, 124, mode=mode, upscale=True)
+
+        assert kept.gpu_bytes >= loaded_twice.gpu_bytes
+        assert kept.gpu_bytes <= 9.0 * GIB
+        assert kept.system_bytes == loaded_twice.system_bytes
+        assert h3_memory.h3_upscale_keeps_transformer(width, height, 124, 10 * GIB, mode=mode)
+
+    def test_the_resident_transformer_adds_to_the_upscaler_the_keyframe_encode_and_the_audio_decode(self, monkeypatch):
+        resident = h3_memory._CUDA_RESIDENT_TRANSFORMER_BYTES
+        monkeypatch.setattr(h3_memory, "_cuda_upsampler_bytes", lambda width, height, frames: 6 * GIB)
+        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124, upscale=True).gpu_bytes < 6 * GIB + resident
+        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124, upscale=True, keep_transformer=True).gpu_bytes == 6 * GIB + resident + GIB
+
+        monkeypatch.setattr(h3_memory, "_cuda_upsampler_bytes", lambda width, height, frames: 0)
+        monkeypatch.setattr(h3_memory, "_CUDA_ENCODE_BASE_BYTES", 6 * GIB)
+        t2v = h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124, upscale=True, keep_transformer=True).gpu_bytes
+        i2v = h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124, mode="i2v", upscale=True, keep_transformer=True).gpu_bytes
+        assert i2v > t2v
+        assert i2v >= 6 * GIB + resident + GIB
+
+        monkeypatch.setattr(h3_memory, "_CUDA_AUDIO_DECODE_BYTES", 12 * GIB)
+        assert h3_memory.estimate_h3_cuda_clip_memory(1280, 704, 124, upscale=True, keep_transformer=True).gpu_bytes == 12 * GIB + resident + GIB
+
+    def test_keeping_the_transformer_changes_nothing_without_an_upscale(self):
+        assert h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124, keep_transformer=True) == h3_memory.estimate_h3_cuda_clip_memory(864, 480, 124)
+
+    def test_a_clip_whose_resident_stages_would_not_fit_loads_twice(self, monkeypatch):
+        monkeypatch.setattr(h3_memory, "_cuda_upsampler_bytes", lambda width, height, frames: 7 * GIB)
+
+        assert not h3_memory.h3_upscale_keeps_transformer(1280, 704, 124, 10 * GIB)
+        assert h3_memory.h3_upscale_keeps_transformer(1280, 704, 124, 24 * GIB)
+
+    def test_a_card_too_small_for_the_clip_loads_twice(self):
+        assert not h3_memory.h3_upscale_keeps_transformer(1600, 896, 124, 8 * GIB)
+
+    def test_the_fit_of_an_upscale_without_review_skips_the_second_load(self):
+        no_review = h3_memory.h3_clip_fit(1280, 704, 124, self.BUDGET, forwards=8, upscale=True)
+        review = h3_memory.h3_clip_fit(1280, 704, 124, self.BUDGET, forwards=8, upscale=True, review=True)
+
+        assert no_review["expected_seconds"] == h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True, keep_transformer=True)
+        assert review["expected_seconds"] == h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True)
+        assert review["expected_seconds"] - no_review["expected_seconds"] == h3_memory._CUDA_REFINE_LOAD_SECONDS
+
+    def test_the_fit_loads_twice_where_the_single_load_does_not_fit(self, monkeypatch):
+        monkeypatch.setattr(h3_memory, "_cuda_upsampler_bytes", lambda width, height, frames: 7 * GIB)
+
+        fit = h3_memory.h3_clip_fit(1280, 704, 124, self.BUDGET, forwards=8, upscale=True)
+
+        assert fit["expected_seconds"] == h3_memory.h3_expected_seconds(1280, 704, 124, forwards=8, upscale=True)
+
+    def test_the_review_flag_does_not_change_a_clip_without_an_upscale(self):
+        assert h3_memory.h3_clip_fit(864, 480, 124, self.BUDGET, forwards=8, review=True) == h3_memory.h3_clip_fit(864, 480, 124, self.BUDGET, forwards=8)
+
+    def test_the_fit_takes_no_seedvr2_tier(self):
+        import inspect
+
+        assert "seedvr2_tier" not in inspect.signature(h3_memory.h3_clip_fit).parameters
+        assert "seedvr2_tier" not in inspect.signature(h3_memory.estimate_h3_cuda_clip_memory).parameters
+        assert not hasattr(h3_memory, "h3_seedvr2_tier")
 
     def test_the_fit_carries_status_budget_resource_family_and_the_estimated_time(self):
         fit = h3_memory.h3_clip_fit(864, 480, 124, self.BUDGET, forwards=8)

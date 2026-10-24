@@ -635,7 +635,7 @@ def test_load_web_config_builds_seedvr2_setup_from_the_memory_budget_and_engine(
 
 def _seedvr2_app_config() -> dict[str, object]:
     tiers = [{"model": "seedvr2-7b", "weights_gb": 9.26, "activation_floor_gb": 10.79, "activation_base_gb": 1.88, "activation_gb_per_mp": 0.83}]
-    return {**_make_app_config(), "seedvr2": {"model": "auto", "softness": 0.75, "reference_megapixels": 16, "tiers": tiers}}
+    return {**_make_app_config(), "seedvr2": {"model": "auto", "softness": 0.75, "video_softness": 0.0, "reference_megapixels": 16, "tiers": tiers}}
 
 
 @pytest.mark.usefixtures("hub_offline")

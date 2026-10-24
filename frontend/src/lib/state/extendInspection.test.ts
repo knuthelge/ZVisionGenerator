@@ -28,15 +28,27 @@ describe('extendInspection', () => {
     draft.setExtendSourcePath(SOURCE);
   });
 
-  it('sends the source, the length, the model and the low-memory setting, and hands the answer to the draft', async () => {
+  it('sends the source, the length, the model, the low-memory setting and the steps, and hands the answer to the draft', async () => {
     apiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
     draft.update('extendFrames', 64);
+    draft.update('steps', 4);
     await extendInspection.inspect(null);
 
-    expect(apiMocks.inspectExtendSource).toHaveBeenCalledWith({ path: SOURCE, extend_frames: 64, model: 'ltx-8', low_memory: true });
+    expect(apiMocks.inspectExtendSource).toHaveBeenCalledWith({ path: SOURCE, extend_frames: 64, model: 'ltx-8', low_memory: true, steps: 4, lora: null });
     expect(draft.extendSource?.filename).toBe('walk.mp4');
     expect(extendInspection.statusFor(SOURCE)).toBe('ready');
     expect(draft.state.scene).toBe('A woman on a rainy street.');
+  });
+
+  it('sends the selected LoRAs, and counts a change of them as a change to inspect again', async () => {
+    apiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
+    draft.update('loraString', 'detail:0.8');
+    await extendInspection.inspect(null);
+
+    expect(apiMocks.inspectExtendSource).toHaveBeenCalledWith(expect.objectContaining({ lora: 'detail:0.8' }));
+    expect(extendInspection.isCurrent()).toBe(true);
+    draft.update('loraString', 'detail:0.5');
+    expect(extendInspection.isCurrent()).toBe(false);
   });
 
   it('is checking while the server thinks, and reports the status only for the path it was made for', async () => {
@@ -131,6 +143,10 @@ describe('extendInspection', () => {
       draft.update('lowMemory', false);
       expect(extendInspection.isCurrent()).toBe(false);
       draft.update('lowMemory', true);
+      draft.update('steps', 4);
+      expect(extendInspection.isCurrent()).toBe(false);
+      draft.update('steps', 0);
+      expect(extendInspection.isCurrent()).toBe(true);
       draft.update('model', 'other');
       expect(extendInspection.isCurrent()).toBe(false);
     });

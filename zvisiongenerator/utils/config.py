@@ -310,7 +310,17 @@ def video_family(config: dict[str, Any], family: str) -> VideoFamily | None:
         carry_frames=_positive_int(preset["carry_frames"], f"{base}.carry_frames"),
         default_upscale_steps=_default_upscale_steps(preset.get("upscale"), default_steps, f"{base}.upscale"),
         extend_fps=None if preset.get("extend_fps") is None else _positive_int(preset["extend_fps"], f"{base}.extend_fps"),
+        platform_carry_frames=_platform_carry_frames(preset.get("platform_carry_frames"), f"{base}.platform_carry_frames"),
     )
+
+
+def _platform_carry_frames(value: Any, path: str) -> dict[str, int]:
+    """Parse ``platform_carry_frames``: per platform, the frames an extension carries there."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must be a mapping.")
+    return {str(platform): _positive_int(frames, f"{path}.{platform}") for platform, frames in value.items()}
 
 
 def _default_upscale_steps(value: Any, default_steps: int, path: str) -> int:
@@ -885,9 +895,8 @@ def video_companion_repos(family: str, config: dict[str, Any], repo_id: str) -> 
 def h3_companion_repos(config: dict[str, Any], repo_id: str) -> tuple[str, ...]:
     """Return the other Hugging Face repos the H3 backend downloads beside *repo_id*.
 
-    That is the text encoder and the turbo LoRA on Windows and Linux, and the INT8 transformer and the turbo LoRA on
-    macOS. These are listed when *repo_id* is the configured H3 repository (at any revision), otherwise none. The SeedVR2 weights
-    of the upscale are shared with the image upscaler and are not companions.
+    That is the text encoder, the turbo LoRA and the latent upscaler on Windows and Linux, and the INT8 transformer and
+    the turbo LoRA on macOS. These are listed when *repo_id* is the configured H3 repository (at any revision), otherwise none.
 
     Raises:
         ValueError: If the H3 entry of *config* is malformed.

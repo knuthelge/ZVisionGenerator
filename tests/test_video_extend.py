@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import subprocess
 from functools import partial
 from pathlib import Path
@@ -541,6 +542,23 @@ class TestWindowArithmetic:
         apply_extend_args(args, _source(), extend, video_family(load_config(), family))
 
         assert args.num_frames == window
+
+    @pytest.mark.parametrize(("extend", "window"), [(51, 56), (17, 22), (34, 39), (102, 107)])
+    def test_a_family_that_carries_one_frame_moves_the_window_to_its_frame_rule(self, extend, window):
+        mac = dataclasses.replace(video_family(load_config(), "h3"), carry_frames=1)
+        args = argparse.Namespace(width=704, height=448, fps=24, num_frames=121)
+
+        apply_extend_args(args, _source(), extend, mac)
+
+        assert window_frames(extend, mac) == args.num_frames == window
+
+    def test_the_rewrite_context_of_a_one_frame_carry_spans_the_window_the_mac_renders(self):
+        mac = dataclasses.replace(video_family(load_config(), "h3"), carry_frames=1)
+
+        context = extend_enhance_context(_source(), 51, no_audio=False, family=mac)
+
+        assert context.seconds == pytest.approx(56 / 24)
+        assert context.new_seconds == pytest.approx(51 / 24)
 
     def test_the_rewrite_context_spans_the_window_of_the_family(self):
         context = extend_enhance_context(_source(), 17, no_audio=False, family=video_family(load_config(), "h3"))

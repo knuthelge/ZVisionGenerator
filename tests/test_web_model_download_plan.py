@@ -75,7 +75,7 @@ def _video(name: str, path: str) -> VideoInventoryEntry:
 
 
 def _seedvr2(downloaded: bool = False) -> SeedVR2Setup:
-    settings = SeedVR2Settings(model="auto", softness=0.75, reference_megapixels=16, tiers=(_TIER,))
+    settings = SeedVR2Settings(model="auto", softness=0.75, video_softness=0.0, reference_megapixels=16, tiers=(_TIER,))
     return SeedVR2Setup(settings=settings, tier=_TIER, budget_bytes=None, downloaded=downloaded, weights=FP8_WEIGHTS)
 
 

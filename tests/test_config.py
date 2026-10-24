@@ -34,6 +34,7 @@ from zvisiongenerator.utils.paths import resolve_model_path
 _SEEDVR2_BLOCK = {
     "model": "auto",
     "softness": 0.75,
+    "video_softness": 0.0,
     "reference_megapixels": 16,
     "tiers": [{"model": "seedvr2-3b", "weights_gb": 4.72, "activation_floor_gb": 10.79, "activation_base_gb": 1.1, "activation_gb_per_mp": 0.89}],
     "discrete_tiers": [{"model": "seedvr2-3b", "weights_gb": 0.3, "activation_floor_gb": 5.0, "activation_base_gb": 0.6, "activation_gb_per_mp": 0.6, "system_gb": 12.5}],

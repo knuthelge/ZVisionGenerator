@@ -182,7 +182,9 @@ def test_workflow_quit_after_the_call_saves_nothing(tmp_path):
 def _planned_request(tmp_path, source_path, factor=2):
     """Plan a SeedVR2 upscale of a real file the way the web UI does, then attach a mock engine."""
     tier = SeedVR2Tier("seedvr2-3b", weights_gb=4.0, activation_floor_gb=5.0, activation_base_gb=1.0, activation_gb_per_mp=0.5)
-    setup = SeedVR2Setup(settings=SeedVR2Settings(model="auto", softness=0.5, reference_megapixels=16, tiers=(tier,)), tier=tier, budget_bytes=None, downloaded=True, weights=MLX_WEIGHTS)
+    setup = SeedVR2Setup(
+        settings=SeedVR2Settings(model="auto", softness=0.5, video_softness=0.0, reference_megapixels=16, tiers=(tier,)), tier=tier, budget_bytes=None, downloaded=True, weights=MLX_WEIGHTS
+    )
     request = plan_seedvr2_upscale(read_upscale_source(source_path), factor, setup=setup).request
     backend = MagicMock()
     backend.upscale_image.side_effect = lambda model, path, *, width, height, **_kw: Image.new("RGB", (width, height))

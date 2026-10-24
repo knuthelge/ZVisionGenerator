@@ -9,7 +9,7 @@ const VIDEO_CONTROLS = ['workflow', 'model', 'runs', 'frame_count', 'steps', 'se
 function videoDefaults(overrides: Partial<VideoModelDefaults> = {}): VideoModelDefaults {
   return {
     ratio: '16:9', size: 's', steps: 8, width: 768, height: 448, frame_count: 121, audio: true, low_memory: true, supports_i2v: true,
-    supports_quantize: false, quantize: null, max_steps: 8, fps: 24, upscale: { enabled: false, factor: 2, steps: null }, ...overrides,
+    supports_quantize: false, quantize: null, max_steps: 8, fps: 24, frame_rule: { alignment: 1, offset: 1, round: 'nearest' }, supports_extend: true, extend_frame_step: 8, upscale: { enabled: false, factor: 2, steps: null }, ...overrides,
   };
 }
 

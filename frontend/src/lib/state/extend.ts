@@ -75,7 +75,7 @@ export interface ExtendModelSupport {
 export function extendModelSupport(ctx: WorkspaceContext | null, model: string): ExtendModelSupport | null {
   const defaults = ctx?.video_model_defaults?.[model];
   if (!ctx || !defaults) return null;
-  return { supported: defaults.supports_extend !== false, label: ctx.video_models.find((entry) => entry.id === model)?.label ?? model };
+  return { supported: defaults.supports_extend, label: ctx.video_models.find((entry) => entry.id === model)?.label ?? model };
 }
 
 /** Whether the chosen source lets an extension start, and the reason shown when it does not. */

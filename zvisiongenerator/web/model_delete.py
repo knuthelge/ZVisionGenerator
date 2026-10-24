@@ -47,14 +47,14 @@ def model_delete_target(
 ) -> DeleteTarget | None:
     """Return what deleting *entry* would remove, or ``None`` when the model is not deletable.
 
-    Installed models delete their folder in *models_dir*. Aliases delete their HuggingFace cache download once
-    the repo's own weights are fully downloaded (an LTX MLX repo counts even while its separate text encoder is
+    Installed models delete their folder in *models_dir*. Aliases delete their HuggingFace cache download, whether it
+    is complete or an interrupted, partial one (an LTX MLX repo counts even while its separate text encoder is
     missing); aliases pointing at a local directory are not deletable from the UI.
 
     Args:
         entry: The model to delete.
         models_dir: The models folder.
-        find_local_dir: Resolver for fully downloaded model directories.
+        find_local_dir: Resolver for fully downloaded model directories; a repo with no such directory still counts while its cache folder exists.
         sharing: Other models that load from the same download (see :func:`models_sharing`). While one of them has
             stored quants the download stays, and only *entry*'s own stored quants are deleted.
         companion_repos: Other HuggingFace repos downloaded for this model, removed with its download.
@@ -64,8 +64,8 @@ def model_delete_target(
         path = models_dir / entry.name
         return DeleteTarget("installed", path, stored_quants=stored_quants) if _is_direct_child(path, models_dir) else None
     repo = parse_huggingface_repo_reference(entry.resolved_path)
-    # H3 on macOS downloads only parts of its repository, so no complete model folder exists; what is in the cache counts.
-    if repo is None or (find_local_dir(entry.resolved_path) is None and not (entry.family == "h3" and huggingface_cache_repo_dir(repo.repo_id).is_dir())):
+    # Whatever is in the cache counts, so an interrupted or partial download (H3 on macOS fetches only parts of its repository) can be cleared too.
+    if repo is None or (find_local_dir(entry.resolved_path) is None and not huggingface_cache_repo_dir(repo.repo_id).is_dir()):
         return None
     users = tuple(name for name in sharing if stored_quant_dirs_for(models_dir, name))
     if users:

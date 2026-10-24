@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import TYPE_CHECKING, Any, cast
 
 from zvisiongenerator.core.video_family import VideoCapabilities
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from zvisiongenerator.core.image_backend import ImageBackend
     from zvisiongenerator.core.prompt_enhancer import PromptEnhancer
     from zvisiongenerator.core.seedvr2 import SeedVR2Upscaler
+    from zvisiongenerator.core.video_family import VideoFamily
     from zvisiongenerator.downloads.target import DownloadTarget
     from zvisiongenerator.utils.h3_preset import H3MlxPreset, H3Preset, HubFiles
     from zvisiongenerator.utils.model_memory import LtxCudaMemoryEstimate, MemoryBudget
@@ -45,6 +46,7 @@ __all__ = [
     "video_capabilities",
     "video_download_plan",
     "video_family_available",
+    "video_family_on_platform",
 ]
 
 BACKENDS: dict[str, "ImageBackend"] = {}
@@ -187,6 +189,23 @@ def video_capabilities(config: dict[str, Any], family: str) -> VideoCapabilities
     available = video_family_available(family)
     limits = {"audio": supports_video_audio(), "extend": supports_video_extend(), "upscale_review": supports_video_upscale_review()}
     return VideoCapabilities(**{name: available and flag and limits.get(name, True) for name, flag in flags.items()})
+
+
+def video_family_on_platform(config: dict[str, Any], family: str) -> "VideoFamily | None":
+    """Return the description of a video family as this platform runs it, or ``None`` when the config does not describe it.
+
+    The family's ``carry_frames`` are replaced by its ``platform_carry_frames`` entry for this platform, so the window an
+    extension generates (and the estimate, rewrite context and request built from it) matches what the backend renders.
+
+    Raises:
+        ValueError: If the family's description is malformed.
+    """
+    from zvisiongenerator.utils.config import video_family
+
+    described = video_family(config, family)
+    if described is None or sys.platform not in described.platform_carry_frames:
+        return described
+    return replace(described, carry_frames=described.platform_carry_frames[sys.platform])
 
 
 # --- SeedVR2 upscaler ---
@@ -415,7 +434,7 @@ def video_download_plan(
 def h3_download_plan(model_ref: str, preset: "H3Preset | H3MlxPreset", *, upscale: bool = False, lora: "HubFiles | None" = None) -> "tuple[DownloadTarget, ...]":
     """Return the downloads this platform's MiniMax H3 backend needs for *model_ref*.
 
-    Windows and Linux list the repository, the text encoder and the turbo LoRA, plus SeedVR2 with *upscale*. macOS lists
+    Windows and Linux list the repository, the text encoder and the turbo LoRA, plus the latent upscaler with *upscale*. macOS lists
     the INT8 transformer, the ``FL2VA`` components and the turbo LoRA *lora*; it has no upscale.
 
     Raises:
@@ -438,7 +457,7 @@ def h3_download_plan(model_ref: str, preset: "H3Preset | H3MlxPreset", *, upscal
 def h3_companion_repo_ids(config: dict[str, Any]) -> tuple[str, ...]:
     """Return the Hugging Face repos, besides the main one, that this platform's MiniMax H3 backend downloads.
 
-    Windows and Linux download the text encoder and the turbo LoRA; macOS downloads the INT8 transformer and the turbo LoRA.
+    Windows and Linux download the text encoder, the turbo LoRA and the latent upscaler; macOS downloads the INT8 transformer and the turbo LoRA.
 
     Raises:
         ValueError: If the H3 entry of *config* is malformed.
@@ -450,7 +469,7 @@ def h3_companion_repo_ids(config: dict[str, Any]) -> tuple[str, ...]:
     from zvisiongenerator.utils.h3_preset import h3_preset
 
     preset = h3_preset(config)
-    return (preset.text_encoder.repo_id, preset.lora.repo_id)
+    return (preset.text_encoder.repo_id, preset.lora.repo_id, preset.latent_upsampler.repo_id)
 
 
 def h3_load_options(config: dict[str, Any], model_name: str | None, *, quiet: bool = False) -> dict[str, Any]:

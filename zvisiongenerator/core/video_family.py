@@ -6,7 +6,7 @@ branching on its name. Everything here is pure.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 __all__ = ["ANY_FRAMES", "UNDESCRIBED_UPSCALE_STEPS", "FrameRule", "SettledSteps", "VideoCapabilities", "VideoFamily", "settle_video_steps"]
@@ -70,6 +70,7 @@ class VideoFamily:
         carry_frames: The frames of the source's end an extension carries into its window (the window is these plus the new frames).
         default_upscale_steps: The steps of an upscaled clip when none are given.
         extend_fps: The one frame rate an extension source must run at, or ``None`` when the family extends a clip at its own rate.
+        platform_carry_frames: Per ``sys.platform``, the ``carry_frames`` that differ there (H3 on macOS continues from the last frame alone).
     """
 
     name: str
@@ -85,6 +86,7 @@ class VideoFamily:
     carry_frames: int
     default_upscale_steps: int
     extend_fps: int | None = None
+    platform_carry_frames: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

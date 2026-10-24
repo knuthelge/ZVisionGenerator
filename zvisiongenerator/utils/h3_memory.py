@@ -7,13 +7,11 @@ geometry of a canvas, the memory estimate and the sampler all share these pure f
 
 from __future__ import annotations
 
-import math
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from zvisiongenerator.utils.model_memory import GIB, CudaMemoryEstimate, MemoryBudget, classify_memory_fit, discrete_clip_fit
-from zvisiongenerator.utils.seedvr2 import FP8_WEIGHTS, SeedVR2Tier, estimate_seedvr2_bytes, pick_seedvr2_tier, seedvr2_settings
+from zvisiongenerator.utils.model_memory import GIB, CudaMemoryEstimate, MemoryBudget, classify_cuda_memory_fit, classify_memory_fit, discrete_clip_fit
 
 __all__ = [
     "H3_AUDIO_CHANNELS",
@@ -22,6 +20,10 @@ __all__ = [
     "H3_FRAMES_PER_CHUNK",
     "H3_LATENTS_PER_CHUNK",
     "H3_PATCH",
+    "H3_REFINE_FORWARDS",
+    "H3_REFINE_OVERLAP_LATENT_FRAMES",
+    "H3_REFINE_SCHEDULE",
+    "H3_REFINE_WINDOW_LATENT_FRAMES",
     "H3_ROW_PIXELS",
     "H3_SPATIAL_RATIO",
     "H3_TAIL_FRAMES",
@@ -34,11 +36,13 @@ __all__ = [
     "h3_cuda_system_bytes",
     "h3_expected_seconds",
     "h3_extend_window_frames",
+    "h3_frames_of_latent_frames",
     "h3_latent_frames",
     "h3_lora_bytes",
     "h3_mlx_clip_fit",
-    "h3_seedvr2_tier",
+    "h3_refine_windows",
     "h3_sequence_rows",
+    "h3_upscale_keeps_transformer",
     "h3_video_rows",
 ]
 
@@ -52,6 +56,12 @@ H3_ROW_PIXELS = H3_SPATIAL_RATIO * H3_PATCH  # 32 pixels per row, along each spa
 H3_AUDIO_CHANNELS = 2  # the mono audio VAE codes each of the two channels on its own
 H3_TEXT_TOKENS = 100  # approximation of the prompt length in rows
 H3_TAIL_FRAMES = 22  # an extension carries 17 * 1 + 5 frames of its source, the smallest valid clip
+# The upscale refines the enlarged latents with the last forwards of the 8-step schedule, in overlapping windows of latent frames.
+# They are code constants, not config: there is no user control, and they are tied to the stored copy's fold tables.
+H3_REFINE_SCHEDULE = 8  # the schedule the refine runs the tail of, whatever the stage-1 step count
+H3_REFINE_FORWARDS = 2  # forwards of that schedule's tail
+H3_REFINE_WINDOW_LATENT_FRAMES = 22  # 73 frames
+H3_REFINE_OVERLAP_LATENT_FRAMES = 7
 
 # macOS (MLX) estimates, from the fork's M4 Pro measurements; they are estimates until recalibrated on a Mac.
 _MLX_IMAGE_MODES = ("i2v", "extend")
@@ -82,7 +92,6 @@ _CUDA_DECODE_BASE_BYTES = int((5.157 + 0.70) * GIB)  # the video VAE decode: wei
 _CUDA_DECODE_BYTES_PER_PIXEL = 9.48e-7 * GIB
 _CUDA_SYSTEM_BASE_BYTES = int(17.7 * GIB)  # the CUDA runtime, the stored copy's streaming buffers and the encoders' CPU side
 _CUDA_VISION_SYSTEM_BYTES = int(1.5 * GIB)  # the vision tower's CPU side while keyframes are encoded
-_CUDA_SEEDVR2_SYSTEM_BYTES = 12 * GIB  # the SeedVR2 phase of a video: its weights stream from system memory (11.7 GiB at 768x448, 124 frames)
 _CUDA_FIXED_SECONDS = 116  # load, text encode, prepare the transformer and mux
 _CUDA_DECODE_BASE_SECONDS = 8.8
 _CUDA_DECODE_SECONDS_PER_PIXEL_FRAME = 3.01e-7
@@ -94,9 +103,22 @@ _CUDA_C1 = _CUDA_LINEAR_SHARE * _CUDA_FORWARD_SECONDS / _CUDA_REFERENCE_ROWS  # 
 _CUDA_C2 = (1 - _CUDA_LINEAR_SHARE) * _CUDA_FORWARD_SECONDS / _CUDA_REFERENCE_ROWS**2  # seconds per row squared
 _CUDA_IMAGE_ENCODE_SECONDS = 30  # the video VAE encoder (and the vision tower) of a keyframe or an extension tail
 _CUDA_LORA_FORWARD_FACTOR = 1.08  # a user LoRA is merged at run time
-_CUDA_UPSCALE_BATCH = 5  # frames SeedVR2 enlarges together
-_CUDA_SEEDVR2_BYTES_PER_PIXEL_CHANNEL = 5  # the clip as float32 (4) and the uint8 output (1)
-_CUDA_SEEDVR2_SECONDS_PER_MEGAPIXEL_FRAME = 4.4  # seconds per frame and megapixel of the enlarged output
+# The latent upscale (RTX 3080): the network runs unchunked, so its GPU peak is linear in the full-size latent volume
+# ``cells = (width / 16) * (height / 16) * latent_frames``. The line passes above the four peaks measured with the network alone:
+# 1.71 GiB at 130,240 cells (1280x704, 124 frames), 2.28 at 207,200 (1600x896, 124), 4.14 at 403,200 (1600x896, 243) and 7.44 at
+# 795,200 (1600x896, 483).
+_CUDA_UPSAMPLER_BASE_BYTES = int(0.75 * GIB)
+_CUDA_UPSAMPLER_BYTES_PER_CELL = 8.43e-6 * GIB
+_CUDA_LATENT_UPSCALE_SECONDS = 10  # the network: 6.7 to 10.9 s measured for 37 to 72 latent frames
+_CUDA_REFINE_LOAD_SECONDS = 62  # the second load of the stored transformer copy for the refine: 35 to 62 s measured
+# An upscale without review keeps the transformer loaded from stage 1 to the refine (one load, not two), so it stays on the GPU
+# while the waveform is decoded, the latents are enlarged and the keyframes are encoded. What stays is the part outside the
+# streamed blocks plus the quantization state and fold tables of the blocks: 2016 MiB measured on an RTX 3080 (a stage-1 size of
+# 640x352), rounded up. The upscaler stage measured about 3.0 GiB beside it at 1280x704.
+_CUDA_RESIDENT_TRANSFORMER_BYTES = int(2.1 * GIB)
+_CUDA_AUDIO_DECODE_BYTES = GIB  # the audio VAE's 0.58 GiB of weights and a few seconds of audio
+_CUDA_ENCODE_BASE_BYTES = int(1.5 * GIB)  # the keyframe encode: the video VAE's encoder (0.67 GiB in float32) and slack
+_CUDA_ENCODE_BYTES_PER_PIXEL = 2 * _CUDA_DECODE_BYTES_PER_PIXEL  # one frame in float32 against the decoder's chunks in bfloat16
 
 
 def h3_latent_frames(num_frames: int) -> int:
@@ -108,6 +130,34 @@ def h3_latent_frames(num_frames: int) -> int:
     if num_frames < H3_LATENTS_PER_CHUNK or num_frames % H3_FRAMES_PER_CHUNK != H3_LATENTS_PER_CHUNK:
         raise ValueError(f"num_frames must be of the form {H3_FRAMES_PER_CHUNK} * n + {H3_LATENTS_PER_CHUNK}, got {num_frames}.")
     return (num_frames - H3_LATENTS_PER_CHUNK) // H3_FRAMES_PER_CHUNK * H3_LATENTS_PER_CHUNK + 2
+
+
+def h3_frames_of_latent_frames(latent_frames: int) -> int:
+    """Return the frame count of a clip with *latent_frames* latent frames: the inverse of :func:`h3_latent_frames`.
+
+    Raises:
+        ValueError: If *latent_frames* is not of the form ``5 * n + 2``.
+    """
+    if latent_frames < 2 or (latent_frames - 2) % H3_LATENTS_PER_CHUNK:
+        raise ValueError(f"latent_frames must be of the form {H3_LATENTS_PER_CHUNK} * n + 2, got {latent_frames}.")
+    return (latent_frames - 2) // H3_LATENTS_PER_CHUNK * H3_FRAMES_PER_CHUNK + H3_LATENTS_PER_CHUNK
+
+
+def h3_refine_windows(latent_frames: int) -> tuple[tuple[int, int], ...]:
+    """Return the ``(start, end)`` latent-frame windows the upscale refines, which overlap by 7 frames and are never shorter than 22.
+
+    A clip of 22 latent frames (73 frames) or fewer is one window. A longer one gets windows of 22 latent frames
+    starting every 15, and a last window pulled back to end at the last latent frame when the steps stop short of it,
+    so every window is 22 long and the last may overlap its neighbour by more than 7. The plan depends on the clip
+    length alone, so a seed gives the same clip on every card.
+    """
+    if latent_frames <= H3_REFINE_WINDOW_LATENT_FRAMES:
+        return ((0, latent_frames),)
+    step = H3_REFINE_WINDOW_LATENT_FRAMES - H3_REFINE_OVERLAP_LATENT_FRAMES
+    starts = list(range(0, latent_frames - H3_REFINE_WINDOW_LATENT_FRAMES + 1, step))
+    if starts[-1] + H3_REFINE_WINDOW_LATENT_FRAMES < latent_frames:
+        starts.append(latent_frames - H3_REFINE_WINDOW_LATENT_FRAMES)
+    return tuple((start, start + H3_REFINE_WINDOW_LATENT_FRAMES) for start in starts)
 
 
 def h3_audio_latents(num_frames: int) -> int:
@@ -235,16 +285,6 @@ def h3_lora_bytes(paths: Iterable[str | Path]) -> int:
     return total
 
 
-def h3_seedvr2_tier(config: dict[str, Any], budget: MemoryBudget | None) -> SeedVR2Tier:
-    """Return the SeedVR2 tier an H3 upscale uses on a CUDA machine with *budget*, as the upscale itself picks it.
-
-    Raises:
-        ValueError: If the config's ``seedvr2`` block is invalid.
-    """
-    settings = seedvr2_settings(config, FP8_WEIGHTS.tiers_key)
-    return pick_seedvr2_tier(settings, budget.gpu_bytes if budget else None, budget.system_bytes if budget else None)
-
-
 def _cuda_rows(width: int, height: int, frames: int, mode: str) -> int:
     """Return the sequence rows of a CUDA clip; only an image-to-video clip carries a keyframe (an extension's tail adds no rows).
 
@@ -261,29 +301,31 @@ def _stage_one_size(width: int, height: int, *, upscale: bool) -> tuple[int, int
     return (width // 2, height // 2) if upscale else (width, height)
 
 
-def _require_tier(upscale: bool, tier: SeedVR2Tier | None) -> None:
-    if upscale and tier is None:
-        raise ValueError("An upscaled clip needs the SeedVR2 tier (seedvr2_tier=).")
-
-
-def h3_cuda_system_bytes(*, loras_bytes: int = 0, frame_bytes: int = 0, vision: bool = False, seedvr2_tier: SeedVR2Tier | None = None, seedvr2_frame_bytes: int = 0) -> int:
-    """Return the peak system memory of an H3 clip on CUDA: the larger of its two phases, which never overlap.
-
-    The H3 phase (prompt, transformer, decode) holds the base, the user LoRAs and the decoded frames. With an upscale,
-    the generation is released before SeedVR2 runs, so that phase holds SeedVR2's own system need (measured on a video
-    upscale, less than the image path's tier figure) plus the frame buffers it works on.
+def h3_cuda_system_bytes(*, loras_bytes: int = 0, frame_bytes: int = 0, vision: bool = False) -> int:
+    """Return the peak system memory of an H3 clip on CUDA: the base, the keyframe vision tower, the user LoRAs and the decoded frames.
 
     Args:
         loras_bytes: Total size of the user LoRA files.
-        frame_bytes: The decoded frames of the H3 phase.
+        frame_bytes: The decoded frames of the clip.
         vision: Whether keyframes are encoded, which keeps the text encoder's vision tower resident.
-        seedvr2_tier: The SeedVR2 tier of an upscale, or ``None`` without one (or without a system need).
-        seedvr2_frame_bytes: The frame buffers of the SeedVR2 phase.
     """
-    h3_phase = _CUDA_SYSTEM_BASE_BYTES + (_CUDA_VISION_SYSTEM_BYTES if vision else 0) + loras_bytes + frame_bytes
-    if seedvr2_tier is None or seedvr2_tier.system_gb is None:
-        return h3_phase
-    return max(h3_phase, _CUDA_SEEDVR2_SYSTEM_BYTES + seedvr2_frame_bytes)
+    return _CUDA_SYSTEM_BASE_BYTES + (_CUDA_VISION_SYSTEM_BYTES if vision else 0) + loras_bytes + frame_bytes
+
+
+def _cuda_upsampler_bytes(width: int, height: int, frames: int) -> float:
+    """Return the GPU peak of the latent upscaler on a ``width x height x frames`` output: linear in the full-size latent volume."""
+    cells = (width // H3_SPATIAL_RATIO) * (height // H3_SPATIAL_RATIO) * h3_latent_frames(frames)
+    return _CUDA_UPSAMPLER_BASE_BYTES + _CUDA_UPSAMPLER_BYTES_PER_CELL * cells
+
+
+def _refine_windows_of(frames: int) -> tuple[int, int]:
+    """Return ``(window frames, windows)`` of the refine of a *frames*-frame clip: the pixel frames of its largest window and how many windows there are.
+
+    Raises:
+        ValueError: If *frames* is not ``17 * n + 5``.
+    """
+    windows = h3_refine_windows(h3_latent_frames(frames))
+    return h3_frames_of_latent_frames(max(end - start for start, end in windows)), len(windows)
 
 
 def estimate_h3_cuda_clip_memory(
@@ -294,15 +336,21 @@ def estimate_h3_cuda_clip_memory(
     mode: str = "t2v",
     loras_bytes: int = 0,
     upscale: bool = False,
-    seedvr2_tier: SeedVR2Tier | None = None,
+    keep_transformer: bool = False,
 ) -> CudaMemoryEstimate:
     """Estimate the peak GPU and system memory of an H3 clip on a CUDA machine.
 
     The stages never overlap, so the GPU peak is the largest of the text encoder (with its vision tower for a
     keyframe), the streamed transformer at the sequence's rows (user LoRAs add 2.7 times their size), the video
-    decode and, when upscaling, SeedVR2 on a batch of five frames, plus 1 GiB the desktop takes. An upscaled
-    clip runs the transformer and the decode at half size. System memory is the larger of the H3 phase and, when
-    upscaling, the SeedVR2 phase (:func:`h3_cuda_system_bytes`).
+    decode at the output size, and, when upscaling, the latent upscaler and the transformer again for the refine,
+    plus 1 GiB the desktop takes. An upscaled clip renders stage 1 at half size; the refine works in windows of at most
+    73 frames at the full size, so its rows are those of the largest window. The latent upscaler grows linearly with
+    the full-size latent volume. The full-size keyframe encode of an image mode stays below the decode, so it is not a
+    stage of its own. System memory is the base, the vision tower, the LoRAs and the decoded output frames.
+
+    With *keep_transformer* the upscale keeps the transformer loaded from stage 1 to the refine, so the audio decode, the
+    latent upscaler and the keyframe encode (an image-to-video clip) run beside its resident part, and each of their peaks
+    adds it.
 
     Args:
         width: Output width in pixels (the enlarged size when *upscale*).
@@ -310,29 +358,34 @@ def estimate_h3_cuda_clip_memory(
         frames: Output frame count (an extension's window, with its carried tail).
         mode: ``"t2v"``, ``"i2v"`` or ``"extend"``.
         loras_bytes: Total size of the user LoRA files.
-        upscale: Whether the clip is enlarged 2x with SeedVR2.
-        seedvr2_tier: The SeedVR2 tier the upscale uses; required with *upscale*.
+        upscale: Whether the clip is enlarged 2x with the latent upscaler.
+        keep_transformer: Whether the upscale keeps the transformer loaded between its two passes (no review; see
+            :func:`h3_upscale_keeps_transformer`). Ignored without *upscale*.
 
     Raises:
-        ValueError: If *mode* is unknown, the canvas or frame count is invalid, or *upscale* comes without a tier.
+        ValueError: If *mode* is unknown, or the canvas or frame count is invalid.
     """
-    _require_tier(upscale, seedvr2_tier)
     work_width, work_height = _stage_one_size(width, height, upscale=upscale)
     rows = _cuda_rows(work_width, work_height, frames, mode)
+    lora = _CUDA_DIT_LORA_BYTES_PER_BYTE * loras_bytes
     text_encoder = _CUDA_TEXT_ENCODER_BYTES + (_CUDA_VISION_BYTES if mode == "i2v" else 0)
-    transformer = _CUDA_DIT_REFERENCE_BYTES + _CUDA_DIT_BYTES_PER_ROW * (rows - _CUDA_REFERENCE_ROWS) + _CUDA_DIT_LORA_BYTES_PER_BYTE * loras_bytes
-    decode = _CUDA_DECODE_BASE_BYTES + _CUDA_DECODE_BYTES_PER_PIXEL * work_width * work_height
+    transformer = _CUDA_DIT_REFERENCE_BYTES + _CUDA_DIT_BYTES_PER_ROW * (rows - _CUDA_REFERENCE_ROWS) + lora
+    decode = _CUDA_DECODE_BASE_BYTES + _CUDA_DECODE_BYTES_PER_PIXEL * width * height
     stages = [text_encoder, transformer, decode]
-    if upscale and seedvr2_tier is not None:
-        stages.append(estimate_seedvr2_bytes(seedvr2_tier, _CUDA_UPSCALE_BATCH * width * height / 1e6))
-    stage_one_frame_bytes = frames * work_width * work_height * 3
-    # SeedVR2 holds the stage-1 frames, a float32 tensor of the clip at the target size and the uint8 output.
-    seedvr2_frame_bytes = stage_one_frame_bytes + frames * width * height * 3 * _CUDA_SEEDVR2_BYTES_PER_PIXEL_CHANNEL
+    if upscale:
+        stages.append(_cuda_upsampler_bytes(width, height, frames))
+        window_frames, _windows = _refine_windows_of(frames)
+        refine_rows = _cuda_rows(width, height, window_frames, mode)
+        stages.append(_CUDA_DIT_REFERENCE_BYTES + _CUDA_DIT_BYTES_PER_ROW * (refine_rows - _CUDA_REFERENCE_ROWS) + lora)
+        if keep_transformer:
+            resident = _CUDA_RESIDENT_TRANSFORMER_BYTES  # user LoRAs sit in the streamed blocks (CPU) and the token refiner, which the figure covers
+            stages.append(_CUDA_AUDIO_DECODE_BYTES + resident)
+            stages.append(_cuda_upsampler_bytes(width, height, frames) + resident)
+            if mode == "i2v":
+                stages.append(_CUDA_ENCODE_BASE_BYTES + _CUDA_ENCODE_BYTES_PER_PIXEL * width * height + resident)
     return CudaMemoryEstimate(
         gpu_bytes=int(max(stages) + _CUDA_GPU_HEADROOM_BYTES),
-        system_bytes=h3_cuda_system_bytes(
-            loras_bytes=loras_bytes, frame_bytes=stage_one_frame_bytes, vision=mode == "i2v", seedvr2_tier=seedvr2_tier if upscale else None, seedvr2_frame_bytes=seedvr2_frame_bytes
-        ),
+        system_bytes=h3_cuda_system_bytes(loras_bytes=loras_bytes, frame_bytes=frames * width * height * 3, vision=mode == "i2v"),
     )
 
 
@@ -351,22 +404,27 @@ def h3_expected_seconds(
     loras: bool = False,
     upscale: bool = False,
     platform: str = "cuda",
+    keep_transformer: bool = False,
 ) -> int:
     """Estimate the generation time, in seconds, of an H3 clip; it excludes the one-time weight preparation.
 
-    On CUDA (an RTX 3080 calibration): a fixed 116 s, the decode and export, one linear-plus-quadratic term per forward
-    (8% more with a user LoRA), 30 s to encode a keyframe or an extension tail, and, when upscaling, the SeedVR2 phase
-    with the rest at half size. On ``"mlx"`` it is :func:`estimate_h3_mlx_seconds`.
+    On CUDA (an RTX 3080 calibration): a fixed 116 s, the decode and export at the output size, one linear-plus-quadratic
+    term per forward (8% more with a user LoRA) and 30 s to encode a keyframe or an extension tail. When upscaling, the
+    *forwards* run at half size, and the latent upscale, the transformer's second load and the refine's forwards (two per
+    window, at the rows of the largest window) are added, with a second keyframe encode at the full size for an image mode.
+    An upscale that keeps the transformer loaded between its passes (*keep_transformer*) has no second load.
+    On ``"mlx"`` it is :func:`estimate_h3_mlx_seconds`.
 
     Args:
         width: Output width in pixels (the enlarged size when *upscale*).
         height: Output height in pixels.
         frames: Output frame count (an extension's window).
-        forwards: Transformer forwards of the run.
+        forwards: Transformer forwards of the run (of stage 1 when upscaling).
         mode: ``"t2v"``, ``"i2v"`` or ``"extend"``.
         loras: Whether a user LoRA is applied.
-        upscale: Whether the clip is enlarged 2x with SeedVR2 (CUDA only).
+        upscale: Whether the clip is enlarged 2x with the latent upscaler (CUDA only).
         platform: ``"cuda"`` or ``"mlx"``.
+        keep_transformer: Whether the upscale loads the transformer once for both passes (see :func:`h3_upscale_keeps_transformer`).
 
     Raises:
         ValueError: If *forwards* is below 1, *platform* or *mode* is unknown, or the canvas or frame count is invalid.
@@ -379,13 +437,46 @@ def h3_expected_seconds(
         raise ValueError(f"platform must be cuda or mlx, got {platform!r}.")
     work_width, work_height = _stage_one_size(width, height, upscale=upscale)
     rows = _cuda_rows(work_width, work_height, frames, mode)
-    seconds = _CUDA_FIXED_SECONDS + _CUDA_DECODE_BASE_SECONDS + _CUDA_DECODE_SECONDS_PER_PIXEL_FRAME * work_width * work_height * frames + _CUDA_EXPORT_SECONDS * frames / _CUDA_REFERENCE_FRAMES
-    seconds += forwards * _cuda_forward_seconds(rows) * (_CUDA_LORA_FORWARD_FACTOR if loras else 1)
+    lora_factor = _CUDA_LORA_FORWARD_FACTOR if loras else 1
+    seconds = _CUDA_FIXED_SECONDS + _CUDA_DECODE_BASE_SECONDS + _CUDA_DECODE_SECONDS_PER_PIXEL_FRAME * width * height * frames + _CUDA_EXPORT_SECONDS * frames / _CUDA_REFERENCE_FRAMES
+    seconds += forwards * _cuda_forward_seconds(rows) * lora_factor
     if mode != "t2v":
-        seconds += _CUDA_IMAGE_ENCODE_SECONDS
+        seconds += _CUDA_IMAGE_ENCODE_SECONDS * (2 if upscale else 1)  # an upscale encodes the images again at the full size
     if upscale:
-        seconds += math.ceil(frames / _CUDA_UPSCALE_BATCH) * _CUDA_UPSCALE_BATCH * width * height / 1e6 * _CUDA_SEEDVR2_SECONDS_PER_MEGAPIXEL_FRAME
+        window_frames, windows = _refine_windows_of(frames)
+        refine_forwards = H3_REFINE_FORWARDS * windows
+        seconds += (
+            _CUDA_LATENT_UPSCALE_SECONDS
+            + (0 if keep_transformer else _CUDA_REFINE_LOAD_SECONDS)
+            + refine_forwards * _cuda_forward_seconds(_cuda_rows(width, height, window_frames, mode)) * lora_factor
+        )
     return round(seconds)
+
+
+def h3_upscale_keeps_transformer(width: int, height: int, frames: int, gpu_bytes: int, *, mode: str = "t2v", loras_bytes: int = 0) -> bool:
+    """Return whether an upscale without review can keep the transformer loaded between its two passes on a card of *gpu_bytes*.
+
+    The single load skips the second load of the stored copy, but the transformer's resident part then sits beside the audio
+    decode, the latent upscaler and the keyframe encode. It is used where the estimate of that flow stays within the share of the
+    card a clip may use (the ``fits`` line of :func:`~zvisiongenerator.utils.model_memory.classify_cuda_memory_fit`); a clip
+    that would not fit loads twice, as before. The backend and the estimates both ask this, so they agree.
+
+    Args:
+        width: Output width in pixels (the enlarged size).
+        height: Output height in pixels.
+        frames: Output frame count.
+        gpu_bytes: The card's memory.
+        mode: ``"t2v"`` or ``"i2v"``.
+        loras_bytes: Total size of the user LoRA files.
+
+    Raises:
+        ValueError: If *mode* is unknown, or the canvas or frame count is invalid.
+    """
+    estimate = estimate_h3_cuda_clip_memory(width, height, frames, mode=mode, loras_bytes=loras_bytes, upscale=True, keep_transformer=True)
+    # Only the GPU decides here. System memory does not differ between the flows: the kept transformer loads where the first
+    # load did (after the encoders have let go), and the stages it stays through hold less than the denoise, which the base
+    # system figure already covers.
+    return classify_cuda_memory_fit(CudaMemoryEstimate(estimate.gpu_bytes, 0), MemoryBudget(gpu_bytes, system_bytes=0)) == "fits"
 
 
 def h3_clip_fit(
@@ -398,18 +489,23 @@ def h3_clip_fit(
     mode: str = "t2v",
     loras_bytes: int = 0,
     upscale: bool = False,
-    seedvr2_tier: SeedVR2Tier | None = None,
+    review: bool = False,
 ) -> dict[str, Any] | None:
     """Check an H3 clip against a discrete GPU's budget; callers warn on ``tight`` or ``too_large`` and the backend refuses only what cannot fit system memory.
+
+    An upscale without *review* keeps the transformer loaded between its passes where the card holds that
+    (:func:`h3_upscale_keeps_transformer`), which skips the second load; with review it loads twice, as the half-size decode needs the memory.
 
     Returns:
         ``{"status", "required_gb", "budget_gb", "kind": "discrete", "resource", "family": "h3", "expected_seconds"}`` (the time is an
         estimate), or ``None`` without a budget or on unified memory, which :func:`h3_mlx_clip_fit` estimates.
 
     Raises:
-        ValueError: If *mode* is unknown, *forwards* is below 1, the canvas or frame count is invalid, or *upscale* comes without a tier.
+        ValueError: If *mode* is unknown, *forwards* is below 1, or the canvas or frame count is invalid.
     """
     if budget is None or not budget.gpu_bytes or budget.system_bytes is None:
         return None
-    estimate = estimate_h3_cuda_clip_memory(width, height, frames, mode=mode, loras_bytes=loras_bytes, upscale=upscale, seedvr2_tier=seedvr2_tier)
-    return {**discrete_clip_fit(estimate, budget), "family": "h3", "expected_seconds": h3_expected_seconds(width, height, frames, forwards=forwards, mode=mode, loras=loras_bytes > 0, upscale=upscale)}
+    keep = upscale and not review and h3_upscale_keeps_transformer(width, height, frames, budget.gpu_bytes, mode=mode, loras_bytes=loras_bytes)
+    estimate = estimate_h3_cuda_clip_memory(width, height, frames, mode=mode, loras_bytes=loras_bytes, upscale=upscale, keep_transformer=keep)
+    seconds = h3_expected_seconds(width, height, frames, forwards=forwards, mode=mode, loras=loras_bytes > 0, upscale=upscale, keep_transformer=keep)
+    return {**discrete_clip_fit(estimate, budget), "family": "h3", "expected_seconds": seconds}

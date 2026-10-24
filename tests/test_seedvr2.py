@@ -33,13 +33,14 @@ STREAMED_3B = SeedVR2Tier("seedvr2-3b", weights_gb=0.3, activation_floor_gb=5.0,
 
 
 def _settings(model: str = "auto", reference_megapixels: float = 16) -> SeedVR2Settings:
-    return SeedVR2Settings(model=model, softness=0.75, reference_megapixels=reference_megapixels, tiers=(TIER_7B, TIER_3B))
+    return SeedVR2Settings(model=model, softness=0.75, video_softness=0.0, reference_megapixels=reference_megapixels, tiers=(TIER_7B, TIER_3B))
 
 
 def _config(**overrides):
     block = {
         "model": "auto",
         "softness": 0.75,
+        "video_softness": 0.0,
         "reference_megapixels": 16,
         "tiers": [
             {"model": "seedvr2-7b", "weights_gb": 9.26, "activation_floor_gb": 10.79, "activation_base_gb": 1.88, "activation_gb_per_mp": 0.83},
@@ -238,7 +239,7 @@ class TestPickTier:
 
 class TestPickStreamedTier:
     def _settings(self, model: str = "auto") -> SeedVR2Settings:
-        return SeedVR2Settings(model=model, softness=0.75, reference_megapixels=16, tiers=(STREAMED_7B, STREAMED_3B))
+        return SeedVR2Settings(model=model, softness=0.75, video_softness=0.0, reference_megapixels=16, tiers=(STREAMED_7B, STREAMED_3B))
 
     def test_system_memory_equal_to_the_7b_need_picks_7b(self):
         assert pick_seedvr2_tier(self._settings(), 1, int(22e9)) is STREAMED_7B
@@ -296,6 +297,7 @@ class TestSettings:
 
         assert settings.model == "auto"
         assert settings.softness == 0.75
+        assert settings.video_softness == 0.0
         assert settings.reference_megapixels == 16
         assert [tier.model for tier in settings.tiers] == ["seedvr2-7b", "seedvr2-3b"]
 
@@ -333,6 +335,13 @@ class TestSettings:
     def test_softness_bounds_are_inclusive(self, softness):
         assert seedvr2_settings(_config(softness=softness)).softness == softness
 
+    @pytest.mark.parametrize("video_softness", [0, 1, 0.5])
+    def test_video_softness_bounds_are_inclusive(self, video_softness):
+        settings = seedvr2_settings(_config(video_softness=video_softness))
+
+        assert settings.video_softness == video_softness
+        assert settings.softness == 0.75
+
     @pytest.mark.parametrize(
         ("overrides", "key"),
         [
@@ -349,6 +358,10 @@ class TestSettings:
             ({"model": 7}, "seedvr2.model"),
             ({"softness": 1.5}, "seedvr2.softness"),
             ({"softness": -0.1}, "seedvr2.softness"),
+            ({"video_softness": 1.5}, "seedvr2.video_softness"),
+            ({"video_softness": -0.1}, "seedvr2.video_softness"),
+            ({"video_softness": "0"}, "seedvr2.video_softness"),
+            ({"video_softness": True}, "seedvr2.video_softness"),
             ({"reference_megapixels": 0}, "seedvr2.reference_megapixels"),
         ],
     )
@@ -356,7 +369,7 @@ class TestSettings:
         with pytest.raises(ValueError, match=key.replace("[", r"\[").replace("]", r"\]")):
             seedvr2_settings(_config(**overrides))
 
-    @pytest.mark.parametrize("key", ["softness", "reference_megapixels"])
+    @pytest.mark.parametrize("key", ["softness", "video_softness", "reference_megapixels"])
     def test_required_keys_must_be_present(self, key):
         config = _config()
         del config["seedvr2"][key]

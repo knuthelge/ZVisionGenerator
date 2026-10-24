@@ -419,6 +419,7 @@ class TestBuildSetup:
             "seedvr2": {
                 "model": "auto",
                 "softness": 0.75,
+                "video_softness": 0.0,
                 "reference_megapixels": 16,
                 "tiers": [
                     {"model": "seedvr2-7b", "weights_gb": 9.26, "activation_floor_gb": 10.79, "activation_base_gb": 1.88, "activation_gb_per_mp": 0.83},

@@ -1471,6 +1471,17 @@ class TestEstimatedTimeLine:
 
         assert [(call["mode"], call["forwards"], call["frames"]) for call in calls] == [("i2v", 4, 124), ("extend", 8, 56), ("t2v", 8, 124)]
 
+    def test_the_clip_fit_knows_whether_the_upscale_pauses_for_review(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(video_cli, "accelerator_memory_budget_or_none", lambda: self._DISCRETE)
+        monkeypatch.setattr(video_cli, "clip_memory_fit", lambda model, **kwargs: calls.append(kwargs))
+
+        video_cli._clip_fit(self._args(review=True), {}, upscale=True)
+        video_cli._clip_fit(self._args(review=False), {}, upscale=True)
+        video_cli._clip_fit(self._args(), {}, upscale=True)
+
+        assert [call["review"] for call in calls] == [True, False, False]
+
     def test_ltx_prints_no_time_line(self, monkeypatch, capsys):
         monkeypatch.setattr(video_cli, "clip_memory_fit", lambda *_a, **_k: {"status": "fits", "required_gb": 8.0, "budget_gb": 10.0})
 

@@ -70,6 +70,9 @@ function makeVideoDefaults(overrides: Partial<VideoModelDefaults> = {}): VideoMo
     quantize: null,
     max_steps: 8,
     fps: 24,
+    frame_rule: { alignment: 1, offset: 1, round: 'nearest' },
+    supports_extend: true,
+    extend_frame_step: 8,
     upscale: { enabled: false, factor: 2, steps: null },
     ...overrides,
   };
@@ -377,7 +380,7 @@ describe('draft store', () => {
 
     it('aligns a reused frame count to one the model accepts', () => {
       const ctx = makeContext({
-        video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ frame_alignment: 8 }) },
+        video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ frame_rule: { alignment: 8, offset: 1, round: 'nearest' } }) },
       });
 
       draft.update('workflow', 'txt2vid');
@@ -388,7 +391,7 @@ describe('draft store', () => {
     });
 
     it('aligns a reused frame count with the default video model when the named one has no defaults', () => {
-      const aligned = makeVideoDefaults({ frame_alignment: 8 });
+      const aligned = makeVideoDefaults({ frame_rule: { alignment: 8, offset: 1, round: 'nearest' } });
       const ctx = makeContext({ video_defaults: aligned, video_model_defaults: { 'ltx-v-0.9': aligned } });
 
       draft.update('workflow', 'txt2vid');
@@ -400,7 +403,7 @@ describe('draft store', () => {
 
     it('aligns a kept frame count that predates snapping', () => {
       const ctx = makeContext({
-        video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ frame_alignment: 8 }) },
+        video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ frame_rule: { alignment: 8, offset: 1, round: 'nearest' } }) },
       });
 
       draft.update('workflow', 'txt2vid');
@@ -413,7 +416,7 @@ describe('draft store', () => {
 
     it('aligns an off-grid configured default so Reset matches the hydrated count', () => {
       const ctx = makeContext({
-        video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ frame_count: 50, frame_alignment: 8 }) },
+        video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ frame_count: 50, frame_rule: { alignment: 8, offset: 1, round: 'nearest' } }) },
       });
 
       draft.update('workflow', 'txt2vid');
@@ -424,7 +427,7 @@ describe('draft store', () => {
     });
 
     it('takes fps and alignment together from the default video model for a model without defaults', () => {
-      const ctx = makeContext({ video_defaults: makeVideoDefaults({ fps: 30, frame_alignment: 8 }) });
+      const ctx = makeContext({ video_defaults: makeVideoDefaults({ fps: 30, frame_rule: { alignment: 8, offset: 1, round: 'nearest' } }) });
 
       expect(videoTimingFor(ctx, 'unknown-video')).toEqual({ fps: 30, frameRule: { alignment: 8, offset: 1, round: 'nearest' } });
       expect(videoTimingFor(ctx, 'ltx-v-0.9')).toEqual({ fps: 24, frameRule: { alignment: 1, offset: 1, round: 'nearest' } });
@@ -941,7 +944,7 @@ describe('extend', () => {
   const extendContext = (overrides: Partial<WorkspaceContext> = {}): WorkspaceContext => {
     const ctx = makeContext({
       video_models: [{ id: 'ltx-v-0.9', label: 'LTX Video', type: 'video' }, { id: 'ltx-2', label: 'LTX 2', type: 'video' }],
-      video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults(), 'ltx-2': makeVideoDefaults({ steps: 12, frame_alignment: 8 }) },
+      video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults(), 'ltx-2': makeVideoDefaults({ steps: 12, frame_rule: { alignment: 8, offset: 1, round: 'nearest' } }) },
       ...overrides,
     });
     ctx.workflow_contract.values = ['txt2img', 'img2img', 'txt2vid', 'img2vid', 'extend'];
@@ -1104,7 +1107,7 @@ describe('extend', () => {
 
   describe('hydrateFromContext', () => {
     it('keeps the new frames as a multiple of 8, not 8k+1', () => {
-      const ctx = extendContext({ video_defaults: makeVideoDefaults({ frame_alignment: 8 }), video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ frame_alignment: 8 }) } });
+      const ctx = extendContext({ video_defaults: makeVideoDefaults({ frame_rule: { alignment: 8, offset: 1, round: 'nearest' } }), video_model_defaults: { 'ltx-v-0.9': makeVideoDefaults({ frame_rule: { alignment: 8, offset: 1, round: 'nearest' } }) } });
       draft.patch({ extendFrames: 48 });
       draft.hydrateFromContext(ctx, null, { keepSettings: true });
       expect(draft.state.extendFrames).toBe(48);
@@ -1593,7 +1596,7 @@ describe('hydrateFromContext – keepChangedSettings', () => {
       video_models: [{ id: 'ltx-v-0.9', label: 'LTX Video', type: 'video' }, { id: 'ltx-2', label: 'LTX 2', type: 'video' }],
       video_model_defaults: {
         'ltx-v-0.9': makeVideoDefaults({ steps: 30, max_steps: null }),
-        'ltx-2': makeVideoDefaults({ steps: 8, max_steps: 8, frame_alignment: 8 }),
+        'ltx-2': makeVideoDefaults({ steps: 8, max_steps: 8, frame_rule: { alignment: 8, offset: 1, round: 'nearest' } }),
       },
       current_video_model: 'ltx-v-0.9',
     });
@@ -1636,8 +1639,8 @@ describe('hydrateFromContext – keepChangedSettings', () => {
         const ctx = makeContext({
           video_models: [{ id: 'ltx-2', label: 'LTX 2', type: 'video' }, { id: 'h3', label: 'MiniMax H3', type: 'video' }],
           video_model_defaults: {
-            'ltx-2': makeVideoDefaults({ steps: 8, max_steps: 8, frame_alignment: 8 }),
-            h3: makeVideoDefaults({ steps: 8, max_steps: 8, frame_count: 124, frame_alignment: 17, frame_rule: H3_RULE, step_options: [4, 8], extend_frame_step: 17, hidden_controls: ['low_memory'], ...h3 }),
+            'ltx-2': makeVideoDefaults({ steps: 8, max_steps: 8, frame_rule: { alignment: 8, offset: 1, round: 'nearest' } }),
+            h3: makeVideoDefaults({ steps: 8, max_steps: 8, frame_count: 124, frame_rule: H3_RULE, step_options: [4, 8], extend_frame_step: 17, hidden_controls: ['low_memory'], ...h3 }),
           },
           current_video_model: 'ltx-2',
         });
