@@ -6,7 +6,7 @@
   import { jobStore } from '$lib/state/job.svelte';
   import { downloadStore, type DownloadRequestResult } from '$lib/state/downloads.svelte';
   import { downloadStatusText } from '$lib/state/downloadProgress';
-  import { historyStore } from '$lib/state/history.svelte';
+  import { galleryStore } from '$lib/state/gallery.svelte';
   import { router } from '$lib/state/router.svelte';
   import { hold } from '$lib/actions/hold';
   import { canScrollToward, OWN_DRAG, pan, rubberBand, type PanEnd, type PanMove, type PanStart } from '$lib/actions/pan';
@@ -47,7 +47,7 @@
   import { confirmDeleteAsset } from '$lib/state/assetActions';
   import ControlsSidebar from './ControlsSidebar.svelte';
   import ComposePane from './ComposePane.svelte';
-  import HistoryStrip from './HistoryStrip.svelte';
+  import GalleryStrip from './GalleryStrip.svelte';
   import SettingsStrip from './SettingsStrip.svelte';
   import SettingPopover from './SettingPopover.svelte';
   import PresetMenu from './PresetMenu.svelte';
@@ -155,7 +155,7 @@
     loadError ? 'error'
       : hasCompletedOutputs ? 'outputs'
       : jobStore.current && (jobStore.isRunning || (jobOutputs.length > 0 && jobStore.current.status !== 'completed')) ? 'job'
-      : historyStore.assets.length > 0 ? 'latest'
+      : galleryStore.assets.length > 0 ? 'latest'
       : 'empty'
   );
   // The stage steps through history in place: the viewed asset is tracked by id, so new outputs arriving at the
@@ -163,21 +163,21 @@
   let viewedId = $state<string | null>(null);
   const viewedIndex = $derived.by(() => {
     if (viewedId === null) return 0;
-    const index = historyStore.assets.findIndex((asset) => asset.id === viewedId);
+    const index = galleryStore.assets.findIndex((asset) => asset.id === viewedId);
     return index < 0 ? 0 : index;
   });
-  const viewedAsset = $derived<GalleryAsset | null>(historyStore.assets[viewedIndex] ?? null);
+  const viewedAsset = $derived<GalleryAsset | null>(galleryStore.assets[viewedIndex] ?? null);
   const atLatest = $derived(viewedIndex === 0);
-  const historyTotal = $derived(historyStore.totalCount ?? historyStore.assets.length);
+  const historyTotal = $derived(galleryStore.totalCount ?? galleryStore.assets.length);
   const STEP_NEAR_END = 3;
 
   /** Show the asset `delta` places older (positive) or newer (negative) than the viewed one, loading more history near the end. */
   function stepView(delta: number): void {
-    const assets = historyStore.assets;
+    const assets = galleryStore.assets;
     if (assets.length === 0) return;
     const next = Math.min(assets.length - 1, Math.max(0, viewedIndex + delta));
     viewedId = next === 0 ? null : assets[next].id;
-    if (next >= assets.length - STEP_NEAR_END && historyStore.hasMore) void historyStore.loadMore();
+    if (next >= assets.length - STEP_NEAR_END && galleryStore.hasMore) void galleryStore.loadMore();
   }
 
   function showLatest(): void {
@@ -211,7 +211,7 @@
   let stageSettling = $state(false);
   let settleTimer: ReturnType<typeof setTimeout> | undefined;
   const stageMoves = $derived<StageMoves>({
-    older: canStepStage && previewView !== 'empty' && (viewedIndex < historyStore.assets.length - 1 || historyStore.hasMore || previewView === 'outputs'),
+    older: canStepStage && previewView !== 'empty' && (viewedIndex < galleryStore.assets.length - 1 || galleryStore.hasMore || previewView === 'outputs'),
     newer: canStepStage && previewView === 'latest' && !atLatest,
     gallery: compact && previewView !== 'error',
   });
@@ -273,7 +273,7 @@
   // A reference path that points at a known asset can show that asset as its thumbnail.
   const referencePreviewUrl = $derived(
     draft.state.referenceImagePath
-      ? (historyStore.assets.find((asset) => asset.file_path === draft.state.referenceImagePath)?.url ?? null)
+      ? (galleryStore.assets.find((asset) => asset.file_path === draft.state.referenceImagePath)?.url ?? null)
       : null
   );
   // Keep the preview occupied until the latest image has painted. Videos show at once:
@@ -292,7 +292,7 @@
     void latestLoading;
     untrack(rememberMascotSpots);
   });
-  const lookingForHistory = $derived(!historyChecked || historyStore.loading);
+  const lookingForHistory = $derived(!historyChecked || galleryStore.loading);
   const mascotMood = $derived(pickMascotMood({
     job: jobStore.current,
     reaction,
@@ -307,7 +307,7 @@
   const lightboxAssets = $derived<GalleryAsset[]>(
     lightboxMode === 'completed-output'
       ? jobOutputs
-      : historyStore.assets
+      : galleryStore.assets
   );
 
   // Surface successful batch items in History as soon as their SSE event lands.
@@ -315,7 +315,7 @@
   $effect(() => {
     const outputs = jobOutputs;
     if (jobStore.isRunning && outputs.length > 0) {
-      untrack(() => historyStore.mergeOutputs(outputs));
+      untrack(() => galleryStore.mergeOutputs(outputs));
     }
   });
 
@@ -423,7 +423,7 @@
   const draftModel = $derived(draft.state.model);
   const loraGroups = $derived.by(() => {
     const model = context ? modelLoraFamily(context, selectedModel?.id ?? draftModel) : null;
-    return groupLorasForModel(loraOptions, model, recentLoraNames(historyStore.assets, model?.family ?? null, loraOptions));
+    return groupLorasForModel(loraOptions, model, recentLoraNames(galleryStore.assets, model?.family ?? null, loraOptions));
   });
   const loraMenuItems = $derived.by<ActionMenuEntry[]>(() => {
     const { main, other } = loraGroups;
@@ -518,7 +518,7 @@
   async function handleJobComplete(): Promise<void> {
     react('cheerful');
     refreshModelStatus();
-    await historyStore.refreshHistory();
+    await galleryStore.refresh();
     addToast('Generation complete', 'success');
   }
 
@@ -532,7 +532,7 @@
     react('surprised');
     refreshModelStatus();
     addToast('Lost track of the job. Refreshed the gallery with any results.', 'info');
-    await historyStore.refreshHistory();
+    await galleryStore.refresh();
   }
 
   function handleJobCancelled(): void {
@@ -542,7 +542,7 @@
   }
 
   function openHistoryViewer(asset: GalleryAsset, trigger: HTMLElement): void {
-    const index = historyStore.assets.findIndex((item) => item.id === asset.id);
+    const index = galleryStore.assets.findIndex((item) => item.id === asset.id);
     if (index < 0) return;
     lightboxMode = 'history';
     lightboxIndex = index;
@@ -711,7 +711,7 @@
     try {
       await deleteAsset(asset.id);
       jobStore.removeOutputs([asset.id]);
-      historyStore.removeAssets([asset.id]);
+      galleryStore.removeAssets([asset]);
       // A reference pointing at the deleted file would fail the next run.
       if (asset.file_path && draft.state.referenceImagePath === asset.file_path) draft.update('referenceImagePath', null);
       addToast('Deleted', 'success');
@@ -831,7 +831,7 @@
       context = ctx;
       workflows = ctx.workflow_contract.values;
       if (ctx.history_assets.length > 0) {
-        historyStore.seedHistory(ctx.history_assets);
+        galleryStore.seed(ctx.history_assets);
       }
       if (urlParams.workflow) {
         draft.loadFromUrl({ workflow: urlParams.workflow }, ctx);
@@ -879,7 +879,7 @@
 
         historyTimer = setTimeout(() => {
           if (cancelled) return;
-          void historyStore.refreshHistory().finally(() => {
+          void galleryStore.refresh().finally(() => {
             if (!cancelled) historyChecked = true;
           });
         }, 0);
@@ -1322,7 +1322,7 @@
             <button type="button" class="ui-btn ui-btn-sm" onclick={showLatest}>Latest</button>
           </span>
         {:else}
-          <span class="text-meta text-text-muted">{reviewing ? 'Review' : jobStore.isRunning ? 'Generating…' : hasCompletedOutputs || historyStore.assets.length ? 'Latest output' : 'Ready'}</span>
+          <span class="text-meta text-text-muted">{reviewing ? 'Review' : jobStore.isRunning ? 'Generating…' : hasCompletedOutputs || galleryStore.assets.length ? 'Latest output' : 'Ready'}</span>
         {/if}
       </div>
       {#if compact && previewView === 'latest' && !atLatest}
@@ -1346,7 +1346,7 @@
           <span class="gallery-pull" class:ready={galleryPullReady(stageDrag.offset)} style:opacity={Math.min(1, -stageDrag.offset / GALLERY_PULL_PX)} aria-hidden="true">
             <Icon name="grid" size={14} />{galleryPullReady(stageDrag.offset) ? 'Release for the Gallery' : 'Gallery'}
           </span>
-        {:else if stageDrag?.axis === 'x' && historyStore.assets.length > 0}
+        {:else if stageDrag?.axis === 'x' && galleryStore.assets.length > 0}
           <span class="gallery-pull" aria-hidden="true">{viewedIndex + 1} of {historyTotal}</span>
         {/if}
         {#if loadError}
@@ -1452,7 +1452,7 @@
           <button type="button" class="stage-nav prev ui-btn ui-btn-icon" aria-label="Newer output" disabled={atLatest} onclick={() => stepView(-1)}>
             <Icon name="chevleft" size={16} />
           </button>
-          <button type="button" class="stage-nav next ui-btn ui-btn-icon" aria-label="Older output" disabled={viewedIndex >= historyStore.assets.length - 1 && !historyStore.hasMore} onclick={() => stepView(1)}>
+          <button type="button" class="stage-nav next ui-btn ui-btn-icon" aria-label="Older output" disabled={viewedIndex >= galleryStore.assets.length - 1 && !galleryStore.hasMore} onclick={() => stepView(1)}>
             <Icon name="chevright" size={16} />
           </button>
           <!-- Side padding keeps wide media clear of the docked mascot. -->
@@ -1510,13 +1510,13 @@
       </div>
 
       {#if !compact}
-        <HistoryStrip
-          assets={historyStore.assets}
-          loading={historyStore.loading}
-          totalCount={historyStore.totalCount}
-          hasMore={historyStore.hasMore}
-          loadingMore={historyStore.loadingMore}
-          onloadmore={() => void historyStore.loadMore()}
+        <GalleryStrip
+          assets={galleryStore.assets}
+          loading={galleryStore.loading}
+          totalCount={galleryStore.totalCount}
+          hasMore={galleryStore.hasMore}
+          loadingMore={galleryStore.loadingMore}
+          onloadmore={() => void galleryStore.loadMore()}
           {deletingIds}
           onpreview={openHistoryViewer}
           onreuse={reuseAsset}
@@ -1547,10 +1547,10 @@
             quantizeOptions={supportsQuantize ? quantizeOptions : null}
             {imageFile}
             {referencePreviewUrl}
-            lastSeed={historyStore.assets[0]?.seed ?? null}
+            lastSeed={galleryStore.assets[0]?.seed ?? null}
             onImageFileChange={(f) => { imageFile = f; submitError = null; }}
             onModelChange={switchModel}
-            onUseLatestAsReference={() => { const latest = historyStore.assets[0]; if (latest) useAsReference(latest, draft.state.workflow === 'img2vid' ? 'video' : 'image'); activeChip = null; }}
+            onUseLatestAsReference={() => { const latest = galleryStore.assets[0]; if (latest) useAsReference(latest, draft.state.workflow === 'img2vid' ? 'video' : 'image'); activeChip = null; }}
             onclose={() => { activeChip = null; }}
           />
         {/if}
@@ -1629,7 +1629,7 @@
           submitError={generateError}
           {imageFile}
           {referencePreviewUrl}
-          lastSeed={historyStore.assets[0]?.seed ?? null}
+          lastSeed={galleryStore.assets[0]?.seed ?? null}
           onImageFileChange={(f) => { imageFile = f; submitError = null; }}
         />
       </Sheet>
@@ -1647,7 +1647,7 @@
         submitError={generateError}
         {imageFile}
         {referencePreviewUrl}
-        lastSeed={historyStore.assets[0]?.seed ?? null}
+        lastSeed={galleryStore.assets[0]?.seed ?? null}
         onImageFileChange={(f) => { imageFile = f; submitError = null; }}
         oncopycli={copyCliCommand}
       />
@@ -1671,11 +1671,11 @@
   assets={lightboxAssets}
   currentIndex={lightboxIndex}
   open={lightboxOpen}
-  setLabel={lightboxMode === 'completed-output' ? 'This run' : 'History'}
+  setLabel={lightboxMode === 'completed-output' ? 'This run' : 'Gallery'}
   {deletingIds}
   onclose={closeLightbox}
   onnavigate={navigateLightbox}
-  onnearend={() => { if (lightboxMode === 'history') void historyStore.loadMore(); }}
+  onnearend={() => { if (lightboxMode === 'history') void galleryStore.loadMore(); }}
   onreuse={reuseAsset}
   onreference={useAsReference}
   onextend={extendAsset}

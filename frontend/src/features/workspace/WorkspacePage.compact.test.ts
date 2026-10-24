@@ -3,7 +3,7 @@ import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/inde
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { draft } from '$lib/state/draft.svelte';
-import { historyStore } from '$lib/state/history.svelte';
+import { galleryStore } from '$lib/state/gallery.svelte';
 import { jobStore } from '$lib/state/job.svelte';
 import { workspaceMemory } from '$lib/state/pageMemory';
 import type { JobSnapshot, WorkspaceContext } from '$lib/types';
@@ -40,7 +40,7 @@ describe('WorkspacePage on a phone', () => {
     sessionStorage.clear();
     draft.reset();
     workspaceMemory.forget();
-    historyStore.seedHistory([]);
+    galleryStore.reset();
     jobStore.clearJob();
     workspaceApiMocks.getWorkspaceCoreContext.mockReset();
     target = document.createElement('div');

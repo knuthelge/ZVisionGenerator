@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { jobStore } from '$lib/state/job.svelte';
 import { router } from '$lib/state/router.svelte';
-import type { AppConfig, GalleryPage, WorkspaceContext } from '$lib/types';
+import type { AppConfig, WorkspaceContext } from '$lib/types';
 
 const configApiMocks = vi.hoisted(() => ({
   getConfig: vi.fn<() => Promise<AppConfig>>(),
@@ -14,7 +14,6 @@ const configApiMocks = vi.hoisted(() => ({
 const workspaceApiMocks = vi.hoisted(() => ({
   getWorkspaceContext: vi.fn<() => Promise<WorkspaceContext>>(),
   getWorkspaceCoreContext: vi.fn<() => Promise<WorkspaceContext>>(),
-  getHistory: vi.fn<(page?: number) => Promise<GalleryPage>>(),
 }));
 
 vi.mock('$lib/api/config', () => ({
@@ -28,7 +27,6 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
     ...actual,
     getWorkspaceContext: workspaceApiMocks.getWorkspaceContext,
     getWorkspaceCoreContext: workspaceApiMocks.getWorkspaceCoreContext,
-    getHistory: workspaceApiMocks.getHistory,
   };
 });
 
@@ -83,7 +81,6 @@ describe('App startup routing', () => {
     configApiMocks.updateConfig.mockReset();
     workspaceApiMocks.getWorkspaceContext.mockReset();
     workspaceApiMocks.getWorkspaceCoreContext.mockReset();
-    workspaceApiMocks.getHistory.mockReset();
     configApiMocks.getConfig.mockResolvedValue(makeConfig('config'));
     target = document.createElement('div');
     document.body.appendChild(target);

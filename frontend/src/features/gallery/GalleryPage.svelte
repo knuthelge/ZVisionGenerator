@@ -6,7 +6,7 @@
   import { router } from '$lib/state/router.svelte';
   import { addToast, dismissToast } from '$lib/state/toasts.svelte';
   import { getGallery, deleteAsset } from '$lib/api/gallery';
-  import { historyStore } from '$lib/state/history.svelte';
+  import { galleryStore, type GalleryQuery, type MediaFilter, type SortOrder } from '$lib/state/gallery.svelte';
   import { jobStore } from '$lib/state/job.svelte';
   import { draft } from '$lib/state/draft.svelte';
   import { extendParams, referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
@@ -26,17 +26,21 @@
     if (!compact) selectMode = false;
   });
 
-  let assets = $state<GalleryAsset[]>([]);
-  let page = $state(1);
-  let totalPages = $state(1);
-  let totalCount = $state(0);
   let loading = $state(true);
   let loadingMore = $state(false);
   let pageOnePending = $state(false);
   let error = $state<string | null>(null);
 
-  let mediaFilter = $state<'all' | 'image' | 'video'>('all');
-  let sortOrder = $state<'newest' | 'oldest'>('newest');
+  let mediaFilter = $state<MediaFilter>('all');
+  let sortOrder = $state<SortOrder>('newest');
+  // The list is the gallery store's view of the last query that loaded: shared with the Workspace strip, and kept
+  // across visits. A view whose replacement failed keeps showing the previous one.
+  let shownQuery = $state<GalleryQuery>({ filter: 'all', sort: 'newest' });
+  const view = $derived(galleryStore.view(shownQuery));
+  const assets = $derived(view.assets);
+  const page = $derived(view.page);
+  const totalPages = $derived(view.totalPages);
+  const totalCount = $derived(view.totalCount ?? 0);
   let selected = $state<Set<string>>(new Set());
   let deletingIds = $state<Set<string>>(new Set());
   let bulkDeleteRuns = $state(0);
@@ -79,26 +83,27 @@
 
     // Pages remember: the view a previous visit left is drawn at once, scrolled where it was, and page one refreshes
     // behind it; the first visit loads into placeholder tiles.
-    const remembered = galleryMemory.get();
-    if (remembered) {
-      assets = remembered.assets;
-      page = remembered.page;
-      totalPages = remembered.totalPages;
-      totalCount = remembered.totalCount;
-      mediaFilter = remembered.filter;
-      sortOrder = remembered.sort;
+    const visit = galleryMemory.get();
+    if (visit) {
+      mediaFilter = visit.filter;
+      sortOrder = visit.sort;
+      shownQuery = { filter: visit.filter, sort: visit.sort };
+    }
+    // The store may already hold this view: from the last visit, or the strip's list on the first one.
+    const known = galleryStore.view({ filter: mediaFilter, sort: sortOrder }).assets.length > 0;
+    if (known) {
       loading = false;
-      void tick().then(() => { if (scrollRegion) scrollRegion.scrollTop = remembered.scrollTop; });
+      void tick().then(() => { if (scrollRegion && visit) scrollRegion.scrollTop = visit.scrollTop; });
     }
 
     _viewGeneration += 1;
-    void loadPageOne(mediaFilter, sortOrder, _viewGeneration, _mutationRevision, true, false, remembered !== null);
+    void loadPageOne(mediaFilter, sortOrder, _viewGeneration, _mutationRevision, true, false, known);
     document.addEventListener('keydown', handleGridKeydown);
 
     return () => {
       document.removeEventListener('keydown', handleGridKeydown);
       if (error || loading) galleryMemory.forget();
-      else galleryMemory.set({ assets, page, totalPages, totalCount, filter: mediaFilter, sort: sortOrder, scrollTop });
+      else galleryMemory.set({ filter: mediaFilter, sort: sortOrder, scrollTop });
       // Invalidate every request still awaiting a response after unmount.
       _viewGeneration += 1;
       _mutationRevision += 1;
@@ -143,8 +148,8 @@
   }
 
   async function loadPageOne(
-    filter: string,
-    sort: string,
+    filter: MediaFilter,
+    sort: SortOrder,
     viewGeneration: number,
     mutationRevision: number,
     restorePendingSelection = false,
@@ -167,13 +172,16 @@
       const pageOne = result.assets.filter((asset) => !_successfullyDeletedIds.has(asset.id));
       // A remembered view keeps the pages loaded after page one, so the grid stays where it was scrolled.
       const merged = keepLoaded ? keepLoadedTail(pageOne, assets) : pageOne;
-      page = merged.length > pageOne.length ? page : result.page;
-      assets = merged;
-      totalPages = result.total_pages;
       const staleDeletedCount = returnedDeletedAssets.filter(
         (asset) => filter === 'all' || asset.media_type === filter
       ).length;
-      totalCount = Math.max(0, result.total_count - staleDeletedCount);
+      galleryStore.setView({ filter, sort }, {
+        assets: merged,
+        page: merged.length > pageOne.length ? page : result.page,
+        totalPages: result.total_pages,
+        totalCount: Math.max(0, result.total_count - staleDeletedCount),
+      });
+      shownQuery = { filter, sort };
       const visibleIds = new Set(assets.map((asset) => asset.id));
       selected = new Set(Array.from(selected).filter((id) => visibleIds.has(id)));
 
@@ -229,17 +237,16 @@
       if (expectedPage !== page + 1) return;
       const returnedDeletedAssets = result.assets.filter((asset) => _successfullyDeletedIds.has(asset.id));
       const loadedIds = new Set(assets.map((asset) => asset.id));
-      assets = [
-        ...assets,
-        ...result.assets.filter((asset) => !_successfullyDeletedIds.has(asset.id) && !loadedIds.has(asset.id))
-      ];
       if (rereadLastPage) _pagesShifted = false;
-      page = result.page;
-      totalPages = result.total_pages;
       const staleDeletedCount = returnedDeletedAssets.filter(
         (asset) => requestedFilter === 'all' || asset.media_type === requestedFilter
       ).length;
-      totalCount = Math.max(0, result.total_count - staleDeletedCount);
+      galleryStore.setView({ filter: requestedFilter, sort: requestedSort }, {
+        assets: [...assets, ...result.assets.filter((asset) => !_successfullyDeletedIds.has(asset.id) && !loadedIds.has(asset.id))],
+        page: result.page,
+        totalPages: result.total_pages,
+        totalCount: Math.max(0, result.total_count - staleDeletedCount),
+      });
     } catch {
       // ignore load-more errors silently
     } finally {
@@ -378,22 +385,17 @@
     for (const asset of newlyDeleted) _successfullyDeletedIds.add(asset.id);
 
     const deletedIds = new Set(newlyDeleted.map((asset) => asset.id));
-    historyStore.removeAssets(deletedIds);
+    // The store takes them out of every list and count: this view, the strip, and any other query loaded.
+    galleryStore.removeAssets(newlyDeleted);
     jobStore.removeOutputs(deletedIds);
     // A workspace reference pointing at a deleted file would fail the next run.
     if (newlyDeleted.some((asset) => asset.file_path && asset.file_path === draft.state.referenceImagePath)) {
       draft.update('referenceImagePath', null);
     }
-    assets = assets.filter((asset) => !deletedIds.has(asset.id));
     const visibleIds = new Set(assets.map((asset) => asset.id));
     selected = new Set(
       Array.from(selected).filter((id) => !deletedIds.has(id) && visibleIds.has(id))
     );
-
-    const matchingCount = newlyDeleted.filter(
-      (asset) => mediaFilter === 'all' || asset.media_type === mediaFilter
-    ).length;
-    totalCount = Math.max(0, totalCount - matchingCount);
 
     // The viewer moves on to the neighbouring asset; with nothing left it closes.
     if (selectedAsset && deletedIds.has(selectedAsset.id)) {

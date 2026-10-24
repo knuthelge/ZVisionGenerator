@@ -1,4 +1,5 @@
-import type { AppConfig, GalleryAsset, ModelInventory, WorkspaceContext } from '$lib/types';
+import type { AppConfig, ModelInventory, WorkspaceContext } from '$lib/types';
+import type { MediaFilter, SortOrder } from '$lib/state/gallery.svelte';
 
 /**
  * A value one visit of a page loads and the next visit draws at once, refreshing it behind the frame.
@@ -23,21 +24,14 @@ function remembered<T>(): Remembered<T> {
   };
 }
 
-export type MediaFilter = 'all' | 'image' | 'video';
-export type SortOrder = 'newest' | 'oldest';
-
-/** What the Gallery showed when it was left: the loaded pages, their query, and how far it was scrolled. */
-export interface GalleryView {
-  assets: GalleryAsset[];
-  page: number;
-  totalPages: number;
-  totalCount: number;
+/** How the Gallery page was left: its query and how far it was scrolled. The list itself lives in the gallery store. */
+export interface GalleryVisit {
   filter: MediaFilter;
   sort: SortOrder;
   scrollTop: number;
 }
 
 export const workspaceMemory = remembered<WorkspaceContext>();
-export const galleryMemory = remembered<GalleryView>();
+export const galleryMemory = remembered<GalleryVisit>();
 export const inventoryMemory = remembered<ModelInventory>();
 export const configMemory = remembered<AppConfig>();

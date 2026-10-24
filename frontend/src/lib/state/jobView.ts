@@ -523,7 +523,7 @@ export function outcome(job: ActiveJobState): { text: string; error: boolean; sa
   let text = job.message;
   if (job.status === 'cancelled' && !job.message.startsWith('Removed')) text = DOWNLOAD_STOP_TEXT[job.downloadStop ?? ''] ?? 'You stopped the job.';
   if (job.status === 'unknown') text = 'The server restarted and no longer has this job.';
-  const savedText = saved === 0 ? 'Nothing saved' : total > 1 ? `${saved} of ${total} saved to History` : 'Saved to History';
+  const savedText = saved === 0 ? 'Nothing saved' : total > 1 ? `${saved} of ${total} saved to the Gallery` : 'Saved to the Gallery';
   return { text, error: job.status === 'failed', saved: total > 1 && notRun > 0 ? `${savedText} · ${notRun} not run` : savedText };
 }
 

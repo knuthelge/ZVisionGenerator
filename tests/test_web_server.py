@@ -1788,8 +1788,8 @@ def test_media_and_delete_reject_invalid_asset_ids(monkeypatch, tmp_path):
     assert valid_asset.exists()
 
 
-def test_gallery_and_history_exclude_reference_upload_staging(monkeypatch, tmp_path):
-    """Temporary Web upload staging should not appear in user-visible gallery/history inventory."""
+def test_gallery_excludes_reference_upload_staging(monkeypatch, tmp_path):
+    """Temporary Web upload staging should not appear in the user-visible gallery."""
     web_config = _make_web_config()
     web_config.output_dir = str(tmp_path)
     monkeypatch.setattr(web_server, "load_web_config", lambda: web_config)
@@ -1802,20 +1802,16 @@ def test_gallery_and_history_exclude_reference_upload_staging(monkeypatch, tmp_p
 
     with TestClient(web_server.app) as client:
         gallery_response = client.get("/api/gallery")
-        history_response = client.get("/api/history")
         workspace_response = client.get("/api/workspace")
         staged_media_response = client.get("/media/.web_uploads/reference.png")
 
     assert gallery_response.status_code == 200
-    assert history_response.status_code == 200
     assert workspace_response.status_code == 200
     assert staged_media_response.status_code == 404
 
     gallery_ids = [asset["id"] for asset in gallery_response.json()["assets"]]
-    history_ids = [asset["id"] for asset in history_response.json()["assets"]]
     workspace_history_ids = [asset["id"] for asset in workspace_response.json()["history_assets"]]
     assert gallery_ids == ["published.png"]
-    assert history_ids == ["published.png"]
     assert workspace_history_ids == ["published.png"]
     assert [asset.id for asset in list_gallery_assets(str(tmp_path))] == ["published.png"]
 

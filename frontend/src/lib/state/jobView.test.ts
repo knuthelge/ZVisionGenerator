@@ -224,7 +224,7 @@ describe('jobView', () => {
   it('counts what an ended job saved and what never ran', () => {
     const asset = { id: 'a' } as ActiveJobState['outputs'][number];
     expect(outcome(batch({ status: 'failed', message: 'CUDA out of memory.', outputs: Array(7).fill(asset) }))).toEqual({
-      text: 'CUDA out of memory.', error: true, saved: '7 of 24 saved to History · 16 not run',
+      text: 'CUDA out of memory.', error: true, saved: '7 of 24 saved to the Gallery · 16 not run',
     });
     expect(outcome(job({ status: 'cancelled', message: 'Job stopped.' }))).toEqual({ text: 'You stopped the job.', error: false, saved: 'Nothing saved' });
     expect(outcome(batch())).toBeNull();

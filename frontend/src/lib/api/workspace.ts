@@ -41,10 +41,6 @@ export function clearQueue(): Promise<{ cancelled: string[] }> {
   return api.delete<{ cancelled: string[] }>('/api/jobs/queue');
 }
 
-export function getHistory(page: number = 1): Promise<GalleryPage> {
-  return api.get<GalleryPage>(`/api/history?page=${page}`);
-}
-
 export function parseUrlPrefill(): Record<string, string> {
   const params: Record<string, string> = {};
   // Hash takes precedence over query string (per router design)

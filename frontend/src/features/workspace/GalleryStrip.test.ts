@@ -4,7 +4,7 @@ import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/inde
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { GalleryAsset } from '$lib/types';
-import HistoryStrip from './HistoryStrip.svelte';
+import GalleryStrip from './GalleryStrip.svelte';
 
 class MockIntersectionObserver {
   static instances: MockIntersectionObserver[] = [];
@@ -59,10 +59,10 @@ afterEach(async () => {
 });
 
 function render(props: Record<string, unknown>): void {
-  app = flushSync(() => mount(HistoryStrip, { target, props: { assets: [makeAsset('a.png')], ...handlers, ...props } }));
+  app = flushSync(() => mount(GalleryStrip, { target, props: { assets: [makeAsset('a.png')], ...handlers, ...props } }));
 }
 
-describe('HistoryStrip infinite scroll', () => {
+describe('GalleryStrip infinite scroll', () => {
   it('loads more when the end of the strip comes into view', () => {
     const onloadmore = vi.fn();
     render({ hasMore: true, totalCount: 40, onloadmore });
@@ -85,7 +85,7 @@ describe('HistoryStrip infinite scroll', () => {
     expect(MockIntersectionObserver.instances).toHaveLength(0);
     unmount(app);
 
-    app = flushSync(() => mount(HistoryStrip, { target, props: { assets: [makeAsset('a.png')], ...handlers, hasMore: true, loadingMore: true } }));
+    app = flushSync(() => mount(GalleryStrip, { target, props: { assets: [makeAsset('a.png')], ...handlers, hasMore: true, loadingMore: true } }));
     expect(MockIntersectionObserver.instances).toHaveLength(0);
   });
 });

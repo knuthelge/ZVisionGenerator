@@ -13,7 +13,7 @@ import { firstRun } from './firstRun.svelte';
 import { clipMemory } from '$lib/state/clipMemory.svelte';
 import { extendInspection } from '$lib/state/extendInspection.svelte';
 import { legacySource, sceneSource, sourceInfo } from '$lib/state/extend.fixtures';
-import { historyStore } from '$lib/state/history.svelte';
+import { galleryStore } from '$lib/state/gallery.svelte';
 import { jobStore } from '$lib/state/job.svelte';
 import { hasPendingJobSettings, requestJobSettings } from '$lib/state/pendingJobSettings.svelte';
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
@@ -27,7 +27,6 @@ const workspaceApiMocks = vi.hoisted(() => ({
   getWorkspaceCoreContext: vi.fn<() => Promise<WorkspaceContext>>(),
   submitGenerate: vi.fn<(formData: FormData) => Promise<JobContext>>(),
   getJobSnapshot: vi.fn<(jobId: string) => Promise<JobSnapshot>>(),
-  getHistory: vi.fn<(page?: number) => Promise<GalleryPage>>(),
   parseUrlPrefill: vi.fn<() => Record<string, string>>(),
   listJobs: vi.fn(async () => ({ active_job: null as JobSnapshot | null, queued_jobs: [] as JobSnapshot[] })),
   clearQueue: vi.fn(async () => ({ cancelled: [] as string[] })),
@@ -92,7 +91,6 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
     getWorkspaceCoreContext: workspaceApiMocks.getWorkspaceCoreContext,
     submitGenerate: workspaceApiMocks.submitGenerate,
     getJobSnapshot: workspaceApiMocks.getJobSnapshot,
-    getHistory: workspaceApiMocks.getHistory,
     parseUrlPrefill: workspaceApiMocks.parseUrlPrefill,
     listJobs: workspaceApiMocks.listJobs,
     clearQueue: workspaceApiMocks.clearQueue,
@@ -103,12 +101,13 @@ vi.mock('$lib/api/workspace', async (importOriginal) => {
 
 
 const galleryApiMocks = vi.hoisted(() => ({
+  getGallery: vi.fn<(page?: number, filter?: string, sort?: string) => Promise<GalleryPage>>(),
   deleteAsset: vi.fn<(assetId: string) => Promise<void>>(),
 }));
 
 vi.mock('$lib/api/gallery', async (importOriginal) => {
   const actual = await importOriginal<typeof import('$lib/api/gallery')>();
-  return { ...actual, deleteAsset: galleryApiMocks.deleteAsset };
+  return { ...actual, getGallery: galleryApiMocks.getGallery, deleteAsset: galleryApiMocks.deleteAsset };
 });
 
 const enhanceApiMocks = vi.hoisted(() => ({
@@ -165,7 +164,7 @@ beforeEach(() => {
   workspaceMemory.forget();
   extendInspection.reset();
   clipMemory.reset();
-  historyStore.seedHistory([]);
+  galleryStore.reset();
   jobStore.clearJob();
   downloadStore.reset();
   for (const mock of Object.values(presetApiMocks)) mock.mockReset();
@@ -178,7 +177,7 @@ beforeEach(() => {
   toasts.splice(0, toasts.length);
   for (const mock of [
     workspaceApiMocks.getWorkspaceContext, workspaceApiMocks.getWorkspaceCoreContext, workspaceApiMocks.submitGenerate, workspaceApiMocks.getJobSnapshot,
-    workspaceApiMocks.getHistory, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.listJobs, browseApiMocks.listDirectory, browseApiMocks.browsePlaces,
+    galleryApiMocks.getGallery, workspaceApiMocks.parseUrlPrefill, workspaceApiMocks.listJobs, browseApiMocks.listDirectory, browseApiMocks.browsePlaces,
     promptFileApiMocks.inspectPromptFile, promptFileApiMocks.writePromptFile, promptFileApiMocks.appendPromptEntry, promptFileApiMocks.createPromptFile, extendApiMocks.inspectExtendSource, enhanceApiMocks.enhancePrompt,
     videoMemoryApiMocks.checkVideoMemoryFit, galleryApiMocks.deleteAsset,
   ]) mock.mockReset();
@@ -186,7 +185,7 @@ beforeEach(() => {
   workspaceApiMocks.cancelJob.mockClear();
   workspaceApiMocks.listJobs.mockResolvedValue({ active_job: null, queued_jobs: [] });
   workspaceApiMocks.parseUrlPrefill.mockReturnValue({});
-  workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage());
+  galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage());
   target = document.createElement('div');
   document.body.appendChild(target);
 });
@@ -572,13 +571,13 @@ describe('WorkspacePage', () => {
 
   it('hydrates workspace authority first, then loads history after mount', async () => {
     const asset = makeAsset({ id: 'out/deferred.png', url: '/media/out/deferred.png', filename: 'deferred.png' });
-    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage([asset]));
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([asset]));
 
     await mountWorkspace(makeContext({ history_assets: [] }));
 
     expect(workspaceApiMocks.getWorkspaceCoreContext).toHaveBeenCalledTimes(1);
     expect(workspaceApiMocks.getWorkspaceContext).not.toHaveBeenCalled();
-    expect(workspaceApiMocks.getHistory).toHaveBeenCalledWith(1);
+    expect(galleryApiMocks.getGallery).toHaveBeenCalledWith(1, 'all', 'newest');
     expect(target.querySelector(`button[aria-label="View ${asset.filename}"]`)).not.toBeNull();
   });
 
@@ -599,7 +598,7 @@ describe('WorkspacePage', () => {
 
   it('keeps the mascot on stage until the latest output paints, then docks it', async () => {
     const asset = makeAsset({ id: 'out/latest.png', url: '/media/out/latest.png', filename: 'latest.png' });
-    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage([asset]));
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([asset]));
 
     await mountWorkspace(makeContext({ history_assets: [asset] }));
 
@@ -621,7 +620,7 @@ describe('WorkspacePage', () => {
       () => new Promise<WorkspaceContext>((resolve) => { resolveContext = resolve; })
     );
     let resolveHistory!: (page: ReturnType<typeof makeGalleryPage>) => void;
-    workspaceApiMocks.getHistory.mockImplementation(
+    galleryApiMocks.getGallery.mockImplementation(
       () => new Promise((resolve) => { resolveHistory = resolve; })
     );
 
@@ -645,7 +644,7 @@ describe('WorkspacePage', () => {
 
   it('shows the latest video immediately without waiting for load events', async () => {
     const asset = makeAsset({ id: 'out/latest.mp4', url: '/media/out/latest.mp4', filename: 'latest.mp4', media_type: 'video' });
-    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage([asset]));
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([asset]));
 
     await mountWorkspace(makeContext({ history_assets: [asset] }));
 
@@ -2754,7 +2753,7 @@ describe('WorkspacePage', () => {
     const actions = () => Array.from(picker()?.querySelectorAll('[data-action]') ?? []).map((el) => el.getAttribute('data-action'));
 
     function loraContext(loras: WorkspaceContext['loras'], assets: GalleryAsset[] = []): WorkspaceContext {
-      workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage(assets));
+      galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage(assets));
       const context = makeContext();
       context.image_model_defaults = { ...context.image_model_defaults, zit: makeImageDefaults({ family: 'zimage' }) };
       context.loras = loras;
@@ -2988,7 +2987,7 @@ describe('WorkspacePage', () => {
 
     expect(target.querySelector('button[aria-label="View first.png"]')).not.toBeNull();
     expect(target.querySelector('button[aria-label="View second.png"]')).not.toBeNull();
-    expect(historyStore.assets.map((item) => item.id)).toEqual([secondAsset.id, firstAsset.id]);
+    expect(galleryStore.assets.map((item) => item.id)).toEqual([secondAsset.id, firstAsset.id]);
   });
 
   it('restores an active job from the backend workspace snapshot on mount', async () => {
@@ -3080,13 +3079,13 @@ describe('WorkspacePage', () => {
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.textContent).toContain('Add to queue');
 
-    workspaceApiMocks.getHistory.mockClear();
+    galleryApiMocks.getGallery.mockClear();
     source.emit('job_completed', { type: 'job_completed', job_id: 'job-remount', total_runs: 1, outputs: [] });
     await settle();
 
     expect(jobStore.current?.status).toBe('completed');
     expect(source.closeCalls).toBe(1);
-    expect(workspaceApiMocks.getHistory).toHaveBeenCalledOnce();
+    expect(galleryApiMocks.getGallery).toHaveBeenCalledOnce();
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.disabled).toBe(false);
     expect((target.querySelector('#ws-submit') as HTMLButtonElement | null)?.textContent).not.toContain('Add to queue');
   });
@@ -3906,7 +3905,7 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
       filename: 'completed-second.png',
       prompt: 'Second completed asset',
     });
-    historyStore.seedHistory([staleHistoryAsset]);
+    galleryStore.seed([staleHistoryAsset]);
 
     const form = target.querySelector('form');
     form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
@@ -3943,7 +3942,7 @@ describe('WorkspacePage history viewer (REC-UX-002)', () => {
 
   it('clicking a history row opens the workspace viewer lightbox', async () => {
     const asset = makeAsset({ id: 'out/first.png', url: '/media/out/first.png', filename: 'first.png' });
-    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage([asset]));
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([asset]));
     const context = makeContext({ history_assets: [] });
     await mountWorkspace(context);
 
@@ -3960,7 +3959,7 @@ describe('WorkspacePage history viewer (REC-UX-002)', () => {
 describe('WorkspacePage asset actions and settings', () => {
 
   async function mountWithHistory(assets: GalleryAsset[]): Promise<void> {
-    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage(assets));
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage(assets));
     workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(makeContext({ history_assets: assets }));
     app = flushSync(() => mount(WorkspacePage, { target }));
     await settle();
@@ -4078,7 +4077,7 @@ describe('WorkspacePage asset actions and settings', () => {
     await answerConfirm(true);
 
     expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith(second.id);
-    expect(historyStore.assets.map((asset) => asset.id)).toEqual([first.id]);
+    expect(galleryStore.assets.map((asset) => asset.id)).toEqual([first.id]);
     expect(historyTile(second)).toBeNull();
   });
 
@@ -4196,7 +4195,7 @@ describe('WorkspacePage asset actions and settings', () => {
     const asset = makeAsset({ id: 'out/first.png', filename: 'first.png', file_path: '/outputs/out/first.png' });
     const context = makeContext({ history_assets: [asset] });
     context.image_model_defaults = { ...context.image_model_defaults, zit: { ...context.image_model_defaults!.zit, supports_img2img: false } };
-    workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage([asset]));
+    galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([asset]));
     workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue(context);
     app = flushSync(() => mount(WorkspacePage, { target }));
     await settle();
@@ -5172,7 +5171,7 @@ describe('WorkspacePage extend', () => {
 
     async function mountWithClip(asset: GalleryAsset, workflow: 'txt2vid' | 'extend' = 'txt2vid'): Promise<void> {
       extendApiMocks.inspectExtendSource.mockResolvedValue(sceneSource());
-      workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage([asset]));
+      galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([asset]));
       workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue({ ...makeExtendContext(), history_assets: [asset] });
       draft.update('workflow', workflow);
       app = flushSync(() => mount(WorkspacePage, { target }));
@@ -5268,7 +5267,7 @@ describe('WorkspacePage extend', () => {
     it('has no Extend item for an image or where the server offers none', async () => {
       const image = makeAsset({ id: 'out/a.png', filename: 'a.png', file_path: '/outputs/a.png' });
       const video = clip({ id: 'out/b.mp4', filename: 'b.mp4', extend: null });
-      workspaceApiMocks.getHistory.mockResolvedValue(makeGalleryPage([image, video]));
+      galleryApiMocks.getGallery.mockResolvedValue(makeGalleryPage([image, video]));
       workspaceApiMocks.getWorkspaceCoreContext.mockResolvedValue({ ...makeExtendContext(), history_assets: [image, video] });
       app = flushSync(() => mount(WorkspacePage, { target }));
       await settle();

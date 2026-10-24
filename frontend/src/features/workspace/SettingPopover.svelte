@@ -5,7 +5,7 @@
   import { draft, offeredSizes, settingDefaultsFor, videoTimingFor, type SettingKey } from '$lib/state/draft.svelte';
   import { downloadStatusText } from '$lib/state/downloadProgress';
   import { downloadStore } from '$lib/state/downloads.svelte';
-  import { historyStore } from '$lib/state/history.svelte';
+  import { galleryStore } from '$lib/state/gallery.svelte';
   import { clipMemory } from '$lib/state/clipMemory.svelte';
   import { memoryFitNote } from '$lib/state/memoryFit';
   import { familyLabel, formatLoraString, groupLorasForModel, loraLabel, modelLoraFamily, parseLoraString, recentLoraNames } from '$lib/state/loras';
@@ -113,7 +113,7 @@
   }
 
   // --- Seed ---
-  const latestSeed = $derived(historyStore.assets[0]?.seed ?? null);
+  const latestSeed = $derived(galleryStore.assets[0]?.seed ?? null);
 
   // --- LoRAs ---
   const loraOptions = $derived(context.loras);
@@ -121,7 +121,7 @@
   const addable = $derived(loraOptions.filter((lora) => !loraChips.some((chip) => chip.name === lora.name)));
   // The LoRAs that fit the model lead; the rest fold under "Other models", open from the start only when nothing else is offered.
   const loraModel = $derived(modelLoraFamily(context, s.model));
-  const loraGroups = $derived(groupLorasForModel(addable, loraModel, recentLoraNames(historyStore.assets, loraModel?.family ?? null, loraOptions)));
+  const loraGroups = $derived(groupLorasForModel(addable, loraModel, recentLoraNames(galleryStore.assets, loraModel?.family ?? null, loraOptions)));
   let otherToggled = $state<boolean | null>(null);
   const otherOpen = $derived(otherToggled ?? loraGroups.main.length === 0);
   $effect(() => {
@@ -165,7 +165,7 @@
   const sourceName = $derived(info?.filename ?? (sourcePath ? fileName(sourcePath) : null));
   const sourceFacts = $derived(info ? extendSourceFacts(info) : []);
   const sourceThumbUrl = $derived(info?.media_url ? `${info.media_url}#t=${Math.max(0, (info.duration_seconds ?? 0) - 0.05).toFixed(2)}` : null);
-  const latestVideo = $derived(historyStore.assets.find((asset) => asset.media_type === 'video' && asset.file_path) ?? null);
+  const latestVideo = $derived(galleryStore.assets.find((asset) => asset.media_type === 'video' && asset.file_path) ?? null);
   let browsingSource = $state(false);
 
   let sourceText = $state(draft.state.extendSourcePath ?? '');
@@ -329,7 +329,7 @@
         <button type="button" class="pop-item" onclick={() => fileInput?.click()}><Icon name="upload" size={16} />Choose from this device<small>photos or files</small></button>
         <input bind:this={fileInput} type="file" accept="image/png,image/jpeg,image/webp" class="hidden" onchange={(e) => onImageFileChange(e.currentTarget.files?.[0] ?? null)}>
         <button type="button" class="pop-item" onclick={() => { browsing = true; }}><Icon name="folder" size={16} />Browse the server<small>output and reference folders</small></button>
-        {#if historyStore.assets[0]?.media_type === 'image'}
+        {#if galleryStore.assets[0]?.media_type === 'image'}
           <button type="button" class="pop-item" onclick={onUseLatestAsReference}><Icon name="film" size={16} />Use the latest output</button>
         {/if}
       </div>

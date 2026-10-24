@@ -71,18 +71,18 @@
       class="strip-toggle ui-link"
       aria-expanded={!collapsed}
       aria-controls="ws-history-scroll"
-      aria-label="{collapsed ? 'Expand' : 'Collapse'} history"
+      aria-label="{collapsed ? 'Expand' : 'Collapse'} the gallery strip"
       onclick={() => draft.update('historyCollapsed', !collapsed)}
     >
       <Icon name="chevdown" size={14} class="strip-chev" />
-      <span id="ws-history-title" class="ui-area-label">History</span>
+      <span id="ws-history-title" class="ui-area-label">Gallery</span>
       <span class="strip-count font-mono">{totalCount ?? assets.length}</span>
     </button>
     <span class="flex-1"></span>
     {#if !collapsed && assets.length > 0}
       <span class="strip-hint">Click a tile to open the viewer</span>
     {/if}
-    <button type="button" class="ui-btn ui-btn-sm ui-btn-quiet" onclick={() => router.navigate('gallery')}>Open Gallery</button>
+    <button type="button" class="ui-btn ui-btn-sm ui-btn-quiet" onclick={() => router.navigate('gallery')}>Show all</button>
   </div>
 
   {#if !collapsed}
@@ -91,15 +91,15 @@
       id="ws-history-scroll"
       class="strip-scroll"
       role="list"
-      aria-label="History, newest first"
+      aria-label="Gallery, newest first"
       aria-busy={loadingMore}
       onkeydown={onKeydown}
       bind:this={scrollEl}
     >
       {#if loading && assets.length === 0}
-        <p class="strip-empty">Loading history…</p>
+        <p class="strip-empty">Loading the gallery…</p>
       {:else if assets.length === 0}
-        <p class="strip-empty">No history yet. Generated assets will appear here.</p>
+        <p class="strip-empty">Nothing yet. Generated assets will appear here.</p>
       {:else}
         {#each assets as asset (asset.id)}
           <div role="listitem" class="strip-item" style="height: {TILE_HEIGHT_PX}px; width: {Math.round(TILE_HEIGHT_PX * assetAspect(asset))}px">

@@ -1814,22 +1814,6 @@ def api_workspace(include_history: bool = Query(True)) -> dict[str, Any]:
     return _build_workspace_response(web_config, history_assets)
 
 
-@app.get("/api/history")
-def api_history(
-    page: int = Query(1, ge=1),
-    media_filter: str = Query("all"),
-    sort_order: str = Query("newest"),
-) -> dict[str, Any]:
-    """Return paginated gallery history for the Svelte SPA."""
-    web_config = load_web_config()
-    all_assets = filter_and_sort_assets(
-        list_gallery_assets(web_config.output_dir),
-        media_filter=media_filter,
-        sort_order=sort_order,
-    )
-    return build_gallery_page_json(all_assets, web_config, page=page, page_size=web_config.gallery_page_size)
-
-
 @app.get("/api/gallery")
 def api_gallery_json(
     page: int = Query(1, ge=1),

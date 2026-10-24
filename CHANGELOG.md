@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - **Web UI: no half-saved video in the Gallery.** While a video's settings were being saved, a `.tmp.mp4` copy could show up next to it.
 
 ### Changed
+- **Web UI: one Gallery.** The Workspace's strip is now called Gallery, as it shows the same list as the Gallery page, and its button says **Show all**. Both read one list: a finished job or a delete lands in both at once, and the Gallery page opens with the strip's images already in place. The `/api/history` route is gone; `/api/gallery` serves both
 - **Web UI: Gallery and history open fast after a restart.** What each image and video records is kept in the app database `ziv.sqlite3` in the data folder, so only new or changed files are read. A file you delete, in the app or in the folder, is never shown; its entry is dropped the next time the folder is loaded with at least one file in it. The first load after this update reads every file once.
 - **Web UI: models are shown by name.** The Workspace, job cards and the Models page say FLUX.2 Klein 9B instead of `klein9b`. The alias is still what you use in the CLI and prompt files, and the Models page shows it under the name
 - **Web UI: downloads show in the Workspace.** A model downloading from the Models page shows its progress in the Workspace model picker (for example "Downloading 42%") instead of "not downloaded", and the picker updates when it finishes. The "downloaded" and "download failed" messages stay on screen when you leave the Models page, and Retry still works

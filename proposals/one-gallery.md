@@ -1,49 +1,42 @@
-# One Gallery: the Workspace strip is a view of it
+# One Gallery, and a viewer that feels native on every device
 
-**Status:** Proposed (2026-10-17)
+**Status:** In progress (2026-10-24). Stage 1 (one store, one name, one route) is done. The viewer stages remain.
 
 ## Problem
 
-The same list has two names. The Workspace strip is titled **History**, has its own store (`historyStore`, `/api/history`) and ends with a button that says **Open Gallery**. The Gallery page lists the same files from `/api/gallery`. Toasts after a job say "Refreshed the gallery", the shortcut list says "Focus the history", and the viewer labels the set "History" on one page and "Gallery" on the other. A new user reads two features where there is one.
+The same list had two names. The Workspace strip was titled **History**, had its own store and route (`historyStore`, `/api/history`) and ended with **Open Gallery**; the Gallery page listed the same files from `/api/gallery`. Two stores meant two copies that drifted: outputs merged into one, deletes had to be applied to both, and the Gallery page refetched from nothing on every visit.
 
-Two stores also mean two copies of the list that drift: the Workspace merges a job's outputs into its copy as they arrive (`historyStore.mergeOutputs`) and refreshes after the job; the Gallery page refetches on open; a favourite or a delete has to be applied to both.
+The viewer is one component already, used by the Gallery, the strip and the stage, with swipe, pinch and a pull-down details sheet on the phone. But it is a full-screen dark layer on every device, it opens and closes with a cut, a swipe moves on release instead of under the finger, the details open from a button rather than a swipe up, and Back leaves the page instead of closing it. On the desktop a page behind a modal panel would read better than a layer that replaces it.
 
-## Evidence
+## Evidence (2026-10-24)
 
-- `/api/history` and `/api/gallery` in `web/server.py` are the same six lines apart from the name of the media filter parameter (`media_filter` and `filter`).
-- `HistoryStrip.svelte`, `history.svelte.ts` and the `historyCollapsed` draft flag carry the name; `GalleryPage.svelte` has its own `assets`, paging and deletion state.
-- The `PANES` map in `WorkspacePage.svelte` describes Alt+3 as the history pane; the shortcuts dialog says "Focus the history".
+- `/api/history` and `/api/gallery` were the same lines apart from the filter parameter's name. The strip used `historyStore`; `GalleryPage.svelte` kept its own `assets`, paging and deletion state, and the page memory from [Stable frames](archive/stable-frames.md) kept a third copy.
+- `AssetViewer.svelte` (780 lines) handles swipe left and right, swipe down to close, pinch and double-tap zoom, a details sheet on compact and a details column on wide, a film strip, and keyboard shortcuts. It does not go through the escape stack, so Back does not close it. The swipe decides on `touchend` only; nothing follows the finger.
+- `AssetTile.svelte` opens its menu on a hold through `actions/hold.ts`; the viewer's image has no hold.
 
-## Proposed change
+## What the user sees
 
-### 1. One name
+**Phone.** Tap a tile and the image grows out of the tile into the screen with the backdrop fading in behind it. Swipe sideways and the neighbouring images move with the finger, settling with the flick. Swipe up and the image rises as the Details sheet comes up under it to half height; pull it further for all of it, or down to put it away. Pull the image down and it shrinks back toward its tile and the viewer closes. Tap the image to hide the bar and the film strip; tap again to bring them back. A hold on the image opens the ⋯ menu at the finger, the same menu a hold on a tile opens. Back closes the viewer. Phone landscape is the same with the sheet from the right.
 
-- The strip's heading becomes **Gallery**, its count stays, and the button becomes **Show all**. The viewer's set label is "Gallery" on both pages. Shortcut labels say "gallery strip". Toasts keep "gallery".
-- Internal names (`historyCollapsed`, test ids) can follow or stay; the draft schema needs no bump if the key stays.
+**iPad and desktop.** Click a tile and a panel grows out of it: the image on the left, the details column on the right, the actions in the panel's top bar, the film strip under the image, a backdrop behind it that closes on click. Arrows, keys and Escape work as today, the details column can be hidden and the choice is remembered. A right-click on a tile or on the image opens the same menu as a hold does on a phone. On an iPad the panel also takes the swipe, pinch, pull-down and hold.
 
-### 2. One store
+**One Gallery.** The strip is called Gallery with a Show all button. The strip, the stage, the Gallery page and the viewer read one store, so scrolling the viewer to its end loads more from one place, and a delete or a new output lands everywhere at once.
 
-- `historyStore` becomes `galleryStore` in `lib/state/`, used by the strip and the Gallery page: one list, one paging cursor, one `removeAssets`, one `mergeOutputs`, one favourite toggle when [Search and favourites](gallery-search-favourites.md) lands. The Gallery page's filters and search are a view on top (query params to the server, results kept in the same store keyed by the query), so the strip, which shows the unfiltered newest-first list, is just the empty query.
-- `/api/history` is removed; the strip calls `/api/gallery`. Both are internal to the SPA and change together.
+## Stages
 
-### 3. Ordering
+Each is one commit that rebuilds the SPA and passes the gate.
 
-Do this before or together with the search proposal, so search is built once, on one store.
+1. **One store.** *Done.* `lib/state/gallery.svelte.ts` holds one list per query (filter and sort); the default query is the strip's and the stage's, the Gallery page commits its own query's pages into it, and `removeAssets` and `mergeOutputs` reach every list. The page memory keeps only the query and the scroll position. `/api/history` and `getHistory` are gone; the strip is `GalleryStrip` and says Gallery and Show all.
+2. **Viewer on the overlay stack.** The viewer pushes an escape layer, so Back and the iPad swipe-back close it, and the pages stop guarding their keyboard handlers against it by hand.
+3. **Open and close from the tile.** The viewer remembers the tile that opened it and animates the image between the tile's box and its own on open and close, on every layout. A pull-down on the phone drives the same path under the finger.
+4. **Phone pager, details and hold.** Three panes that follow the finger sideways; the swipe-up details sheet at half and full height; tap to hide the chrome; a hold on the image opens the ⋯ menu, and a right-click on a tile or the image opens it on a desktop.
+5. **Desktop and iPad panel.** The modal with the details column and backdrop replaces the full-screen layer on the wide and tall layouts.
+6. **Docs and changelog.**
 
-### Docs and changelog
+### Tests
 
-- CHANGELOG `[Unreleased]`: "The Workspace's history strip is now called Gallery, as it shows the same list as the Gallery page."
-- The Web UI section of `docs/getting-started.md` replaces "history" with "the gallery strip".
-
-## Alternatives considered
-
-- **Keep both names and only share the store.** Cheaper, but the naming is the user-facing problem. Rejected.
-- **Rename the Gallery page to History.** "History" suggests jobs and time; the page is a library of outputs with filters. Gallery is the better word.
-
-## Open questions
-
-- Should the strip show the Gallery page's current filter when one is set, or always the full list? Always the full list: it is the "latest work" view beside the stage.
+Vitest: the store's views, removal and merge contracts; the viewer's escape layer; the pager's decisions (which pane settles, from offset and velocity) as pure helpers; the details sheet's snap points; the hold and context-menu wiring. The animation itself is checked by hand in a browser.
 
 ## Out of scope
 
-- The Jobs drawer in [A log of past jobs](archive/job-log.md), which is where "history" in the time sense belongs.
+Favourites and search stay in [their own proposal](gallery-search-favourites.md) and sit on the same store. A Share action needs a secure context, which a plain http address on the network is not. The film strip stays as it is; it already works as a scrubber on both devices.

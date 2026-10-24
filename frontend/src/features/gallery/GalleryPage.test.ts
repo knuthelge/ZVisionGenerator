@@ -3,7 +3,7 @@ import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/inde
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { historyStore } from '$lib/state/history.svelte';
+import { galleryStore } from '$lib/state/gallery.svelte';
 import { galleryMemory } from '$lib/state/pageMemory';
 import type { GalleryAsset, GalleryPage as GalleryPageResponse } from '$lib/types';
 
@@ -144,6 +144,7 @@ beforeEach(() => {
   target = document.createElement('div');
   document.body.appendChild(target);
   galleryMemory.forget();
+  galleryStore.reset();
   galleryApiMocks.getGallery.mockReset();
   galleryApiMocks.deleteAsset.mockReset();
   toastMocks.addToast.mockReset();
@@ -348,7 +349,7 @@ describe('GalleryPage regressions', () => {
 
   it('removes a deleted asset from the workspace history too', async () => {
     const asset = makeAsset();
-    historyStore.seedHistory([asset]);
+    galleryStore.seed([asset]);
     galleryApiMocks.getGallery.mockResolvedValue({ assets: [asset], page: 1, total_pages: 1, total_count: 1 });
     galleryApiMocks.deleteAsset.mockResolvedValue(undefined);
     confirmMocks.requestConfirm.mockResolvedValue(true);
@@ -358,7 +359,7 @@ describe('GalleryPage regressions', () => {
     deleteAssetFromCard(target, asset);
     await settle();
 
-    expect(historyStore.assets).toEqual([]);
+    expect(galleryStore.assets).toEqual([]);
     vi.restoreAllMocks();
   });
 
