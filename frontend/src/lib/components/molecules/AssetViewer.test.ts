@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryAsset } from '$lib/types';
 
 import AssetViewer from './AssetViewer.svelte';
+import { escapeLayerOpen } from '$lib/actions/escapeStack';
+import { reactiveProps } from '../../../test-utils/reactiveProps.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
 import { requestConfirm } from './confirm.svelte';
 
@@ -364,6 +366,22 @@ describe('AssetViewer', () => {
 
     press('Escape');
     expect(onclose).toHaveBeenCalled();
+  });
+
+  it('takes the shortcut list down with it when the viewer closes, leaving no layer behind', () => {
+    const props = reactiveProps({ assets: [makeAsset(), assetB], currentIndex: 0, open: true, onclose: vi.fn(), onnavigate: vi.fn() });
+    app = flushSync(() => mount(AssetViewer, { target, props }));
+    press('?', { shiftKey: true });
+    expect(document.querySelector('#asset-viewer-shortcuts')).not.toBeNull();
+    expect(escapeLayerOpen()).toBe(true);
+
+    props.open = false;
+    flushSync();
+    expect(escapeLayerOpen()).toBe(false);
+
+    props.open = true;
+    flushSync();
+    expect(document.querySelector('#asset-viewer-shortcuts')).toBeNull();
   });
 
   it('leaves the delete key alone while typing in a field', () => {

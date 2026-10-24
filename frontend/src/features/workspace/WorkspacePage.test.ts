@@ -3923,13 +3923,13 @@ describe('WorkspacePage center pane promotion (REC-UX-001)', () => {
     await settle();
 
     expect(target.querySelector('[data-testid="asset-viewer"]')).not.toBeNull();
-    const lightboxImage = target.querySelector('[data-testid="asset-viewer"] img') as HTMLImageElement | null;
+    const lightboxImage = target.querySelector('[data-testid="viewer-image"]') as HTMLImageElement | null;
     expect(lightboxImage?.getAttribute('src')).toBe(secondAsset.url);
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Close viewer');
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
     await settle();
-    expect((target.querySelector('[data-testid="asset-viewer"] img') as HTMLImageElement | null)?.getAttribute('src')).toBe(completedAsset.url);
+    expect((target.querySelector('[data-testid="viewer-image"]') as HTMLImageElement | null)?.getAttribute('src')).toBe(completedAsset.url);
 
     const closeButton = target.querySelector('[data-testid="asset-viewer"] button[aria-label="Close viewer"]');
     closeButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));

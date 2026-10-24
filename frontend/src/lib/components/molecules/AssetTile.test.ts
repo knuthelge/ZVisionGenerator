@@ -235,4 +235,22 @@ describe('AssetTile', () => {
     mountTile({ asset, density: 'stage' });
     expect(target.querySelector('img')?.getAttribute('src')).toBe(asset.url);
   });
+
+  it('opens the menu on a right-click, but leaves a video its own menu', async () => {
+    const asset = makeAsset();
+    mountTile({ asset, ondelete: vi.fn() });
+    const rightClick = (el: Element) => { const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 50 }); el.dispatchEvent(event); flushSync(); return event; };
+    expect(rightClick(target.querySelector('img')!).defaultPrevented).toBe(true);
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    await unmount(app!);
+    app = null;
+    document.body.innerHTML = '';
+    target = document.createElement('div');
+    document.body.appendChild(target);
+
+    const video = makeAsset({ id: 'out/clip.mp4', filename: 'clip.mp4', media_type: 'video' });
+    mountTile({ asset: video, density: 'stage', ondelete: vi.fn() });
+    expect(rightClick(target.querySelector('video')!).defaultPrevented).toBe(false);
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
 });

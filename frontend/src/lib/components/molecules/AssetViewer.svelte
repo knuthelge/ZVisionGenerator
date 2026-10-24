@@ -33,6 +33,9 @@
   import { pushEscapeLayer } from '$lib/actions/escapeStack';
   import { tick, untrack } from 'svelte';
   import { FLIGHT_EASING, FLIGHT_MS, fitRect, flightKeyframes, rectOf, usableRect, type Rect } from './viewerFlight';
+  import { pagerOutcome, pullBackdropOpacity, pullOutcome, pullTransform, type PagerOutcome } from './viewerPager';
+  import { lockAxis, releaseVelocity, rubberBand, type PanAxis, type PanSample } from '$lib/actions/pan';
+  import { hold } from '$lib/actions/hold';
   import { FIT, actualPixelsScale, clampPan, settleZoom, zoomAt, type Zoom } from './viewerZoom';
 
   interface Props extends Omit<AssetActionHandlers, 'onpreview'> {
@@ -158,13 +161,13 @@
   // everything, between the tile's box and the image's box while the viewer itself fades. Until the full image has
   // loaded, the flown thumbnail stands in for it.
   type Flight = { rect: Rect; src: string };
+  const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   let flight = $state<Flight | null>(null);
   let flightEl = $state<HTMLImageElement | null>(null);
   let phase = $state<'opening' | 'open' | 'closing'>('open');
   let mediaLoaded = $state(false);
 
   const viewportSize = () => ({ width: window.innerWidth, height: window.innerHeight });
-  const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   /** The tile's box, while it is still on screen. */
   function originRect(): Rect | null {
@@ -186,7 +189,7 @@
 
   /** The shown media's box: the loaded image or the video, else the thumbnail standing in for the image. */
   function mediaRect(): Rect | null {
-    const shown = mediaLoaded || asset?.media_type === 'video' ? stageEl?.querySelector('.viewer-media') : flightEl;
+    const shown = stageEl?.querySelector(mediaLoaded || asset?.media_type === 'video' ? '.viewer-media' : '.viewer-standin');
     const rect = shown ? rectOf(shown.getBoundingClientRect()) : null;
     return usableRect(rect, viewportSize()) ? rect : null;
   }
@@ -236,11 +239,10 @@
       phase = 'opening';
       fly(from, fitRect(stage, mediaAspect()), shown.thumbnail_url || shown.url, () => {
         phase = 'open';
-        // The thumbnail stays until the image has loaded; a video shows itself at once.
-        if (mediaLoaded || shown.media_type === 'video') flight = null;
+        flight = null;
       });
     });
-    return () => { flight = null; phase = 'open'; };
+    return () => { window.removeEventListener('resize', measureGap); flight = null; phase = 'open'; chromeHidden = false; drag = null; helpOpen = false; };
   });
 
   $effect(() => {
@@ -250,7 +252,6 @@
 
   function onMediaLoad(): void {
     mediaLoaded = true;
-    if (phase === 'open') flight = null;
     measureActual();
   }
 
@@ -293,13 +294,54 @@
   }
 
   type Gesture =
-    | { kind: 'swipe'; x: number; y: number; at: number }
+    | { kind: 'swipe'; x: number; y: number; at: number; axis: PanAxis | null; samples: PanSample[] }
     | { kind: 'pan'; x: number; y: number; at: number; from: Zoom }
     | { kind: 'pinch'; distance: number; mid: { x: number; y: number }; from: Zoom };
   let gesture: Gesture | null = null;
   let lastTap: { x: number; y: number; at: number } | null = null;
+  let tapTimer: ReturnType<typeof setTimeout> | undefined;
   const DOUBLE_TAP_MS = 300;
   const TAP_SLOP_PX = 10;
+  /** A finger has moved this far before the drag's direction is known. */
+  const AXIS_LOCK_PX = 8;
+  const SETTLE_MS = 220;
+
+  // The pager and the pull. Dragged sideways, the panes follow the finger and the neighbour slides in when it lets
+  // go; dragged down, the image follows and shrinks, and lets go into its tile. A pull up opens the details.
+  let drag = $state<{ axis: PanAxis; offset: number } | null>(null);
+  let trackEl = $state<HTMLDivElement | null>(null);
+  let paneEl = $state<HTMLDivElement | null>(null);
+  let settling = $state(false);
+  // The stage's padding: the neighbours sit that much further out, so they stay clear of the stage's edges.
+  let paneGap = $state(0);
+  // A tap hides the bar and the strip for a clean look at the image; another brings them back.
+  let chromeHidden = $state(false);
+  const paneWidth = () => (trackEl?.clientWidth || stageEl?.clientWidth || window.innerWidth) + paneGap;
+  const thumbOf = (item: GalleryAsset) => item.thumbnail_url || item.url;
+
+  /** Animate an element's transform, then call `done` (at once where the browser cannot animate). */
+  function slide(el: HTMLElement | null, from: string, to: string, done: () => void): void {
+    if (!el || typeof el.animate !== 'function' || reduceMotion()) { done(); return; }
+    settling = true;
+    const animation = el.animate([{ transform: from }, { transform: to }], { duration: SETTLE_MS, easing: FLIGHT_EASING, fill: 'both' });
+    animation.oncancel = () => { settling = false; };
+    animation.onfinish = () => {
+      animation.oncancel = null;
+      settling = false;
+      done();
+      animation.cancel();
+    };
+  }
+
+  /** Slide the track to the neighbour, then step the index: the new asset is in place when the index changes. */
+  function settlePager(outcome: PagerOutcome, from: number): void {
+    const target = outcome === 'next' ? -paneWidth() : outcome === 'prev' ? paneWidth() : 0;
+    slide(trackEl, `translateX(${from}px)`, `translateX(${target}px)`, () => {
+      drag = null;
+      if (outcome === 'next') onnavigate(index + 1);
+      else if (outcome === 'prev') onnavigate(index - 1);
+    });
+  }
 
   function pinchOf(touches: TouchList): { distance: number; mid: { x: number; y: number } } {
     const [a, b] = [touches[0], touches[1]];
@@ -308,16 +350,18 @@
 
   function onStageTouchStart(event: TouchEvent): void {
     // A video's own controls take the finger: scrubbing must not step to another asset.
-    if ((event.target as Element).closest('video, .viewer-details-scrim')) { gesture = null; return; }
+    if ((event.target as Element).closest('video, .viewer-details-scrim') || settling) { gesture = null; return; }
     if (event.touches.length === 2 && isImage) {
       gesture = { kind: 'pinch', ...pinchOf(event.touches), from: zoom };
       return;
     }
     const touch = event.touches[0];
     if (!touch || event.touches.length > 1) { gesture = null; return; }
+    const at = Date.now();
+    paneGap = Math.max(0, (stageEl?.clientWidth ?? 0) - (trackEl?.clientWidth ?? 0));
     gesture = zoomed
-      ? { kind: 'pan', x: touch.clientX, y: touch.clientY, at: Date.now(), from: zoom }
-      : { kind: 'swipe', x: touch.clientX, y: touch.clientY, at: Date.now() };
+      ? { kind: 'pan', x: touch.clientX, y: touch.clientY, at, from: zoom }
+      : { kind: 'swipe', x: touch.clientX, y: touch.clientY, at, axis: null, samples: [{ x: touch.clientX, y: touch.clientY, at }] };
   }
 
   function onStageTouchMove(event: TouchEvent): void {
@@ -329,6 +373,20 @@
     } else if (gesture.kind === 'pan') {
       const touch = event.touches[0];
       setZoom({ ...gesture.from, x: gesture.from.x + touch.clientX - gesture.x, y: gesture.from.y + touch.clientY - gesture.y }, false);
+    } else if (gesture.kind === 'swipe') {
+      const touch = event.touches[0];
+      if (!touch) return;
+      const dx = touch.clientX - gesture.x;
+      const dy = touch.clientY - gesture.y;
+      gesture.samples.push({ x: touch.clientX, y: touch.clientY, at: Date.now() });
+      if (gesture.axis === null && Math.hypot(dx, dy) >= AXIS_LOCK_PX) gesture.axis = lockAxis(dx, dy);
+      if (gesture.axis === 'x') {
+        // Past either end the panes give a little and no further.
+        const offset = dx > 0 && !hasPrev ? rubberBand(dx, 48) : dx < 0 && !hasNext ? -rubberBand(-dx, 48) : dx;
+        drag = { axis: 'x', offset };
+      } else if (gesture.axis === 'y') {
+        drag = { axis: 'y', offset: dy };
+      }
     }
   }
 
@@ -343,23 +401,57 @@
     }
     gesture = null;
     const touch = event.changedTouches[0];
-    if (!current || !touch) return;
+    if (!current || !touch) { drag = null; return; }
     const dx = touch.clientX - current.x;
     const dy = touch.clientY - current.y;
     const now = Date.now();
     if (Math.abs(dx) < TAP_SLOP_PX && Math.abs(dy) < TAP_SLOP_PX && now - current.at < DOUBLE_TAP_MS) {
-      if (isImage && lastTap && now - lastTap.at < DOUBLE_TAP_MS && Math.hypot(touch.clientX - lastTap.x, touch.clientY - lastTap.y) < 40) {
-        lastTap = null;
-        toggleZoomAt(touch.clientX, touch.clientY, 2);
-      } else {
-        lastTap = { x: touch.clientX, y: touch.clientY, at: now };
-      }
+      drag = null;
+      onTap(touch.clientX, touch.clientY, now);
       return;
     }
     lastTap = null;
-    if (current.kind !== 'swipe' || now - current.at > 900) return;
-    if (Math.abs(dx) >= 48 && Math.abs(dx) > Math.abs(dy) * 1.5) runAction(dx < 0 ? 'next' : 'prev');
-    else if (dy >= 80 && Math.abs(dx) < 40) close();
+    if (current.kind !== 'swipe') return;
+    if (current.axis === 'x') {
+      settlePager(pagerOutcome(dx, releaseVelocity(current.samples, 'x'), paneWidth(), { prev: hasPrev, next: hasNext }), drag?.offset ?? dx);
+    } else if (current.axis === 'y') {
+      const outcome = pullOutcome(dy, releaseVelocity(current.samples, 'y'), compact && !detailsOpen);
+      if (outcome === 'close') { close(); drag = null; return; }
+      const from = pullTransform(drag?.offset ?? dy);
+      drag = null;
+      if (outcome === 'details') toggleDetails();
+      else if (dy > 0) slide(paneEl, from, 'translate(0px, 0px) scale(1)', () => undefined);
+    } else {
+      drag = null;
+    }
+  }
+
+  /** One tap shows or hides the bar and the strip; two taps in a row zoom an image instead. */
+  function onTap(x: number, y: number, at: number): void {
+    if (isImage && lastTap && at - lastTap.at < DOUBLE_TAP_MS && Math.hypot(x - lastTap.x, y - lastTap.y) < 40) {
+      clearTimeout(tapTimer);
+      lastTap = null;
+      toggleZoomAt(x, y, 2);
+      return;
+    }
+    lastTap = { x, y, at };
+    clearTimeout(tapTimer);
+    tapTimer = setTimeout(() => {
+      lastTap = null;
+      if (!detailsOpen) chromeHidden = !chromeHidden;
+    }, DOUBLE_TAP_MS);
+  }
+
+  // A hold on the image, or a right-click, opens the same menu as the ⋯ button, at the pointer on a desktop.
+  let contextAt = $state<{ x: number; y: number } | null>(null);
+  let contextAnchorEl = $state<HTMLSpanElement | null>(null);
+  // Where the finger went down: a hold opens the menu there on a tablet, where the menu is a popover, not a sheet.
+  let pressAt: { x: number; y: number } | null = null;
+  function onStageContextMenu(event: MouseEvent): void {
+    if (event.defaultPrevented || !asset) return;
+    event.preventDefault();
+    contextAt = { x: event.clientX, y: event.clientY };
+    moreOpen = true;
   }
 
   // A mouse: a click toggles real pixels at the cursor; a drag pans a zoomed image.
@@ -543,7 +635,10 @@
     data-compact={compact}
     data-phase={phase}
     data-flight={flight !== null}
+    data-chrome={chromeHidden ? 'hidden' : 'shown'}
+    style:--pull={drag?.axis === 'y' ? pullBackdropOpacity(drag.offset) : undefined}
   >
+    <div class="viewer-backdrop" aria-hidden="true"></div>
     <div class="viewer-bar">
       <div class="viewer-title">
         <b id="asset-viewer-title" class="truncate">{asset.filename}</b>
@@ -551,8 +646,7 @@
       </div>
       {#if compact}
         <button type="button" class="viewer-btn ui-btn ui-btn-icon" data-action="details" aria-label="Details" aria-expanded={detailsOpen} aria-controls="asset-viewer-details" onclick={toggleDetails}><Icon name="info" size={16} /></button>
-        <button type="button" bind:this={moreButton} class="viewer-btn ui-btn ui-btn-icon" data-action="more" aria-label="Actions" aria-haspopup="menu" aria-expanded={moreOpen} onclick={() => { moreOpen = !moreOpen; }}><Icon name="more" size={16} /></button>
-        <ActionMenu open={moreOpen} anchor={moreButton} items={moreItems} label={asset.filename} onclose={() => { moreOpen = false; }} />
+        <button type="button" bind:this={moreButton} class="viewer-btn ui-btn ui-btn-icon" data-action="more" aria-label="Actions" aria-haspopup="menu" aria-expanded={moreOpen} onclick={() => { contextAt = null; moreOpen = !moreOpen; }}><Icon name="more" size={16} /></button>
         <button type="button" bind:this={closeButton} class="viewer-btn ui-btn ui-btn-icon" aria-label="Close viewer" onclick={close}><Icon name="close" size={16} /></button>
       {:else}
       {#if onreuse}
@@ -656,10 +750,13 @@
         bind:this={stageEl}
         class="viewer-stage"
         data-touch={touchLayer}
+        use:hold={{ onhold: () => { contextAt = pressAt; moreOpen = true; }, ignore: 'video, button' }}
+        onpointerdown={(event) => { pressAt = { x: event.clientX, y: event.clientY }; }}
+        oncontextmenu={onStageContextMenu}
         ontouchstart={onStageTouchStart}
         ontouchmove={onStageTouchMove}
         ontouchend={onStageTouchEnd}
-        ontouchcancel={() => { gesture = null; }}
+        ontouchcancel={() => { gesture = null; drag = null; }}
       >
         {#if compact && detailsOpen}
           <button type="button" class="viewer-details-scrim" aria-label="Close details" tabindex="-1" onclick={toggleDetails}></button>
@@ -671,30 +768,45 @@
           disabled={!hasPrev}
           onclick={() => hasPrev && onnavigate(index - 1)}
         ><Icon name="chevleft" size={20} /></button>
-        {#if asset.media_type === 'video'}
-          <!-- svelte-ignore a11y_media_has_caption because generated videos have no caption tracks -->
-          <video src={asset.url} controls class="viewer-media"></video>
-        {:else}
-          <!-- svelte-ignore a11y_no_noninteractive_element_interactions because the zoom is a closer look; the keys and buttons do the rest -->
-          <img
-            bind:this={mediaEl}
-            src={asset.url}
-            alt={asset.prompt || asset.filename}
-            class="viewer-media"
-            class:zoomable={actualScale !== null}
-            class:zoomed
-            class:animated={zoomAnimated}
-            style:transform={zoomed ? `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` : undefined}
-            draggable="false"
-            data-testid="viewer-image"
-            data-zoom={zoom.scale.toFixed(2)}
-            onload={onMediaLoad}
-            onpointerdown={onMediaPointerDown}
-            onpointermove={onMediaPointerMove}
-            onpointerup={onMediaPointerUp}
-            ontransitionend={() => { zoomAnimated = false; }}
-          >
-        {/if}
+        <!-- The pager: the shown asset between its neighbours' thumbnails, which a finger drags into view. -->
+        <div bind:this={trackEl} class="viewer-track" style:--pane-gap="{paneGap}px" style:transform={drag?.axis === 'x' ? `translateX(${drag.offset}px)` : undefined}>
+          {#if touchLayer && hasPrev}
+            <div class="viewer-pane viewer-pane-prev" aria-hidden="true">{@render neighbour(assets[index - 1])}</div>
+          {/if}
+          <div bind:this={paneEl} class="viewer-pane viewer-pane-current" style:transform={drag?.axis === 'y' ? pullTransform(drag.offset) : undefined}>
+            {#if !mediaLoaded && asset.media_type !== 'video'}
+              <!-- The thumbnail stands in until the image has loaded. -->
+              <img class="viewer-standin" src={thumbOf(asset)} alt="" aria-hidden="true">
+            {/if}
+            {#if asset.media_type === 'video'}
+              <!-- svelte-ignore a11y_media_has_caption because generated videos have no caption tracks -->
+              <video src={asset.url} controls class="viewer-media"></video>
+            {:else}
+              <!-- svelte-ignore a11y_no_noninteractive_element_interactions because the zoom is a closer look; the keys and buttons do the rest -->
+              <img
+                bind:this={mediaEl}
+                src={asset.url}
+                alt={asset.prompt || asset.filename}
+                class="viewer-media"
+                class:zoomable={actualScale !== null}
+                class:zoomed
+                class:animated={zoomAnimated}
+                style:transform={zoomed ? `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` : undefined}
+                draggable="false"
+                data-testid="viewer-image"
+                data-zoom={zoom.scale.toFixed(2)}
+                onload={onMediaLoad}
+                onpointerdown={onMediaPointerDown}
+                onpointermove={onMediaPointerMove}
+                onpointerup={onMediaPointerUp}
+                ontransitionend={() => { zoomAnimated = false; }}
+              >
+            {/if}
+          </div>
+          {#if touchLayer && hasNext}
+            <div class="viewer-pane viewer-pane-next" aria-hidden="true">{@render neighbour(assets[index + 1])}</div>
+          {/if}
+        </div>
         <button
           type="button"
           class="viewer-nav next ui-btn ui-btn-icon"
@@ -802,6 +914,9 @@
       </div>
     {/if}
 
+    {#if contextAt}<span bind:this={contextAnchorEl} class="viewer-context-anchor" style:left="{contextAt.x}px" style:top="{contextAt.y}px" aria-hidden="true"></span>{/if}
+    <ActionMenu open={moreOpen} anchor={contextAt ? contextAnchorEl : moreButton} items={moreItems} label={asset.filename} onclose={() => { moreOpen = false; contextAt = null; }} />
+
     {#if helpOpen}
       <div id="asset-viewer-shortcuts" class="viewer-shortcuts ui-overlay" role="note" aria-label="Keyboard shortcuts">
         <h4 class="viewer-h ui-area-label">Keyboard shortcuts</h4>
@@ -842,6 +957,15 @@
   >
 {/if}
 
+{#snippet neighbour(item: GalleryAsset)}
+  <!-- A neighbour waiting beside the shown asset: its thumbnail, or a video's first frame. -->
+  {#if item.media_type === 'video'}
+    <video class="viewer-neighbour" src={thumbOf(item)} muted preload="metadata"></video>
+  {:else}
+    <img class="viewer-neighbour" src={thumbOf(item)} alt="">
+  {/if}
+{/snippet}
+
 {#snippet factSection(title: string, facts: DetailFact[])}
   {#if facts.length > 0}
     <section>
@@ -859,7 +983,12 @@
 {/snippet}
 
 <style>
-  .asset-viewer { z-index: var(--z-viewer); display: flex; flex-direction: column; background: color-mix(in srgb, var(--color-bg-base) 70%, black); }
+  .asset-viewer { z-index: var(--z-viewer); display: flex; flex-direction: column; }
+  /* The backdrop and the chrome clear as the image is pulled down (--pull), and the chrome goes on a tap. */
+  .viewer-backdrop { position: absolute; inset: 0; background: color-mix(in srgb, var(--color-bg-base) 70%, black); opacity: var(--pull, 1); }
+  .viewer-bar, .viewer-main, .viewer-film { position: relative; }
+  .viewer-bar, .viewer-film { opacity: var(--pull, 1); transition: opacity 160ms ease; }
+  .asset-viewer[data-chrome='hidden'] .viewer-bar, .asset-viewer[data-chrome='hidden'] .viewer-film { opacity: 0; pointer-events: none; }
   .viewer-bar { display: flex; flex: none; align-items: center; gap: 6px; min-height: 44px; padding: 6px 12px 6px 16px; background: var(--color-bg-surface); }
   .viewer-title { display: flex; flex: 1 1 auto; min-width: 7rem; flex-direction: column; }
   .viewer-title b { font-size: var(--text-content); font-weight: 600; }
@@ -870,6 +999,8 @@
   .viewer-main { display: flex; flex: 1; min-height: 0; }
   .viewer-stage { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; justify-content: center; padding: 20px 64px; }
   .viewer-media { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--radius-xs); transform-origin: center; user-select: none; }
+  /* A finger's hold opens our menu, not iOS's image callout (Copy, Save Image); the whole stage opts out of it. */
+  .viewer-stage, .viewer-stage img, .viewer-stage video { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   .viewer-media.zoomable { cursor: zoom-in; }
   .viewer-media.zoomed { position: relative; z-index: 1; cursor: grab; }
   .viewer-media.animated { transition: transform 0.18s ease-out; }
@@ -915,7 +1046,10 @@
   .asset-viewer[data-compact='true'] .viewer-nav { display: none; }
   .viewer-details-scrim { position: absolute; inset: 0; z-index: 2; background: transparent; cursor: default; }
   .asset-viewer[data-compact='true'] .viewer-stage { padding: 8px 12px; }
-  .asset-viewer[data-compact='true'] .viewer-details { position: absolute; inset: auto 0 0 0; z-index: 3; width: auto; max-height: 60%; }
+  /* The details rise as a half sheet under the image, which moves up to make room; the strip goes meanwhile. */
+  .asset-viewer[data-compact='true'] .viewer-main { flex-direction: column; }
+  .asset-viewer[data-compact='true'] .viewer-details { position: static; z-index: 3; width: auto; max-height: 50%; flex: none; }
+  .asset-viewer[data-compact='true'][data-details='true'] .viewer-film { display: none; }
   .asset-viewer[data-compact='true'] .viewer-details-body { padding: 4px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
   /* Below a full desktop the labelled buttons show their icons only, so the title keeps its room; the tooltip names them. */
   @media (max-width: 1023px) {
@@ -923,9 +1057,18 @@
   }
   .asset-viewer[data-compact='true'] .viewer-film { padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
 
+  /* The pager: the shown asset's pane between its neighbours, one pane to each side, moved by transform alone. */
+  .viewer-track { position: relative; display: flex; width: 100%; height: 100%; will-change: transform; }
+  .viewer-pane { position: relative; display: flex; flex: none; width: 100%; height: 100%; align-items: center; justify-content: center; }
+  .viewer-pane-prev, .viewer-pane-next { position: absolute; top: 0; }
+  .viewer-pane-prev { left: calc(-100% - var(--pane-gap, 0px)); }
+  .viewer-pane-next { left: calc(100% + var(--pane-gap, 0px)); }
+  .viewer-neighbour { width: 100%; height: 100%; object-fit: contain; border-radius: var(--radius-xs); }
+  .viewer-standin { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; border-radius: var(--radius-xs); pointer-events: none; }
+  .viewer-context-anchor { position: fixed; width: 1px; height: 1px; pointer-events: none; }
   /* The flight: the thumbnail fixed over everything, moved by transform alone; the viewer fades in or out under it. */
   .viewer-flight { position: fixed; z-index: calc(var(--z-viewer) + 1); object-fit: cover; border-radius: var(--radius-xs); transform-origin: top left; pointer-events: none; will-change: transform; }
-  .asset-viewer[data-flight='true'] .viewer-media { opacity: 0; }
+  .asset-viewer[data-flight='true'] .viewer-media, .asset-viewer[data-flight='true'] .viewer-standin { opacity: 0; }
   .asset-viewer[data-phase='opening'] { animation: viewer-fade-in 240ms ease-out both; }
   .asset-viewer[data-phase='closing'] { animation: viewer-fade-out 240ms ease-in both; pointer-events: none; }
   @keyframes viewer-fade-in { from { opacity: 0; } }

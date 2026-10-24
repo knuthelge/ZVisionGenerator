@@ -53,11 +53,24 @@
   function preview(trigger: HTMLElement): void {
     onpreview?.(asset, trigger);
   }
+
+  // A right-click opens the menu at the pointer: a 1px anchor there stands in for the ⋯ button.
+  let contextAt = $state<{ x: number; y: number } | null>(null);
+  let contextAnchorEl = $state<HTMLSpanElement | null>(null);
+  function onContextMenu(event: MouseEvent): void {
+    // A finger's hold already prevented the browser's menu and opened ours. A video keeps the browser's own menu
+    // (loop, picture in picture), and the tile's buttons their defaults, as the hold leaves them alone too.
+    if (event.defaultPrevented || (event.target as Element).closest('video, .asset-tile-actions, .asset-tile-check')) return;
+    event.preventDefault();
+    contextAt = { x: event.clientX, y: event.clientY };
+    menuOpen = true;
+  }
 </script>
 
-<!-- A finger's long press opens the same menu as ⋯. -->
+<!-- A finger's long press opens the same menu as ⋯; so does a right-click, at the pointer. -->
 <article
-  use:hold={{ onhold: () => { menuOpen = true; }, ignore: '.asset-tile-actions, .asset-tile-check, video' }}
+  use:hold={{ onhold: () => { contextAt = null; menuOpen = true; }, ignore: '.asset-tile-actions, .asset-tile-check, video' }}
+  oncontextmenu={onContextMenu}
   class="asset-tile {extraClass}"
   data-density={density}
   data-asset-id={asset.id}
@@ -138,7 +151,7 @@
       aria-label="More actions for {asset.filename}"
       aria-haspopup="menu"
       aria-expanded={menuOpen}
-      onclick={() => { menuOpen = !menuOpen; }}
+      onclick={() => { contextAt = null; menuOpen = !menuOpen; }}
     ><Icon name="more" size={14} /></button>
   </div>
 
@@ -149,12 +162,13 @@
     </div>
   {/if}
 
+  {#if contextAt}<span bind:this={contextAnchorEl} class="asset-tile-context-anchor" style:left="{contextAt.x}px" style:top="{contextAt.y}px" aria-hidden="true"></span>{/if}
   <ActionMenu
     open={menuOpen}
-    anchor={moreButton}
+    anchor={contextAt ? contextAnchorEl : moreButton}
     items={menuItems}
     label="Actions for {asset.filename}"
-    onclose={() => { menuOpen = false; }}
+    onclose={() => { menuOpen = false; contextAt = null; }}
   />
 </article>
 
@@ -233,5 +247,6 @@
   .asset-tile[data-density='compact'] .asset-tile-action { width: 24px; height: 24px; border-radius: var(--radius-sm); }
 
   .asset-tile-check { position: absolute; top: 8px; left: 8px; z-index: 2; width: 16px; height: 16px; border-radius: 4px; }
+  .asset-tile-context-anchor { position: fixed; width: 1px; height: 1px; pointer-events: none; }
   .asset-tile-foot { padding: 8px 12px; }
 </style>

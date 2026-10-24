@@ -2,6 +2,9 @@
 export const HOLD_MS = 480;
 /** How far a finger may move before the press counts as a scroll or a drag. */
 const HOLD_SLOP_PX = 10;
+/** How long after the finger lifts the click it makes is still the hold's, and swallowed: the browser's own click
+ * follows the lift at once, while a person's next tap takes longer than this. */
+const RELEASE_MS = 120;
 
 export interface HoldOptions {
   /** Called once the press has been held long enough. */
@@ -29,6 +32,25 @@ export function hold(node: HTMLElement, initial: HoldOptions): { update: (next: 
     clearTimeout(timer);
     start = null;
     delete node.dataset.holding;
+    // The finger lifting after a hold still clicks whatever is under it by then, such as an item of the menu the
+    // hold opened: that click is swallowed wherever it lands, then clicks are ordinary again.
+    if (fired) {
+      releaseTimer = setTimeout(() => {
+        // No click came (iOS sends none after a long press): clicks on the node are ordinary again.
+        fired = false;
+        document.removeEventListener('click', swallowRelease, true);
+      }, RELEASE_MS);
+    }
+  }
+
+  let releaseTimer: ReturnType<typeof setTimeout> | undefined;
+  function swallowRelease(event: MouseEvent): void {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    // That was the hold's click; the next one on the node is an ordinary click again.
+    fired = false;
+    clearTimeout(releaseTimer);
+    document.removeEventListener('click', swallowRelease, true);
   }
 
   function onPointerDown(event: PointerEvent): void {
@@ -42,6 +64,7 @@ export function hold(node: HTMLElement, initial: HoldOptions): { update: (next: 
     timer = setTimeout(() => {
       cancel();
       fired = true;
+      document.addEventListener('click', swallowRelease, true);
       navigator.vibrate?.(10);
       options.onhold();
     }, HOLD_MS);
@@ -77,6 +100,8 @@ export function hold(node: HTMLElement, initial: HoldOptions): { update: (next: 
     },
     destroy(): void {
       cancel();
+      clearTimeout(releaseTimer);
+      document.removeEventListener('click', swallowRelease, true);
       node.removeEventListener('pointerdown', onPointerDown);
       node.removeEventListener('pointermove', onPointerMove);
       node.removeEventListener('pointerup', cancel);
