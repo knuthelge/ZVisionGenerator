@@ -13,6 +13,7 @@
   import NavDrawer from '$lib/components/organisms/NavDrawer.svelte';
   import { layout } from '$lib/state/layoutMode.svelte';
   import { compactUi } from '$lib/state/compactUi.svelte';
+  import { scrollToTop } from '$lib/scrollToTop';
   import ToastContainer from '$lib/components/molecules/ToastContainer.svelte';
   import ShortcutsDialog from '$lib/components/organisms/ShortcutsDialog.svelte';
   import JobLogDrawer from '$features/jobLog/JobLogDrawer.svelte';
@@ -30,6 +31,8 @@
   // Phones: the pages live in a drawer behind the strip's menu button.
   let drawerOpen = $state(false);
   let jobLogOpen = $state(false);
+  // The page area: a tap on the phone's title scrolls whatever is scrolled in it back to the top.
+  let pageEl = $state<HTMLDivElement | null>(null);
 
   /** Hand a logged job's settings to the Workspace, which applies them once it has loaded. */
   function loadJobLogSettings(entry: JobLogEntry): void {
@@ -63,12 +66,12 @@
 {#if ready}
   <div class="ui-viewport flex flex-col overflow-hidden bg-bg-base text-text-primary font-sans" data-layout={layout.mode}>
     {#if layout.compact}
-      <TopStrip currentPage={router.page} {workflows} onmenu={() => { drawerOpen = true; }} onstatus={() => compactUi.requestJobSheet()} onjoblog={() => { jobLogOpen = true; }} />
+      <TopStrip currentPage={router.page} {workflows} onmenu={() => { drawerOpen = true; }} onstatus={() => compactUi.requestJobSheet()} onjoblog={() => { jobLogOpen = true; }} ontitle={() => { if (pageEl) scrollToTop(pageEl); }} />
       <NavDrawer open={drawerOpen} currentPage={router.page} onnavigate={(page) => router.navigate(page)} onclose={() => { drawerOpen = false; }} />
     {:else}
       <TopNav currentPage={router.page} {workflows} onjoblog={() => { jobLogOpen = true; }} />
     {/if}
-    <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
+    <div bind:this={pageEl} class="flex-1 flex flex-col min-h-0 overflow-hidden">
       {#if router.page === 'workspace'}
         <WorkspacePage bind:workflows />
       {:else if router.page === 'prompts'}

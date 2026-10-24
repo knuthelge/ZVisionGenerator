@@ -4,6 +4,7 @@ import { flushSync, mount, unmount } from '../../../node_modules/svelte/src/inde
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { historyStore } from '$lib/state/history.svelte';
+import { forgetGallery } from './galleryMemory';
 import type { GalleryAsset, GalleryPage as GalleryPageResponse } from '$lib/types';
 
 const galleryApiMocks = vi.hoisted(() => ({
@@ -142,6 +143,7 @@ let app: Record<string, unknown> | null = null;
 beforeEach(() => {
   target = document.createElement('div');
   document.body.appendChild(target);
+  forgetGallery();
   galleryApiMocks.getGallery.mockReset();
   galleryApiMocks.deleteAsset.mockReset();
   toastMocks.addToast.mockReset();
@@ -1470,5 +1472,55 @@ describe('GalleryPage keyboard shortcuts', () => {
     await settle();
     expect(galleryApiMocks.deleteAsset).toHaveBeenCalledWith('a.png');
     expect(galleryApiMocks.deleteAsset).not.toHaveBeenCalledWith('b.png');
+  });
+});
+
+describe('GalleryPage memory', () => {
+  const assets = [
+    makeAsset({ id: 'a.png', filename: 'a.png' }),
+    makeAsset({ id: 'b.png', filename: 'b.png' }),
+  ];
+  const tiles = () => Array.from(target.querySelectorAll('button[aria-label^="View "]:not([aria-label$=" fullscreen"])')).map((b) => b.getAttribute('aria-label'));
+
+  it('draws placeholder tiles on the first visit, then comes back with the loaded assets before the refresh answers', async () => {
+    galleryApiMocks.getGallery.mockImplementation(() => new Promise(() => undefined));
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    expect(target.querySelector('[data-testid="gallery-placeholders"]')).not.toBeNull();
+    await unmount(app!);
+    app = null;
+
+    galleryApiMocks.getGallery.mockResolvedValue({ assets, page: 1, total_pages: 1, total_count: assets.length });
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    expect(tiles()).toEqual(['View a.png', 'View b.png']);
+    await unmount(app!);
+    app = null;
+
+    // Back: the grid is there at once, and the refreshed page one adds the new asset without a spinner in between.
+    let answer: (page: GalleryPageResponse) => void = () => undefined;
+    galleryApiMocks.getGallery.mockImplementation(() => new Promise<GalleryPageResponse>((resolve) => { answer = resolve; }));
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    expect(target.querySelector('[data-testid="gallery-placeholders"]')).toBeNull();
+    expect(tiles()).toEqual(['View a.png', 'View b.png']);
+
+    const fresh = makeAsset({ id: 'new.png', filename: 'new.png' });
+    answer({ assets: [fresh, ...assets], page: 1, total_pages: 1, total_count: 3 });
+    await settle();
+    expect(tiles()).toEqual(['View new.png', 'View a.png', 'View b.png']);
+  });
+
+  it('forgets a view whose load failed, so the next visit starts from the placeholders', async () => {
+    galleryApiMocks.getGallery.mockRejectedValue(new Error('offline'));
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    await unmount(app!);
+    app = null;
+
+    galleryApiMocks.getGallery.mockImplementation(() => new Promise(() => undefined));
+    app = flushSync(() => mount(GalleryPage, { target }));
+    await settle();
+    expect(target.querySelector('[data-testid="gallery-placeholders"]')).not.toBeNull();
   });
 });

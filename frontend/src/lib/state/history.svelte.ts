@@ -1,5 +1,6 @@
 import type { GalleryAsset, GalleryPage } from '$lib/types';
 import { getHistory } from '$lib/api/workspace';
+import { keepLoadedTail } from '$lib/state/pageMerge';
 
 let _history = $state<GalleryAsset[]>([]);
 let _loading = $state(false);
@@ -15,15 +16,6 @@ function appendNew(assets: GalleryAsset[]): number {
   const fresh = assets.filter((asset) => !loadedIds.has(asset.id));
   if (fresh.length > 0) _history = [..._history, ...fresh];
   return fresh.length;
-}
-
-// Keep tiles loaded past page one so a refresh does not snap a scrolled strip back to the start.
-function mergePageOne(page: GalleryPage): GalleryAsset[] {
-  const pageIds = new Set(page.assets.map((asset) => asset.id));
-  const last = page.assets.at(-1);
-  const lastIndex = last ? _history.findIndex((asset) => asset.id === last.id) : -1;
-  if (lastIndex < 0) return page.assets;
-  return [...page.assets, ..._history.slice(lastIndex + 1).filter((asset) => !pageIds.has(asset.id))];
 }
 
 export const historyStore = {
@@ -60,7 +52,8 @@ export const historyStore = {
     try {
       const page = await getHistory(1);
       if (generation !== _generation) return;
-      _history = mergePageOne(page);
+      // Keep tiles loaded past page one so a refresh does not snap a scrolled strip back to the start.
+      _history = keepLoadedTail(page.assets, _history);
       _totalCount = page.total_count;
       // Page one is full whenever more pages follow, so its length is the server's page size.
       if (page.total_pages > 1) _pageSize = page.assets.length;

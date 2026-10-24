@@ -42,6 +42,13 @@ describe('TopStrip', () => {
     expect(target.querySelector('button[aria-label="Back to the Workspace"]')).toBeNull();
   });
 
+  it('scrolls the page to its top when its title is tapped', () => {
+    const ontitle = vi.fn();
+    app = flushSync(() => mount(TopStrip, { target, props: { currentPage: 'gallery', onmenu: vi.fn(), ontitle } }));
+    (target.querySelector('.strip-title button') as HTMLButtonElement).click();
+    expect(ontitle).toHaveBeenCalledOnce();
+  });
+
   it('keeps the menu and adds an arrow back with the page name on other pages', () => {
     const navigate = vi.spyOn(router, 'navigate').mockImplementation(() => {});
     app = flushSync(() => mount(TopStrip, { target, props: { currentPage: 'gallery', onmenu: vi.fn() } }));

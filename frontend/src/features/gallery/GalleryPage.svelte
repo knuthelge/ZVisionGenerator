@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import { errorText } from '$lib/api/client';
+  import { keepLoadedTail } from '$lib/state/pageMerge';
+  import { forgetGallery, rememberGallery, rememberedGallery } from './galleryMemory';
   import { router } from '$lib/state/router.svelte';
   import { addToast, dismissToast } from '$lib/state/toasts.svelte';
   import { getGallery, deleteAsset } from '$lib/api/gallery';
@@ -75,12 +77,28 @@
       _pendingSelected = params.selected;
     }
 
+    // Pages remember: the view a previous visit left is drawn at once, scrolled where it was, and page one refreshes
+    // behind it; the first visit loads into placeholder tiles.
+    const remembered = rememberedGallery();
+    if (remembered) {
+      assets = remembered.assets;
+      page = remembered.page;
+      totalPages = remembered.totalPages;
+      totalCount = remembered.totalCount;
+      mediaFilter = remembered.filter;
+      sortOrder = remembered.sort;
+      loading = false;
+      void tick().then(() => { if (scrollRegion) scrollRegion.scrollTop = remembered.scrollTop; });
+    }
+
     _viewGeneration += 1;
-    void loadPageOne(mediaFilter, sortOrder, _viewGeneration, _mutationRevision, true);
+    void loadPageOne(mediaFilter, sortOrder, _viewGeneration, _mutationRevision, true, false, remembered !== null);
     document.addEventListener('keydown', handleGridKeydown);
 
     return () => {
       document.removeEventListener('keydown', handleGridKeydown);
+      if (error || loading) forgetGallery();
+      else rememberGallery({ assets, page, totalPages, totalCount, filter: mediaFilter, sort: sortOrder, scrollTop });
       // Invalidate every request still awaiting a response after unmount.
       _viewGeneration += 1;
       _mutationRevision += 1;
@@ -130,13 +148,14 @@
     viewGeneration: number,
     mutationRevision: number,
     restorePendingSelection = false,
-    preserveLocalOnError = false
+    preserveLocalOnError = false,
+    keepLoaded = false
   ): Promise<void> {
     const pageOneRequestRevision = ++_pageOneRequestRevision;
     _refillAfterViewer = false;
     _pagesShifted = false;
     pageOnePending = true;
-    if (!preserveLocalOnError) loading = true;
+    if (!preserveLocalOnError && !keepLoaded) loading = true;
     loadingMore = false;
     // Preserve local assets during a mutation refill, but never let an error
     // from an invalidated replacement request keep hiding those assets.
@@ -145,8 +164,11 @@
       const result = await getGallery(1, filter, sort);
       if (!requestIsCurrent(viewGeneration, mutationRevision, filter, sort)) return;
       const returnedDeletedAssets = result.assets.filter((asset) => _successfullyDeletedIds.has(asset.id));
-      assets = result.assets.filter((asset) => !_successfullyDeletedIds.has(asset.id));
-      page = result.page;
+      const pageOne = result.assets.filter((asset) => !_successfullyDeletedIds.has(asset.id));
+      // A remembered view keeps the pages loaded after page one, so the grid stays where it was scrolled.
+      const merged = keepLoaded ? keepLoadedTail(pageOne, assets) : pageOne;
+      page = merged.length > pageOne.length ? page : result.page;
+      assets = merged;
       totalPages = result.total_pages;
       const staleDeletedCount = returnedDeletedAssets.filter(
         (asset) => filter === 'all' || asset.media_type === filter
@@ -448,6 +470,9 @@
 
   // --- Keyboard -------------------------------------------------------------
   let gridEl = $state<HTMLDivElement | null>(null);
+  let scrollRegion = $state<HTMLElement | null>(null);
+  // Where the grid is scrolled, kept as it scrolls: the element is gone by the time the page is torn down.
+  let scrollTop = 0;
 
   function gridTiles(): HTMLElement[] {
     return Array.from(gridEl?.querySelectorAll<HTMLElement>('.asset-tile') ?? []);
@@ -536,9 +561,14 @@
     {/snippet}
   </PageHeader>
 
-  <section id="gallery-scroll-region" class="min-h-0 flex-1 overflow-y-auto p-4">
+  <section bind:this={scrollRegion} id="gallery-scroll-region" class="min-h-0 flex-1 overflow-y-auto p-4" onscroll={(event) => { scrollTop = event.currentTarget.scrollTop; }}>
     {#if loading}
-      <p class="flex items-center justify-center gap-2 py-24 text-ui text-text-muted" role="status"><Spinner />Loading…</p>
+      <!-- The frame first: the grid's shape is drawn before the assets arrive, so nothing moves when they do. -->
+      <div class="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6" role="status" aria-label="Loading" data-testid="gallery-placeholders">
+        {#each { length: 12 } as _, i (i)}
+          <div class="tile-placeholder" aria-hidden="true"></div>
+        {/each}
+      </div>
     {:else if error}
       <Alert tone="error" live>{error}</Alert>
     {:else if emptyState}
@@ -617,3 +647,8 @@
   onupscale={upscaleAsset}
   ondelete={deleteSingle}
 />
+
+<style>
+  /* A tile's shape while the assets load: the image square over a caption, in the tile's surface. */
+  .tile-placeholder { aspect-ratio: 1 / 1.32; border-radius: var(--radius-md); background: var(--color-bg-surface); }
+</style>

@@ -17,9 +17,11 @@
     onstatus?: () => void;
     /** Open the job log drawer. */
     onjoblog?: () => void;
+    /** The page's title was tapped: scroll the page back to its top. */
+    ontitle?: () => void;
   }
 
-  let { currentPage, workflows = null, onmenu, onstatus, onjoblog }: Props = $props();
+  let { currentPage, workflows = null, onmenu, onstatus, onjoblog, ontitle }: Props = $props();
 
   const PAGE_TITLES: Record<PageId, string> = { workspace: 'Workspace', prompts: 'Prompts', gallery: 'Gallery', models: 'Models', config: 'Config' };
   const WORKFLOW_LABELS: { id: Workflow; label: string }[] = [
@@ -64,7 +66,8 @@
     <button type="button" class="strip-btn" aria-label="Gallery" onclick={() => router.navigate('gallery')}><Icon name="grid" size={20} /></button>
   {:else}
     <button type="button" class="strip-btn" aria-label="Back to the Workspace" onclick={() => router.navigate('workspace')}><Icon name="arrowleft" size={20} /></button>
-    <h1 class="strip-title">{PAGE_TITLES[currentPage]}</h1>
+    <!-- A tap on the title scrolls the page to its top, as a tap on the status bar does in a native app. -->
+    <h1 class="strip-title"><button type="button" class="strip-title-btn" onclick={ontitle}>{PAGE_TITLES[currentPage]}</button></h1>
     {#if status.tone !== 'idle'}
       <button type="button" class="strip-status" data-tone={status.tone} onclick={() => router.navigate('workspace')}>
         <i class="strip-dot" aria-hidden="true"></i>{status.text}
@@ -86,6 +89,7 @@
   .strip-status[data-tone='running'] .strip-dot { background: var(--color-primary-main); animation: strip-pulse 1.2s infinite; }
   .strip-status[data-tone='review'] { color: var(--color-warning); }
   .strip-status[data-tone='review'] .strip-dot { background: var(--color-warning); }
-  .strip-title { flex: 1; min-width: 0; overflow: hidden; font-family: var(--font-heading); font-size: 15px; font-weight: 800; white-space: nowrap; text-overflow: ellipsis; }
+  .strip-title { display: flex; flex: 1; min-width: 0; overflow: hidden; font-family: var(--font-heading); font-size: 15px; font-weight: 800; white-space: nowrap; }
+  .strip-title-btn { display: block; max-width: 100%; height: 40px; overflow: hidden; padding: 0; border-radius: var(--radius-sm); font: inherit; color: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
   @keyframes strip-pulse { 50% { opacity: 0.3; } }
 </style>
