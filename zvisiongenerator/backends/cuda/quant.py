@@ -239,7 +239,9 @@ def _stream_fp8_transformer(component_dir: Path, compute_dtype: torch.dtype) -> 
 def empty_diffusers_model(config: dict[str, Any], compute_dtype: torch.dtype, model_class: type[Any] | None = None) -> Any:
     """Return the diffusers model *config* describes, without weights (on the meta device), in *compute_dtype*.
 
-    Modules the model keeps in float32 stay in float32. *model_class* builds models diffusers' ``AutoModel`` cannot
+    Modules the model keeps in float32 stay in float32. Non-persistent buffers (the rotary frequencies) keep the values
+    and dtype the constructor gave them, as they do under ``from_pretrained(torch_dtype=...)``: no state dict holds them, so
+    a cast to *compute_dtype* would round them for good. *model_class* builds models diffusers' ``AutoModel`` cannot
     resolve by name (pipeline-specific ones).
     """
     import torch
@@ -248,11 +250,24 @@ def empty_diffusers_model(config: dict[str, Any], compute_dtype: torch.dtype, mo
 
     with init_empty_weights():
         model = (model_class or DiffusersAutoModel).from_config(config)
+    derived = _derived_buffers(model)
     model.to(compute_dtype)
     for name, module in model.named_modules():
         if any(part in (model._keep_in_fp32_modules or ()) for part in name.split(".")):
             module.to(torch.float32)
+    for module, leaf, buffer in derived:
+        module._buffers[leaf] = buffer
     return model
+
+
+def _derived_buffers(model: Any) -> list[tuple[Any, str, torch.Tensor]]:
+    """Return ``(module, name, buffer)`` of every floating-point non-persistent buffer of *model*, as constructed."""
+    return [
+        (module, leaf, buffer)
+        for module in model.modules()
+        for leaf in module._non_persistent_buffers_set
+        if (buffer := module._buffers.get(leaf)) is not None and buffer.is_floating_point() and not buffer.is_meta
+    ]
 
 
 def fill_weights(model: Any, tensors: Iterable[tuple[str, torch.Tensor]], source: str, skipped: Collection[str] = ()) -> None:
