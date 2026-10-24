@@ -14,6 +14,7 @@
   import { addToast } from '$lib/state/toasts.svelte';
   import { getWorkspaceCoreContext, skipFirstRun, submitGenerate, parseUrlPrefill } from '$lib/api/workspace';
   import { updateConfig } from '$lib/api/config';
+  import { rememberContext, rememberedContext } from '$lib/state/workspaceContext';
   import { deleteAsset } from '$lib/api/gallery';
   import { canExtend, extendParams, referenceParams, reuseParams, type DeleteOptions, type ReferenceTarget } from '$lib/state/assetActions';
   import { Icon, MascotSpot } from '$lib/components/atoms';
@@ -502,6 +503,7 @@
       .then((fresh) => {
         if (request !== modelStatusRequest || !context) return;
         context = { ...context, image_models: fresh.image_models, video_models: fresh.video_models };
+        rememberContext(context);
       })
       .catch(() => undefined);
   }
@@ -824,34 +826,44 @@
     let cancelled = false;
     let historyTimer: ReturnType<typeof setTimeout> | undefined;
 
+    /** Take a context as the page's authority: the draft hydrated from it, with the URL's prefill on top. */
+    function adoptContext(ctx: WorkspaceContext): void {
+      context = ctx;
+      workflows = ctx.workflow_contract.values;
+      if (ctx.history_assets.length > 0) {
+        historyStore.seedHistory(ctx.history_assets);
+      }
+      if (urlParams.workflow) {
+        draft.loadFromUrl({ workflow: urlParams.workflow }, ctx);
+      }
+      // Hydrate model + defaults from backend for the current workflow.
+      // preferredModel = URL-specified model (may be null).
+      // A saved draft keeps its settings across visits and restarts unless a URL names a model to reuse.
+      draft.hydrateFromContext(ctx, urlParams.model ?? null, { keepSettings: !urlParams.model });
+
+      // Re-apply remaining URL params on top of the backend defaults so that
+      // explicit URL values (prompt, steps, ratio, etc.) take precedence.
+      if (hasUrlParams) {
+        draft.loadFromUrl(urlParams, ctx);
+        // A link into the workspace loads a source's settings, so the form no longer starts from a preset.
+        draft.setAppliedPreset(null);
+      }
+
+      // After full hydration, sync _prevWorkflow so the workflow-change $effect
+      // does not fire for the initial state.
+      _prevWorkflow = draft.state.workflow;
+    }
+
+    // Pages remember: the context a previous visit loaded answers the first frame; the server's fresh one replaces it.
+    const remembered = rememberedContext();
+    if (remembered) adoptContext(remembered);
+
     // Load workspace authority first; gallery/history hydration follows after the core page can paint.
     getWorkspaceCoreContext()
       .then((ctx) => {
         if (cancelled) return;
-        context = ctx;
-        workflows = ctx.workflow_contract.values;
-        if (ctx.history_assets.length > 0) {
-          historyStore.seedHistory(ctx.history_assets);
-        }
-        if (urlParams.workflow) {
-          draft.loadFromUrl({ workflow: urlParams.workflow }, ctx);
-        }
-        // Hydrate model + defaults from backend for the current workflow.
-        // preferredModel = URL-specified model (may be null).
-        // A saved draft keeps its settings across visits and restarts unless a URL names a model to reuse.
-        draft.hydrateFromContext(ctx, urlParams.model ?? null, { keepSettings: !urlParams.model });
-
-        // Re-apply remaining URL params on top of the backend defaults so that
-        // explicit URL values (prompt, steps, ratio, etc.) take precedence.
-        if (hasUrlParams) {
-          draft.loadFromUrl(urlParams, ctx);
-          // A link into the workspace loads a source's settings, so the form no longer starts from a preset.
-          draft.setAppliedPreset(null);
-        }
-
-        // After full hydration, sync _prevWorkflow so the workflow-change $effect
-        // does not fire for the initial state.
-        _prevWorkflow = draft.state.workflow;
+        rememberContext(ctx);
+        adoptContext(ctx);
         jobStore.seedQueue(ctx.queued_jobs ?? []);
         void jobStore.reconnectActiveJob({ snapshot: ctx.active_job });
         // "Generate this one" on the Prompts page: queue that prompt with these settings once the form exists.

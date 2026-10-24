@@ -19,6 +19,7 @@ import { hasPendingJobSettings, requestJobSettings } from '$lib/state/pendingJob
 import { requestPromptRun } from '$lib/state/pendingPromptRun';
 import { router } from '$lib/state/router.svelte';
 import { toasts } from '$lib/state/toasts.svelte';
+import { forgetContext } from '$lib/state/workspaceContext';
 import type { DownloadItem, EnhanceFrame, SettingsPreset, ImageModelDefaults, JobContext, JobSnapshot, PromptEnhancerContract, VideoModelDefaults, WorkspaceContext, GalleryAsset, GalleryPage } from '$lib/types';
 
 const workspaceApiMocks = vi.hoisted(() => ({
@@ -161,6 +162,7 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   draft.reset();
+  forgetContext();
   extendInspection.reset();
   clipMemory.reset();
   historyStore.seedHistory([]);
@@ -578,6 +580,21 @@ describe('WorkspacePage', () => {
     expect(workspaceApiMocks.getWorkspaceContext).not.toHaveBeenCalled();
     expect(workspaceApiMocks.getHistory).toHaveBeenCalledWith(1);
     expect(target.querySelector(`button[aria-label="View ${asset.filename}"]`)).not.toBeNull();
+  });
+
+  it('comes back complete from the context a previous visit loaded, before the fresh one answers', async () => {
+    await mountWorkspace(makeContext());
+    await unmount(app!);
+    app = null;
+    workspaceApiMocks.getWorkspaceCoreContext.mockImplementation(
+      () => new Promise<WorkspaceContext>(() => undefined)
+    );
+
+    app = flushSync(() => mount(WorkspacePage, { target }));
+    await settle();
+
+    expect((target.querySelector('#ws-model') as HTMLSelectElement).disabled).toBe(false);
+    expect(target.querySelector('#ws-prompt')).not.toBeNull();
   });
 
   it('keeps the mascot on stage until the latest output paints, then docks it', async () => {
